@@ -3,8 +3,10 @@ CDC sync tests for database operations.
 """
 
 import time
+
 import pytest
 from common.common_type import CaseLabel
+
 from .base import TestCDCSyncBase, logger
 
 
@@ -61,23 +63,17 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
             assert upstream_exists, f"Database {db_name} not created in upstream"
 
             # Log sync verification start
-            self.log_sync_verification(
-                "CREATE_DATABASE", db_name, "exists in downstream"
-            )
+            self.log_sync_verification("CREATE_DATABASE", db_name, "exists in downstream")
 
             # Wait for sync to downstream
             def check_sync():
                 downstream_databases = downstream_client.list_databases()
                 exists = db_name in downstream_databases
                 if exists:
-                    self.log_resource_state(
-                        "database", db_name, "exists", "downstream", "Sync confirmed"
-                    )
+                    self.log_resource_state("database", db_name, "exists", "downstream", "Sync confirmed")
                 return exists
 
-            sync_success = self.wait_for_sync(
-                check_sync, sync_timeout, f"create database {db_name}"
-            )
+            sync_success = self.wait_for_sync(check_sync, sync_timeout, f"create database {db_name}")
             assert sync_success, f"Database {db_name} failed to sync to downstream"
 
             # Log test success
@@ -108,9 +104,7 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
         def check_create():
             return db_name in downstream_client.list_databases()
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create database {db_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create database {db_name}")
 
         # Drop database in upstream
         upstream_client.drop_database(db_name)
@@ -122,9 +116,7 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
 
         assert self.wait_for_sync(check_drop, sync_timeout, f"drop database {db_name}")
 
-    def test_alter_database_properties(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_alter_database_properties(self, upstream_client, downstream_client, sync_timeout):
         """Test ALTER_DATABASE_PROPERTIES operation sync."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -142,9 +134,7 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
         def check_create():
             return db_name in downstream_client.list_databases()
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create database {db_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create database {db_name}")
 
         # Set multiple database properties
         properties_to_set = {
@@ -152,9 +142,7 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
             "database.diskQuota.mb": 1024,
         }
 
-        upstream_client.alter_database_properties(
-            db_name=db_name, properties=properties_to_set
-        )
+        upstream_client.alter_database_properties(db_name=db_name, properties=properties_to_set)
 
         # Wait for alter properties to sync
         def check_alter_properties():
@@ -167,22 +155,16 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
                 downstream_props = downstream_client.describe_database(db_name)
                 logger.info(f"Downstream database properties: {downstream_props}")
                 for key, expected_value in properties_to_set.items():
-                    if key not in downstream_props or str(downstream_props[key]) != str(
-                        expected_value
-                    ):
+                    if key not in downstream_props or str(downstream_props[key]) != str(expected_value):
                         return False
                 return True
-            except:
+            except Exception:
                 return False
 
-        assert self.wait_for_sync(
-            check_alter_properties, sync_timeout, f"alter database properties {db_name}"
-        )
+        assert self.wait_for_sync(check_alter_properties, sync_timeout, f"alter database properties {db_name}")
         logger.info(f"Database properties altered successfully for {db_name}")
 
-    def test_drop_database_properties(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_drop_database_properties(self, upstream_client, downstream_client, sync_timeout):
         """Test DROP_DATABASE_PROPERTIES operation sync."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -200,9 +182,7 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
         def check_create():
             return db_name in downstream_client.list_databases()
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create database {db_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create database {db_name}")
 
         # First set some properties
         properties_to_set = {
@@ -210,9 +190,7 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
             "database.diskQuota.mb": 2048,
         }
 
-        upstream_client.alter_database_properties(
-            db_name=db_name, properties=properties_to_set
-        )
+        upstream_client.alter_database_properties(db_name=db_name, properties=properties_to_set)
 
         # Wait for initial properties to sync
         time.sleep(3)  # Allow properties to be set
@@ -220,9 +198,7 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
         # Drop specific database properties (only drop one, keep the other)
         property_keys_to_drop = ["database.max.collections"]
 
-        upstream_client.drop_database_properties(
-            db_name=db_name, property_keys=property_keys_to_drop
-        )
+        upstream_client.drop_database_properties(db_name=db_name, property_keys=property_keys_to_drop)
 
         # Wait for drop properties to sync
         def check_drop_properties():
@@ -247,10 +223,8 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
                     return False
 
                 return True
-            except:
+            except Exception:
                 return False
 
-        assert self.wait_for_sync(
-            check_drop_properties, sync_timeout, f"drop database properties {db_name}"
-        )
+        assert self.wait_for_sync(check_drop_properties, sync_timeout, f"drop database properties {db_name}")
         logger.info(f"Database properties dropped successfully for {db_name}")

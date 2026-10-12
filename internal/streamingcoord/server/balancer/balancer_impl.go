@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -63,12 +64,14 @@ func RecoverBalancer(
 		reqCh:                  make(chan *request, 5),
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		freezeNodes:            typeutil.NewConcurrentSet[int64](),
+		primaryRGChangedCh:     make(chan struct{}, 1),
 	}
 	b.SetLogger(logger)
 	ready260Future, err := b.checkIfAllNodeGreaterThan260AndWatch(ctx)
 	if err != nil {
 		return nil, err
 	}
+	b.watchPrimaryResourceGroupChanges()
 	go b.execute(ready260Future)
 	return b, nil
 }
@@ -86,9 +89,23 @@ type balancerImpl struct {
 	reqCh                  chan *request                         // reqCh is the request channel, send the operation to background task.
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
 	freezeNodes            *typeutil.ConcurrentSet[int64]        // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
+	primaryRGChangedCh     chan struct{}                         // primaryRGChangedCh wakes the balance loop when streaming.primaryResourceGroup changes.
+	primaryRGChangeHandler config.EventHandler
 
 	fileResourceChecker FileResourceChecker
 	checkerMu           sync.RWMutex
+}
+
+func (b *balancerImpl) watchPrimaryResourceGroupChanges() {
+	key := paramtable.Get().StreamingCfg.PrimaryResourceGroup.Key
+	handler := config.NewHandler("streamingcoord.balancer.primary-rg", func(_ *config.Event) {
+		select {
+		case b.primaryRGChangedCh <- struct{}{}:
+		default:
+		}
+	})
+	b.primaryRGChangeHandler = handler
+	paramtable.Get().Watch(key, handler)
 }
 
 func (b *balancerImpl) SetFileResourceChecker(checker FileResourceChecker) {
@@ -305,6 +322,9 @@ func (b *balancerImpl) sendRequestAndWaitFinish(ctx context.Context, newReq *req
 
 // Close close the balancer.
 func (b *balancerImpl) Close() {
+	if b.primaryRGChangeHandler != nil {
+		paramtable.Get().Unwatch(paramtable.Get().StreamingCfg.PrimaryResourceGroup.Key, b.primaryRGChangeHandler)
+	}
 	b.lifetime.SetState(typeutil.LifetimeStateStopped)
 	b.provider.Close()
 	// cancel all watch opeartion by context.
@@ -377,6 +397,12 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 		case <-channelChanged.WaitChan():
 			// balance triggered by channel changed.
 			channelChanged.Sync()
+		case <-b.primaryRGChangedCh:
+			b.Logger().Info(
+				b.backgroundTaskNotifier.Context(),
+				"balance triggered by primary resource group config change",
+				mlog.String("primaryResourceGroup", paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()),
+			)
 		case newChannels, ok := <-b.provider.NewIncomingChannels():
 			if !ok {
 				return
@@ -597,6 +623,28 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 		return nil, merr.Wrap(err, "fail to collect all status")
 	}
 
+	// clean up the freeze node that has been removed from session.
+	// Use the full session view (all resource groups) instead of nodeStatus:
+	// nodeStatus only contains nodes of the primary/fallback resource group
+	// (see filterStreamingNodeStatusByResourceGroupHint), so a frozen node in
+	// another resource group would otherwise be wrongly unfrozen.
+	// Run before marking frozen nodes below so the marking uses the
+	// post-cleanup freeze set. Non-fatal: a transient failure to get the
+	// session view must not abort the whole balance round, so skip the
+	// cleanup this round and log a warning instead.
+	allNodes, err := b.GetAllStreamingNodes(ctx)
+	if err != nil {
+		b.Logger().Warn(ctx, "fail to get all streaming nodes, skip freeze cleanup this round", mlog.Err(err))
+	} else {
+		b.freezeNodes.Range(func(serverID int64) bool {
+			if _, ok := allNodes[serverID]; !ok {
+				b.Logger().Info(ctx, "freeze node has been removed from session", mlog.Int64("serverID", serverID))
+				b.freezeNodes.Remove(serverID)
+			}
+			return true
+		})
+	}
+
 	// mark the frozen node as frozen in the node status.
 	for _, node := range nodeStatus {
 		if b.freezeNodes.Contain(node.ServerID) && node.IsHealthy() {
@@ -612,15 +660,6 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 			}
 		}
 	}
-
-	// clean up the freeze node that has been removed from session.
-	b.freezeNodes.Range(func(serverID int64) bool {
-		if _, ok := nodeStatus[serverID]; !ok {
-			b.Logger().Info(ctx, "freeze node has been removed from session", mlog.Int64("serverID", serverID))
-			b.freezeNodes.Remove(serverID)
-		}
-		return true
-	})
 	return nodeStatus, nil
 }
 
@@ -635,15 +674,30 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 	for _, channel := range modifiedChannels {
 		channel := channel
 		g.Go(func() error {
+			// ownerLost is true if the streaming node of any read-write assignment history has left the session view.
+			ownerLost := false
 			// all history channels should be remove from related nodes.
 			for _, assignment := range channel.AssignHistories() {
 				opCtx, cancel := context.WithTimeout(ctx, opTimeout)
 				defer cancel()
-				if err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment); err != nil {
+				err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment)
+				if errors.Is(err, types.ErrNotAlive) {
+					if assignment.Channel.AccessMode == types.AccessModeRW {
+						ownerLost = true
+					}
+					b.Logger().Warn(ctx, "streaming node of channel is not alive, wal close not confirmed", mlog.String("assignment", assignment.String()))
+					continue
+				}
+				if err != nil {
 					b.Logger().Warn(ctx, "fail to remove channel", mlog.String("assignment", assignment.String()), mlog.Err(err))
 					return err
 				}
 				b.Logger().Info(ctx, "remove channel success", mlog.String("assignment", assignment.String()))
+			}
+			if ownerLost {
+				if err := b.waitNodeLostGracePeriod(ctx, channel); err != nil {
+					return err
+				}
 			}
 
 			// assign the channel to the target node.
@@ -667,6 +721,25 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 	// huge unavaiable time may be caused by this,
 	// should be fixed in future.
 	return g.Wait()
+}
+
+// waitNodeLostGracePeriod blocks for streaming.walBalancer.nodeLostGracePeriod or until ctx is done.
+func (b *balancerImpl) waitNodeLostGracePeriod(ctx context.Context, meta *channel.PChannelMeta) error {
+	grace := paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.GetAsDurationByParse()
+	if grace <= 0 {
+		return nil
+	}
+	b.Logger().Info(ctx, "wait grace period before assigning channel whose streaming node is lost",
+		mlog.String("target", meta.CurrentAssignment().String()),
+		mlog.Duration("gracePeriod", grace))
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // generateCurrentLayout generate layout from all nodes info and meta.

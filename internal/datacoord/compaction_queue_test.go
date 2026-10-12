@@ -175,3 +175,155 @@ func TestConcurrency(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestCompactionQueue_SyncPrioritizer guards against re-prioritizing the whole
+// queue on every scheduling tick.
+//
+// Prioritizer is a func value and cannot be compared with ==. The previous code
+// compared &q.prioritizer (address of a struct field) against &p (address of a
+// local variable); those addresses are never equal, so the guard was always
+// true and the entire queue was re-prioritized and re-heapified every 500ms.
+func TestCompactionQueue_SyncPrioritizer(t *testing.T) {
+	t1 := &mixCompactionTask{}
+	t1.SetTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction})
+	t2 := &mixCompactionTask{}
+	t2.SetTask(&datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_MixCompaction})
+
+	t.Run("same name does not re-prioritize", func(t *testing.T) {
+		// Observe re-prioritization through the stored priorities rather than
+		// through an instrumented Prioritizer: SyncPrioritizer resolves the
+		// prioritizer by name, so any injected closure is discarded on the very
+		// first call and a call counter would stay at zero either way.
+		//
+		// DefaultPrioritizer is int(PlanID), so mutating PlanID after the queue
+		// has been primed makes a recompute observable: the stored priority only
+		// changes if updatePrioritizerLocked runs again.
+		task := &mixCompactionTask{}
+		task.SetTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction})
+
+		cq := NewCompactionQueue(10, DefaultPrioritizer)
+		assert.NoError(t, cq.Enqueue(task))
+
+		// First sync adopts the configured prioritizer and primes the priority.
+		cq.SyncPrioritizer("default")
+		cq.lock.RLock()
+		primed := cq.pq[0].priority
+		cq.lock.RUnlock()
+		assert.EqualValues(t, 1, primed)
+
+		task.SetTask(&datapb.CompactionTask{PlanID: 42, Type: datapb.CompactionType_MixCompaction})
+
+		// Subsequent syncs with an unchanged configuration must be no-ops.
+		for i := 0; i < 100; i++ {
+			cq.SyncPrioritizer("default")
+		}
+		cq.lock.RLock()
+		after := cq.pq[0].priority
+		cq.lock.RUnlock()
+		assert.EqualValues(t, primed, after, "queue was re-prioritized despite unchanged configuration")
+
+		// A changed configuration must still recompute, proving the assertion
+		// above is not vacuous. It has to switch to "level": MixFirstPrioritizer
+		// also returns 1 for a MixCompaction task, so asserting against "mix"
+		// would pass whether or not updatePrioritizerLocked ran. LevelPrioritizer
+		// returns 10, which makes the three values 1 / 42 / 10 mutually distinct.
+		cq.SyncPrioritizer("level")
+		cq.lock.RLock()
+		recomputed := cq.pq[0].priority
+		cq.lock.RUnlock()
+		assert.EqualValues(t, 10, LevelPrioritizer(task))
+		assert.EqualValues(t, LevelPrioritizer(task), recomputed)
+	})
+
+	// The empty string is a settable configuration value, not "unset": the
+	// RESTful alterConfig contract treats a present value as a set and only
+	// null as a reset, and dataCoord.compaction.taskPrioritizer has no
+	// Formatter, so getWithRaw returns "" verbatim. Holding the name in a
+	// plain string made its zero value collide with that, and a queue that had
+	// not yet adopted a name would silently no-op on SyncPrioritizer("") and
+	// keep the prioritizer it was constructed with.
+	t.Run("empty configuration value is adopted rather than read as unset", func(t *testing.T) {
+		cq := NewCompactionQueue(10, LevelPrioritizer)
+		cq.lock.RLock()
+		assert.Nil(t, cq.prioritizerName, "constructor takes a func, not a configuration name")
+		cq.lock.RUnlock()
+
+		cq.SyncPrioritizer("")
+
+		task := &mixCompactionTask{}
+		task.SetTask(&datapb.CompactionTask{PlanID: 7, Type: datapb.CompactionType_MixCompaction})
+		assert.NoError(t, cq.Enqueue(task))
+
+		cq.lock.RLock()
+		adopted := cq.pq[0].priority
+		cq.lock.RUnlock()
+		// "" resolves to DefaultPrioritizer, i.e. int(PlanID) == 7. Keeping the
+		// constructor's LevelPrioritizer would give 10.
+		assert.EqualValues(t, DefaultPrioritizer(task), adopted,
+			"empty configuration value must resolve to the default prioritizer")
+		assert.NotEqualValues(t, LevelPrioritizer(task), adopted)
+	})
+
+	// UpdatePrioritizer sets the func out of band, so the queue must forget
+	// which configuration value it corresponds to; otherwise the next sync for
+	// that same name would be skipped.
+	t.Run("update forgets the configuration name", func(t *testing.T) {
+		cq := NewCompactionQueue(10, DefaultPrioritizer)
+		cq.SyncPrioritizer("level")
+		cq.UpdatePrioritizer(DefaultPrioritizer)
+		cq.lock.RLock()
+		assert.Nil(t, cq.prioritizerName)
+		cq.lock.RUnlock()
+
+		cq.SyncPrioritizer("level")
+		task := &mixCompactionTask{}
+		task.SetTask(&datapb.CompactionTask{PlanID: 7, Type: datapb.CompactionType_MixCompaction})
+		assert.NoError(t, cq.Enqueue(task))
+		cq.lock.RLock()
+		adopted := cq.pq[0].priority
+		cq.lock.RUnlock()
+		assert.EqualValues(t, LevelPrioritizer(task), adopted)
+	})
+
+	t.Run("changed name does re-prioritize", func(t *testing.T) {
+		cq := NewCompactionQueue(10, DefaultPrioritizer)
+		assert.NoError(t, cq.Enqueue(t1))
+
+		cq.SyncPrioritizer("level")
+		cq.lock.RLock()
+		assert.Equal(t, "level", *cq.prioritizerName)
+		cq.lock.RUnlock()
+
+		cq.SyncPrioritizer("mix")
+		cq.lock.RLock()
+		assert.Equal(t, "mix", *cq.prioritizerName)
+		cq.lock.RUnlock()
+	})
+
+	// UpdatePrioritizer used to assign q.prioritizer before acquiring the lock,
+	// racing with concurrent Enqueue/Dequeue which read it under the lock.
+	// Run with -race.
+	t.Run("no data race with concurrent enqueue", func(t *testing.T) {
+		cq := NewCompactionQueue(0, DefaultPrioritizer)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				cq.UpdatePrioritizer(LevelPrioritizer)
+				cq.SyncPrioritizer("mix")
+				cq.SyncPrioritizer("level")
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				task := &mixCompactionTask{}
+				task.SetTask(&datapb.CompactionTask{PlanID: int64(i), Type: datapb.CompactionType_MixCompaction})
+				_ = cq.Enqueue(task)
+				_, _ = cq.Dequeue()
+			}
+		}()
+		wg.Wait()
+	})
+}

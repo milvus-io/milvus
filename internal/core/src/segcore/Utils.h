@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -153,19 +154,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
                      int64_t count,
                      const FieldMeta& field_meta);
 void
-LoadArrowReaderForJsonStatsFromRemote(
-    const std::vector<std::string>& remote_files,
-    std::shared_ptr<ArrowReaderChannel> channel);
-
-void
 LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
                           std::shared_ptr<ArrowReaderChannel> channel,
                           milvus::proto::common::LoadPriority priority);
 
 void
-LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
-                         FieldDataChannelPtr channel,
-                         milvus::proto::common::LoadPriority priority);
+LoadFieldDatasFromRemote(
+    const std::vector<std::string>& remote_files,
+    FieldDataChannelPtr channel,
+    milvus::proto::common::LoadPriority priority,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.

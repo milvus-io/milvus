@@ -185,24 +185,6 @@ class MmapChunkManager {
     HasRegister(const MmapChunkDescriptorPtr descriptor);
     void*
     Allocate(const MmapChunkDescriptorPtr descriptor, const uint64_t size);
-    uint64_t
-    GetDiskAllocSize() {
-        std::shared_lock<std::shared_mutex> lck(mtx_);
-        if (blocks_handler_ == nullptr) {
-            return 0;
-        } else {
-            return blocks_handler_->Capacity();
-        }
-    }
-    uint64_t
-    GetDiskUsage() {
-        std::shared_lock<std::shared_mutex> lck(mtx_);
-        if (blocks_handler_ == nullptr) {
-            return 0;
-        } else {
-            return blocks_handler_->Size();
-        }
-    }
 
  private:
     void

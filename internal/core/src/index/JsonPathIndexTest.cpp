@@ -12,6 +12,9 @@
 #include <gtest/gtest.h>
 #include <simdjson.h>
 
+#include <boost/filesystem.hpp>
+#include <folly/ScopeGuard.h>
+
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -32,8 +35,12 @@
 #include "index/Meta.h"
 #include "index/ScalarIndexSort.h"
 #include "pb/schema.pb.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "simdjson/padded_string.h"
+#include "storage/ChunkManager.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
 
 using namespace milvus;
 using namespace milvus::index;
@@ -72,6 +79,36 @@ MakeTestContext(int64_t field_id = 101) {
     ctx.fieldDataMeta.field_id = field_id;
     return ctx;
 }
+
+struct JsonV3LoadFixture {
+    explicit JsonV3LoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        boost::filesystem::remove_all(root_path);
+        storage::StorageConfig storage_config;
+        storage_config.storage_type = "local";
+        storage_config.root_path = root_path;
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+
+        field_schema = MakeJsonSchema();
+        field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+        index_meta = storage::IndexMeta{3, 101, 1000, 10000};
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~JsonV3LoadFixture() {
+        boost::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    proto::schema::FieldSchema field_schema;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
 
 }  // namespace
 
@@ -309,6 +346,180 @@ TEST(JsonPathIndexTest, SortDouble_ExistsSemantics) {
     EXPECT_EQ(exists.count(), 4);
 }
 
+template <typename IndexT>
+void
+AssertDoubleComparisonUnknowns(IndexT& idx) {
+    auto known = idx.IsNotNull();
+    ASSERT_EQ(known.size(), 6);
+    EXPECT_TRUE(known[0]);
+    EXPECT_TRUE(known[1]);
+    EXPECT_FALSE(known[2]);
+    EXPECT_FALSE(known[3]);
+    EXPECT_FALSE(known[4]);
+    EXPECT_TRUE(known[5]);
+    EXPECT_EQ(known.count(), 3);
+
+    auto exists = idx.Exists();
+    ASSERT_EQ(exists.size(), 6);
+    EXPECT_TRUE(exists[0]);
+    EXPECT_TRUE(exists[1]);
+    EXPECT_TRUE(exists[2]);   // path exists, but cast fails
+    EXPECT_FALSE(exists[3]);  // path missing
+    EXPECT_FALSE(exists[4]);  // JSON null is not an existing comparable value
+    EXPECT_TRUE(exists[5]);
+    EXPECT_EQ(exists.count(), 4);
+
+    double two = 2.0;
+    auto not_in = idx.NotIn(1, &two);
+    ASSERT_EQ(not_in.size(), 6);
+    EXPECT_TRUE(not_in[0]);
+    EXPECT_FALSE(not_in[1]);
+    EXPECT_FALSE(not_in[2]);
+    EXPECT_FALSE(not_in[3]);
+    EXPECT_FALSE(not_in[4]);
+    EXPECT_TRUE(not_in[5]);
+    EXPECT_EQ(not_in.count(), 2);
+
+    auto greater_than_one = idx.Range(1.0, OpType::GreaterThan);
+    ASSERT_EQ(greater_than_one.size(), 6);
+    EXPECT_FALSE(greater_than_one[0]);
+    EXPECT_TRUE(greater_than_one[1]);
+    EXPECT_FALSE(greater_than_one[2]);
+    EXPECT_FALSE(greater_than_one[3]);
+    EXPECT_FALSE(greater_than_one[4]);
+    EXPECT_TRUE(greater_than_one[5]);
+    EXPECT_EQ(greater_than_one.count(), 2);
+}
+
+std::shared_ptr<FieldData<Json>>
+MakeMixedJsonDoubleFieldData() {
+    return MakeJsonFieldData({
+        R"({"a": 1.0})",
+        R"({"a": 2.0})",
+        R"({"a": "bad"})",
+        R"({"b": 3.0})",
+        R"({"a": null})",
+        R"({"a": 3.0})",
+    });
+}
+
+TEST(JsonPathIndexTest, SortDouble_ComparisonUnknowns) {
+    auto json_fd = MakeMixedJsonDoubleFieldData();
+    auto schema = MakeJsonSchema();
+    auto ctx = MakeTestContext();
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> idx(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        schema,
+        ctx);
+
+    idx.BuildWithFieldData({json_fd});
+    AssertDoubleComparisonUnknowns(idx);
+}
+
+TEST(JsonPathIndexTest, SortDouble_V3PlannedLoadPreservesExistsSemantics) {
+    auto old_enabled =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto async_load_guard = folly::makeGuard([old_enabled]() {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+
+    JsonV3LoadFixture fixture("json_sort_v3_planned_load");
+    auto json_fd = MakeMixedJsonDoubleFieldData();
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> build_index(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        fixture.field_schema,
+        fixture.ctx);
+    build_index.BuildWithFieldData({json_fd});
+    auto stats = build_index.UploadUnified({});
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> load_index(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        fixture.field_schema,
+        fixture.ctx);
+    Config load_config;
+    load_config[INDEX_FILES] = stats->GetIndexFiles();
+    load_config[LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+    load_config[ENABLE_MMAP] = false;
+    load_index.LoadUnified(load_config);
+
+    AssertDoubleComparisonUnknowns(load_index);
+}
+
+TEST(JsonPathIndexTest, SortDouble_LegacyContextLoadFinalizesWrapper) {
+    auto old_enabled =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto async_load_guard = folly::makeGuard([old_enabled]() {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+
+    JsonV3LoadFixture fixture("json_sort_legacy_context_load");
+    auto json_fd = MakeJsonFieldData(
+        {R"({"a": 1.0})", R"({"a": 2.0})", R"({"a": "bad"})", R"({"a": 3.0})"});
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> build_index(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        fixture.field_schema,
+        fixture.ctx);
+    build_index.BuildWithFieldData({json_fd});
+    auto stats = build_index.Upload({});
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> load_index(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        fixture.field_schema,
+        fixture.ctx);
+    Config load_config;
+    load_config[INDEX_FILES] = stats->GetIndexFiles();
+    load_config[LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+    load_config[ENABLE_MMAP] = false;
+    load_config[JSON_PATH] = "/a";
+    load_config[INDEX_TYPE] = ASCENDING_SORT;
+    static_cast<IndexBase&>(load_index)
+        .Load(tracer::TraceContext{}, load_config);
+
+    EXPECT_EQ(load_index.Count(), 4);
+    const auto exists = load_index.Exists();
+    EXPECT_EQ(exists.size(), 4);
+    EXPECT_EQ(exists.count(), 4);
+    EXPECT_EQ(load_index.IsNotNull().count(), 3);
+    const double value = 2.0;
+    EXPECT_EQ(load_index.NotIn(1, &value).count(), 2);
+}
+
+TEST(JsonPathIndexTest, InvertedDouble_ComparisonUnknowns) {
+    auto json_fd = MakeMixedJsonDoubleFieldData();
+    auto schema = MakeJsonSchema();
+    auto ctx = MakeTestContext();
+
+    JsonScalarIndexWrapper<double, InvertedIndexTantivy<double>> idx(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        schema,
+        ctx,
+        TANTIVY_INDEX_LATEST_VERSION);
+
+    idx.BuildWithFieldData({json_fd});
+    idx.finish();
+    idx.create_reader(milvus::index::SetBitsetSealed);
+
+    EXPECT_EQ(idx.ValidityBitmapByteSize(), sizeof(uint64_t));
+    AssertDoubleComparisonUnknowns(idx);
+}
+
 TEST(JsonPathIndexTest, BitmapBool_ExistsSemantics) {
     auto json_fd = MakeJsonFieldData({
         R"({"f": true})",
@@ -449,6 +660,62 @@ TEST(JsonPathIndexTest, Hybrid_ExistsSemantics) {
     EXPECT_TRUE(exists[1]);   // cast fail → still EXISTS
     EXPECT_FALSE(exists[2]);  // path not exist
     EXPECT_TRUE(exists[3]);   // valid
+}
+
+TEST(JsonPathIndexTest, Hybrid_ComparisonUnknowns) {
+    auto json_fd = MakeMixedJsonDoubleFieldData();
+    auto schema = MakeJsonSchema();
+    auto ctx = MakeTestContext();
+
+    JsonHybridScalarIndex<double> idx(JsonCastType::FromString("DOUBLE"),
+                                      "/a",
+                                      JsonCastFunction::FromString("unknown"),
+                                      schema,
+                                      0,
+                                      ctx);
+
+    idx.bitmap_index_cardinality_limit_ = 3;
+    idx.BuildWithFieldData({json_fd});
+    AssertDoubleComparisonUnknowns(idx);
+}
+
+TEST(JsonPathIndexTest, HybridDouble_V3PlannedLoadPreservesExistsSemantics) {
+    auto old_enabled =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto async_load_guard = folly::makeGuard([old_enabled]() {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+
+    JsonV3LoadFixture fixture("json_hybrid_v3_planned_load");
+    auto json_fd = MakeMixedJsonDoubleFieldData();
+
+    JsonHybridScalarIndex<double> build_index(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        fixture.field_schema,
+        0,
+        fixture.ctx);
+    build_index.bitmap_index_cardinality_limit_ = 4;
+    build_index.BuildWithFieldData({json_fd});
+    ASSERT_EQ(build_index.internal_index_type_, ScalarIndexType::BITMAP);
+    auto stats = build_index.UploadUnified({});
+
+    JsonHybridScalarIndex<double> load_index(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        fixture.field_schema,
+        0,
+        fixture.ctx);
+    Config load_config;
+    load_config[INDEX_FILES] = stats->GetIndexFiles();
+    load_config[LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+    load_index.LoadUnified(load_config);
+
+    EXPECT_EQ(load_index.internal_index_type_, ScalarIndexType::BITMAP);
+    AssertDoubleComparisonUnknowns(load_index);
 }
 
 // ============================================================

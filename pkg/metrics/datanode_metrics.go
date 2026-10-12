@@ -471,19 +471,19 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
 	registry.MustRegister(DataNodeSlot)
 	registry.MustRegister(&dataNodePoolMetricsCollector{})
+	// DataNode runs the C++ core (index build / analyze via cgo), so it produces
+	// segcore errors too; register the cgo metrics here so UnmappedSegcoreCodeTotal
+	// (and the other cgo metrics) are scrapeable on a dedicated DataNode, not only
+	// on QueryNode. RegisterCGOMetrics is guarded by sync.Once, so a shared-registry
+	// process (standalone) registers them exactly once.
+	RegisterCGOMetrics(registry)
 	RegisterLoggingMetrics(registry)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {
-	DataNodeConsumeTimeTickLag.
-		Delete(
-			prometheus.Labels{
-				nodeIDLabelName:       fmt.Sprint(nodeID),
-				msgTypeLabelName:      AllLabel,
-				collectionIDLabelName: fmt.Sprint(collectionID),
-			})
-
-	for _, label := range []string{AllLabel, DeleteLabel, InsertLabel} {
+	// The InputNode owns the collection-level AllLabel metrics. They are
+	// deleted when the last InputNode using the cached handles is closed.
+	for _, label := range []string{DeleteLabel, InsertLabel} {
 		DataNodeConsumeMsgCount.
 			Delete(
 				prometheus.Labels{

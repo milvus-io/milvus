@@ -59,7 +59,7 @@ func TestSegmentFlushWorker_RetryAfterAppendFailure(t *testing.T) {
 	defer cancel()
 
 	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 
@@ -127,7 +127,7 @@ func TestSegmentAllocWorker_RetryAfterAppendFailure(t *testing.T) {
 	defer cancel()
 
 	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 
@@ -231,7 +231,7 @@ func TestSegmentFlushWorker_DoOnceCheckIfReady(t *testing.T) {
 	ctx := context.Background()
 
 	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 
@@ -296,31 +296,30 @@ func TestSegmentAllocWorker_InitSegmentConfig(t *testing.T) {
 	assert.Equal(t, firstLimitation, w.limitation)
 }
 
-func TestSegmentAllocWorkerStorageVersionFollowsUseLoonFFI(t *testing.T) {
+func TestSegmentAllocWorkerStorageVersionFollowsRequirements(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
 	param := paramtable.Get()
 	defer param.Reset(param.CommonCfg.UseLoonFFI.Key)
 
 	for name, tc := range map[string]struct {
-		useLoonFFI            string
-		useGrowingSourceFlush bool
-		expected              int64
+		useLoonFFI        string
+		requiresStorageV3 bool
+		expected          int64
 	}{
-		"v2_without_growing_source": {useLoonFFI: "false", useGrowingSourceFlush: false, expected: storage.StorageV2},
-		"v2_with_growing_source":    {useLoonFFI: "false", useGrowingSourceFlush: true, expected: storage.StorageV2},
-		"v3_without_growing_source": {useLoonFFI: "true", useGrowingSourceFlush: false, expected: storage.StorageV3},
-		"v3_with_growing_source":    {useLoonFFI: "true", useGrowingSourceFlush: true, expected: storage.StorageV3},
+		"v2_without_requirement": {useLoonFFI: "false", expected: storage.StorageV2},
+		"v3_required_by_schema":  {useLoonFFI: "false", requiresStorageV3: true, expected: storage.StorageV3},
+		"v3_with_ffi":            {useLoonFFI: "true", expected: storage.StorageV3},
 	} {
 		t.Run(name, func(t *testing.T) {
 			param.Save(param.CommonCfg.UseLoonFFI.Key, tc.useLoonFFI)
 			w := &segmentAllocWorker{
-				ctx:                   context.Background(),
-				collectionID:          1,
-				partitionID:           2,
-				vchannel:              "v1",
-				wal:                   mock_wal.NewMockWAL(t),
-				useGrowingSourceFlush: tc.useGrowingSourceFlush,
+				ctx:               context.Background(),
+				collectionID:      1,
+				partitionID:       2,
+				vchannel:          "v1",
+				wal:               mock_wal.NewMockWAL(t),
+				requiresStorageV3: tc.requiresStorageV3,
 			}
 			w.SetLogger(mlog.With())
 
@@ -339,7 +338,7 @@ func TestSegmentFlushWorker_WaitForTxnManagerRecoverDone(t *testing.T) {
 	t.Run("txn manager ready", func(t *testing.T) {
 		ctx := context.Background()
 		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+		mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 			return make(chan struct{})
 		}).Maybe()
 
@@ -359,7 +358,7 @@ func TestSegmentFlushWorker_WaitForTxnManagerRecoverDone(t *testing.T) {
 		cancel() // Cancel immediately
 
 		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+		mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 			return make(chan struct{})
 		}).Maybe()
 
@@ -385,7 +384,7 @@ func TestSegmentFlushWorker_WaitForTxnManagerRecoverDone(t *testing.T) {
 		unavailableCh := make(chan struct{})
 		close(unavailableCh)
 		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+		mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 			return unavailableCh
 		}).Maybe()
 
@@ -415,7 +414,7 @@ func TestSegmentAllocWorker_DoLoop(t *testing.T) {
 		defer cancel()
 
 		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+		mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 			return make(chan struct{})
 		}).Maybe()
 		mockWAL.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -454,7 +453,7 @@ func TestSegmentAllocWorker_DoLoop(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+		mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 			return make(chan struct{})
 		}).Maybe()
 		mockWAL.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -516,7 +515,7 @@ func TestSegmentFlushWorker_DoLoop(t *testing.T) {
 		defer cancel()
 
 		mockWAL := mock_wal.NewMockWAL(t)
-		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+		mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 			return make(chan struct{})
 		}).Maybe()
 		mockWAL.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -751,7 +750,7 @@ func TestSegmentAllocWorker_UnrecoverableError(t *testing.T) {
 	defer cancel()
 
 	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	mockWAL.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -809,7 +808,7 @@ func TestSegmentFlushWorker_UnrecoverableError(t *testing.T) {
 	defer cancel()
 
 	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	mockWAL.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -851,7 +850,7 @@ func TestSegmentAllocWorker_WALUnavailable(t *testing.T) {
 
 	unavailableCh := make(chan struct{})
 	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return unavailableCh
 	}).Maybe()
 	mockWAL.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -910,7 +909,7 @@ func TestSegmentFlushWorker_ContextCanceledDuringRetry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	mockWAL.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -971,7 +970,7 @@ func TestSegmentFlushWorker_TxnManagerRecoverFailed(t *testing.T) {
 
 	unavailableCh := make(chan struct{})
 	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return unavailableCh
 	}).Maybe()
 
@@ -1026,7 +1025,7 @@ func TestSegmentFlushWorker_WALUnavailableDuringRetry(t *testing.T) {
 
 	unavailableCh := make(chan struct{})
 	mockWAL := mock_wal.NewMockWAL(t)
-	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	mockWAL.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return unavailableCh
 	}).Maybe()
 	mockWAL.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(

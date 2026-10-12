@@ -18,12 +18,16 @@ package storage
 
 import (
 	"context"
+	"io"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -143,6 +147,106 @@ func TestDeltalogReaderWriter(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+}
+
+func makeParquetDeltalogBlob(t *testing.T, startPk int64, numRows int) *Blob {
+	writer, finalizer, err := createDeltalogWriter(1, 2, 3, schemapb.DataType_Int64, 1024)
+	require.NoError(t, err)
+	for i := int64(0); i < int64(numRows); i++ {
+		require.NoError(t, writer.WriteValue(NewDeleteLog(NewInt64PrimaryKey(startPk+i), uint64(100+i))))
+	}
+	require.NoError(t, writer.Close())
+	blob, err := finalizer()
+	require.NoError(t, err)
+	return blob
+}
+
+func TestSimpleArrowRecordReaderRetainAcrossNext(t *testing.T) {
+	originalFormat := paramtable.Get().DataNodeCfg.DeltalogFormat.GetValue()
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.DeltalogFormat.Key, "parquet")
+	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.DeltalogFormat.Key, originalFormat)
+
+	blobs := []*Blob{makeParquetDeltalogBlob(t, 0, 10), makeParquetDeltalogBlob(t, 1000, 10)}
+
+	reader, err := newSimpleArrowRecordReader(blobs)
+	require.NoError(t, err)
+
+	rec1, err := reader.Next()
+	require.NoError(t, err)
+	rec1.Retain()
+	require.Equal(t, 10, rec1.Len())
+	require.Equal(t, int64(0), rec1.Column(0).(*array.Int64).Value(0))
+
+	// cross-blob advance must not invalidate or mutate the retained record
+	rec2, err := reader.Next()
+	require.NoError(t, err)
+	require.NotSame(t, rec1, rec2)
+	require.Equal(t, int64(1000), rec2.Column(0).(*array.Int64).Value(0))
+	require.Equal(t, 10, rec1.Len())
+	require.Equal(t, int64(0), rec1.Column(0).(*array.Int64).Value(0))
+	require.Equal(t, int64(9), rec1.Column(0).(*array.Int64).Value(9))
+	rec1.Release()
+
+	_, err = reader.Next()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, reader.Close())
+	// Close after EOF must not double-release
+	require.NoError(t, reader.Close())
+}
+
+func TestSimpleArrowRecordReaderEmptyMiddleBlob(t *testing.T) {
+	originalFormat := paramtable.Get().DataNodeCfg.DeltalogFormat.GetValue()
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.DeltalogFormat.Key, "parquet")
+	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.DeltalogFormat.Key, originalFormat)
+
+	blobs := []*Blob{
+		makeParquetDeltalogBlob(t, 0, 10),
+		makeParquetDeltalogBlob(t, 0, 0),
+		makeParquetDeltalogBlob(t, 1000, 10),
+	}
+
+	reader, err := newSimpleArrowRecordReader(blobs)
+	require.NoError(t, err)
+
+	pks := make([]int64, 0, 20)
+	for {
+		rec, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		col := rec.Column(0).(*array.Int64)
+		for i := 0; i < rec.Len(); i++ {
+			pks = append(pks, col.Value(i))
+		}
+	}
+	require.Len(t, pks, 20)
+	require.Equal(t, int64(0), pks[0])
+	require.Equal(t, int64(9), pks[9])
+	require.Equal(t, int64(1000), pks[10])
+	require.Equal(t, int64(1009), pks[19])
+	require.NoError(t, reader.Close())
+}
+
+type erroringRecordReader struct {
+	err error
+}
+
+func (e *erroringRecordReader) Retain()               {}
+func (e *erroringRecordReader) Release()              {}
+func (e *erroringRecordReader) Schema() *arrow.Schema { return nil }
+func (e *erroringRecordReader) Next() bool            { return false }
+func (e *erroringRecordReader) Record() arrow.Record  { return nil }
+func (e *erroringRecordReader) Err() error            { return e.err }
+
+func TestSimpleArrowRecordReaderSurfacesReadError(t *testing.T) {
+	// a mid-stream read error must surface as a data-integrity failure,
+	// not be swallowed as batch exhaustion
+	reader := &simpleArrowRecordReader{rr: &erroringRecordReader{err: io.ErrUnexpectedEOF}}
+	_, err := reader.Next()
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.NoError(t, reader.Close())
 }
 
 func TestDeltalogStreamWriter_NoRecordWriter(t *testing.T) {

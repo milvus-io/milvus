@@ -414,12 +414,12 @@ func (_c *MockHandlerClient_GetWALMetricsIfLocal_Call) RunAndReturn(run func(con
 	return _c
 }
 
-// PrepareReleaseManualFlush provides a mock function with given fields: ctx, collectionID, vchannel, releaseSegmentIDs
-func (_m *MockHandlerClient) PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+// PrepareReleaseManualFlushIfLocal provides a mock function with given fields: ctx, collectionID, vchannel, releaseSegmentIDs
+func (_m *MockHandlerClient) PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
 	ret := _m.Called(ctx, collectionID, vchannel, releaseSegmentIDs)
 
 	if len(ret) == 0 {
-		panic("no return value specified for PrepareReleaseManualFlush")
+		panic("no return value specified for PrepareReleaseManualFlushIfLocal")
 	}
 
 	var r0 bool
@@ -442,33 +442,33 @@ func (_m *MockHandlerClient) PrepareReleaseManualFlush(ctx context.Context, coll
 	return r0, r1
 }
 
-// MockHandlerClient_PrepareReleaseManualFlush_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareReleaseManualFlush'
-type MockHandlerClient_PrepareReleaseManualFlush_Call struct {
+// MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareReleaseManualFlushIfLocal'
+type MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call struct {
 	*mock.Call
 }
 
-// PrepareReleaseManualFlush is a helper method to define mock.On call
+// PrepareReleaseManualFlushIfLocal is a helper method to define mock.On call
 //   - ctx context.Context
 //   - collectionID int64
 //   - vchannel string
 //   - releaseSegmentIDs []int64
-func (_e *MockHandlerClient_Expecter) PrepareReleaseManualFlush(ctx interface{}, collectionID interface{}, vchannel interface{}, releaseSegmentIDs interface{}) *MockHandlerClient_PrepareReleaseManualFlush_Call {
-	return &MockHandlerClient_PrepareReleaseManualFlush_Call{Call: _e.mock.On("PrepareReleaseManualFlush", ctx, collectionID, vchannel, releaseSegmentIDs)}
+func (_e *MockHandlerClient_Expecter) PrepareReleaseManualFlushIfLocal(ctx interface{}, collectionID interface{}, vchannel interface{}, releaseSegmentIDs interface{}) *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call {
+	return &MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call{Call: _e.mock.On("PrepareReleaseManualFlushIfLocal", ctx, collectionID, vchannel, releaseSegmentIDs)}
 }
 
-func (_c *MockHandlerClient_PrepareReleaseManualFlush_Call) Run(run func(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64)) *MockHandlerClient_PrepareReleaseManualFlush_Call {
+func (_c *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call) Run(run func(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64)) *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].([]int64))
 	})
 	return _c
 }
 
-func (_c *MockHandlerClient_PrepareReleaseManualFlush_Call) Return(_a0 bool, _a1 error) *MockHandlerClient_PrepareReleaseManualFlush_Call {
+func (_c *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call) Return(_a0 bool, _a1 error) *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockHandlerClient_PrepareReleaseManualFlush_Call) RunAndReturn(run func(context.Context, int64, string, []int64) (bool, error)) *MockHandlerClient_PrepareReleaseManualFlush_Call {
+func (_c *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call) RunAndReturn(run func(context.Context, int64, string, []int64) (bool, error)) *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call {
 	_c.Call.Return(run)
 	return _c
 }

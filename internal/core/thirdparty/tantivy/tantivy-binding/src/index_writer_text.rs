@@ -15,6 +15,7 @@ impl IndexWriterWrapper {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
+        enable_background_merge: bool,
         tanviy_index_version: TantivyIndexVersion,
     ) -> Result<IndexWriterWrapper> {
         match tanviy_index_version {
@@ -27,6 +28,7 @@ impl IndexWriterWrapper {
                     num_threads,
                     overall_memory_budget_in_bytes,
                     in_ram,
+                    enable_background_merge,
                 )?,
             )),
             TantivyIndexVersion::V7 => Ok(IndexWriterWrapper::V7(
@@ -39,6 +41,7 @@ impl IndexWriterWrapper {
                     num_threads,
                     overall_memory_budget_in_bytes,
                     in_ram,
+                    enable_background_merge,
                 )?,
             )),
         }

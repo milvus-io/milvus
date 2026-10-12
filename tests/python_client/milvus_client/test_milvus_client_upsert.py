@@ -1046,7 +1046,7 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
                 verify: success, and the pks are auto-generated
                 3. query 10 entities to get the existing pks
                 4. upsert 10 entities with existing pks
-                verify: success, and the pks are re-generated, and the new pks are visibly
+                verify: success, and the existing pks are preserved
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1063,6 +1063,13 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
         insert_ids = insert_results.get("ids", [])
         self.flush(client, collection_name)
 
+        # Full AutoID Upsert classifies lookup keys through Query, so load the
+        # collection before the first Upsert.
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
         # 2. Upsert 10 entities with non-existing pks (auto_id will generate new pks)
         upsert_schema = self.gen_default_schema_for_upsert(enable_dynamic_field=False, auto_id=False, with_json=True)
         start = ct.default_nb * 10
@@ -1076,12 +1083,6 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
         assert upsert1_ids[0] > insert_ids[-1]
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == ct.default_nb + nb
-
-        # build index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_float_vec_field_name, metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.load_collection(client, collection_name)
 
         # 3. Query 10 entities to get the existing pks
         res_q = self.query(client, collection_name, filter="", limit=nb)[0]
@@ -1097,28 +1098,27 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
         # 4. Upsert 10 entities with the existing pks
         start = ct.default_nb * 20
         upsert_rows2 = cf.gen_row_data_by_schema(nb=nb, schema=upsert_schema, start=start)
-        # Set primary key to existing pks (but with auto_id, they will be regenerated)
+        # Set primary keys to existing entities; Full AutoID Upsert preserves them.
         for i, row in enumerate(upsert_rows2):
             row[ct.default_int64_field_name] = existing_pks[i] if i < len(existing_pks) else existing_pks[0]
 
         res_upsert2 = self.upsert(client, collection_name, upsert_rows2)[0]
         self.flush(client, collection_name)
 
-        # Assert the new pks are auto-generated again
+        # Existing primary keys remain authoritative and are returned in request order.
         upsert2_ids = res_upsert2.get("ids", [])
-        assert len(upsert2_ids) == nb
-        assert upsert2_ids[0] > upsert1_ids[-1]
+        assert upsert2_ids == existing_pks
 
-        # Verify existing pks are no longer in collection (replaced by new auto-generated ones)
+        # Verify the existing entities remain addressable by their original primary keys.
         existing_count = self.query(
             client,
             collection_name,
             filter=f"{ct.default_int64_field_name} in {existing_pks}",
             output_fields=[ct.default_count_output],
         )[0]
-        assert 0 == existing_count[0].get(ct.default_count_output)
+        assert nb == existing_count[0].get(ct.default_count_output)
 
-        # Verify new upserted entities exist
+        # Verify the updated entities exist under the preserved IDs.
         res_q = self.query(
             client, collection_name, filter=f"{ct.default_int64_field_name} in {upsert2_ids}", output_fields=["*"]
         )[0]
@@ -1155,6 +1155,13 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, dimension=ct.default_dim, schema=schema)
 
+        # Full AutoID Upsert requires a queryable scope for existence
+        # classification. Loading here is harmless for the non-AutoID case.
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
         # 2. Insert data
         rng = np.random.default_rng(seed=19530)
         vectors = [list(rng.random(ct.default_dim)) for _ in range(2)]
@@ -1180,7 +1187,7 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
             rows = [{ct.default_float_vec_field_name: vectors[0]}, {ct.default_float_vec_field_name: vectors[1]}]
             self.insert(client, collection_name, rows)
 
-            # 3. Upsert with spaces before or after string (but auto_id will regenerate)
+            # 3. Missing string lookup keys still receive generated AutoIDs.
             upsert_rows = [
                 {ct.default_string_field_name: " a", ct.default_float_vec_field_name: vectors[0]},
                 {ct.default_string_field_name: "b  ", ct.default_float_vec_field_name: vectors[1]},

@@ -40,6 +40,22 @@ pub extern "C" fn tantivy_phrase_match_query(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_fuzzy_match_query(
+    ptr: *mut c_void,
+    query: *const c_char,
+    max_edit_distance: u32,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let query = cstr_to_str!(query);
+    unsafe {
+        (*real)
+            .fuzzy_match_query(query, max_edit_distance, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_register_tokenizer(
     ptr: *mut c_void,
     tokenizer_name: *const c_char,
@@ -58,6 +74,6 @@ pub extern "C" fn tantivy_register_tokenizer(
             (*real).register_tokenizer(String::from(tokenizer_name), text_analyzer);
             Ok(()).into()
         },
-        Err(err) => RustResult::from_error(err.to_string()),
+        Err(err) => RustResult::from_binding_error(&err),
     }
 }

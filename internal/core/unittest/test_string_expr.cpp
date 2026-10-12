@@ -1647,7 +1647,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     ASSERT_EQ(retrieved->fields_data().size(), 1);
     ASSERT_EQ(retrieved->fields_data(0).scalars().string_data().data().size(),
               N);
-    ASSERT_EQ(retrieved->fields_data(0).valid_data_size(), 0);
+    ASSERT_TRUE(GetFieldDataRowValidData(retrieved->fields_data(0)).empty());
 }
 
 TEST(AlwaysTrueStringPlan, QueryWithOutputFieldsNullable) {
@@ -1689,7 +1689,8 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFieldsNullable) {
     ASSERT_EQ(retrieved->fields_data().size(), 1);
     ASSERT_EQ(retrieved->fields_data(0).scalars().string_data().data().size(),
               N / 2);
-    ASSERT_EQ(retrieved->fields_data(0).valid_data().size(), N / 2);
+    ASSERT_EQ(GetFieldDataRowValidData(retrieved->fields_data(0)).size(),
+              N / 2);
 }
 
 // Test: NOT (a IS NOT NULL) - verifies that the result valid bits are always true

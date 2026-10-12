@@ -34,25 +34,25 @@ import (
 // The schema is used to calculate a minimum ID count for V3 manifest segments where
 // binlog metadata may be empty but stats output still requires IDs.
 func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*SegmentInfo, schema *schemapb.CollectionSchema) (*datapb.IDRange, error) {
-	binlogNum := 0
+	binlogNum := int64(0)
 	for _, s := range segmentInfos {
-		for _, l := range s.GetBinlogs() {
-			binlogNum += len(l.GetBinlogs())
-		}
-		for _, l := range s.GetDeltalogs() {
-			binlogNum += len(l.GetBinlogs())
-		}
+		// Insert / delta counts come from Statistics. Stats and BM25
+		// stats arrays are still iterated because Statistics doesn't
+		// carry a per-segment stat-file count today (V3 leaves these
+		// arrays empty regardless; V2 sees the cumulative arrays here).
+		stats := s.EnsureStats()
+		binlogNum += stats.GetInsertBinlogCount() + stats.GetDeltaBinlogCount()
 		for _, l := range s.GetStatslogs() {
-			binlogNum += len(l.GetBinlogs())
+			binlogNum += int64(len(l.GetBinlogs()))
 		}
 		for _, l := range s.GetBm25Statslogs() {
-			binlogNum += len(l.GetBinlogs())
+			binlogNum += int64(len(l.GetBinlogs()))
 		}
 	}
 	// Compaction output always needs IDs for PK stats (1) and BM25 stats (per BM25 function).
 	// For V3 manifest segments, binlog metadata may be empty since data is managed by manifest,
 	// but stats output still requires IDs. Calculate the minimum from schema directly.
-	minIDsFromSchema := 1 // 1 for PK stats
+	minIDsFromSchema := int64(1) // 1 for PK stats
 	if schema != nil {
 		for _, fn := range schema.GetFunctions() {
 			if fn.GetType() == schemapb.FunctionType_BM25 {
@@ -63,8 +63,8 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 	if binlogNum < minIDsFromSchema {
 		binlogNum = minIDsFromSchema
 	}
-	n := binlogNum * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt()
-	begin, end, err := allocator.AllocN(int64(n))
+	n := binlogNum * int64(paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt())
+	begin, end, err := allocator.AllocN(n)
 	return &datapb.IDRange{Begin: begin, End: end}, err
 }
 
@@ -105,15 +105,26 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 }
 
 func isNormalManualCompactionCandidate(meta *meta, segment *SegmentInfo) bool {
+	return isNormalManualCompactionSegment(segment) &&
+		isSharedCompactionSelectable(meta, segment) &&
+		isMixCompactionSelectable(segment)
+}
+
+func isNormalManualCompactionSegment(segment *SegmentInfo) bool {
 	return isSegmentHealthy(segment) &&
 		isFlushed(segment) &&
-		!segment.isCompacting &&
 		!segment.GetIsImporting() &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetLevel() != datapb.SegmentLevel_L2 &&
-		!segment.GetIsInvisible() &&
-		(segment.GetIsSorted() || segment.GetIsSortedByNamespace()) &&
-		!meta.isSegmentCompactionProtected(segment.GetID())
+		segment.GetLevel() != datapb.SegmentLevel_L2
+}
+
+func isSharedCompactionSelectable(meta *meta, segment *SegmentInfo) bool {
+	return !segment.isCompacting && !meta.isSegmentCompactionProtected(segment.GetID())
+}
+
+func isMixCompactionSelectable(segment *SegmentInfo) bool {
+	return !segment.GetIsInvisible() &&
+		(segment.GetIsSorted() || segment.GetIsSortedByNamespace())
 }
 
 // isCompactionTaskFinished returns true if the task has reached a terminal state

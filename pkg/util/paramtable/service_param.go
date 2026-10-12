@@ -19,17 +19,22 @@ package paramtable
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
@@ -39,8 +44,53 @@ const (
 	KafkaProducerConfigPrefix = "kafka.producer."
 	KafkaConsumerConfigPrefix = "kafka.consumer."
 
+	// minWALMessageSize is the smallest supported per-record WAL message-size
+	// limit. Smaller limits do not leave enough useful payload capacity after
+	// reserving the streaming headers, properties, encryption expansion, and
+	// broker envelope, so bounded WAL backends clamp their configured limit to
+	// 256 KiB.
+	minWALMessageSize = 256 * 1024
+
+	// defaultPulsarMessageReserveSize is the headroom kept outside the plaintext
+	// message body for the streaming message header, cipher metadata/expansion,
+	// properties added before WAL append, and Pulsar message metadata. Sized
+	// generously (64 KiB): the WAL-impl payload chunker slices bodies into
+	// records of at most (limit - reserve) bytes, and this reserve must absorb
+	// the per-record properties clone plus the backend envelope of every chunk.
+	defaultPulsarMessageReserveSize = 64 * 1024
+
+	// minPulsarMessageReserveSize is the smallest headroom that can plausibly
+	// absorb one record's envelope. A reserve below this would let a full chunk
+	// plus its properties clone,
+	// streaming header, cipher metadata, and broker metadata cross the backend
+	// cap, and the rejected record would retry forever: exactly the stall the
+	// chunker exists to remove. The effective reserve is therefore clamped
+	// rather than trusted.
+	minPulsarMessageReserveSize = 1024
+
 	defaultLocalStoragePath = "/var/lib/milvus/data"
 )
+
+func walMessageSizeFormatter(key string, defaultSize int) func(string) string {
+	return func(value string) string {
+		messageSize, err := strconv.ParseInt(value, 10, 32)
+		if err != nil {
+			mlog.Warn(context.TODO(), "WAL message size must be a 32-bit integer, using default",
+				mlog.String("key", key),
+				mlog.String("configured", value),
+				mlog.Int("default", defaultSize))
+			return strconv.Itoa(defaultSize)
+		}
+		if messageSize < minWALMessageSize {
+			mlog.Warn(context.TODO(), "WAL message size is below the supported minimum, clamping",
+				mlog.String("key", key),
+				mlog.Int64("configured", messageSize),
+				mlog.Int("minimum", minWALMessageSize))
+			return strconv.Itoa(minWALMessageSize)
+		}
+		return value
+	}
+}
 
 // ServiceParam is used to quickly and easily access all basic service configurations.
 type ServiceParam struct {
@@ -68,11 +118,32 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.KafkaCfg.Init(bt)
 	p.RocksmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
-	p.ProfileCfg.Init(bt)
+	p.ProfileCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
 	return p.RocksmqCfg.Path.GetValue() != ""
+}
+
+// WALMaxMessageSize reports the effective per-record limit used by WAL
+// chunking. Pulsar, Kafka, and Woodpecker configuration is normalized to at
+// least 256 KiB by the corresponding ParamItem formatter. External Pulsar
+// broker/proxy and Kafka broker/topic limits must support the same limit
+// because local normalization cannot raise their caps. RocksMQ has neither a
+// hard per-entry cap nor a configured chunk threshold (and neither do
+// unrecognized names), so 0 is returned there. This is the single place a WAL
+// name maps to its chunking limit.
+func (p *ServiceParam) WALMaxMessageSize(walName string) int {
+	switch walName {
+	case "kafka":
+		return p.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
+	case "woodpecker":
+		return p.WoodpeckerCfg.MaxMessageSize.GetAsInt()
+	case "pulsar":
+		return p.PulsarCfg.MaxMessageSize.GetAsInt()
+	default:
+		return 0
+	}
 }
 
 func (p *ServiceParam) PulsarEnable() bool {
@@ -129,7 +200,8 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		Doc: `Endpoints used to access etcd service. You can change this parameter as the endpoints of your own etcd cluster.
 Environment variable: ETCD_ENDPOINTS
 etcd preferentially acquires valid address from environment variable ETCD_ENDPOINTS when Milvus is started.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.Endpoints.Init(base.mgr)
 
@@ -172,7 +244,8 @@ It is recommended to change this parameter before starting Milvus for the first 
 To share an etcd instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them.
 Set an easy-to-identify root path for Milvus if etcd service already exists.
 Changing this for an already running Milvus instance may result in failures to read legacy data.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.RootPath.Init(base.mgr)
 
@@ -239,6 +312,7 @@ please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log`,
 
 	p.EtcdUseSSL = ParamItem{
 		Key:          "etcd.ssl.enabled",
+		Sensitivity:  Sensitive,
 		DefaultValue: "false",
 		Version:      "2.0.0",
 		Doc:          "Whether to support ETCD secure connection mode",
@@ -247,31 +321,35 @@ please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log`,
 	p.EtcdUseSSL.Init(base.mgr)
 
 	p.EtcdTLSCert = ParamItem{
-		Key:     "etcd.ssl.tlsCert",
-		Version: "2.0.0",
-		Doc:     "path to your cert file",
-		Export:  true,
+		Key:         "etcd.ssl.tlsCert",
+		Sensitivity: Sensitive,
+		Version:     "2.0.0",
+		Doc:         "path to your cert file",
+		Export:      true,
 	}
 	p.EtcdTLSCert.Init(base.mgr)
 
 	p.EtcdTLSKey = ParamItem{
-		Key:     "etcd.ssl.tlsKey",
-		Version: "2.0.0",
-		Doc:     "path to your key file",
-		Export:  true,
+		Key:         "etcd.ssl.tlsKey",
+		Sensitivity: Sensitive,
+		Version:     "2.0.0",
+		Doc:         "path to your key file",
+		Export:      true,
 	}
 	p.EtcdTLSKey.Init(base.mgr)
 
 	p.EtcdTLSCACert = ParamItem{
-		Key:     "etcd.ssl.tlsCACert",
-		Version: "2.0.0",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:         "etcd.ssl.tlsCACert",
+		Sensitivity: Sensitive,
+		Version:     "2.0.0",
+		Doc:         "path to your CACert file",
+		Export:      true,
 	}
 	p.EtcdTLSCACert.Init(base.mgr)
 
 	p.EtcdTLSMinVersion = ParamItem{
 		Key:          "etcd.ssl.tlsMinVersion",
+		Sensitivity:  Sensitive,
 		DefaultValue: "1.3",
 		Version:      "2.0.0",
 		Doc: `TLS min version
@@ -319,6 +397,7 @@ We recommend using version 1.2 and above.`,
 
 	p.EtcdEnableAuth = ParamItem{
 		Key:          "etcd.auth.enabled",
+		Sensitivity:  Sensitive,
 		DefaultValue: "true",
 		Version:      "2.3.7",
 		Doc:          "Whether to enable authentication",
@@ -337,6 +416,7 @@ We recommend using version 1.2 and above.`,
 		DefaultValue: "etcdadmin",
 		Doc:          "username for etcd authentication",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.EtcdAuthUserName.Init(base.mgr)
 
@@ -346,6 +426,7 @@ We recommend using version 1.2 and above.`,
 		DefaultValue: "etcdadmin",
 		Doc:          "password for etcd authentication",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.EtcdAuthPassword.Init(base.mgr)
 
@@ -417,6 +498,7 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 		PanicIfEmpty: true,
 		Doc:          "Note that the default pd port of tikv is 2379, which conflicts with etcd.",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.Endpoints.Init(base.mgr)
 
@@ -427,6 +509,7 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 		PanicIfEmpty: true,
 		Doc:          "The root path where data is stored in tikv",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.RootPath.Init(base.mgr)
 
@@ -484,6 +567,7 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 
 	p.TiKVUseSSL = ParamItem{
 		Key:          "tikv.ssl.enabled",
+		Sensitivity:  Sensitive,
 		DefaultValue: "false",
 		Version:      "2.3.0",
 		Doc:          "Whether to support TiKV secure connection mode",
@@ -492,26 +576,29 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 	p.TiKVUseSSL.Init(base.mgr)
 
 	p.TiKVTLSCert = ParamItem{
-		Key:     "tikv.ssl.tlsCert",
-		Version: "2.3.0",
-		Doc:     "path to your cert file",
-		Export:  true,
+		Key:         "tikv.ssl.tlsCert",
+		Sensitivity: Sensitive,
+		Version:     "2.3.0",
+		Doc:         "path to your cert file",
+		Export:      true,
 	}
 	p.TiKVTLSCert.Init(base.mgr)
 
 	p.TiKVTLSKey = ParamItem{
-		Key:     "tikv.ssl.tlsKey",
-		Version: "2.3.0",
-		Doc:     "path to your key file",
-		Export:  true,
+		Key:         "tikv.ssl.tlsKey",
+		Sensitivity: Sensitive,
+		Version:     "2.3.0",
+		Doc:         "path to your key file",
+		Export:      true,
 	}
 	p.TiKVTLSKey.Init(base.mgr)
 
 	p.TiKVTLSCACert = ParamItem{
-		Key:     "tikv.ssl.tlsCACert",
-		Version: "2.3.0",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:         "tikv.ssl.tlsCACert",
+		Sensitivity: Sensitive,
+		Version:     "2.3.0",
+		Doc:         "path to your CACert file",
+		Export:      true,
 	}
 	p.TiKVTLSCACert.Init(base.mgr)
 }
@@ -526,11 +613,27 @@ func (p *LocalStorageConfig) Init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: defaultLocalStoragePath,
 		Doc: `Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
+Must be an absolute filesystem path. Milvus refuses to start if this value is relative or empty.
+Migration of data written using a relative path in older versions is not supported.
 Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
 It is recommended to change this parameter before starting Milvus for the first time.`,
-		Export: true,
+		// Every local storage key is a complete filesystem path that starts
+		// with this value, and the loon local filesystem is rooted at "/", so
+		// a relative path here would silently depend on the process working
+		// directory. Reject it during configuration initialization.
+		Formatter: formatLocalStoragePath,
+		Forbidden: true,
+		Export:    true,
 	}
 	p.Path.Init(base.mgr)
+}
+
+func formatLocalStoragePath(value string) string {
+	value = strings.TrimSpace(value)
+	if !filepath.IsAbs(value) {
+		panic(merr.WrapErrParameterInvalidMsg("localStorage.path must be an absolute filesystem path, got %q", value))
+	}
+	return filepath.Clean(value)
 }
 
 type MetaStoreConfig struct {
@@ -572,6 +675,13 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		DefaultValue: "64",
 		Doc:          `maximum number of operations in a single etcd transaction`,
 		Export:       true,
+		Formatter: func(value string) string {
+			maxTxnNum := getAsInt(value)
+			if maxTxnNum < 1 {
+				return "64"
+			}
+			return strconv.Itoa(maxTxnNum)
+		},
 	}
 	p.MaxEtcdTxnNum.Init(base.mgr)
 
@@ -719,13 +829,25 @@ type WoodpeckerConfig struct {
 	MetaType   ParamItem `refreshable:"false"`
 	MetaPrefix ParamItem `refreshable:"false"`
 
+	// MaxMessageSize is Milvus' target upper bound for one Woodpecker WAL
+	// record. Woodpecker does not enforce a corresponding single-entry hard
+	// limit; the WAL layer uses this value as its chunk threshold (#52474).
+	MaxMessageSize ParamItem `refreshable:"true"`
+
 	// client
-	AppendQueueSize         ParamItem `refreshable:"true"`
-	AppendMaxRetries        ParamItem `refreshable:"true"`
-	SegmentRollingMaxSize   ParamItem `refreshable:"true"`
-	SegmentRollingMaxTime   ParamItem `refreshable:"true"`
-	SegmentRollingMaxBlocks ParamItem `refreshable:"true"`
-	AuditorMaxInterval      ParamItem `refreshable:"true"`
+	AppendQueueSize                 ParamItem `refreshable:"true"`
+	AppendMaxRetries                ParamItem `refreshable:"true"`
+	AppendMaxBatchEntries           ParamItem `refreshable:"false"`
+	AppendMaxBatchBytes             ParamItem `refreshable:"false"`
+	SegmentRollingMaxSize           ParamItem `refreshable:"true"`
+	SegmentRollingMaxTime           ParamItem `refreshable:"true"`
+	SegmentRollingMaxBlocks         ParamItem `refreshable:"true"`
+	AuditorMaxInterval              ParamItem `refreshable:"true"`
+	AuditorCompactionAttemptTimeout ParamItem `refreshable:"false"`
+	AuditorCompactionPassBudget     ParamItem `refreshable:"false"`
+	DirectReadEnabled               ParamItem `refreshable:"false"`
+	DirectReadMaxBatchSize          ParamItem `refreshable:"false"`
+	DirectReadMaxFetchThreads       ParamItem `refreshable:"false"`
 
 	// quorum configuration
 	// Buffer pools for different regions
@@ -742,6 +864,7 @@ type WoodpeckerConfig struct {
 	// logstore
 	SyncMaxInterval                ParamItem `refreshable:"true"`
 	SyncMaxIntervalForLocalStorage ParamItem `refreshable:"true"`
+	SyncMaxIntervalForService      ParamItem `refreshable:"true"`
 	SyncMaxBytes                   ParamItem `refreshable:"true"`
 	SyncMaxEntries                 ParamItem `refreshable:"true"`
 	FlushMaxRetries                ParamItem `refreshable:"true"`
@@ -751,6 +874,10 @@ type WoodpeckerConfig struct {
 	CompactionSize                 ParamItem `refreshable:"true"`
 	CompactionMaxParallelUploads   ParamItem `refreshable:"true"`
 	CompactionMaxParallelReads     ParamItem `refreshable:"true"`
+	CompactionTimeout              ParamItem `refreshable:"false"`
+	CompactionMaxInflightMemory    ParamItem `refreshable:"false"`
+	CompactionMemoryHighWatermark  ParamItem `refreshable:"false"`
+	SyncSchedulerMaxWorkers        ParamItem `refreshable:"false"`
 	ReaderMaxBatchSize             ParamItem `refreshable:"true"`
 	ReaderMaxFetchThreads          ParamItem `refreshable:"true"`
 	RetentionTTL                   ParamItem `refreshable:"true"`
@@ -776,10 +903,22 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Key:          "woodpecker.meta.prefix",
 		Version:      "2.6.0",
 		DefaultValue: "woodpecker",
-		Doc:          "The Prefix of the metadata provider. default is woodpecker.",
+		Doc:          "The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.",
 		Export:       true,
 	}
 	p.MetaPrefix.Init(base.mgr)
+
+	p.MaxMessageSize = ParamItem{
+		Key:          "woodpecker.maxMessageSize",
+		Version:      "3.0.2",
+		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
+		Doc: `The target maximum size of each Woodpecker WAL record produced by Milvus. Unit: Byte.
+Woodpecker does not enforce a corresponding single-entry hard limit. Milvus uses this value as the WAL-layer chunk threshold and splits larger payloads into multiple records.
+Values below 256 KiB are clamped to 256 KiB. Invalid or out-of-range values fall back to the default 10 MiB limit.`,
+		Export:    true,
+		Formatter: walMessageSizeFormatter("woodpecker.maxMessageSize", 10*1024*1024),
+	}
+	p.MaxMessageSize.Init(base.mgr)
 
 	p.AppendQueueSize = ParamItem{
 		Key:          "woodpecker.client.segmentAppend.queueSize",
@@ -798,6 +937,24 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AppendMaxRetries.Init(base.mgr)
+
+	p.AppendMaxBatchEntries = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchEntries",
+		Version:      "2.6.0",
+		DefaultValue: "1000",
+		Doc:          "Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.",
+		Export:       true,
+	}
+	p.AppendMaxBatchEntries.Init(base.mgr)
+
+	p.AppendMaxBatchBytes = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchBytes",
+		Version:      "2.6.0",
+		DefaultValue: "2000000",
+		Doc:          "Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.",
+		Export:       true,
+	}
+	p.AppendMaxBatchBytes.Init(base.mgr)
 
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
@@ -835,6 +992,57 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	}
 	p.AuditorMaxInterval.Init(base.mgr)
 
+	p.AuditorCompactionAttemptTimeout = ParamItem{
+		Key:          "woodpecker.client.auditor.compactionAttemptTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "330s",
+		Doc: `How long this client waits for one logstore node to answer one compaction request.
+It travels to the node as the gRPC deadline; the node applies its own ceiling
+(woodpecker.logstore.segmentCompactionPolicy.timeout) on top and the shorter of the two applies.
+Raise it together with that ceiling: on its own it has no effect while it stays above the node's.`,
+		Export: true,
+	}
+	p.AuditorCompactionAttemptTimeout.Init(base.mgr)
+
+	p.AuditorCompactionPassBudget = ParamItem{
+		Key:          "woodpecker.client.auditor.compactionPassBudget",
+		Version:      "3.0.2",
+		DefaultValue: "60s",
+		Doc: `How long one auditor cycle keeps starting compactions. It is a start deadline, not a cap on the
+cycle: once spent no further segment is begun, but one already running finishes, so a cycle can
+overrun this by one segment. Raise it to trade the timeliness of the auditor's other passes
+(truncate state, snapshot publication, orphan sweep) for compaction throughput.`,
+		Export: true,
+	}
+	p.AuditorCompactionPassBudget.Init(base.mgr)
+
+	p.DirectReadEnabled = ParamItem{
+		Key:          "woodpecker.client.directRead.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Whether the Woodpecker client reads sealed segments directly from object storage in service storage mode.",
+		Export:       true,
+	}
+	p.DirectReadEnabled.Init(base.mgr)
+
+	p.DirectReadMaxBatchSize = ParamItem{
+		Key:          "woodpecker.client.directRead.maxBatchSize",
+		Version:      "2.6.0",
+		DefaultValue: "16M",
+		Doc:          "Maximum batch size for direct reads from object storage in service storage mode.",
+		Export:       true,
+	}
+	p.DirectReadMaxBatchSize.Init(base.mgr)
+
+	p.DirectReadMaxFetchThreads = ParamItem{
+		Key:          "woodpecker.client.directRead.maxFetchThreads",
+		Version:      "2.6.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent fetch threads used by Woodpecker direct reads from object storage.",
+		Export:       true,
+	}
+	p.DirectReadMaxFetchThreads.Init(base.mgr)
+
 	// Buffer pools for different regions
 	p.QuorumBufferPools = ParamItem{
 		Key:          "woodpecker.client.quorum.quorumBufferPools",
@@ -846,7 +1054,8 @@ Example configuration below:
     seeds: [n1,n2,n3] # List of seed node addresses for this pool
   - name: region2 # Name of the region pool
     seeds: [n4,n5,n6] # List of seed node addresses for this pool`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.QuorumBufferPools.Init(base.mgr)
 
@@ -926,6 +1135,15 @@ Example configuration below:
 		Export:       true,
 	}
 	p.SyncMaxIntervalForLocalStorage.Init(base.mgr)
+
+	p.SyncMaxIntervalForService = ParamItem{
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxIntervalForService",
+		Version:      "2.6.0",
+		DefaultValue: "10ms",
+		Doc:          "Maximum interval between two sync operations for woodpecker service-storage mode (woodpecker.storage.type=service), default is 10 milliseconds. Only takes effect on standalone woodpecker log-store servers (staged-storage writer); it is not consumed by milvus embedded mode. A larger interval coalesces more entries per flush to raise QPS under small-batch high-concurrency writes, at the cost of up to that much extra durability latency. Note this raises the interval from woodpecker's built-in 1ms default, changing the sync cadence for existing service-mode deployments.",
+		Export:       true,
+	}
+	p.SyncMaxIntervalForService.Init(base.mgr)
 
 	p.SyncMaxEntries = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxEntries",
@@ -1008,6 +1226,56 @@ Example configuration below:
 	}
 	p.CompactionMaxParallelReads.Init(base.mgr)
 
+	p.CompactionTimeout = ParamItem{
+		Key:          "woodpecker.logstore.segmentCompactionPolicy.timeout",
+		Version:      "3.0.2",
+		DefaultValue: "300s",
+		Doc: `Ceiling on how long one compaction may run on a logstore node. This is the node's guardrail, not a
+per-tenant policy: one node serves many logs from this single value, and it exists so no one
+request can hold a node's compaction resources indefinitely.`,
+		Export: true,
+	}
+	p.CompactionTimeout.Init(base.mgr)
+
+	p.CompactionMaxInflightMemory = ParamItem{
+		Key:     "woodpecker.logstore.segmentCompactionPolicy.maxInflightMemory",
+		Version: "3.0.2",
+		// Decimal, matching woodpecker's own default exactly: "1G" would parse as 2^30 here and
+		// quietly raise the ceiling by 7% relative to what the library ships with.
+		DefaultValue: "1000000000",
+		Doc: `Memory a logstore node will reserve for the compactions it runs at once, across every log it
+serves. Absolute rather than a share of the pod: useful compaction concurrency saturates on
+object-storage bandwidth long before memory, so a larger node does not need a larger allowance.
+Raise it alongside maxSize or maxParallelUploads, which raise what one compaction costs.
+Compactions beyond it are refused, not queued, and retried on a later auditor cycle.`,
+		Export: true,
+	}
+	p.CompactionMaxInflightMemory.Init(base.mgr)
+
+	p.CompactionMemoryHighWatermark = ParamItem{
+		Key:          "woodpecker.logstore.segmentCompactionPolicy.memoryHighWatermark",
+		Version:      "3.0.2",
+		DefaultValue: "0.7",
+		Doc: `Stop taking on new compactions once a logstore node's memory usage passes this fraction of its
+limit, whatever is using it -- maxInflightMemory above only accounts for compaction. Applies only
+where a container memory limit can be read; on bare metal, with no limit set, or if detection
+fails, it is skipped rather than measured against host memory.`,
+		Export: true,
+	}
+	p.CompactionMemoryHighWatermark.Init(base.mgr)
+
+	p.SyncSchedulerMaxWorkers = ParamItem{
+		Key:          "woodpecker.logstore.syncScheduler.maxWorkers",
+		Version:      "3.0.2",
+		DefaultValue: "32",
+		Doc: `Workers in a logstore node's shared flush pool, as a plain count. Each one blocks in fdatasync
+while a flush is in flight, so this bounds concurrent syncs, not CPU usage. Tune it from the
+volume's IOPS budget: workers ~= target IOPS x fsync latency. Past the point where the device
+saturates, more workers buy queueing rather than throughput.`,
+		Export: true,
+	}
+	p.SyncSchedulerMaxWorkers.Init(base.mgr)
+
 	p.ReaderMaxBatchSize = ParamItem{
 		Key:          "woodpecker.logstore.segmentReadPolicy.maxBatchSize",
 		Version:      "2.6.0",
@@ -1070,6 +1338,7 @@ Valid values: [auto, enable, disable]`,
 		DefaultValue: "default",
 		Doc:          "The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.RootPath.Init(base.mgr)
 }
@@ -1077,11 +1346,12 @@ Valid values: [auto, enable, disable]`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- pulsar ---
 type PulsarConfig struct {
-	Address        ParamItem `refreshable:"false"`
-	Port           ParamItem `refreshable:"false"`
-	WebAddress     ParamItem `refreshable:"false"`
-	WebPort        ParamItem `refreshable:"false"`
-	MaxMessageSize ParamItem `refreshable:"true"`
+	Address            ParamItem `refreshable:"false"`
+	Port               ParamItem `refreshable:"false"`
+	WebAddress         ParamItem `refreshable:"false"`
+	WebPort            ParamItem `refreshable:"false"`
+	MaxMessageSize     ParamItem `refreshable:"true"`
+	MessageReserveSize ParamItem `refreshable:"true"`
 
 	// support auth
 	AuthPlugin ParamItem `refreshable:"false"`
@@ -1098,6 +1368,52 @@ type PulsarConfig struct {
 	EnableClientMetrics ParamItem `refreshable:"false"`
 
 	BacklogAutoClearBytes ParamItem `refreshable:"false"`
+
+	ProducerAccessMode ParamItem `refreshable:"false"`
+
+	ProducerCreateTimeout ParamItem `refreshable:"true"`
+}
+
+// GetMessageSizeLimitsFor generalizes the plaintext-body budget to an
+// arbitrary WAL backend's broker limit -- not necessarily Pulsar's own. The
+// reserve amount (streaming message header, properties added before WAL
+// append, cipher metadata/expansion, and broker message metadata) covers the
+// same envelope regardless of which backend produced maxMessageSize, so it is
+// still read from pulsar.messageReserveSize; that config item is not
+// Pulsar-specific in what it represents, only in where it is set.
+func (p *PulsarConfig) GetMessageSizeLimitsFor(maxMessageSize int) (int, int) {
+	return maxMessageSize, normalizePulsarMessageReserve(maxMessageSize, p.MessageReserveSize.GetAsInt())
+}
+
+func normalizePulsarMessageReserve(maxMessageSize, messageReserveSize int) int {
+	if maxMessageSize <= 0 {
+		return 0
+	}
+	if messageReserveSize >= minPulsarMessageReserveSize && messageReserveSize < maxMessageSize {
+		return messageReserveSize
+	}
+	// Bounded WAL configuration is normalized to at least 256 KiB before it
+	// reaches this helper, so the default reserve always fits in production.
+	// Keep the smaller-limit branches defensive for direct callers and
+	// rate-limit the persistent misconfiguration warning globally by call site.
+	//
+	// Prefer the generous default; fall back to the minimum envelope headroom
+	// when a direct caller supplies a smaller limit. Zero is used only when that
+	// limit is too small to reserve anything at all, which disables chunking
+	// rather than emitting records that are guaranteed to be rejected.
+	fallback := 0
+	switch {
+	case defaultPulsarMessageReserveSize < maxMessageSize:
+		fallback = defaultPulsarMessageReserveSize
+	case minPulsarMessageReserveSize < maxMessageSize:
+		fallback = minPulsarMessageReserveSize
+	}
+	mlog.RatedWarn(context.TODO(), rate.Limit(1.0/60.0),
+		"pulsar.messageReserveSize does not fit under the active WAL message size limit, falling back",
+		mlog.Int("configuredReserve", messageReserveSize),
+		mlog.Int("maxMessageSize", maxMessageSize),
+		mlog.Int("effectiveReserve", fallback))
+	return fallback
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -1107,6 +1423,7 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		DefaultValue: "6650",
 		Doc:          "Port of Pulsar service.",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.Port.Init(base.mgr)
 
@@ -1130,7 +1447,8 @@ Environment variable: PULSAR_ADDRESS
 pulsar.address and pulsar.port together generate the valid access to Pulsar.
 Pulsar preferentially acquires the valid IP address from the environment variable PULSAR_ADDRESS when Milvus is started.
 Default value applies when Pulsar is running on the same network with Milvus.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.Address.Init(base.mgr)
 
@@ -1140,6 +1458,7 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		DefaultValue: "80",
 		Doc:          "Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.WebPort.Init(base.mgr)
 
@@ -1147,13 +1466,42 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Key:          "pulsar.webaddress",
 		Version:      "2.0.0",
 		DefaultValue: "",
+		Sensitivity:  Sensitive,
+		Doc: `Web address of the Pulsar admin REST API, used to clean up subscriptions. It must be a full url with scheme, e.g. http://pulsar-web:8080.
+Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport> is used. Set it only if the admin API is not reachable there, e.g. behind a proxy or over https.`,
+		Export: true,
 		Formatter: func(add string) string {
+			add = strings.TrimSpace(add)
+			if add != "" {
+				// An explicit web address is used as is, but unlike pulsar.address it has to carry
+				// its scheme: the admin API may be served over https, so it cannot be guessed here.
+				u, err := url.Parse(add)
+				if err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+					return add
+				}
+				// The configured URL may contain credentials or private topology.
+				mlog.Warn(context.TODO(), "pulsar.webaddress is not an http(s) url, using the address derived from pulsar.address")
+			}
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
-				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used", mlog.Err(err))
+				// URL parser errors include the input, which can carry credentials.
+				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used")
 				return ""
 			}
-			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
+			// pulsar.address may be a multi-host service url such as
+			// pulsar://host1:6650,host2:6650, which url.Hostname() cannot handle.
+			// Derive the web address from the first host.
+			host := pulsarURL.Host
+			if idx := strings.Index(host, ","); idx >= 0 {
+				host = host[:idx]
+			}
+			if hostOnly, _, err := net.SplitHostPort(host); err == nil {
+				host = hostOnly
+			} else {
+				// no port in the host; strip IPv6 brackets so that JoinHostPort adds them back
+				host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+			}
+			return "http://" + net.JoinHostPort(host, p.WebPort.GetValue())
 		},
 	}
 	p.WebAddress.Init(base.mgr)
@@ -1163,14 +1511,38 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Version:      "2.0.0",
 		DefaultValue: "2097152",
 		Doc: `The maximum size of each message in Pulsar. Unit: Byte.
-By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
-If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.`,
-		Export: true,
+By default, Pulsar can transmit at most 2MB of data in a single message. When streaming.splitChunkSN is enabled, the StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.
+Values below 256 KiB are clamped to 256 KiB. The Pulsar broker/proxy limit must be no smaller than this effective value; otherwise Pulsar can still reject records that Milvus considers valid. Invalid or out-of-range values fall back to the default 2 MiB limit.`,
+		Export:    true,
+		Formatter: walMessageSizeFormatter("pulsar.maxMessageSize", 2*1024*1024),
 	}
 	p.MaxMessageSize.Init(base.mgr)
 
+	p.MessageReserveSize = ParamItem{
+		Key:          "pulsar.messageReserveSize",
+		Version:      "3.0.2",
+		DefaultValue: strconv.Itoa(defaultPulsarMessageReserveSize),
+		Doc: `The headroom reserved out of the active WAL backend's message-size limit (pulsar.maxMessageSize, kafka.producer.message.max.bytes, or woodpecker.maxMessageSize) for message overhead outside the plaintext body. Unit: Byte.
+A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and broker message metadata on top of the body, so the producer budgets only the active WAL backend's own message-size limit minus this value for the body itself.
+Must be a 32-bit integer of at least 1024 bytes and smaller than the active WAL backend's message-size limit: a smaller reserve cannot absorb one record's envelope, so a full-budget chunk would still be rejected by the backend. Invalid or out-of-range values fall back to the default reserve size.`,
+		Export: true,
+		Formatter: func(value string) string {
+			reserveSize, err := strconv.ParseInt(value, 10, 32)
+			if err != nil || reserveSize < minPulsarMessageReserveSize {
+				mlog.Warn(context.TODO(), "pulsar.messageReserveSize must be a 32-bit integer of at least the minimum envelope headroom, using default",
+					mlog.String("configured", value),
+					mlog.Int("minimum", minPulsarMessageReserveSize),
+					mlog.Int("default", defaultPulsarMessageReserveSize))
+				return strconv.Itoa(defaultPulsarMessageReserveSize)
+			}
+			return value
+		},
+	}
+	p.MessageReserveSize.Init(base.mgr)
+
 	p.Tenant = ParamItem{
 		Key:          "pulsar.tenant",
+		Sensitivity:  Sensitive,
 		Version:      "2.2.0",
 		DefaultValue: "public",
 		Doc: `Pulsar can be provisioned for specific tenants with appropriate capacity allocated to the tenant.
@@ -1181,6 +1553,7 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 
 	p.Namespace = ParamItem{
 		Key:          "pulsar.namespace",
+		Sensitivity:  Sensitive,
 		Version:      "2.2.0",
 		DefaultValue: "default",
 		Doc:          "A Pulsar namespace is the administrative unit nomenclature within a tenant.",
@@ -1189,14 +1562,16 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 	p.Namespace.Init(base.mgr)
 
 	p.AuthPlugin = ParamItem{
-		Key:     "pulsar.authPlugin",
-		Version: "2.2.0",
+		Key:         "pulsar.authPlugin",
+		Sensitivity: Sensitive,
+		Version:     "2.2.0",
 	}
 	p.AuthPlugin.Init(base.mgr)
 
 	p.AuthParams = ParamItem{
-		Key:     "pulsar.authParams",
-		Version: "2.2.0",
+		Key:         "pulsar.authParams",
+		Version:     "2.2.0",
+		Sensitivity: Sensitive,
 		Formatter: func(authParams string) string {
 			jsonMap := make(map[string]string)
 			params := strings.Split(authParams, ",")
@@ -1246,24 +1621,48 @@ If this option is zero or negative, it will be ignored and the default value (10
 		Export: true,
 	}
 	p.BacklogAutoClearBytes.Init(base.mgr)
+
+	p.ProducerAccessMode = ParamItem{
+		Key:          "pulsar.producerAccessMode",
+		Version:      "3.0.2",
+		DefaultValue: "exclusive",
+		Doc: `The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+shared: multiple producers can write to the topic at the same time.
+exclusive access is enforced by pulsar broker 2.8.0 or later.`,
+		Export: true,
+	}
+	p.ProducerAccessMode.Init(base.mgr)
+
+	p.ProducerCreateTimeout = ParamItem{
+		Key:          "pulsar.producerCreateTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "1m",
+		Doc: `The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+When it is exceeded, the wal open fails and the streaming coord retries the assignment later. 0 disables the limit.`,
+		Export: true,
+	}
+	p.ProducerCreateTimeout.Init(base.mgr)
 }
 
 // --- kafka ---
 type KafkaConfig struct {
-	Address              ParamItem  `refreshable:"false"`
-	SaslUsername         ParamItem  `refreshable:"false"`
-	SaslPassword         ParamItem  `refreshable:"false"`
-	SaslMechanisms       ParamItem  `refreshable:"false"`
-	SecurityProtocol     ParamItem  `refreshable:"false"`
-	KafkaUseSSL          ParamItem  `refreshable:"false"`
-	KafkaTLSCert         ParamItem  `refreshable:"false"`
-	KafkaTLSKey          ParamItem  `refreshable:"false"`
-	KafkaTLSCACert       ParamItem  `refreshable:"false"`
-	KafkaTLSKeyPassword  ParamItem  `refreshable:"false"`
-	ConsumerExtraConfig  ParamGroup `refreshable:"false"`
-	ProducerExtraConfig  ParamGroup `refreshable:"false"`
-	ReadTimeout          ParamItem  `refreshable:"true"`
-	QueuedMessagesKbytes ParamItem  `refreshable:"false"`
+	Address                 ParamItem  `refreshable:"false"`
+	SaslUsername            ParamItem  `refreshable:"false"`
+	SaslPassword            ParamItem  `refreshable:"false"`
+	SaslMechanisms          ParamItem  `refreshable:"false"`
+	SecurityProtocol        ParamItem  `refreshable:"false"`
+	KafkaUseSSL             ParamItem  `refreshable:"false"`
+	KafkaTLSCert            ParamItem  `refreshable:"false"`
+	KafkaTLSKey             ParamItem  `refreshable:"false"`
+	KafkaTLSCACert          ParamItem  `refreshable:"false"`
+	KafkaTLSKeyPassword     ParamItem  `refreshable:"false"`
+	ProducerMessageMaxBytes ParamItem  `refreshable:"false"`
+	ConsumerExtraConfig     ParamGroup `refreshable:"false"`
+	ProducerExtraConfig     ParamGroup `refreshable:"false"`
+	ReadTimeout             ParamItem  `refreshable:"true"`
+	QueuedMessagesKbytes    ParamItem  `refreshable:"false"`
 }
 
 func (k *KafkaConfig) Init(base *BaseTable) {
@@ -1273,6 +1672,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "localhost:9092",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	k.Address.Init(base.mgr)
 
@@ -1281,6 +1681,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	k.SaslUsername.Init(base.mgr)
 
@@ -1289,11 +1690,13 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	k.SaslPassword.Init(base.mgr)
 
 	k.SaslMechanisms = ParamItem{
 		Key:          "kafka.saslMechanisms",
+		Sensitivity:  Sensitive,
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
@@ -1302,6 +1705,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.SecurityProtocol = ParamItem{
 		Key:          "kafka.securityProtocol",
+		Sensitivity:  Sensitive,
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
@@ -1310,6 +1714,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.KafkaUseSSL = ParamItem{
 		Key:          "kafka.ssl.enabled",
+		Sensitivity:  Sensitive,
 		DefaultValue: "false",
 		Version:      "2.3.11",
 		Doc:          "whether to enable ssl mode",
@@ -1318,46 +1723,81 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	k.KafkaUseSSL.Init(base.mgr)
 
 	k.KafkaTLSCert = ParamItem{
-		Key:     "kafka.ssl.tlsCert",
-		Version: "2.3.11",
-		Doc:     "path to client's public key (PEM) used for authentication",
-		Export:  true,
+		Key:         "kafka.ssl.tlsCert",
+		Sensitivity: Sensitive,
+		Version:     "2.3.11",
+		Doc:         "path to client's public key (PEM) used for authentication",
+		Export:      true,
 	}
 	k.KafkaTLSCert.Init(base.mgr)
 
 	k.KafkaTLSKey = ParamItem{
-		Key:     "kafka.ssl.tlsKey",
-		Version: "2.3.11",
-		Doc:     "path to client's private key (PEM) used for authentication",
-		Export:  true,
+		Key:         "kafka.ssl.tlsKey",
+		Sensitivity: Sensitive,
+		Version:     "2.3.11",
+		Doc:         "path to client's private key (PEM) used for authentication",
+		Export:      true,
 	}
 	k.KafkaTLSKey.Init(base.mgr)
 
 	k.KafkaTLSCACert = ParamItem{
-		Key:     "kafka.ssl.tlsCaCert",
-		Version: "2.3.11",
-		Doc:     "file or directory path to CA certificate(s) for verifying the broker's key",
-		Export:  true,
+		Key:         "kafka.ssl.tlsCaCert",
+		Sensitivity: Sensitive,
+		Version:     "2.3.11",
+		Doc:         "file or directory path to CA certificate(s) for verifying the broker's key",
+		Export:      true,
 	}
 	k.KafkaTLSCACert.Init(base.mgr)
 
 	k.KafkaTLSKeyPassword = ParamItem{
-		Key:     "kafka.ssl.tlsKeyPassword",
-		Version: "2.3.11",
-		Doc:     "private key passphrase for use with ssl.key.location and set_ssl_cert(), if any",
-		Export:  true,
+		Key:         "kafka.ssl.tlsKeyPassword",
+		Version:     "2.3.11",
+		Doc:         "private key passphrase for use with ssl.key.location and set_ssl_cert(), if any",
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	k.KafkaTLSKeyPassword.Init(base.mgr)
 
+	k.ProducerMessageMaxBytes = ParamItem{
+		Key:          KafkaProducerConfigPrefix + "message.max.bytes",
+		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
+		Version:      "3.0.0",
+		Doc:          "Maximum size of a Kafka producer message in bytes. Values below 256 KiB are clamped to 256 KiB; invalid or out-of-range values fall back to the default 10 MiB. Kafka broker/topic limits must support the configured value. Requires a restart to take effect.",
+		Export:       true,
+		Immutable:    true,
+		// A size bound that happens to live below the kafka.producer. prefix,
+		// which is sensitive because librdkafka options are arbitrary. This one
+		// is declared here, so it is not arbitrary.
+		Sensitivity: NonSensitive,
+		Formatter:   walMessageSizeFormatter(KafkaProducerConfigPrefix+"message.max.bytes", 10*1024*1024),
+	}
+	k.ProducerMessageMaxBytes.Init(base.mgr)
+
+	// Sensitive as a group, with no NonSensitiveSuffixes, and both halves of
+	// that are deliberate.
+	//
+	// Sensitive because the name-pattern fallback cannot classify librdkafka's
+	// option names: "ssl.key.pem" carries an inline private key and matches no
+	// pattern in the list, and neither do ssl.keystore.* or oauthbearer.*. The
+	// cost is that ordinary tunables (compression.type, linger.ms) also read as
+	// ***** through ShowConfigurations; that is diagnosability, and it is the
+	// side to be wrong on when the alternative is publishing a private key.
+	//
+	// No suffix exemptions because NonSensitiveSuffixes matches a leaf name at
+	// one level of nesting: exempting "compression.type" would register the leaf
+	// "type" and let through anything under the prefix ending in it. Dotted
+	// librdkafka names are not what that mechanism is shaped for.
 	k.ConsumerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.consumer.",
 		Version:   "2.2.0",
+		Sensitive: true,
 	}
 	k.ConsumerExtraConfig.Init(base.mgr)
 
 	k.ProducerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.producer.",
 		Version:   "2.2.0",
+		Sensitive: true,
 	}
 	k.ProducerExtraConfig.Init(base.mgr)
 
@@ -1413,7 +1853,7 @@ Set an easy-to-identify root key prefix for Milvus if etcd service already exist
 
 	r.LRUCacheRatio = ParamItem{
 		Key:          "rocksmq.lrucacheratio",
-		DefaultValue: "0.0.6",
+		DefaultValue: "0.06",
 		Version:      "2.0.0",
 		Doc:          "rocksdb cache memory ratio",
 		Export:       true,
@@ -1496,6 +1936,9 @@ type MinioConfig struct {
 	MaxConnections     ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 	UseCRC32C          ParamItem `refreshable:"false"`
+
+	MultipartCopyThreshold    ParamItem `refreshable:"true"`
+	DisableAWSChunkedEncoding ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1506,6 +1949,7 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		Doc:          "Port of MinIO or S3 service.",
 		PanicIfEmpty: true,
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.Port.Init(base.mgr)
 
@@ -1528,7 +1972,8 @@ Environment variable: MINIO_ADDRESS
 minio.address and minio.port together generate the valid access to MinIO or S3 service.
 MinIO preferentially acquires the valid IP address from the environment variable MINIO_ADDRESS when Milvus is started.
 Default value applies when MinIO or S3 is running on the same network with Milvus.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.Address.Init(base.mgr)
 
@@ -1542,7 +1987,8 @@ Environment variable: MINIO_ACCESS_KEY_ID or minio.accessKeyID
 minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
 This configuration must be set identical to the environment variable MINIO_ACCESS_KEY_ID, which is necessary for starting MinIO or S3.
 The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.AccessKeyID.Init(base.mgr)
 
@@ -1556,12 +2002,14 @@ Environment variable: MINIO_SECRET_ACCESS_KEY or minio.secretAccessKey
 minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
 This configuration must be set identical to the environment variable MINIO_SECRET_ACCESS_KEY, which is necessary for starting MinIO or S3.
 The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.SecretAccessKey.Init(base.mgr)
 
 	p.UseSSL = ParamItem{
 		Key:          "minio.useSSL",
+		Sensitivity:  Sensitive,
 		Version:      "2.0.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
@@ -1570,8 +2018,20 @@ The default value applies to MinIO or S3 service that started with the default d
 	}
 	p.UseSSL.Init(base.mgr)
 
+	p.DisableAWSChunkedEncoding = ParamItem{
+		Key:          "minio.disableAWSChunkedEncoding",
+		Sensitivity:  Sensitive,
+		Version:      "2.6.20",
+		DefaultValue: "false",
+		Doc: `When enabled, PutObject requests use UNSIGNED-PAYLOAD to support S3-compatible endpoints that are incompatible with AWS chunked encoding.
+HTTPS is recommended because payload integrity is then protected by TLS rather than a signed payload hash.`,
+		Export: false,
+	}
+	p.DisableAWSChunkedEncoding.Init(base.mgr)
+
 	p.SslCACert = ParamItem{
 		Key:          "minio.ssl.tlsCACert",
+		Sensitivity:  Sensitive,
 		Version:      "2.3.12",
 		DefaultValue: "",
 		Doc:          "path to your CACert file",
@@ -1581,6 +2041,7 @@ The default value applies to MinIO or S3 service that started with the default d
 
 	p.SslTLSMinVersion = ParamItem{
 		Key:          "minio.ssl.tlsMinVersion",
+		Sensitivity:  Sensitive,
 		DefaultValue: "default",
 		Version:      "2.6.11",
 		Doc: `TLS minimum version for MinIO/S3 SSL connections.
@@ -1602,7 +2063,8 @@ Bucket with this name will be created if it does not exist. If the bucket alread
 To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.
 The data will be stored in the local Docker if Docker is used to start the MinIO service locally. Ensure that there is sufficient storage space.
 A bucket name is globally unique in one MinIO or S3 instance.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.BucketName.Init(base.mgr)
 
@@ -1622,12 +2084,14 @@ It is recommended to change this parameter before starting Milvus for the first 
 To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.
 Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
 Changing this for an already running Milvus instance may result in failures to read legacy data.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.RootPath.Init(base.mgr)
 
 	p.UseIAM = ParamItem{
 		Key:          "minio.useIAM",
+		Sensitivity:  Sensitive,
 		DefaultValue: DefaultMinioUseIAM,
 		Version:      "2.0.0",
 		Doc: `Whether to useIAM role to access S3/GCS instead of access/secret keys
@@ -1642,6 +2106,7 @@ aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/lates
 
 	p.CloudProvider = ParamItem{
 		Key:          "minio.cloudProvider",
+		Sensitivity:  Sensitive,
 		DefaultValue: DefaultMinioCloudProvider,
 		Version:      "2.4.1",
 		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
@@ -1662,7 +2127,8 @@ When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now`,
 		DefaultValue: "",
 		Doc: `The JSON content contains the gcs service account credentials.
 Used only for the "gcpnative" cloud provider.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.GcpCredentialJSON.Init(base.mgr)
 
@@ -1672,7 +2138,8 @@ Used only for the "gcpnative" cloud provider.`,
 		Version:      "2.0.0",
 		Doc: `Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
 Leave it empty if you want to use AWS default endpoint`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.IAMEndpoint.Init(base.mgr)
 	p.LogLevel = ParamItem{
@@ -1685,6 +2152,7 @@ Leave it empty if you want to use AWS default endpoint`,
 	p.LogLevel.Init(base.mgr)
 	p.Region = ParamItem{
 		Key:          "minio.region",
+		Sensitivity:  Sensitive,
 		DefaultValue: DefaultMinioRegion,
 		Version:      "2.3.0",
 		Doc:          `Specify minio storage system location region`,
@@ -1694,6 +2162,7 @@ Leave it empty if you want to use AWS default endpoint`,
 
 	p.UseVirtualHost = ParamItem{
 		Key:          "minio.useVirtualHost",
+		Sensitivity:  Sensitive,
 		Version:      "2.3.0",
 		DefaultValue: DefaultMinioUseVirtualHost,
 		PanicIfEmpty: false,
@@ -1729,6 +2198,27 @@ Leave it empty if you want to use AWS default endpoint`,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
 
+	p.MultipartCopyThreshold = ParamItem{
+		Key:          "minio.multipartCopyThreshold",
+		Version:      "3.0.3",
+		DefaultValue: "1073741824",
+		Doc: "Object size threshold in bytes for switching from a single CopyObject request to multipart copy. " +
+			"Larger objects use multipart copy. Default is 1 GiB (1073741824 bytes). " +
+			"Must be a positive integer; invalid values fall back to the default. " +
+			"Single CopyObject requests remain capped at 5 GiB regardless of this threshold. " +
+			"Changes apply to subsequent copies, not copies already in progress. " +
+			"Does not apply to GCP or Azure.",
+		Formatter: func(v string) string {
+			size, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || size <= 0 {
+				return "1073741824"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MultipartCopyThreshold.Init(base.mgr)
+
 	p.UseCRC32C = ParamItem{
 		Key:          "minio.ssl.useCRC32C",
 		Version:      "2.6.11",
@@ -1745,6 +2235,10 @@ type ProfileConfig struct {
 }
 
 func (p *ProfileConfig) Init(base *BaseTable) {
+	p.init(base, formatLocalStoragePath(base.GetWithDefault("localStorage.path", defaultLocalStoragePath)))
+}
+
+func (p *ProfileConfig) init(base *BaseTable, localStoragePath string) {
 	p.PprofPath = ParamItem{
 		Key:          "profile.pprof.path",
 		Version:      "2.5.5",
@@ -1752,7 +2246,6 @@ func (p *ProfileConfig) Init(base *BaseTable) {
 		Doc:          "The folder that storing pprof files, by default will use localStoragePath/pprof",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				localStoragePath := getLocalStoragePath(base)
 				return path.Join(localStoragePath, "pprof")
 			}
 			return v

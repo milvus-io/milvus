@@ -17,11 +17,13 @@
 package metrics
 
 import (
-	// #nosec
-	_ "net/http/pprof"
-
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+// Note: this package no longer blank-imports net/http/pprof. Exposing profiling
+// handlers as a side effect of importing a metrics package hid the decision from
+// every registration site; internal/http now registers them explicitly, with an
+// auth posture visible at the registration site.
 
 const (
 	milvusNamespace = "milvus"
@@ -34,21 +36,23 @@ const (
 	RetryLabel    = "retry"
 	RejectedLabel = "rejected"
 
-	// Fine-grained hard-failure labels (composite status values, not a new
-	// dimension label, to keep Prometheus cardinality additive rather than
-	// multiplicative). They split the coarse "fail"/"rejected" into the
-	// responsible party so monitoring/alerting can tell a user-input error
-	// (the caller must fix the request) apart from an internal system error
-	// (operators must intervene). MIGRATION: old queries on status="fail" must
-	// move to status=~"fail_.*" (fail_input/fail_system), and old queries on
-	// status="rejected" must move to status=~"rejected_.*" (rejected_user for
-	// caller-side auth/privilege/bad-arg rejections, rejected_system otherwise).
-	// Dashboards still matching the bare "fail"/"rejected" values return nothing
-	// after this split.
-	FailInputLabel      = "fail_input"
-	FailSystemLabel     = "fail_system"
-	RejectedSystemLabel = "rejected_system"
-	RejectedUserLabel   = "rejected_user"
+	// Values of the "cause" label, a dimension orthogonal to "status" that names
+	// the responsible party for a failed request, so monitoring can tell a
+	// user-input error (the caller must fix the request) apart from an internal
+	// system error (operators must intervene). It is a separate label rather
+	// than extra "status" values on purpose: the coarse status stays a valid
+	// query on its own ("fail" is still every hard failure, aggregated over
+	// cause by Prometheus), so dashboards written against it keep working.
+	// Cause is functionally dependent on the outcome, so the realized
+	// (status, cause) pairs are additive, not the product of both domains.
+	CauseUser   = "user"   // the request itself is at fault: bad arguments, missing auth, no such collection
+	CauseSystem = "system" // Milvus is at fault: component failure, IO error, internal bug
+	CauseCancel = "cancel" // neither party: the client gave up before the request completed
+	// CauseNA is the empty string on purpose: Prometheus treats an empty label
+	// value as equivalent to the label being absent, so success/total/retry/
+	// abandon series carry no meaningful cause and stay byte-identical to what
+	// pre-2.6.19 emitted -- only fail/rejected actually carry user/system/cancel.
+	CauseNA = "" // no cause applies: the request did not hard-fail
 
 	HybridSearchLabel = "hybrid_search"
 
@@ -103,6 +107,9 @@ const (
 
 	BatchReduce = "batch_reduce"
 
+	FunctionChainLevelL0 = "l0"
+	FunctionChainLevelL1 = "l1"
+
 	Pending   = "pending"
 	Executing = "executing"
 	Done      = "done"
@@ -121,6 +128,7 @@ const (
 	nodeIDLabelName                = "node_id"
 	nodeHostLabelName              = "node_host"
 	statusLabelName                = "status"
+	causeLabelName                 = "cause"
 	indexTaskStatusLabelName       = "index_task_status"
 	msgTypeLabelName               = "msg_type"
 	collectionIDLabelName          = "collection_id"
@@ -128,6 +136,7 @@ const (
 	channelNameLabelName           = "channel_name"
 	functionLabelName              = "function_name"
 	queryTypeLabelName             = "query_type"
+	chainLevelLabelName            = "chain_level"
 	collectionName                 = "collection_name"
 	databaseLabelName              = "db_name"
 	ResourceGroupLabelName         = "rg"
@@ -164,7 +173,6 @@ const (
 	// model function/UDF labels
 	functionTypeName = "function_type_name"
 	functionProvider = "function_provider"
-	functionName     = "function_name"
 
 	// entities label
 	LoadedLabel         = "loaded"
@@ -233,5 +241,30 @@ func Register(r prometheus.Registerer) {
 	r.MustRegister(RuntimeInfo)
 	r.MustRegister(ThreadNum)
 	r.MustRegister(ThreadCPUActiveNumByPool)
+	r.MustRegister(AdminAuthTotal)
 	metricRegisterer = r
 }
+
+// Values of AdminAuthTotal's "result" label.
+const (
+	AdminAuthAllowed         = "allowed"
+	AdminAuthUnauthenticated = "unauthenticated" // 401: no credentials, or the root password is wrong
+	AdminAuthForbidden       = "forbidden"       // 403: a non-root username
+	AdminAuthUnavailable     = "unavailable"     // 503: the credential could not be checked
+	AdminAuthCrossSite       = "cross_site"      // 403: a browser reported another site as the initiator
+	AdminAuthError           = "error"
+)
+
+// AdminAuthTotal counts management-plane authentication outcomes.
+//
+// The gate fails closed, so without this an operator cannot tell a node that is
+// rejecting credentials from one that cannot reach its credential store, nor
+// see a credential-stuffing run at all -- the log lines for both are rate
+// limited. The endpoint label is the registered route pattern, never the raw
+// request path, which is caller-controlled under the subtree patterns.
+var AdminAuthTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: milvusNamespace,
+		Name:      "admin_auth_total",
+		Help:      "Total number of management-plane authentication decisions",
+	}, []string{"endpoint", "result"})

@@ -250,6 +250,37 @@ func TestGetCollectionIDFromVChannel(t *testing.T) {
 	assert.Equal(t, int64(-1), collectionID)
 }
 
+func TestParseVChannel(t *testing.T) {
+	pchannel, collectionID, index, err := ParseVChannel("by-dev-rootcoord-dml_0_12345v2")
+	require.NoError(t, err)
+	assert.Equal(t, "by-dev-rootcoord-dml_0", pchannel)
+	assert.Equal(t, int64(12345), collectionID)
+	assert.Equal(t, 2, index)
+
+	for _, vchannel := range []string{
+		"",
+		"_12345v2",
+		"by-dev-rootcoord-dml_0",
+		"by-dev-rootcoord-dml_0_v2",
+		"by-dev-rootcoord-dml_0_12345",
+		"by-dev-rootcoord-dml_0_12345v",
+		"by-dev-rootcoord-dml_0_-1v2",
+		"by-dev-rootcoord-dml_0_12345v-1",
+		"by-dev-rootcoord-dml_0_+12345v2",
+		"by-dev-rootcoord-dml_0_12345v+2",
+		"by-dev-rootcoord-dml_0_012345v2",
+		"by-dev-rootcoord-dml_0_12345v02",
+		"by-dev-rootcoord-dml_0_12345v2x",
+		"by-dev-rootcoord-dml_0_9223372036854775808v2",
+		"by-dev-rootcoord-dml_0_12345v9223372036854775808",
+	} {
+		t.Run(vchannel, func(t *testing.T) {
+			_, _, _, err := ParseVChannel(vchannel)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestCheckCtxValid(t *testing.T) {
 	bgCtx := context.Background()
 	timeout := 20 * time.Millisecond
@@ -491,9 +522,9 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_FloatVector,
-			ValidData: []bool{true, false, true},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim: 2,
+				ValidData: []bool{true, false, true},
+				Dim:       2,
 				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
 					Data: []float32{1, 2, 3, 4},
 				}},
@@ -506,9 +537,9 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_FloatVector,
-			ValidData: []bool{true, false, true},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim: 2,
+				ValidData: []bool{true, false, true},
+				Dim:       2,
 				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
 					Data: []float32{1, 2, 3, 4, 5, 6},
 				}},
@@ -523,10 +554,10 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_Float16Vector,
-			ValidData: []bool{true, false},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim:  2,
-				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2}},
+				ValidData: []bool{true, false},
+				Dim:       2,
+				Data:      &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2}},
 			}},
 		}
 		err := ValidateNullableVectorFieldDataCompact(fieldData, 2, true)
@@ -538,8 +569,8 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_SparseFloatVector,
-			ValidData: []bool{false, true, true},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: []bool{false, true, true},
 				Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 					Contents: [][]byte{
 						typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
@@ -572,9 +603,9 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_BinaryVector,
-			ValidData: []bool{true, false},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xff}},
+				ValidData: []bool{true, false},
+				Data:      &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xff}},
 			}},
 		}
 		require.NoError(t, ValidateNullableVectorFieldDataCompactWithDim(fieldData, 2, true, 8))
@@ -765,6 +796,17 @@ func (s *NumRowsWithSchemaSuite) SetupSuite() {
 			{FieldID: 114, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 115, Name: "int8_vector", DataType: schemapb.DataType_Int8Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 116, Name: "array_vector_float16", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+			{
+				FieldID:     117,
+				Name:        "nested_array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+						ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}},
+					}},
+				}},
+			},
 			{FieldID: 999, Name: "unknown", DataType: schemapb.DataType_None},
 		},
 	}
@@ -870,6 +912,16 @@ func (s *NumRowsWithSchemaSuite) TestNormalCases() {
 				},
 			},
 			expect: 9,
+		},
+		{
+			tag: "nested_array",
+			input: &schemapb.FieldData{
+				FieldName: "nested_array",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: make([]*schemapb.ScalarField, 6)}}},
+				},
+			},
+			expect: 6,
 		},
 		{
 			tag: "json",

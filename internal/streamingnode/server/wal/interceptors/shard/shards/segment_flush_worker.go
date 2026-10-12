@@ -20,17 +20,27 @@ func (m *partitionManager) asyncFlushSegment(
 	ctx context.Context,
 	segment *segmentAllocManager,
 ) {
-	// create a new segment flush worker.
-	w := &segmentFlushWorker{
-		txnManager:   m.txnManager,
-		ctx:          ctx,
-		collectionID: m.collectionID,
-		vchannel:     m.vchannel,
-		segment:      segment,
-		wal:          m.wal.Get(),
-	}
-	w.SetLogger(m.Logger())
-	go w.do()
+	go func() {
+		l, err := m.wal.GetWithContext(ctx)
+		if err != nil {
+			m.Logger().Info(ctx, "stop flushing segment before wal is ready",
+				mlog.FieldSegmentID(segment.GetSegmentID()),
+				mlog.Err(err))
+			return
+		}
+
+		// create a new segment flush worker.
+		w := &segmentFlushWorker{
+			txnManager:   m.txnManager,
+			ctx:          ctx,
+			collectionID: m.collectionID,
+			vchannel:     m.vchannel,
+			segment:      segment,
+			wal:          l,
+		}
+		w.SetLogger(m.Logger())
+		w.do()
+	}()
 }
 
 // segmentFlusherWorker is the worker that flushes segments into the WAL.
@@ -78,7 +88,7 @@ func (w *segmentFlushWorker) do() {
 		case <-w.ctx.Done():
 			w.Logger().Info(w.ctx, "flush segment canceled", mlog.Err(w.ctx.Err()))
 			return
-		case <-w.wal.Available():
+		case <-w.wal.Unavailable():
 			// wal is unavailable, stop the worker.
 			w.Logger().Warn(w.ctx, "wal is unavailable, stop flush segment")
 			return
@@ -96,7 +106,7 @@ func (w *segmentFlushWorker) waitForTxnManagerRecoverDone() error {
 	case <-w.ctx.Done():
 		w.Logger().Info(w.ctx, "flush segment canceled", mlog.Err(w.ctx.Err()))
 		return w.ctx.Err()
-	case <-w.wal.Available():
+	case <-w.wal.Unavailable():
 		return status.NewOnShutdownError("wal is unavailable")
 	}
 }

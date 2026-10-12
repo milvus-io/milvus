@@ -137,6 +137,13 @@ func (suite *ServerSuite) SetupTest() {
 	err = suite.server.Start()
 	suite.NoError(err)
 
+	// DDL callbacks are registered by mixCoord.enableExternalAccess in
+	// production, which the unit test ServerSuite bypasses; register them here
+	// so LoadCollection/alter-load-config broadcasts can find their ack
+	// callbacks (same as ServiceSuite.SetupTest).
+	registry.ResetRegistration()
+	RegisterDDLCallbacks(suite.server)
+
 	for i := range suite.nodes {
 		suite.nodes[i] = mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, int64(i))
 		err := suite.nodes[i].Start()
@@ -428,6 +435,9 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		// Mock paramtable.ParamItem.GetAsStrings() for ClusterLevelLoadResourceGroups
 		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
 
+		// Mock force override config disabled by default.
+		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
+
 		// Mock UpdateLoadConfig to capture the call
 		var updateLoadConfigCalled bool
 		var capturedCollectionIDs []int64
@@ -461,6 +471,143 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		watcher.Trigger()
 		time.Sleep(1 * time.Second)
 		watcher.Close()
+	})
+}
+
+func TestApplyLoadConfigChangesForceOverrideUserSpecifiedReplicaMode(t *testing.T) {
+	mockey.PatchConvey("TestApplyLoadConfigChangesForceOverrideUserSpecifiedReplicaMode", t, func() {
+		ctx := context.Background()
+
+		testServer := &Server{}
+		testServer.meta = &meta.Meta{}
+		testServer.ctx = ctx
+
+		mockCollection1 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1001,
+				UserSpecifiedReplicaMode: false,
+			},
+		}
+		mockCollection2 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1002,
+				UserSpecifiedReplicaMode: true,
+			},
+		}
+
+		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+			switch collectionID {
+			case 1001:
+				return mockCollection1
+			case 1002:
+				return mockCollection2
+			}
+			return nil
+		}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
+
+		var capturedCollectionIDs []int64
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
+			capturedCollectionIDs = collectionIDs
+			return nil
+		}).Build()
+
+		watcher := &LoadConfigWatcher{
+			s:         testServer,
+			notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
+			triggerCh: make(chan struct{}, 10),
+		}
+		watcher.applyLoadConfigChanges()
+
+		assert.Equal(t, []int64{1001, 1002}, capturedCollectionIDs, "Force override should include user-specified replica mode collections")
+	})
+}
+
+func TestApplyLoadConfigChangesSkipsReleasedCollection(t *testing.T) {
+	mockey.PatchConvey("TestApplyLoadConfigChangesSkipsReleasedCollection", t, func() {
+		ctx := context.Background()
+
+		testServer := &Server{}
+		testServer.meta = &meta.Meta{}
+		testServer.ctx = ctx
+
+		mockCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1001,
+				UserSpecifiedReplicaMode: false,
+			},
+		}
+
+		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+			if collectionID == 1001 {
+				return mockCollection
+			}
+			return nil
+		}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
+
+		var capturedCollectionIDs []int64
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
+			capturedCollectionIDs = collectionIDs
+			return nil
+		}).Build()
+
+		watcher := &LoadConfigWatcher{
+			s:         testServer,
+			notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
+			triggerCh: make(chan struct{}, 10),
+		}
+		watcher.applyLoadConfigChanges()
+
+		assert.Equal(t, []int64{1001}, capturedCollectionIDs)
+	})
+}
+
+func TestApplyLoadConfigChangesWhenForceOverrideConfigChanges(t *testing.T) {
+	mockey.PatchConvey("TestApplyLoadConfigChangesWhenForceOverrideConfigChanges", t, func() {
+		ctx := context.Background()
+
+		testServer := &Server{}
+		testServer.meta = &meta.Meta{}
+		testServer.ctx = ctx
+
+		mockCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1002,
+				UserSpecifiedReplicaMode: true,
+			},
+		}
+
+		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1002}).Build()
+		mockey.Mock((*meta.CollectionManager).GetCollection).Return(mockCollection).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
+
+		var updateLoadConfigCalled bool
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
+			updateLoadConfigCalled = true
+			assert.Equal(t, []int64{1002}, collectionIDs)
+			return nil
+		}).Build()
+
+		watcher := &LoadConfigWatcher{
+			s:                                    testServer,
+			notifier:                             syncutil.NewAsyncTaskNotifier[struct{}](),
+			triggerCh:                            make(chan struct{}, 10),
+			previousReplicaNum:                   2,
+			previousRGs:                          []string{"default", "rg1"},
+			previousForceOverrideUserReplicaMode: false,
+		}
+		watcher.applyLoadConfigChanges()
+
+		assert.True(t, updateLoadConfigCalled, "force override config change should trigger load config update even when replica/RG config is unchanged")
 	})
 }
 
@@ -522,7 +669,10 @@ func (suite *ServerSuite) expectGetRecoverInfo(collection int64) {
 			})
 		}
 	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection, mock.Anything).Maybe().Return(vChannels, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).Maybe().Return(vChannels, segmentInfos, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Maybe().Return(vChannels, segmentInfos, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, collection, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe().Return(map[int64][]*querypb.FieldIndexInfo{}, nil)
 }
 
 func (suite *ServerSuite) expectLoadAndReleasePartitions(querynode *mocks.MockQueryNode) {
@@ -1118,6 +1268,59 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		assert.ErrorContains(t, err, "not serviceable")
 	})
 
+	t.Run("leader reported non-serviceable returns error even when data ready", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
+			42: {ID: 42, CollectionID: collectionID},
+		})
+
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Status:   &querypb.LeaderViewStatus{Serviceable: false},
+				Segments: map[int64]*querypb.SegmentDist{42: {NodeID: 10}},
+			},
+		})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "reported not serviceable")
+	})
+
+	t.Run("nil leader status returns error even when data ready", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
+			42: {ID: 42, CollectionID: collectionID},
+		})
+
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Segments: map[int64]*querypb.SegmentDist{42: {NodeID: 10}},
+			},
+		})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "reported not serviceable")
+	})
+
 	t.Run("all serviceable returns nil", func(t *testing.T) {
 		s := newServer()
 		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
@@ -1141,5 +1344,184 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 
 		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
 		assert.NoError(t, err)
+	})
+}
+
+func TestGetLeakedResourcesByCollectionPerRG(t *testing.T) {
+	const collectionID int64 = 100
+
+	// Replica in meta holds nodes {10, 11}. Any segment/channel on a different node is leaked.
+	replica := meta.NewReplica(&querypb.Replica{
+		ID:           1,
+		CollectionID: collectionID,
+		Nodes:        []int64{10, 11},
+	}, typeutil.NewUniqueSet(10, 11))
+
+	idAllocator := func() func() (int64, error) {
+		var id int64
+		return func() (int64, error) {
+			id++
+			return id, nil
+		}
+	}
+	newServer := func() *Server {
+		nodeMgr := session.NewNodeManager()
+		return &Server{
+			meta:    meta.NewMeta(idAllocator(), nil, nodeMgr),
+			dist:    meta.NewDistributionManager(nodeMgr),
+			nodeMgr: nodeMgr,
+		}
+	}
+
+	t.Run("no leaked resources returns empty map", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+
+		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID, nil)
+		assert.Empty(t, leaked)
+	})
+
+	t.Run("leaked resources attributed to the resource group of the holding node", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		// Authoritative mapping: leaked node 99 belongs to rg2, node 98 belongs to rg3.
+		mockerRG := mockey.Mock((*meta.ResourceManager).GetResourceGroupByNodeID).To(func(_ *meta.ResourceManager, nodeID int64) string {
+			switch nodeID {
+			case 99:
+				return "rg2"
+			case 98:
+				return "rg3"
+			}
+			return ""
+		}).Build()
+		defer mockerRG.UnPatch()
+
+		// Node 10 is in replica -> not leaked. Nodes 99 (rg2, 2 segments) and 98 (rg3, 1 channel) are leaked.
+		s.dist.SegmentDistManager.Update(10, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 1, CollectionID: collectionID}))
+		s.dist.SegmentDistManager.Update(99, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 2, CollectionID: collectionID}),
+			meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 3, CollectionID: collectionID}))
+		s.dist.ChannelDistManager.Update(98, meta.DmChannelFromVChannel(&datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "c1"}))
+
+		// ResourceManager remains authoritative when both mappings contain a node.
+		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID, map[int64]string{99: "other", 98: "other"})
+		assert.Equal(t, map[string]int{"rg2": 2, "rg3": 1}, leaked)
+	})
+
+	t.Run("leaked node in no resource group attributed to empty group", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		mockerRG := mockey.Mock((*meta.ResourceManager).GetResourceGroupByNodeID).Return("").Build()
+		defer mockerRG.UnPatch()
+
+		s.dist.SegmentDistManager.Update(99, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 1, CollectionID: collectionID}))
+
+		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID, nil)
+		assert.Equal(t, map[string]int{"": 1}, leaked)
+	})
+
+	t.Run("embedded query node residual uses streaming node RG until released", func(t *testing.T) {
+		ctx := context.Background()
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		// Use the real ResourceManager: embedded QueryNodes never enter its RG map.
+		// Role-specific QueryNode labels need not match the StreamingNode's RG.
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID: 98,
+			Labels: map[string]string{
+				sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+				sessionutil.LabelResourceGroup:                  "querynode-label",
+			},
+		}))
+		s.meta.HandleNodeUp(ctx, 98)
+		assert.Empty(t, s.meta.GetResourceGroupByNodeID(98))
+		s.dist.ChannelDistManager.Update(98, meta.DmChannelFromVChannel(&datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "c1"}))
+
+		assert.Equal(t, map[string]int{"B": 1}, s.GetLeakedResourcesByCollectionPerRG(ctx, collectionID, map[int64]string{98: "B"}))
+		assert.Equal(t, map[string]int{meta.DefaultResourceGroupName: 1}, s.GetLeakedResourcesByCollectionPerRG(ctx, collectionID, map[int64]string{98: meta.DefaultResourceGroupName}))
+		assert.Equal(t, map[string]int{"": 1}, s.GetLeakedResourcesByCollectionPerRG(ctx, collectionID, nil))
+
+		s.dist.ChannelDistManager.Update(98)
+		assert.Empty(t, s.GetLeakedResourcesByCollectionPerRG(ctx, collectionID, map[int64]string{98: "B"}))
+	})
+}
+
+func TestCheckReplicasServiceable(t *testing.T) {
+	const collectionID int64 = 100
+	const channelName = "test-channel-1"
+
+	idAllocator := func() func() (int64, error) {
+		var id int64
+		return func() (int64, error) {
+			id++
+			return id, nil
+		}
+	}
+	newServer := func() *Server {
+		nodeMgr := session.NewNodeManager()
+		targetMgr := meta.NewMockTargetManager(t)
+		return &Server{
+			meta:      meta.NewMeta(idAllocator(), nil, nodeMgr),
+			dist:      meta.NewDistributionManager(nodeMgr),
+			nodeMgr:   nodeMgr,
+			targetMgr: targetMgr,
+		}
+	}
+
+	t.Run("no replicas returns empty map", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{}).Build()
+		defer mocker.UnPatch()
+
+		errs := s.CheckReplicasServiceable(context.Background(), collectionID)
+		assert.Empty(t, errs)
+	})
+
+	t.Run("collects errors for every unserviceable replica without failing fast", func(t *testing.T) {
+		s := newServer()
+		// Two replicas, each missing a shard leader for the channel -> both unserviceable.
+		replicas := []*meta.Replica{
+			meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: collectionID, ResourceGroup: "rg1", Nodes: []int64{10, 11}}, typeutil.NewUniqueSet(10, 11)),
+			meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: collectionID, ResourceGroup: "rg2", Nodes: []int64{20, 21}}, typeutil.NewUniqueSet(20, 21)),
+		}
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return(replicas).Build()
+		defer mocker.UnPatch()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+
+		errs := s.CheckReplicasServiceable(context.Background(), collectionID)
+		// Both replicas reported, keyed by replica ID (not just the first failure).
+		assert.Len(t, errs, 2)
+		assert.ErrorContains(t, errs[1], "no leader for channel")
+		assert.ErrorContains(t, errs[2], "no leader for channel")
+	})
+
+	t.Run("serviceable replica is absent from the map", func(t *testing.T) {
+		s := newServer()
+		replica := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: collectionID, ResourceGroup: "rg1", Nodes: []int64{10, 11}}, typeutil.NewUniqueSet(10, 11))
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{})
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Status:   &querypb.LeaderViewStatus{Serviceable: true},
+				Segments: map[int64]*querypb.SegmentDist{},
+			},
+		})
+
+		errs := s.CheckReplicasServiceable(context.Background(), collectionID)
+		assert.Empty(t, errs)
 	})
 }

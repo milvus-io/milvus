@@ -11,14 +11,17 @@ class LogConfig:
 
     @staticmethod
     def get_env_variable(var="CI_LOG_PATH"):
-        """ get log path for testing """
+        """get log path for testing"""
         try:
             log_path = os.environ[var]
             return str(log_path)
         except Exception as e:
             # now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-            log_path = f"/tmp/ci_logs"
-            print("[get_env_variable] failed to get environment variables : %s, use default path : %s" % (str(e), log_path))
+            log_path = "/tmp/ci_logs"
+            print(
+                "[get_env_variable] failed to get environment variables : %s, use default path : %s"
+                % (str(e), log_path)
+            )
             return log_path
 
     @staticmethod
@@ -29,14 +32,14 @@ class LogConfig:
             os.makedirs(log_path)
 
     def get_default_config(self):
-        """ Make sure the path exists """
+        """Make sure the path exists"""
         log_dir = self.get_env_variable()
         self.log_debug = "%s/ci_test_log.debug" % log_dir
         self.log_info = "%s/ci_test_log.log" % log_dir
         self.log_err = "%s/ci_test_log.err" % log_dir
-        work_log = os.environ.get('PYTEST_XDIST_WORKER')
+        work_log = os.environ.get("PYTEST_XDIST_WORKER")
         if work_log is not None:
-            self.log_worker = f'{log_dir}/{work_log}.log'
+            self.log_worker = f"{log_dir}/{work_log}.log"
 
         self.create_path(log_dir)
 

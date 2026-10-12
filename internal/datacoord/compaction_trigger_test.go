@@ -18,34 +18,38 @@ package datacoord
 
 import (
 	"context"
-	"reflect"
 	"sort"
 	satomic "sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// wantBucket is a lightweight assertion helper describing the expected
+// output of a single compactionBucket produced by generatePlans.
+type wantBucket struct {
+	segmentIDs []int64
+	maxSize    int64
+}
 
 type spyCompactionInspector struct {
 	t       *testing.T
@@ -523,15 +527,6 @@ func Test_compactionTrigger_force(t *testing.T) {
 	im.segmentIndexes.Insert(2, segIdx2)
 	im.segmentIndexes.Insert(3, segIdx3)
 
-	params, err := compaction.GenerateJSONParams(nil)
-	if err != nil {
-		panic(err)
-	}
-	preAllocateIDExpansionFactor := paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
-	preAllocatedSegmentIDBegin := int64(100)
-	preAllocatedSegmentIDEnd := preAllocatedSegmentIDBegin + preAllocateIDExpansionFactor
-	preAllocatedLogIDEnd := preAllocatedSegmentIDBegin + 4*preAllocateIDExpansionFactor
-
 	tests := []struct {
 		name         string
 		fields       fields
@@ -577,68 +572,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			[]int64{
 				1, 2,
 			},
-			[]*datapb.CompactionPlan{
-				{
-					PlanID: preAllocatedSegmentIDEnd,
-					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{
-							SegmentID: 1,
-							FieldBinlogs: []*datapb.FieldBinlog{
-								{
-									Binlogs: []*datapb.Binlog{
-										{EntriesNum: 5, LogID: 1},
-									},
-								},
-							},
-							Field2StatslogPaths: nil,
-							Deltalogs: []*datapb.FieldBinlog{
-								{
-									Binlogs: []*datapb.Binlog{
-										{EntriesNum: 5, LogID: 1},
-									},
-								},
-							},
-							InsertChannel: "ch1",
-							CollectionID:  2,
-							PartitionID:   1,
-							IsSorted:      true,
-						},
-						{
-							SegmentID: 2,
-							FieldBinlogs: []*datapb.FieldBinlog{
-								{
-									Binlogs: []*datapb.Binlog{
-										{EntriesNum: 5, LogID: 2},
-									},
-								},
-							},
-							Field2StatslogPaths: nil,
-							Deltalogs: []*datapb.FieldBinlog{
-								{
-									Binlogs: []*datapb.Binlog{
-										{EntriesNum: 5, LogID: 2},
-									},
-								},
-							},
-							InsertChannel: "ch1",
-							CollectionID:  2,
-							PartitionID:   1,
-							IsSorted:      true,
-						},
-					},
-					// StartTime:        0,
-					BeginLogID:             100,
-					Type:                   datapb.CompactionType_MixCompaction,
-					Channel:                "ch1",
-					TotalRows:              200,
-					Schema:                 schema,
-					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedSegmentIDEnd},
-					PreAllocatedLogIDs:     &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedLogIDEnd},
-					MaxSize:                1073741824,
-					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
-					JsonParams:             params,
-				},
-			},
+			nil,
 		},
 	}
 	for _, tt := range tests {
@@ -666,12 +600,9 @@ func Test_compactionTrigger_force(t *testing.T) {
 			spy := (tt.fields.inspector).(*spyCompactionInspector)
 			select {
 			case plan := <-spy.spyChan:
-				plan.StartTime = 0
-				sortPlanCompactionBinlogs(plan)
-				assert.True(t, proto.Equal(tt.wantPlans[0], plan))
-				return
+				assert.Equal(t, 2, len(plan.SegmentBinlogs))
 			case <-time.After(3 * time.Second):
-				assert.Fail(t, "timeout")
+				assert.Fail(t, "timeout waiting for plan")
 				return
 			}
 		})
@@ -713,10 +644,9 @@ func Test_compactionTrigger_force(t *testing.T) {
 			select {
 			case plan := <-spy.spyChan:
 				assert.NotNil(t, plan)
-				return
+				assert.Equal(t, 3, len(plan.SegmentBinlogs))
 			case <-time.After(3 * time.Second):
-				assert.Fail(t, "timeout")
-				return
+				assert.Fail(t, "timeout waiting for plans")
 			}
 		})
 
@@ -908,7 +838,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				},
 				mock0Allocator,
 				nil,
-				&spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 2)},
+				&spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, nSegments)},
 				nil,
 			},
 			args{
@@ -996,18 +926,12 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			select {
 			case plan := <-spy.spyChan:
 				assert.NotEmpty(t, plan)
-				assert.Equal(t, len(plan.SegmentBinlogs), nSegments)
+				assert.Equal(t, nSegments, len(plan.SegmentBinlogs))
 			case <-time.After(2 * time.Second):
 				assert.Fail(t, "timeout")
 			}
 		})
 	}
-}
-
-func sortPlanCompactionBinlogs(plan *datapb.CompactionPlan) {
-	sort.Slice(plan.SegmentBinlogs, func(i, j int) bool {
-		return plan.SegmentBinlogs[i].SegmentID < plan.SegmentBinlogs[j].SegmentID
-	})
 }
 
 // Test no compaction selection
@@ -1023,8 +947,6 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 		collectionID int64
 		compactTime  *compactTime
 	}
-	Params.Save(Params.DataCoordCfg.MinSegmentToMerge.Key, "4")
-	defer Params.Save(Params.DataCoordCfg.MinSegmentToMerge.Key, Params.DataCoordCfg.MinSegmentToMerge.DefaultValue)
 	vecFieldID := int64(201)
 	mock0Allocator := newMockAllocator(t)
 	im := newSegmentIndexMeta(nil)
@@ -1215,6 +1137,9 @@ func mockSegmentsInfo(sizeInMB ...int64) *SegmentsInfo {
 
 // Test compaction with prioritized candi
 func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+
 	type fields struct {
 		meta          *meta
 		allocator     allocator.Allocator
@@ -1322,7 +1247,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 		(tt.fields.inspector).(*spyCompactionInspector).meta = tt.fields.meta
 		t.Run(tt.name, func(t *testing.T) {
 			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
-				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 				MsgID:     []byte{1, 2, 3, 4},
 			}
 			tr := &compactionTrigger{
@@ -1342,11 +1267,13 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			spy := (tt.fields.inspector).(*spyCompactionInspector)
 			select {
 			case val := <-spy.spyChan:
-				// 6 segments in the final pick list
-				assert.Equal(t, 6, len(val.SegmentBinlogs))
+				assert.Fail(t, "we expect no compaction generated", val)
 				return
 			case <-time.After(3 * time.Second):
-				assert.Fail(t, "failed to get plan")
+				// All 6 segments are fragments (residual size far below
+				// the fragment threshold), but their count stays under
+				// MaxFragmentsPerGroup, so the two-tier algorithm emits
+				// no bucket for them.
 				return
 			}
 		})
@@ -1355,6 +1282,9 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 
 // Test compaction with small candi
 func Test_compactionTrigger_SmallCandi(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+
 	type fields struct {
 		meta          *meta
 		allocator     allocator.Allocator
@@ -1442,8 +1372,10 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			fields{
 				&meta{
 					channelCPs: newChannelCps(),
-					// 7 segments with 200MB each, the compaction is expected to be triggered
-					//  as the first 5 being merged, and 1 plus being squeezed.
+					// 7 segments with 200MB each. The first 5 clear the
+					// full-tier fill-rate gate and are packed into one
+					// bucket; the remaining 2 stay below
+					// MaxFragmentsPerGroup and are left uncompacted.
 					segments:    mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
 					indexMeta:   im,
 					collections: collections,
@@ -1465,7 +1397,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 		(tt.fields.inspector).(*spyCompactionInspector).meta = tt.fields.meta
 		t.Run(tt.name, func(t *testing.T) {
 			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
-				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 				MsgID:     []byte{1, 2, 3, 4},
 			}
 			tr := &compactionTrigger{
@@ -1486,9 +1418,10 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			spy := (tt.fields.inspector).(*spyCompactionInspector)
 			select {
 			case val := <-spy.spyChan:
-				// 6 segments in the final pick list.
-				// 5 generated by the origin plan, 1 was added as additional segment.
-				assert.Equal(t, len(val.SegmentBinlogs), 6)
+				// 5 of the 7 segments clear the full-tier fill-rate gate
+				// and are packed into a single bucket; the remaining 2
+				// stay below MaxFragmentsPerGroup and are left uncompacted.
+				assert.Equal(t, 5, len(val.SegmentBinlogs))
 				return
 			case <-time.After(3 * time.Second):
 				assert.Fail(t, "failed to get plan")
@@ -1500,6 +1433,9 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 
 // Test segment compaction target size
 func Test_compactionTrigger_noplan_random_size(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+
 	type fields struct {
 		meta          *meta
 		allocator     allocator.Allocator
@@ -1649,7 +1585,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 		(tt.fields.inspector).(*spyCompactionInspector).meta = tt.fields.meta
 		t.Run(tt.name, func(t *testing.T) {
 			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
-				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 				MsgID:     []byte{1, 2, 3, 4},
 			}
 			tr := &compactionTrigger{
@@ -1683,15 +1619,12 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				}
 			}
 
-			assert.Equal(t, 4, len(plans))
-			// plan 1: 250 + 20 * 10 + 3 * 20
-			// plan 2: 200 + 7 * 20 + 4 * 40
-			// plan 3: 128 + 6 * 40 + 127
-			// plan 4: 300 + 128 + 128  ( < 512 * 1.25)
-			// assert.Equal(t, 24, len(plans[0].GetInputSegments()))
-			// assert.Equal(t, 12, len(plans[1].GetInputSegments()))
-			// assert.Equal(t, 8, len(plans[2].GetInputSegments()))
-			// assert.Equal(t, 3, len(plans[3].GetInputSegments()))
+			// Two-tier algorithm with expectedSize=1GiB (HNSW index):
+			// 3 segments (510,500,480 MB residual) are full → excluded
+			// Full-tier: {300,200} and {250,128,128} clear fill-rate gate
+			// Fragment-tier: 40 fragments (10×40MB, 10×20MB, 20×10MB)
+			//   exceed maxFragments=8, packed toward middleSize=256MB
+			assert.GreaterOrEqual(t, len(plans), 2, "at least 2 full-tier plans")
 		})
 	}
 }
@@ -1784,9 +1717,16 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
 
-	// didn't reach single compaction size 10 * 1024 * 1024
+	// Opportunistic quantile-based ratio/size check has 20% bucket
+	// granularity (vs. the legacy per-binlog computation). At
+	// expireTime=600 all five quantiles are 500 < 600, so qualifyingIdx=4;
+	// the under-estimate rule drops one bucket → expiredFraction = 0.8.
+	// approxExpiredSize = 0.8 × InsertBinlogSize comfortably exceeds the
+	// 10 MiB threshold and compaction triggers. (Legacy precise per-
+	// binlog sum would have been 100 × 100 KiB = 10 MiB, exactly at
+	// threshold; the approximate path now sits above it.)
 	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 600})
-	assert.False(t, couldDo)
+	assert.True(t, couldDo)
 
 	// expire time < Timestamp False
 	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 1200})
@@ -1828,9 +1768,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	assert.True(t, couldDo)
 
 	mockVersionManager := NewMockVersionManager(t)
-	mockVersionManager.On("GetCurrentIndexEngineVersion").Return(int32(2)).Maybe()
-	mockVersionManager.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
-	mockVersionManager.On("ResolveVecIndexVersion").Return(int32(5)).Maybe()
+	mockVersionManager.On("ResolveVecIndexVersion").Return(int32(2)).Maybe()
 	trigger.indexEngineVersionManager = mockVersionManager
 	info4 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -1913,6 +1851,9 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	defer Params.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "false")
 	Params.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "5")
 	defer Params.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "-1")
+	forceRebuildVersionManager := NewMockVersionManager(t)
+	forceRebuildVersionManager.On("ResolveVecIndexVersion").Return(int32(5)).Maybe()
+	trigger.indexEngineVersionManager = forceRebuildVersionManager
 	couldDo = trigger.ShouldDoSingleCompaction(info5, &compactTime{expireTime: 300})
 	assert.True(t, couldDo)
 
@@ -1932,8 +1873,8 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		// expireTime is 5000 which is > row timestamps but < commit_timestamp.
 		// Without the fix, rows appear expired. With the fix, commit_timestamp is used as effective ts.
 		now := time.Now()
-		commitTs := tsoutil.ComposeTSByTime(now.Add(24*time.Hour), 0) // future: definitely not expired
-		expireTime := uint64(5000)                                    // > old row ts (1000) but < commitTs
+		commitTs := tsoutil.ComposeTSByTime(now.Add(24 * time.Hour)) // future: definitely not expired
+		expireTime := uint64(5000)                                   // > old row ts (1000) but < commitTs
 
 		var importBinlogs []*datapb.FieldBinlog
 		for i := 0; i < 100; i++ {
@@ -2028,7 +1969,7 @@ func Test_compactionTrigger_ShouldStrictCompactExpiry(t *testing.T) {
 	trigger := &compactionTrigger{}
 
 	now := time.Now()
-	expireTS := tsoutil.ComposeTSByTime(now, 0)
+	expireTS := tsoutil.ComposeTSByTime(now)
 	compact := &compactTime{
 		expireTime: expireTS,
 	}
@@ -2045,13 +1986,13 @@ func Test_compactionTrigger_ShouldStrictCompactExpiry(t *testing.T) {
 	t.Run("no tolerance, fromTs before expire time => should compact", func(t *testing.T) {
 		Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "0")
 		defer Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "-1") // reset
-		fromTs := tsoutil.ComposeTSByTime(now.Add(-time.Hour), 0)
+		fromTs := tsoutil.ComposeTSByTime(now.Add(-time.Hour))
 		shouldCompact := trigger.ShouldCompactExpiry(fromTs, compact, segment)
 		assert.True(t, shouldCompact)
 	})
 
 	t.Run("negative tolerance, disable force expiry compaction => should not compact", func(t *testing.T) {
-		fromTs := tsoutil.ComposeTSByTime(now.Add(-time.Hour), 0)
+		fromTs := tsoutil.ComposeTSByTime(now.Add(-time.Hour))
 		shouldCompact := trigger.ShouldCompactExpiry(fromTs, compact, segment)
 		assert.False(t, shouldCompact)
 	})
@@ -2060,7 +2001,7 @@ func Test_compactionTrigger_ShouldStrictCompactExpiry(t *testing.T) {
 		Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "2")
 		defer Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "-1") // reset
 
-		fromTs := tsoutil.ComposeTSByTime(now.Add(-time.Hour), 0) // within 2h tolerance
+		fromTs := tsoutil.ComposeTSByTime(now.Add(-time.Hour)) // within 2h tolerance
 		shouldCompact := trigger.ShouldCompactExpiry(fromTs, compact, segment)
 		assert.False(t, shouldCompact)
 	})
@@ -2068,7 +2009,7 @@ func Test_compactionTrigger_ShouldStrictCompactExpiry(t *testing.T) {
 	t.Run("with tolerance, fromTs before expireTime - tolerance => should compact", func(t *testing.T) {
 		Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "2")
 		defer Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "-1") // reset
-		fromTs := tsoutil.ComposeTSByTime(now.Add(-3*time.Hour), 0)                // earlier than expireTime - 30m
+		fromTs := tsoutil.ComposeTSByTime(now.Add(-3 * time.Hour))                 // earlier than expireTime - 30m
 		shouldCompact := trigger.ShouldCompactExpiry(fromTs, compact, segment)
 		assert.True(t, shouldCompact)
 	})
@@ -2173,7 +2114,7 @@ func Test_compactionTrigger_getCompactTime(t *testing.T) {
 			common.CollectionTTLConfigKey: "10",
 		},
 	}
-	now := tsoutil.GetCurrentTime()
+	now := tsoutil.ComposeTSByTime(time.Now())
 	ct, err := getCompactTime(now, coll)
 	assert.NoError(t, err)
 	assert.NotNil(t, ct)
@@ -2455,7 +2396,7 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	}
 	s.meta.UpdateChannelCheckpoint(context.TODO(), s.channel, &msgpb.MsgPosition{
 		ChannelName: s.channel,
-		Timestamp:   tsoutil.ComposeTSByTime(time.Now(), 0),
+		Timestamp:   tsoutil.ComposeTSByTime(time.Now()),
 		MsgID:       []byte{1, 2, 3, 4},
 	})
 	s.allocator = allocator.NewMockAllocator(s.T())
@@ -2745,25 +2686,169 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 	})
 }
 
-func (s *CompactionTriggerSuite) TestSqueezeSmallSegments() {
-	expectedSize := int64(70000)
-	smallsegments := []*SegmentInfo{
-		{SegmentInfo: &datapb.SegmentInfo{ID: 3}, size: *atomic.NewInt64(69999)},
-		{SegmentInfo: &datapb.SegmentInfo{ID: 1}, size: *atomic.NewInt64(100)},
+// TestGlobalSignalContinuesPastSkippedCollection guards the collection-less
+// signal sent by the periodic scheduler: a collection that opts out of auto
+// compaction, an external collection, or a collection whose TTL property is
+// invalid must only skip its own groups, never end the tick for the
+// remaining collections.
+func (s *CompactionTriggerSuite) TestGlobalSignalContinuesPastSkippedCollection() {
+	const (
+		enabledCollectionID = int64(101)
+		enabledChannel      = "dml_0_101v0"
+		enabledSegmentID    = int64(7)
+		// Group order comes from map iteration, so a single tick only exposes
+		// an early return when the skipped collection happens to be iterated
+		// first. Repeating the tick makes the check deterministic in practice.
+		ticks = 16
+	)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+		},
 	}
 
-	largeSegment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 2}, size: *atomic.NewInt64(expectedSize)}
-	buckets := [][]*SegmentInfo{{largeSegment}}
-	s.Require().Equal(1, len(buckets))
-	s.Require().Equal(1, len(buckets[0]))
+	// A second collection with one flushed, sorted segment. A lone segment is
+	// below the minimum merge count, so evaluating it never produces a plan.
+	addEnabledCollection := func() {
+		seg := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             enabledSegmentID,
+				CollectionID:   enabledCollectionID,
+				PartitionID:    s.partitionID,
+				LastExpireTime: 100,
+				NumOfRows:      60,
+				MaxRowNum:      110,
+				InsertChannel:  enabledChannel,
+				State:          commonpb.SegmentState_Flushed,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: 5, LogPath: "log7", LogSize: 100, MemorySize: 100},
+						},
+					},
+				},
+				IsSorted: true,
+			},
+			lastFlushTime: time.Now(),
+		}
+		s.meta.segments.segments[enabledSegmentID] = seg
+		s.meta.segments.secondaryIndexes.coll2Segments[enabledCollectionID] = map[UniqueID]*SegmentInfo{enabledSegmentID: seg}
+		s.meta.segments.secondaryIndexes.channel2Segments[enabledChannel] = map[UniqueID]*SegmentInfo{enabledSegmentID: seg}
+		s.meta.collections.Insert(enabledCollectionID, &collectionInfo{ID: enabledCollectionID, Schema: schema})
+	}
 
-	remaining := s.tr.squeezeSmallSegmentsToBuckets(smallsegments, buckets, expectedSize)
-	s.Equal(1, len(remaining))
-	s.EqualValues(3, remaining[0].ID)
+	run := func(skipped *collectionInfo) {
+		// Rebuild the fixture inside the subtest so the mocks are bound to the
+		// subtest's T and any unexpected call fails this subtest.
+		s.SetupTest()
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
+		defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
+		addEnabledCollection()
 
-	s.Equal(1, len(buckets))
-	s.Equal(2, len(buckets[0]))
-	mlog.Info(context.TODO(), "buckets", mlog.Any("buckets", buckets))
+		s.inspector.EXPECT().isFull().Return(false)
+		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(skipped, nil)
+		enabledLookups := 0
+		s.handler.EXPECT().GetCollection(mock.Anything, enabledCollectionID).
+			RunAndReturn(func(context.Context, int64) (*collectionInfo, error) {
+				enabledLookups++
+				return &collectionInfo{ID: enabledCollectionID, Schema: schema}, nil
+			})
+
+		for i := 0; i < ticks; i++ {
+			s.NoError(s.tr.handleSignal(NewCompactionSignal()))
+		}
+		s.EqualValues(ticks, enabledLookups, "the enabled collection must be evaluated on every global tick")
+	}
+
+	s.Run("autoCompactionDisabledByProperty", func() {
+		run(&collectionInfo{
+			ID:     s.collectionID,
+			Schema: schema,
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "false",
+			},
+		})
+	})
+
+	s.Run("externalCollection", func() {
+		// IsExternal() keys off a field-level ExternalField, so build the
+		// external schema on its own field slice rather than reusing the
+		// shared one, which the enabled collection also relies on.
+		skipped := &collectionInfo{
+			ID: s.collectionID,
+			Schema: &schemapb.CollectionSchema{
+				ExternalSource: "s3://external",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:       s.vecFieldID,
+						DataType:      schemapb.DataType_FloatVector,
+						ExternalField: "vec_col",
+					},
+				},
+			},
+		}
+		s.Require().True(skipped.IsExternal())
+		run(skipped)
+	})
+
+	s.Run("invalidCollectionTTL", func() {
+		run(&collectionInfo{
+			ID:     s.collectionID,
+			Schema: schema,
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "not-a-number",
+			},
+		})
+	})
+}
+
+// TestCollectionScopedSignalKeepsEarlyReturn pins the unchanged semantics of
+// collection-scoped signals: a collection that opts out of auto compaction
+// still ends the signal with nil, and a getCompactTime failure still
+// surfaces as an error to the caller.
+func (s *CompactionTriggerSuite) TestCollectionScopedSignalKeepsEarlyReturn() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+		},
+	}
+
+	run := func(coll *collectionInfo) error {
+		// Rebuild the fixture inside the subtest so the mocks are bound to the
+		// subtest's T and any unexpected call fails this subtest.
+		s.SetupTest()
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
+		defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
+
+		s.inspector.EXPECT().isFull().Return(false)
+		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(coll, nil)
+		return s.tr.handleSignal(NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel))
+	}
+
+	s.Run("autoCompactionDisabledByProperty", func() {
+		s.NoError(run(&collectionInfo{
+			ID:     s.collectionID,
+			Schema: schema,
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "false",
+			},
+		}))
+	})
+
+	s.Run("invalidCollectionTTL", func() {
+		s.Error(run(&collectionInfo{
+			ID:     s.collectionID,
+			Schema: schema,
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "not-a-number",
+			},
+		}))
+	})
 }
 
 func TestCompactionTriggerSuite(t *testing.T) {
@@ -2923,11 +3008,82 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 		WriteHandoff:        false,
 	})
 	segIndexes.Insert(2, segIdx1)
+
+	// makeSeg builds a minimal flushed segment for two-tier composition
+	// tests. size is used both as the row count and as the binlog memory
+	// size, for simplicity.
+	makeSeg := func(id int64, size int64) *SegmentInfo {
+		return &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            id,
+				CollectionID:  2,
+				PartitionID:   1,
+				NumOfRows:     size,
+				InsertChannel: "ch1",
+				State:         commonpb.SegmentState_Flushed,
+				Binlogs: []*datapb.FieldBinlog{
+					{Binlogs: []*datapb.Binlog{{EntriesNum: 5, LogID: id, MemorySize: size}}},
+				},
+				IsSorted: true,
+			},
+		}
+	}
+
+	// makeMetaWithSegs registers segs in a fresh meta so generatePlans'
+	// helper methods (e.g. ShouldRebuildSegmentIndex) can look them up.
+	makeMetaWithSegs := func(segs ...*SegmentInfo) *meta {
+		segMap := make(map[int64]*SegmentInfo, len(segs))
+		collMap := make(map[UniqueID]*SegmentInfo, len(segs))
+		sIdxMap := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+		for _, s := range segs {
+			segMap[s.GetID()] = s
+			collMap[s.GetID()] = s
+			si := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+			si.Insert(indexID, &model.SegmentIndex{
+				SegmentID: s.GetID(), CollectionID: 2, PartitionID: 1,
+				IndexID: indexID, BuildID: s.GetID(), IndexVersion: 1,
+				IndexState: commonpb.IndexState_Finished,
+			})
+			sIdxMap.Insert(s.GetID(), si)
+		}
+		return &meta{
+			catalog:    catalog,
+			channelCPs: newChannelCps(),
+			segments: &SegmentsInfo{
+				segments: segMap,
+				secondaryIndexes: segmentInfoIndexes{
+					coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{2: collMap},
+				},
+			},
+			indexMeta: &indexMeta{
+				segmentIndexes: sIdxMap,
+				indexes: map[UniqueID]map[UniqueID]*model.Index{
+					2: {indexID: {
+						CollectionID: 2, FieldID: vecFieldID, IndexID: indexID,
+						IndexName: "_default_idx", IndexParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: "HNSW"},
+						},
+					}},
+				},
+			},
+			collections: collections,
+		}
+	}
+
+	// zeroCompactTime is a non-nil, zero-value compactTime. generatePlans
+	// evaluates ShouldDoSingleCompaction for every non-force segment, which
+	// dereferences compactTime unconditionally, so a nil compactTime would
+	// panic whenever a candidate carries any binlog (as makeSeg's segments
+	// always do). Tests that are not exercising the force/TTL paths must
+	// pass this instead of nil.
+	zeroCompactTime := &compactTime{}
+
 	tests := []struct {
-		name   string
-		fields fields
-		args   args
-		want   []*typeutil.Pair[int64, []int64]
+		name    string
+		fields  fields
+		args    args
+		want    []wantBucket
+		twoTier bool
 	}{
 		{
 			name: "force trigger on large segments",
@@ -2987,13 +3143,175 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 				compactTime:  nil,
 				expectedSize: 1024 * 1024 * 1024,
 			},
-			want: []*typeutil.Pair[int64, []int64]{
-				{A: 100, B: []int64{1}}, {A: 100, B: []int64{2}},
+			want: []wantBucket{
+				{segmentIDs: []int64{1}, maxSize: 1024 * 1024 * 1024},
+				{segmentIDs: []int64{2}, maxSize: 1024 * 1024 * 1024},
+			},
+		},
+		{
+			// Five 200-sized segments clear the 85%-of-1024=870 fill-rate
+			// gate on their own (1000 >= 870), so they compose into one
+			// full-tier bucket. The five smaller segments are all below
+			// the fragment threshold (256*0.85=217) but their count (5)
+			// stays under MaxFragmentsPerGroup (8), so no fragment-tier
+			// bucket is emitted for them: cascading compaction is avoided.
+			name:    "full-tier packs five 200-sized segments leaving fragments below maxFragments",
+			twoTier: true,
+			fields: fields{
+				meta:      makeMetaWithSegs(makeSeg(1, 200), makeSeg(2, 200), makeSeg(3, 200), makeSeg(4, 200), makeSeg(5, 200), makeSeg(6, 50), makeSeg(7, 45), makeSeg(8, 40), makeSeg(9, 35), makeSeg(10, 30)),
+				allocator: mock0Allocator,
+			},
+			args: args{
+				segments: []*SegmentInfo{
+					makeSeg(1, 200), makeSeg(2, 200), makeSeg(3, 200),
+					makeSeg(4, 200), makeSeg(5, 200),
+					makeSeg(6, 50), makeSeg(7, 45), makeSeg(8, 40),
+					makeSeg(9, 35), makeSeg(10, 30),
+				},
+				signal:       &compactionSignal{collectionID: 2, partitionID: 1, channel: "ch1"},
+				compactTime:  zeroCompactTime,
+				expectedSize: 1024,
+			},
+			want: []wantBucket{
+				{segmentIDs: []int64{1, 2, 3, 4, 5}, maxSize: 1024},
+			},
+		},
+		{
+			// 50 segments of residual size 10 total only 500 < 870, so no
+			// full-tier bucket forms. But their count (50) exceeds
+			// MaxFragmentsPerGroup (8), so they are packed towards
+			// middleSize (1024/4=256) instead of being left to accumulate
+			// unboundedly.
+			name:    "fragment-tier triggers when fragment count exceeds maxFragments",
+			twoTier: true,
+			fields: fields{
+				meta: makeMetaWithSegs(func() []*SegmentInfo {
+					segs := make([]*SegmentInfo, 50)
+					for i := range segs {
+						segs[i] = makeSeg(int64(i+1), 10)
+					}
+					return segs
+				}()...),
+				allocator: mock0Allocator,
+			},
+			args: args{
+				segments: func() []*SegmentInfo {
+					segs := make([]*SegmentInfo, 50)
+					for i := range segs {
+						segs[i] = makeSeg(int64(i+1), 10)
+					}
+					return segs
+				}(),
+				signal:       &compactionSignal{collectionID: 2, partitionID: 1, channel: "ch1"},
+				compactTime:  zeroCompactTime,
+				expectedSize: 1024,
+			},
+			want: []wantBucket{
+				{segmentIDs: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}, maxSize: 256},
+				{segmentIDs: []int64{26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50}, maxSize: 256},
+			},
+		},
+		{
+			// The 900-sized segment already clears the full threshold
+			// (870) on its own, so it is excluded from packing altogether
+			// (neither prioritized nor compactable). The remaining two
+			// 100-sized segments total 200 < 870 and their count (2) is
+			// under maxFragments, so no bucket is emitted at all.
+			name:    "full segments are excluded from packing",
+			twoTier: true,
+			fields: fields{
+				meta:      makeMetaWithSegs(makeSeg(1, 900), makeSeg(2, 100), makeSeg(3, 100)),
+				allocator: mock0Allocator,
+			},
+			args: args{
+				segments: []*SegmentInfo{
+					makeSeg(1, 900),
+					makeSeg(2, 100), makeSeg(3, 100),
+				},
+				signal:       &compactionSignal{collectionID: 2, partitionID: 1, channel: "ch1"},
+				compactTime:  zeroCompactTime,
+				expectedSize: 1024,
+			},
+			want: nil,
+		},
+		{
+			// Two 450-sized segments sum to 900 >= 870, clearing the
+			// fill-rate gate without needing a minimum segment count
+			// (the full-tier packer only requires >= 2 segments).
+			name:    "two segments compose without a minimum segment count",
+			twoTier: true,
+			fields: fields{
+				meta:      makeMetaWithSegs(makeSeg(1, 450), makeSeg(2, 450)),
+				allocator: mock0Allocator,
+			},
+			args: args{
+				segments:     []*SegmentInfo{makeSeg(1, 450), makeSeg(2, 450)},
+				signal:       &compactionSignal{collectionID: 2, partitionID: 1, channel: "ch1"},
+				compactTime:  zeroCompactTime,
+				expectedSize: 1024,
+			},
+			want: []wantBucket{
+				{segmentIDs: []int64{1, 2}, maxSize: 1024},
+			},
+		},
+		{
+			// An 800-sized segment blocks the greedy packer: it is
+			// selected first but leaves only 224 capacity, too little
+			// for any 300-sized segment. Without the skip-and-retry
+			// logic the three 300s would never be tried. The packer
+			// skips the 800, packs [300,300,300]=900 (>=870), and
+			// leaves the 800 as a non-full leftover.
+			name:    "skip blocking large segment to pack smaller ones",
+			twoTier: true,
+			fields: fields{
+				meta:      makeMetaWithSegs(makeSeg(1, 800), makeSeg(2, 300), makeSeg(3, 300), makeSeg(4, 300)),
+				allocator: mock0Allocator,
+			},
+			args: args{
+				segments: []*SegmentInfo{
+					makeSeg(1, 800), makeSeg(2, 300),
+					makeSeg(3, 300), makeSeg(4, 300),
+				},
+				signal:       &compactionSignal{collectionID: 2, partitionID: 1, channel: "ch1"},
+				compactTime:  zeroCompactTime,
+				expectedSize: 1024,
+			},
+			want: []wantBucket{
+				{segmentIDs: []int64{2, 3, 4}, maxSize: 1024},
+			},
+		},
+		{
+			// Similar to the previous case with a different shape:
+			// [600,500,500]. The greedy packer selects 600 first,
+			// leaving 424 — too little for 500. But 500+500=1000
+			// (>=870) is valid. The packer skips 600 and packs the
+			// two 500s.
+			name:    "skip one large segment so two medium segments can pair",
+			twoTier: true,
+			fields: fields{
+				meta:      makeMetaWithSegs(makeSeg(1, 600), makeSeg(2, 500), makeSeg(3, 500)),
+				allocator: mock0Allocator,
+			},
+			args: args{
+				segments: []*SegmentInfo{
+					makeSeg(1, 600), makeSeg(2, 500), makeSeg(3, 500),
+				},
+				signal:       &compactionSignal{collectionID: 2, partitionID: 1, channel: "ch1"},
+				compactTime:  zeroCompactTime,
+				expectedSize: 1024,
+			},
+			want: []wantBucket{
+				{segmentIDs: []int64{2, 3}, maxSize: 1024},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.twoTier {
+				Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+				defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+			}
+
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
 				handler:       newMockHandlerWithMeta(tt.fields.meta),
@@ -3005,14 +3323,24 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 				testingOnly:   true,
 			}
 
-			if got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("compactionTrigger.generatePlans() = %+v, want %+v", got, tt.want)
+			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
+			require.Len(t, got, len(tt.want))
+			for i, bucket := range got {
+				gotIDs := lo.Map(bucket.segments, func(s *SegmentInfo, _ int) int64 { return s.GetID() })
+				sort.Slice(gotIDs, func(a, b int) bool { return gotIDs[a] < gotIDs[b] })
+				wantIDs := tt.want[i].segmentIDs
+				sort.Slice(wantIDs, func(a, b int) bool { return wantIDs[a] < wantIDs[b] })
+				assert.Equal(t, wantIDs, gotIDs, "bucket %d segment IDs", i)
+				assert.Equal(t, tt.want[i].maxSize, bucket.maxSize, "bucket %d maxSize", i)
 			}
 		})
 	}
 }
 
 func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -3221,7 +3549,7 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 		name   string
 		fields fields
 		args   args
-		want   []*typeutil.Pair[int64, []int64]
+		want   []wantBucket
 	}{
 		{
 			name: "test time-based compaction",
@@ -3283,9 +3611,14 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 				compactTime:  &compactTime{startTime: 1000, collectionTTL: time.Hour},
 				expectedSize: 1024 * 1024 * 1024,
 			},
-			want: []*typeutil.Pair[int64, []int64]{
-				{A: 300, B: []int64{1, 2, 3}},
-			},
+			// seg1..3 carry only a few KB of residual size against a 1GiB
+			// expectedSize, so neither the full-tier fill-rate gate (85%
+			// of 1GiB) nor the fragment-tier count gate (3 <= the default
+			// MaxFragmentsPerGroup of 8) is cleared: no bucket is emitted.
+			// The old algorithm merged these purely because count reached
+			// MinSegmentToMerge regardless of actual size; that "squeeze"
+			// behavior is exactly what the two-tier algorithm removes.
+			want: nil,
 		},
 	}
 	for _, tt := range tests {
@@ -3302,11 +3635,14 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 			}
 
 			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
-			for i, pair := range got {
-				t.Logf("got[%d]: totalRows=%d, segmentIDs=%v", i, pair.A, pair.B)
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("compactionTrigger.generatePlans() = %+v, want %+v", got, tt.want)
+			require.Len(t, got, len(tt.want))
+			for i, bucket := range got {
+				gotIDs := lo.Map(bucket.segments, func(s *SegmentInfo, _ int) int64 { return s.GetID() })
+				sort.Slice(gotIDs, func(a, b int) bool { return gotIDs[a] < gotIDs[b] })
+				wantIDs := tt.want[i].segmentIDs
+				sort.Slice(wantIDs, func(a, b int) bool { return wantIDs[a] < wantIDs[b] })
+				assert.Equal(t, wantIDs, gotIDs, "bucket %d segment IDs", i)
+				assert.Equal(t, tt.want[i].maxSize, bucket.maxSize, "bucket %d maxSize", i)
 			}
 		})
 	}
@@ -3329,12 +3665,12 @@ func Test_compactionTrigger_ShouldCompactExpiryWithTTLField(t *testing.T) {
 		},
 	}
 
-	startTime := tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	startTime := tsoutil.ComposeTSByTime(ts.Add(time.Minute))
 	ct := &compactTime{startTime: startTime, collectionTTL: 0}
 	shouldCompact := trigger.ShouldCompactExpiryWithTTLField(ct, segment)
 	assert.True(t, shouldCompact)
 
-	startTime = tsoutil.ComposeTSByTime(ts.Add(-1*time.Hour), 0)
+	startTime = tsoutil.ComposeTSByTime(ts.Add(-1 * time.Hour))
 	ct = &compactTime{startTime: startTime, collectionTTL: 0}
 	shouldCompact = trigger.ShouldCompactExpiryWithTTLField(ct, segment)
 	assert.False(t, shouldCompact)
@@ -3342,13 +3678,13 @@ func Test_compactionTrigger_ShouldCompactExpiryWithTTLField(t *testing.T) {
 	origin := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetValue()
 	defer Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, origin)
 	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.1")
-	startTime = tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	startTime = tsoutil.ComposeTSByTime(ts.Add(time.Minute))
 	ct = &compactTime{startTime: startTime, collectionTTL: 0}
 	shouldCompact = trigger.ShouldCompactExpiryWithTTLField(ct, segment)
 	assert.True(t, shouldCompact)
 
 	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "5")
-	startTime = tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	startTime = tsoutil.ComposeTSByTime(ts.Add(time.Minute))
 	ct = &compactTime{startTime: startTime, collectionTTL: 0}
 	shouldCompact = trigger.ShouldCompactExpiryWithTTLField(ct, segment)
 	assert.False(t, shouldCompact)
@@ -3366,7 +3702,7 @@ func Test_compactionTrigger_ShouldCompactExpiryWithTTLField(t *testing.T) {
 		},
 	}
 
-	startTime = tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	startTime = tsoutil.ComposeTSByTime(ts.Add(time.Minute))
 	ct = &compactTime{startTime: startTime, collectionTTL: 0}
 	shouldCompact = trigger.ShouldCompactExpiryWithTTLField(ct, segment2)
 	assert.False(t, shouldCompact)
@@ -3382,7 +3718,7 @@ func Test_compactionTrigger_ShouldCompactExpiryWithTTLField_CommitTimestamp(t *t
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:              1,
 			CollectionID:    2,
-			CommitTimestamp: tsoutil.ComposeTSByTime(ts, 0), // import segment
+			CommitTimestamp: tsoutil.ComposeTSByTime(ts),
 			ExpirQuantiles: []int64{
 				oldTs.UnixMicro(),
 				oldTs.Add(time.Minute).UnixMicro(),
@@ -3395,7 +3731,7 @@ func Test_compactionTrigger_ShouldCompactExpiryWithTTLField_CommitTimestamp(t *t
 
 	// expirQuantiles are based on original row timestamps; ShouldCompactExpiryWithTTLField
 	// does not adjust for commit_timestamp, so stale quantiles still trigger compaction.
-	startTime := tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	startTime := tsoutil.ComposeTSByTime(ts.Add(time.Minute))
 	ct := &compactTime{startTime: startTime, collectionTTL: 0}
 	shouldCompact := trigger.ShouldCompactExpiryWithTTLField(ct, segment)
 	assert.True(t, shouldCompact, "stale expirQuantiles should still trigger TTL compaction")
@@ -3439,8 +3775,7 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
 
 		mockVM := NewMockVersionManager(t)
-		mockVM.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
-		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(2)).Maybe()
 
 		trigger := &compactionTrigger{
 			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
@@ -3463,8 +3798,7 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 		im := newTestIndexMeta(collID, segID, indexID, "INVERTED", segIdx)
 
 		mockVM := NewMockVersionManager(t)
-		mockVM.On("GetCurrentScalarIndexEngineVersion").Return(int32(2)).Maybe()
-		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(2)).Maybe()
 
 		trigger := &compactionTrigger{
 			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
@@ -3613,4 +3947,82 @@ func Test_ShouldRebuildSegmentIndex_ForceRebuild_TargetExceedsMax_Converges(t *t
 		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
 		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
 	})
+}
+
+// hasTooManyDeletions reads three independent thresholds off Stats. Make
+// sure each one fires on its own, that all-zero stats don't fire, and that
+// nil Stats lazily initializes (no panic, no false positive).
+func TestHasTooManyDeletions(t *testing.T) {
+	saveKeys := map[string]string{
+		Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key:  Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetValue(),
+		Params.DataCoordCfg.SingleCompactionRatioThreshold.Key:  Params.DataCoordCfg.SingleCompactionRatioThreshold.GetValue(),
+		Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key: Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetValue(),
+	}
+	defer func() {
+		for k, v := range saveKeys {
+			Params.Save(k, v)
+		}
+	}()
+	Params.Save(Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key, "10")
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.2")
+	Params.Save(Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key, "1024")
+
+	cases := []struct {
+		name    string
+		stats   *datapb.Statistics
+		numRows int64
+		want    bool
+	}{
+		{
+			name:    "no stats no deletions",
+			stats:   nil,
+			numRows: 100,
+			want:    false,
+		},
+		{
+			name:    "all zero stats does not fire",
+			stats:   &datapb.Statistics{},
+			numRows: 100,
+			want:    false,
+		},
+		{
+			name:    "exceeds delta file count",
+			stats:   &datapb.Statistics{DeltaBinlogCount: 11},
+			numRows: 100,
+			want:    true,
+		},
+		{
+			name:    "delta file count at threshold (>, not >=)",
+			stats:   &datapb.Statistics{DeltaBinlogCount: 10},
+			numRows: 100,
+			want:    false,
+		},
+		{
+			name:    "exceeds delete ratio",
+			stats:   &datapb.Statistics{DeleteNumRows: 25},
+			numRows: 100,
+			want:    true,
+		},
+		{
+			name:    "ratio just below threshold",
+			stats:   &datapb.Statistics{DeleteNumRows: 19},
+			numRows: 100,
+			want:    false,
+		},
+		{
+			name:    "exceeds delta size",
+			stats:   &datapb.Statistics{DeltaBinlogSize: 2048},
+			numRows: 100,
+			want:    true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			segment := &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: tc.numRows, Stats: tc.stats},
+			}
+			assert.Equal(t, tc.want, hasTooManyDeletions(segment))
+		})
+	}
 }

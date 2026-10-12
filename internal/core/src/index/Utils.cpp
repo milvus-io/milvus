@@ -56,23 +56,6 @@ get_file_size(int fd) {
     return s.st_size;
 }
 
-std::vector<IndexType>
-NM_List() {
-    static std::vector<IndexType> ret{
-        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-    };
-    return ret;
-}
-
-std::vector<IndexType>
-BIN_List() {
-    static std::vector<IndexType> ret{
-        knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
-        knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-    };
-    return ret;
-}
-
 // TODO caiyd: should list supported list
 std::vector<std::tuple<IndexType, MetricType>>
 unsupported_index_combinations() {
@@ -108,16 +91,6 @@ unsupported_index_combinations() {
 }
 
 bool
-is_in_bin_list(const IndexType& index_type) {
-    return is_in_list<IndexType>(index_type, BIN_List);
-}
-
-bool
-is_in_nm_list(const IndexType& index_type) {
-    return is_in_list<IndexType>(index_type, NM_List);
-}
-
-bool
 is_unsupported(const IndexType& index_type, const MetricType& metric_type) {
     return is_in_list<std::tuple<IndexType, MetricType>>(
         std::make_tuple(index_type, metric_type),
@@ -145,7 +118,7 @@ GetDimFromConfig(const Config& config) {
         auto err_message = fmt::format(
             "invalided dimension:{}, error:{}", dimension.value(), e.what());
         LOG_ERROR("{}", err_message);
-        throw std::logic_error(err_message);
+        ThrowInfo(ErrorCode::UnexpectedError, "{}", std::string(err_message));
     }
 }
 
@@ -177,7 +150,7 @@ GetIndexEngineVersionFromConfig(const Config& config) {
                         index_engine_version.value(),
                         e.what());
         LOG_ERROR("{}", err_message);
-        throw std::logic_error(err_message);
+        ThrowInfo(ErrorCode::UnexpectedError, "{}", std::string(err_message));
     }
 }
 
@@ -194,7 +167,7 @@ GetBitmapCardinalityLimitFromConfig(const Config& config) {
                                        bitmap_limit.value(),
                                        e.what());
         LOG_ERROR("{}", err_message);
-        throw std::logic_error(err_message);
+        ThrowInfo(ErrorCode::UnexpectedError, "{}", std::string(err_message));
     }
 }
 
@@ -218,70 +191,6 @@ GetHybridHighCardinalityIndexTypeFromConfig(const Config& config) {
     }
     // Default to STLSORT for high cardinality
     return ScalarIndexType::STLSORT;
-}
-
-// TODO :: too ugly
-storage::FieldDataMeta
-GetFieldDataMetaFromConfig(const Config& config) {
-    storage::FieldDataMeta field_data_meta;
-    // set collection id
-    auto collection_id =
-        index::GetValueFromConfig<std::string>(config, index::COLLECTION_ID);
-    AssertInfo(collection_id.has_value(),
-               "collection id not exist in index config");
-    field_data_meta.collection_id = std::stol(collection_id.value());
-
-    // set partition id
-    auto partition_id =
-        index::GetValueFromConfig<std::string>(config, index::PARTITION_ID);
-    AssertInfo(partition_id.has_value(),
-               "partition id not exist in index config");
-    field_data_meta.partition_id = std::stol(partition_id.value());
-
-    // set segment id
-    auto segment_id =
-        index::GetValueFromConfig<std::string>(config, index::SEGMENT_ID);
-    AssertInfo(segment_id.has_value(), "segment id not exist in index config");
-    field_data_meta.segment_id = std::stol(segment_id.value());
-
-    // set field id
-    auto field_id =
-        index::GetValueFromConfig<std::string>(config, index::FIELD_ID);
-    AssertInfo(field_id.has_value(), "field id not exist in index config");
-    field_data_meta.field_id = std::stol(field_id.value());
-
-    return field_data_meta;
-}
-
-storage::IndexMeta
-GetIndexMetaFromConfig(const Config& config) {
-    storage::IndexMeta index_meta;
-    // set segment id
-    auto segment_id =
-        index::GetValueFromConfig<std::string>(config, index::SEGMENT_ID);
-    AssertInfo(segment_id.has_value(), "segment id not exist in index config");
-    index_meta.segment_id = std::stol(segment_id.value());
-
-    // set field id
-    auto field_id =
-        index::GetValueFromConfig<std::string>(config, index::FIELD_ID);
-    AssertInfo(field_id.has_value(), "field id not exist in index config");
-    index_meta.field_id = std::stol(field_id.value());
-
-    // set index version
-    auto index_version =
-        index::GetValueFromConfig<std::string>(config, index::INDEX_VERSION);
-    AssertInfo(index_version.has_value(),
-               "index_version id not exist in index config");
-    index_meta.index_version = std::stol(index_version.value());
-
-    // set index id
-    auto build_id =
-        index::GetValueFromConfig<std::string>(config, index::INDEX_BUILD_ID);
-    AssertInfo(build_id.has_value(), "build id not exist in index config");
-    index_meta.build_id = std::stol(build_id.value());
-
-    return index_meta;
 }
 
 Config
@@ -315,16 +224,20 @@ CompactIndexDatas(
             auto& index_data_codec = index_file_slices.at(prefix);
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);
-                AssertInfo(index_datas.find(file_name) != index_datas.end(),
-                           "lost index slice data");
+                if (!(index_datas.find(file_name) != index_datas.end())) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "lost index slice data");
+                }
                 index_data_codec.codecs_.push_back(
                     std::move(index_datas.at(file_name)));
                 compacted_files.insert(file_name);
                 data_len += index_data_codec.codecs_.back()->PayloadSize();
             }
-            AssertInfo(
-                total_len == data_len,
-                "index len is inconsistent after disassemble and assemble");
+            if (!(total_len == data_len)) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "index len is inconsistent after disassemble and assemble");
+            }
             if (index_datas.count(prefix) > 0) {
                 index_data_codec.codecs_.push_back(
                     std::move(index_datas[prefix]));
@@ -374,12 +287,16 @@ CompactIndexDatasByKey(
     for (auto i = 0; i < slice_num; ++i) {
         std::string file_name = GenSlicedFileName(key, i);
         auto it = index_datas.find(file_name);
-        AssertInfo(it != index_datas.end(), "lost index slice data");
+        if (!(it != index_datas.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken, "lost index slice data");
+        }
         index_data_codec.codecs_.push_back(std::move(it->second));
         data_len += index_data_codec.codecs_.back()->PayloadSize();
     }
-    AssertInfo(total_len == data_len,
-               "index len is inconsistent after disassemble and assemble");
+    if (!(total_len == data_len)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "index len is inconsistent after disassemble and assemble");
+    }
     index_data_codec.size_ = data_len;
     return index_data_codec;
 }
@@ -410,8 +327,11 @@ AssembleIndexDataCodec(IndexDataCodec&& index_slices) {
     AssertInfo(index_slices.size_ >= 0, "index data size is invalid");
     if (index_slices.codecs_.size() == 1) {
         auto index_data = std::move(index_slices.codecs_.front());
-        AssertInfo(index_data->PayloadSize() == index_slices.size_,
-                   "index len is inconsistent after disassemble and assemble");
+        if (!(index_data->PayloadSize() == index_slices.size_)) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken,
+                "index len is inconsistent after disassemble and assemble");
+        }
         return index_data;
     }
     return AssembleIndexDataCodec(index_slices);
@@ -467,7 +387,10 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);
                 auto it = index_datas.find(file_name);
-                AssertInfo(it != index_datas.end(), "lost index slice data");
+                if (!(it != index_datas.end())) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "lost index slice data");
+                }
                 auto& channel = it->second;
                 auto data_array = storage::CollectFieldDataChannel(channel);
                 auto data = storage::MergeFieldData(data_array);
@@ -475,9 +398,11 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
                 new_field_data->FillFieldData(data->Data(), len);
                 index_datas.erase(file_name);
             }
-            AssertInfo(
-                new_field_data->IsFull(),
-                "index len is inconsistent after disassemble and assemble");
+            if (!(new_field_data->IsFull())) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "index len is inconsistent after disassemble and assemble");
+            }
             result[prefix] = new_field_data;
         }
     }

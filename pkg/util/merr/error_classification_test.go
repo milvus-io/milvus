@@ -100,7 +100,7 @@ func TestErrorTypeMarker(t *testing.T) {
 }
 
 // TestSentinelErrorTypeClassification guards the input/system split that the
-// proxy fail_input/fail_system alerting relies on. A sentinel silently losing
+// proxy cause="user"/cause="system" alerting relies on. A sentinel silently losing
 // (or gaining) WithErrorType(InputError) flips which party an alert blames.
 func TestSentinelErrorTypeClassification(t *testing.T) {
 	// The request's own fault -> InputError (and therefore non-retriable).
@@ -119,6 +119,7 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		"IncorrectParameterFormat":  ErrIncorrectParameterFormat,
 		"MissingRequiredParameters": ErrMissingRequiredParameters,
 		"InvalidInsertData":         ErrInvalidInsertData,
+		"FieldInvalidName":          ErrFieldInvalidName,
 	}
 	for name, err := range inputSentinels {
 		assert.Equal(t, InputError, GetErrorType(err), "%s should be InputError", name)
@@ -156,6 +157,7 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		801, 802, // Database: num limit / invalid name
 		1100, 1101, 1102, // Parameter: invalid / missing / too large
 		1400, 1401, 1402, // Privilege
+		1701,                   // FieldInvalidName
 		1800, 1801, 1802, 1804, // Auth / parameter format / insert data
 		2100, // ImportFailed
 		2201, // QueryPlan

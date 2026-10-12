@@ -108,10 +108,11 @@ impl IndexWriterWrapperImpl {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         enable_user_specified_doc_id: bool,
+        enable_background_merge: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
-            "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 7",
-            field_name, data_type
+            "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 7, enable_background_merge: {}",
+            field_name, data_type, enable_background_merge
         );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, field_name, data_type);
@@ -125,6 +126,12 @@ impl IndexWriterWrapperImpl {
         let index = Index::create_in_dir(path.clone(), schema)?;
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        if !enable_background_merge {
+            // Sealed index builds keep the segments produced by the writer's
+            // memory-budget flushes. Disable policy-driven background merges to
+            // avoid additional write amplification during the build.
+            index_writer.set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
+        }
         Ok(IndexWriterWrapperImpl {
             field,
             index_writer,
@@ -268,7 +275,6 @@ impl IndexWriterWrapperImpl {
 
     pub fn finish(mut self) -> Result<()> {
         self.index_writer.commit()?;
-        // self.manual_merge();
         block_on(self.index_writer.garbage_collect_files())?;
         self.index_writer.wait_merging_threads()?;
 
@@ -283,5 +289,70 @@ impl IndexWriterWrapperImpl {
     pub(crate) fn commit(&mut self) -> Result<()> {
         self.index_writer.commit()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tantivy::Index;
+    use tempfile::TempDir;
+
+    use super::IndexWriterWrapperImpl;
+    use crate::data_type::TantivyDataType;
+
+    // tantivy's smallest per-thread arena (MEMORY_BUDGET_NUM_BYTES_MIN = 15 MB).
+    // With a single indexing thread this is tight enough that the doc count below
+    // spills into several auto-flushed segments, which is exactly the
+    // multi-segment build this test needs to exercise.
+    const MIN_MEMORY_BUDGET: usize = 15_000_000;
+    const NUM_DOCS: i64 = 1_000_000;
+
+    fn build_i64_writer(path: &str, enable_background_merge: bool) -> IndexWriterWrapperImpl {
+        IndexWriterWrapperImpl::new(
+            "number",
+            TantivyDataType::I64,
+            path.to_string(),
+            1, // single thread -> smallest arena -> forces multiple flushed segments
+            MIN_MEMORY_BUDGET,
+            false, // enable_user_specified_doc_id
+            enable_background_merge,
+        )
+        .unwrap()
+    }
+
+    /// A build-mode (enable_background_merge == false) V7 writer must preserve the
+    /// segments produced by memory-budget flushes instead of merging them all in
+    /// finish(). The production budget is large enough to keep the segment count
+    /// low, while avoiding a full-index rewrite at the end of the build.
+    #[test]
+    fn test_sealed_build_finish_preserves_segments() {
+        let dir = TempDir::new().unwrap();
+        let mut writer = build_i64_writer(dir.path().to_str().unwrap(), false);
+        for i in 0..NUM_DOCS {
+            writer.add::<i64>(i, i as u32).unwrap();
+        }
+        writer.commit().unwrap();
+
+        // Precondition: the build workload genuinely auto-flushes multiple
+        // segments, so the post-finish assertion exercises the no-merge path.
+        let before = writer.index.searchable_segment_metas().unwrap();
+        assert!(
+            before.len() > 1,
+            "expected the build workload to auto-flush multiple segments, got {}",
+            before.len()
+        );
+
+        let segment_count_before_finish = before.len();
+        writer.finish().unwrap();
+
+        let index = Index::open_in_dir(dir.path()).unwrap();
+        let after = index.searchable_segment_metas().unwrap();
+        assert_eq!(
+            after.len(),
+            segment_count_before_finish,
+            "finish must preserve the flushed tantivy segments: before {}, after {}",
+            segment_count_before_finish,
+            after.len()
+        );
     }
 }

@@ -61,19 +61,20 @@ TEST(DeleteMVCC, common_case) {
     auto pks = dataset.get_col<int64_t>(pk);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     ASSERT_EQ(c, segment->get_real_count());
-    auto& insert_record = segment->get_insert_record();
     DeletedRecord<true> delete_record(
-        &insert_record,
-        [&insert_record](
-            const std::vector<PkType>& pks,
-            const Timestamp* timestamps,
-            std::function<void(const SegOffset offset, const Timestamp ts)>
-                cb) {
-            for (size_t i = 0; i < pks.size(); ++i) {
-                auto timestamp = timestamps[i];
-                auto offsets = insert_record.search_pk(pks[i], timestamp);
-                for (auto offset : offsets) {
-                    cb(offset, timestamp);
+        nullptr,
+        [&pks](const std::vector<PkType>& delete_pks,
+               const Timestamp* timestamps,
+               std::function<void(const SegOffset offset, const Timestamp ts)>
+                   cb) {
+            for (size_t i = 0; i < delete_pks.size(); ++i) {
+                auto delete_pk = std::get<int64_t>(delete_pks[i]);
+                auto delete_ts = timestamps[i];
+                for (size_t offset = 0; offset < pks.size(); ++offset) {
+                    if (pks[offset] == delete_pk &&
+                        static_cast<Timestamp>(offset) < delete_ts) {
+                        cb(SegOffset(offset), delete_ts);
+                    }
                 }
             }
         },

@@ -16,6 +16,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -26,15 +27,32 @@
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "common/QueryResult.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/QueryContext.h"
+#include "exec/expression/Utils.h"
 #include "plan/PlanNode.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::query {
+
+inline ColumnVectorPtr
+GetColumnVectorForTest(const VectorPtr& result) {
+    if (auto convert_vector = std::dynamic_pointer_cast<ColumnVector>(result)) {
+        return convert_vector;
+    }
+
+    if (result != nullptr &&
+        std::string_view(typeid(*result).name()) ==
+            std::string_view(typeid(ColumnVector).name())) {
+        return std::static_pointer_cast<ColumnVector>(result);
+    }
+
+    return milvus::exec::GetColumnVector(result);
+}
 
 class ExecPlanNodeVisitor : public PlanNodeVisitor {
  public:
@@ -54,7 +72,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
                             folly::CancellationToken(),
                         int32_t consistency_level = 0,
                         Timestamp collection_ttl = 0,
-                        int64_t entity_ttl_physical_time_us = 0)
+                        int64_t entity_ttl_physical_time_us = 0,
+                        milvus::tracer::SpanPtr trace_span = nullptr)
         : segment_(segment),
           timestamp_(timestamp),
           entity_ttl_physical_time_us_(
@@ -66,7 +85,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
           placeholder_group_(placeholder_group),
           cancel_token_(cancel_token),
           consistency_level_(consistency_level),
-          collection_ttl_timestamp_(collection_ttl) {
+          collection_ttl_timestamp_(collection_ttl),
+          trace_span_(std::move(trace_span)) {
     }
 
     // Only used for test
@@ -173,39 +193,22 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     bool expr_use_pk_index_ = false;
     bool filter_only_ = false;
     bool enable_expr_cache_ = false;
+    milvus::tracer::SpanPtr trace_span_ = nullptr;
 };
 
-// for test use only
-inline BitsetType
-ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
-                 const milvus::segcore::SegmentInternalInterface* segment,
-                 uint64_t active_count,
-                 uint64_t timestamp) {
-    auto plan_fragment = plan::PlanFragment(plannode);
+namespace {
 
-    auto query_context = std::make_shared<milvus::exec::QueryContext>(
-        DEAFULT_QUERY_ID, segment, active_count, timestamp);
-    auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
-    AssertInfo(row != nullptr,
-               "ExecuteTask returned null row vector for query expression");
-    AssertInfo(
-        row->childrens().size() == 1,
-        "query expr operator's result vector's children size not equal one");
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
-    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
-    BitsetType query_view(view);
-    query_view.flip();
-    return query_view;
-}
-
-// for test use only - with explicit entity_ttl_physical_time_us
+// for test use only - shared implementation. pin_snapshot mirrors the
+// production visit() path: capture the sealed published snapshot exactly once
+// per request so the expression hot loop reads from the pinned immutable state
+// instead of self-capturing on every chunk access.
 inline BitsetType
-ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
-                 const milvus::segcore::SegmentInternalInterface* segment,
-                 uint64_t active_count,
-                 uint64_t timestamp,
-                 int64_t entity_ttl_physical_time_us) {
+ExecuteQueryExprImpl(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                     const milvus::segcore::SegmentInternalInterface* segment,
+                     uint64_t active_count,
+                     uint64_t timestamp,
+                     int64_t entity_ttl_physical_time_us,
+                     bool pin_snapshot) {
     auto plan_fragment = plan::PlanFragment(plannode);
 
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
@@ -221,18 +224,59 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
         std::unordered_map<std::string,
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us);
+    if (pin_snapshot) {
+        query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+    }
     auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
     AssertInfo(row != nullptr,
                "ExecuteTask returned null row vector for query expression");
     AssertInfo(
         row->childrens().size() == 1,
         "query expr operator's result vector's children size not equal one");
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
     AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
     BitsetType query_view(view);
     query_view.flip();
     return query_view;
+}
+
+}  // namespace
+
+// for test use only
+inline BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp) {
+    return ExecuteQueryExprImpl(
+        std::move(plannode), segment, active_count, timestamp, 0, false);
+}
+
+// for test use only - with explicit entity_ttl_physical_time_us
+inline BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp,
+                 int64_t entity_ttl_physical_time_us) {
+    return ExecuteQueryExprImpl(std::move(plannode),
+                                segment,
+                                active_count,
+                                timestamp,
+                                entity_ttl_physical_time_us,
+                                false);
+}
+
+// for test use only - pin the sealed read snapshot once per request
+inline BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp,
+                 bool pin_snapshot) {
+    return ExecuteQueryExprImpl(
+        std::move(plannode), segment, active_count, timestamp, 0, pin_snapshot);
 }
 
 }  // namespace milvus::query

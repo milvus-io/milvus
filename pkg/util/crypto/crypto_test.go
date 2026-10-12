@@ -10,39 +10,83 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-//func BenchmarkPasswordVerify(b *testing.B) {
-//	correctPassword := "test_my_pass_new"
-//	credInfo := &internalpb.CredentialInfo{
-//		Username:       "root",
-//		Sha256Password: "bcca79df9650cef1d7ed9f63449d7f8a27843d2678f5666f38ca65ab77d99a13",
-//	}
-//	b.ResetTimer()
-//	for n := 0; n < b.N; n++ {
-//		PasswordVerify(correctPassword, credInfo)
-//	}
-//}
+func TestPasswordEncryptUsesDefaultBcryptCost(t *testing.T) {
+	encryptedPassword, err := PasswordEncrypt("test-password")
+	require.NoError(t, err)
 
-func TestBcryptCompare(t *testing.T) {
-	wrongPassword := "test_my_name"
-	correctPassword := "test_my_pass_new"
-
-	err := bcrypt.CompareHashAndPassword([]byte("$2a$10$3H9DLiHyPxJ29bMWRNyueOrGkbzJfE3BAR159ju3UetytAoKk7Ne2"), []byte(correctPassword))
-	assert.NoError(t, err)
-
-	err = bcrypt.CompareHashAndPassword([]byte("$2a$10$3H9DLiHyPxJ29bMWRNyueOrGkbzJfE3BAR159ju3UetytAoKk7Ne2"), []byte(wrongPassword))
-	assert.Error(t, err)
+	cost, err := bcrypt.Cost([]byte(encryptedPassword))
+	require.NoError(t, err)
+	assert.Equal(t, bcrypt.DefaultCost, cost)
+	assert.GreaterOrEqual(t, cost, 10)
 }
 
-func TestBcryptCost(t *testing.T) {
-	correctPassword := "test_my_pass_new"
+func TestPasswordEncryptVerification(t *testing.T) {
+	password := "test-password"
+	encryptedPassword, err := PasswordEncrypt(password)
+	require.NoError(t, err)
 
-	bytes, _ := bcrypt.GenerateFromPassword([]byte(correctPassword), bcrypt.DefaultCost)
-	err := bcrypt.CompareHashAndPassword(bytes, []byte(correctPassword))
-	assert.NoError(t, err)
+	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(encryptedPassword), []byte(password)))
+	assert.Error(t, bcrypt.CompareHashAndPassword([]byte(encryptedPassword), []byte("wrong-password")))
+}
 
-	bytes, _ = bcrypt.GenerateFromPassword([]byte(correctPassword), bcrypt.MinCost)
-	err = bcrypt.CompareHashAndPassword(bytes, []byte(correctPassword))
-	assert.NoError(t, err)
+func TestPasswordEncryptSupportsLegacyBcryptHash(t *testing.T) {
+	const legacyHash = "$2a$04$FDqkwIegT7SfTGRcPyQjk.reG7poJ99Two1jsl2euNBy0Z.e1DiR."
+
+	cost, err := bcrypt.Cost([]byte(legacyHash))
+	require.NoError(t, err)
+	assert.Equal(t, bcrypt.MinCost, cost)
+	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(legacyHash), []byte("legacy-password")))
+}
+
+func BenchmarkPasswordHashGeneration(b *testing.B) {
+	benchmarkBcryptCosts(b, func(b *testing.B, cost int) {
+		for i := 0; i < b.N; i++ {
+			if _, err := bcrypt.GenerateFromPassword([]byte("benchmark-password"), cost); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkPasswordHashComparison(b *testing.B) {
+	benchmarkBcryptCosts(b, func(b *testing.B, cost int) {
+		hash, err := bcrypt.GenerateFromPassword([]byte("benchmark-password"), cost)
+		require.NoError(b, err)
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			if err := bcrypt.CompareHashAndPassword(hash, []byte("benchmark-password")); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkPasswordHashComparisonParallel(b *testing.B) {
+	benchmarkBcryptCosts(b, func(b *testing.B, cost int) {
+		hash, err := bcrypt.GenerateFromPassword([]byte("benchmark-password"), cost)
+		require.NoError(b, err)
+		b.ResetTimer()
+
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := bcrypt.CompareHashAndPassword(hash, []byte("benchmark-password")); err != nil {
+					b.Error(err)
+					return
+				}
+			}
+		})
+	})
+}
+
+func benchmarkBcryptCosts(b *testing.B, benchmark func(b *testing.B, cost int)) {
+	b.Helper()
+	for _, cost := range []int{bcrypt.MinCost, bcrypt.DefaultCost} {
+		b.Run(fmt.Sprintf("cost_%d", cost), func(b *testing.B) {
+			b.ReportAllocs()
+			benchmark(b, cost)
+		})
+	}
 }
 
 func TestMD5(t *testing.T) {

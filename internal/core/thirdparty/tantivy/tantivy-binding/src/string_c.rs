@@ -11,7 +11,16 @@ pub(crate) unsafe fn c_str_to_str<'a>(s: *const c_char) -> &'a str {
 }
 
 pub(crate) fn create_string(s: &str) -> *const c_char {
-    CString::new(s).unwrap().into_raw()
+    match CString::new(s) {
+        Ok(cs) => cs.into_raw(),
+        // A C string cannot carry an interior NUL, and every error message
+        // crossing the FFI is built here. Escape rather than panic: this runs
+        // inside `extern "C"` frames, where a panic cannot unwind and aborts
+        // the process -- turning a reportable error into a dead node.
+        Err(_) => CString::new(s.replace('\0', "\\0"))
+            .unwrap_or_default()
+            .into_raw(),
+    }
 }
 
 #[no_mangle]

@@ -261,10 +261,10 @@ func sealByBlockingL0(meta *meta) channelSealPolicy {
 
 		// calculate size & num
 		id2Size := lo.SliceToMap(l0segments, func(l0Segment *SegmentInfo) (int64, int64) {
-			return l0Segment.GetID(), int64(GetBinlogSizeAsBytes(l0Segment.GetDeltalogs()))
+			return l0Segment.GetID(), l0Segment.EnsureStats().GetDeltaBinlogSize()
 		})
 		id2EntryNum := lo.SliceToMap(l0segments, func(l0Segment *SegmentInfo) (int64, int64) {
-			return l0Segment.GetID(), int64(GetBinlogEntriesNum(l0Segment.GetDeltalogs()))
+			return l0Segment.GetID(), l0Segment.EnsureStats().GetDeleteNumRows()
 		})
 
 		// util func to calculate blocking statistics

@@ -16,7 +16,10 @@
 
 #pragma once
 
-#include <iostream>
+#include <exception>
+#include <string>
+
+#include "common/EasyAssert.h"
 
 namespace milvus {
 
@@ -36,19 +39,23 @@ class ExecDriverException : public std::exception {
  private:
     std::string exception_message_;
 };
-class ExecOperatorException : public std::exception {
+
+// Thrown by the driver when an operator call fails (see CALL_OPERATOR in
+// exec/Driver.cpp). It derives from SegcoreError so that the classified error
+// code chosen at the original throw site survives the driver wrap all the way
+// to the CGO boundary: both FailureCStatus(const std::exception*) and the
+// futures consume arm (Future.h thenError<milvus::SegcoreError>) extract the
+// code from the SegcoreError base. Non-SegcoreError causes (plain
+// std::exception etc.) keep the legacy UnexpectedError classification.
+class ExecOperatorException : public SegcoreError {
  public:
     explicit ExecOperatorException(const std::string& msg)
-        : std::exception(), exception_message_(msg) {
+        : SegcoreError(ErrorCode::UnexpectedError, msg) {
     }
-    const char*
-    what() const noexcept {
-        return exception_message_.c_str();
+    ExecOperatorException(ErrorCode error_code, const std::string& msg)
+        : SegcoreError(error_code, msg) {
     }
     virtual ~ExecOperatorException() {
     }
-
- private:
-    std::string exception_message_;
 };
 }  // namespace milvus

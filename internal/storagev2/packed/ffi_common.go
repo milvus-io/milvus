@@ -18,23 +18,30 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/storagev2"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
-// milvus-storage does not expose structured error codes, so callers cannot
-// distinguish a recoverable concurrent-transaction conflict from a hard IO
-// error. We treat all loon failures as retryable for now and rely on a
-// bounded retry budget plus outer error handling to keep the worst case
-// finite.
+// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Some
+// milvus-storage paths can still lose their structured error detail and fall
+// back to a generic error code, so callers cannot reliably distinguish a
+// transient failure from a permanent one. Treat all loon failures as retryable
+// for now and rely on a bounded retry budget plus outer error handling to keep
+// the worst case finite.
 //
-// TODO(storage v3): once milvus-storage exposes explicit error codes, narrow
-// this sentinel to only the concurrent-transaction case (FailResolver) and
-// let other errors propagate immediately as retry.Unrecoverable.
+// TODO(storage v3): once every milvus-storage FFI path preserves explicit error
+// codes end-to-end, narrow this sentinel to the retryable cases and let other
+// errors propagate immediately as retry.Unrecoverable.
 var ErrLoonTransient = errors.New("loon FFI transient error")
+
+// ErrLoonPermanent marks a loon FFI failure whose err_code the producer
+// itself reports as non-retryable (loon_ffi_is_retryable_errcode == 0):
+// access denied, malformed input, corrupt data. Retrying cannot succeed;
+// callers' retry guards must terminate on it.
+var ErrLoonPermanent = errors.New("loon FFI permanent error")
 
 // Property keys exported by milvus-storage/ffi_c.h.
 var (
@@ -60,7 +67,7 @@ var (
 	PropertyFSUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 
 	PropertyWriterPolicy             = C.GoString(C.loon_properties_writer_policy)
-	PropertyWriterFormat             = "writer.format"
+	PropertyWriterFormat             = C.GoString(C.loon_properties_writer_format)
 	PropertyWriterSchemaBasedPattern = C.GoString(C.loon_properties_writer_schema_base_patterns)
 	PropertyWriterSchemaBasedFormats = "writer.split.schema_based.formats"
 
@@ -76,10 +83,9 @@ func ExtfsPrefixForCollection(collectionID int64) string {
 	return fmt.Sprintf("extfs.%d.", collectionID)
 }
 
-// MakePropertiesFromStorageConfig creates a Properties object from StorageConfig
-// This function converts a StorageConfig structure into a Properties object by
-// calling the FFI properties_create function. All configuration fields from
-// StorageConfig are mapped to corresponding key-value pairs in Properties.
+// MakePropertiesFromStorageConfig creates a Properties object from StorageConfig.
+// All configuration fields are mapped to corresponding property key-value pairs,
+// with the local filesystem root normalized separately from the key prefix.
 func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
 	if storageConfig == nil {
 		return nil, merr.WrapErrStorageMsg("storageConfig is required")
@@ -106,9 +112,9 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		keys = append(keys, PropertyFSAccessKeyValue)
 		values = append(values, storageConfig.GetSecretAccessKey())
 	}
-	if storageConfig.GetRootPath() != "" {
+	if fsRoot := storagev2.LoonFSRootPath(storageConfig); fsRoot != "" {
 		keys = append(keys, PropertyFSRootPath)
-		values = append(values, storageConfig.GetRootPath())
+		values = append(values, fsRoot)
 	}
 	if storageConfig.GetStorageType() != "" {
 		keys = append(keys, PropertyFSStorageType)
@@ -163,9 +169,22 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyFSUseCustomPartUpload)
 	values = append(values, "true") // hardcoded to true as in the original code
 
-	// Add integer field
+	// Add integer fields
 	keys = append(keys, PropertyFSRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
+	// 0 means "not set by the producer" — leave the key absent so
+	// milvus-storage applies its registered default (100). Emitting "0"
+	// instead would clobber that default: the registry only falls back when
+	// the key is missing, and s3_client_builder takes
+	// max(max(io_capacity, 25), max_connections), so an explicit 0 lowers the
+	// connection cap. It would also change ArrowFileSystemConfig's cache key
+	// and split the filesystem cache against producers that do set it. Same
+	// convention as ChunkManager.cpp / MinioChunkManager.cpp, which apply the
+	// value only when > 0.
+	if maxConns := storageConfig.GetMaxConnections(); maxConns > 0 {
+		keys = append(keys, PropertyFSMaxConnections)
+		values = append(values, strconv.FormatUint(uint64(maxConns), 10))
+	}
 
 	// Add TLS min version (skip "default" — consistent with C++ layer filtering)
 	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {
@@ -184,9 +203,38 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyWriterFormat)
 	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
-	// No extfs.default.* properties here. Per-collection extfs properties
-	// (extfs.{collectionID}.*) are injected downstream via
-	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
+	// Store the External Table mode in the same properties map; it is consumed
+	// by InjectExternalSpecProperties once the collection is known.
+	externalMode := uint32(0)
+	if storageConfig.GetTalonEnableForExternalTable() {
+		externalMode = storageConfig.GetTalonMode()
+	}
+	keys = append(keys, "milvus.talon.external_mode")
+	values = append(values, strconv.FormatUint(uint64(externalMode), 10))
+	for _, property := range []struct {
+		key   string
+		value uint32
+	}{
+		{"fs.talon.mode", storageConfig.GetTalonMode()},
+		{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
+		{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
+		{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
+	} {
+		isMode := property.key == "fs.talon.mode"
+		if !isMode && property.value == 0 {
+			continue // Older StorageConfig messages use the storage defaults.
+		}
+		value := property.value
+		if isMode && storageConfig.GetStorageType() == "local" {
+			value = 0
+		}
+		keys = append(keys, property.key)
+		values = append(values, strconv.FormatUint(uint64(value), 10))
+	}
+	if coordinator := storageConfig.GetTalonCoordinator(); coordinator != "" {
+		keys = append(keys, "fs.talon.coordinator")
+		values = append(values, coordinator)
+	}
 
 	// Add extra kvs (override existing keys if present)
 	for k, v := range extraKVs {
@@ -269,7 +317,7 @@ func (m MilvusTablePrimaryKeyMode) usesExternalPrimaryKey() bool {
 
 // ExternalSpecContext carries the raw external-table inputs that C++
 // InjectExternalSpecProperties needs to derive both extfs.{collectionID}.*
-// (storage layer) and format-layer properties (e.g. iceberg.snapshot_id)
+// (storage layer) and format-layer properties (e.g. reader.exttable.snapshot_id)
 // from a single external_spec JSON. Zero value (CollectionID=0, Source="")
 // signals an internal (non-external) collection — injectExternalSpecProperties
 // treats it as a no-op.
@@ -284,10 +332,11 @@ type ExternalSpecContext struct {
 	MilvusTablePKMode MilvusTablePrimaryKeyMode
 }
 
-// injectExternalSpecProperties appends every external_spec-derived property
-// (extfs.<collectionID>.* and format-layer keys) onto an existing
-// LoonProperties via the C++ InjectExternalSpecProperties pipeline. No-op
-// when externalSource is empty.
+// injectExternalSpecProperties appends External Table filesystem and
+// format-layer properties onto an existing LoonProperties via the C++
+// InjectExternalSpecProperties pipeline. The process-local IOPS policy is
+// applied only to the extfs.<collectionID> namespace. No-op when
+// externalSource is empty.
 func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int64,
 	externalSource, externalSpec string,
 ) error {
@@ -297,6 +346,7 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 	if externalSource == "" {
 		return nil
 	}
+	params := paramtable.Get()
 	cSource := C.CString(externalSource)
 	defer C.free(unsafe.Pointer(cSource))
 	var cSpec *C.char
@@ -305,7 +355,13 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 		defer C.free(unsafe.Pointer(cSpec))
 	}
 	result := C.loon_properties_inject_external_spec(
-		properties, C.int64_t(collectionID), cSource, cSpec)
+		properties,
+		C.int64_t(collectionID),
+		cSource,
+		cSpec,
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return merr.WrapErrStorage(err, "loon inject_external_spec failed")
 	}
@@ -320,8 +376,17 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 		if errMsg != nil {
 			errStr = C.GoString(errMsg)
 		}
-
-		return merr.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
+		// Classify by the err_code the FFI already carries instead of
+		// flattening every failure to transient: the producer's own
+		// loon_ffi_is_retryable_errcode decides, so a 404/access-denied/
+		// corrupt-data failure stops retry loops instead of spinning them.
+		code := int32(ffiResult.err_code)
+		if C.loon_ffi_is_retryable_errcode(C.int(code)) != 0 {
+			return merr.Wrapf(ErrLoonTransient,
+				"FFI operation failed (code=%d): %s", code, errStr)
+		}
+		return merr.Wrapf(ErrLoonPermanent,
+			"FFI operation failed (code=%d): %s", code, errStr)
 	}
 	return nil
 }

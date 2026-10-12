@@ -26,8 +26,10 @@
 #include "arrow/c/abi.h"
 #include "arrow/record_batch.h"
 #include "arrow/result.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/packed/reader.h"
@@ -37,6 +39,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/StorageV2FSCache.h"
 #include "storage/plugin/PluginInterface.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace {
 
@@ -71,6 +74,7 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  int64_t num_paths,
                                  struct ArrowSchema* schema,
                                  const int64_t buffer_size,
+                                 const bool eager_prebuffer,
                                  CStorageConfig c_storage_config,
                                  CPackedReader* c_packed_reader,
                                  CPluginContext* c_plugin_context) {
@@ -103,13 +107,29 @@ NewPackedReaderWithStorageConfig(char** paths,
                 ? std::string(c_storage_config.tls_min_version)
                 : "",
             c_storage_config.use_crc32c_checksum,
+            c_storage_config.talon_mode,
+            c_storage_config.talon_small_read_threshold,
+            c_storage_config.talon_coordinator != nullptr
+                ? c_storage_config.talon_coordinator
+                : "",
+            c_storage_config.talon_block_size,
+            c_storage_config.talon_max_idle_per_addr,
         });
         if (!trueFs) {
             return milvus::FailureCStatus(
                 milvus::ErrorCode::FileReadFailed,
                 "[StorageV2] Failed to get filesystem");
         }
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            // A malformed C-ABI schema from the Go side; ValueOrDie would
+            // abort the process instead of returning a classified status.
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(schema_result.status()),
+                "failed to import arrow schema: {}",
+                schema_result.status().ToString());
+        }
+        auto trueSchema = schema_result.ValueUnsafe();
         UpdateCipherPluginIfNeeded(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
@@ -118,12 +138,11 @@ NewPackedReaderWithStorageConfig(char** paths,
             trueSchema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -131,6 +150,7 @@ NewPackedReaderWithProperties(char** paths,
                               int64_t num_paths,
                               struct ArrowSchema* schema,
                               const int64_t buffer_size,
+                              const bool eager_prebuffer,
                               const LoonProperties* c_properties,
                               const char* filesystem_path,
                               CPackedReader* c_packed_reader,
@@ -149,11 +169,20 @@ NewPackedReaderWithProperties(char** paths,
         auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
             properties, filesystem_path != nullptr ? filesystem_path : "");
         if (!fs_result.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                          fs_result.status().ToString());
+            auto error = milvus_storage::ToSegcoreError(fs_result.status());
+            return milvus::FailureCStatus(&error);
         }
         auto trueFs = fs_result.ValueOrDie();
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            // A malformed C-ABI schema from the Go side; ValueOrDie would
+            // abort the process instead of returning a classified status.
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(schema_result.status()),
+                "failed to import arrow schema: {}",
+                schema_result.status().ToString());
+        }
+        auto trueSchema = schema_result.ValueUnsafe();
         UpdateCipherPluginIfNeeded(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
@@ -162,12 +191,11 @@ NewPackedReaderWithProperties(char** paths,
             trueSchema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -175,6 +203,7 @@ NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
+                const bool eager_prebuffer,
                 CPackedReader* c_packed_reader,
                 CPluginContext* c_plugin_context) {
     SCOPE_CGO_CALL_METRIC();
@@ -187,7 +216,16 @@ NewPackedReader(char** paths,
                 milvus::ErrorCode::FileReadFailed,
                 "[StorageV2] Failed to get filesystem");
         }
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            // A malformed C-ABI schema from the Go side; ValueOrDie would
+            // abort the process instead of returning a classified status.
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(schema_result.status()),
+                "failed to import arrow schema: {}",
+                schema_result.status().ToString());
+        }
+        auto trueSchema = schema_result.ValueUnsafe();
 
         UpdateCipherPluginIfNeeded(c_plugin_context);
 
@@ -197,19 +235,21 @@ NewPackedReader(char** paths,
             trueSchema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
 ReadNext(CPackedReader c_packed_reader,
-         CArrowArray* out_array,
-         CArrowSchema* out_schema) {
+         struct ArrowArray* out_array,
+         struct ArrowSchema* out_schema) {
     SCOPE_CGO_CALL_METRIC();
+
+    *out_array = {};
+    *out_schema = {};
 
     try {
         auto packed_reader =
@@ -218,30 +258,22 @@ ReadNext(CPackedReader c_packed_reader,
         std::shared_ptr<arrow::RecordBatch> record_batch;
         auto status = packed_reader->ReadNext(&record_batch);
         if (!status.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                          status.ToString());
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
         }
         if (record_batch == nullptr) {
             // end of file
             return milvus::SuccessCStatus();
-        } else {
-            std::unique_ptr<ArrowArray> arr = std::make_unique<ArrowArray>();
-            std::unique_ptr<ArrowSchema> schema =
-                std::make_unique<ArrowSchema>();
-            auto status = arrow::ExportRecordBatch(
-                *record_batch, arr.get(), schema.get());
-            if (!status.ok()) {
-                return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                              status.ToString());
-            }
-            *out_array = arr.release();
-            *out_schema = schema.release();
-            return milvus::SuccessCStatus();
+        }
+        auto export_status =
+            arrow::ExportRecordBatch(*record_batch, out_array, out_schema);
+        if (!export_status.ok()) {
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
+                                          export_status.ToString());
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -255,7 +287,6 @@ CloseReader(CPackedReader c_packed_reader) {
         packed_reader->Close();
         delete packed_reader;
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

@@ -2,10 +2,12 @@
 CDC sync tests for index operations.
 """
 
-import time
 import random
+import time
+
 import pytest
 from common.common_type import CaseLabel
+
 from .base import TestCDCSyncBase, logger
 
 
@@ -49,9 +51,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
         def check_create():
             return downstream_client.has_collection(collection_name)
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create collection {collection_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
         # Create index
         index_params = upstream_client.prepare_index_params()
@@ -68,12 +68,10 @@ class TestCDCSyncIndex(TestCDCSyncBase):
             try:
                 downstream_indexes = downstream_client.list_indexes(collection_name)
                 return len(downstream_indexes) > 0
-            except:
+            except Exception:
                 return False
 
-        assert self.wait_for_sync(
-            check_index, sync_timeout, f"create index on {collection_name}"
-        )
+        assert self.wait_for_sync(check_index, sync_timeout, f"create index on {collection_name}")
 
     def test_drop_index(self, upstream_client, downstream_client, sync_timeout):
         """Test DROP_INDEX operation sync."""
@@ -108,12 +106,10 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     downstream_client.has_collection(collection_name)
                     and len(downstream_client.list_indexes(collection_name)) > 0
                 )
-            except:
+            except Exception:
                 return False
 
-        assert self.wait_for_sync(
-            check_setup, sync_timeout, f"setup collection and index {collection_name}"
-        )
+        assert self.wait_for_sync(check_setup, sync_timeout, f"setup collection and index {collection_name}")
 
         # Drop index
         upstream_client.drop_index(collection_name, "vector")
@@ -123,16 +119,12 @@ class TestCDCSyncIndex(TestCDCSyncBase):
             try:
                 downstream_indexes = downstream_client.list_indexes(collection_name)
                 return len(downstream_indexes) == 0
-            except:
+            except Exception:
                 return True  # If error, assume index is dropped
 
-        assert self.wait_for_sync(
-            check_drop, sync_timeout, f"drop index on {collection_name}"
-        )
+        assert self.wait_for_sync(check_drop, sync_timeout, f"drop index on {collection_name}")
 
-    def test_create_vector_indexes_comprehensive(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_create_vector_indexes_comprehensive(self, upstream_client, downstream_client, sync_timeout):
         """Test CREATE_INDEX operation sync for all vector index types."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -220,9 +212,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                 self.resources_to_cleanup.append(("collection", collection_name))
 
                 try:
-                    logger.info(
-                        f"[INDEX_TEST] Testing {test_case['field_type']} with {index_test['index_type']} index"
-                    )
+                    logger.info(f"[INDEX_TEST] Testing {test_case['field_type']} with {index_test['index_type']} index")
 
                     # Initial cleanup
                     self.cleanup_collection(upstream_client, collection_name)
@@ -233,9 +223,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                         test_case["field_name"],
                         test_case["field_type"],
                     )
-                    upstream_client.create_collection(
-                        collection_name=collection_name, schema=schema
-                    )
+                    upstream_client.create_collection(collection_name=collection_name, schema=schema)
 
                     # Wait for creation to sync
                     def check_create():
@@ -253,9 +241,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     )
                     upstream_client.insert(collection_name, test_data)
                     upstream_client.flush(collection_name)
-                    logger.info(
-                        f"[DATA_INSERTED] Inserted 100 records before creating {test_case['field_type']} index"
-                    )
+                    logger.info(f"[DATA_INSERTED] Inserted 100 records before creating {test_case['field_type']} index")
 
                     # Create specific index
                     index_params = upstream_client.prepare_index_params()
@@ -270,11 +256,9 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     # Wait for index creation to sync
                     def check_index():
                         try:
-                            downstream_indexes = downstream_client.list_indexes(
-                                collection_name
-                            )
+                            downstream_indexes = downstream_client.list_indexes(collection_name)
                             return len(downstream_indexes) > 0
-                        except:
+                        except Exception:
                             return False
 
                     assert self.wait_for_sync(
@@ -285,16 +269,12 @@ class TestCDCSyncIndex(TestCDCSyncBase):
 
                     # Verify index details
                     try:
-                        index_info = downstream_client.describe_index(
-                            collection_name, test_case["field_name"]
-                        )
+                        index_info = downstream_client.describe_index(collection_name, test_case["field_name"])
                         logger.info(
                             f"[INDEX_VERIFICATION] {index_test['index_type']} index created successfully: {index_info}"
                         )
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to verify {index_test['index_type']} index details: {e}"
-                        )
+                        logger.warning(f"Failed to verify {index_test['index_type']} index details: {e}")
 
                 except Exception as e:
                     logger.error(
@@ -302,9 +282,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     )
                     raise
 
-    def test_create_scalar_indexes_comprehensive(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_create_scalar_indexes_comprehensive(self, upstream_client, downstream_client, sync_timeout):
         """Test CREATE_INDEX operation sync for all scalar field index types."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -404,9 +382,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
 
                     # Create collection with specific scalar field
                     schema = self._create_scalar_schema(upstream_client, test_case)
-                    upstream_client.create_collection(
-                        collection_name=collection_name, schema=schema
-                    )
+                    upstream_client.create_collection(collection_name=collection_name, schema=schema)
 
                     # Wait for creation to sync
                     def check_create():
@@ -424,9 +400,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     )
                     upstream_client.insert(collection_name, test_data)
                     upstream_client.flush(collection_name)
-                    logger.info(
-                        f"[DATA_INSERTED] Inserted 100 records before creating {test_case['field_type']} index"
-                    )
+                    logger.info(f"[DATA_INSERTED] Inserted 100 records before creating {test_case['field_type']} index")
 
                     # Create specific index
                     index_params = upstream_client.prepare_index_params()
@@ -449,11 +423,9 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     # Wait for index creation to sync
                     def check_index():
                         try:
-                            downstream_indexes = downstream_client.list_indexes(
-                                collection_name
-                            )
+                            downstream_indexes = downstream_client.list_indexes(collection_name)
                             return len(downstream_indexes) > 0
-                        except:
+                        except Exception:
                             return False
 
                     assert self.wait_for_sync(
@@ -464,16 +436,12 @@ class TestCDCSyncIndex(TestCDCSyncBase):
 
                     # Verify index details
                     try:
-                        index_info = downstream_client.describe_index(
-                            collection_name, test_case["field_name"]
-                        )
+                        index_info = downstream_client.describe_index(collection_name, test_case["field_name"])
                         logger.info(
                             f"[SCALAR_INDEX_VERIFICATION] {index_test['index_type']} index created successfully: {index_info}"
                         )
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to verify {index_test['index_type']} scalar index details: {e}"
-                        )
+                        logger.warning(f"Failed to verify {index_test['index_type']} scalar index details: {e}")
 
                 except Exception as e:
                     logger.error(
@@ -509,9 +477,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
 
         schema = client.create_schema(enable_dynamic_field=True)
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
-        schema.add_field(
-            "vector", DataType.FLOAT_VECTOR, dim=128
-        )  # Required for collection
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=128)  # Required for collection
 
         field_name = test_case["field_name"]
         field_type = test_case["field_type"]
@@ -576,9 +542,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
         data = []
         for i in range(count):
             record = {
-                "vector": [
-                    random.random() for _ in range(128)
-                ],  # Required base vector field
+                "vector": [random.random() for _ in range(128)],  # Required base vector field
             }
 
             if field_type == "VARCHAR":
@@ -594,9 +558,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
             elif field_type == "DOUBLE":
                 record[field_name] = random.uniform(-1000.0, 1000.0)
             elif field_type == "ARRAY":
-                record[field_name] = [
-                    random.randint(-100, 100) for _ in range(random.randint(1, 10))
-                ]
+                record[field_name] = [random.randint(-100, 100) for _ in range(random.randint(1, 10))]
             elif field_type == "JSON":
                 record[field_name] = {
                     "name": f"test_item_{i}",
@@ -612,9 +574,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
 
         return data
 
-    def test_create_bfloat16_int8_vector_indexes(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_create_bfloat16_int8_vector_indexes(self, upstream_client, downstream_client, sync_timeout):
         """Test CREATE_INDEX operation sync for BFLOAT16_VECTOR and INT8_VECTOR (combined test due to 4-vector limit)."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -660,9 +620,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                         test_case["field_name"],
                         test_case["field_type"],
                     )
-                    upstream_client.create_collection(
-                        collection_name=collection_name, schema=schema
-                    )
+                    upstream_client.create_collection(collection_name=collection_name, schema=schema)
 
                     # Wait for creation to sync
                     def check_create():
@@ -681,9 +639,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                         test_data = self.generate_int8_test_data(100)
                     upstream_client.insert(collection_name, test_data)
                     upstream_client.flush(collection_name)
-                    logger.info(
-                        f"[DATA_INSERTED] Inserted 100 records before creating {test_case['field_type']} index"
-                    )
+                    logger.info(f"[DATA_INSERTED] Inserted 100 records before creating {test_case['field_type']} index")
 
                     # Create specific index
                     index_params = upstream_client.prepare_index_params()
@@ -698,11 +654,9 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     # Wait for index creation to sync
                     def check_index():
                         try:
-                            downstream_indexes = downstream_client.list_indexes(
-                                collection_name
-                            )
+                            downstream_indexes = downstream_client.list_indexes(collection_name)
                             return len(downstream_indexes) > 0
-                        except:
+                        except Exception:
                             return False
 
                     assert self.wait_for_sync(
@@ -713,9 +667,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
 
                     # Verify index details
                     try:
-                        index_info = downstream_client.describe_index(
-                            collection_name, test_case["field_name"]
-                        )
+                        index_info = downstream_client.describe_index(collection_name, test_case["field_name"])
                         logger.info(
                             f"[{test_case['field_type']}_INDEX_VERIFICATION] {index_test['index_type']} index created successfully: {index_info}"
                         )

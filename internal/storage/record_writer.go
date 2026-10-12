@@ -25,6 +25,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -35,6 +36,54 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// toWriterRecord returns r as an arrow.Record projected onto the writer's own
+// schema, plus a release func the caller must defer. The fast path (returning
+// the backing arrow record untouched) is taken only when r is a
+// simpleArrowRecord whose schema already equals the writer's; otherwise the
+// writer's columns are selected by field ID, narrowing an over-wide record
+// (e.g. the additive schema-bump reader record carrying a row-anchor column in
+// addition to the appended field) to exactly the writer's column set. Passing
+// such an over-wide record straight to the FFI writer misaligns column count
+// against the writer's manifest and crashes loon_writer_write.
+func toWriterRecord(r Record, schema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) (arrow.Record, func(), error) {
+	if sar, ok := r.(*simpleArrowRecord); ok && sar.r.Schema().Equal(arrowSchema) {
+		return sar.r, func() {}, nil
+	}
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	arrays := make([]arrow.Array, len(allFields))
+	var normalized []arrow.Array
+	defer func() {
+		for _, column := range normalized {
+			column.Release()
+		}
+	}()
+	for i, field := range allFields {
+		column := r.Column(field.GetFieldID())
+		expected := arrowSchema.Field(i).Type
+		if column == nil || column.Len() < r.Len() {
+			return nil, nil, merr.WrapErrServiceInternalMsg("missing or short writer column for field %s", field.GetName())
+		}
+		if !arrow.TypeEqual(column.DataType(), expected) {
+			// Absent TEXT fields are filled with binary nulls, including for
+			// decoded UTF8 writers. Nulls have no LOB/string payload to convert;
+			// normalize them to the writer's fixed schema on every batch.
+			sourceType, targetType := column.DataType().ID(), expected.ID()
+			if field.GetDataType() == schemapb.DataType_Text && column.NullN() == column.Len() &&
+				(sourceType == arrow.STRING || sourceType == arrow.BINARY) &&
+				(targetType == arrow.STRING || targetType == arrow.BINARY) {
+				column = array.MakeArrayOfNull(memory.DefaultAllocator, expected, r.Len())
+				normalized = append(normalized, column)
+			} else {
+				return nil, nil, merr.WrapErrServiceInternalMsg("writer column type mismatch for field %s: got %s, expected %s",
+					field.GetName(), column.DataType(), expected)
+			}
+		}
+		arrays[i] = column
+	}
+	rec := array.NewRecord(arrowSchema, arrays, int64(r.Len()))
+	return rec, rec.Release, nil
+}
 
 var _ RecordWriter = (*packedRecordWriter)(nil)
 
@@ -55,20 +104,11 @@ type packedRecordWriter struct {
 }
 
 func (pw *packedRecordWriter) Write(r Record) error {
-	var rec arrow.Record
-	sar, ok := r.(*simpleArrowRecord)
-	if !ok {
-		// Get all fields including struct sub-fields
-		allFields := typeutil.GetAllFieldSchemas(pw.schema)
-		arrays := make([]arrow.Array, len(allFields))
-		for i, field := range allFields {
-			arrays[i] = r.Column(field.FieldID)
-		}
-		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
-		defer rec.Release()
-	} else {
-		rec = sar.r
+	rec, release, err := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	if err != nil {
+		return err
 	}
+	defer release()
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
 		size := calculateActualDataSize(arr)
@@ -195,20 +235,11 @@ type packedRecordBatchWriter struct {
 }
 
 func (pw *packedRecordBatchWriter) Write(r Record) error {
-	var rec arrow.Record
-	sar, ok := r.(*simpleArrowRecord)
-	if !ok {
-		// Get all fields including struct sub-fields
-		allFields := typeutil.GetAllFieldSchemas(pw.schema)
-		arrays := make([]arrow.Array, len(allFields))
-		for i, field := range allFields {
-			arrays[i] = r.Column(field.FieldID)
-		}
-		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
-		defer rec.Release()
-	} else {
-		rec = sar.r
+	rec, release, err := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	if err != nil {
+		return err
 	}
+	defer release()
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
 		size := calculateActualDataSize(arr)
@@ -271,6 +302,19 @@ func (pw *packedRecordBatchWriter) Close() (packed.WriterOutput, error) {
 	return out, nil
 }
 
+// Abort releases the underlying FFI writer without producing column groups for
+// CommitManifestUpdates. It prevents metadata publication only: files already
+// flushed before the abort stay on storage as unreferenced objects, and GC
+// skips files under a registered V3 segment prefix, so their reclamation
+// depends on the manifest-aware orphan cleanup tracked by #51649.
+func (pw *packedRecordBatchWriter) Abort() {
+	if pw.writer == nil {
+		return
+	}
+	pw.writer.Destroy()
+	pw.writer = nil
+}
+
 func (pw *packedRecordBatchWriter) AsNewColumnGroups() {
 	if pw.writer != nil {
 		pw.writer.AsNewColumnGroups()
@@ -303,6 +347,25 @@ func NewPartialPackedRecordBatchWriter(
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
 	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, false, writerFormat, schemaBasedFormats)
+}
+
+// NewPartialPackedRecordBatchWriterWithTextRefsAsBinary creates a partial
+// column-group writer whose TEXT columns use the binary LOB-reference Arrow
+// representation. Schema-bump reconciliation uses this for newly added,
+// nullable TEXT columns, whose historical values are materialized as binary
+// NULLs without rewriting any existing LOB data.
+func NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(
+	basePath string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	writerFormat string,
+	schemaBasedFormats []string,
+) (*packedRecordBatchWriter, error) {
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, true, writerFormat, schemaBasedFormats)
 }
 
 func validatePackedRecordBatchWriterSchema(schema *schemapb.CollectionSchema) error {
@@ -423,20 +486,11 @@ type packedTextBatchWriter struct {
 }
 
 func (pw *packedTextBatchWriter) Write(r Record) error {
-	var rec arrow.Record
-	sar, ok := r.(*simpleArrowRecord)
-	if !ok {
-		// get all fields including struct sub-fields
-		allFields := typeutil.GetAllFieldSchemas(pw.schema)
-		arrays := make([]arrow.Array, len(allFields))
-		for i, field := range allFields {
-			arrays[i] = r.Column(field.FieldID)
-		}
-		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
-		defer rec.Release()
-	} else {
-		rec = sar.r
+	rec, release, err := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	if err != nil {
+		return err
 	}
+	defer release()
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
 		size := calculateActualDataSize(arr)

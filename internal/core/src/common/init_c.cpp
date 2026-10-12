@@ -14,8 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cstddef>
+#include "common/init_c.h"
+
 #include <algorithm>
+#include <cstddef>
+#include <exception>
 #include <mutex>
 #include <string>
 
@@ -23,18 +26,17 @@
 #include <arrow/io/type_fwd.h>
 #include <arrow/util/thread_pool.h>
 #include <openssl/evp.h>
-#include "common/init_c.h"
+
+#include "common/CGoCatch.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
-#include "common/init_c.h"
-#include "monitor/Monitor.h"
-#include "log/Log.h"
-#include "storage/ThreadPool.h"
 #include "exec/expression/ExprCache.h"
 #include "log/Log.h"
+#include "monitor/Monitor.h"
 #include "segcore/memory_planner.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "storage/EntryStreamUtils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
 
 std::once_flag traceFlag;
@@ -54,6 +56,11 @@ SetIndexSliceSize(const int64_t size) {
 void
 SetLoadTransientBudgetBytes(int64_t bytes) {
     milvus::SetLoadTransientBudgetBytes(bytes);
+}
+
+void
+SetLoadAdmissionSlots(int64_t slots) {
+    milvus::SetLoadAdmissionSlots(slots);
 }
 
 void
@@ -92,6 +99,11 @@ SetDefaultOptimizeExprEnable(bool val) {
 }
 
 void
+SetDefaultDriverPrefetchEnable(bool val) {
+    milvus::SetDefaultDriverPrefetchEnable(val);
+}
+
+void
 SetDefaultJSONKeyStatsEnable(bool val) {
     milvus::SetDefaultJSONKeyStatsEnable(val);
 }
@@ -118,7 +130,10 @@ SetEnableLatestDeleteSnapshotOptimization(bool val) {
 
 void
 SetLogLevel(const char* level) {
-    milvus::SetLogLevel(level);
+    try {
+        milvus::SetLogLevel(level);
+    }
+    CGO_CATCH_AND_LOG("SetLogLevel")
 }
 
 void
@@ -129,8 +144,10 @@ SetExprResCacheEnable(bool val) {
 void
 SetExprResCacheConfig(const char* mode,
                       const char* disk_base_path,
+                      int64_t materialization_max_bytes,
                       int64_t mem_max_bytes,
                       bool compression_enabled,
+                      bool mem_enable_growing,
                       int32_t admission_threshold,
                       int64_t mem_min_eval_duration_us,
                       int64_t disk_max_bytes,
@@ -149,7 +166,8 @@ SetExprResCacheConfig(const char* mode,
         return;
     }
 
-    if ((config.mode == milvus::exec::CacheMode::Memory &&
+    if (materialization_max_bytes <= 0 ||
+        (config.mode == milvus::exec::CacheMode::Memory &&
          mem_max_bytes <= 0) ||
         (config.mode == milvus::exec::CacheMode::Disk &&
          (disk_max_bytes <= 0 || disk_max_file_size <= 0))) {
@@ -160,8 +178,11 @@ SetExprResCacheConfig(const char* mode,
 
     config.disk_base_path =
         disk_base_path == nullptr ? std::string() : std::string(disk_base_path);
+    config.materialization_max_bytes =
+        static_cast<size_t>(materialization_max_bytes);
     config.mem_max_bytes = static_cast<size_t>(mem_max_bytes);
     config.compression_enabled = compression_enabled;
+    config.mem_enable_growing = mem_enable_growing;
     if (admission_threshold < 1) {
         admission_threshold = 1;
     } else if (admission_threshold > 255) {
@@ -175,9 +196,20 @@ SetExprResCacheConfig(const char* mode,
     config.disk_min_eval_duration_us =
         disk_min_eval_duration_us < 0 ? 0 : disk_min_eval_duration_us;
 
-    bool applied =
-        milvus::exec::ExprResCacheManager::Instance().SetConfig(config);
-    milvus::exec::ExprResCacheManager::SetEnabled(applied);
+    try {
+        bool applied =
+            milvus::exec::ExprResCacheManager::Instance().SetConfig(config);
+        milvus::exec::ExprResCacheManager::SetEnabled(applied);
+    } catch (const std::exception& e) {
+        LOG_ERROR("exception swallowed at cgo boundary {}: {}",
+                  "SetExprResCacheConfig",
+                  e.what());
+        milvus::exec::ExprResCacheManager::SetEnabled(false);
+    } catch (...) {
+        LOG_ERROR("unknown exception swallowed at cgo boundary {}",
+                  "SetExprResCacheConfig");
+        milvus::exec::ExprResCacheManager::SetEnabled(false);
+    }
 }
 
 void
@@ -217,6 +249,50 @@ SetStorageV2CellTargetSizeBytes(int64_t bytes) {
     milvus::segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
 }
 
+CStatus
+SetStorageV2AsyncLoadEnabled(const bool enabled) {
+    try {
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            enabled);
+        return milvus::SuccessCStatus();
+    } catch (const std::exception& error) {
+        return milvus::FailureCStatus(&error);
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "Failed to configure async load mode");
+    }
+}
+
+CStatus
+SetStorageV2AsyncLoadThreadPoolSize(const int threads) {
+    try {
+        milvus::storage::SetAsyncLoadThreadPoolSize(threads);
+        return milvus::SuccessCStatus();
+    } catch (const std::exception& error) {
+        return milvus::FailureCStatus(&error);
+    } catch (...) {
+        return milvus::FailureCStatus(
+            milvus::UnexpectedError, "Failed to configure async load executor");
+    }
+}
+
+int
+GetStorageV2AsyncLoadThreadPoolSize() {
+    return milvus::storage::GetAsyncLoadThreadPoolSize();
+}
+
+void
+SetStorageV2AsyncLoadReadWindowSizeBytes(const int64_t bytes) {
+    milvus::segcore::storagev2translator::
+        SetStorageV2AsyncLoadReadWindowSizeBytes(bytes);
+}
+
+int64_t
+GetStorageV2AsyncLoadReadWindowSizeBytes() {
+    return milvus::segcore::storagev2translator::
+        StorageV2AsyncLoadReadWindowSizeBytes();
+}
+
 void
 LogOpenSSLFIPSStatus() {
     std::call_once(fipsFlag, []() {
@@ -236,12 +312,15 @@ InitTrace(CTraceConfig* config) {
                                                    config->otlpHeaders,
                                                    config->oltpSecure,
                                                    config->nodeID};
-    std::call_once(
-        traceFlag,
-        [](const milvus::tracer::TraceConfig& c) {
-            milvus::tracer::initTelemetry(c);
-        },
-        traceConfig);
+    try {
+        std::call_once(
+            traceFlag,
+            [](const milvus::tracer::TraceConfig& c) {
+                milvus::tracer::initTelemetry(c);
+            },
+            traceConfig);
+    }
+    CGO_CATCH_AND_LOG("InitTrace")
 }
 
 void
@@ -254,5 +333,8 @@ SetTrace(CTraceConfig* config) {
                                                    config->otlpHeaders,
                                                    config->oltpSecure,
                                                    config->nodeID};
-    milvus::tracer::initTelemetry(traceConfig);
+    try {
+        milvus::tracer::initTelemetry(traceConfig);
+    }
+    CGO_CATCH_AND_LOG("SetTrace")
 }

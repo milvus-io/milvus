@@ -96,9 +96,10 @@ TEST(IsSpecial, Demo) {
     for (char b : special_bytes) {
         specials.insert(b);
     }
-    for (char c = std::numeric_limits<int8_t>::min();
-         c < std::numeric_limits<int8_t>::max();
-         c++) {
+    // Use an integer counter so this covers all bytes on both signed-char
+    // and unsigned-char platforms.
+    for (int byte = 0; byte < 256; ++byte) {
+        const char c = static_cast<char>(static_cast<unsigned char>(byte));
         if (specials.find(c) != specials.end()) {
             EXPECT_TRUE(milvus::is_special(c)) << c << static_cast<int>(c);
         } else {
@@ -603,14 +604,14 @@ TEST(BoostRegexMatcherTest, DefaultBehavior) {
     EXPECT_FALSE(matcher(true));
 }
 
-// ============== MultiWildcardMatcher Tests ==============
+// ============== LikePatternMatcher Tests ==============
 
 TEST(MultiWildcardMatcherTest, SimplePatterns) {
     using namespace milvus;
 
     // Test "abc" (exact match)
     {
-        MultiWildcardMatcher matcher("abc");
+        LikePatternMatcher matcher("abc");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_FALSE(matcher(std::string("abcd")));
         EXPECT_FALSE(matcher(std::string("xabc")));
@@ -619,7 +620,7 @@ TEST(MultiWildcardMatcherTest, SimplePatterns) {
 
     // Test "abc%" (prefix match)
     {
-        MultiWildcardMatcher matcher("abc%");
+        LikePatternMatcher matcher("abc%");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("abcdef")));
         EXPECT_FALSE(matcher(std::string("xabc")));
@@ -628,7 +629,7 @@ TEST(MultiWildcardMatcherTest, SimplePatterns) {
 
     // Test "%abc" (suffix match)
     {
-        MultiWildcardMatcher matcher("%abc");
+        LikePatternMatcher matcher("%abc");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("xyzabc")));
         EXPECT_FALSE(matcher(std::string("abcx")));
@@ -637,7 +638,7 @@ TEST(MultiWildcardMatcherTest, SimplePatterns) {
 
     // Test "%abc%" (contains)
     {
-        MultiWildcardMatcher matcher("%abc%");
+        LikePatternMatcher matcher("%abc%");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("xabcy")));
         EXPECT_TRUE(matcher(std::string("abcdef")));
@@ -652,7 +653,7 @@ TEST(MultiWildcardMatcherTest, ComplexPatterns) {
 
     // Test "a%b%c" (multi-segment)
     {
-        MultiWildcardMatcher matcher("a%b%c");
+        LikePatternMatcher matcher("a%b%c");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("aXbYc")));
         EXPECT_TRUE(matcher(std::string("aXXXbYYYc")));
@@ -664,7 +665,7 @@ TEST(MultiWildcardMatcherTest, ComplexPatterns) {
 
     // Test "%a%b%c%" (multi-segment with wildcards at both ends)
     {
-        MultiWildcardMatcher matcher("%a%b%c%");
+        LikePatternMatcher matcher("%a%b%c%");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("XaYbZcW")));
         EXPECT_TRUE(matcher(std::string("aXbYc")));
@@ -673,7 +674,7 @@ TEST(MultiWildcardMatcherTest, ComplexPatterns) {
 
     // Test "hello%world" (prefix and suffix)
     {
-        MultiWildcardMatcher matcher("hello%world");
+        LikePatternMatcher matcher("hello%world");
         EXPECT_TRUE(matcher(std::string("helloworld")));
         EXPECT_TRUE(matcher(std::string("hello beautiful world")));
         EXPECT_FALSE(matcher(std::string("hello")));
@@ -688,7 +689,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 
     // Test with escaped % followed by wildcard
     {
-        MultiWildcardMatcher matcher("100\\%%");
+        LikePatternMatcher matcher("100\\%%");
         EXPECT_TRUE(matcher(std::string("100%")));
         EXPECT_TRUE(matcher(std::string("100%discount")));
         EXPECT_FALSE(matcher(std::string("100")));
@@ -697,7 +698,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 
     // Test with trailing escaped % (no wildcard after) - critical regression test
     {
-        MultiWildcardMatcher matcher("100\\%");
+        LikePatternMatcher matcher("100\\%");
         EXPECT_TRUE(matcher(std::string("100%")));
         EXPECT_FALSE(matcher(std::string("100")));
         EXPECT_FALSE(matcher(std::string("100%X")));  // Must not allow suffix!
@@ -706,7 +707,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 
     // Test with escaped _
     {
-        MultiWildcardMatcher matcher("file\\_name");
+        LikePatternMatcher matcher("file\\_name");
         EXPECT_TRUE(matcher(std::string("file_name")));
         EXPECT_FALSE(matcher(std::string("fileXname")));
         EXPECT_FALSE(matcher(std::string("file_name_")));
@@ -714,7 +715,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 
     // Test leading escaped %
     {
-        MultiWildcardMatcher matcher("\\%value");
+        LikePatternMatcher matcher("\\%value");
         EXPECT_TRUE(matcher(std::string("%value")));
         EXPECT_FALSE(matcher(std::string("value")));
         EXPECT_FALSE(matcher(std::string("X%value")));
@@ -724,7 +725,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 TEST(MultiWildcardMatcherTest, StringViewSupport) {
     using namespace milvus;
 
-    MultiWildcardMatcher matcher("%hello%");
+    LikePatternMatcher matcher("%hello%");
     std::string_view sv1 = "hello world";
     std::string_view sv2 = "world";
 

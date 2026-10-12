@@ -158,12 +158,10 @@ func (gcs *GcpNativeObjectStorage) RemoveObject(ctx context.Context, bucketName,
 	return nil
 }
 
-func (gcs *GcpNativeObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
-	bucket := gcs.client.Bucket(bucketName)
-	srcObj := bucket.Object(srcObjectName)
-	dstObj := bucket.Object(dstObjectName)
+func (gcs *GcpNativeObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
+	srcObj := gcs.client.Bucket(srcBucket).Object(srcObjectName)
+	dstObj := gcs.client.Bucket(dstBucket).Object(dstObjectName)
 
-	// Use CopierFrom to copy object
 	_, err := dstObj.CopierFrom(srcObj).Run(ctx)
 	return mapObjectStorageError(dstObjectName, err)
 }

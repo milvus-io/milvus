@@ -24,6 +24,15 @@ type walStatePair struct {
 
 // WaitCurrentStateReachExpected waits until the current state is reach the expected state.
 func (w *walStatePair) WaitCurrentStateReachExpected(ctx context.Context, expected expectedWALState) error {
+	// Fail fast on an already-canceled context. Without this check the
+	// outcome would depend on whether the background task has already
+	// converged to the expected state (the fast path below never consults
+	// ctx), making the result of Open/Remove with a canceled context
+	// nondeterministic. The expected state is registered before this wait,
+	// so the background task still converges regardless.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	current := w.currentState.GetState()
 	for isStateBefore(current, expected) {
 		if err := w.currentState.WatchChanged(ctx, current); err != nil {

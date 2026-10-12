@@ -19,6 +19,7 @@ package metacache
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
@@ -35,7 +36,7 @@ type SegmentSuite struct {
 func (s *SegmentSuite) TestBasic() {
 	bfs := pkoracle.NewBloomFilterSet()
 	stats := NewEmptySegmentBM25Stats()
-	segment := NewSegmentInfo(s.info, bfs, stats)
+	segment := NewSegmentInfo(s.info, bfs, stats, NewEmptySegmentStats())
 	s.Equal(s.info.GetID(), segment.SegmentID())
 	s.Equal(s.info.GetPartitionID(), segment.PartitionID())
 	s.Equal(s.info.GetNumOfRows(), segment.NumOfRows())
@@ -48,7 +49,7 @@ func (s *SegmentSuite) TestBasic() {
 func (s *SegmentSuite) TestClone() {
 	bfs := pkoracle.NewBloomFilterSet()
 	stats := NewEmptySegmentBM25Stats()
-	segment := NewSegmentInfo(s.info, bfs, stats)
+	segment := NewSegmentInfo(s.info, bfs, stats, NewEmptySegmentStats())
 	cloned := segment.Clone()
 	s.Equal(segment.SegmentID(), cloned.SegmentID())
 	s.Equal(segment.PartitionID(), cloned.PartitionID())
@@ -82,7 +83,7 @@ func (s *SegmentSuite) TestRecoverCurrentSplitFormat() {
 		},
 	}
 
-	segment := NewSegmentInfo(info, pkoracle.NewBloomFilterSet(), nil)
+	segment := NewSegmentInfo(info, pkoracle.NewBloomFilterSet(), nil, NewEmptySegmentStats())
 
 	s.Equal("parquet", segment.GetCurrentSplit()[0].Format)
 	s.Equal("vortex", segment.GetCurrentSplit()[1].Format)
@@ -90,4 +91,22 @@ func (s *SegmentSuite) TestRecoverCurrentSplitFormat() {
 
 func TestSegment(t *testing.T) {
 	suite.Run(t, new(SegmentSuite))
+}
+
+func TestSegmentInfo_StatsCarriedByRefThroughClone(t *testing.T) {
+	insertBinlog := func(memSize int64, tsTo uint64) map[int64]*datapb.FieldBinlog {
+		return map[int64]*datapb.FieldBinlog{
+			1: {FieldID: 1, Binlogs: []*datapb.Binlog{{MemorySize: memSize, EntriesNum: 10, TimestampTo: tsTo}}},
+		}
+	}
+	si := NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, nil, nil, NewEmptySegmentStats())
+	si.Statistics().Digest(insertBinlog(100, 5), nil, 0, 10, 1, 5)
+	cloned := si.Clone()
+	// shared by pointer: digesting through the clone is visible on the original
+	cloned.Statistics().Digest(insertBinlog(100, 9), nil, 0, 10, 6, 9)
+	// SegmentInfo.Clone shares the *SegmentStats by pointer, so the original
+	// and the clone are the same accumulator.
+	assert.Same(t, si.Statistics(), cloned.Statistics())
+	// And the original sees the clone's digest: cumulative 100+100 = 200.
+	assert.Equal(t, int64(200), si.Statistics().Publish().GetInsertBinlogSize())
 }

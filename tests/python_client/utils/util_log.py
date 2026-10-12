@@ -1,8 +1,6 @@
 import logging
 import sys
 
-from config.log_config import log_config
-
 
 class TestLog:
     def __init__(self, logger):
@@ -13,8 +11,9 @@ class TestLog:
         # Only add console handler if needed (commented out by default)
         # All file logging is handled by ConditionalLogHandler plugin
         try:
-            formatter = logging.Formatter("[%(asctime)s - %(levelname)s - %(name)s]: "
-                                          "%(message)s (%(filename)s:%(lineno)s)")
+            formatter = logging.Formatter(
+                "[%(asctime)s - %(levelname)s - %(name)s]: %(message)s (%(filename)s:%(lineno)s)"
+            )
 
             # Stream handler (commented out by default)
             ch = logging.StreamHandler(sys.stdout)
@@ -27,4 +26,4 @@ class TestLog:
 
 
 """All modules share this unified log"""
-test_log = TestLog('ci_test').log
+test_log = TestLog("ci_test").log

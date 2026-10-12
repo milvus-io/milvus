@@ -1,5 +1,6 @@
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -8,7 +9,8 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from ml_dtypes import bfloat16
-from pymilvus import DataType
+from pymilvus import DataType, MilvusException
+from pymilvus.client.embedding_list import EmbeddingList
 from utils.util_log import test_log as log
 
 prefix = "snapshot"
@@ -642,8 +644,8 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientSnapshotBase):
         # Create target collection (should cause conflict)
         self.create_collection(client, target_collection_name, default_dim)
 
-        error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
-        self.restore_snapshot(
+        error = {ct.err_code: 1100, ct.err_msg: "already exists in database"}
+        res, _ = self.restore_snapshot(
             client,
             snapshot_name,
             collection_name,
@@ -651,6 +653,7 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientSnapshotBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert res.code == error[ct.err_code], f"Unexpected restore error: {res}"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -1151,27 +1154,12 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientSnapshotBase):
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_snapshot_growing_segment_without_flush(self):
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_snapshot_includes_growing_segment_without_flush(self):
         """
-        target: test snapshot behavior with growing segment (unflushed data)
-        method: insert data without flush -> create snapshot -> restore -> verify
-        expected:
-            - Based on source code analysis, snapshot only includes segments with binlogs
-            - Growing segments without binlogs (data in buffer) should NOT be included
-            - This test verifies that unflushed data is NOT captured in snapshot
-
-        Source code reference (handler.go:725-728):
-            segments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID),
-                SegmentFilterFunc(func(info *SegmentInfo) bool {
-                    segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-                    return segmentHasData && ...
-                }))
-
-        Key insight:
-            - Snapshot does NOT trigger flush
-            - Only data already persisted to binlog files will be captured
-            - Growing segment data in memory buffer will be lost if not flushed before snapshot
+        target: capture growing data without a separate client Flush
+        method: flush a baseline, insert more rows, create snapshot, then insert again
+        expected: restore includes both pre-snapshot batches and excludes later writes
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1203,7 +1191,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientSnapshotBase):
             for i in range(50)
         ]
         self.insert(client, collection_name, unflushed_rows)
-        # Intentionally NOT calling flush - data stays in growing segment buffer
+        # No explicit Flush: CreateSnapshot must persist this batch itself.
         log.info("Inserted 50 rows WITHOUT flush (growing segment)")
 
         # Verify source collection can query all 150 rows (growing + flushed)
@@ -1213,9 +1201,26 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientSnapshotBase):
         log.info(f"Source collection total rows (flushed + growing): {source_count}")
         assert source_count == 150, f"Source should have 150 rows, got {source_count}"
 
-        # Create snapshot - this should NOT include growing segment data
+        # CreateSnapshot waits for L1/L0 persistence through its WAL boundary.
         self.create_snapshot(client, snapshot_name, collection_name)
-        log.info("Created snapshot (without triggering flush)")
+        log.info("Created snapshot including all 150 pre-snapshot rows")
+
+        # A later write must stay outside the snapshot even when it is visible
+        # in the source before restore.
+        self.insert(
+            client,
+            collection_name,
+            [
+                {
+                    default_primary_key_field_name: 150,
+                    default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                }
+            ],
+        )
+        res, _ = self.query(
+            client, collection_name, filter="id >= 0", output_fields=["count(*)"], consistency_level="Strong"
+        )
+        assert res[0]["count(*)"] == 151
 
         # Restore snapshot to new collection
         job_id, _ = self.restore_snapshot(client, snapshot_name, collection_name, restored_collection_name)
@@ -1227,23 +1232,14 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientSnapshotBase):
         restored_count = res[0]["count(*)"]
         log.info(f"Restored collection rows: {restored_count}")
 
-        # Expectation: Only flushed data (100 rows) should be in snapshot
-        # Growing segment data (50 rows) should NOT be captured
-        # NOTE: This assertion documents the current behavior - snapshot does NOT include
-        # growing segment data. If this test fails, it means the behavior has changed.
-        assert restored_count == 100, (
-            f"Expected 100 rows (only flushed data), got {restored_count}. "
-            f"Growing segment data should NOT be included in snapshot."
+        assert restored_count == 150, (
+            f"Expected all 150 pre-snapshot rows, got {restored_count}. "
+            "CreateSnapshot must include data without a separate client Flush."
         )
-
-        # Also verify the specific IDs: only 0-99 should exist, not 100-149
-        res, _ = self.query(client, restored_collection_name, filter="id >= 100", output_fields=["count(*)"])
-        growing_data_count = res[0]["count(*)"]
-        assert growing_data_count == 0, (
-            f"Growing segment data (id >= 100) should NOT be in snapshot, found {growing_data_count}"
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["id"], limit=200)
+        assert {row["id"] for row in res} == set(range(150)), (
+            "Snapshot must include the previously growing rows 100-149 and exclude the later row 150"
         )
-
-        log.info("Verified: Snapshot does NOT include growing segment data")
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -2242,6 +2238,152 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientSnapshotBase):
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_snapshot_restores_struct_array_semantics_and_indexes(self):
+        """
+        target: verify snapshot restores Struct Array schema, nullability, nested indexes, and both search modes
+        method: snapshot nullable Struct rows with empty and variable-length values plus separate embedding-list and
+            element-vector sub-fields, restore to a new collection, and compare exact semantic observations
+        expected: restored projection, predicates, complete valid ANN candidate sets, and index metadata equal source
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_struct_source")
+        restored_collection_name = cf.gen_unique_str(f"{prefix}_struct_restored")
+        snapshot_name = cf.gen_unique_str(f"{prefix}_struct")
+        dim = 8
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("element_embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("tag", DataType.VARCHAR, max_length=32)
+        schema.add_field(
+            "events",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+            nullable=True,
+        )
+        index_params = client.prepare_index_params()
+        index_params.add_index("vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 64})
+        index_params.add_index(
+            "events[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params={"M": 8, "efConstruction": 64},
+        )
+        index_params.add_index(
+            "events[element_embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 8, "efConstruction": 64},
+        )
+        index_params.add_index("events[tag]", index_type="BITMAP")
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+
+        def vector(axis):
+            value = [0.0] * dim
+            value[axis % dim] = 1.0
+            return value
+
+        def event(axis, tag):
+            value = vector(axis)
+            return {"embedding": value, "element_embedding": value, "tag": tag}
+
+        rows = [
+            {"id": 0, "vector": vector(0), "events": None},
+            {"id": 1, "vector": vector(1), "events": []},
+            {"id": 2, "vector": vector(2), "events": [event(0, "target"), event(2, "other")]},
+            {"id": 3, "vector": vector(3), "events": [event(1, "control")]},
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        def collect_observations(target_collection):
+            projected = self.query(
+                client,
+                target_collection,
+                filter="id >= 0",
+                output_fields=["id", "events"],
+                limit=len(rows),
+            )[0]
+            contains = self.query(
+                client,
+                target_collection,
+                filter='array_contains(events[tag], "target")',
+                output_fields=["id"],
+                limit=len(rows),
+            )[0]
+            matched = self.query(
+                client,
+                target_collection,
+                filter='MATCH_ANY(events, $[tag] == "target")',
+                output_fields=["id"],
+                limit=len(rows),
+            )[0]
+            element_hits = self.search(
+                client,
+                target_collection,
+                data=[vector(0)],
+                anns_field="events[element_embedding]",
+                search_params={"metric_type": "COSINE", "params": {"ef": 64}},
+                output_fields=["id"],
+                limit=3,
+            )[0][0]
+            tensor = EmbeddingList()
+            tensor.add(vector(0))
+            embedding_hits = self.search(
+                client,
+                target_collection,
+                data=[tensor],
+                anns_field="events[embedding]",
+                search_params={"metric_type": "MAX_SIM_COSINE", "params": {"ef": 32}},
+                output_fields=["id"],
+                limit=2,
+            )[0][0]
+            return {
+                "projection": sorted((row["id"], row["events"]) for row in projected),
+                "contains_ids": sorted(row["id"] for row in contains),
+                "match_ids": sorted(row["id"] for row in matched),
+                "element_keys": sorted((hit["id"], hit["offset"]) for hit in element_hits),
+                "embedding_ids": sorted(hit["id"] for hit in embedding_hits),
+                "indexes": sorted(client.list_indexes(target_collection)),
+            }
+
+        source_observations = collect_observations(collection_name)
+        assert source_observations["contains_ids"] == [2]
+        assert source_observations["match_ids"] == [2]
+        assert source_observations["element_keys"] == [(2, 0), (2, 1), (3, 0)]
+        assert source_observations["embedding_ids"] == [2, 3]
+
+        self.create_snapshot(client, snapshot_name, collection_name)
+        job_id = self.restore_snapshot(
+            client,
+            snapshot_name,
+            collection_name,
+            restored_collection_name,
+        )[0]
+        wait_for_restore_complete(self, client, job_id)
+        self.load_collection(client, restored_collection_name)
+        try:
+            restored_observations = collect_observations(restored_collection_name)
+            for key in ("projection", "contains_ids", "match_ids", "element_keys", "indexes"):
+                assert restored_observations[key] == source_observations[key]
+            assert restored_observations["embedding_ids"] == [2, 3]
+        finally:
+            self.drop_snapshot(client, snapshot_name, collection_name)
+            self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_snapshot_with_bfloat16_vector(self):
@@ -3376,6 +3518,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientSnapshotBase):
     - Concurrent snapshot creation with same name
     - Snapshot consistency during concurrent writes
     - Concurrent restore operations from same snapshot
+    - Competing restores to the same target collection
     """
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3581,6 +3724,85 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientSnapshotBase):
         self.drop_snapshot(client, snapshot_name, collection_name)
         for name in restored_names:
             self.drop_collection(client, name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_concurrent_restore_same_target(self):
+        """
+        target: reject competing restores to the same database and collection
+        method: release two restore RPCs together, then inspect jobs and data
+        expected: one success, one target-exists error, one job, unchanged data
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_name = cf.gen_unique_str(prefix + "_same_target")
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [
+            {
+                "id": i,
+                "vector": rng.random(default_dim).astype(np.float32).tolist(),
+                "value": i * 3,
+                "tag": f"row_{i}",
+                "active": i % 2 == 0,
+            }
+            for i in range(256)
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, snapshot_name, collection_name)
+        # Register the target even if an assertion or RPC fails after creation.
+        self.tear_down_collection_names.append(restored_name)
+        start = threading.Barrier(2)
+
+        def restore():
+            start.wait(timeout=10)
+            try:
+                return client.restore_snapshot(
+                    snapshot_name,
+                    collection_name,
+                    restored_name,
+                    target_db_name="default",
+                    timeout=120,
+                )
+            except MilvusException as exc:
+                return exc
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(restore) for _ in range(2)]
+                results = [future.result(timeout=150) for future in futures]
+            job_ids = [result for result in results if isinstance(result, int) and result > 0]
+            errors = [result for result in results if isinstance(result, MilvusException)]
+            # Let every accepted job finish, including duplicate jobs on a buggy
+            # server, so the snapshot pin is released before cleanup.
+            for job_id in job_ids:
+                wait_for_restore_complete(self, client, job_id, timeout=120)
+            assert len(job_ids) == 1 and len(errors) == 1, f"Unexpected restore results: {results}"
+            assert errors[0].code == 1100, f"Unexpected restore error: {errors[0]}"
+            assert "already exists" in errors[0].message and restored_name in errors[0].message
+
+            jobs, _ = self.list_restore_snapshot_jobs(client, collection_name=restored_name)
+            assert [job.job_id for job in jobs] == job_ids, f"Unexpected restore jobs: {jobs}"
+            self.load_collection(client, restored_name)
+            count, _ = self.query(client, restored_name, filter="", output_fields=["count(*)"])
+            assert count[0]["count(*)"] == len(rows)
+            restored, _ = self.query(
+                client,
+                restored_name,
+                filter="id >= 0",
+                output_fields=["id", "vector", "value", "tag", "active"],
+                limit=len(rows),
+            )
+            assert len(restored) == len(rows)
+            assert {row["id"] for row in restored} == set(range(len(rows)))
+            for row in restored:
+                expected = rows[row["id"]]
+                for field in ("value", "tag", "active"):
+                    assert row[field] == expected[field], f"Mismatch at id={row['id']}, field={field}"
+                np.testing.assert_allclose(row["vector"], expected["vector"], rtol=1e-6, atol=1e-7)
+        finally:
+            self.drop_snapshot(client, snapshot_name, collection_name)
 
 
 class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):
@@ -3815,8 +4037,8 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):
         self.create_collection(client, existing_collection, default_dim)
 
         # 3. Restore to existing collection - should fail
-        error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
-        self.restore_snapshot(
+        error = {ct.err_code: 1100, ct.err_msg: "already exists in database"}
+        res, _ = self.restore_snapshot(
             client,
             snapshot_name,
             collection_name,
@@ -3824,6 +4046,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert res.code == error[ct.err_code], f"Unexpected restore error: {res}"
 
         # 4. Verify the existing collection is untouched
         self.load_collection(client, existing_collection)
@@ -4458,10 +4681,10 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
                 an existing alias should fail (alias and collection share a namespace)
         method: create col_src + snapshot -> create alias A pointing to col_src
                 -> restore snapshot to target_collection_name=A
-        expected: restore is synchronously rejected with an alias-conflict error;
+        expected: restore is synchronously rejected with a target-already-exists error;
                   source collection, snapshot, and alias all remain intact
-        note: the rejection happens in datacoord's broker.CreateCollection path
-              during RestoreCollection (snapshot_manager.go:833)
+        note: restore admission resolves aliases and rejects an occupied target name
+              before creating the target collection
         """
         client = self._client()
         col_src = cf.gen_collection_name_by_testcase_name()
@@ -4474,8 +4697,8 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
         self.create_alias(client, col_src, alias_name)
 
         # 2. Restore with target_collection_name = existing alias name must fail
-        error = {ct.err_code: 1601, ct.err_msg: "alias and collection name conflict"}
-        self.restore_snapshot(
+        error = {ct.err_code: 1100, ct.err_msg: "already exists in database"}
+        res, _ = self.restore_snapshot(
             client,
             snapshot_name,
             col_src,
@@ -4483,6 +4706,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert res.code == error[ct.err_code], f"Unexpected restore error: {res}"
 
         # 3. Verify source, snapshot, and alias are all untouched
         snapshots, _ = self.list_snapshots(client, collection_name=col_src)

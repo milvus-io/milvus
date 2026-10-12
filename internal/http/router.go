@@ -28,12 +28,6 @@ const LogLevelRouterPath = "/log/level"
 // EventLogRouterPath is path for eventlog control.
 const EventLogRouterPath = "/eventlog"
 
-// ExprPath is path for expression.
-const ExprPath = "/expr"
-
-// StaticPath is path for the static view.
-const StaticPath = "/static/"
-
 const RootPath = "/"
 
 // Prometheus restful api path
@@ -165,6 +159,8 @@ const (
 	TelemetryClientHistoryPath = "/_telemetry/clients/:clientId/history"
 	// TelemetryCommandsPath is the path to manage client commands.
 	TelemetryCommandsPath = "/_telemetry/commands"
+	// TelemetryCommandReplyPath is the path to fetch a client's reply to a pushed command.
+	TelemetryCommandReplyPath = "/_telemetry/commands/:commandId/reply"
 	// TelemetryUIPath is the path for telemetry management web UI.
 	TelemetryUIPath = "/telemetry"
 )

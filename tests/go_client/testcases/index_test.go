@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -1005,10 +1005,12 @@ func TestCreateIndexVanillaFaissGeneric(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	annParam := index.NewCustomAnnParam()
+	annParam.WithExtraParam("nprobe", 64)
 	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
 		WithANNSField(common.DefaultFloatVecFieldName).
 		// nprobe=nlist (IVF64) scans all lists so topK results are returned deterministically (#50392)
-		WithSearchParam("nprobe", "64").
+		WithAnnParam(annParam).
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)

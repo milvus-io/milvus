@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -124,7 +125,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "foo",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 			},
 		}, nil).Once()
 
@@ -151,7 +152,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "foo",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 			},
 		}, nil).Once()
 
@@ -178,7 +179,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "foo",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 			},
 		}, nil).Once()
 
@@ -295,7 +296,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "foo",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 			},
 		}, nil).Once()
 		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
@@ -378,7 +379,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "foo",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 			},
 		}, nil).Once()
 		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
@@ -430,7 +431,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "foo",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 			},
 		}, nil).Once()
 		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
@@ -477,7 +478,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "foo",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 			},
 		}, nil).Once()
 		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
@@ -530,13 +531,13 @@ func TestShowCollectionsAuth(t *testing.T) {
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "foo",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 			},
 			{
 				DBID:         1,
 				CollectionID: 200,
 				Name:         "a",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 			},
 		}, nil).Once()
 		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
@@ -593,7 +594,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				DBID:         1,
 				CollectionID: 100,
 				Name:         "test_collection",
-				CreateTime:   tsoutil.GetCurrentTime(),
+				CreateTime:   tsoutil.ComposeTSByTime(time.Now()),
 				ShardsNum:    2,
 			},
 		}, nil).Once()

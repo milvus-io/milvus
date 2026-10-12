@@ -40,7 +40,7 @@ PhyColumnExpr::GetNextBatchSize() {
 void
 PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span("PhyColumnExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type", static_cast<int>(expr_->type()));
+    span.SetAttribute("data_type", static_cast<int>(expr_->type()));
 
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
@@ -72,7 +72,7 @@ PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "unsupported data type: {}",
                       this->expr_->type());
     }
@@ -98,7 +98,35 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
+                auto accessor =
+                    segment_chunk_reader_.GetStringDataAccessorByOffsets(
+                        expr_->GetColumn().field_id_,
+                        OffsetView::From(input->data(), real_batch_size),
+                        PinnedIndexForRawLookup());
+                for (int64_t i = 0; i < real_batch_size; ++i) {
+                    auto value = accessor(i);
+                    if (value.has_value()) {
+                        res_value[i] = segcore::get_from_variant<T>(value);
+                    } else {
+                        valid_res[i] = false;
+                    }
+                }
+                return res_vec;
+            }
+        }
+
         int64_t processed_rows = 0;
+        // Keep the chunk's data accessor (which pins the chunk) across
+        // iterations and rebuild only when the chunk id changes, avoiding a
+        // per-row chunk pin + accessor construction. Safe on both sealed
+        // (CellAccessor keeps the chunk resident) and growing (data and the
+        // chunked validity storage have stable per-chunk buffers). The pinned
+        // index view is chunk-independent, so it is resolved once.
+        const auto pinned_index = PinnedIndexForRawLookup();
+        int64_t cached_chunk_id = -1;
+        segcore::ChunkDataAccessor cda;
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
             auto [chunk_id,
@@ -109,19 +137,22 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                         segment_chunk_reader_.SizePerChunk();
                     return {offset / size_per_chunk, offset % size_per_chunk};
                 } else if (segment_chunk_reader_.segment_->is_chunked() &&
-                           segment_chunk_reader_.segment_->num_chunk_data(
+                           segment_chunk_reader_.NumChunkData(
                                expr_->GetColumn().field_id_) > 0) {
-                    return segment_chunk_reader_.segment_->get_chunk_by_offset(
+                    return segment_chunk_reader_.GetChunkByOffset(
                         expr_->GetColumn().field_id_, offset);
                 } else {
                     return {0, offset};
                 }
             }();
-            auto cda = segment_chunk_reader_.GetChunkDataAccessor(
-                expr_->GetColumn().data_type_,
-                expr_->GetColumn().field_id_,
-                chunk_id,
-                PinnedIndexForRawLookup());
+            if (chunk_id != cached_chunk_id) {
+                cda = segment_chunk_reader_.GetChunkDataAccessor(
+                    expr_->GetColumn().data_type_,
+                    expr_->GetColumn().field_id_,
+                    chunk_id,
+                    pinned_index);
+                cached_chunk_id = chunk_id;
+            }
             auto chunk_data_by_offset = cda(chunk_offset);
             if (!chunk_data_by_offset.has_value()) {
                 valid_res[processed_rows] = false;
@@ -151,7 +182,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             expr_->GetColumn().field_id_,
             current_chunk_id_,
             current_chunk_pos_,
-            PinnedIndexForRawLookup());
+            PinnedIndexForRawLookup(),
+            real_batch_size,
+            &string_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
             auto data = cda();
             if (!data.has_value()) {

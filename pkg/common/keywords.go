@@ -1,5 +1,7 @@
 package common
 
+import "strings"
+
 var FieldNameKeywords = map[string]struct{}{
 	"$meta":              {},
 	"like":               {},
@@ -35,4 +37,21 @@ var FieldNameKeywords = map[string]struct{}{
 	"PHRASE_MATCH":       {},
 	"random_sample":      {},
 	"RANDOM_SAMPLE":      {},
+}
+
+// IsFieldNameKeyword reports whether fieldName is a reserved word that cannot be
+// used as a field name. Core operators (like, and, or, not, in) and null are
+// reserved in every casing. Contextual keywords such as iso and interval stay
+// usable as field names; other reserved words retain the exact casings listed
+// in FieldNameKeywords.
+func IsFieldNameKeyword(fieldName string) bool {
+	if _, ok := FieldNameKeywords[fieldName]; ok {
+		return true
+	}
+	switch strings.ToLower(fieldName) {
+	case "like", "and", "or", "not", "in", "null":
+		return true
+	default:
+		return false
+	}
 }

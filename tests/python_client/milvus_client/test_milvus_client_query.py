@@ -130,6 +130,10 @@ def gen_query_string_primary_rows(nb=default_nb):
     return rows
 
 
+def get_nullable_vector_index(vector_data_type):
+    return "AUTOINDEX", ct.default_metric_for_vector_type[vector_data_type], {}
+
+
 class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
     """Test case of search interface"""
 
@@ -1018,6 +1022,83 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
         )[0]
         assert set(res[0].keys()) == {default_primary_key_field_name, default_vector_field_name}
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_data_type", ct.all_vector_types)
+    @pytest.mark.parametrize("is_flush", [False, True])
+    def test_milvus_client_query_null_expr_nullable_vector_field(self, vector_data_type, is_flush):
+        """
+        target: test query filter with is null/is not null on nullable vector field
+        method: create nullable vector collection, insert mixed null/non-null vector rows, query vector null predicates
+        expected: query returns exactly the primary keys whose vector validity matches the predicate
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 32
+        vector_field = default_vector_field_name
+        # 1. create collection and load it so the non-flush branch stays on growing data
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(
+            default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False
+        )
+        if vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
+            schema.add_field(vector_field, vector_data_type, nullable=True)
+        else:
+            schema.add_field(vector_field, vector_data_type, dim=dim, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_type, metric_type, params = get_nullable_vector_index(vector_data_type)
+        index_params.add_index(field_name=vector_field, index_type=index_type, metric_type=metric_type, params=params)
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+        self.load_collection(client, collection_name)
+        # 2. insert mixed vector validity rows
+        null_ids = {0, 3, 7}
+        vectors = cf.gen_vectors(10, dim, vector_data_type=vector_data_type)
+        rows = []
+        for i in range(10):
+            vector = None if i in null_ids else vectors[i]
+            rows.append({default_primary_key_field_name: i, vector_field: vector})
+        self.insert(client, collection_name, rows)
+        if is_flush:
+            self.flush(client, collection_name)
+            self.release_collection(client, collection_name)
+            self.load_collection(client, collection_name)
+        # 3. query by vector null predicates
+        null_res = self.query(
+            client,
+            collection_name,
+            filter=f"{vector_field} is null",
+            output_fields=[default_primary_key_field_name],
+        )[0]
+        not_null_res = self.query(
+            client,
+            collection_name,
+            filter=f"{vector_field} is not null",
+            output_fields=[default_primary_key_field_name],
+        )[0]
+        assert {row[default_primary_key_field_name] for row in null_res} == null_ids
+        assert {row[default_primary_key_field_name] for row in not_null_res} == set(range(10)) - null_ids
+        mixed_cases = [
+            (f"{vector_field} is null and {default_primary_key_field_name} < 5", {0, 3}),
+            (f"{vector_field} is not null and 2 <= {default_primary_key_field_name} < 8", {2, 4, 5, 6}),
+            (f"({vector_field} is null and {default_primary_key_field_name} < 2) or "
+             f"({vector_field} is not null and {default_primary_key_field_name} == 9)", {0, 9}),
+            (f"{vector_field} is not null and {default_primary_key_field_name} < 0", set()),
+        ]
+        for filter_expr, expected_ids in mixed_cases:
+            res = self.query(
+                client,
+                collection_name,
+                filter=filter_expr,
+                output_fields=[default_primary_key_field_name],
+            )[0]
+            assert {row[default_primary_key_field_name] for row in res} == expected_ids
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2106,7 +2187,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 "listFlt": [m * 1.0 for m in range(i, i + limit)],
                 "listBool": [bool(i % 2)],
                 "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
-                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]],
+                "listMix": [i, i + 0.5, str(i), bool(i % 2), [i, str(i)]],
             }
         self.insert(client, collection_name, rows)
         # 3. create index and load
@@ -2175,7 +2256,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 "listFlt": [m * 1.0 for m in range(i, i + limit)],
                 "listBool": [bool(i % 2)],
                 "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
-                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]],
+                "listMix": [i, i + 0.5, str(i), bool(i % 2), [i, str(i)]],
             }
         self.insert(client, collection_name, rows)
         # 3. create index and load
@@ -2475,7 +2556,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         flt_data = [[m * 1.0 for m in range(i, i + limit)] for i in range(default_nb)]
         bool_data = [[bool(i % 2)] for i in range(default_nb)]
         list_data = [[[i, str(i + 1)], [i * 1.0, i + 1]] for i in range(default_nb)]
-        mix_data = [[i, i * 1.1, str(i), bool(i % 2), [i, str(i)]] for i in range(default_nb)]
+        mix_data = [[i, i + 0.5, str(i), bool(i % 2), [i, str(i)]] for i in range(default_nb)]
 
         for i in range(default_nb):
             rows[i][ct.default_json_field_name] = {
@@ -5442,6 +5523,99 @@ class TestQueryArray(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_array_contains_merge_equivalence(self):
+        """
+        target: compare merged ARRAY contains predicates with explicit contains_any/contains_all
+        method: query nullable, empty, and duplicate-element arrays in growing and sealed/indexed segments
+        expected: original and explicit predicates return identical primary keys in both execution paths
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        array_field = "array_values"
+
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            array_field,
+            DataType.ARRAY,
+            element_type=DataType.INT64,
+            max_capacity=16,
+            nullable=True,
+        )
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+
+        vector_index = self.prepare_index_params(client)[0]
+        vector_index.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, vector_index)
+        self.load_collection(client, collection_name)
+
+        arrays = [[], None, [1], [2], [1, 2], [1, 1, 2], [3]]
+        vectors = cf.gen_vectors(len(arrays), default_dim)
+        rows = [
+            {"id": row_id, "vector": vectors[row_id], array_field: array}
+            for row_id, array in enumerate(arrays)
+        ]
+        self.insert(client, collection_name, rows)
+
+        predicate_cases = [
+            (
+                f"array_contains({array_field}, 1) or array_contains({array_field}, 2)",
+                f"array_contains_any({array_field}, [1, 2])",
+                {2, 3, 4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) and array_contains({array_field}, 2)",
+                f"array_contains_all({array_field}, [1, 2])",
+                {4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) or array_contains({array_field}, 1)",
+                f"array_contains_any({array_field}, [1, 1])",
+                {2, 4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) and array_contains({array_field}, 1)",
+                f"array_contains_all({array_field}, [1, 1])",
+                {2, 4, 5},
+            ),
+        ]
+
+        def assert_equivalent():
+            for original, explicit, expected_ids in predicate_cases:
+                original_result = self.query(
+                    client,
+                    collection_name,
+                    filter=original,
+                    output_fields=["id"],
+                    limit=len(rows),
+                )[0]
+                explicit_result = self.query(
+                    client,
+                    collection_name,
+                    filter=explicit,
+                    output_fields=["id"],
+                    limit=len(rows),
+                )[0]
+                original_ids = {record["id"] for record in original_result}
+                explicit_ids = {record["id"] for record in explicit_result}
+                assert original_ids == explicit_ids == expected_ids
+
+        # Loaded-before-insert data stays in the growing segment.
+        assert_equivalent()
+
+        # Flush and add an ARRAY scalar index to exercise the sealed/indexed path.
+        self.flush(client, collection_name)
+        self.release_collection(client, collection_name)
+        array_index = self.prepare_index_params(client)[0]
+        array_index.add_index(field_name=array_field, index_type="INVERTED")
+        self.create_index(client, collection_name, array_index)
+        self.load_collection(client, collection_name)
+        assert_equivalent()
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("use_index", [True, False])
     @pytest.mark.parametrize("index_type", ["INVERTED", "BITMAP"])
     def test_milvus_client_query_array_with_prefix_like(self, use_index, index_type):
@@ -6346,7 +6520,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
-            field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8", metric_type="L2", params={"nlist": 64}
+            field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="L2", params={}
         )
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)

@@ -105,6 +105,90 @@ func (suite *ChannelDistManagerSuite) TestVersion() {
 	suite.Greater(v2, v1)
 }
 
+func (suite *ChannelDistManagerSuite) TestPatch() {
+	suite.Run("empty delta", func() {
+		suite.SetupTest()
+		dist := suite.dist
+		v1 := dist.GetVersion()
+		before := dist.GetByFilter(WithNodeID2Channel(suite.nodes[0]))
+
+		newServiceableChannels := dist.Patch(suite.nodes[0], nil, nil)
+
+		v2 := dist.GetVersion()
+		after := dist.GetByFilter(WithNodeID2Channel(suite.nodes[0]))
+		suite.Empty(newServiceableChannels)
+		suite.Equal(v1, v2)
+		suite.Equal(before, after)
+	})
+
+	suite.Run("remove one channel", func() {
+		suite.SetupTest()
+		dist := suite.dist
+		v1 := dist.GetVersion()
+
+		newServiceableChannels := dist.Patch(suite.nodes[1], nil, []string{"dmc0"})
+
+		v2 := dist.GetVersion()
+		after := dist.GetByFilter(WithNodeID2Channel(suite.nodes[1]))
+		suite.Empty(newServiceableChannels)
+		suite.Greater(v2, v1)
+		suite.Len(after, 1)
+		suite.Equal("dmc1", after[0].GetChannelName())
+	})
+
+	suite.Run("upsert channels", func() {
+		suite.SetupTest()
+		dist := suite.dist
+		nonServiceableChannel := suite.channels["dmc0"].Clone()
+		nonServiceableChannel.View.Status.Serviceable = false
+		dist.Update(suite.nodes[0], nonServiceableChannel)
+		v1 := dist.GetVersion()
+
+		serviceableChannel := suite.channels["dmc0"].Clone()
+		serviceableChannel.Version = 2
+		newChannel := &DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collection,
+				ChannelName:  "dmc2",
+			},
+			Version: 1,
+			View: &LeaderView{
+				ID:           1,
+				CollectionID: suite.collection,
+				Channel:      "dmc2",
+				Version:      1,
+				Status: &querypb.LeaderViewStatus{
+					Serviceable: true,
+				},
+			},
+		}
+
+		newServiceableChannels := dist.Patch(suite.nodes[0], []*DmChannel{serviceableChannel, newChannel}, nil)
+
+		v2 := dist.GetVersion()
+		channels := dist.GetByFilter(WithNodeID2Channel(suite.nodes[0]))
+		suite.Greater(v2, v1)
+		suite.Len(channels, 2)
+		suite.AssertNames(channels, "dmc0", "dmc2")
+		suite.AssertNode(channels, suite.nodes[0])
+		suite.AssertNames(newServiceableChannels, "dmc0", "dmc2")
+	})
+
+	suite.Run("remove last channel", func() {
+		suite.SetupTest()
+		dist := suite.dist
+		v1 := dist.GetVersion()
+
+		newServiceableChannels := dist.Patch(suite.nodes[0], nil, []string{"dmc0"})
+
+		v2 := dist.GetVersion()
+		channels := dist.GetByFilter(WithNodeID2Channel(suite.nodes[0]))
+		suite.Empty(newServiceableChannels)
+		suite.Greater(v2, v1)
+		suite.Empty(channels)
+	})
+}
+
 func (suite *ChannelDistManagerSuite) TestNodeOffline() {
 	dist := suite.dist
 

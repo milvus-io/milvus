@@ -19,6 +19,7 @@
 #include <cstring>
 #include "common/FastMem.h"
 #include <map>
+#include <new>
 #include <optional>
 #include <set>
 #include <string>
@@ -31,12 +32,12 @@
 
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/jsmn.h"
 #include "index/InvertedIndexTantivy.h"
 
 namespace milvus::index {
 
-constexpr int64_t DEFAULT_BATCH_SIZE = 8192 * 10;
 constexpr int64_t DEFAULT_BUFFER_SIZE = 16 * 1024 * 1024;
 constexpr int64_t DEFAULT_PART_UPLOAD_SIZE = 10 * 1024 * 1024;
 
@@ -78,13 +79,21 @@ UnescapeJsonString(const std::string& escaped) {
         quoted[quoted.size() - 1] = '"';
         simdjson::dom::element elem = parser.parse(quoted);
         if (elem.type() != simdjson::dom::element_type::STRING) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::DataFormatBroken,
                       "input is not a JSON string: {}",
                       escaped);
         }
         return std::string(std::string_view(elem.get_string()));
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (const SegcoreError&) {
+        // Already classified above (DataFormatBroken); SegcoreError derives from
+        // std::runtime_error, so without this the generic handler below would
+        // rewrap it as UnexpectedError and the build scheduler would retry a
+        // document that fails identically on every attempt.
+        throw;
     } catch (const simdjson::simdjson_error& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(SimdjsonParseErrorToErrorCode(e.error()),
                   "Failed to unescape json string (simdjson): {}, {}",
                   escaped,
                   e.what());
@@ -188,37 +197,6 @@ IsPrimitiveJsonType(JSONType type) {
            type == JSONType::INT32 || type == JSONType::INT64 ||
            type == JSONType::FLOAT || type == JSONType::DOUBLE ||
            type == JSONType::STRING || type == JSONType::STRING_ESCAPE;
-}
-
-inline bool
-IsIntegerJsonType(JSONType type) {
-    return type == JSONType::INT8 || type == JSONType::INT16 ||
-           type == JSONType::INT32 || type == JSONType::INT64;
-}
-
-inline bool
-IsFloatJsonType(JSONType type) {
-    return type == JSONType::FLOAT || type == JSONType::DOUBLE;
-}
-
-inline bool
-IsStringJsonType(JSONType type) {
-    return type == JSONType::STRING || type == JSONType::STRING_ESCAPE;
-}
-
-inline bool
-IsComplexJsonType(JSONType type) {
-    return type == JSONType::ARRAY || type == JSONType::OBJECT;
-}
-
-inline bool
-IsNullJsonType(JSONType type) {
-    return type == JSONType::NONE;
-}
-
-inline bool
-IsShreddingJsonType(JSONType type) {
-    return IsPrimitiveJsonType(type) || type == JSONType::ARRAY;
 }
 
 enum class JsonKeyLayoutType {
@@ -406,10 +384,6 @@ struct KeyStatsInfo {
         return "row_num: " + std::to_string(hit_row_num_);
     }
 };
-struct PathWriter {
-    JsonKeyLayoutType type_;
-    JsonKey key_;
-};
 
 std::shared_ptr<arrow::ArrayBuilder>
 CreateSharedArrowBuilder();
@@ -426,6 +400,12 @@ CreateArrowField(const JsonKey& key, const JsonKeyLayoutType& key_type);
 std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
           std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
 CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
+
+// Build task-local Arrow columns without visiting the potentially much larger
+// set of keys stored in the shared BSON column. The shared builder is last.
+std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
+          std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
+CreateArrowBuildersForColumns(const std::set<JsonKey>& column_keys);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
@@ -555,22 +535,6 @@ class JsonStatsMeta {
     const std::map<JsonKey, JsonKeyLayoutType>&
     GetLayoutTypeMap() const {
         return layout_type_map_;
-    }
-
-    // build key_field_map from layout_type_map (for loading)
-    std::unordered_map<std::string, std::set<std::string>>
-    BuildKeyFieldMap() const {
-        std::unordered_map<std::string, std::set<std::string>> key_field_map;
-        for (const auto& [json_key, layout_type] : layout_type_map_) {
-            // only store metadata for shredding columns (TYPED/DYNAMIC),
-            // skip SHARED keys to save memory
-            if (layout_type == JsonKeyLayoutType::SHARED) {
-                continue;
-            }
-            auto column_name = json_key.ToColumnName();
-            key_field_map[json_key.key_].insert(column_name);
-        }
-        return key_field_map;
     }
 
     std::string

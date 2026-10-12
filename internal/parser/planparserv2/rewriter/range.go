@@ -2,6 +2,8 @@ package rewriter
 
 import (
 	"fmt"
+	"math"
+	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -57,16 +59,20 @@ func resolveEffectiveType(col *planpb.ColumnInfo) (schemapb.DataType, bool) {
 
 // resolveJSONEffectiveType returns the effective type for a JSON field based on the literal value.
 // Returns (type, ok) where ok is false if the value is not suitable for range optimization.
-// For numeric types (int and float), we normalize to Double to allow mixing, similar to scalar Float/Double columns.
+// Numeric literals share the Double comparison group so int and float bounds
+// can still be merged. cmpGeneric preserves their concrete literal kinds and
+// compares int64 against float64 without lossy promotion.
 func resolveJSONEffectiveType(v *planpb.GenericValue) (schemapb.DataType, bool) {
 	if v == nil || v.GetVal() == nil {
 		return schemapb.DataType_None, false
 	}
 	switch v.GetVal().(type) {
 	case *planpb.GenericValue_Int64Val:
-		// Normalize int to Double for JSON to allow mixing with float literals
 		return schemapb.DataType_Double, true
 	case *planpb.GenericValue_FloatVal:
+		if math.IsNaN(v.GetFloatVal()) {
+			return schemapb.DataType_None, false
+		}
 		return schemapb.DataType_Double, true
 	case *planpb.GenericValue_StringVal:
 		return schemapb.DataType_VarChar, true
@@ -92,7 +98,9 @@ func valueMatchesType(dt schemapb.DataType, v *planpb.GenericValue) bool {
 	case schemapb.DataType_Float, schemapb.DataType_Double:
 		// For float columns, accept both float and int literal values
 		switch v.GetVal().(type) {
-		case *planpb.GenericValue_FloatVal, *planpb.GenericValue_Int64Val:
+		case *planpb.GenericValue_FloatVal:
+			return !math.IsNaN(v.GetFloatVal())
+		case *planpb.GenericValue_Int64Val:
 			return true
 		default:
 			return false
@@ -107,6 +115,27 @@ func valueMatchesType(dt schemapb.DataType, v *planpb.GenericValue) bool {
 	default:
 		return false
 	}
+}
+
+func resolveBinaryRangeEffectiveType(col *planpb.ColumnInfo, lower, upper *planpb.GenericValue) (schemapb.DataType, bool) {
+	effDt, ok := resolveEffectiveType(col)
+	if !ok {
+		return schemapb.DataType_None, false
+	}
+
+	if effDt != schemapb.DataType_JSON {
+		if !valueMatchesType(effDt, lower) || !valueMatchesType(effDt, upper) {
+			return schemapb.DataType_None, false
+		}
+		return effDt, true
+	}
+
+	lowerType, lowerOK := resolveJSONEffectiveType(lower)
+	upperType, upperOK := resolveJSONEffectiveType(upper)
+	if !lowerOK || !upperOK || lowerType != upperType {
+		return schemapb.DataType_None, false
+	}
+	return lowerType, true
 }
 
 func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr {
@@ -175,6 +204,9 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 		used[idx] = true
 	}
 	for _, g := range groups {
+		if len(g.lowers)+len(g.uppers) == 1 {
+			continue
+		}
 		// Use the effective type stored in the group
 		var bestLower *bound
 		for i := range g.lowers {
@@ -206,7 +238,7 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 				}
 			}
 
-			if isEmpty && hasNullableFieldSemantics(g.col) {
+			if isEmpty && !canFoldPredicateToBoolConstant(g.col) {
 				continue
 			}
 
@@ -378,6 +410,51 @@ func newBinaryRangeExpr(col *planpb.ColumnInfo, lowerInclusive bool, upperInclus
 	}
 }
 
+// compareInt64ToFloat64 compares an int64 and float64 without lossy integer
+// promotion. Callers must reject NaN before relying on the result.
+func compareInt64ToFloat64(lhs int64, rhs float64) int {
+	if math.IsNaN(rhs) {
+		return 0
+	}
+	const (
+		int64Lower = -0x1p63
+		int64Upper = 0x1p63
+	)
+	if rhs < int64Lower {
+		return 1
+	}
+	if rhs >= int64Upper {
+		return -1
+	}
+
+	rhsInteger := int64(rhs)
+	if lhs < rhsInteger {
+		return -1
+	}
+	if lhs > rhsInteger {
+		return 1
+	}
+
+	rhsIntegerAsFloat := float64(rhsInteger)
+	if rhs > rhsIntegerAsFloat {
+		return -1
+	}
+	if rhs < rhsIntegerAsFloat {
+		return 1
+	}
+	return 0
+}
+
+// CompareRangeValues compares two supported range literals exactly.
+func CompareRangeValues(a, b *planpb.GenericValue) (int, bool) {
+	aType, aOK := resolveJSONEffectiveType(a)
+	bType, bOK := resolveJSONEffectiveType(b)
+	if !aOK || !bOK || aType != bType {
+		return 0, false
+	}
+	return cmpGeneric(aType, a, b), true
+}
+
 // -1 means a < b, 0 means a == b, 1 means a > b
 func cmpGeneric(dt schemapb.DataType, a, b *planpb.GenericValue) int {
 	switch dt {
@@ -394,25 +471,37 @@ func cmpGeneric(dt schemapb.DataType, a, b *planpb.GenericValue) int {
 		}
 		return 0
 	case schemapb.DataType_Float, schemapb.DataType_Double:
-		// Allow comparing int and float by promoting to float
-		toFloat := func(g *planpb.GenericValue) float64 {
-			switch g.GetVal().(type) {
-			case *planpb.GenericValue_FloatVal:
-				return g.GetFloatVal()
+		switch a.GetVal().(type) {
+		case *planpb.GenericValue_Int64Val:
+			switch b.GetVal().(type) {
 			case *planpb.GenericValue_Int64Val:
-				return float64(g.GetInt64Val())
-			default:
-				// Should not happen due to gate; treat as 0 deterministically
+				ai, bi := a.GetInt64Val(), b.GetInt64Val()
+				if ai < bi {
+					return -1
+				}
+				if ai > bi {
+					return 1
+				}
+				return 0
+			case *planpb.GenericValue_FloatVal:
+				return compareInt64ToFloat64(a.GetInt64Val(), b.GetFloatVal())
+			}
+		case *planpb.GenericValue_FloatVal:
+			switch b.GetVal().(type) {
+			case *planpb.GenericValue_Int64Val:
+				return -compareInt64ToFloat64(b.GetInt64Val(), a.GetFloatVal())
+			case *planpb.GenericValue_FloatVal:
+				af, bf := a.GetFloatVal(), b.GetFloatVal()
+				if af < bf {
+					return -1
+				}
+				if af > bf {
+					return 1
+				}
 				return 0
 			}
 		}
-		af, bf := toFloat(a), toFloat(b)
-		if af < bf {
-			return -1
-		}
-		if af > bf {
-			return 1
-		}
+		// Should not happen because callers gate supported literal kinds.
 		return 0
 	case schemapb.DataType_String,
 		schemapb.DataType_VarChar:
@@ -457,19 +546,10 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				others = append(others, idx)
 				continue
 			}
-			effDt, ok := resolveEffectiveType(col)
+			effDt, ok := resolveBinaryRangeEffectiveType(col, bre.GetLowerValue(), bre.GetUpperValue())
 			if !ok {
 				others = append(others, idx)
 				continue
-			}
-			// For JSON, determine actual type from lower value
-			if effDt == schemapb.DataType_JSON {
-				var typeOk bool
-				effDt, typeOk = resolveJSONEffectiveType(bre.GetLowerValue())
-				if !typeOk {
-					others = append(others, idx)
-					continue
-				}
 			}
 			key := columnKey(col) + fmt.Sprintf("|%d", effDt)
 			g, exists := groups[key]
@@ -608,7 +688,7 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				}
 			}
 			if isEmpty {
-				if hasNullableFieldSemantics(g.col) {
+				if !canFoldPredicateToBoolConstant(g.col) {
 					continue
 				}
 				// Empty intersection → constant false
@@ -680,18 +760,10 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				others = append(others, idx)
 				continue
 			}
-			effDt, ok := resolveEffectiveType(col)
+			effDt, ok := resolveBinaryRangeEffectiveType(col, bre.GetLowerValue(), bre.GetUpperValue())
 			if !ok {
 				others = append(others, idx)
 				continue
-			}
-			if effDt == schemapb.DataType_JSON {
-				var typeOk bool
-				effDt, typeOk = resolveJSONEffectiveType(bre.GetLowerValue())
-				if !typeOk {
-					others = append(others, idx)
-					continue
-				}
 			}
 			key := columnKey(col) + fmt.Sprintf("|%d", effDt)
 			g, exists := groups[key]
@@ -783,140 +855,76 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 
-		// For OR, try to merge overlapping/adjacent intervals
-		// If any interval is unbounded on one side, check if it subsumes others
-		// For simplicity, we'll handle the common cases:
-		// 1. All bounded intervals: try to merge if overlapping/adjacent
-		// 2. Mix of bounded/unbounded: merge unbounded with compatible bounds
-
-		var hasUnboundedLower, hasUnboundedUpper bool
-		var unboundedLowerVal *planpb.GenericValue
-		var unboundedLowerInc bool
-		var unboundedUpperVal *planpb.GenericValue
-		var unboundedUpperInc bool
-
-		// Check for unbounded intervals
+		// Keep unbounded, non-finite, and empty/invalid intervals unchanged.
+		// In particular, dropping an empty nullable interval could lose UNKNOWN
+		// under an outer NOT. Only union ordinary bounded intervals here.
+		canMerge := true
 		for _, iv := range g.intervals {
-			if iv.lower != nil && iv.upper == nil {
-				// Lower bound only (x > a)
-				if !hasUnboundedLower {
-					hasUnboundedLower = true
-					unboundedLowerVal = iv.lower
-					unboundedLowerInc = iv.lowerInc
-				} else {
-					// Multiple lower-only bounds: take weakest (minimum)
-					c := cmpGeneric(g.effDt, iv.lower, unboundedLowerVal)
-					if c < 0 || (c == 0 && iv.lowerInc && !unboundedLowerInc) {
-						unboundedLowerVal = iv.lower
-						unboundedLowerInc = iv.lowerInc
-					}
+			if iv.lower == nil || iv.upper == nil {
+				canMerge = false
+				break
+			}
+			for _, value := range []*planpb.GenericValue{iv.lower, iv.upper} {
+				if floatValue, ok := value.GetVal().(*planpb.GenericValue_FloatVal); ok &&
+					(math.IsNaN(floatValue.FloatVal) || math.IsInf(floatValue.FloatVal, 0)) {
+					canMerge = false
 				}
 			}
-			if iv.lower == nil && iv.upper != nil {
-				// Upper bound only (x < b)
-				if !hasUnboundedUpper {
-					hasUnboundedUpper = true
-					unboundedUpperVal = iv.upper
-					unboundedUpperInc = iv.upperInc
-				} else {
-					// Multiple upper-only bounds: take weakest (maximum)
-					c := cmpGeneric(g.effDt, iv.upper, unboundedUpperVal)
-					if c > 0 || (c == 0 && iv.upperInc && !unboundedUpperInc) {
-						unboundedUpperVal = iv.upper
-						unboundedUpperInc = iv.upperInc
-					}
-				}
+			c := cmpGeneric(g.effDt, iv.lower, iv.upper)
+			if c > 0 || (c == 0 && (!iv.lowerInc || !iv.upperInc)) {
+				canMerge = false
+			}
+			if !canMerge {
+				break
 			}
 		}
-
-		// Case 1: Have both unbounded lower and upper → entire domain (always true, but we can't express that simply)
-		// For now, keep them separate
-		// Case 2: Have one unbounded side → merge with compatible bounded intervals
-		// Case 3: All bounded → try to merge overlapping/adjacent
-
-		if hasUnboundedLower && hasUnboundedUpper {
-			// Both unbounded sides - this likely covers most values
-			// Keep as separate predicates for now (more advanced merging could be done)
+		if !canMerge {
 			continue
 		}
 
-		if hasUnboundedLower || hasUnboundedUpper {
-			// Merge unbounded with bounded intervals where applicable
-			// For unbounded lower (x > a): can merge with binary ranges that have compatible upper bounds
-			// For unbounded upper (x < b): can merge with binary ranges that have compatible lower bounds
-			// This is complex, so for now we'll keep it simple and just skip merging
-			// In practice, unbounded intervals often dominate
-			continue
-		}
-
-		// All bounded intervals: try to merge overlapping/adjacent ones
-		// This requires sorting and checking overlap
-		// For simplicity in this initial implementation, we'll check if there are exactly 2 intervals
-		// and try to merge them if they overlap or are adjacent
-
-		if len(g.intervals) == 2 {
-			iv1, iv2 := g.intervals[0], g.intervals[1]
-			if iv1.lower == nil || iv1.upper == nil || iv2.lower == nil || iv2.upper == nil {
-				// One is not fully bounded, skip
+		// One-shot flattening exposes the whole OR chain. Sort once and sweep
+		// all intervals in O(N log N), retaining gaps and endpoint inclusivity.
+		sort.Slice(g.intervals, func(i, j int) bool {
+			c := cmpGeneric(g.effDt, g.intervals[i].lower, g.intervals[j].lower)
+			return c < 0 || (c == 0 && g.intervals[i].lowerInc && !g.intervals[j].lowerInc)
+		})
+		merged := make([]interval, 0, len(g.intervals))
+		for _, iv := range g.intervals {
+			if len(merged) == 0 {
+				merged = append(merged, iv)
 				continue
 			}
-
-			// Check if they overlap or are adjacent
-			// They overlap if: iv1.lower <= iv2.upper AND iv2.lower <= iv1.upper
-			// They are adjacent if: iv1.upper == iv2.lower (or vice versa) with at least one inclusive
-
-			// Determine order: which has smaller lower bound
-			var first, second interval
-			c := cmpGeneric(g.effDt, iv1.lower, iv2.lower)
-			if c <= 0 {
-				first, second = iv1, iv2
+			last := &merged[len(merged)-1]
+			c := cmpGeneric(g.effDt, last.upper, iv.lower)
+			if c < 0 || (c == 0 && !last.upperInc && !iv.lowerInc) {
+				merged = append(merged, iv)
+				continue
+			}
+			if cmpGeneric(g.effDt, last.lower, iv.lower) == 0 {
+				last.lowerInc = last.lowerInc || iv.lowerInc
+			}
+			c = cmpGeneric(g.effDt, last.upper, iv.upper)
+			if c < 0 {
+				last.upper = iv.upper
+				last.upperInc = iv.upperInc
+			} else if c == 0 {
+				last.upperInc = last.upperInc || iv.upperInc
+			}
+			last.exprIndex = -1 // This cluster needs a new merged predicate.
+		}
+		if len(merged) == len(g.intervals) {
+			continue
+		}
+		for _, iv := range g.intervals {
+			used[iv.exprIndex] = true
+		}
+		for _, iv := range merged {
+			if iv.exprIndex >= 0 {
+				out = append(out, parts[iv.exprIndex])
 			} else {
-				first, second = iv2, iv1
-			}
-
-			// Check if they can be merged
-			// Overlap: first.upper >= second.lower
-			cmpUpperLower := cmpGeneric(g.effDt, first.upper, second.lower)
-			canMerge := false
-			if cmpUpperLower > 0 {
-				// Overlap
-				canMerge = true
-			} else if cmpUpperLower == 0 {
-				// Adjacent: at least one bound must be inclusive
-				if first.upperInc || second.lowerInc {
-					canMerge = true
-				}
-			}
-
-			if canMerge {
-				// Merge: take min lower and max upper
-				mergedLower := first.lower
-				mergedLowerInc := first.lowerInc
-				mergedUpper := second.upper
-				mergedUpperInc := second.upperInc
-
-				// Upper bound: take maximum
-				cmpUppers := cmpGeneric(g.effDt, first.upper, second.upper)
-				if cmpUppers > 0 {
-					mergedUpper = first.upper
-					mergedUpperInc = first.upperInc
-				} else if cmpUppers == 0 {
-					// Same value: prefer inclusive
-					if first.upperInc {
-						mergedUpperInc = true
-					}
-				}
-
-				// Mark both as used
-				used[first.exprIndex] = true
-				used[second.exprIndex] = true
-
-				// Emit merged interval
-				out = append(out, newBinaryRangeExpr(g.col, mergedLowerInc, mergedUpperInc, mergedLower, mergedUpper))
+				out = append(out, newBinaryRangeExpr(g.col, iv.lowerInc, iv.upperInc, iv.lower, iv.upper))
 			}
 		}
-		// For more than 2 intervals, we'd need more sophisticated merging logic
-		// For now, we'll leave them separate
 	}
 
 	// Add unused parts

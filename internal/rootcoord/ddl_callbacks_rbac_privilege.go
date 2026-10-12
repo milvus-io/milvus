@@ -22,7 +22,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -39,6 +38,10 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 		return merr.Wrap(err, "failed to operate privilege common check")
 	}
 	privName := in.Entity.Grantor.Privilege.Name
+	if in.Type == milvuspb.OperatePrivilegeType_Grant && isDeprecatedExprPrivilege(privName) {
+		return merr.WrapErrParameterInvalidMsg(
+			"privilege %q is deprecated: the /expr endpoint it granted access to has been removed", privName)
+	}
 	switch in.Version {
 	case "v2":
 		if err := c.isValidPrivilegeV2(ctx, privName); err != nil {
@@ -67,7 +70,7 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 				Entity: in.Entity,
 			}).
 			WithBody(&message.AlterPrivilegeMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	case milvuspb.OperatePrivilegeType_Revoke:
 		msg = message.NewDropPrivilegeMessageBuilderV2().
@@ -75,13 +78,25 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 				Entity: in.Entity,
 			}).
 			WithBody(&message.DropPrivilegeMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid operate privilege type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
+}
+
+// isDeprecatedExprPrivilege reports whether name refers to the Expr privilege,
+// in either its API form ("Expr") or its metastore form ("PrivilegeExpr").
+//
+// The /expr endpoint that this privilege guarded has been removed, so granting
+// it confers nothing. New grants are rejected, but the name stays valid
+// everywhere else so that grants created on releases which shipped the endpoint
+// can still be listed and revoked -- grant and revoke otherwise share one
+// validation path, and rejecting both would strand them.
+func isDeprecatedExprPrivilege(name string) bool {
+	return name == util.PrivilegeExpr || util.PrivilegeNameForMetastore(name) == util.PrivilegeExpr
 }
 
 func (c *DDLCallback) alterPrivilegeV2AckCallback(ctx context.Context, result message.BroadcastResultAlterPrivilegeMessageV2) error {
@@ -111,7 +126,7 @@ func (c *Core) broadcastCreatePrivilegeGroup(ctx context.Context, in *milvuspb.C
 			},
 		}).
 		WithBody(&message.AlterPrivilegeGroupMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -139,7 +154,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 				},
 			}).
 			WithBody(&message.AlterPrivilegeGroupMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
 		msg = message.NewDropPrivilegeGroupMessageBuilderV2().
@@ -150,7 +165,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 				},
 			}).
 			WithBody(&message.DropPrivilegeGroupMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid operate privilege group type")
@@ -184,7 +199,7 @@ func (c *Core) broadcastDropPrivilegeGroup(ctx context.Context, in *milvuspb.Dro
 			},
 		}).
 		WithBody(&message.DropPrivilegeGroupMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

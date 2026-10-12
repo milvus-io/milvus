@@ -20,6 +20,15 @@ func (w localServiceImpl) GetLatestMVCCTimestampIfLocal(ctx context.Context, vch
 	return w.handlerClient.GetLatestMVCCTimestampIfLocal(ctx, vchannel)
 }
 
+func (w localServiceImpl) PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return false, ErrWALAccesserClosed
+	}
+	defer w.lifetime.Done()
+
+	return w.handlerClient.PrepareReleaseManualFlushIfLocal(ctx, collectionID, vchannel, releaseSegmentIDs)
+}
+
 // GetMetrics gets the metrics of the wal.
 func (w localServiceImpl) GetMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {

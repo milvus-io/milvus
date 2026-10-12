@@ -127,6 +127,15 @@ ParsePlaceholderGroup(const Plan* plan,
     milvus::proto::common::PlaceholderGroup ph_group;
     auto ok = ph_group.ParseFromArray(blob, blob_len);
     Assert(ok);
+    // A zero-placeholder group parses fine (the loop body just never runs) but
+    // every consumer indexes it: GetNumOfQueries is group->at(0) and returns
+    // through a plain int64_t, so std::out_of_range would cross the C ABI and
+    // terminate the process. Reject it here, inside a CStatus channel, which
+    // fixes every downstream consumer at once.
+    if (ph_group.placeholders_size() == 0) {
+        ThrowInfo(ErrorCode::InvalidParameter,
+                  "placeholder group contains no placeholder");
+    }
     for (auto& ph : ph_group.placeholders()) {
         Placeholder element;
         element.tag_ = ph.tag();
@@ -250,9 +259,9 @@ CreateSearchPlanByExpr(SchemaPtr schema,
                        const void* serialized_expr_plan,
                        const int64_t size) {
     // Note: serialized_expr_plan is of binary format
-    proto::plan::PlanNode plan_node;
-    ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
-    return ProtoParser(std::move(schema)).CreatePlan(plan_node);
+    auto plan_node = std::make_unique<proto::plan::PlanNode>();
+    ParsePlanNodeProto(*plan_node, serialized_expr_plan, size);
+    return ProtoParser(std::move(schema)).CreatePlan(std::move(plan_node));
 }
 
 std::unique_ptr<Plan>
@@ -265,9 +274,10 @@ std::unique_ptr<RetrievePlan>
 CreateRetrievePlanByExpr(SchemaPtr schema,
                          const void* serialized_expr_plan,
                          const int64_t size) {
-    proto::plan::PlanNode plan_node;
-    ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
-    return ProtoParser(std::move(schema)).CreateRetrievePlan(plan_node);
+    auto plan_node = std::make_unique<proto::plan::PlanNode>();
+    ParsePlanNodeProto(*plan_node, serialized_expr_plan, size);
+    return ProtoParser(std::move(schema))
+        .CreateRetrievePlan(std::move(plan_node));
 }
 
 int64_t

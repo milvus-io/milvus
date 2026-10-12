@@ -46,6 +46,8 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "folly/ScopeGuard.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -89,6 +91,38 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 using namespace milvus::exec;
 
+std::unique_ptr<index::NgramInvertedIndex>
+CreateNgramIndexForCanHandleLiteral(uintptr_t min_gram = 2,
+                                    uintptr_t max_gram = 4) {
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 4000;
+    int64_t index_version = 4000;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id.get(),
+                                                      DataType::VARCHAR,
+                                                      DataType::NONE,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, field_id.get(), index_build_id, index_version);
+
+    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+
+    auto ngram_params = index::NgramParams{
+        .loading_index = true, .min_gram = min_gram, .max_gram = max_gram};
+    return std::make_unique<index::NgramInvertedIndex>(ctx, ngram_params);
+}
+
 void
 test_ngram_with_data(const boost::container::vector<std::string>& data,
                      const std::string& literal,
@@ -115,8 +149,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
-    std::string root_path = TestLocalPath;
-    auto storage_config = gen_local_storage_config(root_path);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -144,8 +177,8 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}{}/{}/{}/{}/{}",
-                           TestLocalPath,
+        return fmt::format("{}insert_log/ngram_index/{}/{}/{}/{}/{}",
+                           storage_config.root_path,
                            collection_id,
                            partition_id,
                            segment_id,
@@ -241,6 +274,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         load_index_info.index_files = index_files;
         load_index_info.schema = field_meta.field_schema;
         load_index_info.index_size = index_size;
+        load_index_info.num_rows = nb;
 
         uint8_t trace_id[16] = {0};
         uint8_t span_id[8] = {0};
@@ -252,7 +286,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         trace.traceFlags = 0;
         auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);
         AppendIndexV2(trace, cload_index_info);
-        UpdateSealedSegmentIndex(segment.get(), cload_index_info);
+        segment->LoadIndex(load_index_info);
 
         auto unary_range_expr = test::GenUnaryRangeExpr(op_type, literal);
         auto column_info = test::GenColumnInfo(
@@ -275,6 +309,18 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
             ASSERT_EQ(final[i], expected_result[i]);
         }
     }
+}
+
+TEST(NgramIndexV3AsyncLoadTest, AsyncLoadPreservesSealedQueryResults) {
+    using namespace milvus::segcore::storagev2translator;
+    const auto previous = StorageV2AsyncLoadEnabled();
+    auto restore = folly::makeGuard(
+        [previous] { SetStorageV2AsyncLoadEnabled(previous); });
+    SetStorageV2AsyncLoadEnabled(true);
+    test_ngram_with_data({"alpha beta", "alphabet", "beta", "gamma"},
+                         "alpha",
+                         proto::plan::OpType::PrefixMatch,
+                         {true, true, false, false});
 }
 
 TEST(NgramIndex, TestNgramWikiEpisode) {
@@ -434,8 +480,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
-    std::string root_path = TestLocalPath;
-    auto storage_config = gen_local_storage_config(root_path);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -463,8 +508,8 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}{}/{}/{}/{}/{}",
-                           TestLocalPath,
+        return fmt::format("{}insert_log/ngram_index/{}/{}/{}/{}/{}",
+                           storage_config.root_path,
                            collection_id,
                            partition_id,
                            segment_id,
@@ -530,7 +575,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         trace.traceFlags = 0;
         auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);
         AppendIndexV2(trace, cload_index_info);
-        UpdateSealedSegmentIndex(segment.get(), cload_index_info);
+        segment->LoadIndex(load_index_info);
 
         // Test: TermFilterExpr (IN operator)
         {
@@ -849,6 +894,8 @@ TEST(NgramIndex, TestNgramJson) {
     ngram_index->BuildWithFieldData({json_field});
     ngram_index->finish();
     ngram_index->create_reader(milvus::index::SetBitsetSealed);
+    EXPECT_EQ(ngram_index->ValidityBitmapByteSize(), 0);
+    EXPECT_EQ(ngram_index->IsNotNull().size(), json_raw_data.size());
 
     auto segment = segcore::CreateSealedSegment(schema);
     segcore::LoadIndexInfo load_index_info;
@@ -1497,6 +1544,210 @@ TEST(NgramPatternMatchConsistency, UTF8Patterns) {
         // Test with ngram index
         test_ngram_with_data(test_data, pattern, op_type, expected_results);
     }
+}
+
+TEST(NgramPatternMatchConsistency, CanHandleLiteralUsesUtf8CharacterCount) {
+    auto ngram_index = CreateNgramIndexForCanHandleLiteral(2, 4);
+
+    const std::string single_chinese = "测";
+    const std::string two_chinese = "测试";
+    ASSERT_EQ(single_chinese.size(), 3);
+    ASSERT_EQ(Utf8CharCount(single_chinese.data(), single_chinese.size()), 1);
+    ASSERT_EQ(Utf8CharCount(two_chinese.data(), two_chinese.size()), 2);
+
+    struct TestCase {
+        std::string literal;
+        proto::plan::OpType op_type;
+        bool expected_can_handle;
+    };
+
+    std::vector<TestCase> test_cases = {
+        {single_chinese, proto::plan::OpType::InnerMatch, false},
+        {single_chinese, proto::plan::OpType::PrefixMatch, false},
+        {single_chinese, proto::plan::OpType::PostfixMatch, false},
+        {"%" + single_chinese + "%", proto::plan::OpType::Match, false},
+        {single_chinese, proto::plan::OpType::RegexMatch, false},
+        {two_chinese, proto::plan::OpType::InnerMatch, true},
+        {"%" + two_chinese + "%", proto::plan::OpType::Match, true},
+        {two_chinese, proto::plan::OpType::RegexMatch, true},
+    };
+
+    for (const auto& test_case : test_cases) {
+        EXPECT_EQ(
+            ngram_index->CanHandleLiteral(test_case.literal, test_case.op_type),
+            test_case.expected_can_handle)
+            << "literal=\"" << test_case.literal << "\""
+            << ", op_type=" << static_cast<int>(test_case.op_type)
+            << ", byte_len=" << test_case.literal.size() << ", utf8_char_count="
+            << Utf8CharCount(test_case.literal.data(),
+                             test_case.literal.size());
+    }
+}
+
+// End-to-end shape of the reported crash: a LIKE literal (or wildcard-free
+// part) that is a single multi-byte UTF-8 character. 3 bytes pass a
+// byte-length min_gram gate, the rust binding counts 1 char and used to
+// panic across the FFI, aborting the QueryNode. The literal must be
+// forwarded to brute force and the filter must still produce the right rows.
+TEST(NgramPatternMatchConsistency, SingleMultiByteCharLiteralFallsBack) {
+    boost::container::vector<std::string> test_data = {
+        "订单（已取消）",
+        "中文测试",
+        "hello world",
+        "abc）",
+    };
+
+    struct TestCase {
+        std::string literal;
+        proto::plan::OpType op_type;
+        std::string like_pattern;
+    };
+    std::vector<TestCase> test_cases = {
+        {"）", proto::plan::OpType::InnerMatch, "%）%"},
+        {"订", proto::plan::OpType::PrefixMatch, "订%"},
+        {"）", proto::plan::OpType::PostfixMatch, "%）"},
+        {"%abc%）%", proto::plan::OpType::Match, "%abc%）%"},
+        // 2-byte and 4-byte characters take the same path
+        {"é", proto::plan::OpType::InnerMatch, "%é%"},
+        {"😀", proto::plan::OpType::InnerMatch, "%😀%"},
+    };
+
+    for (const auto& test_case : test_cases) {
+        ASSERT_GE(test_case.literal.size(), 2)
+            << "literal must be >= min_gram bytes for this test to matter";
+        PatternMatchTranslator translator;
+        RegexMatcher re2_matcher(translator(test_case.like_pattern));
+        std::vector<bool> expected_results;
+        for (const auto& data : test_data) {
+            expected_results.push_back(re2_matcher(data));
+        }
+        test_ngram_with_data(test_data,
+                             test_case.literal,
+                             test_case.op_type,
+                             expected_results,
+                             /*forward_to_br=*/true);
+    }
+}
+
+// A literal with an interior NUL must cross the ngram FFI intact: the entry
+// points take (pointer, length), so rust checks and queries the same literal
+// the C++ gate saw. The InnerMatch case below is <= max_gram chars and skips
+// the post-filter, so a truncated "ab" would have returned "xabzz" as a
+// false positive.
+TEST(NgramPatternMatchConsistency, EmbeddedNulLiteralIsHandledByNgram) {
+    const std::string nul_row("xab\0cy", 6);
+    const std::string nul_short("ab\0c", 4);
+    boost::container::vector<std::string> test_data = {
+        nul_row, "xabzz", "hello", nul_short};
+
+    struct TestCase {
+        std::string literal;
+        proto::plan::OpType op_type;
+        std::vector<bool> expected;
+    };
+    std::vector<TestCase> test_cases = {
+        {nul_short,
+         proto::plan::OpType::InnerMatch,
+         {true, false, false, true}},
+        {nul_short,
+         proto::plan::OpType::PrefixMatch,
+         {false, false, false, true}},
+        {std::string("b\0c", 3),
+         proto::plan::OpType::PostfixMatch,
+         {false, false, false, true}},
+        {"%xa%" + std::string("\0cy", 3) + "%",
+         proto::plan::OpType::Match,
+         {true, false, false, false}},
+    };
+    for (const auto& test_case : test_cases) {
+        test_ngram_with_data(test_data,
+                             test_case.literal,
+                             test_case.op_type,
+                             test_case.expected,
+                             /*forward_to_br=*/false);
+    }
+}
+
+TEST(NgramPatternMatchConsistency, EmbeddedNulCrossesFfiIntact) {
+    auto path = TestLocalPath + "ngram_nul_ffi/";
+    boost::filesystem::remove_all(path);
+    boost::filesystem::create_directories(path);
+
+    milvus::tantivy::TantivyIndexWrapper wrapper(
+        "ngram", path.c_str(), uintptr_t{2}, uintptr_t{4});
+    std::vector<std::string> data = {std::string("xab\0cy", 6), "xabzz"};
+    wrapper.add_data<std::string>(data.data(), data.size(), 0);
+    wrapper.finish();
+    wrapper.create_reader(milvus::index::SetBitsetSealed);
+
+    const std::string nul_literal("ab\0c", 4);
+    {
+        TargetBitmap bitset(data.size());
+        wrapper.ngram_match_query(nul_literal, 2, 4, &bitset);
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_FALSE(bitset[1]) << "literal truncated at NUL to \"ab\"";
+    }
+    {
+        auto terms = wrapper.ngram_tokenize({nul_literal}, 2, 4);
+        ASSERT_EQ(terms.size(), 1);
+        EXPECT_EQ(terms[0], nul_literal);
+        TargetBitmap bitset(data.size());
+        wrapper.ngram_term_posting_list(terms[0], &bitset);
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_FALSE(bitset[1]);
+    }
+    {
+        // longer than max_gram: split into 4-char grams, each carrying the NUL
+        auto terms = wrapper.ngram_tokenize({data[0]}, 2, 4);
+        ASSERT_EQ(terms.size(), 3);
+        for (const auto& term : terms) {
+            EXPECT_EQ(term.size(), 4) << "term lost bytes at NUL";
+            EXPECT_NE(term.find('\0'), std::string::npos);
+        }
+    }
+}
+
+// The C++ gate above is the primary defense; this pins the second one: a
+// literal that reaches the rust binding below min_gram must come back as a
+// SegcoreError, not a panic. The binding is entered through `extern "C"`
+// frames, where a panic cannot unwind and aborts the QueryNode.
+TEST(NgramPatternMatchConsistency, ShortLiteralAtRustBoundaryThrows) {
+    auto path = TestLocalPath + "ngram_short_literal_ffi/";
+    boost::filesystem::remove_all(path);
+    boost::filesystem::create_directories(path);
+
+    // explicit uintptr_t: the (field, path, version, in_ram) json-stats
+    // constructor would otherwise make the int literals ambiguous
+    milvus::tantivy::TantivyIndexWrapper wrapper(
+        "ngram", path.c_str(), uintptr_t{2}, uintptr_t{3});
+    std::vector<std::string> data = {"订单（已取消）", "hello world"};
+    wrapper.add_data<std::string>(data.data(), data.size(), 0);
+    wrapper.finish();
+    wrapper.create_reader(milvus::index::SetBitsetSealed);
+
+    const std::string one_char_three_bytes = "订";
+    ASSERT_EQ(one_char_three_bytes.size(), 3);
+
+    {
+        TargetBitmap bitset(data.size());
+        EXPECT_THROW(
+            wrapper.ngram_match_query(one_char_three_bytes, 2, 3, &bitset),
+            milvus::SegcoreError);
+        EXPECT_THROW(wrapper.ngram_match_query("a", 2, 3, &bitset),
+                     milvus::SegcoreError);
+    }
+    EXPECT_THROW(wrapper.ngram_tokenize({one_char_three_bytes}, 2, 3),
+                 milvus::SegcoreError);
+    EXPECT_THROW(wrapper.ngram_tokenize({"订单", "a"}, 2, 3),
+                 milvus::SegcoreError);
+    EXPECT_THROW(wrapper.ngram_tokenize({}, 2, 3), milvus::SegcoreError);
+
+    // the reader is still usable afterwards
+    TargetBitmap bitset(data.size());
+    wrapper.ngram_match_query("订单", 2, 3, &bitset);
+    EXPECT_TRUE(bitset[0]);
+    EXPECT_FALSE(bitset[1]);
+    EXPECT_FALSE(wrapper.ngram_tokenize({"订单"}, 2, 3).empty());
 }
 
 TEST(NgramPatternMatchConsistency, EscapeSequences) {

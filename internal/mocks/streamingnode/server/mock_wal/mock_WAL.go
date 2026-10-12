@@ -122,12 +122,12 @@ func (_c *MockWAL_AppendAsync_Call) RunAndReturn(run func(context.Context, messa
 	return _c
 }
 
-// Available provides a mock function with no fields
-func (_m *MockWAL) Available() <-chan struct{} {
+// Unavailable provides a mock function with no fields
+func (_m *MockWAL) Unavailable() <-chan struct{} {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for Available")
+		panic("no return value specified for Unavailable")
 	}
 
 	var r0 <-chan struct{}
@@ -142,29 +142,29 @@ func (_m *MockWAL) Available() <-chan struct{} {
 	return r0
 }
 
-// MockWAL_Available_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Available'
-type MockWAL_Available_Call struct {
+// MockWAL_Unavailable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Unavailable'
+type MockWAL_Unavailable_Call struct {
 	*mock.Call
 }
 
-// Available is a helper method to define mock.On call
-func (_e *MockWAL_Expecter) Available() *MockWAL_Available_Call {
-	return &MockWAL_Available_Call{Call: _e.mock.On("Available")}
+// Unavailable is a helper method to define mock.On call
+func (_e *MockWAL_Expecter) Unavailable() *MockWAL_Unavailable_Call {
+	return &MockWAL_Unavailable_Call{Call: _e.mock.On("Unavailable")}
 }
 
-func (_c *MockWAL_Available_Call) Run(run func()) *MockWAL_Available_Call {
+func (_c *MockWAL_Unavailable_Call) Run(run func()) *MockWAL_Unavailable_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *MockWAL_Available_Call) Return(_a0 <-chan struct{}) *MockWAL_Available_Call {
+func (_c *MockWAL_Unavailable_Call) Return(_a0 <-chan struct{}) *MockWAL_Unavailable_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWAL_Available_Call) RunAndReturn(run func() <-chan struct{}) *MockWAL_Available_Call {
+func (_c *MockWAL_Unavailable_Call) RunAndReturn(run func() <-chan struct{}) *MockWAL_Unavailable_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -674,7 +674,8 @@ func (_c *MockWAL_WALName_Call) RunAndReturn(run func() message.WALName) *MockWA
 func NewMockWAL(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockWAL {
+},
+) *MockWAL {
 	mock := &MockWAL{}
 	mock.Mock.Test(t)
 

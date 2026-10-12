@@ -289,9 +289,10 @@ func ValidateMinHashFunction(collSchema *schemapb.CollectionSchema, funSchema *s
 	}
 
 	if numHashes > 0 {
-		expectedDim := int64(numHashes * 32) // binary vector, each hash is 4 bytes (32 bits), but stored as 8 bits in binary vector
-		if outputDim != expectedDim {
-			return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim %d does not match expected dim %d (numHashes %d * one minhash signature size of 32bit)", outputFieldName, outputDim, expectedDim, numHashes)
+		// Compare via division: numHashes*32 can wrap around int64 and defeat
+		// the check. Each hash occupies 32 bits of the binary vector.
+		if outputDim%32 != 0 || outputDim/32 != int64(numHashes) {
+			return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim %d does not match expected dim (numHashes %d * one minhash signature size of 32bit)", outputFieldName, outputDim, numHashes)
 		}
 	} else {
 		if outputDim%32 != 0 {
@@ -330,7 +331,10 @@ func (m *MinHashFunctionRunner) run(data []string, dst [][]byte) error {
 		tokenizerPtr = getTokenizerPtr(wordTokenizer)
 	}
 	// Char-level: tokenizerPtr is nil, C++ will process characters directly
-	allSignatures = m.batchComputeMinHashFromTexts(data, tokenizerPtr)
+	allSignatures, err = m.batchComputeMinHashFromTexts(data, tokenizerPtr)
+	if err != nil {
+		return err
+	}
 
 	// Phase 3: Batch convert to binary vectors
 	batchSignatureToBinaryVector(allSignatures, dst)
@@ -419,9 +423,9 @@ func (m *MinHashFunctionRunner) Close() {
 	}
 }
 
-func (m *MinHashFunctionRunner) batchComputeMinHashFromTexts(texts []string, tokenizerPtr unsafe.Pointer) [][]uint32 {
+func (m *MinHashFunctionRunner) batchComputeMinHashFromTexts(texts []string, tokenizerPtr unsafe.Pointer) ([][]uint32, error) {
 	if len(texts) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Prepare text data - calculate total bytes needed
@@ -457,7 +461,7 @@ func (m *MinHashFunctionRunner) batchComputeMinHashFromTexts(texts []string, tok
 	flatSignatures := make([]uint32, len(texts)*m.numHashes)
 
 	// Call C++ end-to-end implementation
-	C.ComputeMinHashFromTexts(
+	status := C.ComputeMinHashFromTexts(
 		(**C.char)(unsafe.Pointer(&cTexts[0])),
 		(*C.int32_t)(unsafe.Pointer(&textLengths[0])),
 		C.int32_t(len(texts)),
@@ -469,6 +473,11 @@ func (m *MinHashFunctionRunner) batchComputeMinHashFromTexts(texts []string, tok
 		C.int32_t(m.numHashes),
 		(*C.uint32_t)(unsafe.Pointer(&flatSignatures[0])),
 	)
+	if status.error_code != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		C.free(unsafe.Pointer(status.error_msg))
+		return nil, merr.SegcoreError(int32(status.error_code), errorMsg)
+	}
 
 	// Convert flattened output to [][]uint32 using slicing (zero-copy view)
 	signatures := make([][]uint32, len(texts))
@@ -478,7 +487,7 @@ func (m *MinHashFunctionRunner) batchComputeMinHashFromTexts(texts []string, tok
 		signatures[i] = flatSignatures[start:end]
 	}
 
-	return signatures
+	return signatures, nil
 }
 
 // helper function to get analyzer params

@@ -68,6 +68,23 @@ var (
 			Help:      "counter of vectors successfully deleted",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
+	ProxyPathReplaceParentOperations = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "path_replace_parent_operations_total",
+			Help:      "number of successfully resolved positional partial-update parent operations by category",
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName, "parent_type"})
+
+	ProxyPathReplaceMergeLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "path_replace_merge_latency",
+			Help:      "latency of materializing positional partial updates",
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
+
 	// ProxySQLatency record the latency of search successfully.
 	ProxySQLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -77,6 +94,24 @@ var (
 			Help:      "latency of search or query successfully",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
+
+	// ProxyResourceGroupSQLatency records the latency of a search or query
+	// attributed to the resource group that served it.
+	//
+	// It is a family of its own rather than an rg label on ProxySQLatency
+	// because only a deployment form that scopes its queries to a resource group
+	// can attribute anything: adding the label to the existing family would give
+	// every stock milvus an extra, permanently empty dimension on a metric its
+	// dashboards and recording rules already read. Nothing scopes a query in a
+	// binary with no provider installed, so it exposes no series here at all.
+	ProxyResourceGroupSQLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "resource_group_sq_latency",
+			Help:      "latency of search or query successfully, per resource group",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
 
 	// ProxyCollectionSQLatency record the latency of search successfully, per collection
 	// Deprecated, ProxySQLatency instead of it
@@ -138,15 +173,6 @@ var (
 			Help:      "latency that proxy decodes the search result",
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, queryTypeLabelName})
-
-	// ProxyMsgStreamObjectsForPChan record the number of MsgStream objects per PChannel on each collection_id on Proxy.
-	ProxyMsgStreamObjectsForPChan = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "msgstream_obj_num",
-			Help:      "number of MsgStream objects per physical channel",
-		}, []string{nodeIDLabelName, channelNameLabelName})
 
 	// ProxySendMutationReqLatency record the latency that Proxy send insert request to MsgStream.
 	ProxySendMutationReqLatency = prometheus.NewHistogramVec(
@@ -233,7 +259,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "req_count",
 			Help:      "count of operation executed",
-		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, databaseLabelName, collectionName})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName, databaseLabelName, collectionName})
 
 	// ProxyReqLatency records the latency for each grpc request.
 	ProxyGRPCLatency = prometheus.NewHistogramVec(
@@ -243,7 +269,7 @@ var (
 			Name:      "grpc_latency",
 			Help:      "latency of each grpc request",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName})
 
 	// ProxyReqLatency records the latency that for all requests, like "CreateCollection".
 	ProxyReqLatency = prometheus.NewHistogramVec(
@@ -447,7 +473,7 @@ var (
 			Name:      "search_sparse_num_non_zeros",
 			Help:      "the number of non-zeros in each sparse search task",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, collectionName, queryTypeLabelName, fieldIDLabelName})
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName, queryTypeLabelName, fieldIDLabelName})
 
 	// ProxyQueueTaskNum records task number of queue in Proxy.
 	ProxyQueueTaskNum = prometheus.NewGaugeVec(
@@ -474,7 +500,7 @@ var (
 			Name:      "function_udf_call_latency",
 			Help:      "latency of function call",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, collectionName, functionTypeName, functionProvider, functionName})
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName, functionTypeName, functionProvider, functionLabelName})
 
 	ProxyScannedRemoteMB = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -500,8 +526,11 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyInsertVectors)
 	registry.MustRegister(ProxyUpsertVectors)
 	registry.MustRegister(ProxyDeleteVectors)
+	registry.MustRegister(ProxyPathReplaceParentOperations)
+	registry.MustRegister(ProxyPathReplaceMergeLatency)
 
 	registry.MustRegister(ProxySQLatency)
+	registry.MustRegister(ProxyResourceGroupSQLatency)
 	registry.MustRegister(ProxyCollectionSQLatency)
 	registry.MustRegister(ProxyMutationLatency)
 	registry.MustRegister(ProxyCollectionMutationLatency)
@@ -509,8 +538,6 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyWaitForSearchResultLatency)
 	registry.MustRegister(ProxyReduceResultLatency)
 	registry.MustRegister(ProxyDecodeResultLatency)
-
-	registry.MustRegister(ProxyMsgStreamObjectsForPChan)
 
 	registry.MustRegister(ProxySendMutationReqLatency)
 
@@ -568,217 +595,70 @@ func RegisterProxy(registry *prometheus.Registry) {
 	RegisterLoggingMetrics(registry)
 }
 
+// partialMatchDeleter is implemented by every prometheus *Vec type; it lets the
+// cleanup helpers below drop series without enumerating the remaining labels.
+type partialMatchDeleter interface {
+	DeletePartialMatch(labels prometheus.Labels) int
+}
+
+// proxyCollectionScopedMetrics lists every proxy metric that carries both a
+// db_name and a collection_name label, so a dropped database or collection can
+// be cleaned from one place.
+//
+// Cleanup deliberately goes through DeletePartialMatch on (node_id, db_name[,
+// collection_name]) instead of Delete() with a fully specified label set:
+// enumerating the msg_type/query_type values a metric may hold silently leaks
+// series as soon as a new value is emitted (hybrid search and upsert used to
+// leak this way). Keep this list in sync when adding a collection labeled proxy
+// metric -- TestCollectionScopedMetricsAreComplete guards it.
+func proxyCollectionScopedMetrics() []partialMatchDeleter {
+	return []partialMatchDeleter{
+		ProxySearchVectors,
+		ProxyInsertVectors,
+		ProxyUpsertVectors,
+		ProxyDeleteVectors,
+		ProxyPathReplaceParentOperations,
+		ProxyPathReplaceMergeLatency,
+		ProxySQLatency,
+		ProxyCollectionSQLatency,
+		ProxyMutationLatency,
+		ProxyCollectionMutationLatency,
+		ProxyFunctionCall,
+		ProxyFunctionlatency,
+		ProxyReceivedNQ,
+		ProxyReceiveBytes,
+		ProxyRetrySearchCount,
+		ProxyRetrySearchResultInsufficientCount,
+		ProxyRecallSearchCount,
+		ProxySearchSparseNumNonZeros,
+		ProxyScannedRemoteMB,
+		ProxyScannedTotalMB,
+		ProxyResourceGroupSQLatency,
+	}
+}
+
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
-	ProxySearchVectors.DeletePartialMatch(prometheus.Labels{
+	labels := prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
-	})
-	ProxyInsertVectors.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-	})
-	ProxyUpsertVectors.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-	})
-	ProxyDeleteVectors.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-	})
-	ProxySQLatency.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-	})
-	ProxyMutationLatency.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-	})
-	ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-	})
+	}
+	for _, m := range proxyCollectionScopedMetrics() {
+		m.DeletePartialMatch(labels)
+	}
+	// ProxyReportValue is the only proxy metric carrying db_name without a
+	// collection_name label, so it cannot join proxyCollectionScopedMetrics():
+	// CleanupProxyCollectionMetrics passes collection_name too and would then
+	// match nothing for it. Delete it here, db-scoped only.
+	ProxyReportValue.DeletePartialMatch(labels)
 }
 
 func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection string) {
-	ProxySearchVectors.DeletePartialMatch(prometheus.Labels{
+	labels := prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 		collectionName:    collection,
-	})
-	ProxyInsertVectors.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyUpsertVectors.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxySQLatency.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyMutationLatency.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-
-	ProxyCollectionSQLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyCollectionSQLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: QueryLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyCollectionSQLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: UpsertQueryLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyCollectionMutationLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  InsertLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyCollectionMutationLatency.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyReceivedNQ.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyReceivedNQ.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: QueryLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  SearchLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  QueryLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  InsertLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyReceiveBytes.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  UpsertLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyRetrySearchCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyRetrySearchCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: HybridSearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: HybridSearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyRecallSearchCount.Delete(prometheus.Labels{
-		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
-		queryTypeLabelName: SearchLabel,
-		databaseLabelName:  dbName,
-		collectionName:     collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  SearchLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  QueryLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  UpsertLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedRemoteMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  SearchLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  QueryLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  UpsertLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyScannedTotalMB.Delete(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		msgTypeLabelName:  DeleteLabel,
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
+	}
+	for _, m := range proxyCollectionScopedMetrics() {
+		m.DeletePartialMatch(labels)
+	}
 }

@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use libc::c_char;
 use tantivy::fastfield::FastValue;
-use tantivy::query::{
-    BooleanQuery, ExistsQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery,
-};
+use tantivy::query::{BooleanQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
 use tantivy::{Directory, HasLen, Index, IndexReader, ReloadPolicy, Term};
@@ -19,7 +17,9 @@ use crate::milvus_id_collector::MilvusIdCollector;
 use crate::util::{c_ptr_to_str, make_bounds};
 use crate::vec_collector::VecCollector;
 
+use crate::data_type::JsonExistValueType;
 use crate::error::{Result, TantivyBindingError};
+use crate::json_exists_query::JsonExistsQuery;
 
 // Threshold for batch-in query. Less than this threshold, we use term_query one by one and use
 // TermSetQuery when larger than this threshold. This value is based on some experiments.
@@ -485,6 +485,18 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
+    pub fn json_term_query_u64(
+        &self,
+        json_path: &str,
+        term: u64,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+        json_term.append_type_and_fast_value(term);
+        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
+        self.search(&q, bitset)
+    }
+
     pub fn json_term_query_f64(
         &self,
         json_path: &str,
@@ -532,6 +544,29 @@ impl IndexReaderWrapper {
             return terms
                 .iter()
                 .try_for_each(|&term| self.json_term_query_i64(json_path, term, bitset));
+        }
+        let term_vec: Vec<_> = terms
+            .iter()
+            .map(|&t| {
+                let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+                json_term.append_type_and_fast_value(t);
+                json_term
+            })
+            .collect();
+        let q = TermSetQuery::new(term_vec);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_terms_query_u64(
+        &self,
+        json_path: &str,
+        terms: &[u64],
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        if terms.len() < JSON_BATCH_THRESHOLD {
+            return terms
+                .iter()
+                .try_for_each(|&term| self.json_term_query_u64(json_path, term, bitset));
         }
         let term_vec: Vec<_> = terms
             .iter()
@@ -603,13 +638,19 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
-    pub fn json_exist_query(&self, json_path: &str, bitset: *mut c_void) -> Result<()> {
+    pub fn json_exist_query(
+        &self,
+        json_path: &str,
+        json_subpaths: bool,
+        value_type: JsonExistValueType,
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let full_json_path = if json_path == "" {
             self.field_name.clone()
         } else {
             format!("{}.{}", self.field_name, json_path)
         };
-        let q = ExistsQuery::new(full_json_path, true);
+        let q = JsonExistsQuery::new(full_json_path, json_subpaths, value_type);
         self.search(&q, bitset)
     }
 
@@ -692,7 +733,11 @@ impl IndexReaderWrapper {
         self.json_regex_query(json_path, &pattern, bitset)
     }
 
-    // **Note**: literal length must be larger or equal to min_gram.
+    // **Note**: literal length must be larger or equal to min_gram. The C++
+    // side (`NgramInvertedIndex::CanHandleLiteral`) is the gate; a violation
+    // here means that gate was bypassed. It is reported as an error rather
+    // than asserted: this runs under an `extern "C"` frame, where a panic
+    // cannot unwind and aborts the whole process.
     pub fn ngram_match_query(
         &self,
         literal: &str,
@@ -700,15 +745,15 @@ impl IndexReaderWrapper {
         max_gram: usize,
         bitset: *mut c_void,
     ) -> Result<()> {
-        // literal length should be larger or equal to min_gram.
-        assert!(
-            literal.chars().count() >= min_gram,
-            "literal length should be larger or equal to min_gram. literal: {}, min_gram: {}",
-            literal,
-            min_gram
-        );
+        let char_count = literal.chars().count();
+        if char_count < min_gram {
+            return Err(TantivyBindingError::InternalError(format!(
+                "ngram_match_query: literal char length {} < min_gram {}, literal: {:?}",
+                char_count, min_gram, literal
+            )));
+        }
 
-        if literal.chars().count() <= max_gram {
+        if char_count <= max_gram {
             return self.term_query_keyword(literal, bitset);
         }
 
@@ -744,14 +789,15 @@ impl IndexReaderWrapper {
         let mut tokenizer = NgramTokenizer::new(max_gram, max_gram, false).unwrap();
 
         for literal in literals {
-            assert!(
-                literal.chars().count() >= min_gram,
-                "literal '{}' must be >= min_gram {}",
-                literal,
-                min_gram
-            );
+            let char_count = literal.chars().count();
+            if char_count < min_gram {
+                return Err(TantivyBindingError::InternalError(format!(
+                    "ngram_tokenize: literal char length {} < min_gram {}, literal: {:?}",
+                    char_count, min_gram, literal
+                )));
+            }
 
-            if literal.chars().count() <= max_gram {
+            if char_count <= max_gram {
                 all_term_pairs.push((
                     literal.to_string(),
                     Term::from_field_text(self.field, literal),
@@ -767,10 +813,11 @@ impl IndexReaderWrapper {
             }
         }
 
-        assert!(
-            !all_term_pairs.is_empty(),
-            "ngram_tokenize should not produce empty terms for valid literals"
-        );
+        if all_term_pairs.is_empty() {
+            return Err(TantivyBindingError::InternalError(
+                "ngram_tokenize: no ngram terms produced, literals must be non-empty".to_string(),
+            ));
+        }
 
         // Get doc_freq for each term and sort
         let searcher = self.reader.searcher();

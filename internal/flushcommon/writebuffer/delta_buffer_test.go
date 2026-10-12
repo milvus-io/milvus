@@ -22,7 +22,7 @@ func (s *DeltaBufferSuite) TestBuffer() {
 	s.Run("int64_pk", func() {
 		deltaBuffer := NewDeltaBuffer()
 
-		tss := lo.RepeatBy(100, func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)) })
+		tss := lo.RepeatBy(100, func(idx int) uint64 { return tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx)) })
 		pks := lo.Map(tss, func(ts uint64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(int64(ts)) })
 
 		memSize := deltaBuffer.Buffer(pks, tss, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
@@ -33,7 +33,7 @@ func (s *DeltaBufferSuite) TestBuffer() {
 	s.Run("string_pk", func() {
 		deltaBuffer := NewDeltaBuffer()
 
-		tss := lo.RepeatBy(100, func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)) })
+		tss := lo.RepeatBy(100, func(idx int) uint64 { return tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx)) })
 		pks := lo.Map(tss, func(ts uint64, idx int) storage.PrimaryKey {
 			return storage.NewVarCharPrimaryKey(fmt.Sprintf("%03d", idx))
 		})
@@ -52,7 +52,7 @@ func (s *DeltaBufferSuite) TestYield() {
 
 	deltaBuffer = NewDeltaBuffer()
 
-	tss := lo.RepeatBy(100, func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)) })
+	tss := lo.RepeatBy(100, func(idx int) uint64 { return tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx)) })
 	pks := lo.Map(tss, func(ts uint64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(int64(ts)) })
 
 	deltaBuffer.Buffer(pks, tss, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})

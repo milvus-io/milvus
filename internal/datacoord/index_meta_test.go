@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -250,6 +251,106 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 		assert.Equal(t, newIndexParams[0].Key, common.IndexTypeKey)
 		assert.Equal(t, newIndexParams[0].Value, "INVERTED")
 	})
+
+	t.Run("ngram index param rewrite", func(t *testing.T) {
+		m.indexes[collID] = map[UniqueID]*model.Index{
+			indexID: {
+				CollectionID: collID,
+				FieldID:      fieldID,
+				IndexID:      indexID,
+				IndexName:    indexName,
+				CreateTime:   10,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
+				},
+				UserIndexParams: userIndexParams,
+			},
+		}
+		ngramReq := &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    indexName,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "HYBRID"},
+			},
+			IsAutoIndex:     true,
+			UserIndexParams: userIndexParams,
+		}
+
+		indexID, err := m.CanCreateIndex(ngramReq, false)
+		assert.ErrorIs(t, err, errIndexOperationIgnored)
+		assert.Zero(t, indexID)
+		require.Len(t, ngramReq.GetIndexParams(), 1)
+		assert.Equal(t, "NGRAM", ngramReq.GetIndexParams()[0].GetValue())
+	})
+}
+
+// TestMeta_CanCreateIndex_BoundAutoIndexEquivalence: the add-function-field DDL
+// persists an AutoIndex-resolved bound index in the create_index convention
+// (UserIndexParams = AUTOINDEX + final metric); a later create_index(AUTOINDEX)
+// on the same field must dedupe as idempotent instead of hitting the
+// one-distinct-index-per-field conflict.
+func TestMeta_CanCreateIndex_BoundAutoIndexEquivalence(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("CreateIndex", mock.Anything, mock.Anything).Return(nil)
+	m := newSegmentIndexMeta(catalog)
+
+	resolvedIndexParams := []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+		{Key: common.MetricTypeKey, Value: "BM25"},
+		{Key: "bm25_k1", Value: "1.2"},
+		{Key: "bm25_b", Value: "0.75"},
+		{Key: "bm25_avgdl", Value: "100"},
+	}
+	autoIndexUserParams := []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+		{Key: common.MetricTypeKey, Value: "BM25"},
+	}
+	// Shape persisted by rootcoord prepareBoundFieldIndex on the AutoIndex path.
+	boundIndex := &model.Index{
+		CollectionID:    UniqueID(1),
+		FieldID:         UniqueID(101),
+		IndexID:         UniqueID(10),
+		IndexName:       "sparse",
+		IndexParams:     resolvedIndexParams,
+		UserIndexParams: autoIndexUserParams,
+		IsAutoIndex:     false,
+	}
+	err := m.CreateIndex(context.TODO(), boundIndex)
+	assert.NoError(t, err)
+
+	// What proxy sends for a later create_index(AUTOINDEX, metric_type=BM25).
+	req := &indexpb.CreateIndexRequest{
+		CollectionID:                     UniqueID(1),
+		FieldID:                          UniqueID(101),
+		IndexName:                        "sparse",
+		IndexParams:                      resolvedIndexParams,
+		UserIndexParams:                  autoIndexUserParams,
+		IsAutoIndex:                      false,
+		UserAutoindexMetricTypeSpecified: true,
+	}
+	tmpIndexID, err := m.CanCreateIndex(req, false)
+	assert.ErrorIs(t, err, errIndexOperationIgnored)
+	assert.Zero(t, tmpIndexID)
+
+	// A different explicit index on the same field remains a conflict.
+	conflictReq := &indexpb.CreateIndexRequest{
+		CollectionID: UniqueID(1),
+		FieldID:      UniqueID(101),
+		IndexName:    "sparse",
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "SPARSE_WAND"},
+			{Key: common.MetricTypeKey, Value: "IP"},
+		},
+		UserIndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "SPARSE_WAND"},
+			{Key: common.MetricTypeKey, Value: "IP"},
+		},
+	}
+	tmpIndexID, err = m.CanCreateIndex(conflictReq, false)
+	assert.Error(t, err)
+	assert.NotErrorIs(t, err, errIndexOperationIgnored)
+	assert.Zero(t, tmpIndexID)
 }
 
 func TestMeta_CanCreateIndex(t *testing.T) {
@@ -761,6 +862,44 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 		state := m.GetSegmentIndexState(collID, segID, indexID)
 		assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
 	})
+}
+
+func TestMeta_GetSegmentsIndexStatesUsesScalarVersionForNGRAM(t *testing.T) {
+	const (
+		collID  = UniqueID(1)
+		indexID = UniqueID(10)
+		segID   = UniqueID(1000)
+	)
+
+	segmentIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	indexesForSegment := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	indexesForSegment.Insert(indexID, &model.SegmentIndex{
+		SegmentID:                 segID,
+		IndexID:                   indexID,
+		IndexType:                 "NGRAM",
+		CurrentIndexVersion:       11,
+		CurrentScalarIndexVersion: 7,
+		IndexState:                commonpb.IndexState_Finished,
+	})
+	segmentIndexes.Insert(segID, indexesForSegment)
+
+	m := &indexMeta{
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					CollectionID: collID,
+					IndexID:      indexID,
+					IndexName:    "ngram_idx",
+				},
+			},
+		},
+		segmentIndexes: segmentIndexes,
+	}
+
+	states := m.getSegmentsIndexStates(collID, []UniqueID{segID})
+	require.Contains(t, states, segID)
+	require.Contains(t, states[segID], indexID)
+	assert.Equal(t, int32(7), states[segID][indexID].GetIndexVersion())
 }
 
 func TestMeta_GetIndexedSegment(t *testing.T) {
@@ -2519,34 +2658,31 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 	})
 }
 
-func TestIndexMeta_GetDeletedIndexesWithV1Path(t *testing.T) {
-	m := &indexMeta{
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
+// The feature switch controls completed-artifact publication only. Task
+// lifecycle states remain durable in etcd in both modes.
+func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
+	assert.False(t, paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("manifest=%t", enabled), func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, enabled)
+			catalog := catalogmocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Times(2)
+			m := &indexMeta{
+				ctx:              context.TODO(),
+				catalog:          catalog,
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				keyLock:          lock.NewKeyLock[UniqueID](),
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			}
+			require.NoError(t, m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+				CollectionID: 100, PartitionID: 10, SegmentID: 6002,
+				IndexID: 600, BuildID: 6200,
+			}))
+			require.NoError(t, m.BuildIndex(6200))
+			require.NoError(t, m.UpdateIndexState(6200, commonpb.IndexState_Failed, "failed"))
+		})
 	}
-
-	// Add: deleted v0, deleted v1, not-deleted v1.
-	// Only deleted v1 indexes need metadata-driven cleanup under index_v1;
-	// v0 deletion is handled by the buildID-rooted index_files prefix walk.
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               1000,
-		CollectionID:          100,
-		IndexStorePathVersion: 0,
-		IsDeleted:             true,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               2000,
-		CollectionID:          200,
-		IndexStorePathVersion: 1,
-		IsDeleted:             true,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               3000,
-		CollectionID:          300,
-		IndexStorePathVersion: 1,
-		IsDeleted:             false,
-	})
-
-	result := m.GetDeletedIndexesWithV1Path()
-	assert.Len(t, result, 1)
-	assert.Equal(t, int64(2000), result[0].BuildID)
 }

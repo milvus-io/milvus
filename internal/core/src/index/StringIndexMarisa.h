@@ -86,6 +86,11 @@ class StringIndexMarisa : public StringIndex {
     const TargetBitmap
     IsNull() override;
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<std::string>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override;
 
@@ -156,6 +161,15 @@ class StringIndexMarisa : public StringIndex {
     void
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
+
+ protected:
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
  private:
     Config config_;

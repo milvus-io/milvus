@@ -77,17 +77,17 @@ func (_c *MockBufferManager_BufferData_Call) RunAndReturn(run func(string, []*In
 	return _c
 }
 
-// CreateNewGrowingSegment provides a mock function with given fields: ctx, channel, partition, segmentID, schemaVersion
-func (_m *MockBufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64, schemaVersion int32) error {
-	ret := _m.Called(ctx, channel, partition, segmentID, schemaVersion)
+// CreateNewGrowingSegment provides a mock function with given fields: ctx, channel, info
+func (_m *MockBufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, info CreateGrowingSegmentInfo) error {
+	ret := _m.Called(ctx, channel, info)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateNewGrowingSegment")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64, int64, int32) error); ok {
-		r0 = rf(ctx, channel, partition, segmentID, schemaVersion)
+	if rf, ok := ret.Get(0).(func(context.Context, string, CreateGrowingSegmentInfo) error); ok {
+		r0 = rf(ctx, channel, info)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -103,16 +103,14 @@ type MockBufferManager_CreateNewGrowingSegment_Call struct {
 // CreateNewGrowingSegment is a helper method to define mock.On call
 //   - ctx context.Context
 //   - channel string
-//   - partition int64
-//   - segmentID int64
-//   - schemaVersion int32
-func (_e *MockBufferManager_Expecter) CreateNewGrowingSegment(ctx interface{}, channel interface{}, partition interface{}, segmentID interface{}, schemaVersion interface{}) *MockBufferManager_CreateNewGrowingSegment_Call {
-	return &MockBufferManager_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", ctx, channel, partition, segmentID, schemaVersion)}
+//   - info CreateGrowingSegmentInfo
+func (_e *MockBufferManager_Expecter) CreateNewGrowingSegment(ctx interface{}, channel interface{}, info interface{}) *MockBufferManager_CreateNewGrowingSegment_Call {
+	return &MockBufferManager_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", ctx, channel, info)}
 }
 
-func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Run(run func(ctx context.Context, channel string, partition int64, segmentID int64, schemaVersion int32)) *MockBufferManager_CreateNewGrowingSegment_Call {
+func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Run(run func(ctx context.Context, channel string, info CreateGrowingSegmentInfo)) *MockBufferManager_CreateNewGrowingSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(int64), args[4].(int32))
+		run(args[0].(context.Context), args[1].(string), args[2].(CreateGrowingSegmentInfo))
 	})
 	return _c
 }
@@ -122,7 +120,7 @@ func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Return(_a0 error) *Moc
 	return _c
 }
 
-func (_c *MockBufferManager_CreateNewGrowingSegment_Call) RunAndReturn(run func(context.Context, string, int64, int64, int32) error) *MockBufferManager_CreateNewGrowingSegment_Call {
+func (_c *MockBufferManager_CreateNewGrowingSegment_Call) RunAndReturn(run func(context.Context, string, CreateGrowingSegmentInfo) error) *MockBufferManager_CreateNewGrowingSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -368,12 +366,12 @@ func (_c *MockBufferManager_GetGrowingFlushProgress_Call) RunAndReturn(run func(
 	return _c
 }
 
-// UseGrowingSourceFlush provides a mock function with given fields: channel
-func (_m *MockBufferManager) UseGrowingSourceFlush(channel string) bool {
+// AllowGrowingSourceFlush provides a mock function with given fields: channel
+func (_m *MockBufferManager) AllowGrowingSourceFlush(channel string) bool {
 	ret := _m.Called(channel)
 
 	if len(ret) == 0 {
-		panic("no return value specified for UseGrowingSourceFlush")
+		panic("no return value specified for AllowGrowingSourceFlush")
 	}
 
 	var r0 bool
@@ -386,30 +384,30 @@ func (_m *MockBufferManager) UseGrowingSourceFlush(channel string) bool {
 	return r0
 }
 
-// MockBufferManager_UseGrowingSourceFlush_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UseGrowingSourceFlush'
-type MockBufferManager_UseGrowingSourceFlush_Call struct {
+// MockBufferManager_AllowGrowingSourceFlush_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllowGrowingSourceFlush'
+type MockBufferManager_AllowGrowingSourceFlush_Call struct {
 	*mock.Call
 }
 
-// UseGrowingSourceFlush is a helper method to define mock.On call
+// AllowGrowingSourceFlush is a helper method to define mock.On call
 //   - channel string
-func (_e *MockBufferManager_Expecter) UseGrowingSourceFlush(channel interface{}) *MockBufferManager_UseGrowingSourceFlush_Call {
-	return &MockBufferManager_UseGrowingSourceFlush_Call{Call: _e.mock.On("UseGrowingSourceFlush", channel)}
+func (_e *MockBufferManager_Expecter) AllowGrowingSourceFlush(channel interface{}) *MockBufferManager_AllowGrowingSourceFlush_Call {
+	return &MockBufferManager_AllowGrowingSourceFlush_Call{Call: _e.mock.On("AllowGrowingSourceFlush", channel)}
 }
 
-func (_c *MockBufferManager_UseGrowingSourceFlush_Call) Run(run func(channel string)) *MockBufferManager_UseGrowingSourceFlush_Call {
+func (_c *MockBufferManager_AllowGrowingSourceFlush_Call) Run(run func(channel string)) *MockBufferManager_AllowGrowingSourceFlush_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(string))
 	})
 	return _c
 }
 
-func (_c *MockBufferManager_UseGrowingSourceFlush_Call) Return(_a0 bool) *MockBufferManager_UseGrowingSourceFlush_Call {
+func (_c *MockBufferManager_AllowGrowingSourceFlush_Call) Return(_a0 bool) *MockBufferManager_AllowGrowingSourceFlush_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockBufferManager_UseGrowingSourceFlush_Call) RunAndReturn(run func(string) bool) *MockBufferManager_UseGrowingSourceFlush_Call {
+func (_c *MockBufferManager_AllowGrowingSourceFlush_Call) RunAndReturn(run func(string) bool) *MockBufferManager_AllowGrowingSourceFlush_Call {
 	_c.Call.Return(run)
 	return _c
 }

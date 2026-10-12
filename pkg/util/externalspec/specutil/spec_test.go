@@ -67,6 +67,22 @@ func TestParseExternalSpec(t *testing.T) {
 		require.Equal(t, "true", spec.Extfs[ExtfsKeyUseIAM])
 	})
 
+	t.Run("Azure credential broker keys accepted", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{
+			"format":"parquet",
+			"extfs":{
+				"azure_client_id":"client",
+				"azure_tenant_id":"tenant",
+				"azure_credential_endpoint":"https://broker.example.com/v1/credentials/assume-role"
+			}
+		}`)
+		require.NoError(t, err)
+		require.Equal(t, "client", spec.Extfs[ExtfsKeyAzureClientID])
+		require.Equal(t, "tenant", spec.Extfs[ExtfsKeyAzureTenantID])
+		require.Equal(t, "https://broker.example.com/v1/credentials/assume-role",
+			spec.Extfs[ExtfsKeyAzureCredentialEndpoint])
+	})
+
 	t.Run("snapshot id accepts string and number", func(t *testing.T) {
 		spec, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"5320540205222981137"}`)
 		require.NoError(t, err)

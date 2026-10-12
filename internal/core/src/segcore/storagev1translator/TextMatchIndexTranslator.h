@@ -12,12 +12,14 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "cachinglayer/Translator.h"
 #include "common/Types.h"
 #include "common/LoadInfo.h"
+#include "common/resource_c.h"
 #include "index/TextMatchIndex.h"
 #include "storage/FileManager.h"
 
@@ -29,6 +31,7 @@ struct TextMatchIndexLoadInfo {
     int64_t field_id;
     std::string analyzer_params;
     int64_t index_size;
+    int64_t num_rows;
     std::string
         warmup_policy;  // "disable", "sync", or "async"; empty means use global config
     std::string shard;
@@ -78,6 +81,7 @@ class TextMatchIndexTranslator
     milvus::Config config_;
     std::string key_;
     milvus::cachinglayer::Meta meta_;
+    std::optional<LoadResourceRequest> packed_load_resource_request_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

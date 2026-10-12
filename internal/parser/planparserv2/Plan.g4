@@ -1,19 +1,19 @@
 grammar Plan;
 
 expr:
-  Identifier (op1=(ADD | SUB) INTERVAL interval_string=StringLiteral)? op2=(LT | LE | GT | GE | EQ | NE) ISO compare_string=StringLiteral # TimestamptzCompareForward
-	| ISO compare_string=StringLiteral op2=(LT | LE | GT | GE | EQ | NE) Identifier (op1=(ADD | SUB) INTERVAL interval_string=StringLiteral)? # TimestamptzCompareReverse
+  fieldName (op1=(ADD | SUB) INTERVAL interval_string=StringLiteral)? op2=(LT | LE | GT | GE | EQ | NE) ISO compare_string=StringLiteral # TimestamptzCompareForward
+	| ISO compare_string=StringLiteral op2=(LT | LE | GT | GE | EQ | NE) fieldName (op1=(ADD | SUB) INTERVAL interval_string=StringLiteral)? # TimestamptzCompareReverse
 	| IntegerConstant											                                            # Integer
 	| FloatingConstant										                                                # Floating
 	| BooleanConstant										                                                # Boolean
 	| StringLiteral											                                                # String
 	| RawStringLiteral										                                                # RawString
-	| (Identifier|Meta)           			      							                                # Identifier
+	| (fieldName|Meta)           			      							                                # Identifier
 	| JSONIdentifier                                                                                        # JSONIdentifier
 	| StructFieldIdentifier                                                                                 # StructField
 	| StructIndexFieldIdentifier                                                                            # StructIndexField
 	| StructSubFieldIdentifier                                                                              # StructSubField
-	| LBRACE Identifier RBRACE                                                                              # TemplateVariable
+	| LBRACE fieldName RBRACE                                                                              # TemplateVariable
 	| '(' expr ')'											                                                # Parens
 	| '[' expr (',' expr)* ','? ']'                                                                         # Array
 	| EmptyArray                                                                                            # EmptyArray
@@ -21,12 +21,13 @@ expr:
 	| expr LIKE expr                                                                                        # Like
 	| expr REGEXMATCH expr                                                                                  # RegexMatch
 	| expr REGEXNOTMATCH expr                                                                               # RegexNotMatch
-	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                                             # TextMatch
-	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
+	| TEXTMATCH'('fieldName',' expr (',' textMatchOption)? ')'                                             # TextMatch
+	| TEXTMATCHFUZZY'('fieldName',' expr ',' Identifier ASSIGN IntegerConstant ')'                         # TextMatchFuzzy
+	| PHRASEMATCH'('fieldName',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
-	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
-	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple
-	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'  # MatchThreshold
+	| ElementFilter'('fieldName',' expr')'                                	                                # ElementFilter
+	| op=(MATCH_ALL | MATCH_ANY) '(' fieldName ',' expr ')'                                                 # MatchSimple
+	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' fieldName ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'  # MatchThreshold
 	| expr POW expr											                                                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
 //	| '(' typeName ')' expr									                                                # Cast
@@ -37,13 +38,14 @@ expr:
 	| (JSONContains | ArrayContains)'('expr',' expr')'                                                      # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                                                # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                                                # JSONContainsAny
-	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' expr ')'  # SpatialBinary
-	| STDWithin'('Identifier',' expr',' expr')'                                                             # STDWithin
-	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
-	| ArrayLength'('(Identifier | JSONIdentifier | StructFieldIdentifier)')'                                 # ArrayLength
+	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' fieldName ',' expr ')'  # SpatialBinary
+	| STDWithin'('fieldName',' expr',' expr')'                                                             # STDWithin
+	| STIsValid'('fieldName')'                                  			 	                            # STIsValid
+	| ArrayLength'('(fieldName | JSONIdentifier | StructFieldIdentifier | StructSubFieldIdentifier)')'      # ArrayLength
+	| function=Identifier '(' field=fieldReference ',' expr ',' option=Identifier ASSIGN kind=Identifier ')' # MembershipMatchWithOption
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
-	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (LT | LE) expr	# Range
-	| expr op1 = (GT | GE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (GT | GE) expr    # ReverseRange
+	| expr op1 = (LT | LE) (fieldName | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (LT | LE) expr	# Range
+	| expr op1 = (GT | GE) (fieldName | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (GT | GE) expr    # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                                                # Relational
 	| expr op = (EQ | NE) expr								                                                # Equality
 	| expr BAND expr										                                                # BitAnd
@@ -51,8 +53,42 @@ expr:
 	| expr BOR expr											                                                # BitOr
 	| expr AND expr											                                                # LogicalAnd
 	| expr OR expr											                                                # LogicalOr
-	| (Identifier | JSONIdentifier) ISNULL                                                                  # IsNull
-	| (Identifier | JSONIdentifier) ISNOTNULL                                                               # IsNotNull;
+	| (fieldName | JSONIdentifier) ISNULL                                                                  # IsNull
+	| (fieldName | JSONIdentifier) ISNOTNULL                                                               # IsNotNull;
+
+// These keywords retain their specialized syntax while also naming fields.
+// Operators and constants remain reserved, and generic function names and
+// option names continue to use Identifier rather than this rule.
+fieldName:
+	Identifier
+	| ISO
+	| INTERVAL
+	| MINIMUM_SHOULD_MATCH
+	| THRESHOLD
+	| TEXTMATCHFUZZY
+	| MATCH_ALL
+	| MATCH_ANY
+	| MATCH_LEAST
+	| MATCH_MOST
+	| MATCH_EXACT
+	| ElementFilter
+	| STEuqals
+	| STTouches
+	| STOverlaps
+	| STCrosses
+	| STContains
+	| STIntersects
+	| STWithin
+	| STDWithin
+	| STIsValid;
+
+fieldReference:
+	fieldName
+	| Meta
+	| JSONIdentifier
+	| StructFieldIdentifier
+	| StructIndexFieldIdentifier
+	| StructSubFieldIdentifier;
 
 textMatchOption:
 	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;
@@ -70,6 +106,7 @@ NE: '!=';
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
+TEXTMATCHFUZZY: 'text_match_fuzzy'|'TEXT_MATCH_FUZZY';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 MATCH_ALL: 'match_all' | 'MATCH_ALL';

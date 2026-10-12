@@ -24,7 +24,6 @@ import (
 	"strings"
 	"syscall"
 
-	cstorage "cloud.google.com/go/storage"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
@@ -45,6 +44,10 @@ import (
 // Otherwise, WalkWithObjects will continue until reach the last object.
 type ChunkObjectWalkFunc func(chunkObjectInfo *ChunkObjectInfo) bool
 
+type CrossBucketCopier interface {
+	CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error
+}
+
 type ObjectStorage interface {
 	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
@@ -55,7 +58,7 @@ type ObjectStorage interface {
 	// 2. underlying walking failed or context canceled, WalkWithPrefix will stop and return a error.
 	WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
-	CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error
+	CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error
 }
 
 // RemoteChunkManager is responsible for read and write data stored in mminio.
@@ -98,7 +101,7 @@ func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*Remot
 // NewRemoteChunkManagerForTesting is used for testing.
 func NewRemoteChunkManagerForTesting(c *minio.Client, bucket string, rootPath string) *RemoteChunkManager {
 	mcm := &RemoteChunkManager{
-		client:            &MinioObjectStorage{c},
+		client:            &MinioObjectStorage{Client: c},
 		bucketName:        bucket,
 		rootPath:          rootPath,
 		readRetryAttempts: 10,
@@ -317,6 +320,14 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
+	// An empty prefix matches every object in the bucket, so this API would
+	// erase the whole instance. LocalChunkManager refuses it for the same
+	// reason; the guard belongs here rather than in each caller.
+	if len(prefix) == 0 {
+		errMsg := "empty prefix is not allowed for ChunkManager remove operation"
+		mlog.Warn(ctx, errMsg)
+		return merr.WrapErrStorageMsg("%s", errMsg)
+	}
 	// removeObject in parallel.
 	runningGroup, _ := errgroup.WithContext(ctx)
 	runningGroup.SetLimit(10)
@@ -443,7 +454,7 @@ func ToMilvusIoError(fileName string, err error) error {
 }
 
 func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
-	err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, dstFilePath)
+	err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, mcm.bucketName, dstFilePath)
 	if err != nil {
 		mlog.Warn(ctx, "failed to copy object", mlog.String("bucket", mcm.bucketName), mlog.String("src", srcFilePath), mlog.String("dst", dstFilePath), mlog.Err(err))
 		return err
@@ -451,10 +462,24 @@ func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dst
 	return nil
 }
 
-func (mcm *RemoteChunkManager) copyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
+func (mcm *RemoteChunkManager) CopyCrossBucket(ctx context.Context, srcBucket, srcFilePath, dstBucket, dstFilePath string) error {
+	err := mcm.copyObject(ctx, srcBucket, srcFilePath, dstBucket, dstFilePath)
+	if err != nil {
+		mlog.Warn(ctx, "failed to copy object across buckets",
+			mlog.String("srcBucket", srcBucket),
+			mlog.String("dstBucket", dstBucket),
+			mlog.String("src", srcFilePath),
+			mlog.String("dst", dstFilePath),
+			mlog.Err(err))
+		return err
+	}
+	return nil
+}
+
+func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
 	start := timerecord.NewTimeRecorder("copyObject")
 
-	err := mcm.client.CopyObject(ctx, bucketName, srcObjectName, dstObjectName)
+	err := mcm.client.CopyObjectCrossBucket(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.TotalLabel).Inc()
 	if err == nil {
 		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataPutLabel).
@@ -510,6 +535,12 @@ func mapObjectStorageError(fileName string, err error) error {
 
 	// If error is already a Milvus error, return it as-is to avoid double-wrapping
 	if merr.IsMilvusError(err) {
+		return err
+	}
+
+	// Preserve context termination so callers can stop retries and classify
+	// canceled operations correctly.
+	if merr.IsCanceledOrTimeout(err) {
 		return err
 	}
 
@@ -575,11 +606,12 @@ func mapObjectStorageError(fileName string, err error) error {
 		}
 	}
 
-	// GCP cloud.google.com/go/storage sentinel errors (not *googleapi.Error)
-	if errors.Is(err, cstorage.ErrObjectNotExist) {
+	// GCP cloud.google.com/go/storage sentinel errors (not *googleapi.Error).
+	// The library wraps them with a multi-%w, so plain errors.Is misses them.
+	if objectstorage.IsGcsObjectNotExist(err) {
 		return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 	}
-	if errors.Is(err, cstorage.ErrBucketNotExist) {
+	if objectstorage.IsGcsBucketNotExist(err) {
 		return merr.WrapErrIoBucketNotFound(fileName, err)
 	}
 

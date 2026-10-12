@@ -89,6 +89,7 @@ func Init(opts ...optResourceInit) {
 
 // Release releases the singleton of resources.
 func Release() {
+	r.timeTickInspector.Close()
 	r.wbMgr.Stop()
 	r.syncMgr.Close()
 }

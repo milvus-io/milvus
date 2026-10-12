@@ -1,11 +1,13 @@
 package storage
 
 import (
+	"context"
 	"io"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -17,6 +19,8 @@ import (
 )
 
 type RecordReader interface {
+	// Next returns a record borrowed from the reader and valid until the next
+	// Next or Close. Callers retaining it longer must Retain and Release it.
 	Next() (Record, error)
 	Close() error
 }
@@ -44,10 +48,10 @@ func (pr *packedRecordReader) Next() (Record, error) {
 }
 
 func (pr *packedRecordReader) Close() error {
-	if pr.reader != nil {
-		return pr.reader.Close()
+	if pr == nil || pr.reader == nil {
+		return nil
 	}
-	return nil
+	return pr.reader.Close()
 }
 
 func (pr *ffiPackedRecordReader) Next() (Record, error) {
@@ -59,10 +63,10 @@ func (pr *ffiPackedRecordReader) Next() (Record, error) {
 }
 
 func (pr *ffiPackedRecordReader) Close() error {
-	if pr.reader != nil {
-		return pr.reader.Close()
+	if pr == nil || pr.reader == nil {
+		return nil
 	}
-	return nil
+	return pr.reader.Close()
 }
 
 func newPackedRecordReader(
@@ -72,6 +76,7 @@ func newPackedRecordReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	externalReader packed.ExternalReaderContext,
+	opts ...packed.ReaderOption,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -82,7 +87,7 @@ func newPackedRecordReader(
 	for i, field := range allFields {
 		field2Col[field.FieldID] = i
 	}
-	reader, err := packed.NewPackedReaderWithExtfs(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext, externalReader)
+	reader, err := packed.NewPackedReaderWithExtfs(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext, externalReader, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -176,13 +181,52 @@ func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 		if closeErr != nil {
 			return nil, closeErr
 		}
-		ir.cur, err = ir.iterate()
-		if err != nil {
-			return nil, err
+		// Clear cur before iterating: iterate() returns a typed-nil reader
+		// (e.g. a nil *packedRecordReader boxed into the RecordReader
+		// interface) together with an error when opening the next chunk
+		// fails, e.g. a binlog object is missing in object storage. Assigning
+		// that to ir.cur would leave a non-nil interface holding a nil pointer,
+		// and the deferred Close() would then dereference it and panic. Only
+		// publish the reader once iterate() succeeds.
+		ir.cur = nil
+		next, iterErr := ir.iterate()
+		if iterErr != nil {
+			return nil, iterErr
 		}
+		ir.cur = next
 		rec, err = ir.cur.Next()
 	}
 	return rec, err
+}
+
+// newPackedChunksRecordReader reads the packed chunks at paths in order. Callers
+// that opted into WithParallelChunkRead get several chunks read at once;
+// everyone else gets the serial reader, unchanged.
+func newPackedChunksRecordReader(
+	ctx context.Context,
+	paths [][]string,
+	schema *schemapb.CollectionSchema,
+	options *rwOptions,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) RecordReader {
+	parallel := options.parallelChunkRead
+	if parallel.Concurrency <= 1 {
+		return newIterativePackedRecordReader(paths, schema, options.bufferSize, options.storageConfig, storagePluginContext, options.externalReader)
+	}
+	bufferSize := parallel.BufferSize
+	if bufferSize <= 0 {
+		// The packed reader reads a non-positive buffer size as "no limit", and
+		// one round would then keep a whole chunk file resident per worker.
+		bufferSize = packed.DefaultReadBufferSize
+	}
+	return newParallelChunkRecordReader(ctx, len(paths), parallel.Concurrency, func(chunk int) (RecordReader, error) {
+		reader, err := newPackedRecordReader(paths[chunk], schema, bufferSize, options.storageConfig,
+			storagePluginContext, options.externalReader, packed.WithEagerPrebuffer())
+		if err != nil {
+			return nil, err
+		}
+		return reader, nil
+	})
 }
 
 func newIterativePackedRecordReader(
@@ -209,7 +253,7 @@ func newIterativePackedRecordReader(
 type ManifestReader struct {
 	fieldBinlogs []*datapb.FieldBinlog
 	manifest     string
-	reader       *packed.FFIPackedReader
+	reader       manifestArrowReader
 
 	bufferSize           int64
 	arrowSchema          *arrow.Schema
@@ -219,8 +263,14 @@ type ManifestReader struct {
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
 	externalSpecContext  packed.ExternalSpecContext
+	textColumnConfigs    []packed.TextColumnConfig
 
 	neededColumns []string
+}
+
+type manifestArrowReader interface {
+	ReadNext() (arrow.Record, error)
+	Close() error
 }
 
 // NewManifestReaderFromBinlogs creates a ManifestReader from binlogs
@@ -298,6 +348,31 @@ func NewManifestReaderWithExtfs(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs packed.ExternalSpecContext,
 ) (*ManifestReader, error) {
+	return newManifestReader(manifest, schema, bufferSize, storageConfig, storagePluginContext, extfs, nil)
+}
+
+// NewTextDecodedManifestReader opens a manifest through milvus-storage's
+// SegmentReader so TEXT reference columns are resolved through source-specific
+// LOB paths and returned as logical UTF8 strings.
+func NewTextDecodedManifestReader(
+	manifest string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	textColumnConfigs []packed.TextColumnConfig,
+) (*ManifestReader, error) {
+	return newManifestReader(manifest, schema, bufferSize, storageConfig, nil, packed.ExternalSpecContext{}, textColumnConfigs)
+}
+
+func newManifestReader(
+	manifest string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	extfs packed.ExternalSpecContext,
+	textColumnConfigs []packed.TextColumnConfig,
+) (*ManifestReader, error) {
 	columnResolver := typeutil.NewStorageColumnResolver(schema, typeutil.WithStorageColumnExternalSpec(extfs.Spec))
 	arrowSchema, err := ConvertToArrowSchemaWithNameResolver(
 		schema,
@@ -316,7 +391,7 @@ func NewManifestReaderWithExtfs(
 	// RecordToInsertData conversion does not accidentally decode internal LOB
 	// references as user text. Any source type coercion must stay in the
 	// external-source normalization path, not in the internal manifest path.
-	if !typeutil.IsExternalCollection(schema) || columnResolver.IsMilvusTable() {
+	if len(textColumnConfigs) == 0 && (!typeutil.IsExternalCollection(schema) || columnResolver.IsMilvusTable()) {
 		arrowSchema = overrideTextFieldsToBinaryByFields(
 			columnResolver.ManifestStoredFields(),
 			arrowSchema,
@@ -348,6 +423,7 @@ func NewManifestReaderWithExtfs(
 		storageConfig:        storageConfig,
 		storagePluginContext: storagePluginContext,
 		externalSpecContext:  extfs,
+		textColumnConfigs:    textColumnConfigs,
 
 		neededColumns: neededColumns,
 	}
@@ -361,6 +437,15 @@ func NewManifestReaderWithExtfs(
 }
 
 func (mr *ManifestReader) init() error {
+	if len(mr.textColumnConfigs) > 0 {
+		reader, err := packed.NewFFISegmentReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
+			mr.bufferSize, mr.storageConfig, mr.textColumnConfigs)
+		if err != nil {
+			return err
+		}
+		mr.reader = reader
+		return nil
+	}
 	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
 		mr.bufferSize,
 		mr.storageConfig,
@@ -393,15 +478,18 @@ func (mr *ManifestReader) Close() error {
 type ChunkedBlobsReader func() ([]*Blob, error)
 
 type CompositeBinlogRecordReader struct {
-	fields map[FieldID]*schemapb.FieldSchema
-	index  map[FieldID]int16
-	brs    []*BinlogReader
-	rrs    []array.RecordReader
+	fields  map[FieldID]*schemapb.FieldSchema
+	index   map[FieldID]int16
+	brs     []*BinlogReader
+	rrs     []array.RecordReader
+	current Record
 }
 
 var _ RecordReader = (*CompositeBinlogRecordReader)(nil)
 
 func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
+	crr.releaseCurrent()
+
 	recs := make([]arrow.Array, len(crr.fields))
 	releaseRecsOnError := true
 	defer func() {
@@ -415,12 +503,18 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 	}()
 	nonExistingFields := make([]*schemapb.FieldSchema, 0)
 	nRows := 0
+	sawRecord, sawEOF := false, false
 	for _, f := range crr.fields {
 		idx := crr.index[f.FieldID]
 		if crr.rrs[idx] != nil {
 			if ok := crr.rrs[idx].Next(); !ok {
-				return nil, io.EOF
+				if err := crr.rrs[idx].Err(); err != nil && !errors.Is(err, io.EOF) {
+					return nil, merr.WrapErrDataIntegrity(err, "read V1 insert binlog field %d", f.FieldID)
+				}
+				sawEOF = true
+				continue
 			}
+			sawRecord = true
 			r := crr.rrs[idx].Record()
 			recs[idx] = r.Column(0)
 			recs[idx].Retain()
@@ -434,6 +528,14 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 			nonExistingFields = append(nonExistingFields, f)
 		}
 	}
+	// Inspect every present reader before declaring EOF, so a
+	// later reader's non-EOF error takes precedence regardless of map iteration.
+	if sawEOF && sawRecord {
+		return nil, merr.WrapErrDataIntegrityMsg("field readers reached EOF at different positions")
+	}
+	if sawEOF {
+		return nil, io.EOF
+	}
 	for _, f := range nonExistingFields {
 		// If the field is not in the current batch, fill with null array
 		arr, err := GenerateEmptyArrayFromSchema(f, nRows)
@@ -443,13 +545,16 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		recs[crr.index[f.FieldID]] = arr
 	}
 	releaseRecsOnError = false
-	return &compositeRecord{
+	crr.current = &compositeRecord{
 		index: crr.index,
 		recs:  recs,
-	}, nil
+	}
+	return crr.current, nil
 }
 
 func (crr *CompositeBinlogRecordReader) Close() error {
+	crr.releaseCurrent()
+
 	if crr.brs != nil {
 		for _, er := range crr.brs {
 			if er != nil {
@@ -465,4 +570,122 @@ func (crr *CompositeBinlogRecordReader) Close() error {
 		}
 	}
 	return nil
+}
+
+func (crr *CompositeBinlogRecordReader) releaseCurrent() {
+	if crr.current != nil {
+		crr.current.Release()
+		crr.current = nil
+	}
+}
+
+// NewAbsentFieldFillRecordReader completes a partial record to full read-schema
+// width the way V1's CompositeBinlogRecordReader does: every read-schema field NOT
+// physically present (FieldID not in presentFields) is filled via
+// GenerateEmptyArrayFromSchema -- its declared default when it has one, else null,
+// erroring on a non-nullable absent field. Present columns pass through from inner.
+// This gives the packed StorageV3 manifest reader the same default-for-absent
+// semantic the V1 binlog reader already applies, so it stops presenting declared
+// defaults as NULL (issue #52771). presentFields is the physically-present field
+// set -- self-sourced from the manifest, or supplied by a caller that already
+// computed it (compaction via WithPresentFields). Returns inner unchanged when
+// nothing is absent.
+func NewAbsentFieldFillRecordReader(inner RecordReader, neededSchema *schemapb.CollectionSchema, presentFields map[FieldID]struct{}) RecordReader {
+	fill := make([]*schemapb.FieldSchema, 0)
+	for _, f := range typeutil.GetAllFieldSchemas(neededSchema) {
+		if _, present := presentFields[f.GetFieldID()]; present {
+			continue
+		}
+		fill = append(fill, f)
+	}
+	if len(fill) == 0 {
+		return inner
+	}
+	return &absentFieldFillRecordReader{inner: inner, fill: fill}
+}
+
+type absentFieldFillRecordReader struct {
+	inner RecordReader
+	fill  []*schemapb.FieldSchema
+	cur   *absentFilledRecord
+}
+
+var _ RecordReader = (*absentFieldFillRecordReader)(nil)
+
+func (r *absentFieldFillRecordReader) Next() (Record, error) {
+	r.releaseCur()
+	base, err := r.inner.Next()
+	if err != nil {
+		return nil, err
+	}
+	computed := make(map[FieldID]arrow.Array, len(r.fill))
+	for _, f := range r.fill {
+		arr, genErr := GenerateEmptyArrayFromSchema(f, base.Len())
+		if genErr != nil {
+			for _, a := range computed {
+				a.Release()
+			}
+			return nil, genErr
+		}
+		computed[f.GetFieldID()] = arr
+	}
+	base.Retain()
+	r.cur = &absentFilledRecord{base: base, computed: computed}
+	return r.cur, nil
+}
+
+func (r *absentFieldFillRecordReader) releaseCur() {
+	if r.cur == nil {
+		return
+	}
+	r.cur.Release()
+	r.cur = nil
+}
+
+func (r *absentFieldFillRecordReader) Close() error {
+	r.releaseCur()
+	if r.inner == nil {
+		return nil
+	}
+	return r.inner.Close()
+}
+
+// absentFilledRecord overlays filled columns onto base (the present columns). It
+// owns a retained ref on base plus the filled arrays; Release drops both, so the
+// wrapping reader frees them by releasing this record on its next Next/Close.
+type absentFilledRecord struct {
+	base     Record
+	computed map[FieldID]arrow.Array
+}
+
+var _ Record = (*absentFilledRecord)(nil)
+
+func (r *absentFilledRecord) Column(i FieldID) arrow.Array {
+	if col, ok := r.computed[i]; ok {
+		return col
+	}
+	return r.base.Column(i)
+}
+
+func (r *absentFilledRecord) TryColumn(i FieldID) (arrow.Array, bool) {
+	if col, ok := r.computed[i]; ok {
+		return col, true
+	}
+	return TryRecordColumn(r.base, i)
+}
+
+func (r *absentFilledRecord) Len() int { return r.base.Len() }
+
+func (r *absentFilledRecord) Retain() {
+	r.base.Retain()
+	for _, col := range r.computed {
+		col.Retain()
+	}
+}
+
+func (r *absentFilledRecord) Release() {
+	r.base.Release()
+	for _, col := range r.computed {
+		col.Release()
+	}
 }

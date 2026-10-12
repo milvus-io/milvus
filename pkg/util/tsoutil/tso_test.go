@@ -38,35 +38,43 @@ func TestParseHybridTs(t *testing.T) {
 
 func Test_Tso(t *testing.T) {
 	t.Run("test ComposeTSByTime", func(t *testing.T) {
-		physical := time.Now()
+		physical := time.Unix(1700000000, 123456789)
+		timestamp := ComposeTSByTime(physical)
+		pRes, lRes := ParseHybridTs(timestamp)
+		assert.Equal(t, physical.UnixMilli(), pRes)
+		assert.Equal(t, int64(0), lRes)
+	})
+
+	t.Run("test ComposeTSByTimeWithLogical", func(t *testing.T) {
+		physical := time.Unix(1700000000, 123456789)
 		logical := int64(1000)
-		timestamp := ComposeTSByTime(physical, logical)
-		pRes, lRes := ParseTS(timestamp)
-		assert.Equal(t, physical.Unix(), pRes.Unix())
-		assert.Equal(t, uint64(logical), lRes)
+		timestamp := ComposeTSByTimeWithLogical(physical, logical)
+		pRes, lRes := ParseHybridTs(timestamp)
+		assert.Equal(t, physical.UnixMilli(), pRes)
+		assert.Equal(t, logical, lRes)
 	})
 }
 
 func TestCalculateDuration(t *testing.T) {
 	now := time.Now()
-	ts1 := ComposeTSByTime(now, 0)
+	ts1 := ComposeTSByTime(now)
 	durationInMilliSecs := int64(20 * 1000)
-	ts2 := ComposeTSByTime(now.Add(time.Duration(durationInMilliSecs)*time.Millisecond), 0)
+	ts2 := ComposeTSByTime(now.Add(time.Duration(durationInMilliSecs) * time.Millisecond))
 	diff := CalculateDuration(ts2, ts1)
 	assert.Equal(t, durationInMilliSecs, diff)
 }
 
 func TestAddPhysicalDurationOnTs(t *testing.T) {
 	now := time.Now()
-	ts1 := ComposeTSByTime(now, 0)
+	ts1 := ComposeTSByTime(now)
 	duration := time.Millisecond * (20 * 1000)
 	ts2 := AddPhysicalDurationOnTs(ts1, duration)
-	ts3 := ComposeTSByTime(now.Add(duration), 0)
+	ts3 := ComposeTSByTime(now.Add(duration))
 	// diff := CalculateDuration(ts2, ts1)
 	assert.Equal(t, ts3, ts2)
 
 	ts2 = AddPhysicalDurationOnTs(ts1, -duration)
-	ts3 = ComposeTSByTime(now.Add(-duration), 0)
+	ts3 = ComposeTSByTime(now.Add(-duration))
 	// diff := CalculateDuration(ts2, ts1)
 	assert.Equal(t, ts3, ts2)
 }
@@ -76,7 +84,7 @@ func TestIsValidUnixMilli(t *testing.T) {
 	assert.True(t, IsValidPhysicalTs(physicalTs))
 	assert.False(t, IsValidHybridTs(physicalTs))
 
-	hybridTs := GetCurrentTime()
+	hybridTs := ComposeTSByTime(time.Now())
 	assert.False(t, IsValidPhysicalTs(hybridTs))
 	assert.True(t, IsValidHybridTs(hybridTs))
 }

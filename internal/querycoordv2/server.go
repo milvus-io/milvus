@@ -58,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -138,6 +137,7 @@ type Server struct {
 
 type FileResourceObserver interface {
 	InitQueryCoord(manager *session.NodeManager, cluster session.Cluster)
+	IsEmpty() bool
 	Notify()
 }
 
@@ -150,7 +150,6 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
-	expr.Register("querycoord", server)
 	return server, nil
 }
 
@@ -369,7 +368,6 @@ func (s *Server) initQueryCoord() error {
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
-	RegisterDDLCallbacks(s)
 	mlog.Info(s.ctx, "init querycoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 	return err
 }
@@ -679,7 +677,7 @@ func (s *Server) watchNodes(revision int64) {
 					Labels:   event.Session.GetServerLabel(),
 				}))
 				s.handleNodeUp(nodeID)
-				if s.fileResourceObserver != nil {
+				if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
 					s.fileResourceObserver.Notify()
 				}
 
@@ -871,12 +869,25 @@ func (s *Server) watchLoadConfigChanges() {
 
 	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
+
+	forceOverrideHandler := config.NewHandler("watchForceOverrideUserReplicaModeChanges", func(e *config.Event) { w.Trigger() })
+	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key, forceOverrideHandler)
 }
 
 // GetInternalReplicasByCollection returns replicas for a collection from internal meta.
 // This method provides access to internal replica information including resource groups.
 func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
 	return s.meta.GetByCollection(ctx, collectionID)
+}
+
+// IsCollectionUserSpecifiedReplicaMode returns whether the collection load config
+// was created from a request with an explicit replica number.
+func (s *Server) IsCollectionUserSpecifiedReplicaMode(ctx context.Context, collectionID int64) bool {
+	if s.meta == nil {
+		return false
+	}
+	collection := s.meta.GetCollection(ctx, collectionID)
+	return collection != nil && collection.UserSpecifiedReplicaMode
 }
 
 // CheckAllReplicasServiceable returns an error if any replica has a non-serviceable
@@ -909,10 +920,29 @@ func (s *Server) checkReplicaServiceable(ctx context.Context, replica *meta.Repl
 				replica.GetID(), replica.GetResourceGroup(), channelName)
 		}
 		if err := utils.CheckDelegatorDataReady(s.nodeMgr, s.targetMgr, leader.View, meta.CurrentTarget); err != nil {
-			return merr.Wrapf(err, "replica %d (rg=%s) channel %s not serviceable", replica.GetID(), replica.GetResourceGroup(), channelName)
+			return merr.Wrapf(err, "replica %d (rg=%s) not serviceable", replica.GetID(), replica.GetResourceGroup())
+		}
+		if !leader.IsServiceable() {
+			err := merr.WrapErrChannelNotAvailable(channelName, "delegator reported not serviceable")
+			return merr.Wrapf(err, "replica %d (rg=%s) not serviceable", replica.GetID(), replica.GetResourceGroup())
 		}
 	}
 	return nil
+}
+
+// CheckReplicasServiceable checks every replica of the collection and returns a map of replica ID
+// to error for each non-serviceable one, instead of failing fast on the first bad replica. This
+// allows per-resource-group compliance reporting to attribute each failure to the replica's own
+// resource group. An empty map with no error means every replica is serviceable.
+func (s *Server) CheckReplicasServiceable(ctx context.Context, collectionID int64) map[int64]error {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	errs := make(map[int64]error)
+	for _, replica := range replicas {
+		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
+			errs[replica.GetID()] = err
+		}
+	}
+	return errs
 }
 
 // GetLeakedResourcesByCollection returns the number of segments and channels still held by
@@ -936,4 +966,38 @@ func (s *Server) GetLeakedResourcesByCollection(ctx context.Context, collectionI
 		}
 	}
 	return leakedSegments, leakedChannels
+}
+
+// GetLeakedResourcesByCollectionPerRG returns the number of segments and channels still held by
+// querynodes that are NOT part of any current replica of the collection, grouped by the resource
+// group of the holding querynode. Unlike GetLeakedResourcesByCollection, it preserves the per-RG
+// attribution so compliance reporting can mark exactly the resource groups that hold leaked
+// resources. Ordinary QueryNodes use the authoritative ResourceManager mapping.
+// Embedded QueryNodes are excluded from that manager, so their RGs are resolved
+// from the caller's complete StreamingNode snapshot, including frozen nodes.
+// Nodes absent from both mappings are attributed to the empty RG (global).
+func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collectionID int64, streamingNodeRGs map[int64]string) map[string]int {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	validNodes := typeutil.NewUniqueSet()
+	for _, r := range replicas {
+		validNodes.Insert(r.GetNodes()...)
+	}
+	leaked := make(map[string]int)
+	rgOf := func(nodeID int64) string {
+		if rg := s.meta.GetResourceGroupByNodeID(nodeID); rg != "" {
+			return rg
+		}
+		return streamingNodeRGs[nodeID]
+	}
+	for _, seg := range s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID)) {
+		if !validNodes.Contain(seg.Node) {
+			leaked[rgOf(seg.Node)]++
+		}
+	}
+	for _, ch := range s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)) {
+		if !validNodes.Contain(ch.Node) {
+			leaked[rgOf(ch.Node)]++
+		}
+	}
+	return leaked
 }

@@ -1,6 +1,6 @@
 package common
 
-import "github.com/milvus-io/milvus/client/v2/index"
+import "github.com/milvus-io/milvus/client/v3/index"
 
 // cost default field name
 const (
@@ -71,6 +71,7 @@ const (
 	MaxCapacity             = 4096 // max array capacity
 	DefaultPartitionNum     = 16   // default num_partitions
 	MaxTopK                 = 16384
+	MaxFieldNum             = 256
 	MaxVectorFieldNum       = 10
 	MaxShardNum             = 16
 	DefaultBatchSize        = 1000

@@ -182,13 +182,26 @@ func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int6
 	return blobs, nil
 }
 
+// serializeMergedPkStatsList serializes an already-assembled list of per-batch
+// PrimaryKeyStats into one compound merged blob. Unlike serializeMergedPkStats
+// it reads nothing from the metaCache: the V3 flush path assembles the list
+// from the per-batch bloom blobs already persisted in the manifest plus the
+// current flush batch, so the merged blob no longer depends on RollStats having
+// been applied. numRows is the segment's authoritative row count.
+func (s *storageV1Serializer) serializeMergedPkStatsList(
+	stats []*storage.PrimaryKeyStats, numRows int64,
+) (*storage.Blob, error) {
+	if len(stats) == 0 {
+		return nil, nil
+	}
+	return s.inCodec.SerializePkStatsList(stats, numRows)
+}
+
 // serializeMergedPkStatsWith is like serializeMergedPkStats but includes an
 // explicitly provided current-batch PrimaryKeyStats in the merged result,
-// without requiring the metaCache to have been updated via RollStats.
-//
-// This is used by BulkPackWriterV3 so that the metaCache.RollStats action can
-// be deferred until after a successful Write, while still emitting a correct
-// merged stats blob on flush. See ccmd/pack_writer_v3_retry_plan.md.
+// without requiring the metaCache to have been updated via RollStats. Used by
+// the growing-source flush path so RollStats can be deferred until after a
+// successful Write while still emitting a correct merged stats blob on flush.
 func (s *storageV1Serializer) serializeMergedPkStatsWith(
 	pack *SyncPack, extra *storage.PrimaryKeyStats,
 ) (*storage.Blob, error) {
@@ -218,30 +231,13 @@ func (s *storageV1Serializer) serializeMergedPkStatsWith(
 	return s.inCodec.SerializePkStatsList(stats, segment.NumOfRows())
 }
 
-// serializeMergedBM25StatsWith is like serializeMergedBM25Stats but includes
-// an explicitly provided current-batch bm25 stats map in the merged result,
-// without mutating the metaCache copy. See serializeMergedPkStatsWith for
-// rationale.
-func (s *storageV1Serializer) serializeMergedBM25StatsWith(
-	pack *SyncPack, extra map[int64]*storage.BM25Stats,
+// serializeMergedBM25StatsFrom serializes an already-assembled combined
+// SegmentBM25Stats into per-field merged blobs. Like serializeMergedPkStatsList
+// it reads nothing from the metaCache; the V3 flush path builds combined from
+// the persisted per-batch BM25 blobs plus the current flush batch.
+func (s *storageV1Serializer) serializeMergedBM25StatsFrom(
+	combined *metacache.SegmentBM25Stats,
 ) (map[int64]*storage.Blob, error) {
-	segment, ok := s.metacache.GetSegmentByID(pack.segmentID)
-	if !ok {
-		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
-	}
-
-	historyStats := segment.GetBM25Stats()
-	var combined *metacache.SegmentBM25Stats
-	if historyStats == nil {
-		combined = metacache.NewEmptySegmentBM25Stats()
-	} else {
-		// Clone so we do not mutate the metaCache copy when merging extras.
-		combined = historyStats.Clone()
-	}
-	if len(extra) > 0 {
-		combined.Merge(extra)
-	}
-
 	fieldBytes, numRow, err := combined.Serialize()
 	if err != nil {
 		return nil, err

@@ -2021,6 +2021,95 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 assert hit is not None
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_search_emb_list_with_trailing_empty_arrays_and_scalar_filter(self):
+        """
+        target: test filtered emb-list search when sealed index data ends with empty arrays
+        method: insert non-empty arrays followed by empty arrays, flush, index, and search with a scalar filter
+        expected: search succeeds and returns every matching non-empty row
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_trailing_empty")
+        client = self._client()
+        dim = 32
+        non_empty_rows = 2000
+        total_rows = 3000
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=1,
+            nullable=False,
+        )
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        rng = np.random.default_rng(seed=19530)
+        vectors = rng.random((non_empty_rows, dim)).tolist()
+        data = [
+            {
+                "id": i,
+                "clips": [{"embedding": vectors[i]}] if i < non_empty_rows else [],
+            }
+            for i in range(total_rows)
+        ]
+        res, check = self.insert(client, collection_name, data)
+        assert check
+        assert res["insert_count"] == total_rows
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="clips[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        trailing_results, check = self.query(
+            client,
+            collection_name,
+            filter=f"id in [{non_empty_rows - 1}, {total_rows - 2}, {total_rows - 1}]",
+            output_fields=["id", "clips"],
+        )
+        assert check
+        assert len(trailing_results) == 3
+        trailing_results_by_id = {row["id"]: row["clips"] for row in trailing_results}
+        assert len(trailing_results_by_id[non_empty_rows - 1]) == 1
+        np.testing.assert_allclose(
+            trailing_results_by_id[non_empty_rows - 1][0]["embedding"],
+            vectors[non_empty_rows - 1],
+        )
+        assert trailing_results_by_id[total_rows - 2] == []
+        assert trailing_results_by_id[total_rows - 1] == []
+
+        search_tensor = EmbeddingList()
+        search_tensor.add(vectors[0])
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[search_tensor],
+            anns_field="clips[embedding]",
+            search_params={"metric_type": "MAX_SIM_COSINE", "params": {"ef": 64}},
+            filter="id < 10",
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) == 10
+        assert {hit["id"] for hit in results[0]} == set(range(10))
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_different_array_lengths(self):
         """
         target: test search with different EmbeddingList lengths
@@ -3805,6 +3894,124 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
             assert "clips" in result
             assert "normal_vector" not in result
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_struct_array_parent_output_with_diskann_index(self):
+        """
+        target: test query parent struct array output when vector sub-field uses DISKANN
+        method: build DISKANN on array_struct[float_vector], query id-only, then query id + array_struct
+        expected: both queries succeed and parent struct array output is returned
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_query_diskann_output")
+
+        client = self._client()
+        dim = 32
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("name", DataType.VARCHAR, max_length=64)
+        struct_schema.add_field("age", DataType.INT64)
+        struct_schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("nested_float_vector", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(
+            "array_struct",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+        )
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        rows = []
+        for i in range(3000):
+            rows.append(
+                {
+                    "id": i,
+                    "vector": [random.random() for _ in range(dim)],
+                    "array_struct": [
+                        {
+                            "name": f"n{i}",
+                            "age": i % 100,
+                            "float_vector": [random.random() for _ in range(dim)],
+                            "nested_float_vector": [random.random() for _ in range(dim)],
+                        },
+                        {
+                            "name": f"n{i}_alt",
+                            "age": (i + 1) % 100,
+                            "float_vector": [random.random() for _ in range(dim)],
+                            "nested_float_vector": [random.random() for _ in range(dim)],
+                        },
+                    ],
+                }
+            )
+        res, check = self.insert(client, collection_name, rows)
+        assert check
+        assert res["insert_count"] == len(rows)
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 8, "efConstruction": 64},
+        )
+        index_params.add_index(
+            field_name="array_struct[float_vector]",
+            index_type="DISKANN",
+            metric_type="MAX_SIM_COSINE",
+            params={},
+        )
+        index_params.add_index(
+            field_name="array_struct[nested_float_vector]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 8, "efConstruction": 64},
+        )
+        index_params.add_index(field_name="array_struct[name]", index_type="INVERTED")
+        index_params.add_index(field_name="array_struct[age]", index_type="STL_SORT")
+        res, check = self.create_index(
+            client,
+            collection_name,
+            index_params,
+            timeout=300,
+        )
+        assert check
+        res, check = self.load_collection(client, collection_name, timeout=300)
+        assert check
+
+        filter_expr = "MATCH_ANY(array_struct, $[age] >= 0)"
+        id_only_results, check = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=["id"],
+            limit=3,
+        )
+        assert check
+        assert len(id_only_results) > 0
+        assert all(set(row) == {"id"} for row in id_only_results)
+
+        struct_results, check = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=["id", "array_struct"],
+            limit=3,
+        )
+        assert check
+        assert len(struct_results) > 0
+        for row in struct_results:
+            assert "id" in row
+            assert "array_struct" in row
+            assert isinstance(row["array_struct"], list)
+            assert len(row["array_struct"]) > 0
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_with_expr_filter(self):
         """
@@ -4777,8 +4984,8 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"sub-field in non-nullable struct cannot be nullable individually, "
-            f"set nullable on the struct instead: structName=clips, subFieldName={nullable_field}",
+            ct.err_msg: f"Field '{nullable_field}' in struct 'clips' cannot be nullable individually, "
+            f"set nullable on the struct instead",
         }
         self.create_collection(
             client,

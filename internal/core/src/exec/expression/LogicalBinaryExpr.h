@@ -43,7 +43,7 @@ struct LogicalElementFunc {
                 left[i] |= right[i];
             } else {
                 ThrowInfo(
-                    OpTypeInvalid, "unsupported logical operator: {}", op);
+                    UnexpectedError, "unsupported logical operator: {}", op);
             }
         }
         */
@@ -57,7 +57,7 @@ struct LogicalElementFunc {
         } else if constexpr (op == LogicalOpType::Minus) {
             left.inplace_sub(right, n);
         } else {
-            ThrowInfo(OpTypeInvalid, "unsupported logical operator: {}", op);
+            ThrowInfo(UnexpectedError, "unsupported logical operator: {}", op);
         }
     }
 };
@@ -65,7 +65,7 @@ struct LogicalElementFunc {
 class PhyLogicalBinaryExpr : public Expr {
  public:
     PhyLogicalBinaryExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::LogicalBinaryExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx)

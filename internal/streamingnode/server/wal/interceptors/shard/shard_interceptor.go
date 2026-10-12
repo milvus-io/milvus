@@ -16,7 +16,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const interceptorName = "shard"
@@ -39,6 +41,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeInsert:             impl.handleInsertMessage,
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
+		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshotMessage,
 		message.MessageTypeSchemaChange:       impl.handleSchemaChange,
 		message.MessageTypeAlterCollection:    impl.handleAlterCollection,
 		message.MessageTypeCreateSegment:      impl.handleCreateSegment,
@@ -68,6 +71,11 @@ func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableM
 // handleCreateCollection handles the create collection message.
 func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	createCollectionMsg := message.MustAsMutableCreateCollectionMessageV1(msg)
+	body := createCollectionMsg.MustBody()
+	if body.GetCollectionSchema() == nil && len(body.GetSchema()) == 0 {
+		return nil, status.NewUnrecoverableError("create collection message does not contain collection schema")
+	}
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	header := createCollectionMsg.Header()
 	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
 		impl.shardManager.Logger().Warn(ctx, "collection already exists when creating collection", mlog.FieldCollectionID(header.GetCollectionId()))
@@ -81,9 +89,10 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 		return msgID, err
 	}
 	impl.shardManager.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	if schema := createCollectionMsg.MustBody().GetCollectionSchema(); schema != nil {
-		impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
-	}
+	// Legacy CreateCollection messages keep the schema in the serialized Schema
+	// field instead of CollectionSchema. Resolve both formats so Alloc always
+	// registers the WAL lifecycle key before later schema updates.
+	impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
 	return msgID, nil
 }
 
@@ -102,7 +111,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	function.ReleaseFunctionRunners(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
+	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
 
@@ -174,20 +183,31 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
 			mlog.Int32("schemaVersion", schemaVersion),
 			mlog.Err(err))
-		return nil, errors.Wrap(err, "CheckIfCollectionSchemaVersionMatch")
+		return nil, status.NewUnrecoverableError("unexpected error from CheckIfCollectionSchemaVersionMatch: %s", err.Error())
 	}
 	schemaVersion = correctSchemaVersion
-	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
-		impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
-			mlog.Int64("collectionID", header.GetCollectionId()),
-			mlog.Int32("schemaVersion", schemaVersion),
-			mlog.Err(err))
-		return nil, status.NewInner("failed to materialize function fields before WAL append: %s", err.Error())
+	if header.SchemaVersion == nil {
+		schemaVersion = function.LatestFunctionRunnerVersion
+	}
+	// Write-before function materialization is version-gated: it only runs once
+	// the whole cluster has confirmed version >= GateVersion (config default
+	// "auto"); before that the write path keeps the legacy format. The gate is
+	// applied at the config-item read layer, so GetAsBool already returns the
+	// effective value.
+	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
+		if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
+			impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
+				mlog.Int64("collectionID", header.GetCollectionId()),
+				mlog.Int32("schemaVersion", schemaVersion),
+				mlog.Err(err))
+			return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
+		}
 	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
-			// Proxy does not estimate binary size today. Use payload size after
-			// write-before materialization when the estimate is absent.
+			// Proxy does not estimate binary size today. Use the payload size;
+			// note this excludes materialized function output fields while the
+			// version gate is off (matching pre-feature behavior).
 			partition.BinarySize = uint64(msg.EstimateSize())
 		}
 		req := &shards.AssignSegmentRequest{
@@ -212,8 +232,8 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// we just redo it to refresh a new latest timetick.
 			return nil, redo.ErrRedo
 		}
-		if errors.IsAny(err, shards.ErrTooLargeInsert, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
-			// Message is too large, so retry operation is unrecoverable, can't be retry at client side.
+		if errors.IsAny(err, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
+			// The target metadata no longer exists, so retrying cannot recover the operation.
 			impl.shardManager.Logger().Warn(ctx, "unrecoverable insert operation", mlog.Object("message", msg), mlog.Err(err))
 			return nil, status.NewUnrecoverableError("fail to assign segment, %s", err.Error())
 		}
@@ -267,6 +287,16 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 	return appendOp(ctx, msg)
 }
 
+// handleCreateSnapshotMessage seals the old segments so later inserts cannot
+// change the snapshot's L1 data. The consuming-side Ack waits for their output.
+func (impl *shardInterceptor) handleCreateSnapshotMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	header := message.MustAsMutableCreateSnapshotMessageV2(msg).Header()
+	if _, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick()); err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+	return appendOp(ctx, msg)
+}
+
 // handleSchemaChange handles the schema change message.
 func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	schemaChangeMsg := message.MustAsMutableSchemaChangeMessageV2(msg)
@@ -304,8 +334,10 @@ func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg mes
 	if err != nil {
 		return msgID, err
 	}
-	if schema := putCollectionMsg.MustBody().GetUpdates().GetSchema(); schema != nil {
-		impl.updateFunctionRunners(header.GetCollectionId(), putCollectionMsg.VChannel(), schema)
+	if messageutil.IsSchemaChange(header) {
+		if schema := putCollectionMsg.MustBody().GetUpdates().GetSchema(); schema != nil {
+			impl.updateFunctionRunners(header.GetCollectionId(), putCollectionMsg.VChannel(), schema)
+		}
 	}
 	return msgID, nil
 }
@@ -377,7 +409,7 @@ func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Contex
 func (impl *shardInterceptor) Close() {
 	if schemaProvider, ok := impl.shardManager.(collectionSchemaProvider); ok {
 		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {
-			function.ReleaseFunctionRunners(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
+			function.GetManager().Release(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
 }

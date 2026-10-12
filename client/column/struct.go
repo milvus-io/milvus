@@ -21,21 +21,107 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 // columnStructArray represents a struct-array field. Each sub-column must itself be an
 // "array-of-X" column (e.g. ColumnInt32Array, ColumnFloatVectorArray) so that one entry
 // in the column corresponds to one row's variable-length list of struct elements.
 type columnStructArray struct {
-	fields []Column
-	name   string
+	fields   []Column
+	name     string
+	nullable bool
 }
 
 func NewColumnStructArray(name string, fields []Column) Column {
+	nullable := false
+	for _, field := range fields {
+		if field.Nullable() {
+			nullable = true
+			break
+		}
+	}
 	return &columnStructArray{
-		fields: fields,
-		name:   name,
+		fields:   fields,
+		name:     name,
+		nullable: nullable,
+	}
+}
+
+// NewColumnStructArrayFromSchema creates an empty StructArray column whose
+// child columns match schema. Values can then be appended as map[string]any.
+func NewColumnStructArrayFromSchema(name string, schema *entity.StructSchema) (Column, error) {
+	if schema == nil {
+		return nil, errors.New("struct schema is required")
+	}
+	fields := make([]Column, 0, len(schema.Fields))
+	for _, field := range schema.Fields {
+		if field == nil {
+			return nil, errors.New("struct schema contains a nil child")
+		}
+		child, err := newStructArrayChildColumn(field)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, child)
+	}
+	return NewColumnStructArray(name, fields), nil
+}
+
+func newStructArrayChildColumn(field *entity.Field) (Column, error) {
+	if field == nil {
+		return nil, errors.New("struct child field is required")
+	}
+
+	switch field.DataType {
+	case entity.FieldTypeBool:
+		return NewColumnBoolArray(field.Name, nil), nil
+	case entity.FieldTypeInt8:
+		return NewColumnInt8Array(field.Name, nil), nil
+	case entity.FieldTypeInt16:
+		return NewColumnInt16Array(field.Name, nil), nil
+	case entity.FieldTypeInt32:
+		return NewColumnInt32Array(field.Name, nil), nil
+	case entity.FieldTypeInt64:
+		return NewColumnInt64Array(field.Name, nil), nil
+	case entity.FieldTypeFloat:
+		return NewColumnFloatArray(field.Name, nil), nil
+	case entity.FieldTypeDouble:
+		return NewColumnDoubleArray(field.Name, nil), nil
+	case entity.FieldTypeVarChar, entity.FieldTypeString:
+		return NewColumnVarCharArray(field.Name, nil), nil
+	case entity.FieldTypeFloatVector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnFloatVectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeFloat16Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnFloat16VectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeBFloat16Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnBFloat16VectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeBinaryVector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnBinaryVectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeInt8Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnInt8VectorArray(field.Name, int(dim), nil), nil
+	default:
+		return nil, errors.Newf("unsupported struct sub-field type %v for field %q", field.DataType, field.Name)
 	}
 }
 
@@ -73,8 +159,9 @@ func (c *columnStructArray) Slice(start, end int) Column {
 		fields[idx] = subField.Slice(start, end)
 	}
 	return &columnStructArray{
-		name:   c.name,
-		fields: fields,
+		name:     c.name,
+		fields:   fields,
+		nullable: c.nullable,
 	}
 }
 
@@ -99,14 +186,24 @@ func (c *columnStructArray) FieldData() *schemapb.FieldData {
 // If any sub-field append fails, previously appended sub-fields are rolled back to their pre-call
 // lengths so sub-columns stay in lock-step.
 func (c *columnStructArray) AppendValue(value any) error {
+	if value == nil {
+		return c.AppendNull()
+	}
 	row, ok := value.(map[string]any)
 	if !ok {
 		return errors.Newf("struct array AppendValue expects map[string]any, got %T", value)
 	}
+	if row == nil {
+		return c.AppendNull()
+	}
 	// pre-check all keys exist before mutating any sub-column.
 	for _, sub := range c.fields {
-		if _, present := row[sub.Name()]; !present {
+		value, present := row[sub.Name()]
+		if !present {
 			return errors.Newf("struct array AppendValue: missing sub-field %q", sub.Name())
+		}
+		if value == nil {
+			return errors.Newf("struct array AppendValue: sub-field %q is nil; use a nil struct row to append null", sub.Name())
 		}
 	}
 	preLens := make([]int, len(c.fields))
@@ -125,6 +222,14 @@ func (c *columnStructArray) AppendValue(value any) error {
 }
 
 func (c *columnStructArray) Get(idx int) (any, error) {
+	isNull, err := c.IsNull(idx)
+	if err != nil {
+		return nil, err
+	}
+	if isNull {
+		return nil, nil
+	}
+
 	m := make(map[string]any)
 	for _, field := range c.fields {
 		v, err := field.Get(idx)
@@ -153,25 +258,84 @@ func (c *columnStructArray) GetAsBool(idx int) (bool, error) {
 }
 
 func (c *columnStructArray) IsNull(idx int) (bool, error) {
-	return false, nil
+	if idx < 0 || idx >= c.Len() {
+		return false, errors.Newf("index %d out of range[0, %d)", idx, c.Len())
+	}
+	if !c.nullable {
+		return false, nil
+	}
+	return c.fields[0].IsNull(idx)
 }
 
 func (c *columnStructArray) AppendNull() error {
-	return errors.New("struct array column does not support AppendNull")
+	if !c.nullable {
+		return errors.New("append null to not nullable struct array column")
+	}
+	for _, field := range c.fields {
+		if !field.Nullable() {
+			return errors.Newf("struct array AppendNull: sub-field %q is not nullable", field.Name())
+		}
+	}
+	for _, field := range c.fields {
+		if err := field.AppendNull(); err != nil {
+			return errors.Wrapf(err, "struct array AppendNull: sub-field %q", field.Name())
+		}
+	}
+	return nil
 }
 
 func (c *columnStructArray) Nullable() bool {
-	return false
+	return c.nullable
 }
 
 func (c *columnStructArray) SetNullable(nullable bool) {
-	// Shall not be set
+	c.nullable = nullable
+	for _, field := range c.fields {
+		field.SetNullable(nullable)
+	}
 }
 
 func (c *columnStructArray) ValidateNullable() error {
+	if c.nullable && len(c.fields) == 0 {
+		return errors.New("nullable struct array requires at least one sub-field")
+	}
 	for _, field := range c.fields {
 		if err := field.ValidateNullable(); err != nil {
-			return err
+			return errors.Wrapf(err, "struct array sub-field %q", field.Name())
+		}
+		if field.Nullable() != c.nullable {
+			return errors.Newf("struct array sub-field %q nullable %t does not match parent nullable %t",
+				field.Name(), field.Nullable(), c.nullable)
+		}
+	}
+	if len(c.fields) == 0 {
+		return nil
+	}
+
+	rowCount := c.fields[0].Len()
+	for _, field := range c.fields[1:] {
+		if field.Len() != rowCount {
+			return errors.Newf("struct array sub-field %q length %d does not match length %d",
+				field.Name(), field.Len(), rowCount)
+		}
+	}
+	if !c.nullable {
+		return nil
+	}
+	for row := 0; row < rowCount; row++ {
+		expected, err := c.fields[0].IsNull(row)
+		if err != nil {
+			return errors.Wrapf(err, "struct array sub-field %q row %d", c.fields[0].Name(), row)
+		}
+		for _, field := range c.fields[1:] {
+			actual, err := field.IsNull(row)
+			if err != nil {
+				return errors.Wrapf(err, "struct array sub-field %q row %d", field.Name(), row)
+			}
+			if actual != expected {
+				return errors.Newf("struct array sub-field %q null state at row %d does not match sub-field %q",
+					field.Name(), row, c.fields[0].Name())
+			}
 		}
 	}
 	return nil
@@ -184,5 +348,8 @@ func (c *columnStructArray) CompactNullableValues() {
 }
 
 func (c *columnStructArray) ValidCount() int {
-	return c.Len()
+	if len(c.fields) == 0 {
+		return 0
+	}
+	return c.fields[0].ValidCount()
 }

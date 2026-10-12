@@ -7,10 +7,13 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -24,6 +27,10 @@ var errGracefulShutdown = errors.New("graceful shutdown")
 // ProducerOptions is the options for creating a producer.
 type ProducerOptions struct {
 	PChannel string
+}
+
+type ProduceOption struct {
+	IdempotencyKey string
 }
 
 // NewResumableProducer creates a new producer.
@@ -80,6 +87,10 @@ type ResumableProducer struct {
 
 // BeginProduce begins a new produce task.
 func (p *ResumableProducer) BeginProduce(ctx context.Context, msgs ...message.MutableMessage) (*ProduceGuard, error) {
+	return p.BeginProduceWithOptions(ctx, msgs)
+}
+
+func (p *ResumableProducer) BeginProduceWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...ProduceOption) (*ProduceGuard, error) {
 	if len(msgs) == 0 {
 		panic("begin produce with no messages")
 	}
@@ -97,6 +108,7 @@ func (p *ResumableProducer) BeginProduce(ctx context.Context, msgs ...message.Mu
 		return &ProduceGuard{
 			producer: p,
 			msgs:     msgs,
+			opts:     opts,
 			r:        nil,
 		}, nil
 	}
@@ -108,6 +120,7 @@ func (p *ResumableProducer) BeginProduce(ctx context.Context, msgs ...message.Mu
 	return &ProduceGuard{
 		producer: p,
 		msgs:     msgs,
+		opts:     opts,
 		r:        r,
 	}, nil
 }
@@ -124,7 +137,15 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 		if err != nil {
 			return nil, err
 		}
-		produceResult, err := producerHandler.Append(ctx, msg)
+		appendCtx, span := p.startDistAppendSpanIfRemote(ctx, producerHandler, msg)
+		produceResult, err := producerHandler.Append(appendCtx, msg)
+		if span != nil {
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+			}
+			span.End()
+		}
 		if err == nil {
 			return produceResult, nil
 		}
@@ -133,6 +154,11 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 			return nil, errors.Mark(err, errs.ErrCanceledOrDeadlineExceed)
 		}
 		if sErr := status.AsStreamingError(err); sErr != nil {
+			if sErr.IsPartialUpdateRetryableCAS() {
+				// Proxy must re-query and rebuild the row instead of retrying the
+				// transaction with stale merged fields.
+				return nil, err
+			}
 			// if the error is txn unavailable or unrecoverable error,
 			// it cannot be retried forever.
 			// we should mark it and return.
@@ -150,6 +176,20 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 			}
 		}
 	}
+}
+
+func (p *ResumableProducer) startDistAppendSpanIfRemote(ctx context.Context, producerHandler handler.Producer, msg message.MutableMessage) (context.Context, trace.Span) {
+	if isLocalProducer(producerHandler) {
+		return ctx, nil
+	}
+	return message.StartSpanForMessage(ctx, msg, message.SpanNameWALDistAppend)
+}
+
+func isLocalProducer(producerHandler handler.Producer) bool {
+	if pm, ok := producerHandler.(producerWithMetrics); ok {
+		return registry.IsLocal(pm.Producer)
+	}
+	return registry.IsLocal(producerHandler)
 }
 
 // resumeLoop is used to resume producer from error.

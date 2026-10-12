@@ -66,8 +66,8 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 				return merr.Success(), nil
 			},
 			expectLabels: [][]string{
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, dbName, collection},
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.SuccessLabel, dbName, collection},
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, metrics.CauseNA, dbName, collection},
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.SuccessLabel, metrics.CauseNA, dbName, collection},
 			},
 		},
 		{
@@ -83,8 +83,8 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 				return merr.Status(merr.WrapErrServiceInternal("unexpcted")), nil
 			},
 			expectLabels: [][]string{
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, dbName, collection},
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.FailSystemLabel, dbName, collection},
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, metrics.CauseNA, dbName, collection},
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.FailLabel, metrics.CauseSystem, dbName, collection},
 			},
 		},
 		{
@@ -102,8 +102,8 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 				}, nil
 			},
 			expectLabels: [][]string{
-				{paramtable.GetStringNodeID(), "Insert", metrics.TotalLabel, dbName, collection},
-				{paramtable.GetStringNodeID(), "Insert", metrics.RetryLabel, dbName, collection},
+				{paramtable.GetStringNodeID(), "Insert", metrics.TotalLabel, metrics.CauseNA, dbName, collection},
+				{paramtable.GetStringNodeID(), "Insert", metrics.RetryLabel, metrics.CauseNA, dbName, collection},
 			},
 		},
 		{
@@ -119,9 +119,9 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 				return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
 			},
 			expectLabels: [][]string{
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, dbName, collection},
-				// Unauthenticated is a caller-side rejection -> rejected_user (review §8).
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.RejectedUserLabel, dbName, collection},
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, metrics.CauseNA, dbName, collection},
+				// Unauthenticated is the caller's fault -> rejected, cause=user.
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.RejectedLabel, metrics.CauseUser, dbName, collection},
 			},
 		},
 	}

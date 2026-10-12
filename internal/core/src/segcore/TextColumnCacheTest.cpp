@@ -32,6 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include "common/EasyAssert.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 
 namespace milvus::segcore {
@@ -224,30 +226,6 @@ ExpectTaskUsesCachedReaderLock(
     }
 }
 
-TEST(TextColumnCache, ReadTextSerializesCallsOnCachedReader) {
-    auto tracker = std::make_shared<BlockingCallTracker>();
-    auto factory_calls = std::make_shared<std::atomic<int>>(0);
-    auto cache = std::make_shared<TextColumnCache>(
-        TextColumnCacheConfig{}, MakeReaderFactory(tracker, factory_calls));
-    auto properties = std::make_shared<milvus_storage::api::Properties>();
-    const std::string lob_base_path = "/tmp/text-column-cache";
-    auto ref = std::make_shared<std::vector<uint8_t>>(MakeLobReference());
-    auto text = std::make_shared<std::string>();
-
-    auto cached_reader =
-        cache->GetOrCreateReader(lob_base_path, nullptr, *properties);
-    ASSERT_NE(cached_reader, nullptr);
-
-    ExpectTaskUsesCachedReaderLock(cached_reader, tracker, [=] {
-        *text = cache->ReadText(
-            lob_base_path, nullptr, *properties, ref->data(), ref->size());
-    });
-
-    EXPECT_EQ(*text, "mock-text");
-    EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
-    EXPECT_EQ(tracker->CallCount(), 1);
-}
-
 TEST(TextColumnCache, ReadBatchSerializesCallsOnCachedReader) {
     auto tracker = std::make_shared<BlockingCallTracker>();
     auto factory_calls = std::make_shared<std::atomic<int>>(0);
@@ -304,6 +282,30 @@ TEST(TextColumnCache, ReadBatchIntoSerializesCallsOnCachedReader) {
     EXPECT_EQ(dst->Get(1), "mock-text");
     EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
     EXPECT_EQ(tracker->CallCount(), 1);
+}
+
+TEST(TextColumnCache, PreservesStorageErrorWhenCreatingReader) {
+    auto status = milvus_storage::MakeExtendError(
+        milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+        "storage timeout");
+    TextColumnCache cache(
+        TextColumnCacheConfig{},
+        [status](std::shared_ptr<arrow::fs::FileSystem>, const LobColumnConfig&)
+            -> arrow::Result<std::unique_ptr<LobColumnReader>> {
+            return status;
+        });
+    milvus_storage::api::Properties properties;
+
+    try {
+        static_cast<void>(cache.GetOrCreateReader(
+            "/tmp/text-column-cache", nullptr, properties));
+        FAIL() << "expected storage error";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(),
+                  milvus::ErrorCode::StorageTransientError);
+        EXPECT_NE(std::string(error.what()).find("storage timeout"),
+                  std::string::npos);
+    }
 }
 
 }  // namespace

@@ -55,7 +55,8 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeDropPartition: {
 		ExclusiveRequired: true,
 	},
-	MessageTypeImport: {},
+	MessageTypeImport:       {},
+	MessageTypeUpdateImport: {},
 	MessageTypeCommitImport: {
 		ExclusiveRequired: true,
 	},
@@ -70,6 +71,9 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		SelfControlled: true,
 	},
 	MessageTypeManualFlush: {
+		ExclusiveRequired: true,
+	},
+	MessageTypeCreateSnapshot: {
 		ExclusiveRequired: true,
 	},
 	MessageTypeAlterReplicateConfig: {
@@ -120,11 +124,18 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeCreateIndex:         {},
 	MessageTypeAlterIndex:          {},
 	MessageTypeDropIndex:           {},
+	MessageTypeAlterRLSMetadata:    {},
+	MessageTypeDropRLSMetadata:     {},
 	MessageTypeFlushAll: {
 		ExclusiveRequired: true,
 	},
 	MessageTypeAlterWAL: {
 		ExclusiveRequired: true,
+	},
+	MessageTypeRecoveryBarrier: {
+		LogLevel:       mlog.InfoLevel,
+		IsSystem:       true,
+		SelfControlled: true,
 	},
 }
 
@@ -148,6 +159,8 @@ func (t MessageType) Valid() bool {
 // IsExclusiveRequired checks if the MessageType is exclusive append required.
 // An exclusive required message type is that the message's timetick should keep same order with message id.
 // And when the message is appending, other messages with the same vchannel cannot append concurrently.
+// Collection-scoped broadcast messages apply this requirement to their data VChannel copies. Their control-channel
+// copies are ordered by broadcaster resource keys so non-conflicting DDL can append concurrently.
 func (t MessageType) IsExclusiveRequired() bool {
 	return messageTypePropertiesMap[t].ExclusiveRequired
 }

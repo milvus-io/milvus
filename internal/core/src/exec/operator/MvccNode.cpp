@@ -76,20 +76,6 @@ PhyMvccNode::GetOutput() {
     tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
     WaitPrefetch();
 
-    // Visibility filtering disabled globally: skip all filtering.
-    if (!segcore::SegcoreConfig::default_config()
-             .get_visibility_filter_enabled()) {
-        auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
-                                               TargetBitmap(active_count_),
-                                               TargetBitmap(active_count_))
-                                         : GetColumnVector(input_);
-        if (is_source_node_) {
-            query_context->set_all_rows_visible(true);
-        }
-        is_finished_ = true;
-        return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
-    }
-
     // ── Sealed-segment fast path (skip timestamp mask) ──
     // On a sealed segment without TTL, when query_ts covers all inserts,
     // mask_with_timestamps is redundant (all rows pass).  Only apply the

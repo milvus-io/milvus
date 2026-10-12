@@ -28,7 +28,7 @@ import (
 )
 
 func init() {
-	MustRegisterOperator(types.OpTypeMap, NewMapOpFromRepr)
+	MustRegisterOperator(types.OpTypeMap, NewMapOpFromReprWithContext)
 }
 
 // MapOp applies a function to specified columns of the DataFrame.

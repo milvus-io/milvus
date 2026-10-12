@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/codes"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -115,6 +116,7 @@ func waitForReservationOK(ctx context.Context, tasks ...*ProduceGuard) error {
 type ProduceGuard struct {
 	producer *ResumableProducer
 	msgs     []message.MutableMessage
+	opts     []ProduceOption
 	r        *rate.Reservation
 }
 
@@ -123,22 +125,64 @@ func (g *ProduceGuard) commit(ctx context.Context) (*types.AppendResult, error) 
 	if len(g.msgs) == 0 {
 		panic("append task with no messages")
 	}
-	// auto commit if there's only one message.
-	if len(g.msgs) == 1 {
+	if g.msgs[0].BroadcastHeader() != nil {
+		if len(g.msgs) != 1 {
+			panic("broadcast guard must hold exactly one message")
+		}
 		return g.producer.produceInternal(ctx, g.msgs[0])
+	}
+	if len(g.msgs) == 1 {
+		// No idempotency key is applied here: a single message already carries its
+		// own key from the layer that built it (the proxy, for inserts).
+		msg := g.msgs[0]
+		// Only a local CAS message without transaction context needs wrapping.
+		// Replication already carries the source transaction and must preserve it.
+		if !message.HasPartialUpdateCAS(msg) || msg.TxnContext() != nil || msg.ReplicateHeader() != nil {
+			return g.produceAutocommit(ctx, msg)
+		}
 	}
 	// produce with transaction.
 	return g.produceTxn(ctx, g.msgs...)
 }
 
+func (g *ProduceGuard) produceAutocommit(ctx context.Context, msg message.MutableMessage) (_ *types.AppendResult, err error) {
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAutocommit)
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	message.InjectTraceContext(ctx, msg)
+	return g.producer.produceInternal(ctx, msg)
+}
+
 // produceTxn produces the messages with a transaction, retry if the transaction is expired.
-func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMessage) (*types.AppendResult, error) {
+func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMessage) (_ *types.AppendResult, err error) {
+	ctx, span := message.StartSpan(ctx, message.SpanNameWALTxn)
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	for _, msg := range msgs {
+		message.InjectTraceContext(ctx, msg)
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		result, err := g.produceWithTxnOnce(ctx, msgs...)
-		if err := status.AsStreamingError(err); err != nil && err.IsTxnExpired() {
+		if streamingErr := status.AsStreamingError(err); streamingErr != nil && streamingErr.IsTxnExpired() {
+			for _, msg := range msgs {
+				if message.HasPartialUpdateCAS(msg) {
+					return nil, status.NewPartialUpdateRetryable("partial update transaction expired before commit")
+				}
+			}
 			// if the transaction is expired,
 			// there may be wal is transferred to another streaming node,
 			// retry it with new transaction.
@@ -153,7 +197,15 @@ func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMe
 }
 
 // produceWithTxnOnce produces the messages with a transaction once.
-func (g *ProduceGuard) produceWithTxnOnce(ctx context.Context, msgs ...message.MutableMessage) (*types.AppendResult, error) {
+func (g *ProduceGuard) produceWithTxnOnce(ctx context.Context, msgs ...message.MutableMessage) (_ *types.AppendResult, err error) {
+	partialUpdateCAS := false
+	for _, msg := range msgs {
+		if message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil {
+			partialUpdateCAS = true
+			break
+		}
+	}
+
 	// a txn batch should always belong to one vchannel.
 	txn, err := g.beginTxn(ctx, msgs[0].VChannel())
 	if err != nil {
@@ -162,7 +214,7 @@ func (g *ProduceGuard) produceWithTxnOnce(ctx context.Context, msgs ...message.M
 	if err := g.appendTxnBody(ctx, txn, msgs...); err != nil {
 		return nil, err
 	}
-	return g.commitTxn(ctx, msgs[0].VChannel(), txn)
+	return g.commitTxn(ctx, msgs[0].VChannel(), txn, partialUpdateCAS)
 }
 
 // beginTxn begins a new transaction.
@@ -173,6 +225,7 @@ func (g *ProduceGuard) beginTxn(ctx context.Context, vchannel string) (*message.
 		WithHeader(&message.BeginTxnMessageHeader{}).
 		WithBody(&message.BeginTxnMessageBody{}).
 		MustBuildMutable()
+	message.InjectTraceContext(ctx, beginTxn)
 
 	result, err := g.producer.produceInternal(ctx, beginTxn)
 	if err != nil {
@@ -209,14 +262,40 @@ func (g *ProduceGuard) appendTxnBody(ctx context.Context, txn *message.TxnContex
 }
 
 // commitTxn commits the transaction.
-func (g *ProduceGuard) commitTxn(ctx context.Context, vchannel string, txn *message.TxnContext) (*types.AppendResult, error) {
+//
+// The idempotency key for a single insert is stamped on the message by the proxy
+// (single-sourced alongside the insert result). Only the commit-txn message is
+// synthesized here in the producer, out of the proxy's reach, so it is the one
+// message that needs the key applied at this layer.
+func (g *ProduceGuard) commitTxn(
+	ctx context.Context,
+	vchannel string,
+	txn *message.TxnContext,
+	partialUpdateCAS bool,
+) (*types.AppendResult, error) {
 	commitTxn := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel(vchannel).
 		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey(message.IdempotencyKey(idempotencyKeyFromProduceOptions(g.opts...))).
 		MustBuildMutable()
+	if partialUpdateCAS {
+		if err := message.MarkPartialUpdateCASCommit(commitTxn); err != nil {
+			return nil, err
+		}
+	}
+	message.InjectTraceContext(ctx, commitTxn)
 
 	return g.producer.produceInternal(ctx, commitTxn.WithTxnContext(*txn))
+}
+
+func idempotencyKeyFromProduceOptions(opts ...ProduceOption) string {
+	for i := len(opts) - 1; i >= 0; i-- {
+		if opts[i].IdempotencyKey != "" {
+			return opts[i].IdempotencyKey
+		}
+	}
+	return ""
 }
 
 // Cancel cancel the produce task.

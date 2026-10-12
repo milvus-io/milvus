@@ -35,11 +35,6 @@ type SealedSegment interface {
 	// LoadFieldData loads field data into the segment.
 	LoadFieldData(ctx context.Context, request *LoadFieldDataRequest) (*LoadFieldDataResult, error)
 
-	// DropIndex drops the index of the segment.
-	DropIndex(ctx context.Context, fieldID int64) error
-
-	DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error
-
 	Reopen(ctx context.Context, request *ReopenRequest) error
 }
 

@@ -23,8 +23,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // broadcastAlterLoadConfigCollectionV2ForLoadCollection is called when the load collection request is received.
@@ -45,19 +47,62 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
-	// if user specified the replica number in load request, load config changes won't be apply to the collection automatically
-	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
-	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, req.GetReplicaNumber(), req.GetResourceGroups(), req.GetCollectionID())
+	replicaNumber, resourceGroups, scopedResourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
+		ctx,
+		req.GetReplicaNumber(),
+		req.GetResourceGroups(),
+		req.GetCollectionID(),
+	)
 	if err != nil {
 		return err
 	}
 
 	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
-	// only check node number when the collection is not loaded
-	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, currentLoadConfig.Collection == nil)
+	// Node numbers are checked for a first load, and not for a config update
+	// on a loaded collection, which is master's rule and stays the stock
+	// binary's. With a form installed, a request that names resource groups
+	// on a loaded collection and asks one of them for more replicas than it
+	// holds is not a config update: it is a scoped expansion into those
+	// groups (see completePlacementForOutOfScopeResourceGroups), which
+	// places replicas exactly as a first load does, so it is admitted
+	// against the same bounds. Without the check, a group with no node would
+	// receive replicas that never get a delegator: the scoped task's clock
+	// would pause on an unknown progress forever and the group would report 0
+	// indefinitely.
+	// LoadPartitions has always passed true here for the same reason.
+	//
+	// Admission runs only for a request that ADDS replicas to a group it
+	// names. A scoped request that adds none is not admitted against
+	// anything: the same load re-sent, a shrink, or a request that changes
+	// only its load fields, partitions, priority or replica mode at the
+	// same counts - a config update, which master never admits either. None
+	// of these places a replica, and refusing one for a node that is
+	// restarting would turn an idempotent retry into a failure against a
+	// collection that is still serving.
+	//
+	// Whether the request is scoped is the decision getLoadReplicaConfigForRequest
+	// took, not a second reading of the request: under a cluster-level force
+	// override the groups the request named are discarded and the load states
+	// the whole placement, which is a config update like any other.
+	requestedReplicasNumber, err := utils.ReplicaNumberByResourceGroup(resourceGroups, replicaNumber)
 	if err != nil {
 		return err
 	}
+	checkNodeNum := currentLoadConfig.Collection == nil ||
+		(extension.FormInstalled() && len(scopedResourceGroups) > 0 && scopedLoadAddsReplicas(requestedReplicasNumber, currentLoadConfig))
+	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, checkNodeNum)
+	if err != nil {
+		return err
+	}
+	// With a form installed, a request that names resource groups speaks only
+	// for those and leaves the placement of the others alone; a request that
+	// names none - and every request on a stock binary - states the whole
+	// placement, which is the native behavior, and this returns what
+	// AssignReplica just produced. The scoping list comes from the same call
+	// that resolved the configuration, so both are decided from one reading of
+	// it.
+	expectedReplicasNumber = completePlacementForOutOfScopeResourceGroups(
+		ctx, req.GetCollectionID(), scopedResourceGroups, expectedReplicasNumber, currentLoadConfig)
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
 		Meta:           s.meta,
 		CollectionInfo: coll,
@@ -81,8 +126,75 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 			mlog.Int64("collectionID", req.GetCollectionID()))
 		return nil
 	}
+	requiredByRG, err := s.checkLoadResource(ctx, alterLoadConfigReq)
+	if err != nil {
+		return err
+	}
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	if err != nil {
+		return err
+	}
+	recordLoadResourceDemand(requiredByRG)
+	return nil
+}
+
+// getLoadReplicaConfigForRequest resolves the replica configuration a load
+// request runs with. It returns, in order: the replica number, the resource
+// groups to assign replicas in (defaulted, which is what AssignReplica needs),
+// the resource groups the REQUEST itself speaks for, and whether the caller
+// named a replica number.
+//
+// The third return value is the scoping decision, and it is the raw list off
+// the request, taken before the defaulting below rewrites an empty one to the
+// default resource group. A request naming no group is a request about the
+// collection, not a request about the default group: reading the defaulted list
+// instead would turn every bare load into a request scoped to
+// __default_resource_group, carry every other group's replicas through it, and
+// so add a replica nobody asked for to a load_collection and refuse a
+// load_partitions for "changing the replica number" of a group the caller never
+// mentioned.
+//
+// Empty means "this request states the whole placement". A cluster-level force
+// override states it by definition -- it replaces both the replica number and
+// the resource groups of every load -- so it answers empty however the request
+// itself was written, and it is read exactly once here, so the two answers
+// cannot disagree with each other.
+func (s *Server) getLoadReplicaConfigForRequest(ctx context.Context, replicaNumber int32, resourceGroups []string, collectionID int64) (int32, []string, []string, bool, error) {
+	// If force override is enabled with a complete cluster-level load config,
+	// new load requests are interpreted as cluster-managed even when the request
+	// carries explicit replica/RG parameters.
+	if overrideReplicaNumber, overrideResourceGroups, ok := getClusterLevelLoadConfigForForceOverride(); ok {
+		mlog.Info(ctx,
+			"force override user-specified replica mode for load request",
+			mlog.Int64("collectionID", collectionID),
+			mlog.Int32("replicaNumber", overrideReplicaNumber),
+			mlog.Strings("resourceGroups", overrideResourceGroups))
+		return overrideReplicaNumber, overrideResourceGroups, nil, false, nil
+	}
+	scopedResourceGroups := resourceGroups
+
+	// If user specified the replica number in load request, load config changes
+	// won't be applied to the collection automatically.
+	userSpecifiedReplicaMode := replicaNumber > 0
+	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, replicaNumber, resourceGroups, collectionID)
+	return replicaNumber, resourceGroups, scopedResourceGroups, userSpecifiedReplicaMode, err
+}
+
+func getClusterLevelLoadConfigForForceOverride() (int32, []string, bool) {
+	queryCoordCfg := &paramtable.Get().QueryCoordCfg
+	if !queryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool() {
+		return 0, nil, false
+	}
+
+	replicaNumber := queryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
+	resourceGroups := queryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	if replicaNumber <= 0 || len(resourceGroups) == 0 {
+		return 0, nil, false
+	}
+	if len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
+		return 0, nil, false
+	}
+	return replicaNumber, resourceGroups, true
 }
 
 // getDefaultResourceGroupsAndReplicaNumber gets the default resource groups and replica number for the collection.

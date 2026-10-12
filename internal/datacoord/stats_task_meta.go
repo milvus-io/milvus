@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
@@ -45,6 +46,8 @@ type statsTaskMeta struct {
 
 	// segmentID + SubJobType -> statsTask
 	segmentID2Tasks *typeutil.ConcurrentMap[string, *indexpb.StatsTask]
+
+	deprecatedSortTaskIDs []int64
 }
 
 func newStatsTaskMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*statsTaskMeta, error) {
@@ -67,21 +70,16 @@ func createSecondaryIndexKey(segmentID UniqueID, subJobType string) string {
 
 func (stm *statsTaskMeta) reloadFromKV() error {
 	record := timerecord.NewTimeRecorder("statsTaskMeta-reloadFromKV")
-	// load stats task
 	statsTasks, err := stm.catalog.ListStatsTasks(stm.ctx)
 	if err != nil {
 		mlog.Error(stm.ctx, "statsTaskMeta reloadFromKV load stats tasks failed", mlog.Err(err))
 		return err
 	}
+
+	deprecatedSortTaskIDs := make([]int64, 0, len(statsTasks))
 	for _, t := range statsTasks {
-		// sort stats task no need to reload
 		if t.GetSubJobType() == indexpb.StatsSubJob_Sort {
-			if err := stm.catalog.DropStatsTask(stm.ctx, t.GetTaskID()); err != nil {
-				mlog.Warn(stm.ctx, "drop stats task failed",
-					mlog.FieldTaskID(t.GetTaskID()),
-					mlog.FieldSegmentID(t.GetSegmentID()),
-					mlog.Err(err))
-			}
+			deprecatedSortTaskIDs = append(deprecatedSortTaskIDs, t.GetTaskID())
 			continue
 		}
 		stm.tasks.Insert(t.GetTaskID(), t)
@@ -90,8 +88,54 @@ func (stm *statsTaskMeta) reloadFromKV() error {
 		stm.segmentID2Tasks.Insert(secondaryKey, t)
 	}
 
-	mlog.Info(stm.ctx, "statsTaskMeta reloadFromKV done", mlog.Duration("duration", record.ElapseSpan()))
+	stm.deprecatedSortTaskIDs = deprecatedSortTaskIDs
+	mlog.Info(stm.ctx, "statsTaskMeta reloadFromKV done",
+		mlog.Duration("duration", record.ElapseSpan()),
+		mlog.Int("deprecatedSortTasks", len(deprecatedSortTaskIDs)))
 	return nil
+}
+
+func (stm *statsTaskMeta) StartCleanupDeprecatedSortTasks(ctx context.Context, wg *sync.WaitGroup) {
+	taskIDs := stm.deprecatedSortTaskIDs
+	if len(taskIDs) == 0 {
+		return
+	}
+	stm.deprecatedSortTaskIDs = nil
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		stm.cleanupDeprecatedSortTasks(ctx, taskIDs)
+	}()
+}
+
+func (stm *statsTaskMeta) cleanupDeprecatedSortTasks(ctx context.Context, taskIDs []int64) {
+	total := len(taskIDs)
+	mlog.Info(ctx, "start cleaning up deprecated sort tasks", mlog.Int("total", total))
+	cleaned := 0
+	for _, id := range taskIDs {
+		select {
+		case <-ctx.Done():
+			mlog.Info(ctx, "deprecated sort task cleanup aborted",
+				mlog.Int("cleaned", cleaned),
+				mlog.Int("remaining", total-cleaned))
+			return
+		default:
+		}
+		if err := stm.catalog.DropStatsTask(ctx, id); err != nil {
+			mlog.RatedWarn(ctx, rate.Limit(10), "drop deprecated sort task failed",
+				mlog.FieldTaskID(id), mlog.Err(err))
+			continue
+		}
+		cleaned++
+		if cleaned%10000 == 0 {
+			mlog.Info(ctx, "deprecated sort task cleanup progress",
+				mlog.Int("cleaned", cleaned),
+				mlog.Int("total", total))
+		}
+	}
+	mlog.Info(ctx, "deprecated sort task cleanup finished",
+		mlog.Int("cleaned", cleaned),
+		mlog.Int("total", total))
 }
 
 func (stm *statsTaskMeta) updateMetrics() {
@@ -313,6 +357,16 @@ func (stm *statsTaskMeta) GetStatsTaskStateBySegmentID(segmentID int64, subJobTy
 		state = t.GetState()
 	}
 	return state
+}
+
+// HasStatsTask reports whether a task for (segmentID, subJobType) is recorded in
+// meta, regardless of its state: a Finished or Failed task still counts until GC
+// recycles it, which is exactly the condition under which AddStatsTask would
+// reject a resubmission.
+func (stm *statsTaskMeta) HasStatsTask(segmentID int64, subJobType indexpb.StatsSubJob) bool {
+	secondaryKey := createSecondaryIndexKey(segmentID, subJobType.String())
+	_, exists := stm.segmentID2Tasks.Get(secondaryKey)
+	return exists
 }
 
 func (stm *statsTaskMeta) CanCleanedTasks() []int64 {

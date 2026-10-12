@@ -98,7 +98,19 @@ namespace neon {
     FUNC(__VA_ARGS__, BitXor, GT);   \
     FUNC(__VA_ARGS__, BitXor, LE);   \
     FUNC(__VA_ARGS__, BitXor, LT);   \
-    FUNC(__VA_ARGS__, BitXor, NE);
+    FUNC(__VA_ARGS__, BitXor, NE);   \
+    FUNC(__VA_ARGS__, Shl, EQ);      \
+    FUNC(__VA_ARGS__, Shl, GE);      \
+    FUNC(__VA_ARGS__, Shl, GT);      \
+    FUNC(__VA_ARGS__, Shl, LE);      \
+    FUNC(__VA_ARGS__, Shl, LT);      \
+    FUNC(__VA_ARGS__, Shl, NE);      \
+    FUNC(__VA_ARGS__, Shr, EQ);      \
+    FUNC(__VA_ARGS__, Shr, GE);      \
+    FUNC(__VA_ARGS__, Shr, GT);      \
+    FUNC(__VA_ARGS__, Shr, LE);      \
+    FUNC(__VA_ARGS__, Shr, LT);      \
+    FUNC(__VA_ARGS__, Shr, NE);
 
 ///////////////////////////////////////////////////////////////////////////
 

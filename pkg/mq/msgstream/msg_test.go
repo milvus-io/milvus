@@ -223,9 +223,9 @@ func TestInsertMsg_CheckAlignedRejectsNullableVectorNonCompactData(t *testing.T)
 			fieldData: &schemapb.FieldData{
 				FieldName: "vec",
 				Type:      schemapb.DataType_FloatVector,
-				ValidData: validData,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: validData,
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
 						Data: []float32{1, 2, 0, 0, 3, 4},
 					}},
@@ -237,10 +237,10 @@ func TestInsertMsg_CheckAlignedRejectsNullableVectorNonCompactData(t *testing.T)
 			fieldData: &schemapb.FieldData{
 				FieldName: "vec",
 				Type:      schemapb.DataType_BinaryVector,
-				ValidData: validData,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  8,
-					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 0, 2}},
+					ValidData: validData,
+					Dim:       8,
+					Data:      &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 0, 2}},
 				}},
 			},
 		},
@@ -249,10 +249,10 @@ func TestInsertMsg_CheckAlignedRejectsNullableVectorNonCompactData(t *testing.T)
 			fieldData: &schemapb.FieldData{
 				FieldName: "vec",
 				Type:      schemapb.DataType_Float16Vector,
-				ValidData: validData,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 0, 0, 0, 0, 5, 6, 7, 8}},
+					ValidData: validData,
+					Dim:       2,
+					Data:      &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 0, 0, 0, 0, 5, 6, 7, 8}},
 				}},
 			},
 		},
@@ -261,10 +261,10 @@ func TestInsertMsg_CheckAlignedRejectsNullableVectorNonCompactData(t *testing.T)
 			fieldData: &schemapb.FieldData{
 				FieldName: "vec",
 				Type:      schemapb.DataType_BFloat16Vector,
-				ValidData: validData,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 0, 0, 0, 0, 5, 6, 7, 8}},
+					ValidData: validData,
+					Dim:       2,
+					Data:      &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 0, 0, 0, 0, 5, 6, 7, 8}},
 				}},
 			},
 		},
@@ -273,8 +273,8 @@ func TestInsertMsg_CheckAlignedRejectsNullableVectorNonCompactData(t *testing.T)
 			fieldData: &schemapb.FieldData{
 				FieldName: "vec",
 				Type:      schemapb.DataType_SparseFloatVector,
-				ValidData: validData,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					ValidData: validData,
 					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 						Contents: [][]byte{
 							typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
@@ -290,10 +290,10 @@ func TestInsertMsg_CheckAlignedRejectsNullableVectorNonCompactData(t *testing.T)
 			fieldData: &schemapb.FieldData{
 				FieldName: "vec",
 				Type:      schemapb.DataType_Int8Vector,
-				ValidData: validData,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 0, 0, 3, 4}},
+					ValidData: validData,
+					Dim:       2,
+					Data:      &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 0, 0, 3, 4}},
 				}},
 			},
 		},

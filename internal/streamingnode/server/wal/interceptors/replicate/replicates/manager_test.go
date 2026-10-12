@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -24,15 +26,8 @@ func TestNonReplicateManager(t *testing.T) {
 			Name: "test1-rootcoord-dml_0",
 			Term: 1,
 		},
-		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
-				MessageID:           walimplstest.NewTestMessageID(1),
-				TimeTick:            1,
-				ReplicateCheckpoint: nil,
-				ReplicateConfig:     nil,
-			},
-		},
+		CurrentClusterID:       "test1",
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(nil, nil, nil),
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RolePrimary)
@@ -48,15 +43,8 @@ func TestPrimaryReplicateManager(t *testing.T) {
 			Name: "test1-rootcoord-dml_0",
 			Term: 1,
 		},
-		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
-				MessageID:           walimplstest.NewTestMessageID(1),
-				TimeTick:            1,
-				ReplicateCheckpoint: nil,
-				ReplicateConfig:     newReplicateConfiguration("test1", "test2"),
-			},
-		},
+		CurrentClusterID:       "test1",
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(newReplicateConfiguration("test1", "test2"), nil, nil),
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RolePrimary)
@@ -73,20 +61,16 @@ func TestSecondaryReplicateManager(t *testing.T) {
 			Term: 1,
 		},
 		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("test2", "test1"),
+			&utility.ReplicateCheckpoint{
+				ClusterID: "test2",
+				PChannel:  "test2-rootcoord-dml_0",
 				MessageID: walimplstest.NewTestMessageID(1),
 				TimeTick:  1,
-				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
-					ClusterID: "test2",
-					PChannel:  "test2-rootcoord-dml_0",
-					MessageID: walimplstest.NewTestMessageID(1),
-					TimeTick:  1,
-				},
-				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
 			},
-			TxnBuffer: utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
-		},
+			utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		),
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
@@ -96,26 +80,60 @@ func TestSecondaryReplicateManager(t *testing.T) {
 	testMessageOnSecondary(t, rm)
 }
 
+func TestReplicateManager_UnreplicableMessage(t *testing.T) {
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{
+			Name: "test1-rootcoord-dml_0",
+			Term: 1,
+		},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("test2", "test1"),
+			&utility.ReplicateCheckpoint{
+				ClusterID: "test2",
+				PChannel:  "test2-rootcoord-dml_0",
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+			},
+			utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		),
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
+
+	msg := newCreateSnapshotMutableMessage()
+	g, err := rm.BeginReplicateMessage(context.Background(), msg)
+	assert.ErrorIs(t, err, ErrNotHandledByReplicateManager)
+	assert.Nil(t, g)
+
+	msg = newCreateSnapshotMutableMessage().WithReplicateHeader(&message.ReplicateHeader{
+		ClusterID:              "test2",
+		MessageID:              walimplstest.NewTestMessageID(2),
+		LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:               2,
+		VChannel:               "test2-rootcoord-dml_0",
+	})
+	g, err = rm.BeginReplicateMessage(context.Background(), msg)
+	assert.True(t, status.AsStreamingError(err).IsIgnoredOperation())
+	assert.Nil(t, g)
+}
+
 func TestSalvageCheckpointCaptureOnForcePromote(t *testing.T) {
 	// Setup: cluster starts as secondary with a checkpoint
 	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
 		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
 		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
-				MessageID: walimplstest.NewTestMessageID(1),
-				TimeTick:  1,
-				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
-					ClusterID: "test2",
-					PChannel:  "test2-rootcoord-dml_0",
-					MessageID: walimplstest.NewTestMessageID(100),
-					TimeTick:  1000,
-				},
-				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("test2", "test1"),
+			&utility.ReplicateCheckpoint{
+				ClusterID: "test2",
+				PChannel:  "test2-rootcoord-dml_0",
+				MessageID: walimplstest.NewTestMessageID(100),
+				TimeTick:  1000,
 			},
-			TxnBuffer: txnBuffer,
-		},
+			txnBuffer,
+		),
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
@@ -143,20 +161,16 @@ func TestSalvageCheckpointNotCapturedOnNormalPromote(t *testing.T) {
 	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
 		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
 		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
-				MessageID: walimplstest.NewTestMessageID(1),
-				TimeTick:  1,
-				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
-					ClusterID: "test2",
-					PChannel:  "test2-rootcoord-dml_0",
-					MessageID: walimplstest.NewTestMessageID(100),
-					TimeTick:  1000,
-				},
-				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("test2", "test1"),
+			&utility.ReplicateCheckpoint{
+				ClusterID: "test2",
+				PChannel:  "test2-rootcoord-dml_0",
+				MessageID: walimplstest.NewTestMessageID(100),
+				TimeTick:  1000,
 			},
-			TxnBuffer: txnBuffer,
-		},
+			txnBuffer,
+		),
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
@@ -173,16 +187,9 @@ func TestSalvageCheckpointNotCapturedOnNormalPromote(t *testing.T) {
 func TestSalvageCheckpointNotCapturedWhenAlreadyPrimary(t *testing.T) {
 	// Setup: cluster starts as primary (no secondary state)
 	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
-		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
-		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
-				MessageID:           walimplstest.NewTestMessageID(1),
-				TimeTick:            1,
-				ReplicateCheckpoint: nil,
-				ReplicateConfig:     newReplicateConfiguration("test1", "test2"),
-			},
-		},
+		ChannelInfo:            types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
+		CurrentClusterID:       "test1",
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(newReplicateConfiguration("test1", "test2"), nil, nil),
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
@@ -204,16 +211,10 @@ func TestSalvageCheckpointLoadedFromEtcd(t *testing.T) {
 	}
 
 	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
-		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
-		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
-				MessageID:       walimplstest.NewTestMessageID(1),
-				TimeTick:        1,
-				ReplicateConfig: newReplicateConfiguration("test1", "test2"),
-			},
-		},
-		SalvageCheckpoints: preLoaded,
+		ChannelInfo:            types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
+		CurrentClusterID:       "test1",
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(newReplicateConfiguration("test1", "test2"), nil, nil),
+		SalvageCheckpoints:     preLoaded,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
@@ -239,20 +240,16 @@ func TestSalvageCheckpointMultipleForcePromotes(t *testing.T) {
 	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
 		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
 		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
-				MessageID: walimplstest.NewTestMessageID(1),
-				TimeTick:  1,
-				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
-					ClusterID: "cluster-a",
-					PChannel:  "cluster-a-rootcoord-dml_0",
-					MessageID: walimplstest.NewTestMessageID(10),
-					TimeTick:  100,
-				},
-				ReplicateConfig: newReplicateConfiguration("cluster-a", "test1"),
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("cluster-a", "test1"),
+			&utility.ReplicateCheckpoint{
+				ClusterID: "cluster-a",
+				PChannel:  "cluster-a-rootcoord-dml_0",
+				MessageID: walimplstest.NewTestMessageID(10),
+				TimeTick:  100,
 			},
-			TxnBuffer: txnBuffer,
-		},
+			txnBuffer,
+		),
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
@@ -305,20 +302,16 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 			Term: 1,
 		},
 		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("test2", "test1"),
+			&utility.ReplicateCheckpoint{
+				ClusterID: "test2",
+				PChannel:  "test2-rootcoord-dml_0",
 				MessageID: walimplstest.NewTestMessageID(1),
 				TimeTick:  1,
-				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
-					ClusterID: "test2",
-					PChannel:  "test2-rootcoord-dml_0",
-					MessageID: walimplstest.NewTestMessageID(1),
-					TimeTick:  1,
-				},
-				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
 			},
-			TxnBuffer: txnBuffer,
-		},
+			txnBuffer,
+		),
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
@@ -338,6 +331,69 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	}
 }
 
+func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *testing.T) {
+	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	recovered := newReplicateTxnMessage("test1", "test2", 2)
+	for _, msg := range []message.MutableMessage{recovered[0], recovered[2]} {
+		immutableMsg := msg.WithTimeTick(3).IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		txnBuffer.HandleImmutableMessages([]message.ImmutableMessage{immutableMsg}, msg.TimeTick())
+	}
+
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{
+			Name: "test1-rootcoord-dml_0",
+			Term: 1,
+		},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("test2", "test1"),
+			&utility.ReplicateCheckpoint{
+				ClusterID: "test2",
+				PChannel:  "test2-rootcoord-dml_0",
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+			},
+			txnBuffer,
+		),
+	})
+	require.NoError(t, err)
+
+	firstReplay := newReplicateTxnMessage("test1", "test2", 2)
+	for _, msg := range firstReplay {
+		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
+		if msg.MessageType() == message.MessageTypeCommitTxn && acker != nil {
+			require.NoError(t, appendErr)
+			acker.Ack(status.NewTransactionExpired("recovered transaction"))
+			continue
+		}
+		require.Nil(t, acker)
+		require.True(t, status.AsStreamingError(appendErr).IsIgnoredOperation())
+	}
+	checkpoint, err := rm.GetReplicateCheckpoint()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, checkpoint.TimeTick)
+
+	accepted := make([]message.MessageType, 0, 3)
+	for _, msg := range newReplicateTxnMessage("test1", "test2", 2) {
+		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
+		if acker == nil {
+			require.True(t, status.AsStreamingError(appendErr).IsIgnoredOperation())
+			continue
+		}
+		require.NoError(t, appendErr)
+		accepted = append(accepted, msg.MessageType())
+		acker.Ack(nil)
+	}
+	require.Equal(t, []message.MessageType{
+		message.MessageTypeBeginTxn,
+		message.MessageTypeCreateDatabase,
+		message.MessageTypeCommitTxn,
+	}, accepted)
+	checkpoint, err = rm.GetReplicateCheckpoint()
+	require.NoError(t, err)
+	require.EqualValues(t, 2, checkpoint.TimeTick)
+}
+
 func TestSecondaryReplicateManagerIgnoreStaleTxnBody(t *testing.T) {
 	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
 		ChannelInfo: types.PChannelInfo{
@@ -345,20 +401,16 @@ func TestSecondaryReplicateManagerIgnoreStaleTxnBody(t *testing.T) {
 			Term: 1,
 		},
 		CurrentClusterID: "test1",
-		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			Checkpoint: &utility.WALCheckpoint{
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("test2", "test1"),
+			&utility.ReplicateCheckpoint{
+				ClusterID: "test2",
+				PChannel:  "test2-rootcoord-dml_0",
 				MessageID: walimplstest.NewTestMessageID(1),
-				TimeTick:  1,
-				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
-					ClusterID: "test2",
-					PChannel:  "test2-rootcoord-dml_0",
-					MessageID: walimplstest.NewTestMessageID(1),
-					TimeTick:  100,
-				},
-				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+				TimeTick:  100,
 			},
-			TxnBuffer: utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
-		},
+			utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		),
 	})
 	assert.NoError(t, err)
 
@@ -514,6 +566,25 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Equal(t, cp.TimeTick, uint64(0))
 }
 
+func newReplicateRecoverySnapshot(
+	config *commonpb.ReplicateConfiguration,
+	checkpoint *utility.ReplicateCheckpoint,
+	txnBuffer *utility.TxnBuffer,
+) *recovery.RecoverySnapshot {
+	control := &streamingpb.PChannelRecoveryControlMeta{ReplicateConfig: config}
+	if checkpoint != nil {
+		control.ReplicateCheckpoint = checkpoint.IntoProto()
+	}
+	return &recovery.RecoverySnapshot{
+		Checkpoint: &utility.WALCheckpoint{
+			MessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:  1,
+		},
+		PChannelControl: control,
+		TxnBuffer:       txnBuffer,
+	}
+}
+
 func testMessageOnPrimary(t *testing.T, rm ReplicatesManager) {
 	// switch to primary
 	err := rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessage("test1", "test2"))
@@ -600,6 +671,15 @@ func testMessageOnSecondary(t *testing.T, rm ReplicatesManager) {
 	g, err = rm.BeginReplicateMessage(context.Background(), newReplicateTxnMessage("test1", "test2", 2)[0])
 	assert.True(t, status.AsStreamingError(err).IsIgnoredOperation())
 	assert.Nil(t, g)
+}
+
+func newCreateSnapshotMutableMessage() message.MutableMessage {
+	return message.NewCreateSnapshotMessageBuilderV2().
+		WithHeader(&message.CreateSnapshotMessageHeader{}).
+		WithBody(&message.CreateSnapshotMessageBody{}).
+		WithVChannel("test1-rootcoord-dml_0").
+		WithUnreplicable().
+		MustBuildMutable()
 }
 
 // newReplicateConfiguration creates a valid replicate configuration for testing

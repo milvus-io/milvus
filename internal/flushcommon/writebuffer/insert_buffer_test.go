@@ -49,7 +49,7 @@ func (s *InsertBufferSuite) SetupSuite() {
 }
 
 func (s *InsertBufferSuite) composeInsertMsg(rowCount int, dim int) ([]int64, *msgstream.InsertMsg) {
-	tss := lo.RepeatBy(rowCount, func(idx int) int64 { return int64(tsoutil.ComposeTSByTime(time.Now(), int64(idx))) })
+	tss := lo.RepeatBy(rowCount, func(idx int) int64 { return int64(tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx))) })
 	vectors := lo.RepeatBy(rowCount, func(_ int) []float32 {
 		return lo.RepeatBy(dim, func(_ int) float32 { return rand.Float32() })
 	})

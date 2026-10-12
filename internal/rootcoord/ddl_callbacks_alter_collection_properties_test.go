@@ -19,6 +19,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -27,13 +28,17 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -106,6 +111,30 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
+	// RLS property values are validated before looking up the collection.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "invalid"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// rls.enabled delete key must use the exact property key casing.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{"RLS.Enabled"},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// rls.force delete key must use the exact property key casing.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{"RLS.Force"},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
 	// Alter a database that does not exist should return error.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
@@ -129,6 +158,15 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	// atler a property of a collection.
 	createCollectionAndAliasForTest(t, ctx, core, dbName, collectionName)
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 1)
+
+	// Existing collections can enable RLS through the normal property path.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+	})
+	alterErr := merr.CheckRPCCall(resp, err)
+	require.NoError(t, alterErr)
 
 	for _, tc := range []struct {
 		name       string
@@ -215,6 +253,50 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 }
 
+func TestAlterCollectionRejectsReservedMaxFieldIDProperty(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+	}{
+		{
+			name:       "alter",
+			properties: []*commonpb.KeyValuePair{{Key: common.MaxFieldIDKey, Value: "999"}},
+		},
+		{
+			name:       "delete",
+			deleteKeys: []string{common.MaxFieldIDKey},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			streaming.SetupNoopWALForTest()
+			defer streaming.SetWALForTest(nil)
+
+			coll := new(DDLCallbacksCollectionFunctionTestSuite).createTestCollection()
+			mockMeta := mockrootcoord.NewIMetaTable(t)
+			mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil).Maybe()
+			core := newTestCore(withHealthyCode(), withMeta(mockMeta), withBroker(newValidMockBroker()))
+
+			mockBroadcaster := mock_broadcaster.NewMockBroadcastAPI(t)
+			mockBroadcaster.EXPECT().Close().Maybe()
+			mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Maybe()
+			lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(mockBroadcaster, nil).Build()
+			defer lockMocker.UnPatch()
+			cacheMocker := mockey.Mock((*Core).getCacheExpireForCollection).Return(nil, nil).Build()
+			defer cacheMocker.UnPatch()
+
+			err := core.broadcastAlterCollectionForAlterCollection(context.Background(), &milvuspb.AlterCollectionRequest{
+				DbName:         "test_db",
+				CollectionName: "test_collection",
+				Properties:     tc.properties,
+				DeleteKeys:     tc.deleteKeys,
+			})
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, common.MaxFieldIDKey)
+		})
+	}
+}
+
 func TestValidateNamespaceModeImmutable(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -268,7 +350,11 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *te
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
-		withBroker(&mockBroker{}),
+		withBroker(&mockBroker{
+			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
+				return nil
+			},
+		}),
 	)
 	cb := &DDLCallback{Core: c}
 
@@ -308,7 +394,11 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigNonRGNotFoundE
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
-		withBroker(&mockBroker{}),
+		withBroker(&mockBroker{
+			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
+				return nil
+			},
+		}),
 	)
 	cb := &DDLCallback{Core: c}
 
@@ -352,16 +442,31 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
-		withBroker(&mockBroker{}),
+		withTsoAllocator(newMockTsoAllocator()),
+		withBroker(&mockBroker{
+			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
+				return nil
+			},
+		}),
 	)
 	cb := &DDLCallback{Core: c}
+	notifyErr := merr.WrapErrServiceUnavailableMsg("proxy temporarily unavailable")
+	var notifications []*proxypb.InvalidateCollMetaCacheRequest
+	proxy := newMockProxy()
+	proxy.InvalidateCollectionMetaCacheFunc = func(_ context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+		notifications = append(notifications, req)
+		return merr.Status(notifyErr), nil
+	}
+	c.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
 
 	raw := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			CollectionId: 1,
+			CollectionId:     1,
+			CacheExpirations: newRLSCacheExpirations("db", "coll", 1, commonpb.MsgType_AlterCollection),
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
 				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
 					ReplicaNumber:  1,
 					ResourceGroups: []string{"rg_not_exist"},
@@ -376,7 +481,18 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		Message: msg,
 		Results: map[string]*message.AppendResult{},
 	})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Len(t, notifications, 1)
+	require.Equal(t, int64(1), notifications[0].GetCollectionID())
+	require.Equal(t, commonpb.MsgType_AlterCollection, notifications[0].GetBase().GetMsgType())
+
+	notifyErr = nil
+	err = cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
 	require.NoError(t, err)
+	require.Len(t, notifications, 2)
 }
 
 func TestCore_getAlterLoadConfigOfAlterCollection(t *testing.T) {
@@ -435,8 +551,9 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_BroadcastAlteredCollectionErro
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
 
+	// UpdateLoadConfig is never reached: the schema broadcast now runs first
+	// (before the bound-index apply and load-config update) and fails here.
 	mixc := imocks.NewMixCoord(t)
-	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	c := newTestCore(
 		withMeta(meta),
@@ -846,7 +963,7 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 2)
 }
 
-func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {
+func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, properties ...*commonpb.KeyValuePair) {
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,
 	})
@@ -865,9 +982,11 @@ func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbNa
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
 	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: append([]*commonpb.KeyValuePair{
+			{Key: common.CollectionReplicaNumber, Value: "1"},
+		}, properties...),
 		Schema:           schemaBytes,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	})

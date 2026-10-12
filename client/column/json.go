@@ -22,7 +22,7 @@ import (
 	"reflect"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 var _ (Column) = (*ColumnVarChar)(nil)
@@ -45,6 +45,7 @@ func NewColumnJSONBytes(name string, values [][]byte) *ColumnJSONBytes {
 func (c *ColumnJSONBytes) Slice(start, end int) Column {
 	return &ColumnJSONBytes{
 		genericColumnBase: c.genericColumnBase.slice(start, end),
+		isDynamic:         c.isDynamic,
 	}
 }
 

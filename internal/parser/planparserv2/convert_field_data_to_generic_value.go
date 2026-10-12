@@ -12,6 +12,19 @@ import (
 func convertArrayValue(templateName string, templateValue *schemapb.TemplateArrayValue) (*planpb.GenericValue, error) {
 	var arrayValues []*planpb.GenericValue
 	var elementType schemapb.DataType
+	// An empty SDK list has no element from which to infer a concrete oneof
+	// type. Preserve it as an untyped empty array; consumers with field context
+	// can still interpret its semantics (for example, ARRAY == []).
+	if templateValue != nil && templateValue.GetData() == nil {
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_ArrayVal{
+				ArrayVal: &planpb.Array{
+					SameType:    true,
+					ElementType: schemapb.DataType_None,
+				},
+			},
+		}, nil
+	}
 	switch templateValue.GetData().(type) {
 	case *schemapb.TemplateArrayValue_BoolData:
 		elements := templateValue.GetBoolData().GetData()
@@ -91,7 +104,7 @@ func convertArrayValue(templateName string, templateValue *schemapb.TemplateArra
 		}
 		elementType = schemapb.DataType_JSON
 	default:
-		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type: %v", templateValue.GetData())
+		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type")
 	}
 	return &planpb.GenericValue{
 		Val: &planpb.GenericValue_ArrayVal{
@@ -135,6 +148,13 @@ func ConvertToGenericValue(templateName string, templateValue *schemapb.Template
 		}, nil
 	case *schemapb.TemplateValue_ArrayVal:
 		return convertArrayValue(templateName, templateValue.GetArrayVal())
+	case *schemapb.TemplateValue_BytesVal:
+		// Raw binary payload (e.g. a client pre-built membership-filter blob).
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_BytesVal{
+				BytesVal: templateValue.GetBytesVal(),
+			},
+		}, nil
 	default:
 		return nil, merr.WrapErrQueryPlanMsg("expression elements can only be scalars")
 	}

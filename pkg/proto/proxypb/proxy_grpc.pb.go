@@ -39,6 +39,7 @@ const (
 	Proxy_GetSegmentsInfo_FullMethodName               = "/milvus.proto.proxy.Proxy/GetSegmentsInfo"
 	Proxy_GetQuotaMetrics_FullMethodName               = "/milvus.proto.proxy.Proxy/GetQuotaMetrics"
 	Proxy_ClearReadTaskQueue_FullMethodName            = "/milvus.proto.proxy.Proxy/ClearReadTaskQueue"
+	Proxy_SyncFileResource_FullMethodName              = "/milvus.proto.proxy.Proxy/SyncFileResource"
 )
 
 // ProxyClient is the client API for Proxy service.
@@ -63,6 +64,7 @@ type ProxyClient interface {
 	GetSegmentsInfo(ctx context.Context, in *internalpb.GetSegmentsInfoRequest, opts ...grpc.CallOption) (*internalpb.GetSegmentsInfoResponse, error)
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
 	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
+	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type proxyClient struct {
@@ -226,6 +228,15 @@ func (c *proxyClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.Cle
 	return out, nil
 }
 
+func (c *proxyClient) SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, Proxy_SyncFileResource_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProxyServer is the server API for Proxy service.
 // All implementations should embed UnimplementedProxyServer
 // for forward compatibility
@@ -248,6 +259,7 @@ type ProxyServer interface {
 	GetSegmentsInfo(context.Context, *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error)
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
 	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
+	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedProxyServer should be embedded to have forward compatible implementations.
@@ -304,6 +316,9 @@ func (UnimplementedProxyServer) GetQuotaMetrics(context.Context, *internalpb.Get
 }
 func (UnimplementedProxyServer) ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ClearReadTaskQueue not implemented")
+}
+func (UnimplementedProxyServer) SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncFileResource not implemented")
 }
 
 // UnsafeProxyServer may be embedded to opt out of forward compatibility for this service.
@@ -623,6 +638,24 @@ func _Proxy_ClearReadTaskQueue_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Proxy_SyncFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.SyncFileResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProxyServer).SyncFileResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Proxy_SyncFileResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProxyServer).SyncFileResource(ctx, req.(*internalpb.SyncFileResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Proxy_ServiceDesc is the grpc.ServiceDesc for Proxy service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -697,6 +730,10 @@ var Proxy_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClearReadTaskQueue",
 			Handler:    _Proxy_ClearReadTaskQueue_Handler,
+		},
+		{
+			MethodName: "SyncFileResource",
+			Handler:    _Proxy_SyncFileResource_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

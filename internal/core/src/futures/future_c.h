@@ -14,6 +14,7 @@
 #include "common/common_type_c.h"
 #include "future_c_types.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,13 +42,16 @@ void
 future_destroy(CFuture* future);
 
 void
-executor_set_thread_num(int thread_num);
-
-void
 executor_set_search_thread_num(int thread_num);
 
 void
 executor_set_load_thread_num(int thread_num);
+
+CStatus
+executor_set_json_stats_build_thread_num(int thread_num);
+
+CStatus
+executor_set_json_stats_build_max_inflight_bytes(int64_t max_inflight_bytes);
 
 #ifdef __cplusplus
 }

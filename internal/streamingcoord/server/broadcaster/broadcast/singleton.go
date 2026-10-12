@@ -43,6 +43,23 @@ func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message
 	return broadcaster.WithResourceKeys(ctx, resourceKeys...)
 }
 
+// StartUnreplicableBroadcastWithResourceKeys starts a broadcast that stays in this cluster.
+// It is accepted on any replicate role. The message passed to Broadcast must be unreplicable.
+func StartUnreplicableBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	broadcaster, err := singleton.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+		return nil, merr.Wrap(err, "failed to wait until WAL based DDL ready")
+	}
+	return broadcaster.WithUnreplicableResourceKeys(ctx, resourceKeys...)
+}
+
 // StartBroadcastWithSecondaryClusterResourceKey starts a broadcast with exclusive cluster resource key
 // and verifies the cluster is secondary. Returns error if the cluster is primary.
 // This is used for force promote operations that should only be executed on secondary clusters.
@@ -61,13 +78,13 @@ func StartBroadcastWithSecondaryClusterResourceKey(ctx context.Context) (broadca
 	return broadcaster.WithSecondaryClusterResourceKey(ctx)
 }
 
-// GetPendingCreateCollectionResources returns pending CreateCollection file resource
-// IDs from the broadcaster. Must be called after Register.
-func GetPendingCreateCollectionResources() map[int64][]int64 {
+// GetPendingSchemaFileResources returns pending schema file resource IDs
+// from the broadcaster. Must be called after Register.
+func GetPendingSchemaFileResources() map[int64][]int64 {
 	if !singleton.Ready() {
 		return nil
 	}
-	return singleton.Get().GetPendingCreateCollectionResources()
+	return singleton.Get().GetPendingSchemaFileResources()
 }
 
 // Release releases the broadcaster.

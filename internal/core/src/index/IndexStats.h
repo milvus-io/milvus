@@ -39,7 +39,7 @@ class IndexStats {
  public:
     static IndexStatsPtr
     NewFromSizeMap(int64_t mem_size,
-                   std::map<std::string, int64_t>& index_size_map);
+                   const std::map<std::string, int64_t>& index_size_map);
 
     // Create a new IndexStats instance.
     static IndexStatsPtr
