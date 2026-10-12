@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "index/Families.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "index/scalar/text/TextIndexArtifact.h"
@@ -295,7 +296,7 @@ TantivyGrowingTextIndex::ValueType() const {
 
 std::string
 TantivyGrowingTextIndex::Family() const {
-    return "text";
+    return families::kText;
 }
 
 }  // namespace milvus::index

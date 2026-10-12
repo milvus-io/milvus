@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "index/Families.h"
 #include "index/scalar/spatial/RTreeIndexReader.h"
 
 namespace milvus::index {
@@ -257,7 +258,7 @@ RTreeGrowingSpatialIndex::ValueType() const {
 
 std::string
 RTreeGrowingSpatialIndex::Family() const {
-    return "rtree";
+    return families::kRTree;
 }
 
 }  // namespace milvus::index
