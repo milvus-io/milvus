@@ -265,7 +265,7 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 	queryNode := qviews.NewQueryNode(11)
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1},
+		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardID.VChannel: legacyQueryPlan(shardID, queryNode),
 		}},
@@ -289,10 +289,12 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 		Req: &internalpb.RetrieveRequest{
 			CollectionID:     collectionID,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+			Limit:            1,
 		},
 	})
 	require.NoError(t, err)
 
+	require.Nil(t, result.Stream)
 	require.Len(t, result.Results, 1)
 	require.Equal(t, int64(201), result.Results[0].GetBase().GetSourceID())
 	require.Len(t, result.Plans, 1)
@@ -318,6 +320,7 @@ func TestLegacyClientQueryReducesIteratorVChannelStreams(t *testing.T) {
 	)
 
 	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+		AllowStreaming: true,
 		Req: &internalpb.RetrieveRequest{
 			CollectionID:     collectionID,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
@@ -360,6 +363,7 @@ func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
 	)
 
 	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+		AllowStreaming: true,
 		Req: &internalpb.RetrieveRequest{
 			CollectionID:     collectionID,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
