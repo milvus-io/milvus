@@ -566,6 +566,24 @@ TEST_F(JsonFlatExpressionTest, ReusesValidityAcrossLiteralsAndOperators) {
 
 TEST_F(JsonFlatExpressionTest, RawFallbackPreservesLargeInt64LiteralPrecision) {
     ExprBatchSizeGuard batch_size_guard(7);
+    auto projected =
+        expr_index::BuildIndex(json_fid_,
+                               DataType::JSON,
+                               index::INVERTED_INDEX_TYPE,
+                               {expr_index::JsonField(json_data_, true)},
+                               {{JSON_PATH, "/a"}, {JSON_CAST_TYPE, "DOUBLE"}});
+    expr_index::InstallIndex(
+        *segment_, json_fid_, DataType::JSON, std::move(projected));
+    exec::ExprIndexRequirement requirement{.field_id = json_fid_,
+                                           .value_type = DataType::INT64,
+                                           .is_json_field = true,
+                                           .json_path = "/a",
+                                           .requires_flat_json_index = true};
+    const auto capabilities = segment_->IndexCapability(json_fid_);
+    const auto decision = exec::DetermineExecPath(requirement, capabilities);
+    ASSERT_EQ(decision.path, exec::ExprExecPath::ScalarIndex);
+    ASSERT_TRUE(decision.key.has_value());
+    EXPECT_EQ(capabilities.Find(*decision.key)->value_type, DataType::JSON);
     const auto evaluate = [&](const expr::TypedExprPtr& expr,
                               bool can_execute_all_at_once) {
         EXPECT_EQ(
@@ -586,7 +604,7 @@ TEST_F(JsonFlatExpressionTest, RawFallbackPreservesLargeInt64LiteralPrecision) {
         proto::plan::OpType::Equal,
         value,
         std::vector<proto::plan::GenericValue>());
-    auto result = evaluate(equal_expr, false);
+    auto result = evaluate(equal_expr, true);
     TargetBitmapView result_view(result->GetRawData(), result->size());
     TargetBitmapView valid_view(result->GetValidRawData(), result->size());
     EXPECT_TRUE(valid_view[16]);
@@ -595,6 +613,21 @@ TEST_F(JsonFlatExpressionTest, RawFallbackPreservesLargeInt64LiteralPrecision) {
     EXPECT_FALSE(result_view[16]);
     EXPECT_TRUE(result_view[17]);
     EXPECT_FALSE(result_view[18]);
+
+    auto not_equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::OpType::NotEqual,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    result = evaluate(not_equal_expr, true);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(valid_view[16]);
+    EXPECT_TRUE(valid_view[17]);
+    EXPECT_TRUE(valid_view[18]);
+    EXPECT_TRUE(result_view[16]);
+    EXPECT_FALSE(result_view[17]);
+    EXPECT_TRUE(result_view[18]);
 
     auto term_expr = std::make_shared<expr::TermFilterExpr>(
         expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),

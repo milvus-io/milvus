@@ -35,8 +35,9 @@
 //
 // Prefer a usable index; otherwise scan the raw or shredded column. This does
 // not compare cold-index fetch cost with an already-resident column scan.
-// TODO: add such cost modeling separately if needed. Literal-dependent guards
-// are queried on the chosen pinned interface after metadata selection.
+// TODO: add such cost modeling separately if needed. Metadata-only literal/type
+// constraints live in ExprIndexRequirement; reader-specific guards are queried
+// on the chosen pinned interface after metadata selection.
 
 namespace milvus::exec {
 
@@ -92,6 +93,10 @@ struct ExprIndexRequirement {
     // even when both expose the same scalar value type.
     bool json_array_cast{false};
 
+    // Int64 JSON literals at or beyond +/-2^53 can alias in DOUBLE projections.
+    // Require a field-level JSON router (flat) that keeps integer precision.
+    bool requires_flat_json_index{false};
+
     // Whether execution can refine a candidate superset. If false, an entry with
     // caps.exact == false is unusable and selection must fall back to RawData.
     bool accepts_candidates{true};
@@ -122,6 +127,11 @@ struct ExecPathDecision {
 // caps read; expression literal/type checks populate ExprIndexRequirement.
 // Runtime literal-dependent guards still belong on the selected pinned reader.
 namespace index_path_detail {
+
+inline bool
+IsFlatJsonIndex(const segcore::IndexCapabilityEntry& entry) {
+    return entry.caps.json_paths && entry.value_type == DataType::JSON;
+}
 
 inline DataType
 NormalizeJsonValueType(DataType type) {
@@ -169,8 +179,7 @@ inline bool
 ReaderMatches(const ExprIndexRequirement& req,
               const segcore::IndexCapabilityEntry& entry) {
     const auto& caps = entry.caps;
-    const bool multi_path_router = req.is_json_field && caps.json_paths &&
-                                   entry.value_type == DataType::JSON;
+    const bool multi_path_router = req.is_json_field && IsFlatJsonIndex(entry);
     if (multi_path_router) {
         return req.reader == RequiredReader::Predicate ||
                req.reader == RequiredReader::PatternMatch ||
@@ -208,8 +217,7 @@ PathMatchScore(const ExprIndexRequirement& req,
     if (entry.json_path == req.json_path) {
         return 2;
     }
-    const bool multi_path_router =
-        entry.caps.json_paths && entry.value_type == DataType::JSON;
+    const bool multi_path_router = IsFlatJsonIndex(entry);
     if (!multi_path_router || !IsPathPrefix(entry.json_path, req.json_path) ||
         RelativePathContainsInteger(entry.json_path, req.json_path)) {
         return -1;
@@ -231,8 +239,7 @@ ValueTypeMatches(const ExprIndexRequirement& req,
     if (req.value_type == DataType::NONE) {
         return true;
     }
-    const bool multi_path_router = req.is_json_field && entry.caps.json_paths &&
-                                   entry.value_type == DataType::JSON;
+    const bool multi_path_router = req.is_json_field && IsFlatJsonIndex(entry);
     if (multi_path_router) {
         return true;
     }
@@ -282,6 +289,8 @@ DetermineExecPath(const ExprIndexRequirement& req,
         const bool needs_refine =
             index_path_detail::NeedsCandidateRefine(req.reader, entry.caps);
         if (entry.key.field_id != req.field_id ||
+            (req.requires_flat_json_index &&
+             !index_path_detail::IsFlatJsonIndex(entry)) ||
             !index_path_detail::ReaderMatches(req, entry) ||
             (needs_refine && !req.accepts_candidates) ||
             (req.has_offset_input && req.reader == RequiredReader::Ngram) ||

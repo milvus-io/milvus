@@ -2094,6 +2094,8 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     }
 
     if (data_type == DataType::JSON &&
+        expr_->op_type_ != proto::plan::OpType::Equal &&
+        expr_->op_type_ != proto::plan::OpType::NotEqual &&
         expr_->val_.val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val &&
         !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
@@ -2164,6 +2166,11 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         data_type == DataType::ARRAY
             ? expr_->column_.element_type_
             : (field_type_ == DataType::JSON ? value_type_ : data_type);
+    req.requires_flat_json_index =
+        data_type == DataType::JSON &&
+        expr_->val_.val_case() ==
+            proto::plan::GenericValue::ValCase::kInt64Val &&
+        !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val());
     if (is_pattern && SelectAndPinIndex(req) &&
         ngram_reader_->CanHandle(GetValueFromProto<std::string>(expr_->val_),
                                  ToIndexPatternOp(expr_->op_type_))) {
@@ -2213,15 +2220,6 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         }
         case DataType::JSON: {
             const auto val_case = expr_->val_.val_case();
-            if (val_case == proto::plan::GenericValue::ValCase::kInt64Val &&
-                !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
-                const auto is_equality =
-                    expr_->op_type_ == proto::plan::OpType::Equal ||
-                    expr_->op_type_ == proto::plan::OpType::NotEqual;
-                can_use = PinnedJsonIndexIsFlat() && is_equality;
-                break;
-            }
-
             auto val_type = FromValCase(val_case);
             switch (val_type) {
                 case DataType::STRING:
