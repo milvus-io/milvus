@@ -72,14 +72,12 @@ func MarkIO(err error, format string, args ...any) error {
 
 // ToMerr translates a pkindex error into a merr for a boundary that leaves the
 // pkindex tree: a coordinator's gRPC service or a worker's task result. An
-// error that is already a merr passes through, so a boundary may call it on a
-// mixed error without checking first.
+// error marked with a category translates by its category, even when it wraps
+// a merr; an unmarked merr passes through unchanged.
 func ToMerr(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case merr.IsMilvusError(err):
-		return err
 	case errors.Is(err, ErrCorrupted):
 		return merr.WrapErrDataIntegrity(err, "pkindex data corrupted")
 	case errors.Is(err, ErrIO):
@@ -88,6 +86,8 @@ func ToMerr(err error) error {
 		return merr.WrapErrIoFailed("pkindex", err)
 	case errors.Is(err, ErrUnavailable):
 		return merr.WrapErrServiceUnavailableErr(err, "pkindex unavailable")
+	case merr.IsMilvusError(err):
+		return err
 	default:
 		// an uncategorized error is a pkindex bug, not a condition to retry
 		return merr.WrapErrServiceInternalErr(err, "pkindex internal error")

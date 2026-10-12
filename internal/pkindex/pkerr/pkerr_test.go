@@ -59,6 +59,40 @@ func TestToMerrCategories(t *testing.T) {
 	}
 }
 
+// A category mark wins over a merr code inside the error.
+func TestToMerrCategoryWinsOverInnerMerr(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		category error
+		wantCode int32
+	}{
+		{"corrupted", ErrCorrupted, merr.Code(merr.ErrDataIntegrity)},
+		{"io", ErrIO, merr.Code(merr.ErrIoFailed)},
+		{"unavailable", ErrUnavailable, merr.Code(merr.ErrServiceUnavailable)},
+	} {
+		for _, inner := range []error{
+			merr.WrapErrIoFailedReason("x"),
+			merr.WrapErrIoKeyNotFound("k"),
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				in := errors.Mark(errors.Wrap(inner, "ctx"), tc.category)
+				got := ToMerr(in)
+				require.Error(t, got)
+				assert.Equal(t, tc.wantCode, merr.Code(got))
+				assert.Equal(t, tc.category == ErrUnavailable, merr.IsRetryableErr(got))
+			})
+		}
+	}
+}
+
+// An unmarked merr passes through with its own code.
+func TestToMerrUnmarkedMerrKeepsCode(t *testing.T) {
+	in := errors.Wrap(merr.WrapErrIoKeyNotFound("k"), "ctx")
+	got := ToMerr(in)
+	assert.Equal(t, merr.Code(merr.ErrIoKeyNotFound), merr.Code(got))
+	assert.Equal(t, in, got)
+}
+
 // An error carrying no category is a pkindex bug rather than a condition the
 // caller can act on, so it becomes ServiceInternal.
 func TestToMerrUncategorized(t *testing.T) {
