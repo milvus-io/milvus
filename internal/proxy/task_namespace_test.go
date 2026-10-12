@@ -22,6 +22,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -31,106 +32,96 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+func namespacePartitionModeSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:            "coll",
+		EnableNamespace: true,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+		},
+	}
+}
+
 func TestCreateNamespaceTaskPreExecuteModeValidation(t *testing.T) {
-	mockey.PatchConvey("create namespace mode validation", t, func() {
-		globalMetaCache = &MetaCache{}
-		ctx := context.Background()
+	ctx := context.Background()
 
-		tests := []struct {
-			name    string
-			schema  *schemapb.CollectionSchema
-			wantErr bool
-		}{
-			{
-				name: "namespace disabled",
-				schema: &schemapb.CollectionSchema{
-					Name:            "coll",
-					EnableNamespace: false,
-				},
-				wantErr: true,
+	tests := []struct {
+		name    string
+		schema  *schemapb.CollectionSchema
+		wantErr bool
+	}{
+		{
+			name: "namespace disabled",
+			schema: &schemapb.CollectionSchema{
+				Name:            "coll",
+				EnableNamespace: false,
 			},
-			{
-				name: "partition key mode",
-				schema: &schemapb.CollectionSchema{
-					Name:            "coll",
-					EnableNamespace: true,
-					Properties: []*commonpb.KeyValuePair{
-						{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
-					},
-				},
-				wantErr: true,
-			},
-			{
-				name: "partition mode",
-				schema: &schemapb.CollectionSchema{
-					Name:            "coll",
-					EnableNamespace: true,
-					Properties: []*commonpb.KeyValuePair{
-						{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
-					},
+			wantErr: true,
+		},
+		{
+			name: "partition key mode",
+			schema: &schemapb.CollectionSchema{
+				Name:            "coll",
+				EnableNamespace: true,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
 				},
 			},
-		}
+			wantErr: true,
+		},
+		{
+			name:   "partition mode",
+			schema: namespacePartitionModeSchema(),
+		},
+	}
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				guard := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(tt.schema), nil).Build()
-				defer guard.UnPatch()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockCache := NewMockCache(t)
+			mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, "coll").Return(mustNewSchemaInfo(tt.schema), nil)
 
-				task := &createNamespaceTask{
-					CreateNamespaceRequest: &milvuspb.CreateNamespaceRequest{
-						CollectionName: "coll",
-						NamespaceName:  "tenant_1",
-					},
-				}
-				err := task.PreExecute(ctx)
-				if tt.wantErr {
-					assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-					return
-				}
-				assert.NoError(t, err)
-			})
-		}
-	})
+			task := &createNamespaceTask{
+				baseTask: baseTask{MetaCache: mockCache},
+				CreateNamespaceRequest: &milvuspb.CreateNamespaceRequest{
+					CollectionName: "coll",
+					NamespaceName:  "tenant_1",
+				},
+			}
+			err := task.PreExecute(ctx)
+			if tt.wantErr {
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func TestCreateNamespaceTaskPreExecuteRejectsInvalidName(t *testing.T) {
-	mockey.PatchConvey("create namespace invalid name", t, func() {
-		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(&schemapb.CollectionSchema{
-			Name:            "coll",
-			EnableNamespace: true,
-			Properties: []*commonpb.KeyValuePair{
-				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
-			},
-		}), nil).Build()
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, "coll").Return(mustNewSchemaInfo(namespacePartitionModeSchema()), nil)
 
-		task := &createNamespaceTask{
-			CreateNamespaceRequest: &milvuspb.CreateNamespaceRequest{
-				CollectionName: "coll",
-				NamespaceName:  "bad name",
-			},
-		}
-		require.Error(t, task.PreExecute(context.Background()))
-	})
+	task := &createNamespaceTask{
+		baseTask: baseTask{MetaCache: mockCache},
+		CreateNamespaceRequest: &milvuspb.CreateNamespaceRequest{
+			CollectionName: "coll",
+			NamespaceName:  "bad name",
+		},
+	}
+	require.ErrorIs(t, task.PreExecute(context.Background()), merr.ErrParameterInvalid)
 }
 
 func TestDropNamespaceTaskPreExecuteRejectsLoadedNamespace(t *testing.T) {
 	mockey.PatchConvey("drop namespace loaded rejection", t, func() {
-		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(&schemapb.CollectionSchema{
-			Name:            "coll",
-			EnableNamespace: true,
-			Properties: []*commonpb.KeyValuePair{
-				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
-			},
-		}), nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
-		mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
+		mockCache := NewMockCache(t)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, "coll").Return(mustNewSchemaInfo(namespacePartitionModeSchema()), nil)
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "coll").Return(int64(100), nil)
+		mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, "coll", "tenant_1").Return(int64(200), nil)
 		mockey.Mock(isCollectionLoaded).Return(true, nil).Build()
 		mockey.Mock(isPartitionLoaded).Return(true, nil).Build()
 
 		task := &dropNamespaceTask{
+			baseTask: baseTask{MetaCache: mockCache},
 			DropNamespaceRequest: &milvuspb.DropNamespaceRequest{
 				CollectionName: "coll",
 				NamespaceName:  "tenant_1",
@@ -150,19 +141,19 @@ func TestGetNamespaceStatsTaskPreExecuteRejectsExact(t *testing.T) {
 }
 
 func TestGetNamespaceStatsTaskExecuteRejectsDefaultPartition(t *testing.T) {
-	mockey.PatchConvey("get namespace stats rejects default partition", t, func() {
-		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
-		mockey.Mock((*MetaCache).GetPartitionID).Return(int64(200), nil).Build()
+	defaultPartition := Params.CommonCfg.DefaultPartitionName.GetValue()
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "coll").Return(int64(100), nil)
+	mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, "coll", defaultPartition).Return(int64(200), nil)
 
-		task := &getNamespaceStatsTask{
-			GetNamespaceStatsRequest: &milvuspb.GetNamespaceStatsRequest{
-				CollectionName: "coll",
-				NamespaceName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
-			},
-		}
-		require.ErrorIs(t, task.Execute(context.Background()), merr.ErrNamespaceNotFound)
-	})
+	task := &getNamespaceStatsTask{
+		baseTask: baseTask{MetaCache: mockCache},
+		GetNamespaceStatsRequest: &milvuspb.GetNamespaceStatsRequest{
+			CollectionName: "coll",
+			NamespaceName:  defaultPartition,
+		},
+	}
+	require.ErrorIs(t, task.Execute(context.Background()), merr.ErrNamespaceNotFound)
 }
 
 func TestNamespaceStatsFromKVs(t *testing.T) {
