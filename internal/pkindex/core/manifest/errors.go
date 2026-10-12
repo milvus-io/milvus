@@ -30,7 +30,8 @@ var (
 	// has, or that lists the same SST ID twice.
 	ErrDuplicateSST = errors.New("sst ID is already in the manifest or repeated in the edit")
 	// ErrStaleEdit reports a compaction whose inputs are not a contiguous run
-	// of the manifest SST list.
+	// of the manifest SST list, except an applied retry: no input is in the
+	// list and all outputs are in the list.
 	ErrStaleEdit = errors.New("compaction inputs are not in the manifest")
 	// ErrSchemaMismatch reports a primary key data type that differs from the manifest.
 	ErrSchemaMismatch = errors.New("primary key data type does not match the manifest")
