@@ -47,11 +47,10 @@ message ManifestPointer {
 }
 
 message ClaimManifestRequest {
-  common.MsgBase base = 1;
-  int64 collection_id = 2;
-  string vchannel = 3;
-  int64 pchannel_term = 4;
-  schema.DataType pk_data_type = 5;
+  int64 collection_id = 1;
+  string vchannel = 2;
+  int64 pchannel_term = 3;
+  schema.DataType pk_data_type = 4;
 }
 
 message ClaimManifestResponse {
@@ -60,13 +59,12 @@ message ClaimManifestResponse {
 }
 
 message CommitFlushRequest {
-  common.MsgBase base = 1;
-  int64 collection_id = 2;
-  string vchannel = 3;
-  int64 pchannel_term = 4;
+  int64 collection_id = 1;
+  string vchannel = 2;
+  int64 pchannel_term = 3;
   // Newest first.
-  repeated SSTRef add_ssts = 5;
-  uint64 checkpoint_time_tick = 6;
+  repeated SSTRef add_ssts = 4;
+  uint64 checkpoint_time_tick = 5;
 }
 
 message CommitFlushResponse {
@@ -76,9 +74,8 @@ message CommitFlushResponse {
 }
 
 message GetManifestRequest {
-  common.MsgBase base = 1;
-  int64 collection_id = 2;
-  string vchannel = 3;
+  int64 collection_id = 1;
+  string vchannel = 2;
 }
 
 message GetManifestResponse {
