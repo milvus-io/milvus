@@ -33,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -473,9 +473,8 @@ func lateMaterializeOutputFields(
 	}
 
 	var fieldResult schemapb.SearchResultData
-	// fastpb: wire-equivalent fast decoder for the late-materialize output-fields
-	// hot path (~2x varchar / ~6x vector vs proto.Unmarshal).
-	if err := fastpb.UnmarshalSearchResultData(protoBytes, &fieldResult); err != nil {
+	// Decode with the configured fast or standard protobuf decoder.
+	if err := resource.UnmarshalSearchResultData(protoBytes, &fieldResult); err != nil {
 		return err
 	}
 	searchResultData.FieldsData = fieldResult.FieldsData

@@ -166,6 +166,12 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Power.
 	VisitPower(ctx *PowerContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#fieldName.
+	VisitFieldName(ctx *FieldNameContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#fieldReference.
+	VisitFieldReference(ctx *FieldReferenceContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#textMatchOption.
 	VisitTextMatchOption(ctx *TextMatchOptionContext) interface{}
 }

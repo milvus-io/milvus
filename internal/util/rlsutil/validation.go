@@ -81,7 +81,7 @@ func ValidatePolicyRoles(roles []string) error {
 	return nil
 }
 
-// ValidatePolicyActionCount bounds the raw action list before conversion.
+// ValidatePolicyActionCount bounds the raw action list before validation.
 func ValidatePolicyActionCount(actionCount int) error {
 	if actionCount == 0 {
 		return merr.WrapErrParameterInvalidMsg("RLS policy actions is empty")
@@ -138,7 +138,7 @@ func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAc
 	switch policyType {
 	case PolicyTypePermissive, PolicyTypeRestrictive:
 	default:
-		return merr.WrapErrParameterInvalidMsg("invalid RLS policy type: %s", policyType.String())
+		return merr.WrapErrParameterInvalidMsg("invalid RLS policy type: %s", PolicyTypeUnknown.String())
 	}
 	if err := ValidatePolicyActionCount(len(actions)); err != nil {
 		return err
@@ -181,7 +181,7 @@ func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAc
 			needUsingExpr = true
 			needCheckExpr = true
 		default:
-			return merr.WrapErrParameterInvalidMsg("invalid RLS policy action: %s", action.String())
+			return merr.WrapErrParameterInvalidMsg("invalid RLS policy action: Unknown")
 		}
 	}
 	if needUsingExpr && usingExprEmpty {

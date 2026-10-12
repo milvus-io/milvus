@@ -1341,6 +1341,35 @@ func TestReplicateServiceGetConfigError(t *testing.T) {
 	assert.Contains(t, err.Error(), "config unavailable")
 }
 
+// A cluster that has never been given a replicate configuration answers the
+// configuration query with a nil helper. Appending a replicate message to it is
+// rejected as a replicate violation instead of being dereferenced.
+func TestReplicateServiceNoConfig(t *testing.T) {
+	c := mock_client.NewMockClient(t)
+	as := mock_client.NewMockAssignmentService(t)
+	c.EXPECT().Assignment().Return(as).Maybe()
+	h := mock_handler.NewMockHandlerClient(t)
+
+	as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	rs := &replicateService{
+		walAccesserImpl: &walAccesserImpl{
+			lifetime:             typeutil.NewLifetime(),
+			clusterID:            "by-dev",
+			streamingCoordClient: c,
+			handlerClient:        h,
+			producers:            make(map[string]*producer.ResumableProducer),
+		},
+	}
+
+	replicateMsgs := createReplicateCreateCollectionMessages()
+	_, err := rs.Append(context.Background(), replicateMsgs[0])
+	assert.Error(t, err)
+	se := status.AsStreamingError(err)
+	assert.NotNil(t, se)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_REPLICATE_VIOLATION, se.Code)
+}
+
 func createSimpleReplicateAlterConfigMessages(newConfig *commonpb.ReplicateConfiguration) []message.ReplicateMutableMessage {
 	alterMsg := message.NewAlterReplicateConfigMessageBuilderV2().
 		WithHeader(&message.AlterReplicateConfigMessageHeader{

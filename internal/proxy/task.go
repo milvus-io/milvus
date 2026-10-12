@@ -772,7 +772,7 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, structFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", structFieldSchema.GetName())
 	}
-	if err := ValidateStructArrayField(structFieldSchema, schema); err != nil {
+	if err := validateStructArrayField(structFieldSchema, schema); err != nil {
 		return err
 	}
 	if err := validateAddStructSubFieldProperties(structFieldSchema); err != nil {
@@ -2132,9 +2132,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
-		return err
-	}
-	if err := common.ValidateRLSEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
 		return err
 	}
 	for _, key := range t.GetDeleteKeys() {

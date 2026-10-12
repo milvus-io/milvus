@@ -40,14 +40,18 @@ var FieldNameKeywords = map[string]struct{}{
 }
 
 // IsFieldNameKeyword reports whether fieldName is a reserved word that cannot be
-// used as a field name. `null` is matched case-insensitively — any casing of NULL
-// is rejected — to stay consistent with the expression parser, which rejects a
-// bare NULL literal regardless of casing (issue #50882). It is therefore handled
-// here rather than enumerated in FieldNameKeywords; the other keywords match the
-// exact casings listed there.
+// used as a field name. Core operators (like, and, or, not, in) and null are
+// reserved in every casing. Contextual keywords such as iso and interval stay
+// usable as field names; other reserved words retain the exact casings listed
+// in FieldNameKeywords.
 func IsFieldNameKeyword(fieldName string) bool {
 	if _, ok := FieldNameKeywords[fieldName]; ok {
 		return true
 	}
-	return strings.EqualFold(fieldName, "null")
+	switch strings.ToLower(fieldName) {
+	case "like", "and", "or", "not", "in", "null":
+		return true
+	default:
+		return false
+	}
 }

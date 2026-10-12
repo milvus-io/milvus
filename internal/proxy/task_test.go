@@ -5307,7 +5307,7 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid rls.enabled")
 	})
 
-	t.Run("alter rejects rls.enabled", func(t *testing.T) {
+	t.Run("alter accepts rls.enabled", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName)
 		alterTask := &alterCollectionTask{
@@ -5320,11 +5320,10 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 			mixCoord: qc,
 		}
 		err := alterTask.PreExecute(ctx)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.ErrorContains(t, err, "cannot alter rls.enabled")
+		assert.NoError(t, err)
 	})
 
-	t.Run("alter rejects standard boolean rls.enabled spelling", func(t *testing.T) {
+	t.Run("alter accepts standard boolean rls.enabled spelling", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName)
 		alterTask := &alterCollectionTask{
@@ -5337,11 +5336,10 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 			mixCoord: qc,
 		}
 		err := alterTask.PreExecute(ctx)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.ErrorContains(t, err, "cannot alter rls.enabled")
+		assert.NoError(t, err)
 	})
 
-	t.Run("alter rejects deleting rls.enabled", func(t *testing.T) {
+	t.Run("alter accepts deleting rls.enabled", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName)
 		alterTask := &alterCollectionTask{
@@ -5354,8 +5352,7 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 			mixCoord: qc,
 		}
 		err := alterTask.PreExecute(ctx)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.ErrorContains(t, err, "cannot delete rls.enabled")
+		assert.NoError(t, err)
 	})
 
 	t.Run("alter rejects wrong case rls.enabled delete key", func(t *testing.T) {

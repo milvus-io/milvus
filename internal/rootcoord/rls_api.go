@@ -52,25 +52,11 @@ func (c *Core) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolic
 }
 
 func (c *Core) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
-	if req == nil {
-		return c.dropRowPolicy(ctx, nil)
-	}
-	return c.dropRowPolicy(ctx, &rlsutil.DropRowPolicyRequest{
-		DbName:         req.GetDbName(),
-		CollectionName: req.GetCollectionName(),
-		PolicyName:     req.GetPolicyName(),
-	})
+	return c.dropRowPolicy(ctx, req)
 }
 
 func (c *Core) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
-	var internalReq *rlsutil.ListRowPoliciesRequest
-	if req != nil {
-		internalReq = &rlsutil.ListRowPoliciesRequest{
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}
-	}
-	resp, err := c.listRowPolicies(ctx, internalReq)
+	resp, err := c.listRowPolicies(ctx, req)
 	if resp == nil {
 		return nil, err
 	}
@@ -81,8 +67,8 @@ func (c *Core) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPolicie
 		}
 		policies = append(policies, &milvuspb.RowPolicy{
 			PolicyName:  policy.PolicyName,
-			PolicyType:  milvuspb.RowPolicyType(policy.PolicyType),
-			Actions:     policyActionsToMilvusProto(policy.Actions),
+			PolicyType:  policy.PolicyType,
+			Actions:     slices.Clone(policy.Actions),
 			UsingExpr:   policy.UsingExpr,
 			CheckExpr:   policy.CheckExpr,
 			Description: policy.Description,
@@ -127,15 +113,7 @@ func setRLSPrincipalTagsRequestFromProto(req *milvuspb.SetRLSPrincipalTagsReques
 }
 
 func (c *Core) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
-	var internalReq *rlsutil.GetRLSPrincipalTagsRequest
-	if req != nil {
-		internalReq = &rlsutil.GetRLSPrincipalTagsRequest{
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-			PrincipalName:  req.GetPrincipalName(),
-		}
-	}
-	resp, err := c.getRLSPrincipalTags(ctx, internalReq)
+	resp, err := c.getRLSPrincipalTags(ctx, req)
 	if resp == nil {
 		return nil, err
 	}
@@ -158,23 +136,7 @@ func (c *Core) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrin
 }
 
 func (c *Core) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
-	var internalReq *rlsutil.ListRLSPrincipalsRequest
-	if req != nil {
-		internalReq = &rlsutil.ListRLSPrincipalsRequest{
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}
-	}
-	resp, err := c.listRLSPrincipals(ctx, internalReq)
-	if resp == nil {
-		return nil, err
-	}
-	return &milvuspb.ListRLSPrincipalsResponse{
-		Status:         resp.Status,
-		PrincipalNames: slices.Clone(resp.PrincipalNames),
-		DbName:         resp.DbName,
-		CollectionName: resp.CollectionName,
-	}, err
+	return c.listRLSPrincipals(ctx, req)
 }
 
 func (c *Core) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
@@ -199,14 +161,14 @@ func createRowPolicyRequestFromProto(req *milvuspb.CreateRowPolicyRequest) *rlsu
 	}
 	policyType := rlsutil.PolicyTypePermissive
 	if req.PolicyType != nil {
-		policyType = rlsutil.PolicyType(req.GetPolicyType())
+		policyType = req.GetPolicyType()
 	}
 	return &rlsutil.CreateRowPolicyRequest{
 		DbName:         req.GetDbName(),
 		CollectionName: req.GetCollectionName(),
 		PolicyName:     req.GetPolicyName(),
 		PolicyType:     policyType,
-		Actions:        policyActionsFromMilvusProto(req.GetActions()),
+		Actions:        slices.Clone(req.GetActions()),
 		UsingExpr:      req.GetUsingExpr(),
 		CheckExpr:      req.GetCheckExpr(),
 		Description:    req.GetDescription(),
@@ -221,8 +183,8 @@ func updateRowPolicyRequestFromProto(req *milvuspb.UpdateRowPolicyRequest) *rlsu
 		DbName:         req.GetDbName(),
 		CollectionName: req.GetCollectionName(),
 		PolicyName:     req.GetPolicyName(),
-		PolicyType:     rlsutil.PolicyType(req.GetPolicyType()),
-		Actions:        policyActionsFromMilvusProto(req.GetActions()),
+		PolicyType:     req.GetPolicyType(),
+		Actions:        slices.Clone(req.GetActions()),
 		UsingExpr:      req.GetUsingExpr(),
 		CheckExpr:      req.GetCheckExpr(),
 		Description:    req.GetDescription(),
