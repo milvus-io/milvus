@@ -271,27 +271,46 @@ ReadPosting(const uint8_t*& cursor,
             const uint8_t* end,
             size_t ordinal,
             size_t count) {
-    if (cursor == end) {
-        ThrowInfo(DataFormatBroken, "truncated bitmap posting {}", ordinal);
+    const auto remaining = static_cast<size_t>(end - cursor);
+    if (remaining >= 2 * sizeof(uint32_t)) {
+        uint32_t cookie, containers;
+        std::memcpy(&cookie, cursor, sizeof(cookie));
+        std::memcpy(&containers, cursor + sizeof(cookie), sizeof(containers));
+        // CRoaring 3.0's size probe does not reject negative int32 counts.
+        if (cookie == roaring::internal::SERIAL_COOKIE_NO_RUNCONTAINER &&
+            containers > 65536) {
+            ThrowInfo(DataFormatBroken,
+                      "invalid bitmap posting {} container count {}",
+                      ordinal,
+                      containers);
+        }
     }
-    roaring::Roaring posting;
-    try {
-        posting = roaring::Roaring::readSafe(
-            reinterpret_cast<const char*>(cursor), end - cursor);
-    } catch (const std::bad_alloc&) {
-        ThrowInfo(MemAllocateFailed,
-                  "failed to allocate while decoding bitmap posting");
-    } catch (const std::exception& error) {
+    const auto* bytes = reinterpret_cast<const char*>(cursor);
+    const auto consumed =
+        roaring::api::roaring_bitmap_portable_deserialize_size(bytes,
+                                                               remaining);
+    if (consumed == 0 || consumed > remaining) {
+        ThrowInfo(DataFormatBroken,
+                  "truncated or invalid bitmap posting {}",
+                  ordinal);
+    }
+    // The non-allocating probe ruled out malformed framing. The safe C
+    // decoder's remaining null-return paths are allocation failures; readSafe
+    // collapses these into the same runtime_error as corrupt input.
+    auto* decoded =
+        roaring::api::roaring_bitmap_portable_deserialize_safe(bytes, consumed);
+    if (decoded == nullptr) {
+        ThrowInfo(
+            MemAllocateFailed, "failed to allocate bitmap posting {}", ordinal);
+    }
+    roaring::Roaring posting(decoded);
+    const char* reason = nullptr;
+    if (!roaring::api::roaring_bitmap_internal_validate(&posting.roaring,
+                                                        &reason)) {
         ThrowInfo(DataFormatBroken,
                   "invalid bitmap posting {}: {}",
                   ordinal,
-                  error.what());
-    }
-    const auto consumed = posting.getSizeInBytes(true);
-    if (consumed > static_cast<size_t>(end - cursor)) {
-        ThrowInfo(DataFormatBroken,
-                  "bitmap posting {} exceeds serialized entry",
-                  ordinal);
+                  reason ? reason : "unknown");
     }
     for (auto coordinate : posting) {
         if (coordinate >= count) {
