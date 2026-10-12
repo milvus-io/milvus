@@ -23,11 +23,14 @@
 #include <string_view>
 #include <type_traits>
 
+#include "common/Json.h"
+#include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/scalar/ScalarIndexUtils.h"
 #include "indexbuilder/test_utils/SourceBuildTestUtils.h"
+#include "simdjson/padded_string.h"
 
 namespace milvus::indexbuilder::test {
 namespace {
@@ -243,6 +246,73 @@ TYPED_TEST(InvertedMissingBinlogPrefixTest, MissingPrefixIsNullBeforeSourceRows)
 
 TYPED_TEST(InvertedMissingBinlogPrefixTest, MissingPrefixUsesSchemaDefault) {
     this->CheckPrefix(true);
+}
+
+class NgramBuildSessionTest : public SourceBuildTest {};
+
+// The build adapter writes the generic Tantivy writer version (5 for a scalar
+// index version <= 1) into every request; NGRAM always builds Tantivy v7.
+TEST_F(NgramBuildSessionTest, BuildsForEveryScalarIndexVersion) {
+    const std::vector<std::string> rows{
+        "apple pie", "banana split", "cherry tart", "grape apple"};
+    const Config gram_params{{index::MIN_GRAM, 2}, {index::MAX_GRAM, 3}};
+    for (const int32_t scalar_version : {1, 3}) {
+        SCOPED_TRACE(scalar_version);
+        {
+            const auto prepared = Prepare(DataType::VARCHAR,
+                                          DataType::NONE,
+                                          false,
+                                          index::NGRAM_INDEX_TYPE,
+                                          rows.size(),
+                                          0,
+                                          gram_params,
+                                          scalar_version);
+            ASSERT_EQ(prepared.request.family, index::families::kNgram);
+            auto data = storage::CreateFieldData(
+                DataType::VARCHAR, DataType::NONE, false, 1, rows.size());
+            data->FillFieldData(rows.data(), rows.size());
+            WriteInsert(prepared, data);
+            const auto stats = Publish(prepared);
+            ASSERT_FALSE(stats.Files().empty());
+            auto reader = Open(prepared, stats);
+            ASSERT_EQ(reader->Count(), rows.size());
+            const auto* ngram =
+                dynamic_cast<const index::INgramReader*>(reader.get());
+            ASSERT_NE(ngram, nullptr);
+            ASSERT_TRUE(
+                ngram->CanHandle("apple", index::PatternOp::InnerMatch));
+            TargetBitmap candidates(rows.size(), true);
+            ngram->Candidates(
+                "apple", index::PatternOp::InnerMatch, candidates);
+            EXPECT_TRUE(candidates[0]);
+            EXPECT_TRUE(candidates[3]);
+            EXPECT_FALSE(candidates[2]);
+        }
+        {
+            auto params = gram_params;
+            params[JSON_CAST_TYPE] = "VARCHAR";
+            params[JSON_PATH] = "/a";
+            const auto prepared = Prepare(DataType::JSON,
+                                          DataType::NONE,
+                                          false,
+                                          index::NGRAM_INDEX_TYPE,
+                                          rows.size(),
+                                          0,
+                                          params,
+                                          scalar_version);
+            ASSERT_EQ(prepared.request.family, index::families::kNgram);
+            std::vector<Json> documents;
+            for (const auto& row : rows) {
+                documents.emplace_back(
+                    simdjson::padded_string("{\"a\":\"" + row + "\"}"));
+            }
+            auto data =
+                std::make_shared<FieldData<Json>>(DataType::JSON, false);
+            data->add_json_data(documents);
+            WriteInsert(prepared, data);
+            EXPECT_FALSE(Publish(prepared).Files().empty());
+        }
+    }
 }
 
 }  // namespace

@@ -157,14 +157,21 @@ class SourceBuildTest : public ::testing::Test {
                          prepared.request.output.storage_namespace}},
                  std::move(options)});
         }
+        // Same V1 layout choice as the sealed index translator.
+        const auto& family = prepared.request.family;
+        const bool disk_layout = family == index::families::kVectorDisk ||
+                                 family == index::families::kInverted ||
+                                 family == index::families::kNgram ||
+                                 family == index::families::kRTree ||
+                                 family == index::families::kJsonFlat ||
+                                 family == index::families::kHybrid;
         return loader.Load(
             {index::IndexFiles{
                  std::move(context),
                  std::move(paths),
                  index::LegacyIndexStorageConfig{
-                     prepared.request.family == index::families::kVectorDisk
-                         ? storage::V1SourceLayout::DiskFiles
-                         : storage::V1SourceLayout::MemoryEntries,
+                     disk_layout ? storage::V1SourceLayout::DiskFiles
+                                 : storage::V1SourceLayout::MemoryEntries,
                      prepared.request.output.storage_namespace}},
              std::move(options)});
     }
