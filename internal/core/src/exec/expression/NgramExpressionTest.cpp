@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
 #include <boost/container/vector.hpp>
 #include "common/RegexQuery.h"
 #include "index/contracts/query/INgramReader.h"
@@ -20,11 +21,22 @@
 
 #include "common/Schema.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanProto.h"
 #include "test_utils/GenExprProto.h"
+#include "folly/ScopeGuard.h"
+#include "exec/QueryContext.h"
+#include "index/Families.h"
+#include "query/Plan.h"
+#include "rescores/BoostScoreRunner.h"
+#include "rescores/Scorer.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -739,5 +751,195 @@ TEST(NgramExpressionTest, EmbeddedNulLiteralIsHandledByNgram) {
                              test_case.op_type,
                              test_case.expected,
                              /*forward_to_br=*/false);
+    }
+}
+
+TEST(NgramExpressionTest, IterativeAndBoostOffsetsDoNotFetchNgram) {
+    constexpr int dim = 8;
+    constexpr int64_t rows = 64;
+    auto schema = std::make_shared<Schema>();
+    const auto vector_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    const auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    const auto text_id = schema->AddDebugField("text", DataType::VARCHAR);
+    schema->set_primary_field_id(pk_id);
+    auto raw = DataGen(schema, rows, 42);
+    std::vector<std::string> texts;
+    for (int64_t row = 0; row < rows; ++row) {
+        texts.push_back(row % 2 == 0 ? "abcdef" : "xyz");
+    }
+    for (auto& field : *raw.raw_->mutable_fields_data()) {
+        if (field.field_id() == text_id.get()) {
+            auto* values = field.mutable_scalars()->mutable_string_data();
+            values->clear_data();
+            for (const auto& text : texts) {
+                values->add_data(text);
+            }
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
+    auto vectors = raw.get_col<float>(vector_id);
+    auto vector_reader = GenVecIndexing(
+        rows, dim, vectors.data(), knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo vector_info{};
+    vector_info.field_id = vector_id.get();
+    SetTestIndexMetadata(
+        vector_info, *vector_reader, index::families::kVectorMem);
+    vector_info.index_params = GenIndexParams(vector_reader.get());
+    vector_info.index_params["metric_type"] = knowhere::metric::L2;
+    vector_info.cache_index =
+        CreateTestCacheIndex("ngram-offset-vector", std::move(vector_reader));
+    segment->LoadIndex(vector_info);
+
+    auto field = test::expr_index::StringField(texts);
+    auto opened = test::expr_index::BuildIndex(
+        text_id,
+        DataType::VARCHAR,
+        index::NGRAM_INDEX_TYPE,
+        {field},
+        {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
+    OpContext untouched;
+    OpContext* observed_pin = &untouched;
+    test::expr_index::InstallIndex(*segment,
+                                   text_id,
+                                   DataType::VARCHAR,
+                                   std::move(opened),
+                                   DataType::NONE,
+                                   &observed_pin);
+    const bool saved_prefetch = ENABLE_DRIVER_PREFETCH.load();
+    auto restore_prefetch = folly::makeGuard(
+        [saved_prefetch] { ENABLE_DRIVER_PREFETCH = saved_prefetch; });
+    ScopedSchemaHandle handle(*schema);
+    for (const bool prefetch : {false, true}) {
+        SCOPED_TRACE(prefetch);
+        ENABLE_DRIVER_PREFETCH = prefetch;
+        for (const std::string filter :
+             {"text like \"ab%\"",
+              "text like \"ab%\" AND text like \"%bc%\""}) {
+            auto bytes = handle.ParseSearch(
+                filter, "vec", 4, "L2", "{\"ef\": 64}", -1, "iterative_filter");
+            auto plan =
+                CreateSearchPlanByExpr(schema, bytes.data(), bytes.size());
+            auto placeholder = CreatePlaceholderGroup(1, dim, 1024);
+            auto group = ParsePlaceholderGroup(plan.get(),
+                                               placeholder.SerializeAsString());
+            auto result =
+                segment->Search(plan.get(), group.get(), MAX_TIMESTAMP);
+            ASSERT_EQ(result->seg_offsets_.size(), 4);
+            for (const auto offset : result->seg_offsets_) {
+                ASSERT_GE(offset, 0);
+                EXPECT_EQ(offset % 2, 0);
+            }
+            EXPECT_EQ(observed_pin, &untouched);
+        }
+    }
+
+    // Boost's prepared native ExprSet takes the same offset-input path.
+    proto::plan::GenericValue literal;
+    literal.set_string_val("ab%");
+    auto filter = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(text_id, DataType::VARCHAR),
+        proto::plan::OpType::Match,
+        literal);
+    auto scorer = std::make_shared<rescores::WeightScorer>(filter, 2.0F);
+    exec::QueryContext query_context(
+        "ngram-offset-boost", segment.get(), rows, MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context.set_op_context(&op_context);
+    exec::ExecContext exec_context(&query_context);
+    std::unique_ptr<exec::ExprSet> prepared;
+    EXPECT_FALSE(
+        rescores::ComputeNonNativeFilterBitset(&exec_context, scorer, &prepared)
+            .has_value());
+    ASSERT_NE(prepared, nullptr);
+    FixedVector<int32_t> offsets{0, 1, 2};
+    std::vector<std::optional<float>> scores(offsets.size());
+    rescores::ComputeScorerScores(&exec_context,
+                                  &op_context,
+                                  segment.get(),
+                                  scorer,
+                                  offsets,
+                                  scores,
+                                  nullptr,
+                                  prepared.get());
+    ASSERT_TRUE(scores[0].has_value());
+    EXPECT_EQ(*scores[0], 2.0F);
+    EXPECT_FALSE(scores[1].has_value());
+    ASSERT_TRUE(scores[2].has_value());
+    EXPECT_EQ(*scores[2], 2.0F);
+    EXPECT_EQ(observed_pin, &untouched);
+}
+
+TEST(NgramExpressionTest, PrefetchedUnaryJoinsBeforeBindingOffsetMode) {
+    class ObservedPrefetchUnary final : public exec::PhyUnaryRangeFilterExpr {
+     public:
+        using PhyUnaryRangeFilterExpr::PhyUnaryRangeFilterExpr;
+
+        void
+        WaitPrefetch() override {
+            offset_mode_before_wait = has_offset_input_;
+            exec::SegmentExpr::WaitPrefetch();
+        }
+
+        bool offset_mode_before_wait = true;
+    };
+
+    const std::vector<std::string> rows{"abcdef", "xyz", "ab123"};
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = schema->AddDebugField("text", DataType::VARCHAR);
+    test::expr_index::RawFieldFiles raw_files;
+    auto field = test::expr_index::StringField(rows);
+    auto segment = CreateSealedSegment(schema);
+    auto raw_info = raw_files.Prepare(field_id, {field});
+    segment->LoadFieldData(raw_info);
+    auto opened = test::expr_index::BuildIndex(
+        field_id,
+        DataType::VARCHAR,
+        index::NGRAM_INDEX_TYPE,
+        {field},
+        {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
+    test::expr_index::InstallIndex(
+        *segment, field_id, DataType::VARCHAR, std::move(opened));
+    proto::plan::GenericValue literal;
+    literal.set_string_val("ab%");
+    auto filter = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(field_id, DataType::VARCHAR),
+        proto::plan::OpType::Match,
+        literal);
+    exec::QueryContext query_context(
+        "ngram-prefetched-unary", segment.get(), rows.size(), MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+
+    for (const bool with_offsets : {false, true}) {
+        SCOPED_TRACE(with_offsets);
+        auto physical = std::make_shared<ObservedPrefetchUnary>(
+            std::vector<exec::ExprPtr>{},
+            filter,
+            "ObservedPrefetchUnary",
+            nullptr,
+            segment.get(),
+            rows.size(),
+            rows.size(),
+            0);
+        physical->PrefetchAsync(pool);
+        exec::OffsetVector offsets{2, 1, 0, 2};
+        exec::EvalCtx eval_context(&exec_context,
+                                   with_offsets ? &offsets : nullptr);
+        VectorPtr result;
+        physical->Eval(eval_context, result);
+        EXPECT_FALSE(physical->offset_mode_before_wait);
+        EXPECT_EQ(physical->GetExecPath(), exec::ExprExecPath::ScalarIndex);
+        auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+        ASSERT_NE(column, nullptr);
+        const auto count = with_offsets ? offsets.size() : rows.size();
+        ASSERT_EQ(column->size(), count);
+        TargetBitmapView bits(column->GetRawData(), count);
+        TargetBitmapView valid(column->GetValidRawData(), count);
+        for (size_t i = 0; i < count; ++i) {
+            const auto row = with_offsets ? offsets[i] : i;
+            EXPECT_EQ(bits[i], row != 1);
+            EXPECT_TRUE(valid[i]);
+        }
     }
 }
