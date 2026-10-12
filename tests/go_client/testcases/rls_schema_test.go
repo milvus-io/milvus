@@ -1741,6 +1741,7 @@ func TestRLSSchemaMixedSegments(t *testing.T) {
 	for _, vector := range []string{"float32", "binary", "float16", "bfloat16", "int8", "sparse"} {
 		for _, varchar := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/varchar_%v", vector, varchar), func(t *testing.T) {
+				t.Parallel()
 				ctx := hp.CreateContext(t, 10*time.Minute)
 				mc := hp.CreateDefaultMilvusClient(ctx, t).Client
 				tc := rlsSchemaCase{vector: vector, varchar: varchar, dim: 128}
@@ -1847,6 +1848,7 @@ func TestRLSSchemaKeys(t *testing.T) {
 	for _, field := range []string{"i64", "text"} {
 		for _, mode := range []string{"partition", "isolation", "clustering", "partition_and_clustering"} {
 			t.Run(mode+"/"+field, func(t *testing.T) {
+				t.Parallel()
 				ctx := hp.CreateContext(t, 15*time.Minute)
 				mc := hp.CreateDefaultMilvusClient(ctx, t).Client
 				tc := rlsSchemaCase{vector: "float32", dim: 128, isolation: mode == "isolation"}
