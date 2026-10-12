@@ -79,14 +79,14 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"GetImportState": "legacy import status polling",
 	// GetMetrics is a diagnostics endpoint for system metrics.
 	"GetMetrics": "system metrics diagnostics",
-	// GetPersistentSegmentInfo is a legacy segment diagnostics endpoint.
-	"GetPersistentSegmentInfo": "legacy segment diagnostics",
-	// GetQuerySegmentInfo is a legacy query-segment diagnostics endpoint.
-	"GetQuerySegmentInfo": "legacy query-segment diagnostics",
+	// GetPersistentSegmentInfo explicitly requires collection GetStatistics in Proxy.
+	"GetPersistentSegmentInfo": "explicit collection GetStatistics authorization",
+	// GetQuerySegmentInfo explicitly requires collection GetStatistics in Proxy.
+	"GetQuerySegmentInfo": "explicit collection GetStatistics authorization",
 	// GetRefreshExternalCollectionProgress only polls the state of an external-collection refresh job.
 	"GetRefreshExternalCollectionProgress": "async external-collection refresh status polling",
-	// GetReplicas is a legacy replica-topology diagnostics endpoint.
-	"GetReplicas": "legacy replica diagnostics",
+	// GetReplicas explicitly requires collection GetLoadState, resolving ID-only targets in Proxy.
+	"GetReplicas": "explicit collection GetLoadState authorization",
 	// GetReplicateInfo reports CDC checkpoint metadata for replication recovery.
 	"GetReplicateInfo": "CDC checkpoint diagnostics",
 	// GetRestoreSnapshotState only polls the state of a snapshot restore job.

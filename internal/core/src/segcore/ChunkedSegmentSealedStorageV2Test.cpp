@@ -3479,7 +3479,7 @@ TEST(SkipIndexPr51441, StorageV2SkipQueryResultsCorrect) {
     StorageV2CellTargetGuard cell_target_guard(256 * 1024 * 1024);
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
-    const std::string root = "skip_pr51441_query_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_query_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 4 * 1024 * 1024);
 
@@ -3520,7 +3520,7 @@ TEST(SkipIndexPr51441, StorageV2CellPruneByFlag) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
-    const std::string root = "skip_pr51441_prune_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_prune_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
     const int64_t threshold = N - 10000;  // 30000; only the top batch matches
@@ -3556,7 +3556,7 @@ TEST(SkipIndexPr51441, StorageV2PackingFollowsFlagRegardlessOfFooterMetrics) {
     StorageV2CellTargetGuard cell_target_guard(256 * 1024 * 1024);
     FieldId val_fid, pk_fid, payload_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid, true);
-    const std::string root = "skip_pr51441_packing_metrics_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_packing_metrics_v2";
     for (bool all_null : {false, true}) {
         SCOPED_TRACE(all_null);
         ::parquet::WriterProperties::Builder properties;
@@ -3621,7 +3621,7 @@ TEST(SkipIndexPr51441, StorageV2VarcharInPrunesOnExecutedPath) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid, payload_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
-    const std::string root = "skip_pr51441_varchar_in_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_varchar_in_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
 
@@ -3705,7 +3705,8 @@ TEST(SkipIndexPr51441, StorageV2OneSidedVarcharFooterStatsFailOpen) {
     ParquetStatsSkipIndexGuard skip_index_guard(true);
     FieldId val_fid, pk_fid, payload_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
-    const std::string root = "skip_pr51441_one_sided_varchar_v2";
+    const std::string root =
+        TestLocalPath + "skip_pr51441_one_sided_varchar_v2";
     const int64_t N = WriteOneSidedVarcharStatsV2Parquet(schema, pk_fid, root);
 
     // Exercise the real Arrow writer/reader boundary.  Arrow's default 4 KiB
@@ -3754,7 +3755,7 @@ TEST(SkipIndexPr51441, PrunedCellsAreNotPrefetchedOrPinned) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
-    const std::string root = "skip_pr51441_no_touch_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_no_touch_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
 
@@ -3824,7 +3825,8 @@ TEST(SkipIndexPr51441, OutOfRangeBinaryRangePrefetchMatchesScan) {
                                         /*payload_fid=*/nullptr,
                                         /*nullable_val=*/false,
                                         DataType::INT32);
-    const std::string root = "skip_pr51441_out_of_range_range_v2";
+    const std::string root =
+        TestLocalPath + "skip_pr51441_out_of_range_range_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
 
@@ -3877,7 +3879,7 @@ TEST(SkipIndexPr51441, ArithmeticPredicatesDoNotUseSkipIndex) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
-    const std::string root = "skip_pr51441_arithmetic_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_arithmetic_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
 
@@ -3921,7 +3923,7 @@ TEST(SkipIndexPr51441, NullableSkippedCellsPreserveNotSemantics) {
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(
         val_fid, pk_fid, /*payload_fid=*/nullptr, /*nullable_val=*/true);
-    const std::string root = "skip_pr51441_nullable_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_nullable_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
     const int64_t threshold = N - 10000;
@@ -3993,7 +3995,7 @@ TEST(SkipIndexPr51441, ConjunctBitmapInputStaysAlignedAcrossPrunedCells) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid, payload_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
-    const std::string root = "skip_pr51441_conjunct_cursor_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_conjunct_cursor_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
     const int64_t threshold = N - 10000;

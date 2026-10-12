@@ -284,8 +284,14 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 			DataType: schemapb.DataType_FloatVector,
 		},
 		StorageConfig: &indexpb.StorageConfig{
-			StorageType:    "minio",
-			MaxConnections: 237,
+			StorageType:                 "minio",
+			MaxConnections:              237,
+			TalonMode:                   2,
+			TalonSmallReadThreshold:     65536,
+			TalonCoordinator:            "talon:7000",
+			TalonBlockSize:              8388608,
+			TalonMaxIdlePerAddr:         32,
+			TalonEnableForExternalTable: true,
 		},
 	}
 	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(context.Background()), nil)
@@ -297,6 +303,12 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 	suite.NoError(err)
 	suite.Require().NotNil(captured)
 	suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())
+	suite.Equal(uint32(2), captured.GetStorageConfig().GetTalonMode())
+	suite.Equal(uint32(65536), captured.GetStorageConfig().GetTalonSmallReadThreshold())
+	suite.Equal("talon:7000", captured.GetStorageConfig().GetTalonCoordinator())
+	suite.Equal(uint32(8388608), captured.GetStorageConfig().GetTalonBlockSize())
+	suite.Equal(uint32(32), captured.GetStorageConfig().GetTalonMaxIdlePerAddr())
+	suite.True(captured.GetStorageConfig().GetTalonEnableForExternalTable())
 }
 
 func TestIndexBuildTask(t *testing.T) {
@@ -407,10 +419,10 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var capturedMaxConnections uint32
+	var captured *clusteringpb.StorageConfig
 	patch := mockey.Mock(analyzecgowrapper.Analyze).To(
 		func(_ context.Context, info *clusteringpb.AnalyzeInfo, _ *indexcgopb.StoragePluginContext) (analyzecgowrapper.CodecAnalyze, error) {
-			capturedMaxConnections = info.GetStorageConfig().GetMaxConnections()
+			captured = info.GetStorageConfig()
 			return nil, nil
 		}).Build()
 	defer patch.UnPatch()
@@ -424,9 +436,15 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 		FieldType:    schemapb.DataType_FloatVector,
 		Dim:          128,
 		StorageConfig: &indexpb.StorageConfig{
-			StorageType:    "minio",
-			RootPath:       "files",
-			MaxConnections: 237,
+			StorageType:                 "minio",
+			RootPath:                    "files",
+			MaxConnections:              237,
+			TalonMode:                   2,
+			TalonSmallReadThreshold:     65536,
+			TalonCoordinator:            "talon:7000",
+			TalonBlockSize:              8388608,
+			TalonMaxIdlePerAddr:         32,
+			TalonEnableForExternalTable: true,
 		},
 	}
 	task := &analyzeTask{
@@ -438,7 +456,14 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 
 	err := task.Execute(ctx)
 	suite.NoError(err)
-	suite.Equal(uint32(237), capturedMaxConnections)
+	suite.Require().NotNil(captured)
+	suite.Equal(uint32(237), captured.GetMaxConnections())
+	suite.Equal(uint32(2), captured.GetTalonMode())
+	suite.Equal(uint32(65536), captured.GetTalonSmallReadThreshold())
+	suite.Equal("talon:7000", captured.GetTalonCoordinator())
+	suite.Equal(uint32(8388608), captured.GetTalonBlockSize())
+	suite.Equal(uint32(32), captured.GetTalonMaxIdlePerAddr())
+	suite.True(captured.GetTalonEnableForExternalTable())
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {

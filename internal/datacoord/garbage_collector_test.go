@@ -1418,10 +1418,8 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 
 func TestGarbageCollector_clearETCD(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.On("ChannelExists",
-		mock.Anything,
-		mock.Anything,
-	).Return(true)
+	channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
+	defer channelExists.UnPatch()
 	catalog.On("DropChannelCheckpoint",
 		mock.Anything,
 		mock.Anything,
@@ -2629,7 +2627,8 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			catalog := catalogmocks.NewDataCoordCatalog(t)
-			catalog.EXPECT().ChannelExists(mock.Anything, channelName).Return(false).Once()
+			channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(false, nil).Build()
+			defer channelExists.UnPatch()
 
 			meta := &meta{
 				catalog:    catalog,
@@ -2765,9 +2764,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	}).Build()
 	defer mock6.UnPatch()
 
-	mock7 := mockey.Mock((*datacoord.Catalog).ChannelExists).To(func(c *datacoord.Catalog, ctx context.Context, channel string) bool {
-		return true
-	}).Build()
+	mock7 := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
 	defer mock7.UnPatch()
 
 	dropSegmentCalled := false
@@ -3641,7 +3638,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 	mockListSegmentIndexes := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).Return([]*model.SegmentIndex{}, nil).Build()
 	defer mockListSegmentIndexes.UnPatch()
 
-	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true).Build()
+	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
 	defer mockChannelExists.UnPatch()
 
 	dropSegmentCalled := false
@@ -4598,7 +4595,7 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	defer mockIsSegBlocked.UnPatch()
 	mockListLoaded := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
 	defer mockListLoaded.UnPatch()
-	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true).Build()
+	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
 	defer mockChannelExists.UnPatch()
 	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
 		droppedSegmentIDs = append(droppedSegmentIDs, segment.ID)
@@ -5318,7 +5315,8 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 	t.Run("import segment not GCed when commit_timestamp > cpTimestamp", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("ChannelExists", mock.Anything, mock.Anything).Return(true)
+		channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
+		defer channelExists.UnPatch()
 
 		m := &meta{
 			catalog:    catalog,
@@ -5343,7 +5341,8 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 
 	t.Run("import segment GCed when commit_timestamp <= cpTimestamp", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("ChannelExists", mock.Anything, mock.Anything).Return(true)
+		channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
+		defer channelExists.UnPatch()
 
 		m := &meta{
 			catalog:    catalog,

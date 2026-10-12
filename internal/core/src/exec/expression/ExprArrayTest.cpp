@@ -23,9 +23,12 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -39,10 +42,14 @@
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
+#include "index/InvertedIndexTantivy.h"
+#include "index/SkipIndex.h"
+#include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
@@ -51,11 +58,16 @@
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "query/Utils.h"
+#include "storage/Util.h"
+#include "storage/ChunkManager.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
@@ -111,7 +123,325 @@ AssertColumnVector(const ColumnVectorPtr& vec,
     }
 }
 
+std::vector<uint8_t>
+BuildValidBitmap(const FixedVector<bool>& valid_data) {
+    std::vector<uint8_t> valid_bitmap((valid_data.size() + 7) / 8, 0);
+    for (size_t i = 0; i < valid_data.size(); ++i) {
+        if (valid_data[i]) {
+            valid_bitmap[i >> 3] |= 1 << (i & 0x07);
+        }
+    }
+    return valid_bitmap;
+}
+
+int64_t
+CountValidRows(const FixedVector<bool>& valid_data) {
+    return std::count(valid_data.begin(), valid_data.end(), true);
+}
+
+std::vector<float>
+MakeCompactFloatVectors(int64_t valid_count, int64_t dim) {
+    std::vector<float> vectors(valid_count * dim);
+    for (int64_t i = 0; i < valid_count; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>(i * dim + d);
+        }
+    }
+    return vectors;
+}
+
+std::shared_ptr<expr::NullExpr>
+MakeVectorNullExpr(FieldId field_id,
+                   bool nullable,
+                   proto::plan::NullExpr_NullOp op,
+                   DataType data_type = DataType::VECTOR_FLOAT) {
+    return std::make_shared<expr::NullExpr>(
+        expr::ColumnInfo(field_id, data_type, {}, nullable), op);
+}
+
+std::shared_ptr<plan::FilterBitsNode>
+MakeVectorNullPlan(FieldId field_id,
+                   bool nullable,
+                   proto::plan::NullExpr_NullOp op,
+                   DataType data_type = DataType::VECTOR_FLOAT) {
+    return std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID,
+        MakeVectorNullExpr(field_id, nullable, op, data_type));
+}
+
+IndexMetaPtr
+MakeFloatVectorIndexMeta(FieldId field_id, int64_t dim, int64_t max_rows) {
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {"metric_type", knowhere::metric::L2},
+        {"nlist", "1"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        field_id, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> field_map = {
+        {field_id, field_index_meta}};
+    return std::make_shared<CollectionIndexMeta>(max_rows,
+                                                 std::move(field_map));
+}
+
+SegmentSealedUPtr
+MakeSealedVectorIndexOnlySegment(const SchemaPtr& schema,
+                                 FieldId vector_fid,
+                                 const FixedVector<bool>& valid_data,
+                                 int64_t dim,
+                                 const std::string& cache_key) {
+    const auto row_count = static_cast<int64_t>(valid_data.size());
+    const auto valid_count = CountValidRows(valid_data);
+    auto vectors =
+        MakeCompactFloatVectors(std::max<int64_t>(valid_count, 1), dim);
+    auto indexing = GenVecIndexing(valid_count,
+                                   dim,
+                                   vectors.data(),
+                                   knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+    auto vec_indexing = dynamic_cast<index::VectorIndex*>(indexing.get());
+    AssertInfo(vec_indexing != nullptr, "invalid generated vector index");
+
+    std::unique_ptr<bool[]> valid_data_bool(new bool[row_count]);
+    for (int64_t i = 0; i < row_count; ++i) {
+        valid_data_bool[i] = valid_data[i];
+    }
+    vec_indexing->SetIdMapType(knowhere::IdMap::Type::SEALED);
+    vec_indexing->GetIdMap().AddFromData(
+        knowhere::IdMapData::FromValidData(valid_data_bool.get(), row_count));
+    vec_indexing->GetIdMap().FinalizeVectorIds();
+
+    TargetBitmap range_storage(row_count + 6, false);
+    auto range_result = range_storage.view(3, row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        range_result[i] = true;
+    }
+    vec_indexing->ApplyValidDataByRange(0, row_count, range_result);
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(range_result[i], valid_data[i]) << "range row " << i;
+    }
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_FALSE(range_storage[i]);
+        EXPECT_FALSE(range_storage[row_count + 3 + i]);
+    }
+
+    const std::vector<int64_t> offsets = {-1, 0, 1, row_count - 1, row_count};
+    TargetBitmap offset_result(offsets.size(), true);
+    vec_indexing->ApplyValidDataByOffsets(
+        offsets.data(), offsets.size(), TargetBitmapView(offset_result));
+    EXPECT_FALSE(offset_result[0]);
+    EXPECT_EQ(offset_result[1], valid_data[0]);
+    EXPECT_EQ(offset_result[2], valid_data[1]);
+    EXPECT_EQ(offset_result[3], valid_data[row_count - 1]);
+    EXPECT_FALSE(offset_result[4]);
+
+    auto sealed_segment = CreateSealedSegment(schema);
+    LoadIndexInfo load_index_info;
+    load_index_info.collection_id = kCollectionID;
+    load_index_info.partition_id = kPartitionID;
+    load_index_info.segment_id = kSegmentID;
+    load_index_info.field_id = vector_fid.get();
+    load_index_info.field_type = DataType::VECTOR_FLOAT;
+    load_index_info.element_type = DataType::NONE;
+    load_index_info.enable_mmap = false;
+    load_index_info.index_size = 0;
+    load_index_info.dim = dim;
+    load_index_info.num_rows = row_count;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.cache_index =
+        CreateTestCacheIndex(cache_key, std::move(indexing));
+    sealed_segment->LoadIndex(load_index_info);
+    return sealed_segment;
+}
+
+BitsetType
+ExecuteQueryExprWithBatchSize(std::shared_ptr<plan::FilterBitsNode> filter_plan,
+                              const SegmentInternalInterface* segment,
+                              int64_t active_count,
+                              Timestamp timestamp,
+                              int64_t batch_size) {
+    auto plan_fragment = plan::PlanFragment(filter_plan);
+    auto query_config = std::make_shared<milvus::exec::QueryConfig>(
+        std::unordered_map<std::string, std::string>{
+            {milvus::exec::QueryConfig::kExprEvalBatchSize,
+             std::to_string(batch_size)}});
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID,
+        segment,
+        active_count,
+        timestamp,
+        0,
+        0,
+        milvus::query::PlanOptions(),
+        query_config);
+    auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+    AssertInfo(row != nullptr,
+               "ExecuteTask returned null row vector for query expression");
+    AssertInfo(
+        row->childrens().size() == 1,
+        "query expr operator's result vector's children size not equal one");
+    auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
+    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    BitsetType query_view(view);
+    query_view.flip();
+    return query_view;
+}
+
+void
+AssertVectorNullExprMatches(const SegmentInternalInterface* segment,
+                            FieldId field_id,
+                            bool nullable,
+                            const FixedVector<bool>& valid_data,
+                            int64_t row_count,
+                            DataType data_type = DataType::VECTOR_FLOAT) {
+    std::vector<
+        std::pair<proto::plan::NullExpr_NullOp, std::function<bool(bool)>>>
+        testcases = {
+            {proto::plan::NullExpr_NullOp_IsNull,
+             [](bool valid) { return !valid; }},
+            {proto::plan::NullExpr_NullOp_IsNotNull,
+             [](bool valid) { return valid; }},
+        };
+
+    for (auto [op, ref_func] : testcases) {
+        auto plan = MakeVectorNullPlan(field_id, nullable, op, data_type);
+        auto final = ExecuteQueryExpr(plan, segment, row_count, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), row_count);
+        for (int64_t i = 0; i < row_count; ++i) {
+            ASSERT_EQ(final[i], ref_func(valid_data[i]))
+                << "segment type " << segment->type() << ", row " << i;
+        }
+
+        auto batched_final = ExecuteQueryExprWithBatchSize(
+            plan, segment, row_count, MAX_TIMESTAMP, 17);
+        ASSERT_EQ(batched_final.size(), row_count);
+        for (int64_t i = 0; i < row_count; ++i) {
+            ASSERT_EQ(batched_final[i], ref_func(valid_data[i]))
+                << "segment type " << segment->type() << ", batch row " << i;
+        }
+
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(row_count / 2);
+        for (int64_t i = 0; i < row_count; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan.get(), segment, row_count, MAX_TIMESTAMP, &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        ASSERT_EQ(view.size(), offsets.size());
+        for (int64_t i = 0; i < static_cast<int64_t>(offsets.size()); ++i) {
+            ASSERT_EQ(view[i], ref_func(valid_data[offsets[i]]))
+                << "segment type " << segment->type() << ", offset row "
+                << offsets[i];
+        }
+    }
+}
+
+void
+AssertSegmentFieldValidDataByOffsets(
+    const SegmentInternalInterface* segment,
+    FieldId field_id,
+    const std::vector<int64_t>& offsets,
+    const std::vector<bool>& expected_valid_data) {
+    ASSERT_EQ(offsets.size(), expected_valid_data.size());
+
+    TargetBitmap valid_res(offsets.size(), true);
+    segment->ApplyFieldValidDataByOffsets(nullptr,
+                                          field_id,
+                                          offsets.data(),
+                                          offsets.size(),
+                                          TargetBitmapView(valid_res));
+    for (size_t i = 0; i < expected_valid_data.size(); ++i) {
+        EXPECT_EQ(valid_res[i], expected_valid_data[i])
+            << "segment type " << segment->type() << ", offset index " << i
+            << ", offset " << offsets[i];
+    }
+}
+
+// Keep the real sealed loading and expression paths, but count the legacy
+// materialization that used to create a complete ArrayView vector per hit.
+class ArrayEqualityCountingSegment : public ChunkedSegmentSealedImpl {
+ public:
+    using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+    mutable int64_t materialized_array_rows = 0;
+    mutable int64_t data_resource_reads = 0;
+
+    std::pair<std::shared_ptr<ChunkedColumnInterface>, FieldSkipMetricsView>
+    GetDataScanResources(FieldId field_id) const override {
+        ++data_resource_reads;
+        return ChunkedSegmentSealedImpl::GetDataScanResources(field_id);
+    }
+
+ protected:
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
+    chunk_array_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        auto views = ChunkedSegmentSealedImpl::chunk_array_view_impl(
+            op_ctx, field_id, chunk_id, offset_len);
+        materialized_array_rows += views.get().first.size();
+        return views;
+    }
+};
+
+class ArrayEqualityCountingIndex : public index::InvertedIndexTantivy<int64_t> {
+ public:
+    using InvertedIndexTantivy::InvertedIndexTantivy;
+    int64_t callback_calls = 0;
+
+    void
+    BuildForTest(const FieldDataPtr& data) {
+        BuildWithFieldData({data});
+        wrapper_->create_reader(milvus::index::SetBitsetSealed);
+        finish();
+        wrapper_->reload();
+        FinalizeSealed();
+    }
+
+    void
+    InApplyCallback(size_t n,
+                    const int64_t* values,
+                    const std::function<void(size_t)>& callback) override {
+        ++callback_calls;
+        InvertedIndexTantivy::InApplyCallback(n, values, callback);
+    }
+};
+
 }  // namespace
+
+TEST(Expr, TestNonNullableOrdinaryVectorNullExprCoversAllDTypes) {
+    constexpr int64_t N = 8;
+    constexpr int64_t dim = 16;
+    const std::vector<DataType> vector_types = {
+        DataType::VECTOR_FLOAT,
+        DataType::VECTOR_BINARY,
+        DataType::VECTOR_FLOAT16,
+        DataType::VECTOR_BFLOAT16,
+        DataType::VECTOR_SPARSE_U32_F32,
+        DataType::VECTOR_INT8,
+    };
+
+    for (auto data_type : vector_types) {
+        auto schema = std::make_shared<Schema>();
+        auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+        auto vector_fid = schema->AddDebugField(
+            "embedding", data_type, dim, knowhere::metric::L2, false);
+        schema->set_primary_field_id(i64_fid);
+
+        auto sealed_segment = CreateSealedSegment(schema);
+        FixedVector<bool> all_valid(N, true);
+        AssertVectorNullExprMatches(
+            sealed_segment.get(), vector_fid, false, all_valid, N, data_type);
+    }
+}
 
 TEST(Expr, TestArraySubscriptMissingElementIsUnknown) {
     auto schema = std::make_shared<Schema>();
@@ -707,6 +1037,198 @@ TEST(Expr, TestArrayEqual) {
     }
 }
 
+TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
+    constexpr int64_t N = 1536;
+    for (bool nested : {false, true}) {
+        for (bool mmap : {false, true}) {
+            for (bool sparse : {false, true}) {
+                SCOPED_TRACE(fmt::format(
+                    "nested={}, mmap={}, sparse={}", nested, mmap, sparse));
+                auto schema = std::make_shared<Schema>();
+                const auto pk = schema->AddDebugField("id", DataType::INT64);
+                const auto field_name = nested ? "structA[array]" : "array";
+                const auto field = schema->AddDebugField(
+                    field_name, DataType::ARRAY, DataType::INT64, true);
+                schema->set_primary_field_id(pk);
+                auto raw_data = DataGen(schema, N);
+                const std::vector<std::vector<int64_t>> patterns{
+                    {1, 2, 1}, {1, 1, 2}, {1, 2}, {1, 2, 1, 1}, {}, {4, 5}};
+                std::vector<std::vector<int64_t>> rows(N);
+                std::vector<bool> validity(N, true);
+                for (int64_t i = 0; i < N; ++i) {
+                    rows[i] = sparse ? std::vector<int64_t>{4, 5}
+                                     : patterns[i % patterns.size()];
+                    validity[i] = i % 11 != 0;
+                }
+                if (sparse) {
+                    rows[1] = {1, 2, 1};
+                    rows[N / 2] = {1, 1, 2};
+                    rows[N - 1] = {1, 2, 1};
+                }
+                ArrayEqualityCountingSegment segment(
+                    schema,
+                    empty_index_meta,
+                    SegcoreConfig::default_config(),
+                    kSegmentID + nested * 4 + mmap * 2 + sparse);
+                LoadGeneratedDataIntoSegment(
+                    raw_data, &segment, mmap, {field.get()});
+
+                FixedVector<Array> arrays;
+                std::vector<uint8_t> valid_bitmap((N + 7) / 8, 0);
+                for (int64_t i = 0; i < N; ++i) {
+                    ScalarFieldProto row;
+                    for (auto value : rows[i]) {
+                        row.mutable_long_data()->add_data(value);
+                    }
+                    arrays.emplace_back(row);
+                    if (validity[i]) {
+                        valid_bitmap[i >> 3] |= 1 << (i & 7);
+                    }
+                }
+                auto field_data = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                field_data->FillFieldData(
+                    arrays.data(), valid_bitmap.data(), N, 0);
+                // Different physical chunk sizes exercise global candidate
+                // offsets on both sides of the boundary.
+                constexpr int64_t split = 513;
+                auto first = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                auto second = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                first->FillFieldData(
+                    arrays.data(), valid_bitmap.data(), split, 0);
+                second->FillFieldData(arrays.data() + split,
+                                      valid_bitmap.data(),
+                                      N - split,
+                                      split);
+                auto load_info = PrepareSingleFieldInsertBinlog(
+                    kCollectionID,
+                    kPartitionID,
+                    kSegmentID,
+                    field.get(),
+                    {first, second},
+                    storage::RemoteChunkManagerSingleton::GetInstance()
+                        .GetRemoteChunkManager(),
+                    mmap ? "./data/mmap-test" : "");
+                segment.LoadFieldData(load_info);
+                ASSERT_EQ(segment.num_chunk_data(field), 2);
+                if (nested) {
+                    ASSERT_NE(segment.GetStructElementOffsets(field), nullptr);
+                }
+                proto::schema::FieldSchema field_schema;
+                field_schema.set_name(field_name);
+                field_schema.set_fieldid(field.get());
+                field_schema.set_data_type(proto::schema::DataType::Array);
+                field_schema.set_element_type(proto::schema::DataType::Int64);
+                field_schema.set_nullable(true);
+                storage::FileManagerContext index_ctx;
+                index_ctx.fieldDataMeta = storage::FieldDataMeta{kCollectionID,
+                                                                 kPartitionID,
+                                                                 kSegmentID,
+                                                                 field.get(),
+                                                                 field_schema};
+                index_ctx.indexMeta =
+                    storage::IndexMeta{kSegmentID, field.get(), 4100, 4100};
+                auto index = std::make_unique<ArrayEqualityCountingIndex>(
+                    index::TANTIVY_INDEX_LATEST_VERSION,
+                    index_ctx,
+                    false,
+                    true,
+                    nested);
+                index->BuildForTest(field_data);
+                auto* index_ptr = index.get();
+                LoadIndexInfo info;
+                info.field_id = field.get();
+                info.field_type = DataType::ARRAY;
+                info.element_type = DataType::INT64;
+                info.index_params = GenIndexParams(index.get());
+                info.cache_index = CreateTestCacheIndex(
+                    "array_equality_candidates", std::move(index));
+                segment.LoadIndex(info);
+                ASSERT_TRUE(segment.HasIndex(field));
+
+                const std::vector<std::vector<int64_t>> targets{
+                    {1, 2, 1}, {9, 9}, {}};
+                for (const auto& target : targets) {
+                    for (bool reverse : {false, true}) {
+                        proto::plan::GenericValue value;
+                        auto* array = value.mutable_array_val();
+                        array->set_element_type(proto::schema::DataType::Int64);
+                        array->set_same_type(true);
+                        for (auto element : target) {
+                            array->add_array()->set_int64_val(element);
+                        }
+                        auto expression =
+                            std::make_shared<expr::UnaryRangeFilterExpr>(
+                                expr::ColumnInfo(field,
+                                                 DataType::ARRAY,
+                                                 DataType::INT64,
+                                                 {},
+                                                 true),
+                                reverse ? proto::plan::NotEqual
+                                        : proto::plan::Equal,
+                                value);
+                        auto query_config = std::make_shared<exec::QueryConfig>(
+                            std::unordered_map<std::string, std::string>{
+                                {exec::QueryConfig::kExprEvalBatchSize,
+                                 "128"}});
+                        auto query_context =
+                            std::make_shared<exec::QueryContext>(
+                                DEAFULT_QUERY_ID,
+                                &segment,
+                                N,
+                                MAX_TIMESTAMP,
+                                0,
+                                0,
+                                query::PlanOptions(),
+                                query_config);
+                        exec::ExecContext exec_context(query_context.get());
+                        exec::ExprSet exprs({expression}, &exec_context);
+                        exec::EvalCtx eval_ctx(&exec_context);
+                        segment.materialized_array_rows = 0;
+                        segment.data_resource_reads = 0;
+                        index_ptr->callback_calls = 0;
+                        int64_t processed = 0;
+                        while (processed < N) {
+                            std::vector<VectorPtr> results;
+                            exprs.Eval(0, 1, true, eval_ctx, results);
+                            ASSERT_EQ(results.size(), 1);
+                            ASSERT_NE(results[0], nullptr);
+                            auto result = milvus::test::GetColumnVectorForTest(
+                                results[0]);
+                            ASSERT_GT(result->size(), 0);
+                            ASSERT_LE(result->size(), 128);
+                            BitsetTypeView bits(result->GetRawData(),
+                                                result->size());
+                            BitsetTypeView valid(result->GetValidRawData(),
+                                                 result->size());
+                            for (int64_t i = 0; i < result->size(); ++i) {
+                                const auto row = processed + i;
+                                EXPECT_EQ(valid[i], validity[row]) << row;
+                                EXPECT_EQ(bits[i],
+                                          validity[row] &&
+                                              ((rows[row] == target) ^ reverse))
+                                    << row;
+                            }
+                            processed += result->size();
+                        }
+                        ASSERT_EQ(processed, N);
+                        if (!target.empty()) {
+                            // Both the index and exact array recheck execute;
+                            // later expression batches reuse the cached bitmap.
+                            EXPECT_GT(index_ptr->callback_calls, 0);
+                            EXPECT_EQ(segment.data_resource_reads,
+                                      target.front() == 1 ? 1 : 0);
+                            EXPECT_EQ(segment.materialized_array_rows, 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 TEST(Expr, TestArrayNullExpr) {
     std::vector<std::tuple<std::string, std::function<bool(bool)>>> testcases =
         {
@@ -982,6 +1504,288 @@ TEST(Expr, TestStructArrayParentNullExprUsesRepresentativeSubField) {
     }
 
     (void)fakevec_fid;
+}
+
+TEST(Expr, TestFloatVectorNullExpr) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 128;
+    constexpr int64_t dim = 16;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 10, 1, false, true, false, 50);
+    auto valid_data = raw_data.get_col_valid(vector_fid);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+    AssertSegmentFieldValidDataByOffsets(
+        growing_segment,
+        vector_fid,
+        {-1, 0, 1, N - 1, N},
+        {false, valid_data[0], valid_data[1], valid_data[N - 1], false});
+
+    auto valid_count = CountValidRows(valid_data);
+    auto vectors = MakeCompactFloatVectors(valid_count, dim);
+    auto valid_bitmap = BuildValidBitmap(valid_data);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    field_data->FillFieldData(vectors.data(), valid_bitmap.data(), N, 0);
+
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto sealed_segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                          kPartitionID,
+                                                          kSegmentID,
+                                                          vector_fid.get(),
+                                                          {field_data},
+                                                          cm);
+    sealed_segment->LoadFieldData(field_data_info);
+    ASSERT_TRUE(sealed_segment->HasFieldData(vector_fid));
+
+    std::array<const SegmentInternalInterface*, 2> segments = {
+        static_cast<const SegmentInternalInterface*>(growing_segment),
+        static_cast<const SegmentInternalInterface*>(sealed_segment.get())};
+    for (auto* segment : segments) {
+        AssertVectorNullExprMatches(segment, vector_fid, true, valid_data, N);
+    }
+}
+
+TEST(Expr, TestFloatVectorNullExprUsesGrowingIndexValidity) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 64;
+    constexpr int64_t dim = 16;
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 64;
+    interim_config.nlist = 1;
+    interim_config.nprobe = 1;
+    interim_config.dense_vector_interim_index_type =
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+    config.set_build_ratio(0.1F);
+
+    auto growing = CreateGrowingSegment(
+        schema, MakeFloatVectorIndexMeta(vector_fid, dim, 100), 1, config);
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 10, 1, false, true, false, 20);
+    auto valid_data = raw_data.get_col_valid(vector_fid);
+
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+    const auto& field_indexing =
+        growing_segment->get_indexing_record().get_vec_field_indexing(
+            vector_fid);
+    ASSERT_GE(CountValidRows(valid_data), field_indexing.get_build_threshold());
+    ASSERT_TRUE(
+        growing_segment->get_indexing_record().SyncDataWithIndex(vector_fid));
+    auto indexing = field_indexing.get_segment_indexing();
+    auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+    ASSERT_NE(vec_index, nullptr);
+    ASSERT_TRUE(vec_index->HasValidData());
+
+    AssertSegmentFieldValidDataByOffsets(growing_segment,
+                                         vector_fid,
+                                         {-1, 0, 1, 2, 17, 18, N - 1, N},
+                                         {false,
+                                          valid_data[0],
+                                          valid_data[1],
+                                          valid_data[2],
+                                          valid_data[17],
+                                          valid_data[18],
+                                          valid_data[N - 1],
+                                          false});
+
+    AssertVectorNullExprMatches(
+        growing_segment, vector_fid, true, valid_data, N);
+}
+
+TEST(Expr, TestFloatVectorNullExprConjunctSkipMovesCursor) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 64;
+    auto raw_data =
+        DataGen(schema, N, 42, 0, 1, 10, 1, false, false, false, 17);
+    auto valid_data = raw_data.get_col_valid(vector_fid);
+    ASSERT_FALSE(valid_data[0]);
+    ASSERT_TRUE(valid_data[17]);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    auto gate_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(i64_fid, DataType::INT64, {}, false),
+        proto::plan::OpType::GreaterEqual,
+        Int64Value(17));
+    auto vector_not_null = MakeVectorNullExpr(
+        vector_fid, true, proto::plan::NullExpr_NullOp_IsNotNull);
+    auto and_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, gate_expr, vector_not_null);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, and_expr);
+
+    auto final = ExecuteQueryExprWithBatchSize(
+        plan, growing_segment, N, MAX_TIMESTAMP, 17);
+    ASSERT_EQ(final.size(), N);
+    for (int64_t i = 0; i < N; ++i) {
+        ASSERT_EQ(final[i], i >= 17 && valid_data[i]) << "row " << i;
+    }
+}
+
+TEST(Expr, TestFloatVectorNullExprAllNull) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 128;
+    constexpr int64_t dim = 16;
+    auto raw_data =
+        DataGen(schema, N, 42, 0, 1, 10, 1, false, true, false, 100);
+    auto valid_data = raw_data.get_col_valid(vector_fid);
+    ASSERT_EQ(CountValidRows(valid_data), 0);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    auto valid_bitmap = BuildValidBitmap(valid_data);
+    auto vectors = MakeCompactFloatVectors(0, dim);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    field_data->FillFieldData(vectors.data(), valid_bitmap.data(), N, 0);
+
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto sealed_segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                          kPartitionID,
+                                                          kSegmentID,
+                                                          vector_fid.get(),
+                                                          {field_data},
+                                                          cm);
+    sealed_segment->LoadFieldData(field_data_info);
+    ASSERT_TRUE(sealed_segment->HasFieldData(vector_fid));
+
+    std::array<const SegmentInternalInterface*, 2> segments = {
+        static_cast<const SegmentInternalInterface*>(growing_segment),
+        static_cast<const SegmentInternalInterface*>(sealed_segment.get())};
+    for (auto* segment : segments) {
+        AssertVectorNullExprMatches(segment, vector_fid, true, valid_data, N);
+    }
+}
+
+TEST(Expr, TestFloatVectorNullExprUsesIndexValidityWithoutFieldData) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 128;
+    constexpr int64_t dim = 16;
+    FixedVector<bool> valid_data(N);
+    for (int64_t i = 0; i < N; ++i) {
+        valid_data[i] = i % 3 != 0;
+    }
+
+    auto assert_index_only_case = [&](const FixedVector<bool>& expected_valid,
+                                      const std::string& cache_key) {
+        auto sealed_segment = MakeSealedVectorIndexOnlySegment(
+            schema, vector_fid, expected_valid, dim, cache_key);
+        ASSERT_TRUE(sealed_segment->HasIndex(vector_fid));
+        ASSERT_FALSE(sealed_segment->HasFieldData(vector_fid));
+
+        AssertVectorNullExprMatches(
+            sealed_segment.get(), vector_fid, true, expected_valid, N);
+        AssertSegmentFieldValidDataByOffsets(sealed_segment.get(),
+                                             vector_fid,
+                                             {-1, 0, 1, 2, N - 1, N},
+                                             {false,
+                                              expected_valid[0],
+                                              expected_valid[1],
+                                              expected_valid[2],
+                                              expected_valid[N - 1],
+                                              false});
+    };
+
+    assert_index_only_case(valid_data, "vector_null_expr_mixed");
+
+    FixedVector<bool> all_null_valid_data(N, false);
+    assert_index_only_case(all_null_valid_data, "vector_null_expr_all_null");
+
+    FixedVector<bool> all_valid_data(N, true);
+    assert_index_only_case(all_valid_data, "vector_null_expr_all_valid");
+}
+
+TEST(Expr, TestNonNullableFloatVectorNullExpr) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, false);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 128;
+    FixedVector<bool> all_valid(N, true);
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 10, 1, false, true, false, 0);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    auto sealed_segment = CreateSealedSegment(schema);
+
+    std::array<const SegmentInternalInterface*, 2> segments = {
+        static_cast<const SegmentInternalInterface*>(growing_segment),
+        static_cast<const SegmentInternalInterface*>(sealed_segment.get())};
+    for (auto* segment : segments) {
+        AssertVectorNullExprMatches(segment, vector_fid, false, all_valid, N);
+    }
 }
 
 TEST(Expr, TestVectorArrayNullExpr) {
@@ -3208,4 +4012,156 @@ TEST(Expr, TestArrayContainsForStruct) {
                 << "Distances should be sorted in ascending order (with index)";
         }
     }
+}
+
+// The index path converts the term list only when the index result is not
+// cached. Evaluating a sealed segment larger than one batch, without the
+// single-pass optimization, checks that every later batch sees the same,
+// deduplicated terms as the first one.
+TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto str_array_fid = schema->AddDebugField(
+        "string_array", DataType::ARRAY, DataType::VARCHAR);
+    schema->set_primary_field_id(i64_fid);
+
+    // more than two default-size (8192) batches
+    constexpr int N = 20000;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 3);
+    auto str_array_col = raw_data.get_col<ScalarFieldProto>(str_array_fid);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    FixedVector<Array> arrays;
+    arrays.reserve(N);
+    for (int i = 0; i < N; ++i) {
+        arrays.emplace_back(str_array_col[i]);
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::VARCHAR, false);
+    field_data->FillFieldData(arrays.data(), N);
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("string_array");
+    field_schema.set_fieldid(str_array_fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::VarChar);
+    auto field_meta = storage::FieldDataMeta{
+        kCollectionID,
+        kPartitionID,
+        kSegmentID,
+        str_array_fid.get(),
+        field_schema,
+    };
+    auto index_meta =
+        storage::IndexMeta{kSegmentID, str_array_fid.get(), 4001, 4001};
+
+    // Build, serialize and reload so the index is in its query-ready state.
+    auto root_path =
+        fmt::format("{}/array_contains_across_batches", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    auto build_index =
+        std::make_unique<index::BitmapIndex<std::string>>(ctx, false);
+    build_index->BuildWithFieldData({field_data});
+    auto binary_set = build_index->Serialize({});
+    auto bitmap_index =
+        std::make_unique<index::BitmapIndex<std::string>>(ctx, false);
+    bitmap_index->Load(binary_set, {});
+    ASSERT_FALSE(bitmap_index->IsNestedIndex());
+    ASSERT_EQ(bitmap_index->Count(), N);
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = str_array_fid.get();
+    load_index_info.field_type = DataType::ARRAY;
+    load_index_info.element_type = DataType::VARCHAR;
+    load_index_info.index_params = GenIndexParams(bitmap_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("array_bitmap_str", std::move(bitmap_index));
+    segment->LoadIndex(load_index_info);
+
+    auto row_values = [&](int i) {
+        auto array = milvus::Array(str_array_col[i]);
+        std::vector<std::string> res;
+        for (int j = 0; j < array.length(); ++j) {
+            res.emplace_back(array.get_data_unchecked<std::string_view>(j));
+        }
+        return res;
+    };
+    auto contains = [](const std::vector<std::string>& values,
+                       const std::string& t) {
+        return std::find(values.begin(), values.end(), t) != values.end();
+    };
+
+    // Targets: every distinct element of the first rows; each is listed
+    // twice in the expression so the converted list must deduplicate.
+    std::vector<std::string> targets;
+    std::unordered_set<std::string> seen;
+    for (int i = 0; i < 300; ++i) {
+        for (auto& v : row_values(i)) {
+            if (seen.insert(v).second) {
+                targets.push_back(v);
+            }
+        }
+    }
+    ASSERT_GT(targets.size(), 1);
+
+    auto run =
+        [&](proto::plan::JSONContainsExpr_JSONOp op,
+            const std::vector<std::string>& terms,
+            const std::function<bool(const std::vector<std::string>&)>& check) {
+            std::vector<proto::plan::GenericValue> vals;
+            for (const auto& t : terms) {
+                proto::plan::GenericValue gv;
+                gv.set_string_val(t);
+                vals.push_back(gv);
+                vals.push_back(gv);
+            }
+            auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+                expr::ColumnInfo(
+                    str_array_fid, DataType::ARRAY, DataType::VARCHAR),
+                op,
+                true,
+                vals);
+
+            auto evaluation =
+                milvus::test::EvalExprInBatches(expr, segment.get(), N);
+            ASSERT_GT(evaluation.batch_sizes.size(), 2);
+            ASSERT_EQ(evaluation.result->size(), N);
+            BitsetTypeView bits(evaluation.result->GetRawData(), N);
+            int matched = 0;
+            for (int i = 0; i < N; ++i) {
+                bool expected = check(row_values(i));
+                matched += expected;
+                ASSERT_EQ(bits[i], expected) << "row " << i;
+            }
+            ASSERT_GT(matched, 0);
+            ASSERT_LT(matched, N);
+        };
+
+    run(proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+        targets,
+        [&](const std::vector<std::string>& values) {
+            for (const auto& t : targets) {
+                if (contains(values, t)) {
+                    return true;
+                }
+            }
+            return false;
+        });
+
+    std::vector<std::string> all_terms{targets[0], targets[1]};
+    run(proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+        all_terms,
+        [&](const std::vector<std::string>& values) {
+            return contains(values, all_terms[0]) &&
+                   contains(values, all_terms[1]);
+        });
 }

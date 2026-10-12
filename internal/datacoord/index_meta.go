@@ -733,7 +733,7 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 
 	if index, ok := fieldIndexes[indexID]; ok && !index.IsDeleted {
-		if segIdx, ok := indexes.Get(indexID); ok {
+		if segIdx, ok := indexes.Get(indexID); ok && !segIdx.IsDeleted {
 			state.IndexName = index.IndexName
 			state.State = segIdx.IndexState
 			state.FailReason = segIdx.FailReason
@@ -779,7 +779,7 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 	checkSegmentState := func(indexes *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
 		indexedFields := 0
 		for _, index := range targetIndices {
-			if segIdx, ok := indexes.Get(index.IndexID); ok && segIdx.IndexState == commonpb.IndexState_Finished {
+			if segIdx, ok := indexes.Get(index.IndexID); ok && !segIdx.IsDeleted && segIdx.IndexState == commonpb.IndexState_Finished {
 				indexedFields += 1
 			}
 		}
@@ -951,15 +951,11 @@ func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 }
 
 // GetAllSegmentIndexes returns a deep-clone of every SegmentIndex recorded
-// for segID, including ones whose parent field index has been marked
-// IsDeleted — that is the case dropped-segment GC needs to clean up.
+// for segID, including deleted tasks and records whose parent field index has
+// been deleted. GC needs their file keys until cleanup completes.
 //
-// Intentionally does NOT acquire fieldIndexLock: this method only reads
-// m.segmentIndexes (a ConcurrentMap, self-synchronized) and never touches
-// m.indexes (which fieldIndexLock protects). Do not add an IsDeleted
-// filter here without first taking fieldIndexLock — that change would
-// silently start requiring the lock, unlike GetSegmentIndexes above which
-// already holds it.
+// It only reads the self-synchronized segmentIndexes map and does not acquire
+// fieldIndexLock or consult field-index definitions.
 func (m *indexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
 	if m.segmentIndexes == nil {
 		return nil
@@ -991,7 +987,7 @@ func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	}
 
 	for _, segIdx := range segIndexInfos.Values() {
-		if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
+		if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
 			ret[segIdx.IndexID] = model.CloneSegmentIndex(segIdx)
 		}
 	}
@@ -1162,6 +1158,10 @@ func (m *indexMeta) DeleteTask(buildID int64) error {
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
 		mlog.Warn(m.ctx, "there is no index with buildID", mlog.Int64("buildID", buildID))
+		return nil
+	}
+
+	if segIdx.IsDeleted {
 		return nil
 	}
 
@@ -1456,7 +1456,7 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 
 		for _, segIdx := range segIndexInfos.Values() {
-			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
+			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
 				indexVersion := segIdx.CurrentIndexVersion
 				if indexparamcheck.IsScalarIndexType(segIdx.IndexType) {
 					indexVersion = segIdx.CurrentScalarIndexVersion

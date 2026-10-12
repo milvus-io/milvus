@@ -221,6 +221,12 @@ func (node *Proxy) TsoAllocator() taskmodel.TsoAllocator {
 	return node.tsoAllocator
 }
 
+// ResolveRLSEnforcement applies the proxy-owned SkipRLS authorization rules
+// for tasks implemented outside the root proxy package.
+func (node *Proxy) ResolveRLSEnforcement(ctx context.Context, cache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
+	return resolveRLSEnforcement(ctx, cache, rlsEnabled, rlsForce, skipRLS, dbName, collectionName, operation)
+}
+
 // IsDQLQueueFull reports whether the next DQL enqueue would be rejected with
 // TooManyRequests. The REST layer probes it (via interface assertion, like
 // GetMetaCache) to reject search/query before paying for body decoding.

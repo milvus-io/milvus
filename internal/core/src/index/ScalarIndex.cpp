@@ -243,7 +243,7 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
                index_files.value().size());
     const auto& packed_file = index_files.value()[0];
 
-    LOG_INFO("LoadUnified: loading packed index file: {}", packed_file);
+    LOG_DEBUG("LoadUnified: loading packed index file: {}", packed_file);
 
     auto load_priority =
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
@@ -288,7 +288,7 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
 
     LoadEntries(*reader, config);
 
-    LOG_INFO("LoadUnified completed for index type: {}", index_type_);
+    LOG_DEBUG("LoadUnified completed for index type: {}", index_type_);
 }
 
 template class ScalarIndex<bool>;

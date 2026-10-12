@@ -55,7 +55,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
 #include "common/FastMem.h"
@@ -1324,6 +1324,20 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
         return {std::move(column), std::move(view)};
     }
 
+    // Hot-loop column accessor: borrowed pointer straight out of the frozen
+    // published state, no shared_ptr copies and no skip-metrics construction.
+    const ChunkedColumnInterface*
+    GetColumn(FieldId field_id) const override {
+        return Column(field_id);
+    }
+
+    // Plain (non-virtual) accessor so the enclosing segment's ToPublishedState
+    // can rebind the concrete published state. The facade itself stays opaque.
+    const std::shared_ptr<const PublishedSegmentState>&
+    GetPublishedState() const {
+        return state_;
+    }
+
  private:
     bool
     FieldDataReady(FieldId field_id) const {
@@ -1344,6 +1358,75 @@ ChunkedSegmentSealedImpl::CaptureReadSnapshot() const {
     return std::make_shared<SealedReadSnapshot>(CapturePublishedState());
 }
 
+std::shared_ptr<const ChunkedSegmentSealedImpl::PublishedSegmentState>
+ChunkedSegmentSealedImpl::ToPublishedState(
+    const std::shared_ptr<const SegmentReadSnapshot>& snapshot) {
+    if (!snapshot) {
+        return nullptr;
+    }
+    // A non-SealedReadSnapshot would make the pointer reinterpretation below
+    // invalid. Sealed reads always come from CaptureReadSnapshot, so the
+    // downcast both guards every call site (including the export paths that
+    // bypass FillTargetEntry's cross-segment assertion) and yields direct
+    // access to the concrete state.
+    auto* sealed = dynamic_cast<const SealedReadSnapshot*>(snapshot.get());
+    AssertInfo(sealed != nullptr,
+               "read_snapshot_ is not a sealed segment read snapshot");
+    // Alias constructor: shares the snapshot's shared_ptr control block (one
+    // ref-count bump), so the concrete state stays owned by
+    // SealedReadSnapshot::state_ for the request lifetime — no separate
+    // ownership of the published state and no atomic ref-count traffic on the
+    // shared published_state_ control block.
+    return std::shared_ptr<const PublishedSegmentState>(
+        snapshot, sealed->GetPublishedState().get());
+}
+
+std::unique_ptr<DataArray>
+BulkSubscriptWithSnapshot(
+    const SegmentInternalInterface* segment,
+    const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const FieldMeta& field_meta,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>* dynamic_field_names) {
+    auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(segment);
+    auto pinned =
+        chunked ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
+                : std::shared_ptr<
+                      const ChunkedSegmentSealedImpl::PublishedSegmentState>();
+    // Dynamic-field extraction bypasses the field-exists gate: the requested
+    // sub-fields are read from the JSON column even when the field is absent
+    // from the schema (matching the pre-helper dispatch).
+    if (dynamic_field_names == nullptr) {
+        bool field_exists = pinned
+                                ? pinned->schema->get_fields().find(field_id) !=
+                                      pinned->schema->get_fields().end()
+                                : segment->is_field_exist(field_id);
+        if (!field_exists) {
+            return segment->bulk_subscript_not_exist_field(field_meta, count);
+        }
+    }
+    if (pinned) {
+        if (dynamic_field_names != nullptr) {
+            return chunked->bulk_subscript_from_state(pinned,
+                                                      op_ctx,
+                                                      field_id,
+                                                      seg_offsets,
+                                                      count,
+                                                      *dynamic_field_names);
+        }
+        return chunked->bulk_subscript_from_state(
+            pinned, op_ctx, field_id, seg_offsets, count);
+    }
+    if (dynamic_field_names != nullptr) {
+        return segment->bulk_subscript(
+            op_ctx, field_id, seg_offsets, count, *dynamic_field_names);
+    }
+    return segment->bulk_subscript(op_ctx, field_id, seg_offsets, count);
+}
+
 std::shared_ptr<const ChunkedSegmentSealedImpl::RuntimeResourceState>
 ChunkedSegmentSealedImpl::BuildRuntimeResourceState() {
     return ToConstRuntimeState(std::make_shared<RuntimeResourceState>());
@@ -1357,8 +1440,8 @@ ChunkedSegmentSealedImpl::CloneRuntimeResourceState(
         return state;
     }
     state->fields = current->fields;
-    state->struct_to_array_offsets = current->struct_to_array_offsets;
-    state->array_offsets_map = current->array_offsets_map;
+    state->struct_to_element_offsets = current->struct_to_element_offsets;
+    state->struct_element_offsets_map = current->struct_element_offsets_map;
     state->scalar_indexings = current->scalar_indexings;
     state->vector_indexings = current->vector_indexings;
     state->vec_binlog_config = current->vec_binlog_config;
@@ -1751,8 +1834,8 @@ ChunkedSegmentSealedImpl::FreezeRuntimeResourceState(
     const RuntimeResourceState& current) {
     auto runtime = std::make_shared<RuntimeResourceState>();
     runtime->fields = current.fields;
-    runtime->struct_to_array_offsets = current.struct_to_array_offsets;
-    runtime->array_offsets_map = current.array_offsets_map;
+    runtime->struct_to_element_offsets = current.struct_to_element_offsets;
+    runtime->struct_element_offsets_map = current.struct_element_offsets_map;
     runtime->scalar_indexings = current.scalar_indexings;
     runtime->vector_indexings = current.vector_indexings;
     runtime->vec_binlog_config = current.vec_binlog_config;
@@ -3871,6 +3954,64 @@ ChunkedSegmentSealedImpl::ApplyFieldValidData(
 }
 
 void
+ChunkedSegmentSealedImpl::ApplyFieldValidDataByRange(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t logical_offset,
+    int64_t count,
+    TargetBitmapView valid_result) const {
+    if (count == 0) {
+        return;
+    }
+
+    auto snapshot = CapturePublishedState();
+    auto& field_meta = snapshot->schema->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type())) {
+        auto vector_entry = GetVectorIndexing(snapshot->runtime, field_id);
+        if (vector_entry != nullptr) {
+            auto ca =
+                SemiInlineGet(vector_entry->indexing_->PinCells(op_ctx, {0}));
+            auto vec_index =
+                dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+            AssertInfo(vec_index != nullptr, "invalid vector indexing");
+            if (vec_index->HasValidData()) {
+                vec_index->ApplyValidDataByRange(
+                    logical_offset, count, valid_result);
+                return;
+            }
+        }
+    }
+
+    AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    auto column = get_column(snapshot->runtime, field_id);
+    AssertInfo(column != nullptr,
+               "field {} column must exist when validity is requested",
+               field_id.get());
+    if (!column->IsNullable()) {
+        return;
+    }
+
+    std::vector<int64_t> offsets(count);
+    for (int64_t i = 0; i < count; ++i) {
+        offsets[i] = logical_offset + i;
+    }
+    column->BulkIsValid(
+        op_ctx,
+        [&valid_result](bool is_valid, size_t i) {
+            if (!is_valid) {
+                valid_result[i] = false;
+            }
+        },
+        offsets.data(),
+        count);
+}
+
+void
 ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -3882,6 +4023,27 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
     }
 
     auto snapshot = CapturePublishedState();
+    auto& field_meta = snapshot->schema->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type())) {
+        auto vector_entry = GetVectorIndexing(snapshot->runtime, field_id);
+        if (vector_entry != nullptr) {
+            auto ca =
+                SemiInlineGet(vector_entry->indexing_->PinCells(op_ctx, {0}));
+            auto vec_index =
+                dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+            AssertInfo(vec_index != nullptr, "invalid vector indexing");
+            if (vec_index->HasValidData()) {
+                vec_index->ApplyValidDataByOffsets(
+                    offsets, count, valid_result);
+                return;
+            }
+        }
+    }
+
     std::shared_ptr<ChunkedColumnInterface> column;
     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -4612,7 +4774,7 @@ ChunkedSegmentSealedImpl::DropFieldData(
     if (runtime != nullptr) {
         runtime->fields.erase(field_id);
         runtime->geometry_caches.erase(field_id);
-        runtime->array_offsets_map.erase(field_id);
+        runtime->struct_element_offsets_map.erase(field_id);
         runtime->mmap_field_ids.erase(field_id);
         // Average size describes the retrievable field value, not the
         // resident raw column. Keep it when an index with raw data remains
@@ -4624,7 +4786,7 @@ ChunkedSegmentSealedImpl::DropFieldData(
         auto next_runtime = CloneRuntimeResourceState(snapshot->runtime);
         next_runtime->fields.erase(field_id);
         next_runtime->geometry_caches.erase(field_id);
-        next_runtime->array_offsets_map.erase(field_id);
+        next_runtime->struct_element_offsets_map.erase(field_id);
         next_runtime->mmap_field_ids.erase(field_id);
         // See the staged-runtime branch above: only schema removal retires
         // field-level size metadata.
@@ -5145,13 +5307,13 @@ std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
 ChunkedSegmentSealedImpl::find_first_n_element(
     int64_t limit,
     const BitsetTypeView& element_bitset,
-    const IArrayOffsets* array_offsets,
+    const IStructElementOffsets* struct_element_offsets,
     const std::optional<QueryIteratorCursor>& cursor) const {
     auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
     if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
         return runtime->virtual_pk2offset->find_first_n_element(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
     if (!is_sorted_by_pk_) {
         auto pk_index = PinPkIndex(runtime, nullptr);
@@ -5159,7 +5321,7 @@ ChunkedSegmentSealedImpl::find_first_n_element(
         AssertInfo(pk_cell != nullptr && pk_cell->has_pk2offset(),
                    "primary key index is not ready");
         return pk_cell->pk2offset().find_first_n_element(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
 
     // Sorted by PK, element_id order = (PK, element_index) order
@@ -5212,7 +5374,8 @@ ChunkedSegmentSealedImpl::find_first_n_element(
     std::optional<size_t> elem_opt = element_bitset.find_first(false);
     while (elem_opt.has_value() && hit_num < limit) {
         int64_t elem_id = static_cast<int64_t>(elem_opt.value());
-        auto [doc_id, elem_idx] = array_offsets->ElementIDToRowID(elem_id);
+        auto [doc_id, elem_idx] =
+            struct_element_offsets->ElementIDToRowID(elem_id);
         if (cursor_doc_offset.has_value() &&
             doc_id == cursor_doc_offset.value() &&
             elem_idx <= cursor->last_element_offset) {
@@ -6700,7 +6863,17 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                          FieldId field_id,
                                          const int64_t* seg_offsets,
                                          int64_t count) const {
-    auto snapshot = CapturePublishedState();
+    return bulk_subscript_from_state(
+        CapturePublishedState(), op_ctx, field_id, seg_offsets, count);
+}
+
+std::unique_ptr<DataArray>
+ChunkedSegmentSealedImpl::bulk_subscript_from_state(
+    const std::shared_ptr<const PublishedSegmentState>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count) const {
     auto& field_meta = snapshot->schema->operator[](field_id);
     // if count == 0, return empty data array
     if (count == 0) {
@@ -6794,13 +6967,28 @@ ChunkedSegmentSealedImpl::bulk_subscript(
     const int64_t* seg_offsets,
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
-    auto snapshot = CapturePublishedState();
+    return bulk_subscript_from_state(CapturePublishedState(),
+                                     op_ctx,
+                                     field_id,
+                                     seg_offsets,
+                                     count,
+                                     dynamic_field_names);
+}
+
+std::unique_ptr<DataArray>
+ChunkedSegmentSealedImpl::bulk_subscript_from_state(
+    const std::shared_ptr<const PublishedSegmentState>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>& dynamic_field_names) const {
     Assert(!dynamic_field_names.empty());
     if (count == 0) {
         return fill_with_empty(field_id, 0);
     }
 
-    auto column = get_column(field_id);
+    auto column = get_column(snapshot->runtime, field_id);
     AssertInfo(column != nullptr,
                "json field {} must exist when bulk_subscript",
                field_id.get());
@@ -7586,28 +7774,34 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         staged_geometry_cache = BuildGeometryCacheDetached(field_id, column);
     }
     auto& field_meta = schema_snapshot->operator[](field_id);
-    auto prepare_array_offsets = [&](RuntimeResourceState& target_runtime) {
-        if (auto parsed_struct_name = GetStructNameForArrayField(field_meta);
-            parsed_struct_name.has_value()) {
-            auto& struct_name = *parsed_struct_name;
-            auto it = target_runtime.struct_to_array_offsets.find(struct_name);
-            if (it != target_runtime.struct_to_array_offsets.end()) {
-                target_runtime.array_offsets_map[field_id] = it->second;
-                return;
-            }
+    auto prepare_struct_element_offsets =
+        [&](RuntimeResourceState& target_runtime) {
+            if (auto parsed_struct_name =
+                    GetStructNameForArrayField(field_meta);
+                parsed_struct_name.has_value()) {
+                auto& struct_name = *parsed_struct_name;
+                auto it =
+                    target_runtime.struct_to_element_offsets.find(struct_name);
+                if (it != target_runtime.struct_to_element_offsets.end()) {
+                    target_runtime.struct_element_offsets_map[field_id] =
+                        it->second;
+                    return;
+                }
 
-            auto new_offsets = ArrayOffsetsSealed::BuildFromColumn(
-                *column, field_meta, num_rows);
-            target_runtime.struct_to_array_offsets[struct_name] = new_offsets;
-            target_runtime.array_offsets_map[field_id] = new_offsets;
-        }
-    };
+                auto new_offsets = StructElementOffsetsSealed::BuildFromColumn(
+                    *column, field_meta, num_rows);
+                target_runtime.struct_to_element_offsets[struct_name] =
+                    new_offsets;
+                target_runtime.struct_element_offsets_map[field_id] =
+                    new_offsets;
+            }
+        };
 
     auto apply_loaded_column =
         [&](RuntimeResourceState& target_runtime,
             const std::shared_ptr<ChunkedColumnInterface>& old_column,
             const PublishedSegmentState& state_snapshot) {
-            prepare_array_offsets(target_runtime);
+            prepare_struct_element_offsets(target_runtime);
 
             if (data_type == DataType::GEOMETRY) {
                 if (staged_geometry_cache != nullptr) {
@@ -7760,12 +7954,12 @@ ChunkedSegmentSealedImpl::PrepareSchemaForReopen(const SchemaPtr& sch) {
 }
 
 void
-ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
+ChunkedSegmentSealedImpl::InvalidateStaleStructElementOffsets(
     const SchemaPtr& current_schema,
     const SchemaPtr& target_schema,
     RuntimeResourceState& runtime) {
-    if (runtime.struct_to_array_offsets.empty() &&
-        runtime.array_offsets_map.empty()) {
+    if (runtime.struct_to_element_offsets.empty() &&
+        runtime.struct_element_offsets_map.empty()) {
         return;
     }
 
@@ -7791,10 +7985,10 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
         }
     }
 
-    for (auto it = runtime.struct_to_array_offsets.begin();
-         it != runtime.struct_to_array_offsets.end();) {
+    for (auto it = runtime.struct_to_element_offsets.begin();
+         it != runtime.struct_to_element_offsets.end();) {
         if (surviving_structs.find(it->first) == surviving_structs.end()) {
-            it = runtime.struct_to_array_offsets.erase(it);
+            it = runtime.struct_to_element_offsets.erase(it);
         } else {
             ++it;
         }
@@ -7802,11 +7996,11 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
 
     // Remove aliases for child fields that no longer exist in the target
     // schema. Otherwise their shared_ptrs keep retired StructArray offsets
-    // reachable through GetArrayOffsets().
-    for (auto it = runtime.array_offsets_map.begin();
-         it != runtime.array_offsets_map.end();) {
+    // reachable through GetStructElementOffsets().
+    for (auto it = runtime.struct_element_offsets_map.begin();
+         it != runtime.struct_element_offsets_map.end();) {
         if (!target_schema->has_field(it->first)) {
-            it = runtime.array_offsets_map.erase(it);
+            it = runtime.struct_element_offsets_map.erase(it);
         } else {
             ++it;
         }
@@ -8144,7 +8338,7 @@ ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
         "Schema-only reopen segment {} with diff {}", id_, diff.ToString());
 
     auto next_runtime = CloneMutableRuntimeResourceState();
-    InvalidateStaleStructArrayOffsets(current_schema, sch, *next_runtime);
+    InvalidateStaleStructElementOffsets(current_schema, sch, *next_runtime);
     auto staged = ClonePublishedState(current);
     staged->schema = sch;
     staged->load_info = std::make_shared<const SegmentLoadInfo>(new_local);
@@ -8223,7 +8417,7 @@ ChunkedSegmentSealedImpl::Reopen(
 
     auto next_runtime = CloneMutableRuntimeResourceState();
     if (has_schema_update) {
-        InvalidateStaleStructArrayOffsets(
+        InvalidateStaleStructElementOffsets(
             current_schema, target_schema, *next_runtime);
     }
     auto staged = ClonePublishedState(current);
@@ -8356,7 +8550,7 @@ ChunkedSegmentSealedImpl::fill_empty_field(
 }
 
 void
-ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
+ChunkedSegmentSealedImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta,
     int64_t row_count,
     RuntimeResourceState& runtime) {
@@ -8365,15 +8559,16 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
         return;
     }
 
-    auto it = runtime.struct_to_array_offsets.find(*struct_name);
-    if (it == runtime.struct_to_array_offsets.end()) {
-        auto array_offsets = ArrayOffsetsSealed::BuildAllZeros(row_count);
-        it =
-            runtime.struct_to_array_offsets.emplace(*struct_name, array_offsets)
-                .first;
+    auto it = runtime.struct_to_element_offsets.find(*struct_name);
+    if (it == runtime.struct_to_element_offsets.end()) {
+        auto struct_element_offsets =
+            StructElementOffsetsSealed::BuildAllZeros(row_count);
+        it = runtime.struct_to_element_offsets
+                 .emplace(*struct_name, struct_element_offsets)
+                 .first;
     }
 
-    runtime.array_offsets_map[field_meta.get_id()] = it->second;
+    runtime.struct_element_offsets_map[field_meta.get_id()] = it->second;
 }
 
 void
@@ -8409,7 +8604,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         const auto& field_meta = schema_snapshot->operator[](field_id);
         fill_empty_field(
             field_meta, schema_snapshot, segment_load_info, *target_runtime);
-        EnsureArrayOffsetsForStructField(
+        EnsureStructElementOffsetsForField(
             field_meta, target_runtime->row_count, *target_runtime);
         filled_fields.push_back(field_id);
     }
@@ -8535,7 +8730,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
             } else {
                 runtime.mmap_field_ids.erase(field_id);
             }
-            EnsureArrayOffsetsForStructField(
+            EnsureStructElementOffsetsForField(
                 field_meta, runtime.row_count, runtime);
             LOG_INFO(
                 "fill empty field {} (data type {}) for growing segment {} "
@@ -8660,7 +8855,7 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
         current,
         MakeStateDelta(
             schema_snapshot, published, static_cast<Timestamp>(commit_ts))));
-    LOG_INFO(
+    LOG_DEBUG(
         "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
         "storage_version: {}, use_take_for_output: {}, commit_ts: {}",
         id_,
@@ -9368,7 +9563,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     auto snapshot = CapturePublishedState();
     auto num_rows = snapshot->load_info->GetNumOfRows();
-    LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
+    LOG_DEBUG("Loading segment {} with {} rows", id_, num_rows);
 
     SegmentLoadInfo mutable_copy(snapshot->load_info->GetProto(),
                                  snapshot->schema);
@@ -9378,18 +9573,31 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
         mutable_copy.SetTextIndexCreated(fid);
     }
     auto diff = mutable_copy.GetLoadDiff();
-    LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
+    LOG_DEBUG("Load segment {} with diff {}", id_, diff.ToString());
 
     ApplyLoadDiff(op_ctx, mutable_copy, diff);
 
-    LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
+    LOG_DEBUG("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
 
 void
 ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
                                           SearchResult& results,
                                           milvus::OpContext* op_ctx) const {
-    auto snapshot = CapturePublishedState();
+    // Reuse the request-pinned snapshot captured once at search start; fall
+    // back to a fresh capture for non-pinned / test paths.
+    if (results.read_snapshot_ != nullptr) {
+        // The snapshot is only safe to reinterpret here if it was captured by
+        // this very segment (alias re-binding in ToPublishedState is a
+        // type-erased static_cast). Cross-segment reuse would be silent UB.
+        // segment_ is null in test helpers, which never attach a snapshot.
+        AssertInfo(results.segment_ == nullptr || results.segment_ == this,
+                   "read_snapshot_ was captured by a different segment");
+    }
+    auto snapshot = ToPublishedState(results.read_snapshot_);
+    if (!snapshot) {
+        snapshot = CapturePublishedState();
+    }
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
     AssertInfo(results.seg_offsets_.size() == size,
@@ -9400,7 +9608,7 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
     // Try take() for eligible output fields. Fields not filled by take still
     // go through bulk_subscript below.
     bool used_take = TryTakeForSearch(
-        plan, results.seg_offsets_.data(), size, results, op_ctx);
+        plan, results.seg_offsets_.data(), size, results, snapshot, op_ctx);
 
     std::unique_ptr<DataArray> field_data;
     // Per-call OpContext keeps storage_usage scoped to this segment;
@@ -9423,16 +9631,21 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript(&local_ctx,
-                                        field_id,
-                                        results.seg_offsets_.data(),
-                                        size,
-                                        target_dynamic_fields);
-        } else if (!is_field_exist(field_id)) {
+            field_data = bulk_subscript_from_state(snapshot,
+                                                   &local_ctx,
+                                                   field_id,
+                                                   results.seg_offsets_.data(),
+                                                   size,
+                                                   target_dynamic_fields);
+        } else if (snapshot->schema->get_fields().find(field_id) ==
+                   snapshot->schema->get_fields().end()) {
             field_data = bulk_subscript_not_exist_field(field_meta, size);
         } else {
-            field_data = bulk_subscript(
-                &local_ctx, field_id, results.seg_offsets_.data(), size);
+            field_data = bulk_subscript_from_state(snapshot,
+                                                   &local_ctx,
+                                                   field_id,
+                                                   results.seg_offsets_.data(),
+                                                   size);
         }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
@@ -9949,8 +10162,12 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids,
+    std::shared_ptr<const PublishedSegmentState> snapshot,
     milvus::OpContext* op_ctx) const {
-    auto snapshot = CapturePublishedState();
+    // Fallback for callers without a pinned snapshot (direct tests).
+    if (!snapshot) {
+        snapshot = CapturePublishedState();
+    }
     auto schema_snapshot = snapshot->schema;
     if (size == 0 || !snapshot->use_take_for_output ||
         !plan->take_for_output_allowed_) {
@@ -10236,12 +10453,17 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
 }
 
 bool
-ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
-                                           const int64_t* seg_offsets,
-                                           int64_t size,
-                                           SearchResult& results,
-                                           milvus::OpContext* op_ctx) const {
-    auto snapshot = CapturePublishedState();
+ChunkedSegmentSealedImpl::TryTakeForSearch(
+    const query::Plan* plan,
+    const int64_t* seg_offsets,
+    int64_t size,
+    SearchResult& results,
+    std::shared_ptr<const PublishedSegmentState> snapshot,
+    milvus::OpContext* op_ctx) const {
+    // Fallback for callers without a pinned snapshot (direct tests).
+    if (!snapshot) {
+        snapshot = CapturePublishedState();
+    }
     auto schema_snapshot = snapshot->schema;
     if (size == 0 || !snapshot->use_take_for_output ||
         !plan->take_for_output_allowed_) {

@@ -1166,10 +1166,10 @@ TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
     const std::string unique_token = "zzlobuniqueterm";
 
     auto test_dir =
-        "sealed_text_lob_index_" +
+        TestLocalPath + "sealed_text_lob_index_" +
         std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count());
-    boost::filesystem::remove_all(TestLocalPath + test_dir);
+    boost::filesystem::remove_all(test_dir);
 
     auto schema = std::make_shared<Schema>();
     schema->AddField(FieldMeta(
@@ -1264,7 +1264,7 @@ TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
     EXPECT_TRUE(hits[1]);
     EXPECT_FALSE(hits[2]);
 
-    boost::filesystem::remove_all(TestLocalPath + test_dir);
+    boost::filesystem::remove_all(test_dir);
 }
 
 TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
@@ -1275,10 +1275,10 @@ TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
     constexpr int64_t row_count = 1030;
 
     auto test_dir =
-        "growing_text_lob_index_" +
+        TestLocalPath + "growing_text_lob_index_" +
         std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count());
-    boost::filesystem::remove_all(TestLocalPath + test_dir);
+    boost::filesystem::remove_all(test_dir);
 
     auto schema = std::make_shared<Schema>();
     schema->AddField(FieldMeta(
@@ -1379,7 +1379,7 @@ TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
     ASSERT_EQ(null_hits.size(), row_count);
     EXPECT_FALSE(null_hits[7]);
 
-    boost::filesystem::remove_all(TestLocalPath + test_dir);
+    boost::filesystem::remove_all(test_dir);
 }
 
 // Regression test: BuildIndexFromFieldData with a single batch should still

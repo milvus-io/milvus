@@ -90,6 +90,10 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 		return nil, err
 	}
 
+	currentSplit, err := currentSplitForGrowingPack(schema, insertData, pack.Meta)
+	if err != nil {
+		return nil, retry.Unrecoverable(merr.Wrapf(err, "restore column groups for growing segment %d", pack.SegmentID))
+	}
 	metaCache := newGrowingSegmentMetaCache(pack.Meta, schema)
 	syncPack := new(syncmgr.SyncPack).
 		WithCollectionID(pack.CollectionID).
@@ -113,7 +117,7 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 		storageConfig:  w.storageConfig,
 		writeRetryOpts: w.writeRetryOpts,
 		storageVersion: pack.Meta.GetStorageVersion(),
-		currentSplit:   currentSplitForGrowingPack(schema, insertData, pack.Meta),
+		currentSplit:   currentSplit,
 		manifestPath:   manifestPathForGrowingPack(pack.Meta),
 	}
 	writeResult, err := writeFn(ctx, request)
@@ -328,32 +332,83 @@ func persistedFieldBinlogs(
 	})
 }
 
-func currentSplitFromPersistedStorage(schema *schemapb.CollectionSchema, storage *streamingpb.L1SegmentPersistedStorage) []storagecommon.ColumnGroup {
+func currentSplitFromPersistedStorage(schema *schemapb.CollectionSchema, storage *streamingpb.L1SegmentPersistedStorage) ([]storagecommon.ColumnGroup, error) {
 	if storage == nil {
-		return nil
+		return nil, nil
 	}
 	fieldIndexes := make(map[int64]int)
 	for idx, field := range typeutil.GetAllFieldSchemas(schema) {
 		fieldIndexes[field.GetFieldID()] = idx
 	}
+	var currentSplit []storagecommon.ColumnGroup
 	for _, binlogBatch := range storage.GetBinlogs() {
 		if len(binlogBatch.GetFieldBinlog()) == 0 {
+			continue
+		}
+		hasColumnGroups := false
+		for _, fieldBinlog := range binlogBatch.GetFieldBinlog() {
+			hasColumnGroups = hasColumnGroups || len(fieldBinlog.GetChildFields()) > 0
+		}
+		if !hasColumnGroups {
 			continue
 		}
 		result := make([]storagecommon.ColumnGroup, 0, len(binlogBatch.GetFieldBinlog()))
 		for _, fieldBinlog := range binlogBatch.GetFieldBinlog() {
 			fields := fieldBinlog.GetChildFields()
 			if len(fields) == 0 {
-				return nil
+				return nil, merr.WrapErrDataIntegrityMsg("persisted column group %d has no child fields", fieldBinlog.GetFieldID())
+			}
+			columns := make([]int, len(fields))
+			for i, fieldID := range fields {
+				index, ok := fieldIndexes[fieldID]
+				if !ok {
+					return nil, merr.WrapErrDataIntegrityMsg("persisted column group %d contains field %d absent from schema version %d", fieldBinlog.GetFieldID(), fieldID, schema.GetVersion())
+				}
+				columns[i] = index
 			}
 			result = append(result, storagecommon.ColumnGroup{
 				GroupID: fieldBinlog.GetFieldID(),
 				Fields:  fields,
-				Columns: lo.Map(fields, func(fieldID int64, _ int) int { return fieldIndexes[fieldID] }),
+				Columns: columns,
 				Format:  fieldBinlog.GetFormat(),
 			})
 		}
-		return result
+		if err := validateGrowingColumnGroups(schema, result); err != nil {
+			return nil, err
+		}
+		if currentSplit == nil {
+			currentSplit = result
+		}
+	}
+	return currentSplit, nil
+}
+
+// Persisted column groups must reference fields and indexes in the selected
+// schema. Older groups may omit fields added later with nullable/default values.
+func validateGrowingColumnGroups(schema *schemapb.CollectionSchema, groups []storagecommon.ColumnGroup) error {
+	fields := typeutil.GetAllFieldSchemas(schema)
+	fieldIndexes := make(map[int64]int, len(fields))
+	for index, field := range fields {
+		fieldIndexes[field.GetFieldID()] = index
+	}
+	seen := make(map[int64]struct{}, len(fields))
+	for _, group := range groups {
+		if len(group.Fields) != len(group.Columns) {
+			return merr.WrapErrDataIntegrityMsg("column group %d field and column counts differ", group.GroupID)
+		}
+		for i, fieldID := range group.Fields {
+			index, ok := fieldIndexes[fieldID]
+			if !ok {
+				return merr.WrapErrDataIntegrityMsg("column group %d contains field %d absent from schema version %d", group.GroupID, fieldID, schema.GetVersion())
+			}
+			if group.Columns[i] != index {
+				return merr.WrapErrDataIntegrityMsg("column group %d field %d maps to column %d instead of %d", group.GroupID, fieldID, group.Columns[i], index)
+			}
+			if _, exists := seen[fieldID]; exists {
+				return merr.WrapErrDataIntegrityMsg("field %d appears in multiple persisted column groups", fieldID)
+			}
+			seen[fieldID] = struct{}{}
+		}
 	}
 	return nil
 }
@@ -362,20 +417,23 @@ func currentSplitForGrowingPack(
 	schema *schemapb.CollectionSchema,
 	insertData []*storage.InsertData,
 	meta *streamingpb.SegmentAssignmentMeta,
-) []storagecommon.ColumnGroup {
+) ([]storagecommon.ColumnGroup, error) {
 	switch meta.GetStorageVersion() {
 	case storage.StorageV2, storage.StorageV3:
 	default:
-		return nil
+		return nil, nil
 	}
 
-	currentSplit := currentSplitFromPersistedStorage(schema, meta.GetPersistedStorage())
+	currentSplit, err := currentSplitFromPersistedStorage(schema, meta.GetPersistedStorage())
+	if err != nil {
+		return nil, err
+	}
 	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 	if len(currentSplit) > 0 {
 		if meta.GetStorageVersion() == storage.StorageV3 {
-			return currentSplit
+			return currentSplit, nil
 		}
-		return storagecommon.FillColumnGroupFormats(currentSplit, writerFormat)
+		return storagecommon.FillColumnGroupFormats(currentSplit, writerFormat), nil
 	}
 
 	currentSplit = storagecommon.SplitColumns(
@@ -383,7 +441,7 @@ func currentSplitForGrowingPack(
 		calcGrowingColumnStats(insertData),
 		storagecommon.DefaultPolicies()...,
 	)
-	return storagecommon.FillColumnGroupFormats(currentSplit, writerFormat)
+	return storagecommon.FillColumnGroupFormats(currentSplit, writerFormat), nil
 }
 
 func calcGrowingColumnStats(insertData []*storage.InsertData) map[int64]storagecommon.ColumnStats {

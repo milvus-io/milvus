@@ -38,7 +38,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
@@ -265,11 +265,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          FieldId field_id,
                          const std::string& nested_path) const override;
 
-    std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const override {
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const override {
         auto runtime = CaptureRuntimeResourceState();
-        auto it = runtime->array_offsets_map.find(field_id);
-        if (it != runtime->array_offsets_map.end()) {
+        auto it = runtime->struct_element_offsets_map.find(field_id);
+        if (it != runtime->struct_element_offsets_map.end()) {
             return it->second;
         }
         return nullptr;
@@ -330,10 +330,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     struct RuntimeResourceState {
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
             fields;
-        std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
-            struct_to_array_offsets;
-        std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
-            array_offsets_map;
+        std::unordered_map<std::string,
+                           std::shared_ptr<StructElementOffsetsSealed>>
+            struct_to_element_offsets;
+        std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsSealed>>
+            struct_element_offsets_map;
         std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings;
         std::unordered_map<FieldId, SealedIndexingEntryPtr> vector_indexings;
         std::unordered_map<FieldId, std::shared_ptr<const VecIndexConfig>>
@@ -521,7 +522,41 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t size,
         bool ignore_non_pk,
         bool fill_ids,
+        std::shared_ptr<const PublishedSegmentState> snapshot = nullptr,
         milvus::OpContext* op_ctx = nullptr) const;
+
+    // Result-fill reads through a request-pinned snapshot instead of
+    // re-capturing the published state per field at this layer. Inner column /
+    // index helpers called below (get_raw_data, PinIndex, HasFieldData, ...)
+    // still self-capture; migrating them is a Phase 4 follow-up. Public for
+    // cross-class access via dynamic_cast from SegmentInterface (same pattern
+    // as TryTakeForRetrieve); the virtual bulk_subscript keeps its frozen
+    // signature and delegates to these with a fresh capture.
+    std::unique_ptr<DataArray>
+    bulk_subscript_from_state(
+        const std::shared_ptr<const PublishedSegmentState>& snapshot,
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count) const;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript_from_state(
+        const std::shared_ptr<const PublishedSegmentState>& snapshot,
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::vector<std::string>& dynamic_field_names) const;
+
+    // Rebind a request-scoped SegmentReadSnapshot to the concrete published
+    // state, sharing the snapshot's shared_ptr ownership (one ref-count bump)
+    // and avoiding a second reference to the published state. Returns nullptr
+    // when the snapshot is null; callers then fall back to
+    // CapturePublishedState().
+    static std::shared_ptr<const PublishedSegmentState>
+    ToPublishedState(
+        const std::shared_ptr<const SegmentReadSnapshot>& snapshot);
 
     // count of chunk that has raw data
     int64_t
@@ -561,7 +596,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
@@ -614,6 +649,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t offset,
                         int64_t size,
                         TargetBitmapView valid_result) const override;
+
+    void
+    ApplyFieldValidDataByRange(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               int64_t logical_offset,
+                               int64_t count,
+                               TargetBitmapView valid_result) const override;
 
     void
     ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
@@ -713,11 +755,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     milvus::OpContext* op_ctx = nullptr) const override;
 
     bool
-    TryTakeForSearch(const query::Plan* plan,
-                     const int64_t* seg_offsets,
-                     int64_t size,
-                     SearchResult& results,
-                     milvus::OpContext* op_ctx = nullptr) const;
+    TryTakeForSearch(
+        const query::Plan* plan,
+        const int64_t* seg_offsets,
+        int64_t size,
+        SearchResult& results,
+        std::shared_ptr<const PublishedSegmentState> snapshot = nullptr,
+        milvus::OpContext* op_ctx = nullptr) const;
 
     // Shared helpers for TryTakeForRetrieve / TryTakeForSearch
     struct TakeContext {
@@ -1872,14 +1916,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                 const SegmentLoadInfo* load_info) const;
 
     static void
-    InvalidateStaleStructArrayOffsets(const SchemaPtr& current_schema,
-                                      const SchemaPtr& target_schema,
-                                      RuntimeResourceState& runtime);
+    InvalidateStaleStructElementOffsets(const SchemaPtr& current_schema,
+                                        const SchemaPtr& target_schema,
+                                        RuntimeResourceState& runtime);
 
     void
-    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
-                                     int64_t row_count,
-                                     RuntimeResourceState& runtime);
+    EnsureStructElementOffsetsForField(const FieldMeta& field_meta,
+                                       int64_t row_count,
+                                       RuntimeResourceState& runtime);
 
     void
     FillDefaultValueFields(const std::vector<FieldId>& field_ids,
@@ -2274,9 +2318,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return FieldAccessible(field_id);
     }
 
-    std::shared_ptr<const IArrayOffsets>
-    TestGetArrayOffsets(FieldId field_id) const {
-        return GetArrayOffsets(field_id);
+    std::shared_ptr<const IStructElementOffsets>
+    TestGetStructElementOffsets(FieldId field_id) const {
+        return GetStructElementOffsets(field_id);
     }
 
     std::shared_ptr<const SegmentLoadInfo>

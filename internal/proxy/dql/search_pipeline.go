@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
@@ -693,7 +695,7 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	// analysis of searchWithAggPipe makes these unreachable, but surfacing
 	// them as service-internal errors is cheaper than a process-level panic
 	// if a future refactor breaks the wire.
-	if len(inputs) == 0 {
+	if len(inputs) < 2 {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator: missing inputs (pipeline wire)")
 	}
 	reducedList, ok := inputs[0].([]*milvuspb.SearchResults)
@@ -705,7 +707,11 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	if len(reducedList) == 0 || reducedList[0] == nil || reducedList[0].GetResults() == nil {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator received empty reduced results")
 	}
-	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx)
+	metrics, ok := inputs[1].([]string)
+	if !ok || len(metrics) != 1 {
+		return nil, merr.WrapErrServiceInternal("aggregateOperator: expected one search metric (pipeline wire)")
+	}
+	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx, metrics[0])
 	nqAggResults, err := computer.Compute(ctx)
 	if err != nil {
 		return nil, err
@@ -1218,11 +1224,13 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 
 type requeryOperator struct {
 	traceCtx         context.Context
+	rlsPredicate     *planpb.Expr
 	outputFieldNames []string
 
 	timestamp          uint64
 	dbName             string
 	collectionName     string
+	collectionID       int64
 	notReturnAllMeta   bool
 	partitionNames     []string
 	partitionIDs       []int64
@@ -1268,12 +1276,22 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 			return true
 		})
 	}
+	collectionName := t.rlsCollectionName
+	if collectionName == "" {
+		collectionName = t.request.GetCollectionName()
+	}
+	dbName := t.rlsDBName
+	if dbName == "" {
+		dbName = t.request.GetDbName()
+	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
+		rlsPredicate:       t.rlsPredicate,
 		outputFieldNames:   outputFieldNames.Collect(),
 		timestamp:          t.BeginTs(),
-		dbName:             t.request.GetDbName(),
-		collectionName:     t.request.GetCollectionName(),
+		dbName:             dbName,
+		collectionName:     collectionName,
+		collectionID:       t.GetCollectionID(),
 		primaryFieldSchema: pkField,
 		queryChannelsTs:    t.queryChannelsTs,
 		queryChannelsNode:  queryChannelsNode,
@@ -1284,7 +1302,7 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		partitionIDs:       t.GetPartitionIDs(),
 		node:               t.node,
 		namespace:          t.request.Namespace,
-		planNamespace:      namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace),
+		planNamespace:      NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace),
 	}, nil
 }
 
@@ -1305,6 +1323,10 @@ func (op *requeryOperator) run(ctx context.Context, span trace.Span, inputs ...a
 }
 
 func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+	var queryParams []*commonpb.KeyValuePair
+	if op.collectionID > 0 {
+		queryParams = []*commonpb.KeyValuePair{{Key: CollectionID, Value: strconv.FormatInt(op.collectionID, 10)}}
+	}
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Retrieve,
@@ -1312,6 +1334,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		},
 		DbName:                op.dbName,
 		CollectionName:        op.collectionName,
+		QueryParams:           queryParams,
 		ConsistencyLevel:      op.consistencyLevel,
 		NotReturnAllMeta:      op.notReturnAllMeta,
 		Expr:                  "",
@@ -1323,6 +1346,11 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	}
 	plan := planparserv2.CreateRequeryPlan(op.primaryFieldSchema, ids)
 	plan.Namespace = op.planNamespace
+	// Reuse the exact top-level Search/HybridSearch predicate. queryTask must
+	// not resolve a separate Query-action policy for this internal retrieval.
+	if err := rls.AttachPredicateToRequeryPlan(plan, op.rlsPredicate); err != nil {
+		return nil, segcore.StorageCost{}, err
+	}
 	channelsMvcc := make(map[string]Timestamp)
 	for k, v := range op.queryChannelsTs {
 		channelsMvcc[k] = v
@@ -1355,6 +1383,8 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		preferredNodes: preferredNodes,
 		fastSkip:       true,
 		reQuery:        true,
+		node:           op.node,
+		skipRuntimeRLS: true,
 		chMgr:          op.node.ChMgr(),
 	}
 	queryRunner, ok := op.node.(taskmodel.QueryRunner)
@@ -3031,7 +3061,7 @@ var searchWithAggPipe = &pipelineDef{
 		},
 		{
 			name:    "agg",
-			inputs:  []string{"reduced"},
+			inputs:  []string{"reduced", "metrics"},
 			outputs: []string{pipelineOutput},
 			opName:  aggOp,
 		},

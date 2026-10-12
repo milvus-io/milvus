@@ -10,6 +10,7 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "plan.proto";
 import "view.proto";
 
 // TODO: import google/protobuf/empty.proto
@@ -391,7 +392,10 @@ message SegmentInfo {
   int64 num_of_rows = 5;
   common.SegmentState state = 6;
   int64 max_row_num = 7 [deprecated = true]; // deprecated, we use the binary size to control the segment size but not a estimate rows.
-  uint64 last_expire_time = 8;
+  // Legacy allocation lease expiry, retained for allocation RPC, recovery,
+  // and empty-segment cleanup compatibility. Do not use for index readiness
+  // or data age; use effective segment data timestamps instead.
+  uint64 last_expire_time = 8 [deprecated = true];
   msg.MsgPosition start_position = 9;
   msg.MsgPosition dml_position = 10;
   // binlogs consist of insert binlogs
@@ -1145,6 +1149,7 @@ message ImportRequest {
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
   bool use_loon_ffi = 17;
+  plan.Expr rls_check_predicate = 18;
 }
 
 message QueryPreImportRequest {
@@ -1498,6 +1503,7 @@ message ImportJob {
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
   bool commit_by_coordinator = 21; // Commit protocol selected by the original Import WAL message.
+  plan.Expr rls_check_predicate = 22;
 }
 
 enum ImportTaskStateV2 {

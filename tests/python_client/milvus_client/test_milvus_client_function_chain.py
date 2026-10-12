@@ -1514,11 +1514,11 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
                 pass
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_xgboost_hybrid_search_rejected(self):
+    def test_milvus_client_xgboost_hybrid_search_rejects_ranker_conflict(self):
         """
-        target: test the explicit hybrid-search compatibility boundary
-        method: pass an XGBoost FunctionChain with two valid AnnSearchRequests
-        expected: PyMilvus rejects FunctionChain instead of silently ignoring it
+        target: test Hybrid Search rejects conflicting rerank sources
+        method: pass an XGBoost FunctionChain and RRFRanker with two valid AnnSearchRequests
+        expected: PyMilvus rejects the ranker and FunctionChain combination before RPC
         """
         request = AnnSearchRequest(
             data=[[0.0] * self.dim],
@@ -1540,7 +1540,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1,
-                ct.err_msg: "function_chains is not supported for hybrid_search yet",
+                ct.err_msg: "function_chains and ranker cannot be used together",
             },
         )
 

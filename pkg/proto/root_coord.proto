@@ -180,6 +180,16 @@ service RootCoord {
     rpc ListPrivilegeGroups(milvus.ListPrivilegeGroupsRequest) returns (milvus.ListPrivilegeGroupsResponse) {}
     rpc OperatePrivilegeGroup(milvus.OperatePrivilegeGroupRequest) returns (common.Status) {}
 
+    // Row-Level Security (RLS) management APIs.
+    rpc CreateRowPolicy(milvus.CreateRowPolicyRequest) returns (common.Status) {}
+    rpc DropRowPolicy(milvus.DropRowPolicyRequest) returns (common.Status) {}
+    rpc ListRowPolicies(milvus.ListRowPoliciesRequest) returns (milvus.ListRowPoliciesResponse) {}
+    rpc UpdateRowPolicy(milvus.UpdateRowPolicyRequest) returns (common.Status) {}
+    rpc SetRLSPrincipalTags(milvus.SetRLSPrincipalTagsRequest) returns (common.Status) {}
+    rpc GetRLSPrincipalTags(milvus.GetRLSPrincipalTagsRequest) returns (milvus.GetRLSPrincipalTagsResponse) {}
+    rpc ListRLSPrincipals(milvus.ListRLSPrincipalsRequest) returns (milvus.ListRLSPrincipalsResponse) {}
+    rpc DeleteRLSPrincipalTags(milvus.DeleteRLSPrincipalTagsRequest) returns (common.Status) {}
+
     // Internal collection-scoped snapshot API used by Proxy RLS caches.
     rpc GetRLSMetadata(GetRLSMetadataRequest) returns (GetRLSMetadataResponse) {}
 

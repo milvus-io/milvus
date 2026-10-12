@@ -166,6 +166,7 @@ minio:
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
   # 0 means using oss client by default, decrease these configuration if ListObjects timeout
   listObjectsMaxKeys: 0
+  multipartCopyThreshold: 1073741824 # Object size threshold in bytes for switching from a single CopyObject request to multipart copy. Larger objects use multipart copy. Default is 1 GiB (1073741824 bytes). Must be a positive integer; invalid values fall back to the default. Single CopyObject requests remain capped at 5 GiB regardless of this threshold. Changes apply to subsequent copies, not copies already in progress. Does not apply to GCP or Azure.
 
 # Milvus supports four message queues (MQ): rocksmq (based on RocksDB), Pulsar, Kafka, and Woodpecker.
 # You can change the MQ by setting the mq.type field.
@@ -208,6 +209,16 @@ woodpecker:
       maxBlocks: 1000 # Maximum number of blocks in a segment
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
+      # How long this client waits for one logstore node to answer one compaction request.
+      # It travels to the node as the gRPC deadline; the node applies its own ceiling
+      # (woodpecker.logstore.segmentCompactionPolicy.timeout) on top and the shorter of the two applies.
+      # Raise it together with that ceiling: on its own it has no effect while it stays above the node's.
+      compactionAttemptTimeout: 330s
+      # How long one auditor cycle keeps starting compactions. It is a start deadline, not a cap on the
+      # cycle: once spent no further segment is begun, but one already running finishes, so a cycle can
+      # overrun this by one segment. Raise it to trade the timeliness of the auditor's other passes
+      # (truncate state, snapshot publication, orphan sweep) for compaction throughput.
+      compactionPassBudget: 60s
     directRead:
       enabled: true # Whether the Woodpecker client reads sealed segments directly from object storage in service storage mode.
       maxBatchSize: 16M # Maximum batch size for direct reads from object storage in service storage mode.
@@ -263,6 +274,27 @@ woodpecker:
       maxSize: 2M # The maximum size of the merged files.
       maxParallelUploads: 4 # The maximum number of parallel upload threads for compaction.
       maxParallelReads: 8 # The maximum number of parallel read threads for compaction.
+      # Ceiling on how long one compaction may run on a logstore node. This is the node's guardrail, not a
+      # per-tenant policy: one node serves many logs from this single value, and it exists so no one
+      # request can hold a node's compaction resources indefinitely.
+      timeout: 300s
+      # Memory a logstore node will reserve for the compactions it runs at once, across every log it
+      # serves. Absolute rather than a share of the pod: useful compaction concurrency saturates on
+      # object-storage bandwidth long before memory, so a larger node does not need a larger allowance.
+      # Raise it alongside maxSize or maxParallelUploads, which raise what one compaction costs.
+      # Compactions beyond it are refused, not queued, and retried on a later auditor cycle.
+      maxInflightMemory: 1000000000
+      # Stop taking on new compactions once a logstore node's memory usage passes this fraction of its
+      # limit, whatever is using it -- maxInflightMemory above only accounts for compaction. Applies only
+      # where a container memory limit can be read; on bare metal, with no limit set, or if detection
+      # fails, it is skipped rather than measured against host memory.
+      memoryHighWatermark: 0.7
+    syncScheduler:
+      # Workers in a logstore node's shared flush pool, as a plain count. Each one blocks in fdatasync
+      # while a flush is in flight, so this bounds concurrent syncs, not CPU usage. Tune it from the
+      # volume's IOPS budget: workers ~= target IOPS x fsync latency. Past the point where the device
+      # saturates, more workers buy queueing rather than throughput.
+      maxWorkers: 32
     segmentReadPolicy:
       maxBatchSize: 16M # Maximum size of a batch in bytes.
       maxFetchThreads: 32 # Maximum number of threads to fetch data.
@@ -416,7 +448,7 @@ proxy:
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
   maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built membership_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
-  maxMembershipFilterPlanSize: 134217728 # The request-wide membership-filter budget in bytes. It independently limits both the aggregate serialized size of membership-filter-bearing expression plans and the aggregate estimated decoded size of Roaring filters in one Search, HybridSearch, Query, or complex Delete request. The proxy checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer filters share both totals. Must be positive; invalid values fall back to 128 MiB.
+  maxMembershipFilterPlanSize: 134217728 # The request-wide large-filter budget in bytes. It independently limits the aggregate serialized size of membership-filter-bearing plans and RLS-bearing HybridSearch plans, and the aggregate estimated decoded size of Roaring filters. The proxy checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
@@ -453,10 +485,10 @@ proxy:
     maxPolicyDescriptionLength: 1024 # Maximum RLS policy description length in bytes.
     maxPrincipalNameLength: 255 # Maximum RLS principal name length in bytes.
     maxTagKeyLength: 128 # Maximum RLS principal tag key length in bytes.
-    maxTagValueLength: 1024 # Maximum RLS principal tag value length in bytes.
-    maxArrayLiteralElements: 1024 # Maximum literal elements for RLS in and array_contains* predicates.
+    maxTagValueLength: 1024 # Maximum RLS principal string tag value or array string element length in bytes.
+    maxArrayLiteralElements: 1024 # Maximum elements for RLS array tags and in or array_contains* predicates.
     maxPrincipalCacheEntries: 65536 # Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.
-    maxPrincipalCacheBytes: 67108864 # Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list.
+    maxPrincipalCacheBytes: 67108864 # Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.
     metaRefreshInterval: 3600 # Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.
   accessLog:
     enable: false # Whether to enable the access log feature.
@@ -614,6 +646,11 @@ queryCoord:
   # Set to 0 to disable the penalty period.
   resourceExhaustionPenaltyDuration: 30
   resourceExhaustionCleanupInterval: 10 # Interval (in seconds) for cleaning up expired resource exhaustion marks on query nodes.
+  autoscale:
+    precheckEnabled: false # Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.
+    enabled: false # Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.
+    maxMemoryLimit: 0 # Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.
+    maxDiskLimit: 0 # Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
@@ -626,8 +663,9 @@ queryCoord:
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
   groupBy:
-    strictGroupAcceptanceThreshold: 0.1 # Recreate a strict group iterator only below this acceptance ratio [0,1]. Zero disables the optimization.
-    strictGroupProbeCandidates: 100 # Positive consumer candidate budget after locking strict groups, not a backend graph visit budget.
+    strictGroupStrategy: per_group # Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.
+    strictGroupPhase1CandidateWeight: 0 # Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.
+    strictGroupSkipRefine: false # Skip query-time refinement consistently in both phases of single-query strict grouping with group size greater than one. May reduce recall.
   stats:
     publishInterval: 1000 # The interval that query node publishes the node statistics information, including segment status, cpu usage, memory usage, health status, etc. Unit: ms.
   segcore:
@@ -1259,6 +1297,13 @@ common:
       # Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
       # The default matches the milvus-storage default.
       maxRate: 5000
+    talon:
+      mode: 0 # Remote milvus-storage read routing: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      enableForExternalTable: false # Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.
+      smallReadThreshold: 524288 # Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.
+      coordinator:  # Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.
+      blockSize: 268435456 # Talon block size in bytes; must be greater than 0. Requires a restart.
+      maxIdlePerAddr: 256 # Maximum idle TCP connections per peer in each Talon pool. Must be greater than 0; does not limit active connections. Requires a restart.
     externalVector:
       # Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
       # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
@@ -1349,6 +1394,7 @@ common:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   nodeScheduler:
     maxConcurrencyRatio: 2 # Maximum number of tasks executed concurrently by the process-level node scheduler, expressed as a ratio of CPU cores. Must be greater than zero; 2 by default.
+  enableFastPB: true # Enable fast protobuf decoding for RPC requests, query results, and search results. Disable to use the standard protobuf decoder.
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
   enableDriverPrefetch: false # Indicates whether to enable query driver prefetch in segcore.
   enabledJSONShredding: true # Indicates sealedsegment whether to enable JSON key stats

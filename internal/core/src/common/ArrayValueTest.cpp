@@ -31,7 +31,7 @@
 #include <utility>
 #include <vector>
 
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/ChunkWriter.h"
 #include "common/Consts.h"
 #include "common/FieldData.h"
@@ -1190,7 +1190,7 @@ TEST(ColumnarArrayChunk, SealedFactoriesUseRecursiveChunk) {
     verify_views(proxy_column);
 }
 
-TEST(ColumnarArrayChunk, SealedArrayOffsetsUseRecursiveRootOffsets) {
+TEST(ColumnarArrayChunk, SealedStructElementOffsetsUseRecursiveRootOffsets) {
     auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::Int32));
     const auto field_id = FieldId(100);
     auto field_meta = NestedArrayFieldMeta(field_id, type);
@@ -1219,15 +1219,16 @@ TEST(ColumnarArrayChunk, SealedArrayOffsetsUseRecursiveRootOffsets) {
     fields.emplace(field_id, std::shared_ptr<Chunk>(std::move(chunk)));
     std::vector<std::unique_ptr<GroupChunk>> group_chunks;
     group_chunks.push_back(std::make_unique<GroupChunk>(std::move(fields)));
-    auto translator =
-        std::make_unique<TestGroupChunkTranslator>(1,
-                                                   std::vector<int64_t>{5},
-                                                   "recursive_array_offsets",
-                                                   std::move(group_chunks));
+    auto translator = std::make_unique<TestGroupChunkTranslator>(
+        1,
+        std::vector<int64_t>{5},
+        "recursive_struct_element_offsets",
+        std::move(group_chunks));
     auto group = std::make_shared<ChunkedColumnGroup>(std::move(translator));
     ProxyChunkColumn column(group, field_id, field_meta);
 
-    auto offsets = ArrayOffsetsSealed::BuildFromColumn(column, field_meta, 5);
+    auto offsets =
+        StructElementOffsetsSealed::BuildFromColumn(column, field_meta, 5);
     EXPECT_EQ(offsets->ElementIDRangeOfRow(0), std::make_pair(0, 2));
     EXPECT_EQ(offsets->ElementIDRangeOfRow(1), std::make_pair(2, 2));
     EXPECT_EQ(offsets->ElementIDRangeOfRow(2), std::make_pair(2, 3));

@@ -28,7 +28,7 @@
 #include <vector>
 
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -593,6 +593,106 @@ class SegmentExpr : public Expr {
                          : segment_->num_chunk_data(field_id);
     }
 
+    // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
+    // read the column from the frozen published state (same generation as the
+    // chunk boundaries above); otherwise fall back to the segment.
+    template <typename T>
+    PinWrapper<Span<T>>
+    GetChunkData(FieldId field_id, int64_t chunk_id) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting chunk data",
+                       field_id.get());
+            return column->Span(op_ctx_, chunk_id)
+                .template transform<Span<T>>([](SpanBase&& span_base) {
+                    return static_cast<Span<T>>(span_base);
+                });
+        }
+        return segment_->chunk_data<T>(op_ctx_, field_id, chunk_id);
+    }
+
+    // Pinned sealed chunk view. Dispatches to the concrete column view
+    // (string / array / array-value / vector-array) through the frozen
+    // snapshot column; growing and non-pinned paths fall back to the segment.
+    template <typename ViewType>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
+    GetChunkView(FieldId field_id,
+                 int64_t chunk_id,
+                 std::optional<std::pair<int64_t, int64_t>> offset_len =
+                     std::nullopt) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting chunk view",
+                       field_id.get());
+            if constexpr (std::is_same_v<ViewType, std::string_view>) {
+                return column->StringViews(op_ctx_, chunk_id, offset_len);
+            } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
+                return column->ArrayViews(op_ctx_, chunk_id, offset_len);
+            } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+                return column->ArrayValueViews(op_ctx_, chunk_id, offset_len);
+            } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
+                return column->VectorArrayViews(op_ctx_, chunk_id, offset_len);
+            } else if constexpr (std::is_same_v<ViewType, Json>) {
+                auto pw = column->StringViews(op_ctx_, chunk_id, offset_len);
+                auto& [string_views, valid_data] = pw.get();
+                std::vector<ViewType> res;
+                res.reserve(string_views.size());
+                for (const auto& str_view : string_views) {
+                    res.emplace_back(Json(str_view));
+                }
+                std::pair<std::vector<ViewType>, ValidityView> content{
+                    std::move(res), std::move(valid_data)};
+                return PinWrapper<
+                    std::pair<std::vector<ViewType>, ValidityView>>(
+                    std::move(pw), std::move(content));
+            }
+        }
+        return segment_->chunk_view<ViewType>(
+            op_ctx_, field_id, chunk_id, offset_len);
+    }
+
+    // Pinned sealed chunk views by offsets. Dispatches through the frozen
+    // snapshot column; growing and non-pinned paths fall back to the segment.
+    template <typename ViewType>
+    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    GetChunkViewsByOffsets(FieldId field_id,
+                           int64_t chunk_id,
+                           const FixedVector<int32_t>& offsets) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting chunk views by "
+                       "offsets",
+                       field_id.get());
+            if constexpr (std::is_same_v<ViewType, std::string_view>) {
+                return column->StringViewsByOffsets(op_ctx_, chunk_id, offsets);
+            } else if constexpr (std::is_same_v<ViewType, Json>) {
+                auto pw =
+                    column->StringViewsByOffsets(op_ctx_, chunk_id, offsets);
+                auto& [string_views, valid_data] = pw.get();
+                std::vector<ViewType> res;
+                res.reserve(string_views.size());
+                for (const auto& view : string_views) {
+                    res.emplace_back(view);
+                }
+                std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+                    std::move(res), std::move(valid_data)};
+                return PinWrapper<
+                    std::pair<std::vector<ViewType>, FixedVector<bool>>>(
+                    std::move(pw), std::move(content));
+            } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
+                return column->ArrayViewsByOffsets(op_ctx_, chunk_id, offsets);
+            } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+                return column->ArrayValueViewsByOffsets(
+                    op_ctx_, chunk_id, offsets);
+            }
+        }
+        return segment_->chunk_views_by_offsets<ViewType>(
+            op_ctx_, field_id, chunk_id, offsets);
+    }
+
     // Global row offset of (chunk, chunk_pos) within the segment.
     int64_t
     RowOffsetInSegment(size_t chunk, int64_t chunk_pos) const {
@@ -697,7 +797,7 @@ class SegmentExpr : public Expr {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
@@ -721,7 +821,7 @@ class SegmentExpr : public Expr {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
@@ -1065,7 +1165,7 @@ class SegmentExpr : public Expr {
             return nullptr;
         }
 
-        // ArrayOffsets already proved that this row batch has no logical
+        // StructElementOffsets already proved that this row batch has no logical
         // elements. Do not fetch or inspect ARRAY payloads just to make
         // progress; nullptr is reserved for expression exhaustion.
         MoveCursor();
@@ -1078,9 +1178,10 @@ class SegmentExpr : public Expr {
     // and elem_count is the total number of elements in those rows
     std::pair<int64_t, int64_t>
     GetNextBatchSizeForElementLevel() {
-        auto array_offsets = segment_->GetArrayOffsets(field_id_);
-        AssertInfo(array_offsets != nullptr,
-                   "ArrayOffsets not found for field {}",
+        auto struct_element_offsets =
+            segment_->GetStructElementOffsets(field_id_);
+        AssertInfo(struct_element_offsets != nullptr,
+                   "StructElementOffsets not found for field {}",
                    field_id_.get());
 
         const auto current_rows = UseIndexCursor() ? current_index_chunk_pos_
@@ -1095,9 +1196,10 @@ class SegmentExpr : public Expr {
         }
 
         // Calculate elem_count based on global row positions
-        auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(current_rows);
-        auto [elem_end, __] =
-            array_offsets->ElementIDRangeOfRow(current_rows + batch_rows);
+        auto [elem_start, _] =
+            struct_element_offsets->ElementIDRangeOfRow(current_rows);
+        auto [elem_end, __] = struct_element_offsets->ElementIDRangeOfRow(
+            current_rows + batch_rows);
         auto elem_count = elem_end - elem_start;
 
         return {batch_rows, elem_count};
@@ -1470,8 +1572,8 @@ class SegmentExpr : public Expr {
                     continue;
                 }
 
-                auto pw = segment_->chunk_views_by_offsets<ViewType>(
-                    op_ctx_, field_id_, run_chunk_id, batch_offsets);
+                auto pw = GetChunkViewsByOffsets<ViewType>(
+                    field_id_, run_chunk_id, batch_offsets);
                 const auto& [data_vec, valid_data] = pw.get();
                 AssertInfo(data_vec.size() == batch_offsets.size(),
                            "view row count mismatch: {} vs {}",
@@ -1523,8 +1625,7 @@ class SegmentExpr : public Expr {
                 // chunk_data<VectorArrayView> would read the wrong layout:
                 // storage holds VectorArray, and nullable rows may be compacted.
                 // Use chunk_view to build logical VectorArrayView rows.
-                auto pw = segment_->chunk_view<VectorArrayView>(
-                    op_ctx_,
+                auto pw = GetChunkView<VectorArrayView>(
                     field_id_,
                     chunk_id,
                     std::make_pair(chunk_offset, int64_t{1}));
@@ -1583,8 +1684,7 @@ class SegmentExpr : public Expr {
                     cached_skip = skip_func && skip_func(skip_view_, chunk_id);
                     if (!cached_skip ||
                         !CanUseSkipFilter(is_nullable_, null_rejecting_)) {
-                        pw.emplace(segment_->chunk_data<T>(
-                            op_ctx_, field_id_, chunk_id));
+                        pw.emplace(GetChunkData<T>(field_id_, chunk_id));
                         auto chunk = pw->get();
                         chunk_base = chunk.data();
                         chunk_validity = chunk.validity();
@@ -1640,8 +1740,7 @@ class SegmentExpr : public Expr {
                 auto chunk_id = offset / size_per_chunk_;
                 auto chunk_offset = offset % size_per_chunk_;
                 if (chunk_id != cached_chunk_id) {
-                    pw.emplace(
-                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
+                    pw.emplace(GetChunkData<T>(field_id_, chunk_id));
                     auto chunk = pw->get();
                     chunk_base = chunk.data();
                     chunk_validity = chunk.validity();
@@ -1936,7 +2035,7 @@ class SegmentExpr : public Expr {
             for (size_t i = 0; i < row_offsets.size(); ++i) {
                 const auto index = index_at(i);
                 AssertInfo(!valid_data || valid_data[index],
-                           "ArrayOffsets references an element in null "
+                           "StructElementOffsets references an element in null "
                            "ARRAY row {}",
                            row_offsets[i]);
                 VisitArrayElementRun<ElementType>(
@@ -1962,8 +2061,8 @@ class SegmentExpr : public Expr {
         };
 
         if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
-            auto pw = segment_->chunk_views_by_offsets<ArrayValueView>(
-                op_ctx_, field_id_, chunk_id, row_offsets);
+            auto pw = GetChunkViewsByOffsets<ArrayValueView>(
+                field_id_, chunk_id, row_offsets);
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == row_offsets.size(),
                        "recursive ARRAY row count mismatch: {} vs {}",
@@ -1975,8 +2074,8 @@ class SegmentExpr : public Expr {
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
         } else if (segment_->type() == SegmentType::Sealed) {
-            auto pw = segment_->get_views_by_offsets<ArrayView>(
-                op_ctx_, field_id_, chunk_id, row_offsets);
+            auto pw = GetChunkViewsByOffsets<ArrayView>(
+                field_id_, chunk_id, row_offsets);
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == row_offsets.size(),
                        "ARRAY row count mismatch: {} vs {}",
@@ -1988,7 +2087,7 @@ class SegmentExpr : public Expr {
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
         } else {
-            auto pw = segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
+            auto pw = GetChunkData<Array>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data(), chunk.validity(), [&](size_t i) {
                 return static_cast<size_t>(row_offsets[i]);
@@ -2041,11 +2140,8 @@ class SegmentExpr : public Expr {
 
         if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
             // Recursive ARRAY rows for both Growing and Sealed segments.
-            auto pw = segment_->chunk_view<ArrayValueView>(
-                op_ctx_,
-                field_id_,
-                chunk_id,
-                std::make_pair(start_offset, length));
+            auto pw = GetChunkView<ArrayValueView>(
+                field_id_, chunk_id, std::make_pair(start_offset, length));
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == static_cast<size_t>(length),
                        "recursive ARRAY row count mismatch: {} vs {}",
@@ -2054,8 +2150,8 @@ class SegmentExpr : public Expr {
             emit_rows(rows.data(), valid_data);
         } else if (segment_->type() == SegmentType::Sealed) {
             // Legacy ARRAY rows from a Sealed segment's chunked storage.
-            auto pw = segment_->get_batch_views<ArrayView>(
-                op_ctx_, field_id_, chunk_id, start_offset, length);
+            auto pw = GetChunkView<ArrayView>(
+                field_id_, chunk_id, std::make_pair(start_offset, length));
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == static_cast<size_t>(length),
                        "ARRAY row count mismatch: {} vs {}",
@@ -2064,7 +2160,7 @@ class SegmentExpr : public Expr {
             emit_rows(rows.data(), valid_data);
         } else {
             // Legacy ARRAY rows from a Growing segment's in-memory storage.
-            auto pw = segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
+            auto pw = GetChunkData<Array>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data() + start_offset,
                       chunk.validity().Subview(start_offset));
@@ -2120,9 +2216,10 @@ class SegmentExpr : public Expr {
             EnsureRawDataPrefetched();
         }
 
-        auto array_offsets = segment_->GetArrayOffsets(field_id_);
-        AssertInfo(array_offsets != nullptr,
-                   "ArrayOffsets not found for field {}",
+        auto struct_element_offsets =
+            segment_->GetStructElementOffsets(field_id_);
+        AssertInfo(struct_element_offsets != nullptr,
+                   "StructElementOffsets not found for field {}",
                    field_id_.get());
 
         // The element ids arriving here come from
@@ -2155,7 +2252,8 @@ class SegmentExpr : public Expr {
         // covers every consecutive element id of that row.
         auto resolve_run = [&](size_t pos) -> RunInfo {
             int32_t element_id = (*element_ids)[pos];
-            const auto row = array_offsets->ElementIDToRowInfo(element_id);
+            const auto row =
+                struct_element_offsets->ElementIDToRowInfo(element_id);
             int64_t max_run = std::min<int64_t>(
                 row.row_element_end - element_id, element_ids->size() - pos);
             int64_t run_len = 1;
@@ -2261,9 +2359,10 @@ class SegmentExpr : public Expr {
                       "Json element type is not supported for "
                       "element-level filtering");
 
-        auto array_offsets = segment_->GetArrayOffsets(field_id_);
-        AssertInfo(array_offsets != nullptr,
-                   "ArrayOffsets not found for field {}",
+        auto struct_element_offsets =
+            segment_->GetStructElementOffsets(field_id_);
+        AssertInfo(struct_element_offsets != nullptr,
+                   "StructElementOffsets not found for field {}",
                    field_id_.get());
 
         const auto expected_rows = GetNextBatchSize();
@@ -2291,15 +2390,16 @@ class SegmentExpr : public Expr {
 
             auto get_element_count = [&]() {
                 const auto start_range =
-                    array_offsets->ElementIDRangeOfRow(row_start);
+                    struct_element_offsets->ElementIDRangeOfRow(row_start);
                 const auto end_range =
-                    array_offsets->ElementIDRangeOfRow(row_start + size);
+                    struct_element_offsets->ElementIDRangeOfRow(row_start +
+                                                                size);
                 return int64_t{end_range.first - start_range.first};
             };
 
             const bool chunk_active = !skip_func || !skip_func(skip_view_, i);
             if (!chunk_active) {
-                // ArrayOffsets defines the logical flattened address space:
+                // StructElementOffsets defines the logical flattened address space:
                 // null ARRAY rows contribute zero elements even if storage
                 // retains a physical payload. Derive the skipped span without
                 // reading that payload.
@@ -2446,12 +2546,12 @@ class SegmentExpr : public Expr {
                           std::is_same_v<T, ArrayValueView>) {
                 // These non-owning views must be built from their logical
                 // storage layout instead of read through chunk_data<T>.
-                auto pw = segment_->chunk_view<T>(
-                    op_ctx_, field_id_, i, std::make_pair(data_pos, size));
+                auto pw = GetChunkView<T>(
+                    field_id_, i, std::make_pair(data_pos, size));
                 const auto& [data_vec, valid_data] = pw.get();
                 process_chunk(data_vec.data(), valid_data);
             } else {
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
+                auto pw = GetChunkData<T>(field_id_, i);
                 auto chunk = pw.get();
                 const auto validity = chunk.validity().Subview(data_pos);
                 process_chunk(chunk.data() + data_pos, validity);
@@ -2705,8 +2805,10 @@ class SegmentExpr : public Expr {
                 int64_t batch_size = std::min(
                     {batch_size_, chunk_size - chunk_offset, remaining});
 
-                auto pw = segment_->get_batch_views<T>(
-                    op_ctx_, field_id_, chunk_id, chunk_offset, batch_size);
+                auto pw =
+                    GetChunkView<T>(field_id_,
+                                    chunk_id,
+                                    std::make_pair(chunk_offset, batch_size));
                 auto data_vec = std::move(pw.get().first);
 
                 func(data_vec.data(), batch_size, res + processed_size);
@@ -2935,15 +3037,17 @@ class SegmentExpr : public Expr {
 
         if (need_element_slicing) {
             // Nested index with element-level result: batch by rows, slice elements
-            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            auto struct_element_offsets =
+                segment_->GetStructElementOffsets(field_id_);
 
             auto data_pos = current_index_chunk_pos_;
             auto batch_rows = std::min(batch_size_, active_count_ - data_pos);
 
             // Calculate corresponding element range
-            auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(data_pos);
-            auto [elem_end, __] =
-                array_offsets->ElementIDRangeOfRow(data_pos + batch_rows);
+            auto [elem_start, _] =
+                struct_element_offsets->ElementIDRangeOfRow(data_pos);
+            auto [elem_end, __] = struct_element_offsets->ElementIDRangeOfRow(
+                data_pos + batch_rows);
             auto elem_count = elem_end - elem_start;
 
             result.append(*cached_index_chunk_res_, elem_start, elem_count);
@@ -3717,14 +3821,16 @@ class SegmentExpr : public Expr {
         // The prefetch worker can race with compound-expression cursor moves,
         // so inspect immutable initial-batch geometry rather than live cursor
         // state. A leading zero-element batch must not touch ARRAY payloads.
-        auto array_offsets = segment_->GetArrayOffsets(field_id_);
-        AssertInfo(array_offsets != nullptr,
-                   "ArrayOffsets not found for field {}",
+        auto struct_element_offsets =
+            segment_->GetStructElementOffsets(field_id_);
+        AssertInfo(struct_element_offsets != nullptr,
+                   "StructElementOffsets not found for field {}",
                    field_id_.get());
         const auto initial_rows = std::min(batch_size_, active_count_);
-        const auto elem_start = array_offsets->ElementIDRangeOfRow(0).first;
+        const auto elem_start =
+            struct_element_offsets->ElementIDRangeOfRow(0).first;
         const auto elem_end =
-            array_offsets->ElementIDRangeOfRow(initial_rows).first;
+            struct_element_offsets->ElementIDRangeOfRow(initial_rows).first;
         return elem_end > elem_start;
     }
 

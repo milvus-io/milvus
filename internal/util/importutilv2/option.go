@@ -44,6 +44,12 @@ const (
 
 	// CSVNullKey specifies the null key used when importing CSV files.
 	CSVNullKey = "nullkey"
+
+	// RLSPrincipal is the application principal used to evaluate import RLS policies.
+	RLSPrincipal = "rls_principal"
+
+	// SkipRLS requests an authorized RLS bypass for an import.
+	SkipRLS = "skip_rls"
 )
 
 // AutoCommitKey is the option key for enabling/disabling auto-commit of import jobs.
@@ -126,6 +132,22 @@ func ValidateNoDuplicateKeys(options Options) error {
 		}
 	}
 	return nil
+}
+
+func GetRLSOptions(options Options) (string, bool, error) {
+	principal, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(RLSPrincipal, options)
+	skip, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(SkipRLS, options)
+	if !ok {
+		return principal, false, nil
+	}
+	switch strings.ToLower(skip) {
+	case "true":
+		return principal, true, nil
+	case "false":
+		return principal, false, nil
+	default:
+		return "", false, merr.WrapErrParameterInvalidMsg("import option %s must be true or false", SkipRLS)
+	}
 }
 
 func GetTimeoutTs(options Options) (uint64, error) {

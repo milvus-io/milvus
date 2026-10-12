@@ -582,7 +582,7 @@ DataGen(SchemaPtr schema,
         // each forking a team sized to the host's core count to run three
         // iterations. On a 128-core machine the fork/join and barrier cost
         // dwarfs the work by orders of magnitude and the fixture never
-        // finishes -- ElementFilter.GrowingSegmentArrayOffsets hung
+        // finishes -- ElementFilter.GrowingSegmentStructElementOffsets hung
         // indefinitely there while passing on smaller CI hosts. The loop is
         // cheap RNG arithmetic; generating it serially costs milliseconds even
         // for the largest fixtures.

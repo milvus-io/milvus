@@ -72,12 +72,12 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
-	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for both the
-	// aggregate serialized size of membership-filter-bearing plans and the
-	// aggregate estimated decoded size of Roaring filters. The two totals are
-	// checked independently. It is deliberately below the default 256 MiB proxy
-	// gRPC client send limit so placeholders and the rest of the internal request
-	// retain ample headroom.
+	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for the
+	// aggregate serialized size of membership-filter-bearing plans and
+	// RLS-bearing HybridSearch plans, and for the aggregate estimated decoded
+	// size of Roaring filters. The serialized and decoded totals are checked
+	// independently. It is deliberately below the default 256 MiB proxy gRPC
+	// client send limit so the rest of the internal request retains headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
 	DefaultMaxDegree                     = 56
@@ -216,6 +216,7 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
+		&p.ProxyCfg.RLSImportEnforcementEnabled,
 	}
 }
 
@@ -321,6 +322,7 @@ func (p *ComponentParam) CleanEvent() {
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
+
 type commonConfig struct {
 	ClusterPrefix ParamItem `refreshable:"false"`
 
@@ -424,12 +426,18 @@ type commonConfig struct {
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
-	StoragePathPrefix               ParamItem `refreshable:"false"`
-	StorageZstdConcurrency          ParamItem `refreshable:"false"`
-	StorageReadRetryAttempts        ParamItem `refreshable:"true"`
-	StorageIopsInitialRate          ParamItem `refreshable:"false"`
-	StorageIopsMaxRate              ParamItem `refreshable:"false"`
-	ExternalVectorPartialNullPolicy ParamItem `refreshable:"false"`
+	StoragePathPrefix                  ParamItem `refreshable:"false"`
+	StorageZstdConcurrency             ParamItem `refreshable:"false"`
+	StorageReadRetryAttempts           ParamItem `refreshable:"true"`
+	StorageIopsInitialRate             ParamItem `refreshable:"false"`
+	StorageIopsMaxRate                 ParamItem `refreshable:"false"`
+	StorageTalonMode                   ParamItem `refreshable:"false"`
+	StorageTalonEnableForExternalTable ParamItem `refreshable:"false"`
+	StorageTalonSmallReadThreshold     ParamItem `refreshable:"false"`
+	StorageTalonCoordinator            ParamItem `refreshable:"false"`
+	StorageTalonBlockSize              ParamItem `refreshable:"false"`
+	StorageTalonMaxIdlePerAddr         ParamItem `refreshable:"false"`
+	ExternalVectorPartialNullPolicy    ParamItem `refreshable:"false"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
@@ -465,6 +473,7 @@ type commonConfig struct {
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 	NodeSchedulerMaxConcurrencyRatio  ParamItem `refreshable:"true"`
 
+	EnableFastPB                      ParamItem `refreshable:"true"`
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
 	EnableDriverPrefetch              ParamItem `refreshable:"true"`
 	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
@@ -1465,6 +1474,88 @@ Rows whose child elements are all null are always promoted to row-level null for
 	}
 	p.ExternalVectorPartialNullPolicy.Init(base.mgr)
 
+	p.StorageTalonMode = ParamItem{
+		Key:          "common.storage.talon.mode",
+		Version:      "3.0.1",
+		DefaultValue: "0",
+		Doc:          "Remote milvus-storage read routing: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed > 2 {
+				panic(fmt.Sprintf("invalid common.storage.talon.mode: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonMode.Init(base.mgr)
+
+	p.StorageTalonEnableForExternalTable = ParamItem{
+		Key:          "common.storage.talon.enableForExternalTable",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc:          "Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.",
+		Export:       true,
+	}
+	p.StorageTalonEnableForExternalTable.Init(base.mgr)
+
+	p.StorageTalonSmallReadThreshold = ParamItem{
+		Key:          "common.storage.talon.smallReadThreshold",
+		Version:      "3.0.1",
+		DefaultValue: "524288",
+		Doc:          "Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed == 0 || parsed > 1048576 {
+				panic(fmt.Sprintf("invalid common.storage.talon.smallReadThreshold: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonSmallReadThreshold.Init(base.mgr)
+
+	p.StorageTalonCoordinator = ParamItem{
+		Key:          "common.storage.talon.coordinator",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Doc:          "Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.",
+		Export:       true,
+	}
+	p.StorageTalonCoordinator.Init(base.mgr)
+
+	p.StorageTalonBlockSize = ParamItem{
+		Key:          "common.storage.talon.blockSize",
+		Version:      "3.0.1",
+		DefaultValue: "268435456",
+		Doc:          "Talon block size in bytes; must be greater than 0. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed == 0 {
+				panic(fmt.Sprintf("invalid common.storage.talon.blockSize: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonBlockSize.Init(base.mgr)
+
+	p.StorageTalonMaxIdlePerAddr = ParamItem{
+		Key:          "common.storage.talon.maxIdlePerAddr",
+		Version:      "3.0.1",
+		DefaultValue: "256",
+		Doc:          "Maximum idle TCP connections per peer in each Talon pool. Must be greater than 0; does not limit active connections. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed == 0 {
+				panic(fmt.Sprintf("invalid common.storage.talon.maxIdlePerAddr: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonMaxIdlePerAddr.Init(base.mgr)
+
 	p.StorageIopsInitialRate = ParamItem{
 		Key:          "common.storage.iops.initialRate",
 		Version:      "3.0.1",
@@ -1715,6 +1806,28 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.NodeSchedulerMaxConcurrencyRatio.Init(base.mgr)
+
+	p.EnableFastPB = ParamItem{
+		Key:          "common.enableFastPB",
+		Version:      "3.0",
+		DefaultValue: "true",
+		Doc:          "Enable fast protobuf decoding for RPC requests, query results, and search results. Disable to use the standard protobuf decoder.",
+		Export:       true,
+	}
+	p.EnableFastPB.Init(base.mgr)
+	// Only mirror the process-global ParamItem used by RPC decoding.
+	// Standalone ComponentParam instances in tests must not change that state.
+	if p == &params.CommonCfg {
+		// The dispatcher matches normalized aliases, including etcd's key without
+		// separators. Refresh from the effective config rather than event.Value.
+		base.mgr.Dispatcher.Register(p.EnableFastPB.Key, config.NewHandler("common.enableFastPB.atomic", func(event *config.Event) {
+			switch event.EventType {
+			case config.CreateType, config.UpdateType, config.DeleteType:
+				updateFastPBEnabled()
+			}
+		}))
+		updateFastPBEnabled()
+	}
 
 	p.EnabledOptimizeExpr = ParamItem{
 		Key:          "common.enabledOptimizeExpr",
@@ -2627,6 +2740,7 @@ type proxyConfig struct {
 	RLSMaxPrincipalCacheEntries       ParamItem `refreshable:"true"`
 	RLSMaxPrincipalCacheBytes         ParamItem `refreshable:"true"`
 	RLSMetaRefreshInterval            ParamItem `refreshable:"true"`
+	RLSImportEnforcementEnabled       ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2832,11 +2946,11 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		DefaultValue: strconv.Itoa(DefaultMaxMembershipFilterPlanSize),
 		FallbackKeys: []string{"proxy.maxBloomFilterPlanSize"},
 		Version:      "3.0.0",
-		Doc: "The request-wide membership-filter budget in bytes. It independently limits both the aggregate " +
-			"serialized size of membership-filter-bearing expression plans and the aggregate estimated decoded " +
-			"size of Roaring filters in one Search, HybridSearch, Query, or complex Delete request. The proxy " +
+		Doc: "The request-wide large-filter budget in bytes. It independently limits the aggregate " +
+			"serialized size of membership-filter-bearing plans and RLS-bearing HybridSearch plans, " +
+			"and the aggregate estimated decoded size of Roaring filters. The proxy " +
 			"checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer " +
-			"filters share both totals. Must be positive; invalid values fall back to 128 MiB.",
+			"filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.",
 		Export:       true,
 		PanicIfEmpty: true,
 		Formatter: func(v string) string {
@@ -3340,7 +3454,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "1024",
 		PanicIfEmpty: true,
-		Doc:          "Maximum RLS principal tag value length in bytes.",
+		Doc:          "Maximum RLS principal string tag value or array string element length in bytes.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
@@ -3351,7 +3465,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "1024",
 		PanicIfEmpty: true,
-		Doc:          "Maximum literal elements for RLS in and array_contains* predicates.",
+		Doc:          "Maximum elements for RLS array tags and in or array_contains* predicates.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
@@ -3373,7 +3487,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "67108864",
 		PanicIfEmpty: true,
-		Doc:          "Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list.",
+		Doc:          "Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("67108864"),
 	}
@@ -3389,6 +3503,26 @@ Disabled if the value is less or equal to 0.`,
 		Formatter:    positiveProxyLimitFormatter("3600"),
 	}
 	p.RLSMetaRefreshInterval.Init(base.mgr)
+
+	// Import RLS spans Proxy, DataCoord, and DataNode. Keep it fail-closed until
+	// every live component is new enough to preserve and enforce the predicate.
+	p.RLSImportEnforcementEnabled = ParamItem{
+		Key:          "proxy.rls.importEnforcementEnabled",
+		Version:      "3.1.0-beta",
+		DefaultValue: "auto",
+		Export:       false,
+		Doc: "Whether RLS enforcement is available for bulk import. auto: enable after every live " +
+			"cluster component reaches the gate version; false: reject RLS-enforced imports; true: " +
+			"force enable and bypass the mixed-version safety gate.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.1.0-beta",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+	}
+	p.RLSImportEnforcementEnabled.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",
@@ -3554,6 +3688,11 @@ type queryCoordConfig struct {
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+
+	AutoscalePrecheckEnabled ParamItem `refreshable:"true"`
+	AutoscaleEnabled         ParamItem `refreshable:"true"`
+	AutoscaleMaxMemoryLimit  ParamItem `refreshable:"true"`
+	AutoscaleMaxDiskLimit    ParamItem `refreshable:"true"`
 
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
@@ -4264,6 +4403,42 @@ Set to 0 to disable the penalty period.`,
 	}
 	p.ResourceExhaustionCleanupInterval.Init(base.mgr)
 
+	p.AutoscalePrecheckEnabled = ParamItem{
+		Key:          "queryCoord.autoscale.precheckEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.",
+		Export:       true,
+	}
+	p.AutoscalePrecheckEnabled.Init(base.mgr)
+
+	p.AutoscaleEnabled = ParamItem{
+		Key:          "queryCoord.autoscale.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.",
+		Export:       true,
+	}
+	p.AutoscaleEnabled.Init(base.mgr)
+
+	p.AutoscaleMaxMemoryLimit = ParamItem{
+		Key:          "queryCoord.autoscale.maxMemoryLimit",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.",
+		Export:       true,
+	}
+	p.AutoscaleMaxMemoryLimit.Init(base.mgr)
+
+	p.AutoscaleMaxDiskLimit = ParamItem{
+		Key:          "queryCoord.autoscale.maxDiskLimit",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.",
+		Export:       true,
+	}
+	p.AutoscaleMaxDiskLimit.Init(base.mgr)
+
 	p.UpdateTargetNeedSegmentDataReady = ParamItem{
 		Key:          "queryCoord.updateTargetNeedSegmentDataReady",
 		Version:      "2.6.8",
@@ -4287,9 +4462,10 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	StrictGroupAcceptanceThreshold ParamItem `refreshable:"true"`
-	StrictGroupProbeCandidates     ParamItem `refreshable:"true"`
-	SoPath                         ParamItem `refreshable:"false"`
+	StrictGroupStrategy              ParamItem `refreshable:"true"`
+	StrictGroupPhase1CandidateWeight ParamItem `refreshable:"true"`
+	StrictGroupSkipRefine            ParamItem `refreshable:"true"`
+	SoPath                           ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -4523,18 +4699,24 @@ func formatDurationWithMillisecondFallback(v string) string {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
-	p.StrictGroupAcceptanceThreshold = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupAcceptanceThreshold",
-		Version: "2.6.23", DefaultValue: "0.1", Export: true,
-		Doc: "Recreate a strict group iterator only below this acceptance ratio [0,1]. Zero disables the optimization.",
+	p.StrictGroupStrategy = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupStrategy",
+		Version: "2.6.23", DefaultValue: "per_group", Export: true,
+		Doc: "Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.",
 	}
-	p.StrictGroupAcceptanceThreshold.Init(base.mgr)
-	p.StrictGroupProbeCandidates = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupProbeCandidates",
-		Version: "2.6.23", DefaultValue: "100", Export: true,
-		Doc: "Positive consumer candidate budget after locking strict groups, not a backend graph visit budget.",
+	p.StrictGroupStrategy.Init(base.mgr)
+	p.StrictGroupPhase1CandidateWeight = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupPhase1CandidateWeight",
+		Version: "2.6.23", DefaultValue: "0", Export: true,
+		Doc: "Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.",
 	}
-	p.StrictGroupProbeCandidates.Init(base.mgr)
+	p.StrictGroupPhase1CandidateWeight.Init(base.mgr)
+	p.StrictGroupSkipRefine = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupSkipRefine",
+		Version: "2.6.23", DefaultValue: "false", Export: true,
+		Doc: "Skip query-time refinement consistently in both phases of single-query strict grouping with group size greater than one. May reduce recall.",
+	}
+	p.StrictGroupSkipRefine.Init(base.mgr)
 	p.IDFPreload = ParamItem{
 		Key:          "queryNode.idfOracle.preload",
 		Version:      "2.6.8",

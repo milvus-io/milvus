@@ -35,16 +35,28 @@ func TestQueryNodeStrictGroupSettings(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 	cfg := &params.QueryNodeCfg
-	assert.Equal(t, 0.1, cfg.StrictGroupAcceptanceThreshold.GetAsFloat())
-	assert.Equal(t, 100, cfg.StrictGroupProbeCandidates.GetAsInt())
-	params.Save(cfg.StrictGroupAcceptanceThreshold.Key, "0")
-	params.Save(cfg.StrictGroupProbeCandidates.Key, "17")
-	assert.Equal(t, 0.0, cfg.StrictGroupAcceptanceThreshold.GetAsFloat())
-	assert.Equal(t, 17, cfg.StrictGroupProbeCandidates.GetAsInt())
-	params.Reset(cfg.StrictGroupAcceptanceThreshold.Key)
-	params.Reset(cfg.StrictGroupProbeCandidates.Key)
-	assert.Equal(t, 0.1, cfg.StrictGroupAcceptanceThreshold.GetAsFloat())
-	assert.Equal(t, 100, cfg.StrictGroupProbeCandidates.GetAsInt())
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	params.Save(cfg.StrictGroupPhase1CandidateWeight.Key, "50")
+	params.Save(cfg.StrictGroupSkipRefine.Key, "true")
+	assert.Equal(t, int64(50), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.True(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	params.Reset(cfg.StrictGroupPhase1CandidateWeight.Key)
+	params.Reset(cfg.StrictGroupSkipRefine.Key)
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	for _, name := range []string{"StrictGroupPhase1CandidateWeight", "StrictGroupSkipRefine"} {
+		field, ok := reflect.TypeOf(cfg).Elem().FieldByName(name)
+		assert.True(t, ok)
+		assert.Equal(t, "true", field.Tag.Get("refreshable"))
+	}
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+	params.Save(cfg.StrictGroupStrategy.Key, "per_group")
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+	params.Save(cfg.StrictGroupStrategy.Key, "original")
+	assert.Equal(t, "original", cfg.StrictGroupStrategy.GetValue())
+	params.Reset(cfg.StrictGroupStrategy.Key)
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
 }
 
 func TestComponentParamDerivedLocalStoragePathsUseCanonicalFrozenValue(t *testing.T) {
@@ -258,6 +270,34 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 		assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
 		assert.NoError(t, params.Save(maxRate.Key, invalid))
 		assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
+	}
+}
+
+func TestComponentParam_StorageTalonParams(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	assert.False(t, params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool())
+	assert.Equal(t, uint32(524288), params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32())
+	for _, tc := range []struct {
+		item    *ParamItem
+		valid   string
+		want    uint32
+		invalid []string
+	}{
+		{&params.CommonCfg.StorageTalonMode, "2", 2, []string{"-1", "3", "4294967296", "invalid"}},
+		{&params.CommonCfg.StorageTalonSmallReadThreshold, "65536", 65536, []string{"0", "1048577", "4294967296"}},
+		{&params.CommonCfg.StorageTalonBlockSize, "8388608", 8388608, []string{"0", "-1", "4294967296"}},
+		{&params.CommonCfg.StorageTalonMaxIdlePerAddr, "32", 32, []string{"0", "-1", "4294967296"}},
+	} {
+		t.Run(tc.item.Key, func(t *testing.T) {
+			require.NoError(t, params.Save(tc.item.Key, tc.valid))
+			assert.Equal(t, tc.want, tc.item.GetAsUint32())
+			for _, invalid := range tc.invalid {
+				require.NoError(t, params.Save(tc.item.Key, invalid))
+				assert.Panics(t, func() { tc.item.GetAsUint32() }, invalid)
+			}
+			require.NoError(t, params.Reset(tc.item.Key))
+		})
 	}
 }
 
@@ -961,6 +1001,19 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.BalanceCheckCollectionMaxCount.GetAsInt())
 		assert.Equal(t, 30, Params.ResourceExhaustionPenaltyDuration.GetAsInt())
 		assert.Equal(t, 10, Params.ResourceExhaustionCleanupInterval.GetAsInt())
+
+		assert.False(t, Params.AutoscalePrecheckEnabled.GetAsBool())
+		assert.False(t, Params.AutoscaleEnabled.GetAsBool())
+		assert.Equal(t, int64(0), Params.AutoscaleMaxMemoryLimit.GetAsInt64())
+		assert.Equal(t, int64(0), Params.AutoscaleMaxDiskLimit.GetAsInt64())
+		params.Save("queryCoord.autoscale.precheckEnabled", "true")
+		params.Save("queryCoord.autoscale.enabled", "true")
+		params.Save("queryCoord.autoscale.maxMemoryLimit", "1024")
+		params.Save("queryCoord.autoscale.maxDiskLimit", "2048")
+		assert.True(t, Params.AutoscalePrecheckEnabled.GetAsBool())
+		assert.True(t, Params.AutoscaleEnabled.GetAsBool())
+		assert.Equal(t, int64(1024), Params.AutoscaleMaxMemoryLimit.GetAsInt64())
+		assert.Equal(t, int64(2048), Params.AutoscaleMaxDiskLimit.GetAsInt64())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
