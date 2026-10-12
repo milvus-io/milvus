@@ -186,11 +186,11 @@ VisitSortedMatches(Iterator first,
 
 // Borrow only string views for the duration of the synchronous query. Sorting
 // and deduplication copy O(N) views, not the variable-length character buffers.
-template <typename ValueAt, typename Match>
+template <typename String, typename ValueAt, typename Match>
 void
 VisitSortedStringMatches(size_t size,
                          size_t n,
-                         const std::string* values,
+                         const String* values,
                          ValueAt value_at,
                          Match match) {
     if (n == 0 || size == 0) {

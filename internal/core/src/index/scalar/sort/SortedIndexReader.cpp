@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "index/scalar/sort/SortedIndexReader.h"
+#include "index/scalar/sort/SortedMembership.h"
 
 #include <algorithm>
 #include <cstring>
@@ -515,6 +516,15 @@ SortedStorageView<T>::SortedStorageView(OpenArgs args)
 
 template <typename T>
 void
+SortedStorageView<T>::ApplyMembership(TargetBitmap& result, size_t n,
+                                      const T* values, bool match) const {
+    if (data_.size == 0) { return; }
+    detail::VisitSortedMatches(data_.data, data_.data + data_.size, n, values,
+        [&](size_t offset) { result[offset] = match; });
+}
+
+template <typename T>
+void
 SortedStorageView<T>::SetEqual(TargetBitmap& result, const T& value) const {
     if (data_.size == 0) {
         return;
@@ -783,9 +793,7 @@ SortedIndexReader<T>::In(size_t n, const T* values) const {
             return result;
         }
     }
-    for (size_t i = 0; i < n; ++i) {
-        storage_.SetEqual(result, values[i]);
-    }
+    storage_.ApplyMembership(result, n, values, true);
     return result;
 }
 
@@ -804,9 +812,7 @@ SortedIndexReader<T>::NotIn(size_t n, const T* values) const {
         AssertInfo(n == 0 || values != nullptr,
                    "sorted NotIn received null values with non-zero count");
     }
-    for (size_t i = 0; i < n; ++i) {
-        storage_.ClearEqual(result, values[i]);
-    }
+    storage_.ApplyMembership(result, n, values, false);
     return result;
 }
 
@@ -918,6 +924,19 @@ namespace sorted_reader_detail {
 SortedStorageView<std::string_view>::SortedStorageView(OpenArgs args)
     : layout_(std::move(args.layout)) {
     AssertInfo(layout_ != nullptr, "sorted string layout must not be null");
+}
+
+void
+SortedStorageView<std::string_view>::ApplyMembership(
+    TargetBitmap& result, size_t n, const std::string_view* values, bool match) const {
+    detail::VisitSortedStringMatches(layout_->UniqueCount(), n, values,
+        [&](size_t i) { return layout_->Value(i); },
+        [&](size_t i) {
+            const auto posting = layout_->Posting(i);
+            for (size_t j = 0; j < posting.size; ++j) {
+                result[posting.At(j)] = match;
+            }
+        });
 }
 
 void

@@ -147,6 +147,9 @@ class SortedStorageView {
     explicit SortedStorageView(OpenArgs args);
 
     void
+    ApplyMembership(TargetBitmap& result, size_t n, const T* values, bool match) const;
+
+    void
     SetEqual(TargetBitmap& result, const T& value) const;
 
     void
@@ -198,6 +201,9 @@ class SortedStorageView<std::string_view> {
     };
 
     explicit SortedStorageView(OpenArgs args);
+
+    void
+    ApplyMembership(TargetBitmap& result, size_t n, const std::string_view* values, bool match) const;
 
     void
     SetEqual(TargetBitmap& result, const std::string_view& value) const;
