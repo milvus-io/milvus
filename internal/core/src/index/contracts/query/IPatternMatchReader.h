@@ -27,7 +27,7 @@
 // declare a specific operation as candidates-only through
 // PatternMatchIsExact(op) == false, in which case PatternMatch returns a
 // SUPERSET of the answer and the consumer must recheck each candidate against
-// the raw column. FM-index uses that for general LIKE (PatternOp::Match).
+// the raw column. FM-index uses that for LIKE and RegexMatch.
 
 namespace milvus::index {
 
@@ -65,9 +65,9 @@ class IPatternMatchReader {
     //
     // This is a per-operation property, not a per-call one: it does not depend
     // on the pattern, so a consumer can decide its execution path before
-    // running the query. The only current non-exact case is FM-index's
-    // PatternOp::Match (see FmIndexReader::PatternMatch and
-    // PhyUnaryRangeFilterExpr::ExecFMMatch).
+    // running the query. FM-index declares Match and RegexMatch non-exact
+    // (see FmIndexReader::PatternMatch and
+    // PhyUnaryRangeFilterExpr::ExecFMPatternCandidates).
     virtual bool
     PatternMatchIsExact(PatternOp op) const {
         return true;

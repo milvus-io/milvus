@@ -164,16 +164,14 @@ class FmIndexReader final : public IIndexReaderBase,
     // ---- IPatternMatchReader -------------------------------------
 
     // PrefixMatch / PostfixMatch / InnerMatch are answered EXACTLY. General
-    // LIKE (`Match`) is answered with CANDIDATES ONLY: the occurrences of the
-    // pattern's rarest literal fragment, a superset of the exact answer that
-    // the consumer MUST recheck against the raw column
-    // (PhyUnaryRangeFilterExpr::ExecFMMatch). `RegexMatch` is declined by
-    // `ShouldUseForOp` below and never arrives.
+    // LIKE (`Match`) and `RegexMatch` return CANDIDATES ONLY: the rarest LIKE
+    // fragment or Count-selected necessary regex condition. The consumer MUST
+    // recheck this superset against the raw column using the canonical matcher
+    // (PhyUnaryRangeFilterExpr::ExecFMPatternCandidates).
     TargetBitmap
     PatternMatch(std::string_view pattern, PatternOp op) const override;
 
-    // Exact for the three anchored ops; false for `Match`, which is answered
-    // with a candidate superset the consumer must recheck.
+    // Exact for the three anchored ops; false for Match and RegexMatch.
     bool
     PatternMatchIsExact(PatternOp op) const override;
 
@@ -218,6 +216,11 @@ class FmIndexReader final : public IIndexReaderBase,
 
     std::optional<RarestFragment>
     RarestMatchFragment(std::string_view pattern) const;
+
+    // Regex TRUE conditions decline routing. Otherwise select against current
+    // index counts, using the same locate-only cost bound as LIKE.
+    bool
+    RegexGuardAccepts(std::string_view pattern) const;
 
     std::shared_ptr<const FmIndexStorage> storage_;
 

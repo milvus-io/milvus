@@ -347,8 +347,9 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
             // Phase 1 ONLY: candidate rows taken from the pattern's rarest
             // literal fragment. This is a SUPERSET of the exact answer -- the
             // consumer must recheck each candidate against the raw column
-            // (PhyUnaryRangeFilterExpr::ExecFMMatch). Null rows are excluded
-            // up front: a NULL never matches a LIKE under either polarity.
+            // (PhyUnaryRangeFilterExpr::ExecFMPatternCandidates). Null rows
+            // are excluded up front: a NULL never matches a LIKE under either
+            // polarity.
             RejectDanglingEscape(pattern);
             auto not_null = IsNotNull();
             const auto rarest = RarestMatchFragment(pattern);
@@ -373,8 +374,31 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
             candidates &= not_null;
             return candidates;
         }
-        case PatternOp::RegexMatch:
-            ThrowInfo(Unsupported, "FM-index does not support regex");
+        case PatternOp::RegexMatch: {
+            auto condition = PartialRegexMatcher::PrepareIndexCondition(
+                std::string(pattern));
+            double cost;
+            auto selected = condition.Select(
+                [&](const std::string& literal) {
+                    return storage_->Engine().Count(Bytes(literal), literal.size());
+                },
+                cost);
+            // Selected AND children may be omitted; every OR branch remains.
+            // These contains lookups are candidates for canonical RE2 recheck.
+            return selected.Evaluate(
+                [&](const std::string& literal) {
+                    TargetBitmap hits(static_cast<size_t>(storage_->Count()), false);
+                    storage_->Engine().VisitMatchingDocs(
+                        Bytes(literal), literal.size(), [&](uint64_t row) {
+                            if (row < static_cast<uint64_t>(storage_->Count()) &&
+                                !storage_->NullBitmap()[row]) {
+                                hits.set(static_cast<size_t>(row));
+                            }
+                        });
+                    return hits;
+                },
+                [&] { return IsNotNull(); });
+        }
         default:
             ThrowInfo(UnexpectedError,
                       "invalid FM-index pattern operation {}",
@@ -384,10 +408,8 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
 
 bool
 FmIndexReader::PatternMatchIsExact(PatternOp op) const {
-    // General LIKE is answered by locating the rarest literal fragment, which
-    // is a superset of the pattern's true matches. Every other supported
-    // operation is answered exactly by backward search.
-    return op != PatternOp::Match;
+    // LIKE and regex return necessary conditions, requiring raw-column recheck.
+    return op != PatternOp::Match && op != PatternOp::RegexMatch;
 }
 
 bool
@@ -400,12 +422,11 @@ FmIndexReader::ShouldUseForOp(PatternOp op, std::string_view pattern) const {
         // General LIKE uses the same locate-only bound, but does NOT inherit
         // the anchored ops' empty-pattern acceptance below: with no literal
         // fragment there is nothing to seed phase 1 with, so the raw scan is
-        // strictly cheaper. RegexMatch stays declined (required-literal
-        // extraction is a follow-up).
+        // strictly cheaper.
         case PatternOp::Match:
             return MatchGuardAccepts(pattern);
         case PatternOp::RegexMatch:
-            return false;
+            return RegexGuardAccepts(pattern);
         default:
             return false;
     }
@@ -484,6 +505,27 @@ FmIndexReader::MatchGuardAccepts(std::string_view pattern) const {
     // across row length and selectivity before recalibrating.
     return static_cast<double>(rarest->occurrences) *
                static_cast<double>(storage_->Engine().sa_sample_rate()) <
+           cost_ratio_ * static_cast<double>(storage_->TotalTokens());
+}
+
+bool
+FmIndexReader::RegexGuardAccepts(std::string_view pattern) const {
+    auto condition = PartialRegexMatcher::PrepareIndexCondition(std::string(pattern));
+    if (condition.IsTrue()) {
+        return false;
+    }
+    double occurrences;
+    condition.Select(
+        [&](const std::string& literal) {
+            return storage_->Engine().Count(Bytes(literal), literal.size());
+        },
+        occurrences);
+    if (occurrences == 0) {
+        return true;
+    }
+    // Counts belong to this index and upper-bound locate work, including every
+    // selected OR branch. Like the LIKE guard, this does not price raw reads.
+    return occurrences * static_cast<double>(storage_->Engine().sa_sample_rate()) <
            cost_ratio_ * static_cast<double>(storage_->TotalTokens());
 }
 
