@@ -218,7 +218,7 @@ write checks verify accepted changes and unchanged data after rejected writes.
 ```bash
 cd tests/go_client
 go test -tags=dynamic,test -gcflags='all=-N -l' -count=1 \
-  ./testcases -run '^TestRLS' -timeout=30m -parallel=4 \
+  ./testcases -run '^TestRLS' -timeout=90m -parallel=4 \
   -addr=127.0.0.1:19530
 ```
 
