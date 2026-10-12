@@ -2,6 +2,7 @@ package viewerror
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 
@@ -32,6 +33,8 @@ func TestRetryClassificationSurvivesGRPCRoundTrip(t *testing.T) {
 			require.Same(t, tc.err, AsViewError(wrapped))
 			wire := NewGRPCStatusFromViewError(tc.err).Err()
 			require.Equal(t, tc.code, status.Code(wire))
+			require.Equal(t, tc.retry, AsViewError(wire).IsRetryable())
+			require.Equal(t, tc.retry, AsViewError(errors.Join(wire, errors.New("cleanup failed"))).IsRetryable())
 			client := ConvertViewError("SearchOnView", wire).(*ViewClientStatus)
 			decoded := AsViewError(client)
 			require.True(t, proto.Equal(tc.err.AsPBError(), decoded.AsPBError()))
