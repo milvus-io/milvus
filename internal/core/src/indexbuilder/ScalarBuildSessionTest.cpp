@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "common/Array.h"
@@ -30,6 +31,7 @@
 #include "index/PackedIndexLoad.h"
 #include "index/contracts/Registry.h"
 #include "index/contracts/query/IJsonIndexReader.h"
+#include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/scalar/json/JsonProjectedIndexLoad.h"
@@ -358,6 +360,66 @@ TEST_F(ScalarBuildSessionTest, TypedJsonIndexOnFieldRoot) {
             EXPECT_EQ(hits.count(), 5);
             EXPECT_TRUE(hits[4]);
         }
+    }
+}
+
+// The Go side encodes an NGRAM on the whole JSON field (json_path naming the
+// field itself, or omitted) as the empty pointer. Root strings are indexed;
+// other roots exist but carry no value.
+TEST_F(ScalarBuildSessionTest, NgramJsonIndexOnFieldRoot) {
+    constexpr int64_t rows = 30;
+    std::vector<Json> documents;
+    documents.reserve(rows);
+    for (int64_t row = 0; row < rows; ++row) {
+        std::string raw;
+        if (row % 3 == 0) {
+            raw = "\"apple pie " + std::to_string(row) + "\"";
+        } else if (row % 3 == 1) {
+            raw = "{\"body\":\"apple\"}";
+        } else {
+            raw = std::to_string(row);
+        }
+        documents.emplace_back(simdjson::padded_string(raw));
+    }
+    auto info = Info(DataType::JSON, index::NGRAM_INDEX_TYPE);
+    info.set_num_rows(rows);
+    const std::array<std::pair<std::string, std::string>, 4> params{{
+        {JSON_CAST_TYPE, "VARCHAR"},
+        {JSON_PATH, ""},
+        {index::MIN_GRAM, "2"},
+        {index::MAX_GRAM, "3"},
+    }};
+    for (const auto& [key, value] : params) {
+        auto* param = info.add_index_params();
+        param->set_key(key);
+        param->set_value(value);
+    }
+    auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+    ASSERT_EQ(prepared.request.family, index::families::kNgram);
+    auto data = std::make_shared<FieldData<Json>>(DataType::JSON, false);
+    data->add_json_data(documents);
+    info.add_insert_files(WriteBinlog(prepared.file_manager_context, data));
+    prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+    auto reader = BuildAndLoad(std::move(prepared));
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->Count(), rows);
+    const auto* json =
+        dynamic_cast<const index::IJsonIndexReader*>(reader.get());
+    ASSERT_NE(json, nullptr);
+    EXPECT_EQ(json->Exists("").count(), rows);
+    EXPECT_FALSE(static_cast<bool>(
+        json->Resolve("/body", JsonCastType::FromString("VARCHAR"))));
+    const auto resolved =
+        json->Resolve("", JsonCastType::FromString("VARCHAR"));
+    ASSERT_TRUE(static_cast<bool>(resolved));
+    const auto* ngram =
+        dynamic_cast<const index::INgramReader*>(resolved.get());
+    ASSERT_NE(ngram, nullptr);
+    ASSERT_TRUE(ngram->CanHandle("apple", index::PatternOp::InnerMatch));
+    TargetBitmap candidates(rows, true);
+    ngram->Candidates("apple", index::PatternOp::InnerMatch, candidates);
+    for (int64_t row = 0; row < rows; ++row) {
+        EXPECT_EQ(candidates[row], row % 3 == 0) << "row " << row;
     }
 }
 
