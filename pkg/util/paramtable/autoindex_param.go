@@ -119,9 +119,8 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.SparseIPIndexParams = ParamItem{
 		Key:          "autoIndex.params.sparse.ip.build",
 		Version:      "3.0.3",
-		DefaultValue: `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`,
 		FallbackKeys: []string{p.SparseIndexParams.Key},
-		Formatter:    GetBuildParamFormatter(metric.IP, "autoIndex.params.sparse.ip.build"),
+		Formatter:    getOptionalBuildParamFormatter(metric.IP, "autoIndex.params.sparse.ip.build"),
 		Export:       true,
 	}
 	p.SparseIPIndexParams.Init(base.mgr)
@@ -129,9 +128,8 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.SparseBM25IndexParams = ParamItem{
 		Key:          "autoIndex.params.sparse.bm25.build",
 		Version:      "3.0.3",
-		DefaultValue: `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25"}`,
 		FallbackKeys: []string{p.SparseIndexParams.Key},
-		Formatter:    GetBuildParamFormatter(metric.BM25, "autoIndex.params.sparse.bm25.build"),
+		Formatter:    getOptionalBuildParamFormatter(metric.BM25, "autoIndex.params.sparse.bm25.build"),
 		Export:       true,
 	}
 	p.SparseBM25IndexParams.Init(base.mgr)
@@ -454,5 +452,15 @@ func GetBuildParamFormatter(defaultMetricsType metric.MetricType, tag string) fu
 			panic(merr.Wrapf(err, "failed to convert updated %s map to json", tag))
 		}
 		return ret
+	}
+}
+
+func getOptionalBuildParamFormatter(defaultMetricsType metric.MetricType, tag string) func(string) string {
+	formatter := GetBuildParamFormatter(defaultMetricsType, tag)
+	return func(originValue string) string {
+		if originValue == "" {
+			return ""
+		}
+		return formatter(originValue)
 	}
 }
