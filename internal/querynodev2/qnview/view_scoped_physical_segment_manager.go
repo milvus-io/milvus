@@ -622,7 +622,7 @@ func (m *ViewScopedPhysicalSegmentManager) readyNotificationsLocked(segmentID in
 
 func (s *physicalSegmentState) satisfies(meta *viewpb.QueryViewMeta) bool {
 	return s.appliedMeta.GetSchemaVersion() >= meta.GetSchemaVersion() &&
-		s.appliedMeta.GetLoadInfoVersion() >= meta.GetLoadInfoVersion()
+		s.appliedMeta.GetLoadInfoVersion() == meta.GetLoadInfoVersion()
 }
 
 func (m *ViewScopedPhysicalSegmentManager) removeView(req ReleaseSegments) ([]SegmentLoadInfoSubscription, func()) {
@@ -789,12 +789,14 @@ func (m *ViewScopedPhysicalSegmentManager) submitCallback(callback func()) {
 
 func (s *physicalSegmentState) loadRequest() (segmentLoadRequest, bool) {
 	var latest segmentLoadRequest
+	var version qviews.QueryViewVersion
 	var found bool
 	for key := range s.refs {
 		request, ok := s.requests[key]
-		if ok && (!found || request.meta.GetSchemaVersion() > latest.meta.GetSchemaVersion() ||
-			(request.meta.GetSchemaVersion() == latest.meta.GetSchemaVersion() && request.meta.GetLoadInfoVersion() > latest.meta.GetLoadInfoVersion())) {
-			latest, found = request, true
+		// LoadInfoVersion is a content hash, not an ordered revision. Use the
+		// actual view publication order when choosing a preparation request.
+		if ok && (!found || key.QueryViewVersion.GT(version)) {
+			latest, version, found = request, key.QueryViewVersion, true
 		}
 	}
 	return latest, found

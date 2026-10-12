@@ -29,12 +29,12 @@ func TestPhysicalSegmentSchemaHandoffKeepsSubscriptionAndWaitsForReopen(t *testi
 		mgr.Acquire(req)
 		return req
 	}
-	first := acquire(1, 1, 1)
+	first := acquire(1, 1, 99)
 	snapshot := SegmentLoadInfoSnapshot{CollectionID: testCollectionID, SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 10}, LoadInfo: &querypb.SegmentLoadInfo{CollectionID: testCollectionID, PartitionID: 10, SegmentID: 1000}}
 	require.NoError(t, stream.Emit(snapshot))
 	scheduler.Tasks()[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
-	require.Equal(t, uint64(1), <-ready)
-	second := acquire(2, 2, 1)
+	require.Equal(t, uint64(99), <-ready)
+	second := acquire(2, 2, 99)
 	require.Empty(t, ready)
 	require.Len(t, scheduler.Updates(), 1)
 	update := scheduler.Updates()[0]
@@ -52,14 +52,15 @@ func TestPhysicalSegmentSchemaHandoffKeepsSubscriptionAndWaitsForReopen(t *testi
 	require.ErrorIs(t, update.Execute(t.Context()), nodescheduler.ErrDelay)
 	require.Empty(t, ready, "failed reopen must not acknowledge the view")
 	// A load-fields change at the same schema arrives while reopen is in flight.
+	// Its content hash is smaller; only QueryViewVersion orders the requests.
 	third := acquire(3, 2, 2)
 	require.Len(t, scheduler.Updates(), 1)
+	require.NoError(t, update.Execute(t.Context()))
+	require.Empty(t, ready, "the earlier reopen cannot acknowledge newer load fields")
+	require.Len(t, scheduler.Updates(), 2, "newest request must win even while older views retain larger hashes")
 	mgr.Release(ReleaseSegments{Key: first.Key})
 	mgr.Release(ReleaseSegments{Key: second.Key})
 	require.False(t, stream.subscriptions[0].closed)
-	require.NoError(t, update.Execute(t.Context()))
-	require.Empty(t, ready, "the earlier reopen cannot acknowledge newer load fields")
-	require.Len(t, scheduler.Updates(), 2)
 	require.NoError(t, scheduler.Updates()[1].Execute(t.Context()))
 	require.Equal(t, uint64(2), <-ready)
 	// Metadata publication after old views drop still reaches the remaining view.
