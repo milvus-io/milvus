@@ -181,6 +181,12 @@ ReaderMatches(const ExprIndexRequirement& req,
     const auto& caps = entry.caps;
     const bool multi_path_router = req.is_json_field && IsFlatJsonIndex(entry);
     if (multi_path_router) {
+        // Field-level JSON null checks cannot use a typed path view. The
+        // selector resolves views after pinning, and Resolve(JSON) is absent.
+        if (req.reader == RequiredReader::Null &&
+            req.value_type == DataType::JSON) {
+            return false;
+        }
         return req.reader == RequiredReader::Predicate ||
                req.reader == RequiredReader::PatternMatch ||
                req.reader == RequiredReader::Null ||
