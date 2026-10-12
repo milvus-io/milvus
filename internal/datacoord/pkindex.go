@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -104,8 +105,9 @@ func (s chunkManagerStore) MultiRemove(ctx context.Context, keys []string) error
 }
 
 // initPKIndex builds the primary key index manifest manager and GC on the meta
-// kv and cm, and gives the manager to the service.
-func (s *Server) initPKIndex(cm storage.ChunkManager) error {
+// kv and cm, and gives the manager to the service. An invalid GC configuration
+// leaves s.pkindexGC nil and does not stop the manager.
+func (s *Server) initPKIndex(cm storage.ChunkManager) {
 	pointers := metaKVPointers{kv: s.kv}
 	store := chunkManagerStore{cm: cm}
 	layout := manifest.Layout{RootPath: cm.RootPath()}
@@ -116,11 +118,11 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) error {
 		RetainDuration: Params.DataCoordCfg.PKIndexManifestRetainDuration.GetAsDuration(time.Second),
 	}, nil)
 	if err != nil {
-		return merr.Wrap(err, "init primary key index gc")
+		mlog.Error(s.ctx, "init primary key index gc failed, the gc is disabled", mlog.Err(err))
+	} else {
+		s.pkindexGC = gc
 	}
-	s.pkindexGC = gc
 	s.pkindexService.SetManager(manifestmanager.New(pointers, store, layout))
-	return nil
 }
 
 // RegisterPKIndexCoordGRPCService registers the primary key index manifest service on server.

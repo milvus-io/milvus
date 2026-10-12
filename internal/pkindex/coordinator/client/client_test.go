@@ -20,8 +20,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
@@ -33,10 +36,11 @@ import (
 type fakeService struct {
 	lazygrpc.Conn
 	svc pkindexpb.PKIndexCoordServiceClient
+	err error
 }
 
 func (s *fakeService) GetService(context.Context) (pkindexpb.PKIndexCoordServiceClient, error) {
-	return s.svc, nil
+	return s.svc, s.err
 }
 
 // fakeCoordClient returns the configured status with a fixed manifest.
@@ -122,4 +126,45 @@ func TestClientTransportError(t *testing.T) {
 	c := newTestClient(&fakeCoordClient{err: merr.ErrServiceUnavailable})
 	_, err := c.ClaimManifest(context.Background(), &pkindexpb.ClaimManifestRequest{})
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+}
+
+// callAll calls the three methods and returns their errors.
+func callAll(c *client) []error {
+	ctx := context.Background()
+	_, e1 := c.ClaimManifest(ctx, &pkindexpb.ClaimManifestRequest{})
+	_, e2 := c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
+	_, _, e3 := c.GetManifest(ctx, &pkindexpb.GetManifestRequest{})
+	return []error{e1, e2, e3}
+}
+
+func TestClientRawErrorsBecomeUnavailable(t *testing.T) {
+	cases := []struct {
+		name string
+		c    *client
+	}{
+		{"grpc unavailable", newTestClient(&fakeCoordClient{err: grpcstatus.Error(codes.Unavailable, "down")})},
+		{"grpc unimplemented", newTestClient(&fakeCoordClient{err: grpcstatus.Error(codes.Unimplemented, "old server")})},
+		{"get service", &client{service: &fakeService{err: errors.New("dial failed")}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, err := range callAll(tc.c) {
+				assert.True(t, errors.Is(err, merr.ErrServiceUnavailable))
+				assert.True(t, merr.IsRetryableErr(err))
+			}
+		})
+	}
+}
+
+func TestClientContextErrorsUnchanged(t *testing.T) {
+	for _, ctxErr := range []error{context.DeadlineExceeded, context.Canceled} {
+		for _, c := range []*client{
+			newTestClient(&fakeCoordClient{err: ctxErr}),
+			{service: &fakeService{err: ctxErr}},
+		} {
+			for _, err := range callAll(c) {
+				assert.Equal(t, ctxErr, err)
+			}
+		}
+	}
 }

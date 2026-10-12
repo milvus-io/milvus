@@ -41,11 +41,13 @@ import (
 
 var _ Client = (*client)(nil)
 
-// Client calls PKIndexCoordService. Every method returns a merr error.
+// Client calls PKIndexCoordService. Every method returns a merr error, except
+// that a context cancel or deadline error is returned unchanged.
 //
 // A merr.ErrChannelNotAvailable error means the term of the caller is fenced
 // by a newer owner of the vchannel; the caller must stop writing that vchannel.
-// A merr.ErrServiceUnavailable error is retryable.
+// A merr.ErrServiceUnavailable error is retryable. It also covers a connection
+// failure and a gRPC transport error that carries no merr code.
 type Client interface {
 	// ClaimManifest claims the manifest of a vchannel for the term in the request.
 	ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifestRequest) (*pkindexpb.Manifest, error)
@@ -136,11 +138,11 @@ type client struct {
 func (c *client) ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifestRequest) (*pkindexpb.Manifest, error) {
 	svc, err := c.service.GetService(ctx)
 	if err != nil {
-		return nil, err
+		return nil, toClientErr(err)
 	}
 	resp, err := svc.ClaimManifest(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, err
+		return nil, toClientErr(err)
 	}
 	return resp.GetManifest(), nil
 }
@@ -148,11 +150,11 @@ func (c *client) ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifest
 func (c *client) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error) {
 	svc, err := c.service.GetService(ctx)
 	if err != nil {
-		return nil, err
+		return nil, toClientErr(err)
 	}
 	resp, err := svc.CommitFlush(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, err
+		return nil, toClientErr(err)
 	}
 	return resp.GetManifest(), nil
 }
@@ -160,13 +162,23 @@ func (c *client) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequ
 func (c *client) GetManifest(ctx context.Context, req *pkindexpb.GetManifestRequest) (*pkindexpb.Manifest, bool, error) {
 	svc, err := c.service.GetService(ctx)
 	if err != nil {
-		return nil, false, err
+		return nil, false, toClientErr(err)
 	}
 	resp, err := svc.GetManifest(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, false, err
+		return nil, false, toClientErr(err)
 	}
 	return resp.GetManifest(), resp.GetFound(), nil
+}
+
+// toClientErr returns err unchanged when it is nil, a merr error, or a context
+// cancel or deadline error. Any other error is a connection or transport
+// failure; it becomes a retryable merr.ErrServiceUnavailable that keeps the cause.
+func toClientErr(err error) error {
+	if err == nil || merr.IsMilvusError(err) || merr.IsCanceledOrTimeout(err) {
+		return err
+	}
+	return merr.WrapErrServiceUnavailableErr(err, "call primary key index coordinator")
 }
 
 func (c *client) Close() {

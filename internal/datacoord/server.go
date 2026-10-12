@@ -376,9 +376,7 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.initGarbageCollection(storageCli)
 
-	if err = s.initPKIndex(storageCli); err != nil {
-		return err
-	}
+	s.initPKIndex(storageCli)
 	mlog.Info(s.ctx, "init primary key index manifest service done")
 
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
@@ -854,7 +852,9 @@ func (s *Server) startServerLoop() {
 	// construction (bounded by s.ctx); nothing to do here.
 
 	s.garbageCollector.start()
-	s.pkindexGC.Start(s.serverLoopCtx)
+	if s.pkindexGC != nil {
+		s.pkindexGC.Start(s.serverLoopCtx)
+	}
 
 	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
