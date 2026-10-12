@@ -14,6 +14,8 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
+#include <limits>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -291,6 +293,71 @@ TEST(CApiTest, LoadIndexSearch) {
     for (int64_t i = 0; i < num_query * TOPK; ++i) {
         EXPECT_EQ(loaded_result.seg_offsets_[i], result.value()->GetIds()[i]);
         EXPECT_FLOAT_EQ(loaded_result.distances_[i], result.value()->GetDistance()[i]);
+    }
+}
+
+TEST(LoadIndexCTest, SerializedResourceEstimateRejectsInvalidInputsAndClearsOutput) {
+    const uint8_t malformed[] = {0xff};
+    for (const auto& input : std::vector<std::pair<const uint8_t*, uint64_t>>{
+             {nullptr, 0}, {malformed, sizeof(malformed)},
+             {malformed, static_cast<uint64_t>(std::numeric_limits<int>::max()) + 1}}) {
+        LoadResourceRequest request{1, 2, 3, 4, true};
+        auto status = EstimateLoadIndexResourceFromSerializedInfo(
+            input.first, input.second, &request);
+        EXPECT_NE(status.error_code, milvus::Success);
+        if (status.error_code != milvus::Success && status.error_msg != nullptr) {
+            free(const_cast<char*>(status.error_msg));
+        }
+        EXPECT_EQ(request.max_memory_cost, 0);
+        EXPECT_EQ(request.max_disk_cost, 0);
+        EXPECT_EQ(request.final_memory_cost, 0);
+        EXPECT_EQ(request.final_disk_cost, 0);
+        EXPECT_FALSE(request.has_raw_data);
+    }
+    auto status = EstimateLoadIndexResourceFromSerializedInfo(malformed, 1, nullptr);
+    EXPECT_NE(status.error_code, milvus::Success);
+    if (status.error_code != milvus::Success && status.error_msg != nullptr) {
+        free(const_cast<char*>(status.error_msg));
+    }
+}
+
+TEST(LoadIndexCTest, SerializedResourceEstimatePreservesMmapAdmissionCosts) {
+    constexpr uint64_t bytes = 1ULL << 30;
+    milvus::proto::cgo::LoadIndexInfo info;
+    info.set_collectionid(1);
+    info.set_partitionid(2);
+    info.set_segmentid(3);
+    info.set_index_engine_version(knowhere::Version::GetCurrentVersion().VersionNumber());
+    info.set_index_file_size(bytes);
+    info.set_num_rows(100);
+    auto* field = info.mutable_field();
+    field->set_fieldid(101);
+    field->set_name("vector");
+    field->set_data_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim = field->add_type_params();
+    dim->set_key("dim");
+    dim->set_value("128");
+    auto& params = *info.mutable_index_params();
+    params["index_type"] = "HNSW";
+    params["metric_type"] = "L2";
+    params["M"] = "30";
+    for (const bool mmap : {false, true}) {
+        info.set_enable_mmap(mmap);
+        const auto serialized = info.SerializeAsString();
+        LoadResourceRequest request{};
+        auto status = EstimateLoadIndexResourceFromSerializedInfo(
+            reinterpret_cast<const uint8_t*>(serialized.data()), serialized.size(), &request);
+        EXPECT_EQ(status.error_code, milvus::Success)
+            << (status.error_msg == nullptr ? "" : status.error_msg);
+        if (status.error_code != milvus::Success) {
+            free(const_cast<char*>(status.error_msg));
+            return;
+        }
+        EXPECT_TRUE(request.has_raw_data);
+        EXPECT_EQ(request.max_memory_cost, mmap ? bytes / 8 : 2 * bytes);
+        EXPECT_EQ(request.final_memory_cost, mmap ? 0 : bytes);
+        EXPECT_EQ(request.max_disk_cost, mmap ? bytes : 0);
+        EXPECT_EQ(request.final_disk_cost, mmap ? bytes : 0);
     }
 }
 

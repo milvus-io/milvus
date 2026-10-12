@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -121,6 +122,69 @@ TEST(SortedIndexReaderTest, MmapAccountsValidityWordOnce) {
     const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
     ASSERT_NE(nulls, nullptr);
     ExpectHits(nulls->IsNull(), rows, {0});
+}
+
+template <typename T>
+void
+ExpectMembershipAfterReload(const std::string& name,
+                            const std::vector<ScalarTestValue<T>>& rows,
+                            const std::vector<T>& terms) {
+    for (const auto& suffix : {std::string{}, std::string{"Mmap"}}) {
+        const auto& backend = ScalarReaderBackends().Get<T>(name + suffix);
+        for (int null_mode : {0, 1, 2}) {
+            SCOPED_TRACE(name + suffix + ":null_mode=" + std::to_string(null_mode));
+            ScalarTestData<T> data(rows);
+            for (size_t row = 0; row < rows.size(); ++row) {
+                if (null_mode == 2 || (null_mode == 1 && row % 3 == 0)) {
+                    data.validity.reset(row);
+                }
+            }
+            const ScalarTestInput<T> input(data);
+            auto artifact = backend.Build(input.View());
+            auto reader = OpenV3(backend, SerializeV3(*artifact), {.row_count = rows.size()});
+            ASSERT_NE(reader, nullptr);
+            const auto* predicate = dynamic_cast<const IScalarPredicateReader<T>*>(reader.get());
+            ASSERT_NE(predicate, nullptr);
+            for (size_t count : {0, 1, 127, 128, 129}) {
+                std::vector<T> queries;
+                for (size_t i = 0; i < count; ++i) {
+                    queries.push_back(terms[i % terms.size()]);
+                }
+                for (int order : {0, 1, 2}) {
+                    if (order == 1) { std::sort(queries.begin(), queries.end()); }
+                    if (order == 2) { std::reverse(queries.begin(), queries.end()); }
+                    const auto original = queries;
+                    const auto in = predicate->In(queries.size(), queries.data());
+                    const auto not_in = predicate->NotIn(queries.size(), queries.data());
+                    ASSERT_EQ(in.size(), rows.size());
+                    ASSERT_EQ(not_in.size(), rows.size());
+                    for (size_t row = 0; row < rows.size(); ++row) {
+                        const bool hit = std::find(queries.begin(), queries.end(), rows[row]) != queries.end();
+                        EXPECT_EQ(in[row], data.validity[row] && hit) << row;
+                        EXPECT_EQ(not_in[row], data.validity[row] && !hit) << row;
+                    }
+                    EXPECT_EQ(queries, original);
+                }
+            }
+        }
+    }
+}
+
+TEST(SortedIndexReaderTest, MembershipMatchesScanAfterHeapAndMmapReload) {
+    std::vector<int64_t> integers;
+    std::vector<double> reals;
+    std::vector<std::string> strings;
+    const std::vector<std::string> dictionary{
+        "", "alpha", std::string("alpha\0beta", 10), "中文", std::string(256, 'x')};
+    for (size_t row = 0; row < 129; ++row) {
+        integers.push_back(static_cast<int64_t>(row % 17) - 8);
+        reals.push_back(row % 5 == 0 ? -0.0 : static_cast<double>(row % 17) - 8.25);
+        strings.push_back(dictionary[row % dictionary.size()]);
+    }
+    ExpectMembershipAfterReload<int64_t>("SortedInt64", integers, {7, -8, 99, 7, 0});
+    ExpectMembershipAfterReload<double>("SortedDouble", reals, {0.0, -8.25, 99.0, -0.0, 7.75});
+    ExpectMembershipAfterReload<std::string_view>(
+        "SortedVarchar", strings, {dictionary[4], dictionary[2], "missing", "", dictionary[2]});
 }
 
 }  // namespace

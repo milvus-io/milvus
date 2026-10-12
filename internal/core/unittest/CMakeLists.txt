@@ -22,6 +22,8 @@ include_directories(
 # Plan parser shared library
 set(PLANPARSER_INCLUDE_DIR ${CMAKE_HOME_DIRECTORY}/output/include)
 set(PLANPARSER_LIB_DIR ${CMAKE_HOME_DIRECTORY}/output/lib)
+# Prefer the linked Conan package over headers left by an earlier installation.
+include_directories(BEFORE SYSTEM ${milvus-common_INCLUDE_DIRS})
 include_directories(${PLANPARSER_INCLUDE_DIR})
 link_directories(${PLANPARSER_LIB_DIR})
 
@@ -119,6 +121,7 @@ set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/ngram/NgramIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/sort/SortedIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/sort/SortedIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/sort/SortedMembershipTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/spatial/RTreeIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/spatial/RTreeIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/text/TextIndexArtifactTest.cpp

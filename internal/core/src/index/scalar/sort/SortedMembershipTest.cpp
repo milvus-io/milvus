@@ -26,8 +26,8 @@
 #include <string>
 #include <vector>
 
-#include "index/IndexStructure.h"
-#include "index/SortedMembership.h"
+#include "index/scalar/sort/IndexStructure.h"
+#include "index/scalar/sort/SortedMembership.h"
 
 namespace milvus::index {
 namespace {

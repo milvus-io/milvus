@@ -10,6 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <boost/container/vector.hpp>
+#include "common/RegexQuery.h"
+#include "index/contracts/query/INgramReader.h"
 
 #include <memory>
 #include <string>
@@ -583,5 +586,121 @@ TEST(NgramExpressionTest, JsonProjectionPreservesNonPatternFallbacks) {
         for (size_t i = 1; i < nb; i++) {
             EXPECT_TRUE(result[i]);
         }
+    }
+}
+
+namespace {
+void
+test_ngram_with_data(const boost::container::vector<std::string>& input,
+                     const std::string& literal, proto::plan::OpType op,
+                     const std::vector<bool>& expected, bool forward_to_br) {
+    std::vector<std::string> data(input.begin(), input.end());
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
+    auto field = test::expr_index::StringField(data);
+    test::expr_index::RawFieldFiles raw_files;
+    auto segment = CreateSealedSegment(schema);
+    segment->LoadFieldData(raw_files.Prepare(field_id, {field}));
+    auto opened = test::expr_index::BuildIndex(
+        field_id, DataType::VARCHAR, index::NGRAM_INDEX_TYPE, {field},
+        {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
+    const auto* ngram = dynamic_cast<const index::INgramReader*>(opened.reader.get());
+    ASSERT_NE(ngram, nullptr);
+    index::PatternOp pattern_op = index::PatternOp::Match;
+    switch (op) {
+        case proto::plan::InnerMatch: pattern_op = index::PatternOp::InnerMatch; break;
+        case proto::plan::PrefixMatch: pattern_op = index::PatternOp::PrefixMatch; break;
+        case proto::plan::PostfixMatch: pattern_op = index::PatternOp::PostfixMatch; break;
+        default: break;
+    }
+    EXPECT_EQ(ngram->CanHandle(literal, pattern_op), !forward_to_br);
+    test::expr_index::InstallIndex(*segment, field_id, DataType::VARCHAR, std::move(opened));
+    proto::plan::GenericValue value;
+    value.set_string_val(literal);
+    auto expression = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(field_id, DataType::VARCHAR), op, value,
+        std::vector<proto::plan::GenericValue>{});
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expression);
+    auto result = ExecuteQueryExpr(plan, segment.get(), data.size(), MAX_TIMESTAMP);
+    ASSERT_EQ(result.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) { EXPECT_EQ(result[i], expected[i]) << i; }
+}
+}  // namespace
+
+TEST(NgramExpressionTest, SingleMultiByteCharLiteralFallsBack) {
+    boost::container::vector<std::string> test_data = {
+        "订单（已取消）",
+        "中文测试",
+        "hello world",
+        "abc）",
+    };
+
+    struct TestCase {
+        std::string literal;
+        proto::plan::OpType op_type;
+        std::string like_pattern;
+    };
+    std::vector<TestCase> test_cases = {
+        {"）", proto::plan::OpType::InnerMatch, "%）%"},
+        {"订", proto::plan::OpType::PrefixMatch, "订%"},
+        {"）", proto::plan::OpType::PostfixMatch, "%）"},
+        {"%abc%）%", proto::plan::OpType::Match, "%abc%）%"},
+        // 2-byte and 4-byte characters take the same path
+        {"é", proto::plan::OpType::InnerMatch, "%é%"},
+        {"😀", proto::plan::OpType::InnerMatch, "%😀%"},
+    };
+
+    for (const auto& test_case : test_cases) {
+        ASSERT_GE(test_case.literal.size(), 2)
+            << "literal must be >= min_gram bytes for this test to matter";
+        PatternMatchTranslator translator;
+        RegexMatcher re2_matcher(translator(test_case.like_pattern));
+        std::vector<bool> expected_results;
+        for (const auto& data : test_data) {
+            expected_results.push_back(re2_matcher(data));
+        }
+        test_ngram_with_data(test_data,
+                             test_case.literal,
+                             test_case.op_type,
+                             expected_results,
+                             /*forward_to_br=*/true);
+    }
+}
+
+// A literal with an interior NUL must cross the ngram FFI intact: the entry
+// points take (pointer, length), so rust checks and queries the same literal
+// the C++ gate saw. Both the candidate lookup and the raw post-filter must
+// evaluate the full literal, including its interior NUL.
+TEST(NgramExpressionTest, EmbeddedNulLiteralIsHandledByNgram) {
+    const std::string nul_row("xab\0cy", 6);
+    const std::string nul_short("ab\0c", 4);
+    boost::container::vector<std::string> test_data = {
+        nul_row, "xabzz", "hello", nul_short};
+
+    struct TestCase {
+        std::string literal;
+        proto::plan::OpType op_type;
+        std::vector<bool> expected;
+    };
+    std::vector<TestCase> test_cases = {
+        {nul_short,
+         proto::plan::OpType::InnerMatch,
+         {true, false, false, true}},
+        {nul_short,
+         proto::plan::OpType::PrefixMatch,
+         {false, false, false, true}},
+        {std::string("b\0c", 3),
+         proto::plan::OpType::PostfixMatch,
+         {false, false, false, true}},
+        {"%xa%" + std::string("\0cy", 3) + "%",
+         proto::plan::OpType::Match,
+         {true, false, false, false}},
+    };
+    for (const auto& test_case : test_cases) {
+        test_ngram_with_data(test_data,
+                             test_case.literal,
+                             test_case.op_type,
+                             test_case.expected,
+                             /*forward_to_br=*/false);
     }
 }

@@ -51,6 +51,34 @@ TEST(BsonInvertedIndexTranslatorTest, ReservesFixedScalarReaderMemoryOnce) {
     }
 }
 
+TEST(IndexLoadContextTest, PriorityOverridePreservesCallerStateAndAccounting) {
+    folly::CancellationSource cancel;
+    OpContext parent(cancel.getToken());
+    parent.coload_fields = {101, 102};
+    parent.pinned_segment_state = std::make_shared<const int>(7);
+    parent.pinned_state_owner = &parent;
+    for (const auto runtime : {std::optional<int32_t>{}, std::optional<int32_t>{0},
+                               std::optional<int32_t>{1}}) {
+        parent.runtime_load_priority = runtime;
+        {
+            IndexLoadContext load(&parent, 1);
+            EXPECT_EQ(load.ctx.runtime_load_priority, runtime.value_or(1));
+            EXPECT_EQ(load.ctx.coload_fields, parent.coload_fields);
+            EXPECT_EQ(load.ctx.pinned_segment_state, parent.pinned_segment_state);
+            EXPECT_EQ(load.ctx.pinned_state_owner, &parent);
+            cancel.requestCancellation();
+            EXPECT_TRUE(load.ctx.cancellation_token.isCancellationRequested());
+            load.ctx.storage_usage.scanned_cold_bytes = 3;
+            load.ctx.storage_usage.scanned_total_bytes = 5;
+        }
+        EXPECT_EQ(parent.runtime_load_priority, runtime);
+    }
+    EXPECT_EQ(parent.storage_usage.scanned_cold_bytes, 9);
+    EXPECT_EQ(parent.storage_usage.scanned_total_bytes, 15);
+    IndexLoadContext warmup(nullptr, 1);
+    EXPECT_EQ(warmup.ctx.runtime_load_priority, 1);
+}
+
 class ScalarIndexTranslatorTest : public ::testing::Test {
  protected:
     void SetUp() override {

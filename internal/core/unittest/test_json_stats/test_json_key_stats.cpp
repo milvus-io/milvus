@@ -53,6 +53,7 @@
 #include "futures/future_c.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "segcore/json_stats/JsonKeyStats.h"
 #include "segcore/json_stats/bson_inverted.h"
 #include "segcore/json_stats/utils.h"

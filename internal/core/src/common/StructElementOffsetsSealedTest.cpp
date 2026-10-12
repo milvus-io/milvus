@@ -11,11 +11,11 @@
 
 #include <gtest/gtest.h>
 
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 
-TEST(ArrayOffsetsSealedTest, BuildAllZerosKeepsEmptyRangesAcrossRepeatedConstruction) {
+TEST(StructElementOffsetsSealedTest, BuildAllZerosKeepsEmptyRangesAcrossRepeatedConstruction) {
     constexpr int64_t kRowCount = 1000;
-    auto offsets = milvus::ArrayOffsetsSealed::BuildAllZeros(kRowCount);
+    auto offsets = milvus::StructElementOffsetsSealed::BuildAllZeros(kRowCount);
     ASSERT_NE(offsets, nullptr);
 
     EXPECT_EQ(offsets->GetRowCount(), kRowCount);
@@ -32,7 +32,7 @@ TEST(ArrayOffsetsSealedTest, BuildAllZerosKeepsEmptyRangesAcrossRepeatedConstruc
 
     // Each newly constructed table independently describes empty arrays.
     for (int i = 0; i < 256; ++i) {
-        auto tmp = milvus::ArrayOffsetsSealed::BuildAllZeros(500);
+        auto tmp = milvus::StructElementOffsetsSealed::BuildAllZeros(500);
         ASSERT_EQ(tmp->GetRowCount(), 500);
         ASSERT_EQ(tmp->GetTotalElementCount(), 0);
         EXPECT_EQ(tmp->ElementIDRangeOfRow(0), std::make_pair(0, 0));
