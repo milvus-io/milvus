@@ -270,14 +270,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          const std::string& nested_path) const override;
 
     std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const override {
-        auto runtime = CaptureRuntimeResourceState();
-        auto it = runtime->array_offsets_map.find(field_id);
-        if (it != runtime->array_offsets_map.end()) {
-            return it->second;
-        }
-        return nullptr;
-    }
+    GetArrayOffsets(FieldId field_id,
+                    OpContext* op_ctx = nullptr) const override;
 
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
@@ -334,9 +328,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     struct RuntimeResourceState {
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
             fields;
-        std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
+        std::unordered_map<std::string, std::shared_ptr<LazyArrayOffsets>>
             struct_to_array_offsets;
-        std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
+        std::unordered_map<FieldId, std::shared_ptr<LazyArrayOffsets>>
             array_offsets_map;
         std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings;
         std::unordered_map<FieldId, SealedIndexingEntryPtr> vector_indexings;
@@ -406,6 +400,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Defined out-of-line in ChunkedSegmentSealedImpl.cpp; reads derive purely
     // from the state (no segment pointer). See CaptureReadSnapshot().
     class SealedReadSnapshot;
+
+    static std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsetsFromState(const PublishedSegmentState& state,
+                             FieldId field_id,
+                             milvus::OpContext* op_ctx);
 
     static std::shared_ptr<const RuntimeResourceState>
     BuildRuntimeResourceState();
@@ -569,7 +568,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // count of chunk that has raw data
     int64_t
-    num_chunk_data(FieldId field_id) const override;
+    num_chunk_data(FieldId field_id,
+                   OpContext* op_ctx = nullptr) const override;
 
     int64_t
     num_chunk(FieldId field_id) const override;
@@ -579,7 +579,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     size_per_chunk() const override;
 
     int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const override;
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               OpContext* op_ctx = nullptr) const override;
 
     // Capture the current published snapshot once per request. Returns a
     // state-only SegmentReadSnapshot; nullptr is never returned (sealed
@@ -588,10 +590,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     CaptureReadSnapshot() const override;
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const override;
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        OpContext* op_ctx = nullptr) const override;
 
     int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override;
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         OpContext* op_ctx = nullptr) const override;
 
     SegcoreError
     Delete(int64_t size,
@@ -1940,6 +1946,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     InvalidateStaleStructArrayOffsets(const SchemaPtr& current_schema,
                                       const SchemaPtr& target_schema,
                                       RuntimeResourceState& runtime);
+
+    void
+    RegisterArrayOffsetsForField(const FieldMeta& field_meta,
+                                 RuntimeResourceState& runtime,
+                                 bool is_replace = false);
 
     void
     EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,

@@ -33,10 +33,11 @@
 namespace milvus::segcore {
 namespace {
 std::pair<const index::IndexBase*, int64_t>
-GetIndexAndBaseOffset(const SegmentInternalInterface* segment,
+GetIndexAndBaseOffset(const SegmentChunkReader& reader,
                       FieldId field_id,
                       int chunk_id,
                       PinnedIndexView pinned_index) {
+    const auto* segment = reader.segment_;
     if (pinned_index.empty()) {
         return {nullptr, 0};
     }
@@ -44,8 +45,7 @@ GetIndexAndBaseOffset(const SegmentInternalInterface* segment,
     if (chunk_id >= 0 && segment->type() == SegmentType::Sealed &&
         segment->is_chunked() && pinned_index.size() == 1) {
         auto base_offset =
-            chunk_id == 0 ? 0
-                          : segment->num_rows_until_chunk(field_id, chunk_id);
+            chunk_id == 0 ? 0 : reader.NumRowsUntilChunk(field_id, chunk_id);
         return {pinned_index[0].get(), base_offset};
     }
 
@@ -275,7 +275,7 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
                                          int chunk_id,
                                          PinnedIndexView pinned_index) const {
     auto index_and_base_offset =
-        GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
+        GetIndexAndBaseOffset(*this, field_id, chunk_id, pinned_index);
     auto index = index_and_base_offset.first;
     auto base_offset = index_and_base_offset.second;
     auto index_ptr = dynamic_cast<const index::ScalarIndex<T>*>(index);
@@ -312,7 +312,7 @@ ChunkDataAccessor
 SegmentChunkReader::GetChunkDataAccessor<std::string>(
     FieldId field_id, int chunk_id, PinnedIndexView pinned_index) const {
     auto index_and_base_offset =
-        GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
+        GetIndexAndBaseOffset(*this, field_id, chunk_id, pinned_index);
     auto index = index_and_base_offset.first;
     auto base_offset = index_and_base_offset.second;
     auto index_ptr =

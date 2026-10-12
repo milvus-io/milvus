@@ -984,7 +984,7 @@ TEST(GroupMembershipTest, CancellationDuringRawScanStopsBeforeNextChunk) {
             return true;
         }
         int64_t
-        num_chunk_data(FieldId) const override {
+        num_chunk_data(FieldId, OpContext* = nullptr) const override {
             return 4;
         }
         int64_t
@@ -992,11 +992,13 @@ TEST(GroupMembershipTest, CancellationDuringRawScanStopsBeforeNextChunk) {
             return 2048;
         }
         int64_t
-        chunk_size(FieldId, int64_t) const override {
+        chunk_size(FieldId, int64_t, OpContext* = nullptr) const override {
             return 2048;
         }
         int64_t
-        num_rows_until_chunk(FieldId, int64_t id) const override {
+        num_rows_until_chunk(FieldId,
+                             int64_t id,
+                             OpContext* = nullptr) const override {
             return id * 2048;
         }
         mutable int pins = 0;

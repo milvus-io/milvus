@@ -20,9 +20,11 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -31,8 +33,10 @@
 #include "cachinglayer/Manager.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "folly/FBVector.h"
+#include "folly/Function.h"
 
 namespace milvus {
 
@@ -45,6 +49,13 @@ struct ElementRowInfo {
     int32_t row_element_end;
 };
 
+// Row-to-struct-element mapping, built only for struct sub-fields. One mapping
+// belongs to each struct and is shared by all of its sibling sub-fields;
+// element IDs are contiguous across the entire segment.
+//
+// Offsets for inner nested arrays stay in each column's own chunk. When nested
+// Array of Struct layers are supported, each layer needs its own mapping from
+// that layer's elements to its parent layer.
 class IArrayOffsets {
  public:
     virtual ~IArrayOffsets() = default;
@@ -54,6 +65,18 @@ class IArrayOffsets {
 
     virtual int64_t
     GetTotalElementCount() const = 0;
+
+    // Sealed mappings built from a column also own its parent-row validity.
+    // Growing mappings continue to get validity from their field columns.
+    virtual bool
+    HasRowValidity() const {
+        return false;
+    }
+
+    virtual bool
+    IsRowValid(int64_t row_id) const {
+        return true;
+    }
 
     // Convert element ID to row ID
     // returns pair of <row_id, element_index>
@@ -153,22 +176,29 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     ArrayOffsetsSealed() : row_to_element_start_({0}) {
     }
 
-    explicit ArrayOffsetsSealed(std::vector<int32_t> row_to_element_start)
-        : row_to_element_start_(std::move(row_to_element_start)) {
+    explicit ArrayOffsetsSealed(
+        std::vector<int32_t> row_to_element_start,
+        std::optional<TargetBitmap> row_validity = std::nullopt)
+        : row_to_element_start_(std::move(row_to_element_start)),
+          row_validity_(std::move(row_validity)) {
         AssertInfo(!row_to_element_start_.empty(),
                    "row_to_element_start must have at least one element");
+        AssertInfo(!row_validity_ || row_validity_->size() == GetRowCount(),
+                   "row validity must cover every struct row");
     }
 
     // Build an all-zeros offsets (every row is an empty array) and charge its
-    // heap cost to the caching layer, mirroring BuildFromSegment so the
-    // destructor's RefundLoadedResource is balanced. Used when a scalar or
-    // struct ARRAY field is materialized for old sealed rows (schema evolution)
-    // without going through the normal offsets-build path.
+    // heap cost to the caching layer so the destructor's RefundLoadedResource
+    // is balanced. Used when a scalar or struct ARRAY field is materialized for
+    // old sealed rows (schema evolution) without going through the normal
+    // offsets-build path.
     static std::shared_ptr<ArrayOffsetsSealed>
-    BuildAllZeros(int64_t row_count) {
+    BuildAllZeros(int64_t row_count, bool rows_valid = true) {
         auto result = std::make_shared<ArrayOffsetsSealed>(
-            std::vector<int32_t>(row_count + 1, 0));
-        result->resource_size_ = 4 * (row_count + 1);
+            std::vector<int32_t>(row_count + 1, 0),
+            TargetBitmap(row_count, rows_valid));
+        result->resource_size_ = sizeof(int32_t) * (row_count + 1) +
+                                 sizeof(uint64_t) * ((row_count + 63) / 64);
         cachinglayer::Manager::GetInstance().ChargeLoadedResource(
             cachinglayer::ResourceUsage{result->resource_size_, 0});
         return result;
@@ -187,6 +217,20 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     int64_t
     GetTotalElementCount() const override {
         return row_to_element_start_.empty() ? 0 : row_to_element_start_.back();
+    }
+
+    bool
+    HasRowValidity() const override {
+        return row_validity_.has_value();
+    }
+
+    bool
+    IsRowValid(int64_t row_id) const override {
+        AssertInfo(row_id >= 0 && row_id < GetRowCount(),
+                   "struct row {} out of range {}",
+                   row_id,
+                   GetRowCount());
+        return !row_validity_.has_value() || (*row_validity_)[row_id];
     }
 
     std::pair<int32_t, int32_t>
@@ -233,16 +277,42 @@ class ArrayOffsetsSealed : public IArrayOffsets {
                                 TargetBitmapView row_result) const override;
 
     static std::shared_ptr<ArrayOffsetsSealed>
-    BuildFromSegment(const void* segment, const FieldMeta& field_meta);
-
-    static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromColumn(const ChunkedColumnInterface& column,
                     const FieldMeta& field_meta,
-                    int64_t row_count);
+                    int64_t row_count,
+                    OpContext* op_ctx = nullptr);
 
  private:
     const std::vector<int32_t> row_to_element_start_;
+    const std::optional<TargetBitmap> row_validity_;
     int64_t resource_size_{0};
+};
+
+// Shared by all sub-fields of one struct generation. Construction does no I/O;
+// the first consumer builds immutable metadata outside segment publish locks.
+// A failed/cancelled attempt leaves the entry available for another consumer.
+class LazyArrayOffsets {
+ public:
+    using Builder = folly::FunctionRef<std::shared_ptr<ArrayOffsetsSealed>()>;
+
+    explicit LazyArrayOffsets(
+        std::shared_ptr<ArrayOffsetsSealed> offsets = nullptr)
+        : offsets_(std::move(offsets)) {
+    }
+
+    std::shared_ptr<ArrayOffsetsSealed>
+    GetOrBuild(OpContext* op_ctx, Builder build) const;
+
+    std::shared_ptr<ArrayOffsetsSealed>
+    GetIfReady() const {
+        return std::atomic_load(&offsets_);
+    }
+
+ private:
+    mutable std::shared_ptr<ArrayOffsetsSealed> offsets_;
+    mutable std::mutex mutex_;
+    mutable std::condition_variable ready_;
+    mutable bool building_{false};
 };
 
 // Growing-segment row -> element-start table with lock-free readers.

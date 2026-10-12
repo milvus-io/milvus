@@ -32,6 +32,12 @@ class ChunkedColumnInterface {
  public:
     virtual ~ChunkedColumnInterface() = default;
 
+    // Layout metadata is already available for columns on this branch.
+    // Keep the caller's context attached to layout reads and future preparation.
+    virtual void
+    Prepare(milvus::OpContext* op_ctx) const {
+    }
+
     // Check if this column is part of a multi-field column group.
     // Used to guard DropFieldData from breaking shared storage.
     virtual bool

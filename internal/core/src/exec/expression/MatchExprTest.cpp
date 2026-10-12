@@ -61,6 +61,8 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -867,6 +869,146 @@ TEST(MatchExprNullableStruct, SealedPropagatesStructRowValidity) {
     CheckNullableStructExpressions(segment.get(), schema);
 }
 
+TEST(MatchExprNullableStruct, ColdMatchCancellationAndFreshContextRetry) {
+    FieldId pk;
+    FieldId sub;
+    auto schema = BuildNullableStructSchema(pk, sub);
+    auto insert_data = BuildNullableStructInsertData(schema, pk, sub);
+    GeneratedData data;
+    data.schema_ = schema;
+    data.raw_ = insert_data.release();
+    data.row_ids_ = {0, 1, 2, 3, 4};
+    data.timestamps_ = {0, 1, 2, 3, 4};
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info =
+        PrepareInsertBinlog(kCollectionID, kPartitionID, kSegmentID, data, cm);
+    load_info.field_infos.at(sub.get()).warmup_policy = "disable";
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(load_info);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto state = sealed->TestGetPublishedStateSnapshot();
+    auto entry = state->runtime->array_offsets_map.at(sub);
+    auto column = state->runtime->fields.at(sub);
+    const int64_t first_row = 0;
+    ASSERT_EQ(entry->GetIfReady(), nullptr);
+    ASSERT_FALSE(column->CellsLoaded(&first_row, 1));
+
+    expr::ColumnInfo column_info(
+        sub, DataType::ARRAY, DataType::INT32, {}, true);
+    column_info.element_level_ = true;
+    proto::plan::GenericValue threshold;
+    threshold.set_int64_val(-1);
+    auto predicate = std::make_shared<expr::UnaryRangeFilterExpr>(
+        column_info, proto::plan::OpType::GreaterEqual, threshold);
+    auto logical = std::make_shared<expr::MatchExpr>(
+        "struct_array", expr::MatchType::MatchAny, 0, predicate);
+    auto evaluate = [&](OpContext& op_ctx) {
+        exec::QueryContext context(
+            "cold_match", segment.get(), 5, MAX_TIMESTAMP);
+        context.set_op_context(&op_ctx);
+        context.set_read_snapshot(segment->CaptureReadSnapshot());
+        exec::ExecContext exec_context(&context);
+        auto physical = exec::CompileExpression(logical, &context, {}, false);
+        exec::EvalCtx eval_context(&exec_context);
+        VectorPtr result;
+        physical->Eval(eval_context, result);
+        return std::dynamic_pointer_cast<ColumnVector>(result);
+    };
+
+    folly::CancellationSource cancellation;
+    cancellation.requestCancellation();
+    OpContext cancelled_ctx;
+    cancelled_ctx.cancellation_token = cancellation.getToken();
+    try {
+        evaluate(cancelled_ctx);
+        FAIL() << "expected MATCH to preserve query cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(entry->GetIfReady(), nullptr);
+    EXPECT_FALSE(column->CellsLoaded(&first_row, 1));
+
+    OpContext fresh_ctx;
+    auto output = evaluate(fresh_ctx);
+    ASSERT_NE(output, nullptr);
+    ASSERT_EQ(output->size(), 5);
+    ASSERT_NE(entry->GetIfReady(), nullptr);
+    TargetBitmapView values(output->GetRawData(), output->size());
+    TargetBitmapView validity(output->GetValidRawData(), output->size());
+    EXPECT_TRUE(values[0]);
+    EXPECT_FALSE(values[1]);  // null parent row
+    EXPECT_FALSE(values[2]);  // valid empty array
+    EXPECT_TRUE(values[3]);
+    EXPECT_FALSE(values[4]);  // null parent row
+    EXPECT_TRUE(validity[0]);
+    EXPECT_FALSE(validity[1]);
+    EXPECT_TRUE(validity[2]);
+    EXPECT_TRUE(validity[3]);
+    EXPECT_FALSE(validity[4]);
+}
+
+TEST(MatchExprNullableStruct, PinnedSchemaBuildsOldMappingAfterStructReadded) {
+    FieldId pk;
+    FieldId sub;
+    auto schema = BuildNullableStructSchema(pk, sub);
+    schema->set_schema_version(1);
+    auto insert_data = BuildNullableStructInsertData(schema, pk, sub);
+    GeneratedData data;
+    data.schema_ = schema;
+    data.raw_ = insert_data.release();
+    data.row_ids_ = {0, 1, 2, 3, 4};
+    data.timestamps_ = {0, 1, 2, 3, 4};
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto read = segment->CaptureReadSnapshot();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("id"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    new_schema->AddField(FieldName("struct_array[sub_int]"),
+                         FieldId(sub.get() + 1),
+                         DataType::ARRAY,
+                         DataType::INT32,
+                         true);
+    segment->Reopen(new_schema);
+
+    auto child = std::make_shared<FixedBitmapExpr>(TargetBitmap(3, true),
+                                                   TargetBitmap(3, true));
+    auto logical = std::make_shared<expr::MatchExpr>(
+        "struct_array", expr::MatchType::MatchAll, 0, expr::TypedExprPtr{});
+    exec::PhyMatchFilterExpr physical(
+        {child}, logical, "pinned_match", nullptr, segment.get(), 5, 5);
+    physical.SetSnapshot(read.get());
+    exec::QueryContext query_context(
+        "pinned_match", segment.get(), 5, MAX_TIMESTAMP);
+    query_context.set_read_snapshot(read);
+    exec::ExecContext exec_context(&query_context);
+    exec::EvalCtx eval_context(&exec_context);
+    VectorPtr result;
+    physical.Eval(eval_context, result);
+    auto pinned_field = query_context.get_schema_snapshot()
+                            ->GetFirstArrayFieldInStruct("struct_array")
+                            .get_id();
+    EXPECT_EQ(pinned_field, sub);
+    EXPECT_EQ(
+        query_context.get_array_offsets(pinned_field)->GetTotalElementCount(),
+        3);
+    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(output, nullptr);
+    ASSERT_EQ(output->size(), 5);
+    TargetBitmapView values(output->GetRawData(), output->size());
+    TargetBitmapView validity(output->GetValidRawData(), output->size());
+    for (int64_t i = 0; i < 5; ++i) {
+        const bool valid = i == 0 || i == 2 || i == 3;
+        EXPECT_EQ(values[i], valid);
+        EXPECT_EQ(validity[i], valid);
+    }
+}
+
 TEST(MatchExprNullableStruct, GrowingPropagatesStructRowValidity) {
     FieldId int64_fid;
     FieldId sub_int_fid;
@@ -917,6 +1059,15 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
         CreateTestCacheIndex("nullable_sub_int", std::move(index));
     segment->LoadIndex(info);
 
+    auto offsets = segment->GetArrayOffsets(sub_int_fid);
+    ASSERT_TRUE(offsets->HasRowValidity());
+    auto snapshot = segment->CaptureReadSnapshot();
+    auto column = snapshot->GetColumn(sub_int_fid);
+    ASSERT_NE(column, nullptr);
+    column->ManualEvictCache();
+    const int64_t first_row = 0;
+    ASSERT_FALSE(column->CellsLoaded(&first_row, 1));
+
     EXPECT_EQ(RetrieveOffsets(segment.get(),
                               schema,
                               "match_all(struct_array, "
@@ -927,6 +1078,8 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
                         schema,
                         "not array_contains(struct_array[sub_int], 9001)"),
         (std::set<int64_t>{0, 2}));
+    EXPECT_FALSE(column->CellsLoaded(&first_row, 1))
+        << "indexed MATCH must use cached parent validity without raw reads";
 }
 
 TEST(StructArrayOffsetsReopen, ConcurrentReadersAreSynchronized) {

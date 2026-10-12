@@ -17,6 +17,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <chrono>
+#include <future>
+#include <new>
 #include <random>
 #include <string>
 #include <thread>
@@ -102,6 +105,124 @@ TEST_F(ArrayOffsetsTest, SealedBasic) {
         EXPECT_EQ(start, 6);
         EXPECT_EQ(end, 6);
     }
+}
+
+TEST_F(ArrayOffsetsTest, LazyConcurrentQueriesShareOneBuild) {
+    LazyArrayOffsets entry;
+    std::atomic<int> builds{0};
+    std::promise<void> building;
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    auto build = [&] {
+        ++builds;
+        building.set_value();
+        released.wait();
+        return std::make_shared<ArrayOffsetsSealed>(
+            std::vector<int32_t>{0, 2, 2, 5});
+    };
+
+    auto first = std::async(std::launch::async,
+                            [&] { return entry.GetOrBuild(nullptr, build); });
+    EXPECT_EQ(building.get_future().wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    EXPECT_EQ(entry.GetIfReady(), nullptr);
+    std::vector<std::future<std::shared_ptr<ArrayOffsetsSealed>>> queries;
+    for (int i = 0; i < 8; ++i) {
+        queries.push_back(std::async(std::launch::async, [&] {
+            return entry.GetOrBuild(nullptr, build);
+        }));
+    }
+    release.set_value();
+    auto offsets = first.get();
+    for (auto& query : queries) {
+        EXPECT_EQ(query.get(), offsets);
+    }
+    EXPECT_EQ(builds, 1);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 5);
+}
+
+TEST_F(ArrayOffsetsTest, LazyCancelledWaiterDoesNotDiscardBuild) {
+    LazyArrayOffsets entry;
+    std::promise<void> building;
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    auto first = std::async(std::launch::async, [&] {
+        return entry.GetOrBuild(nullptr, [&] {
+            building.set_value();
+            released.wait();
+            return std::make_shared<ArrayOffsetsSealed>(
+                std::vector<int32_t>{0, 2});
+        });
+    });
+    EXPECT_EQ(building.get_future().wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    folly::CancellationSource cancel;
+    OpContext op_ctx;
+    op_ctx.cancellation_token = cancel.getToken();
+    auto waiter = std::async(std::launch::async, [&] {
+        try {
+            entry.GetOrBuild(&op_ctx, [] {
+                ADD_FAILURE() << "waiting query must not start another build";
+                return std::make_shared<ArrayOffsetsSealed>();
+            });
+            return ErrorCode::Success;
+        } catch (const SegcoreError& error) {
+            return error.get_error_code();
+        }
+    });
+    EXPECT_EQ(waiter.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    cancel.requestCancellation();
+    const auto status = waiter.wait_for(std::chrono::seconds(5));
+    // Always unblock the builder, including when a cancellation assertion fails.
+    release.set_value();
+    EXPECT_EQ(status, std::future_status::ready);
+    EXPECT_EQ(waiter.get(), ErrorCode::FollyCancel);
+    auto offsets = first.get();
+    EXPECT_EQ(entry.GetIfReady(), offsets);
+}
+
+TEST_F(ArrayOffsetsTest, LazyFailedAndCancelledBuildsCanRetry) {
+    LazyArrayOffsets entry;
+    try {
+        entry.GetOrBuild(nullptr, []() -> std::shared_ptr<ArrayOffsetsSealed> {
+            ThrowInfo(DataFormatBroken, "injected offsets read failure");
+        });
+        FAIL() << "expected read failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+    }
+    EXPECT_EQ(entry.GetIfReady(), nullptr);
+
+    try {
+        entry.GetOrBuild(nullptr, []() -> std::shared_ptr<ArrayOffsetsSealed> {
+            throw std::bad_alloc();
+        });
+        FAIL() << "expected allocation failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::MemAllocateFailed);
+    }
+    EXPECT_EQ(entry.GetIfReady(), nullptr);
+
+    folly::CancellationSource cancel;
+    OpContext op_ctx;
+    op_ctx.cancellation_token = cancel.getToken();
+    try {
+        entry.GetOrBuild(&op_ctx, [&] {
+            cancel.requestCancellation();
+            return std::make_shared<ArrayOffsetsSealed>(
+                std::vector<int32_t>{0, 2});
+        });
+        FAIL() << "expected cancelled build";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(entry.GetIfReady(), nullptr);
+    auto retried = entry.GetOrBuild(nullptr, [] {
+        return std::make_shared<ArrayOffsetsSealed>(std::vector<int32_t>{0, 3});
+    });
+    EXPECT_EQ(retried->GetTotalElementCount(), 3);
+    EXPECT_EQ(entry.GetIfReady(), retried);
 }
 
 TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitset) {
