@@ -819,6 +819,11 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_CompletedSyncsTask() {
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment() {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+	drainBuildIndexOverflowChForTest()
+	defer drainBuildIndexOverflowChForTest()
+
 	ctx := context.Background()
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
@@ -851,6 +856,11 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 	updatedTask := copyMeta.GetTask(ctx, 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
 	s.NotZero(updatedTask.(*copySegmentTask).task.Load().GetCompleteTs())
+
+	// The restored segment is enqueued so indexes missing from the snapshot
+	// get built.
+	assertBuildIndexEvents(s.T(), 2001)
+	assertNoBuildIndexEvent(s.T())
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ReconcilesDataView() {
