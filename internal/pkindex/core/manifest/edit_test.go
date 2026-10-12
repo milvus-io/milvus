@@ -183,6 +183,52 @@ func TestApplyCompact(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrNotClaimed))
 }
 
+// A retry of an applied compaction finds none of its inputs and all of its
+// outputs in the list: it returns cur unchanged.
+func TestApplyCompactRetryOfApplied(t *testing.T) {
+	m, _, err := ApplyFlush(claimed(t, 1), Flush{PChannelTerm: 1, AddSSTs: ssts(4, 3, 2, 1), CheckpointTimeTick: 10})
+	require.NoError(t, err)
+	edit := Compact{Inputs: []int64{2, 1}, Outputs: ssts(11, 10)}
+	c, changed, err := ApplyCompact(m, edit)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	again, changed, err := ApplyCompact(c, edit)
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.Same(t, c, again)
+
+	// a flush after the compaction does not change the result
+	f, _, err := ApplyFlush(c, Flush{PChannelTerm: 1, AddSSTs: ssts(20), CheckpointTimeTick: 20})
+	require.NoError(t, err)
+	again, changed, err = ApplyCompact(f, edit)
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.Same(t, f, again)
+}
+
+// Every other mismatch of the inputs and the outputs is a stale edit.
+func TestApplyCompactMixedIsStale(t *testing.T) {
+	m, _, err := ApplyFlush(claimed(t, 1), Flush{PChannelTerm: 1, AddSSTs: ssts(4, 3, 2, 1), CheckpointTimeTick: 10})
+	require.NoError(t, err)
+	// list after this compaction: 4 3 11 10
+	c, _, err := ApplyCompact(m, Compact{Inputs: []int64{2, 1}, Outputs: ssts(11, 10)})
+	require.NoError(t, err)
+
+	cases := map[string]Compact{
+		"some inputs present, outputs present":  {Inputs: []int64{3, 2}, Outputs: ssts(11, 10)},
+		"some inputs present, outputs absent":   {Inputs: []int64{3, 2}, Outputs: ssts(30)},
+		"inputs present not contiguous":         {Inputs: []int64{4, 11}, Outputs: ssts(30)},
+		"inputs absent, outputs absent":         {Inputs: []int64{2, 1}, Outputs: ssts(30)},
+		"inputs absent, outputs partly present": {Inputs: []int64{2, 1}, Outputs: ssts(11, 30)},
+		"no inputs, outputs present":            {Inputs: []int64{}, Outputs: ssts(11, 10)},
+	}
+	for name, edit := range cases {
+		_, _, err := ApplyCompact(c, edit)
+		assert.True(t, errors.Is(err, ErrStaleEdit), name)
+	}
+}
+
 func TestApplyCompactDuplicateInsideOutputs(t *testing.T) {
 	m, _, err := ApplyFlush(claimed(t, 1), Flush{PChannelTerm: 1, AddSSTs: ssts(2, 1), CheckpointTimeTick: 10})
 	require.NoError(t, err)
