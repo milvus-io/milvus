@@ -496,23 +496,53 @@ func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
-// checkPredicates reads the target key of each predicate inside txn and returns
-// an error marked as predicate-not-met when one predicate does not hold.
+// checkPredicates evaluates each predicate against txn. It returns an error
+// marked as predicate-not-met when a predicate does not hold, an unmarked IO
+// error when the target key cannot be read, and a build-abort ParameterInvalid
+// error for an invalid predicate, which is rejected before any read.
 func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate) error {
 	for _, pred := range preds {
-		key := kv.GetPath(pred.Key())
-		val, err := txn.Get(ctx, []byte(key))
-		if err != nil {
-			if errors.Is(err, tikverr.ErrNotExist) {
-				return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error()))
+		switch pred.Target() {
+		case predicates.PredTargetValue:
+			val, exists, err := kv.readPredicateTarget(ctx, txn, pred)
+			if err != nil {
+				return err
 			}
-			return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
-		}
-		if !pred.IsTrue(val.Value) {
-			return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
+			if !exists {
+				return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), tikverr.ErrNotExist.Error()))
+			}
+			if !pred.IsTrue(val) {
+				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
+			}
+		case predicates.PredTargetKeyExistence:
+			if pred.Type() != predicates.PredTypeNotExist {
+				return markBuildAbort(merr.WrapErrParameterInvalid("valid key existence predicate type", fmt.Sprintf("%d", pred.Type())))
+			}
+			_, exists, err := kv.readPredicateTarget(ctx, txn, pred)
+			if err != nil {
+				return err
+			}
+			if exists {
+				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s exists", pred.Key())))
+			}
+		default:
+			return markBuildAbort(merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target())))
 		}
 	}
 	return nil
+}
+
+// readPredicateTarget reads the target key of pred inside txn. A missing key
+// returns exists=false and no error; any other read failure is an IO error.
+func (kv *txnTiKV) readPredicateTarget(ctx context.Context, txn *transaction.KVTxn, pred predicates.Predicate) ([]byte, bool, error) {
+	val, err := txn.Get(ctx, []byte(kv.GetPath(pred.Key())))
+	if err != nil {
+		if errors.Is(err, tikverr.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
+	}
+	return val.Value, true, nil
 }
 
 // MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
