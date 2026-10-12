@@ -961,9 +961,8 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 
 func (w *sessionWatcher) handleWatchErr(err error) error {
 	// Only recoverable errors are re-watched. ErrCompacted needs a fresh
-	// revision; auth-token errors (etcd auth enabled) need the watch
-	// re-established because clientv3 won't refresh the token on a live watch
-	// stream. Any other error closes the channel. See etcd.IsRetriableWatchErr.
+	// revision; auth-token and transient availability errors may terminate a
+	// clientv3 watch and need it re-established. See etcd.IsRetriableWatchErr.
 	if !etcd.IsRetriableWatchErr(err) {
 		// close event channel
 		log.Ctx(w.ctx).Warn("Watch service found error", zap.Error(err))
@@ -998,8 +997,23 @@ func (w *sessionWatcher) handleReWatch() error {
 	} else if err = w.rewatch(sessions); err != nil {
 		return err
 	}
-	w.rch = w.s.etcdCli.Watch(w.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
-	return nil
+	rch := w.s.etcdCli.Watch(w.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision), clientv3.WithCreatedNotify())
+	// Watch also returns a channel when setup fails, with the error delivered
+	// through that channel. Read the created response or error here so setup
+	// failures stay inside handleWatchErr's bounded retry budget.
+	select {
+	case <-w.ctx.Done():
+		return w.ctx.Err()
+	case resp, ok := <-rch:
+		if !ok {
+			return merr.WrapErrServiceUnavailable("session watch closed before creation")
+		}
+		if err := resp.Err(); err != nil {
+			return err
+		}
+		w.rch = rch
+		return nil
+	}
 }
 
 func (w *sessionWatcher) EventChannel() <-chan *SessionEvent {

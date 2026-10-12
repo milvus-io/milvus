@@ -108,6 +108,21 @@ func (p *ProxyWatcher) WatchProxy(ctx context.Context) error {
 		clientv3.WithPrevKV(),
 		clientv3.WithRev(rev+1),
 	)
+	// Watch can return a channel carrying a setup error. Read the created
+	// response or error here to keep setup failures in the caller's retry budget.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.closeCh.CloseCh():
+		return nil
+	case resp, ok := <-eventCh:
+		if !ok {
+			return merr.WrapErrServiceUnavailable("proxy watch closed before creation")
+		}
+		if err := resp.Err(); err != nil {
+			return err
+		}
+	}
 
 	p.wg.Go(func() error {
 		p.startWatchEtcd(ctx, eventCh)
@@ -135,8 +150,8 @@ func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 				panic("stop watching etcd loop due to closed etcd event channel")
 			}
 			if err := event.Err(); err != nil {
-				// Recoverable watch errors (compaction, or auth-token
-				// invalidation when etcd auth is enabled) are handled by
+				// Recoverable watch errors (compaction, auth-token invalidation,
+				// or transient availability errors) are handled by
 				// re-establishing the watch instead of crashing. Re-watching
 				// issues a unary request that refreshes the etcd auth token, so
 				// the new watch stream recovers. See etcd.IsRetriableWatchErr.

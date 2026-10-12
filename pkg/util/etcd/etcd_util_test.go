@@ -92,6 +92,75 @@ func TestIsRetriableWatchErr(t *testing.T) {
 	}
 }
 
+func TestIsRetriableEtcdErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"leader changed", rpctypes.ErrLeaderChanged, true},
+		{"no leader", rpctypes.ErrNoLeader, true},
+		{"not leader", rpctypes.ErrNotLeader, true},
+		{"not capable", rpctypes.ErrNotCapable, true},
+		{"timeout", rpctypes.ErrTimeout, true},
+		{"timeout due to leader fail", rpctypes.ErrTimeoutDueToLeaderFail, true},
+		{"timeout due to connection lost", rpctypes.ErrTimeoutDueToConnectionLost, true},
+		{"timeout wait applied index", rpctypes.ErrTimeoutWaitAppliedIndex, true},
+		{"unhealthy", rpctypes.ErrUnhealthy, true},
+		{"raw grpc unavailable", status.Error(codes.Unavailable, "connection refused"), true},
+		{"wrapped leader changed", errors.Wrap(rpctypes.ErrLeaderChanged, "get key failed"), true},
+		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"corrupt cluster", rpctypes.ErrCorrupt, false},
+		{"context canceled", context.Canceled, false},
+		{"context deadline exceeded", context.DeadlineExceeded, false},
+		{"generic error", errors.New("some other error"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, IsRetriableEtcdErr(c.err))
+		})
+	}
+}
+
+// Check the client sentinels and their wrapped forms separately: EtcdError
+// does not implement GRPCStatus, so status.Code alone misses these failures.
+func TestWatchAvailabilityErrors(t *testing.T) {
+	for _, err := range []error{
+		rpctypes.ErrLeaderChanged, rpctypes.ErrNoLeader, rpctypes.ErrNotLeader,
+		rpctypes.ErrNotCapable, rpctypes.ErrStopped, rpctypes.ErrTooManyRequests,
+		rpctypes.ErrTimeout, rpctypes.ErrTimeoutDueToLeaderFail,
+		rpctypes.ErrTimeoutDueToConnectionLost, rpctypes.ErrTimeoutWaitAppliedIndex,
+		rpctypes.ErrUnhealthy, rpctypes.ErrClusterVersionUnavailable,
+		status.Error(codes.Unavailable, "connection lost"),
+	} {
+		t.Run(err.Error(), func(t *testing.T) {
+			for _, wrapped := range []error{err, errors.Wrap(err, "read sessions")} {
+				assert.True(t, IsRetriableWatchErr(wrapped))
+				assert.True(t, IsRetriableEtcdErr(wrapped))
+			}
+		})
+	}
+	for _, err := range []error{
+		rpctypes.ErrAuthFailed, rpctypes.ErrPermissionDenied, rpctypes.ErrUserNotFound,
+		rpctypes.ErrAuthNotEnabled, rpctypes.ErrCorrupt, rpctypes.ErrNoSpace,
+		rpctypes.ErrFutureRev, rpctypes.ErrRequestTooLarge, rpctypes.ErrClusterIdMismatch,
+		rpctypes.ErrLeaseNotFound, rpctypes.ErrGRPCWatchCanceled,
+		context.Canceled, context.DeadlineExceeded,
+		status.Error(codes.ResourceExhausted, "message too large"),
+		status.Error(codes.Internal, "unknown internal error"),
+		status.Error(codes.Canceled, "request canceled"),
+		status.Error(codes.DeadlineExceeded, "request timed out"),
+	} {
+		t.Run(err.Error(), func(t *testing.T) {
+			for _, wrapped := range []error{err, errors.Wrap(err, "read sessions")} {
+				assert.False(t, IsRetriableWatchErr(wrapped))
+				assert.False(t, IsRetriableEtcdErr(wrapped))
+			}
+		})
+	}
+}
+
 // freePort grabs a random unused TCP port. There's a small TOCTOU window
 // between Close and the subsequent bind, but for unit tests it's acceptable.
 func freePort(t *testing.T) int {
