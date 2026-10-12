@@ -19,47 +19,12 @@ package httpserver
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/tidwall/gjson"
-
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
-func TestBudgetRowsPreserveSchemaSensitiveUpsertConversion(t *testing.T) {
-	body := []byte(`{"data":[{"id":1,"my_struct":[{"sub_int":18}]},{"id":2,"my_struct":[{"sub_int":21}]}]}`)
-	rows := []gjson.Result{
-		gjson.Parse(`{"id":1,"my_struct":[{"sub_int":18}]}`),
-		gjson.Parse(`{"id":2,"my_struct":[{"sub_int":21}]}`),
-	}
-	ops := []*schemapb.FieldPartialUpdateOp{{
-		FieldName: "my_struct",
-		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
-		Path:      "[1][sub_int]",
-	}}
-	wantSchema, err := schemaForPathReplaceOperands(body, buildStructArrayTestSchema(), ops)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantData, wantValid, err := checkAndSetData(body, wantSchema, true, ops...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotSchema, err := schemaForPathReplaceOperandsRows(context.Background(), rows, buildStructArrayTestSchema(), ops)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotData, gotValid, err := checkAndSetDataRows(context.Background(), rows, gotSchema, true, ops...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(gotSchema, wantSchema) || !reflect.DeepEqual(gotData, wantData) || !reflect.DeepEqual(gotValid, wantValid) {
-		t.Fatalf("streamed row conversion differs from the existing body path")
-	}
-}
-
-func TestBudgetRowsStopConversionAfterCancellation(t *testing.T) {
+func TestContextAwareRESTConversionStopsAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	rows := []gjson.Result{gjson.Parse(`{"id":1}`)}

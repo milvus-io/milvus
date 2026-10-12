@@ -439,12 +439,8 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
 		req := newReq()
 		var bindErr error
-		if _, bulk := req.(*CollectionDataReq); bulk && requestbudget.Active(gCtx.Request.Context()) {
-			var rows []string
-			rows, bindErr = requestbudget.BindBulkJSON(gCtx, req, requestbudget.MaxJSONUnitBytes, requestbudget.MaxJSONBodyBytes)
-			if bindErr == nil {
-				gCtx.Set(budgetDataRowsKey, rows)
-			}
+		if _, bulk := req.(*CollectionDataReq); bulk {
+			bindErr = requestbudget.BindJSONWithLimit(gCtx, req, requestbudget.MaxJSONBodyBytes)
 		} else {
 			bindErr = gCtx.ShouldBindBodyWith(req, binding.JSON)
 		}
@@ -1787,7 +1783,8 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		return nil, err
 	}
-	rows := collectionDataRows(c)
+	body, _ := c.Get(gin.BodyBytesKey)
+	rows := gjson.GetBytes(body.([]byte), HTTPRequestData).Array()
 	var validDataMap map[string][]bool
 	httpReq.Data, validDataMap, err = checkAndSetDataRows(ctx, rows, collSchema, false)
 	if err != nil {
@@ -1876,7 +1873,8 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		return nil, err
 	}
-	rows := collectionDataRows(c)
+	body, _ := c.Get(gin.BodyBytesKey)
+	rows := gjson.GetBytes(body.([]byte), HTTPRequestData).Array()
 	requestSchema, err := schemaForPathReplaceOperandsRows(ctx, rows, collSchema, fieldOps)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to resolve PATH_REPLACE operand", mlog.Err(err))

@@ -28,6 +28,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// MaxJSONResponseUnitBytes bounds one Sonic encoding call on the response path.
+const MaxJSONResponseUnitBytes = 4 << 20
+
 // EncodeResponseRows preserves the REST JSON envelope but marshals each data
 // row separately. A canceled request can stop before the next Sonic call.
 // One row remains a non-interruptible unit, bounded by maxUnitBytes.

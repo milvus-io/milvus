@@ -17,32 +17,32 @@
 package requestbudget
 
 import (
+	"errors"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// BindBulkJSON preserves Gin's metadata validation while leaving the data rows
-// raw for the schema-aware conversion that follows. It does not cache a copy
-// of the complete request body in gin.BodyBytesKey.
-func BindBulkJSON(c *gin.Context, req any, maxUnitBytes, maxBodyBytes int) ([]string, error) {
+// MaxJSONBodyBytes is a provisional per-request limit for V2 insert/upsert.
+// Benchmark and compatibility evidence are required before making it final.
+const MaxJSONBodyBytes = 256 << 20
+
+// BindJSONWithLimit retains Gin's ordinary JSON binding and body cache while
+// bounding the bytes read from one request.
+func BindJSONWithLimit(c *gin.Context, req any, maxBodyBytes int) error {
 	if c.Request.ContentLength > int64(maxBodyBytes) {
-		return nil, merr.WrapErrParameterTooLarge("REST JSON request body")
+		return merr.WrapErrParameterTooLarge("REST JSON request body")
 	}
-	rows := make([]string, 0)
-	metadata, err := DecodeBulkJSON(c.Request.Context(), c.Request.Body, maxUnitBytes, maxBodyBytes, func(row []byte) error {
-		rows = append(rows, string(row))
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, int64(maxBodyBytes))
+	if err := c.ShouldBindBodyWith(req, binding.JSON); err != nil {
+		var sizeErr *http.MaxBytesError
+		if errors.As(err, &sizeErr) {
+			return merr.WrapErrParameterTooLarge("REST JSON request body")
+		}
+		return err
 	}
-	if err := c.Request.Context().Err(); err != nil {
-		return nil, err
-	}
-	if err := binding.JSON.BindBody(metadata, req); err != nil {
-		return nil, err
-	}
-	return rows, c.Request.Context().Err()
+	return c.Request.Context().Err()
 }

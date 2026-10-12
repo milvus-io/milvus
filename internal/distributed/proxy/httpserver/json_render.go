@@ -56,7 +56,7 @@ type jsonRowsRender struct {
 
 func (r jsonRowsRender) Render(w http.ResponseWriter) error {
 	r.WriteContentType(w)
-	return requestbudget.EncodeResponseRows(r.Context, w, map[string]any(r.Data), requestbudget.MaxJSONUnitBytes)
+	return requestbudget.EncodeResponseRows(r.Context, w, map[string]any(r.Data), requestbudget.MaxJSONResponseUnitBytes)
 }
 
 func (r jsonRowsRender) WriteContentType(w http.ResponseWriter) {
