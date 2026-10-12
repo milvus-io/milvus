@@ -104,12 +104,13 @@ ReadManifestColumnGroupsWithFFI(const char* manifest_path,
     auto version = j.at("ver").get<int64_t>();
 
     TransactionGuard transaction;
-    ThrowIfFFIError(loon_transaction_begin(base_path.c_str(),
-                                           properties,
-                                           version,
-                                           LOON_TRANSACTION_RESOLVE_FAIL,
-                                           1,
-                                           &transaction.handle),
+    ThrowIfFFIError(loon_transaction_open(base_path.c_str(),
+                                          properties,
+                                          version,
+                                          /*manifest_size=*/-1,
+                                          LOON_TRANSACTION_RESOLVE_FAIL,
+                                          1,
+                                          &transaction.handle),
                     "open external segment manifest transaction");
 
     ManifestGuard manifest;

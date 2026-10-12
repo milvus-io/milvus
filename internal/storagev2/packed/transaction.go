@@ -110,7 +110,7 @@ func addDeltaLogsToManifest(
 
 	// Start transaction
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), resolveID /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1) /* manifest_size */, resolveID /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -134,7 +134,7 @@ func addDeltaLogsToManifest(
 
 	// Commit transaction
 	var commitVersion C.int64_t
-	result = C.loon_transaction_commit(transactionHandle, &commitVersion)
+	result = C.loon_transaction_commit(transactionHandle, &commitVersion, nil)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}
@@ -202,7 +202,7 @@ func GetDeltaLogsFromManifestWithExtfs(
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1) /* manifest_size */, C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -294,7 +294,7 @@ func AddStatsToManifest(
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1) /* manifest_size */, C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -311,7 +311,7 @@ func AddStatsToManifest(
 	}
 
 	var commitVersion C.int64_t
-	result = C.loon_transaction_commit(transactionHandle, &commitVersion)
+	result = C.loon_transaction_commit(transactionHandle, &commitVersion, nil)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}

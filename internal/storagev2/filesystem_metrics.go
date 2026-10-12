@@ -52,54 +52,61 @@ type FilesystemMetricsEntry struct {
 	FilesystemMetrics
 }
 
-// getMetricsFromHandle retrieves metrics from a filesystem handle
-func getMetricsFromHandle(cFilesystem C.FileSystemHandle) (*FilesystemMetrics, error) {
-	var cMetrics C.LoonFilesystemMetricsSnapshot
-	metricsResult := C.loon_filesystem_get_metrics(cFilesystem, &cMetrics)
-	if err := HandleLoonFFIResult(metricsResult); err != nil {
-		C.loon_filesystem_destroy(cFilesystem)
-		return nil, merr.Wrap(err, "failed to get filesystem metrics")
-	}
+// originMetricsSource is milvus-storage's metrics source for requests served by
+// the filesystem itself. Talon reports its own reads under a separate source,
+// which is not exported here.
+const originMetricsSource = "origin"
 
-	fsMetrics := &FilesystemMetrics{
-		ReadCount:               int64(cMetrics.read_count),
-		WriteCount:              int64(cMetrics.write_count),
-		ReadBytes:               int64(cMetrics.read_bytes),
-		WriteBytes:              int64(cMetrics.write_bytes),
-		GetFileInfoCount:        int64(cMetrics.get_file_info_count),
-		FailedCount:             int64(cMetrics.failed_count),
-		MultiPartUploadCreated:  int64(cMetrics.multi_part_upload_created),
-		MultiPartUploadFinished: int64(cMetrics.multi_part_upload_finished),
+func toFilesystemMetrics(m C.LoonFilesystemMetricsSnapshot) FilesystemMetrics {
+	return FilesystemMetrics{
+		ReadCount:               int64(m.read_count),
+		WriteCount:              int64(m.write_count),
+		ReadBytes:               int64(m.read_bytes),
+		WriteBytes:              int64(m.write_bytes),
+		GetFileInfoCount:        int64(m.get_file_info_count),
+		FailedCount:             int64(m.failed_count),
+		MultiPartUploadCreated:  int64(m.multi_part_upload_created),
+		MultiPartUploadFinished: int64(m.multi_part_upload_finished),
 	}
-
-	C.loon_filesystem_destroy(cFilesystem)
-	return fsMetrics, nil
 }
 
-// ListFilesystemMetrics returns metrics for every filesystem currently held by the cache.
+// getMetricsFromHandle retrieves the origin metrics of a filesystem handle and
+// destroys the handle.
+func getMetricsFromHandle(cFilesystem C.FileSystemHandle) (*FilesystemMetrics, error) {
+	defer C.loon_filesystem_destroy(cFilesystem)
+	var cSources C.LoonFilesystemMetricsSources
+	if err := HandleLoonFFIResult(C.loon_filesystem_get_metrics_sources(cFilesystem, &cSources)); err != nil {
+		return nil, merr.Wrap(err, "failed to get filesystem metrics")
+	}
+	defer C.loon_filesystem_free_metrics_sources(&cSources)
+
+	for _, entry := range unsafe.Slice(cSources.entries, int(cSources.count)) {
+		if C.GoString(entry.source) == originMetricsSource {
+			fsMetrics := toFilesystemMetrics(entry.metrics)
+			return &fsMetrics, nil
+		}
+	}
+	return nil, merr.WrapErrServiceInternalMsg("filesystem reports no %s metrics", originMetricsSource)
+}
+
+// ListFilesystemMetrics returns the origin metrics of every filesystem currently
+// held by the cache.
 func ListFilesystemMetrics() ([]FilesystemMetricsEntry, error) {
-	var cMetricsList C.LoonFilesystemMetricsList
-	result := C.loon_filesystem_list_metrics(&cMetricsList)
-	if err := HandleLoonFFIResult(result); err != nil {
+	var cSources C.LoonFilesystemMetricsSources
+	if err := HandleLoonFFIResult(C.loon_filesystem_list_metrics_sources(&cSources)); err != nil {
 		return nil, merr.Wrap(err, "failed to list filesystem metrics")
 	}
-	defer C.loon_filesystem_free_metrics_list(&cMetricsList)
+	defer C.loon_filesystem_free_metrics_sources(&cSources)
 
-	entries := unsafe.Slice(cMetricsList.entries, int(cMetricsList.count))
+	entries := unsafe.Slice(cSources.entries, int(cSources.count))
 	metricsList := make([]FilesystemMetricsEntry, 0, len(entries))
 	for _, entry := range entries {
+		if C.GoString(entry.source) != originMetricsSource {
+			continue
+		}
 		metricsList = append(metricsList, FilesystemMetricsEntry{
-			DisplayKey: C.GoString(entry.display_key),
-			FilesystemMetrics: FilesystemMetrics{
-				ReadCount:               int64(entry.metrics.read_count),
-				WriteCount:              int64(entry.metrics.write_count),
-				ReadBytes:               int64(entry.metrics.read_bytes),
-				WriteBytes:              int64(entry.metrics.write_bytes),
-				GetFileInfoCount:        int64(entry.metrics.get_file_info_count),
-				FailedCount:             int64(entry.metrics.failed_count),
-				MultiPartUploadCreated:  int64(entry.metrics.multi_part_upload_created),
-				MultiPartUploadFinished: int64(entry.metrics.multi_part_upload_finished),
-			},
+			DisplayKey:        C.GoString(entry.display_key),
+			FilesystemMetrics: toFilesystemMetrics(entry.metrics),
 		})
 	}
 	return metricsList, nil

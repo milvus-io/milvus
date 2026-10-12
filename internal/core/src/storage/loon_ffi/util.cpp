@@ -939,6 +939,7 @@ GetLoonManifest(
             fs,
             base_path,
             version,
+            /*manifest_size=*/-1,
             milvus_storage::api::transaction::FailResolver,
             1);
     if (!transaction_result.ok()) {
