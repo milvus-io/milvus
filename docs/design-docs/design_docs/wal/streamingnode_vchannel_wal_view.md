@@ -307,6 +307,9 @@ resource descriptors using the same nil-versus-empty load-scope convention.
 Later QueryViews reuse the runtime, including across replica IDs during a quick
 release/reload while the old serving lease remains active. WAL events update
 the shared schema; readiness fences their application and checks SchemaVersion.
+IDF tracks its prepared schema revision and LoadInfoVersion: a changed requirement
+rebuilds its snapshot and live tail before readiness, even when the original
+runtime disabled BM25. See [IDF schema changes](../qviews/snview/idf_oracle_runtime.md#schema-changes).
 When load_info_version changes, readiness also resolves current load/index
 metadata and updates the shared collection's native search index metadata.
 MixCoord supplements QueryCoord's load configuration with DataCoord's index

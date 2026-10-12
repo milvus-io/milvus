@@ -32,6 +32,8 @@ type QueryRuntime struct {
 
 	prepareView func(context.Context) error
 	closed      chan struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 type queryRuntimeState int
@@ -61,7 +63,9 @@ func (r *QueryRuntime) RangeModules(fn func(QueryRuntimeModule) bool) {
 }
 
 func newQueryRuntime(dispatcher *Dispatcher, modules ...QueryRuntimeModule) *QueryRuntime {
+	ctx, cancel := context.WithCancel(context.Background())
 	runtime := &QueryRuntime{
+		ctx: ctx, cancel: cancel,
 		dispatcher:   dispatcher,
 		state:        queryRuntimePreparing,
 		closed:       make(chan struct{}),
@@ -76,6 +80,7 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 	if r == nil {
 		return nil
 	}
+	view.RuntimeContext = r.ctx
 	r.indexVersion = view.LoadInfoVersion
 	view.ResourceEventBarrier = func(ctx context.Context) error {
 		return r.resourceEventBarrier(ctx, view.WithResourceEventLock, nil)
@@ -310,6 +315,7 @@ func (r *QueryRuntime) Close() {
 	}
 	r.state = queryRuntimeClosed
 	close(r.closed)
+	r.cancel()
 	r.pending = nil
 	r.drainScheduled = false
 	r.cond.Broadcast()

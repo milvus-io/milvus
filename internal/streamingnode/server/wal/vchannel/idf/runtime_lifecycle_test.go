@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func bm25Insert(t *testing.T, segmentID int64, tf float32) message.ImmutableMessage {
+func bm25Insert(t *testing.T, segmentID int64, tf float32, ticks ...uint64) message.ImmutableMessage {
 	t.Helper()
 	raw, err := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{
 		CollectionId: 1, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: segmentID}}},
@@ -36,7 +36,11 @@ func bm25Insert(t *testing.T, segmentID int64, tf float32) message.ImmutableMess
 		FieldsData: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"already materialized"}}}}}}, {FieldId: 102, Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: tf})}}}}}}},
 	}).BuildMutable()
 	require.NoError(t, err)
-	return raw.WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(10))
+	tick := uint64(10)
+	if len(ticks) != 0 {
+		tick = ticks[0]
+	}
+	return raw.WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(int64(tick)))
 }
 
 // Persisted stats, snapshot/live inserts and sealed handoff contribute exactly once.

@@ -422,6 +422,16 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	// checking the target revision and refreshing shared search index metadata.
 	// Partition/load-field resource changes still need reprepare.
 	err := func() error {
+		var schemaErr error
+		runtime.RangeModules(func(module QueryRuntimeModule) bool {
+			if resource, ok := module.(QueryRuntimeSchemaModule); ok {
+				schemaErr = resource.PrepareSchema(ctx, ref.meta, m.loadInfoProvider)
+			}
+			return schemaErr == nil
+		})
+		if schemaErr != nil {
+			return schemaErr
+		}
 		if err := runtime.PrepareQueryView(ctx, key.QueryViewVersion.DataVersion); err != nil {
 			return err
 		}

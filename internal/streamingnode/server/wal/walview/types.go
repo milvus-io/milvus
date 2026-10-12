@@ -15,6 +15,11 @@ import (
 
 // VChannelWALView is the vchannel-owned WAL input view for one query view.
 type VChannelWALView struct {
+	// CaptureQueryView captures a fresh snapshot and registers its consumer under
+	// the VChannel owner lock. The callback must not perform I/O.
+	CaptureQueryView func(*viewpb.QueryViewMeta, func(VChannelWALView)) bool
+	RuntimeContext   context.Context
+
 	// WithResourceEventLock orders a barrier after all already observed WAL events.
 	WithResourceEventLock func(func())
 	ResourceEventBarrier  func(context.Context) error

@@ -142,6 +142,37 @@ the remaining view watermark; closing the last runtime instead cancels/drains
 refresh work and releases all statistics. No scheduled worker waits for another
 queued task on the same scheduler.
 
+## Schema changes
+
+A reused IDF runtime records its prepared schema revision and LoadInfoVersion,
+including when BM25 was initially disabled. Before a new QueryView can report
+Ready, a higher schema requirement or changed load-info identity rebuilds IDF
+from a fresh owner-captured WAL snapshot and current load metadata. This also
+covers an added BM25 field entering the load configuration after schema handoff. The snapshot and installation of a bounded live-event buffer
+share the VChannel owner lock. Already queued WAL messages through the captured
+TimeTick are represented by the snapshot and are not counted again; sealed
+notifications covered by its DataVersion are likewise excluded. Later seal
+notifications remain idempotent.
+
+The current oracle continues serving while the replacement reads sealed and
+persisted growing statistics. Snapshot insert tails and subsequent live events
+are applied before publishing the replacement and its prepared schema revision
+atomically. The regular QueryView event barrier and DataVersion preparation
+then run before Ready. GrowingRuntime and TransformLog replay are not restarted.
+Schema preparation and DataVersion advancement/release are serialized, and the
+replacement never regresses the shared aggregate's prepared DataVersion.
+
+A failed attempt discards its private state and retries from a fresh snapshot;
+it leaves the current oracle and prepared schema revision intact. Runtime close
+cancels preparation and wakes a producer blocked on the replacement's bounded
+queue before waiting for live application to drain. The usual eager/lazy setting
+still applies to sealed statistics. Lazy preparation does not promise eager
+sealed I/O completion.
+
+This covers IDF reconstruction for schema/load-info handoff, including enabling
+the first BM25 function. GrowingRuntime partition/load-field scope reconciliation
+and field-removal MVCC semantics remain separate work.
+
 ## Query behavior
 
 BuildIDF/BuildIDFBatch accept a query context for lazy initialization and do not

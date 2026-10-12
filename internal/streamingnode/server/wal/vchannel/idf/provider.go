@@ -104,12 +104,18 @@ func (p *Provider) NewRuntime() (queryresource.QueryRuntimeModule, error) {
 }
 
 type Runtime struct {
-	mu       sync.RWMutex
-	provider *Provider
-	future   *FutureProvider
-	oracle   *oracleRuntime
-	disabled bool
-	closed   bool
+	mu              sync.RWMutex
+	provider        *Provider
+	future          *FutureProvider
+	oracle          *oracleRuntime
+	prepareMu       sync.Mutex
+	cond            *sync.Cond
+	refresh         *schemaRefresh
+	schemaVersion   int32
+	loadInfoVersion uint64
+	view            walview.VChannelWALView
+	disabled        bool
+	closed          bool
 }
 
 func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) error {
@@ -122,6 +128,10 @@ func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) 
 		r.mu.Unlock()
 		return nil
 	}
+	r.cond = sync.NewCond(&r.mu)
+	r.view = walview.VChannelWALView{CaptureQueryView: walView.CaptureQueryView, RuntimeContext: walView.RuntimeContext, ResourceEventBarrier: walView.ResourceEventBarrier}
+	r.schemaVersion = walView.Schema.GetVersion()
+	r.loadInfoVersion = walView.LoadInfoVersion
 	r.mu.Unlock()
 
 	if !hasLoadedBM25Function(walView.Schema, loadFieldIDs(walView.LoadFields)) {
@@ -155,6 +165,7 @@ func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) 
 		return context.Canceled
 	}
 	r.oracle = oracle
+	r.disabled = false
 	return nil
 }
 
@@ -215,6 +226,10 @@ func (r *Runtime) BuildIDF(ctx context.Context, dataVersion qviews.DataVersion, 
 }
 
 func (r *Runtime) PrepareDataVersion(ctx context.Context, dataVersion qviews.DataVersion) error {
+	if !r.prepareMu.TryLock() {
+		return merr.WrapErrServiceNotReadyMsg("BM25 schema preparation is in progress")
+	}
+	defer r.prepareMu.Unlock()
 	r.mu.RLock()
 	disabled := r.disabled
 	r.mu.RUnlock()
@@ -229,6 +244,10 @@ func (r *Runtime) PrepareDataVersion(ctx context.Context, dataVersion qviews.Dat
 }
 
 func (r *Runtime) BeforeRelease(ctx context.Context, target qviews.DataVersion) error {
+	if !r.prepareMu.TryLock() {
+		return merr.WrapErrServiceNotReadyMsg("BM25 schema preparation is in progress")
+	}
+	defer r.prepareMu.Unlock()
 	if oracle := r.currentOracle(); oracle != nil {
 		return oracle.PrepareDataVersion(ctx, target)
 	}
@@ -244,8 +263,19 @@ func (r *Runtime) BuildIDFBatch(ctx context.Context, requests []queryresource.ID
 }
 
 func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
-	if oracle := r.currentOracle(); oracle != nil {
-		oracle.ApplyLiveEvent(ctx, event)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for r.refresh != nil && r.refresh.err == nil && len(r.refresh.pending) >= 1024 && !r.closed {
+		r.cond.Wait()
+	}
+	if r.closed {
+		return
+	}
+	if next := r.refresh; next != nil && next.err == nil && next.includes(event) {
+		next.pending = append(next.pending, event)
+	}
+	if r.oracle != nil {
+		r.oracle.ApplyLiveEvent(ctx, event)
 	}
 }
 
@@ -259,6 +289,9 @@ func (r *Runtime) Close() {
 		return
 	}
 	r.closed = true
+	if r.cond != nil {
+		r.cond.Broadcast()
+	}
 	oracle := r.oracle
 	r.oracle = nil
 	r.mu.Unlock()

@@ -77,6 +77,16 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	}
 	return walview.VChannelWALView{
 		PChannel: m.pchannel, VChannel: m.vchannel, CollectionID: state.CollectionID,
+		CaptureQueryView: func(meta *viewpb.QueryViewMeta, captured func(walview.VChannelWALView)) bool {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			view, ok := m.queryWALViewLocked(meta)
+			if !ok || view.Schema.GetVersion() < meta.GetSchemaVersion() {
+				return false
+			}
+			captured(view)
+			return true
+		},
 		WithResourceEventLock: func(fn func()) { m.mu.Lock(); defer m.mu.Unlock(); fn() },
 		PrepareQueryView:      m.prepareQueryViewLocked,
 		BaseGrowingTimeTick:   m.queryObservedTimeTick, BaseTransformTimeTick: m.queryObservedTimeTick,
