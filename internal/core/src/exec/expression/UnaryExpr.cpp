@@ -1523,18 +1523,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
 
     if constexpr (std::is_same_v<T, std::string> ||
                   std::is_same_v<T, std::string_view>) {
-        // FMINDEX answers general LIKE (PatternOp::Match) with CANDIDATES
-        // ONLY -- the rarest literal fragment's occurrences, a superset of
+        // FMINDEX answers general LIKE and regex with CANDIDATES
+        // ONLY -- a necessary byte condition, a superset of
         // the exact answer. Never let such a reader reach
         // UnaryIndexFuncForMatch, which returns the reader's bitmap as the
         // final result and would pass rows the pattern does not match. Either
-        // recheck the candidates on the sealed VARCHAR column (ExecFMMatch),
+        // recheck the candidates on the sealed VARCHAR column (ExecFMPatternCandidates),
         // or fall back to the raw scan. The gate is the reader contract's own
         // exactness declaration, so any future candidates-only pattern reader
         // is covered by the same guard.
         if (!has_offset_input_ && PatternMatchIsCandidatesOnly()) {
-            if (CanUseFMMatch()) {
-                auto res = ExecFMMatch(context);
+            if (CanUseFMPatternCandidates()) {
+                auto res = ExecFMPatternCandidates(context);
                 if (res.has_value()) {
                     return res.value();
                 }
@@ -1796,7 +1796,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     auto expr_type = expr_->op_type_;
 
     // Pre-build regex / LIKE pattern objects once for the entire segment
-    EnsureRegexCache();
+    EnsureRegexScanCache();
     EnsureLikeMatcherCache();
     const PartialRegexMatcher* regex_matcher_ptr = cached_regex_matcher_.get();
     const VolnitskySearcher* volnitsky_ptr = cached_volnitsky_searcher_.get();
@@ -2042,14 +2042,15 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 std::string
 PhyUnaryRangeFilterExpr::StringLiteralForCostGuard() const {
     switch (expr_->op_type_) {
-        // Anchored pattern ops and general LIKE: FMINDEX's count-first guard
+        // Anchored pattern ops, LIKE and regex: FMINDEX's count-first guard
         // uses the literal to decline degenerate high-hit patterns.
         // Equality (Equal/IN) is intentionally NOT accelerated by FMINDEX
-        // (ShouldUseOp declines it), so it needs no literal here.
+        // (the FM reader has no predicate capability), so it needs no literal here.
         case proto::plan::PrefixMatch:
         case proto::plan::PostfixMatch:
         case proto::plan::InnerMatch:
         case proto::plan::Match:
+        case proto::plan::RegexMatch:
             return GetValueFromProto<std::string>(expr_->val_);
         default:
             return "";
@@ -2538,11 +2539,12 @@ PhyUnaryRangeFilterExpr::PatternMatchIsCandidatesOnly() const {
 }
 
 bool
-PhyUnaryRangeFilterExpr::CanUseFMMatch() {
+PhyUnaryRangeFilterExpr::CanUseFMPatternCandidates() {
     if (has_offset_input_ || exec_path_ != ExprExecPath::ScalarIndex) {
         return false;
     }
-    if (expr_->op_type_ != proto::plan::OpType::Match) {
+    if (expr_->op_type_ != proto::plan::OpType::Match &&
+        expr_->op_type_ != proto::plan::OpType::RegexMatch) {
         return false;
     }
     if (segment_->type() != SegmentType::Sealed) {
@@ -2564,7 +2566,7 @@ PhyUnaryRangeFilterExpr::CanUseFMMatch() {
 }
 
 std::optional<VectorPtr>
-PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
+PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     if (!arg_inited_) {
         value_arg_.SetValue<std::string>(expr_->val_);
         arg_inited_ = true;
@@ -2577,21 +2579,21 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
     }
 
     AssertInfo(pattern_reader_ != nullptr && null_reader_ != nullptr,
-               "FMINDEX Match path requires a pattern-match and null reader, "
+               "FMINDEX pattern path requires a pattern-match and null reader, "
                "field_id: {}",
                field_id_.get());
     AssertInfo(num_data_chunk_ > 0,
-               "FMINDEX Match recheck needs sealed VARCHAR field data");
+               "FMINDEX pattern recheck needs sealed VARCHAR field data");
 
     // Phase 1: one segment-level index query, cached for every later batch.
     if (cached_phase1_res_ == nullptr) {
         auto candidates =
-            pattern_reader_->PatternMatch(literal, index::PatternOp::Match);
-        // FM Match is sealed-only, and a sealed segment's active row count is
+            pattern_reader_->PatternMatch(literal, ToIndexPatternOp(expr_->op_type_));
+        // FM candidate evaluation is sealed-only, and a sealed segment's active row count is
         // its complete row count. The reader must therefore answer that exact
         // domain; a mismatch is not an uncovered growing-index tail.
         AssertInfo(static_cast<int64_t>(candidates.size()) == active_count_,
-                   "FMINDEX Match candidates have {} rows, expected sealed "
+                   "FMINDEX pattern candidates have {} rows, expected sealed "
                    "row count {}",
                    candidates.size(),
                    active_count_);
@@ -2599,7 +2601,7 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
             std::make_shared<TargetBitmap>(std::move(candidates));
         auto validity = null_reader_->IsNotNull();
         AssertInfo(static_cast<int64_t>(validity.size()) == active_count_,
-                   "FMINDEX Match validity has {} rows, expected sealed row "
+                   "FMINDEX pattern validity has {} rows, expected sealed row "
                    "count {}",
                    validity.size(),
                    active_count_);
@@ -2621,13 +2623,15 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
         batch_candidates &= bitmap_input;
     }
 
-    // Phase 2: recheck the surviving candidates against the exact LIKE
-    // pattern on the sealed VARCHAR column. FMINDEX Match candidates are a
-    // superset of the answer, so skipping this would return false positives.
+    // Phase 2: recheck surviving LIKE/regex candidates with the canonical
+    // matcher on sealed VARCHAR. Only this result may reach logical NOT.
     if (!batch_candidates.none()) {
         EnsureLikeMatcherCache();
+        EnsureRegexCache();
         const LikePatternMatcher* matcher = cached_like_matcher_.get();
-        AssertInfo(matcher != nullptr, "LIKE matcher cache missing for Match");
+        const PartialRegexMatcher* regex_matcher = cached_regex_matcher_.get();
+        AssertInfo(matcher != nullptr || regex_matcher != nullptr,
+                   "pattern matcher cache missing for FMINDEX recheck");
 
         OffsetVector offsets;
         offsets.reserve(batch_candidates.count());
@@ -2642,7 +2646,7 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
         TargetBitmapView compact_view(compact);
         TargetBitmapView compact_valid_view(compact_valid);
 
-        auto execute_sub_batch = [matcher]<FilterType filter_type =
+        auto execute_sub_batch = [matcher, regex_matcher]<FilterType filter_type =
                                                FilterType::sequential>(
             const std::string_view* data,
             ValidityView valid_data,
@@ -2658,7 +2662,8 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
                     res[i] = false;
                     continue;
                 }
-                res[i] = (*matcher)(data[i]);
+                res[i] = regex_matcher != nullptr ? (*regex_matcher)(data[i])
+                                                  : (*matcher)(data[i]);
             }
         };
 

@@ -908,11 +908,15 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
           expr_(expr),
           enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
         // Pre-warm the LIKE matcher for general Match: the FMINDEX Match
-        // route (ExecFMMatch) rechecks every phase-1 candidate with it, and
+        // route (ExecFMPatternCandidates) rechecks every phase-1 candidate with it, and
         // building it on the query thread inside the first batch would put a
         // regex compile on the critical path of every such query.
         if (expr_->op_type_ == proto::plan::OpType::Match) {
             EnsureLikeMatcherCache();
+        }
+        if (expr_->op_type_ == proto::plan::OpType::RegexMatch) {
+            // Invalid syntax must fail even when candidate lookup has no hits.
+            EnsureRegexCache();
         }
         // DetermineExecPath();
     }
@@ -962,12 +966,12 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return expr_;
     }
 
-    // The concrete string literal to hand to a scalar index's ShouldUseOp cost
+    // The concrete string pattern to hand to a reader's ShouldUseForOp cost
     // guard, for the anchored pattern ops (PrefixMatch/PostfixMatch/InnerMatch)
-    // and general LIKE (Match) whose index cost depends on the literal. Empty
+    // and LIKE/regex whose index cost depends on the pattern. Empty
     // for every other op (including the equality family, which FMINDEX declines
     // outright), so the guard is judged on the op alone. Lets FMINDEX decline
-    // degenerate high-hit LIKE literals to the raw-data scan on the VARCHAR path.
+    // degenerate high-hit patterns to the raw-data scan on the VARCHAR path.
     std::string
     StringLiteralForCostGuard() const;
 
@@ -1061,19 +1065,17 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool
     PatternMatchIsCandidatesOnly() const;
 
-    // Whether general LIKE (Match) may take the FM-index candidate route.
+    // Whether LIKE or regex may take the FM-index candidate route.
     // Requires the ScalarIndex exec path without offset input, a sealed
     // segment, an FM index, and raw VARCHAR field data for the phase-2
     // recheck.
     bool
-    CanUseFMMatch();
+    CanUseFMPatternCandidates();
 
-    // FMINDEX general-LIKE route: phase 1 takes candidates from the rarest
-    // literal fragment via IPatternMatchReader::PatternMatch(Match), phase 2
-    // rechecks those rows against the LIKE matcher on the sealed VARCHAR
-    // column. FMINDEX Match candidates are NEVER served unrechecked.
+    // FM candidate route: phase 1 uses IPatternMatchReader, phase 2 rechecks
+    // candidates using canonical LIKE/RE2 on sealed VARCHAR field data.
     std::optional<VectorPtr>
-    ExecFMMatch(EvalCtx& context);
+    ExecFMPatternCandidates(EvalCtx& context);
 
     static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
@@ -1094,6 +1096,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     // Cached regex objects — constructed once per segment, reused across batches.
     bool regex_cache_inited_{false};
+    bool regex_scan_cache_inited_{false};
     std::unique_ptr<PartialRegexMatcher> cached_regex_matcher_;
     std::string cached_volnitsky_literal_;
     std::unique_ptr<VolnitskySearcher> cached_volnitsky_searcher_;
@@ -1107,11 +1110,18 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
             return;
         auto pattern = GetValueFromProto<std::string>(expr_->val_);
         cached_regex_matcher_ = std::make_unique<PartialRegexMatcher>(pattern);
-        auto lits = index::extract_literals_from_regex(pattern);
-        for (const auto& l : lits) {
-            if (l.size() > cached_volnitsky_literal_.size())
-                cached_volnitsky_literal_ = l;
+    }
+
+    void
+    EnsureRegexScanCache() {
+        EnsureRegexCache();
+        if (regex_scan_cache_inited_ || !cached_regex_matcher_) {
+            return;
         }
+        regex_scan_cache_inited_ = true;
+        // Candidate rechecks need only RE2. Analyze a mandatory scan substring
+        // and allocate the Volnitsky table only when raw scanning is used.
+        cached_volnitsky_literal_ = cached_regex_matcher_->RequiredLiteral();
         if (!cached_volnitsky_literal_.empty()) {
             cached_volnitsky_searcher_ =
                 std::make_unique<VolnitskySearcher>(cached_volnitsky_literal_);
