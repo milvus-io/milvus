@@ -650,11 +650,9 @@ BuildSession::NormalizeAndValidateRequest() {
                           "JSON cast JSON requires the flat JSON family");
             }
         } else {
-            if (req_.family == index::families::kJsonFlat ||
-                req_.json_path.empty()) {
+            if (req_.family == index::families::kJsonFlat) {
                 ThrowInfo(DataTypeInvalid,
-                          "typed JSON projection requires a non-empty path "
-                          "and a predicate family");
+                          "typed JSON projection requires a predicate family");
             }
         }
     } else {

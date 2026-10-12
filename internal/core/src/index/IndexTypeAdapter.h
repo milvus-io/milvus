@@ -59,12 +59,19 @@ struct AdaptedIndexType {
 AdaptedIndexType
 AdaptIndexType(const IndexTypeAdapterRequest& request);
 
-// Normalized build-contract keys Milvus writes for its own build families.
-// None of them is an engine parameter: knowhere forwards undeclared keys to
-// vanilla FAISS, which rejects unknown ones, so a builder removes them before
-// handing its params to an index engine.
-inline constexpr std::array<std::string_view, 5> kNormalizedBuildContractKeys{
-    "field_type", "value_type", "array_element_type", "nested", "is_nested"};
+// Normalized build-contract keys Milvus writes for its own build families
+// (AdaptIndexType and the build session). None of them is an engine
+// parameter: knowhere forwards undeclared keys to vanilla FAISS, which rejects
+// unknown ones, so a builder removes them before handing its params to an
+// index engine.
+inline constexpr std::array<std::string_view, 7> kNormalizedBuildContractKeys{
+    "field_type",
+    "value_type",
+    "array_element_type",
+    "nested",
+    "is_nested",
+    "local_dir",
+    "nullable"};
 
 inline void
 EraseNormalizedBuildContract(Config& params) {
