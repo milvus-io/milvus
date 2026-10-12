@@ -112,18 +112,24 @@ func ApplyFlush(cur *pkindexpb.Manifest, f Flush) (*pkindexpb.Manifest, bool, er
 	return next, true, nil
 }
 
-// ApplyCompact applies a compaction to cur. The inputs must be a non-empty
-// contiguous run of the SST list of cur, in the same order. It returns a new
+// ApplyCompact applies a compaction to cur. When the inputs are a non-empty
+// contiguous run of the SST list of cur, in the same order, it returns a new
 // version and true, in which the outputs replace the inputs at the position of
-// the inputs; the checkpoint and the term do not change. It returns
-// ErrNotClaimed when cur is nil, ErrStaleEdit when the inputs are not such a
-// run, and ErrDuplicateSST when an output ID is already in the SST list of cur
-// or is listed twice in the outputs. It does not change cur.
+// the inputs; the checkpoint and the term do not change. When the inputs are
+// not empty, no input is in the SST list of cur and all outputs are in it, the
+// compaction is an applied retry and ApplyCompact returns cur and false. It
+// returns ErrNotClaimed when cur is nil, ErrStaleEdit in all other cases where
+// the inputs are not such a run, and ErrDuplicateSST when an output ID is
+// already in the SST list of cur or is listed twice in the outputs. It does
+// not change cur.
 func ApplyCompact(cur *pkindexpb.Manifest, c Compact) (*pkindexpb.Manifest, bool, error) {
 	if cur == nil {
 		return nil, false, ErrNotClaimed
 	}
 	list := cur.GetSsts()
+	if isAppliedCompact(idSet(list), c) {
+		return cur, false, nil
+	}
 	start := -1
 	for i, s := range list {
 		if len(c.Inputs) > 0 && s.GetId() == c.Inputs[0] {
@@ -149,6 +155,25 @@ func ApplyCompact(cur *pkindexpb.Manifest, c Compact) (*pkindexpb.Manifest, bool
 	merged = append(merged, next.GetSsts()[start+len(c.Inputs):]...)
 	next.Ssts = merged
 	return next, true, nil
+}
+
+// isAppliedCompact reports whether the inputs of c are not empty, no input is
+// in present, and all outputs of c are in present.
+func isAppliedCompact(present map[int64]struct{}, c Compact) bool {
+	if len(c.Inputs) == 0 {
+		return false
+	}
+	for _, id := range c.Inputs {
+		if _, ok := present[id]; ok {
+			return false
+		}
+	}
+	for _, s := range c.Outputs {
+		if _, ok := present[s.GetId()]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // checkNewSSTs returns ErrDuplicateSST when an SST of add is in present or is
