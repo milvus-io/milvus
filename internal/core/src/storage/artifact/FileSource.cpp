@@ -1064,6 +1064,44 @@ class V1RemoteSource::Impl {
         ThrowInfo(FileReadFailed, "cached artifact entry not found: {}", name);
     }
 
+    void
+    MoveCacheToStaging(std::string_view name, const std::string& staging) {
+        const auto key = std::string(name);
+        const auto cached = CacheToDisk(name);
+        CheckCancelled("V1/V2 artifact cache transfer");
+        if (::rename(cached.c_str(), staging.c_str()) == 0) {
+            staged_files.erase(key);
+            return;
+        }
+        const auto error = errno;
+        if (error != EXDEV) {
+            ThrowInfo(FileWriteFailed,
+                      "failed to move cached artifact entry {} to {}: {}",
+                      cached,
+                      staging,
+                      std::strerror(error));
+        }
+
+        // A cross-filesystem rename cannot transfer the inode. Publish only
+        // after the fallback copy is complete, and remove the cached source.
+        std::ofstream output(staging, std::ios::binary | std::ios::trunc);
+        if (!output.good()) {
+            ThrowInfo(FileOpenFailed,
+                      "failed to open staged local artifact file {}",
+                      staging);
+        }
+        AppendFile(cached, output, cancellation_token);
+        CloseOutput(output, staging);
+        CheckCancelled("V1/V2 artifact cache transfer");
+        if (::unlink(cached.c_str()) != 0) {
+            ThrowInfo(FileWriteFailed,
+                      "failed to remove transferred artifact cache {}: {}",
+                      cached,
+                      std::strerror(errno));
+        }
+        staged_files.erase(key);
+    }
+
     FileManagerContext context;
     std::vector<std::string> remote_paths;
     std::vector<std::string> normalized_paths;
@@ -1272,16 +1310,7 @@ V1RemoteSource::ReadEntryToLocalFile(std::string_view name,
                                      const std::string& local_path) {
     StagedLocalFile staged(local_path);
     if (impl_->CanStreamToDisk(name)) {
-        auto cached = impl_->CacheToDisk(name);
-        std::ofstream output(staged.Staging(),
-                             std::ios::binary | std::ios::trunc);
-        if (!output.good()) {
-            ThrowInfo(FileOpenFailed,
-                      "failed to open staged local artifact file {}",
-                      staged.Staging());
-        }
-        AppendFile(cached, output, impl_->cancellation_token);
-        CloseOutput(output, staged.Staging());
+        impl_->MoveCacheToStaging(name, staged.Staging());
         impl_->CheckCancelled("V1/V2 artifact file publication");
         staged.Commit();
         return;
@@ -1301,6 +1330,10 @@ V1RemoteSource::ReadEntryToLocalFile(std::string_view name,
 void
 V1RemoteSource::ReadEntriesToLocalFile(const std::vector<std::string>& names,
                                        const std::string& local_path) {
+    if (names.size() == 1) {
+        ReadEntryToLocalFile(names.front(), local_path);
+        return;
+    }
     StagedLocalFile staged(local_path);
     std::ofstream output(staged.Staging(), std::ios::binary | std::ios::trunc);
     if (!output.good()) {
@@ -1340,16 +1373,7 @@ V1RemoteSource::ReadEntriesToLocalDir(const std::vector<std::string>& names,
         paths.push_back(path);
         staged.emplace_back(path);
         if (impl_->CanStreamToDisk(name)) {
-            auto cached = impl_->CacheToDisk(name);
-            std::ofstream output(staged.back().Staging(),
-                                 std::ios::binary | std::ios::trunc);
-            if (!output.good()) {
-                ThrowInfo(FileOpenFailed,
-                          "failed to open staged local artifact file {}",
-                          staged.back().Staging());
-            }
-            AppendFile(cached, output, impl_->cancellation_token);
-            CloseOutput(output, staged.back().Staging());
+            impl_->MoveCacheToStaging(name, staged.back().Staging());
         } else {
             std::ofstream output(staged.back().Staging(),
                                  std::ios::binary | std::ios::trunc);

@@ -34,3 +34,21 @@ the channel through its close marker, then calls `DrainFuture`. This order lets
 a producer blocked on the bounded channel finish. Normal exhaustion calls
 `get()` to propagate producer failures. Cleanup preserves an already propagating
 visitor/decoding exception.
+
+# V1 artifact cache transfers
+
+Synchronous V1 directory materialization and single-entry file materialization
+move each downloaded cache file into the destination's staged file. Only an
+`EXDEV` rename failure falls back to copying, followed by removal of the source
+cache. Other move failures retain their `FileWriteFailed` classification.
+
+After a successful transfer the source removes its cache entry from
+`staged_files`; a later read downloads that entry again. Staging owns the moved
+file and cleans it up if cancellation or publication fails. Existing
+destinations are replaced only by the ordinary staging commit, and directory
+publication retains its backup and rollback behavior. The source's disk manager
+cleans its own directory independently of files already moved to the loader's
+directory.
+
+Concatenating several logical entries into one file still copies their bytes in
+the requested order, because those entries cannot share one transferred inode.
