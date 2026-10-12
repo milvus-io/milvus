@@ -64,9 +64,9 @@ enum class RequiredReader {
     TextMatch,     // ITextMatchReader
     Ngram,         // INgramReader     — candidate family, caps.exact == false
     Spatial,       // ISpatialReader   — candidate family, caps.exact == false
-    Null,          // INullReader      — unconditional, carries no caps bit
-    ValueLookup,   // IScalarValueReader<T>
-    JsonPath,      // IJsonIndexReader
+    Null,  // INullReader      — checked after family-capability selection
+    ValueLookup,  // IScalarValueReader<T>
+    JsonPath,     // IJsonIndexReader
 };
 
 // Everything the decision needs from the EXPRESSION side. All of it is known at
@@ -195,8 +195,8 @@ ReaderMatches(const ExprIndexRequirement& req,
         case RequiredReader::Spatial:
             return caps.spatial;
         case RequiredReader::Null:
-            return caps.predicate || caps.ngram_candidates || caps.spatial ||
-                   caps.json_paths;
+            return caps.predicate || caps.pattern_match ||
+                   caps.ngram_candidates || caps.spatial || caps.json_paths;
         case RequiredReader::ValueLookup:
             return caps.value_lookup;
         case RequiredReader::JsonPath:
