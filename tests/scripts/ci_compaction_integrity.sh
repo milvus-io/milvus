@@ -25,6 +25,7 @@ cd "${ROOT}/tests/python_client"
 
 # Preserve caller connection options and filters; keep workload selection serial.
 exec pytest "$@" \
+  -p common.data_integrity_diagnostics \
   -n 0 \
   --tags L3 \
   --run-compaction-integrity-serial \
