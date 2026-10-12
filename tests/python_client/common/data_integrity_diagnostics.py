@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import threading
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,38 @@ def _safe_text(value: Any, limit: int = 2048) -> str:
     if len(text) > limit:
         return text[:limit] + "…[truncated]"
     return text
+
+
+def exception_diagnostics(error: BaseException) -> dict[str, Any]:
+    """Persist bounded stack locations without messages, source lines, or locals.
+
+    These locations survive a stuck writer exit even when pytest never produces
+    its terminal/JUnit traceback. Reasons are fixed categories, never server text.
+    """
+    try:
+        reasons = {
+            ValueError: "invalid value",
+            TypeError: "invalid type",
+            AssertionError: "assertion failed",
+            TimeoutError: "operation timed out",
+            ConnectionError: "connection failed",
+        }
+        frames = deque(maxlen=16)
+        count = 0
+        traceback = error.__traceback__
+        while traceback is not None:
+            code = traceback.tb_frame.f_code
+            frames.append({"file": Path(code.co_filename).name, "function": code.co_name, "line": traceback.tb_lineno})
+            count += 1
+            traceback = traceback.tb_next
+        return {
+            "error_type": type(error).__name__,
+            "error_reason": reasons.get(type(error), "exception raised; inspect error_stack origin"),
+            "error_stack": list(frames),
+            "error_stack_truncated": count > len(frames),
+        }
+    except BaseException:
+        return {"error_type": type(error).__name__, "error_stack_status": "unavailable"}
 
 
 def emit_data_integrity_event(event: dict[str, Any], *, primary_failure: bool = False) -> None:

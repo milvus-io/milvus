@@ -1,9 +1,38 @@
 import json
 
 import pytest
-from common.data_integrity_diagnostics import emit_data_integrity_event
+from common.data_integrity_diagnostics import emit_data_integrity_event, exception_diagnostics
 
 pytest_plugins = ["pytester"]
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_data_integrity_diagnostics_unit_persists_stack_without_payloads(tmp_path, monkeypatch):
+    event_path = tmp_path / "events.jsonl"
+    monkeypatch.setenv("DATA_INTEGRITY_DIAGNOSTICS_PATH", str(event_path))
+
+    def append_row(depth):
+        if depth:
+            append_row(depth - 1)
+        raise ValueError("password=credential-sentinel-value row-payload-sentinel")
+
+    try:
+        append_row(20)
+    except ValueError as error:
+        emit_data_integrity_event(
+            {"event": "continuous_primary_failure", **exception_diagnostics(error)}, primary_failure=True
+        )
+    serialized = event_path.read_text()
+    event = json.loads(serialized)
+    assert event["error_type"] == "ValueError"
+    assert event["error_reason"] == "invalid value"
+    assert len(event["error_stack"]) == 16
+    assert event["error_stack_truncated"] is True
+    assert event["error_stack"][-1]["function"] == "append_row"
+    assert event["error_stack"][-1]["line"] > 0
+    assert "credential-sentinel-value" not in serialized
+    assert "row-payload-sentinel" not in serialized
+    assert all(set(frame) == {"file", "function", "line"} for frame in event["error_stack"])
 
 
 def _run_inner(pytester, monkeypatch, source, *args):

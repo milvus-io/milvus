@@ -14,7 +14,7 @@ import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common.common_type import CaseLabel
-from common.data_integrity_diagnostics import emit_data_integrity_event
+from common.data_integrity_diagnostics import emit_data_integrity_event, exception_diagnostics
 from milvus_client import test_milvus_client_data_integrity as integrity
 from pymilvus import BulkInsertState, DataType, utility
 from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
@@ -427,28 +427,43 @@ class _ContinuousFailureRecorder:
         self.nodeid = nodeid
         self._lock = threading.Lock()
         self._first = None
+        self._recorded_errors = []
 
     def record(self, error, lane, epoch=None, phase="worker"):
         with self._lock:
-            if self._first is not None:
+            if any(error is recorded for recorded in self._recorded_errors):
                 return False
-            self._first = (error, error.__traceback__, lane, epoch, phase, time.monotonic())
+            primary = self._first is None
+            # Keep at most eight distinct secondary failures and omit expected
+            # cooperative cancellation once the underlying failure is recorded.
+            if not primary and (
+                len(self._recorded_errors) >= 9
+                or (
+                    type(error) is RuntimeError
+                    and len(error.args) == 1
+                    and type(error.args[0]) is str
+                    and error.args[0] == "continuous integrity case stopped"
+                )
+            ):
+                return False
+            self._recorded_errors.append(error)
+            if primary:
+                self._first = (error, error.__traceback__, lane, epoch, phase, time.monotonic())
         try:
             emit_data_integrity_event(
                 {
-                    "event": "continuous_primary_failure",
+                    "event": "continuous_primary_failure" if primary else "continuous_secondary_failure",
                     "nodeid": self.nodeid,
                     "lane": lane,
                     "epoch": epoch,
                     "phase": phase,
-                    "error_type": type(error).__name__,
-                    "error_summary": str(error),
+                    **exception_diagnostics(error),
                 },
-                primary_failure=True,
+                primary_failure=primary,
             )
         except BaseException:
             pass
-        return True
+        return primary
 
     def primary(self):
         with self._lock:
@@ -465,18 +480,17 @@ class _ContinuousFailureRecorder:
 @contextmanager
 def _continuous_writer_context(writer, failure_recorder, lane, epoch):
     """Record writer-body errors before RemoteBulkWriter.__exit__ runs."""
-    body_succeeded = False
+    writer_entered = False
     try:
         with writer as active_writer:
+            writer_entered = True
             try:
                 yield active_writer
             except BaseException as error:
                 failure_recorder.record(error, lane, epoch, phase="writer_body")
                 raise
-            else:
-                body_succeeded = True
     except BaseException as error:
-        failure_recorder.record(error, lane, epoch, phase="writer_exit" if body_succeeded else "writer_setup")
+        failure_recorder.record(error, lane, epoch, phase="writer_exit" if writer_entered else "writer_setup")
         raise
 
 
@@ -1435,16 +1449,57 @@ def test_continuous_integrity_unit_worker_polling_surfaces_recorded_failure_with
 
 
 @pytest.mark.tags("CompactionIntegrityUnit")
-def test_continuous_integrity_unit_writer_exit_failure_does_not_replace_body_failure():
+def test_continuous_integrity_unit_writer_exit_failure_does_not_replace_body_failure(tmp_path, monkeypatch):
+    event_path = tmp_path / "events.jsonl"
+    monkeypatch.setenv("DATA_INTEGRITY_DIAGNOSTICS_PATH", str(event_path))
     recorder = _ContinuousFailureRecorder("continuous-case-unit")
     body_error = ValueError("safe append failure detail")
     exit_error = RuntimeError("safe writer exit failure detail")
 
-    recorder.record(body_error, "import", epoch=1, phase="writer_body")
-    recorder.record(exit_error, "import", epoch=1, phase="writer_exit")
+    class BrokenWriter:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            # Evidence must exist before SDK cleanup can fail or hang.
+            primary = json.loads(event_path.read_text().splitlines()[0])
+            assert primary["phase"] == "writer_body"
+            assert primary["error_reason"] == "invalid value"
+            assert primary["error_stack"][-1]["function"] == (
+                "test_continuous_integrity_unit_writer_exit_failure_does_not_replace_body_failure"
+            )
+            raise exit_error
+
+    with pytest.raises(RuntimeError) as cleanup:
+        with _continuous_writer_context(BrokenWriter(), recorder, "import", 1):
+            raise body_error
+    assert cleanup.value is exit_error
+    # The outer handler sees the same exception again; do not duplicate it.
+    recorder.record(exit_error, "import", epoch=1, phase="worker")
     with pytest.raises(ValueError, match="safe append failure detail") as raised:
         recorder.raise_primary(exit_error)
     assert raised.value is body_error
+    events = [json.loads(line) for line in event_path.read_text().splitlines()]
+    assert [(event["event"], event["phase"]) for event in events] == [
+        ("continuous_primary_failure", "writer_body"),
+        ("continuous_secondary_failure", "writer_exit"),
+    ]
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_secondary_errors_are_bounded(tmp_path, monkeypatch):
+    event_path = tmp_path / "events.jsonl"
+    monkeypatch.setenv("DATA_INTEGRITY_DIAGNOSTICS_PATH", str(event_path))
+    recorder = _ContinuousFailureRecorder("continuous-case-unit")
+    primary = ValueError("primary")
+    recorder.record(primary, "import")
+    recorder.record(RuntimeError("continuous integrity case stopped"), "mutation_a")
+    for _ in range(20):
+        recorder.record(RuntimeError("secondary"), "import", phase="writer_exit")
+    events = [json.loads(line) for line in event_path.read_text().splitlines()]
+    assert len(events) == 9
+    assert sum(event["event"] == "continuous_primary_failure" for event in events) == 1
+    assert recorder.primary()[0] is primary
 
 
 @pytest.mark.tags("CompactionIntegrityUnit")
