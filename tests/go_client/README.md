@@ -236,7 +236,9 @@ counted as successful binary indexed iteration.
 
 `TestRLSSchemaKeys` adds INT64/VARCHAR partition keys, partition-key isolation,
 clustering keys, and combined partition/clustering keys with independent key
-distributions. Partition-key fixtures use two physical partitions, each following
+distributions. These eight profiles use FLOAT_VECTOR with an INT64 primary key;
+the key matrix is not crossed with every vector/primary-key combination.
+Partition-key fixtures use two physical partitions, each following
 the same 3,000/500/500 row sequence with both principals. Reads cover key equality,
 joint key conditions, and Query IN/range filters. Existing-row Upsert with an RLS
 USING predicate is rejected for partition-key collections; the tests verify
