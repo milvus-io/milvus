@@ -12,8 +12,8 @@ The request selects one of two sources:
 - Inline `analyzer_params`: call the existing handler service without a target
   server ID; the existing picker round-robins its ready SN connections. There is
   no collection or WAL requirement on the selected server.
-- Collection field: Proxy resolves collection ID, field ID, current schema
-  version and vchannels. Choose any collection vchannel and use its PChannel
+- Collection field: Proxy resolves collection ID, field ID
+  and vchannels. Choose any collection vchannel and use its PChannel
   assignment to call the current WAL owner, carrying the assignment term.
 
 Field analyzer access requires neither load configuration, replicas or loaded
@@ -27,8 +27,8 @@ ReleaseCollection releases query resources, not this WAL key.
 Inline execution constructs a temporary analyzer and destroys it and each token
 stream on exit. Field execution validates assignment ownership and holds the
 WAL's Working lifetime. FunctionRunnerManager resolves collection ID +
-WAL-vchannel key + field ID, checking the requested schema version under the
-same lock selecting its schema/runner. Managed BM25/MinHash analyzers are pinned
+WAL-vchannel key + field ID using that key's current schema. No Proxy schema
+version is sent or compared. Managed BM25/MinHash analyzers are pinned
 through BatchAnalyze; ordinary analyzer-enabled fields use a copied field schema
 and temporary analyzer. GC before pin returns a transient error; after pin it
 waits for execution. WAL shutdown waits for admitted field analyzer calls through
@@ -52,12 +52,16 @@ progress.
   responses without retrying or converting them to streaming errors. Proxy
   preserves the Status, including its original code and retriability.
 
-On an analyzer schema-version mismatch, Proxy refreshes metadata and re-resolves
-the field name, with at most three attempts. A collection ID change during retry
-fails rather than executing against a recreated collection. When retries are
-exhausted, the final analyzer Status is preserved. Other analyzer failures are
-returned directly. There is no historical schema lookup. Retry budgets respect
-the caller deadline; existing gRPC transport retry configuration is unchanged.
+AnalyzerClient owns the single bounded retry loop for streaming failures. Proxy
+resolves metadata once and forwards the result; it does not refresh metadata or
+retry analyzer responses. The RunAnalyzer gRPC method has no configured retry
+policy, so the connection's service-wide retry policy does not multiply the
+AnalyzerClient budget. Other handler RPCs retain their existing policies.
+
+Collection identity is pinned before execution: Proxy resolves field/channel
+metadata by the original collection ID, and all AnalyzerClient attempts retain
+that ID. A same-name drop/recreate cannot redirect a request to the new collection.
+There is no historical schema lookup or schema-version admission check.
 
 ## Compatibility
 
@@ -74,5 +78,5 @@ requests additionally work before load and after release.
 - `internal/streamingnode/server/service/analyzer.go` — native RPC dispatch/errors.
 - `internal/streamingnode/server/wal/adaptor/analyzer.go` — WAL field execution.
 - `internal/util/function/manager.go` — schema selection and runner lifetime.
-- `internal/proxy/{impl.go,run_analyzer_streaming.go}` — SDK adaptation and metadata refresh.
+- `internal/proxy/{impl.go,run_analyzer_streaming.go}` — SDK adaptation and collection identity.
 - `pkg/proto/streaming.proto` — additive request/response and service method.

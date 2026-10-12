@@ -26,8 +26,8 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err), Results: results}, nil
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer:
 		field := source.FieldAnalyzer
-		if field.GetCollectionId() == 0 || field.GetVchannel() == "" || field.SchemaVersion == nil || field.GetPchannel() == nil || field.GetPchannel().GetName() != funcutil.ToPhysicalChannel(field.GetVchannel()) {
-			return nil, status.NewInvalidArgument("field analyzer requires collection, vchannel, schema version and matching pchannel")
+		if field.GetCollectionId() == 0 || field.GetVchannel() == "" || field.GetPchannel() == nil || field.GetPchannel().GetName() != funcutil.ToPhysicalChannel(field.GetVchannel()) {
+			return nil, status.NewInvalidArgument("field analyzer requires collection, vchannel and matching pchannel")
 		}
 		raw, err := hs.walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(field.GetPchannel()))
 		if err != nil {

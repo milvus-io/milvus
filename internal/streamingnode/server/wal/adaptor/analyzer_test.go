@@ -8,6 +8,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -26,8 +27,8 @@ type analyzerWALTest struct{ walimpls.WALImpls }
 
 func (*analyzerWALTest) Channel() types.PChannelInfo { panic("unpatched Channel") }
 
-func TestWALFieldAnalyzerAdmission(t *testing.T) {
-	mockey.PatchConvey("field analyzer needs only WAL schema and works without a QueryView", t, func() {
+func TestWALFieldAnalyzerCurrentSchema(t *testing.T) {
+	mockey.PatchConvey("field analyzer uses the current WAL schema without a requested version", t, func() {
 		mockey.Mock((*analyzerWALTest).Channel).Return(types.PChannelInfo{Name: "p", Term: 1, AccessMode: types.AccessModeRW}).Build()
 		fm := function.GetManager()
 		const collectionID = 734991
@@ -36,15 +37,19 @@ func TestWALFieldAnalyzerAdmission(t *testing.T) {
 		require.NoError(t, fm.Alloc(collectionID, key, schema))
 		defer fm.Release(collectionID, key)
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, rwWALImpls: &analyzerWALTest{}}
-		version := int32(3)
-		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Placeholder: [][]byte{[]byte("hello world")}, Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{CollectionId: collectionID, Vchannel: "p_1v0", FieldId: 101, SchemaVersion: &version}}}
+		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Placeholder: [][]byte{[]byte("hello-world")}, Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{CollectionId: collectionID, Vchannel: "p_1v0", FieldId: 101}}}
 		resp, err := w.RunAnalyzer(context.Background(), req)
 		require.NoError(t, err)
 		require.Len(t, resp.GetResults()[0].Tokens, 2)
-		version = 4
+		updated := proto.Clone(schema).(*schemapb.CollectionSchema)
+		updated.Version++
+		updated.Fields[0].TypeParams = append(updated.Fields[0].TypeParams, &commonpb.KeyValuePair{Key: "analyzer_params", Value: `{"tokenizer":"whitespace"}`})
+		require.NoError(t, fm.Update(collectionID, key, updated))
 		resp, err = w.RunAnalyzer(context.Background(), req)
 		require.NoError(t, err)
-		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionSchemaVersionNotReady)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetResults()[0].Tokens, 1)
+		require.Equal(t, "hello-world", resp.GetResults()[0].Tokens[0].Token)
 		w.lifetime.SetState(typeutil.LifetimeStateStopped)
 		_, err = w.RunAnalyzer(context.Background(), req)
 		require.True(t, status.AsStreamingError(err).IsOnShutdown())
@@ -53,7 +58,7 @@ func TestWALFieldAnalyzerAdmission(t *testing.T) {
 
 type fieldAnalyzerManager struct{ function.FunctionRunnerManager }
 
-func (*fieldAnalyzerManager) RunWithAnalyzerAtSchemaVersion(context.Context, int64, string, int64, int32, func(function.Analyzer) error) (bool, error) {
+func (*fieldAnalyzerManager) RunWithAnalyzer(context.Context, int64, string, int64, func(function.Analyzer) error) (bool, error) {
 	panic("unpatched")
 }
 
@@ -68,7 +73,7 @@ func TestWALFieldAnalyzerLifetimeAndNames(t *testing.T) {
 	mockey.PatchConvey("field requests pin WAL and normalize multi-analyzer names", t, func() {
 		mockey.Mock((*analyzerWALTest).Channel).Return(types.PChannelInfo{AccessMode: types.AccessModeRW}).Build()
 		mockey.Mock(function.GetManager).Return(&fieldAnalyzerManager{}).Build()
-		mockey.Mock((*fieldAnalyzerManager).RunWithAnalyzerAtSchemaVersion).To(func(_ *fieldAnalyzerManager, ctx context.Context, id int64, key string, field int64, version int32, run func(function.Analyzer) error) (bool, error) {
+		mockey.Mock((*fieldAnalyzerManager).RunWithAnalyzer).To(func(_ *fieldAnalyzerManager, ctx context.Context, id int64, key string, field int64, run func(function.Analyzer) error) (bool, error) {
 			require.Equal(t, int64(7), id)
 			require.Equal(t, "WAL-p_7v0", key)
 			return true, run(&fieldAnalyzerRunner{})
@@ -84,8 +89,7 @@ func TestWALFieldAnalyzerLifetimeAndNames(t *testing.T) {
 			return [][]*milvuspb.AnalyzerToken{{{Token: "one"}}, {{Token: "two"}}}, nil
 		}).Build()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, rwWALImpls: &analyzerWALTest{}}
-		version := int32(3)
-		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Placeholder: [][]byte{[]byte("one"), []byte("two")}, Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{CollectionId: 7, Vchannel: "p_7v0", SchemaVersion: &version}}}
+		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Placeholder: [][]byte{[]byte("one"), []byte("two")}, Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{CollectionId: 7, Vchannel: "p_7v0"}}}
 		req.GetFieldAnalyzer().AnalyzerNames = []string{"one", "two", "three"}
 		resp, err := w.RunAnalyzer(context.Background(), req)
 		require.NoError(t, err)

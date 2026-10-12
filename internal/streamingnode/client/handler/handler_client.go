@@ -155,6 +155,13 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 		},
 		"methodConfig": []map[string]interface{}{
 			{
+				// AnalyzerClient owns the retry budget for this unary RPC.
+				"name": []map[string]string{
+					{"service": "milvus.proto.streaming.StreamingNodeHandlerService", "method": "RunAnalyzer"},
+				},
+				"waitForReady": true,
+			},
+			{
 				"name": []map[string]string{
 					{"service": "milvus.proto.streaming.StreamingNodeHandlerService"},
 				},

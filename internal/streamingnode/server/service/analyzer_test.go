@@ -79,9 +79,8 @@ func (*fieldAnalyzerWAL) RunAnalyzer(context.Context, *streamingpb.StreamingNode
 
 func TestAnalyzerFieldNativeTransport(t *testing.T) {
 	mockey.PatchConvey("field ownership and analyzer response status", t, func() {
-		version := int32(3)
 		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{
-			CollectionId: 7, Vchannel: "p_7v0", FieldId: 101, SchemaVersion: &version,
+			CollectionId: 7, Vchannel: "p_7v0", FieldId: 101,
 			Pchannel: &streamingpb.PChannelInfo{Name: "p", Term: 2},
 		}}}
 		var ownershipErr, executionErr error
@@ -112,10 +111,10 @@ func TestAnalyzerFieldNativeTransport(t *testing.T) {
 		require.True(t, status.AsStreamingError(err).IsWrongStreamingNode())
 		require.Equal(t, 1, execute.Times())
 		ownershipErr = nil
-		executionErr = merr.ErrCollectionSchemaVersionNotReady
+		executionErr = merr.ErrServiceInternal
 		resp, err := client.RunAnalyzer(ctx, req)
 		require.NoError(t, err)
-		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionSchemaVersionNotReady)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceInternal)
 		req.GetFieldAnalyzer().Pchannel.Name = "other"
 		_, err = client.RunAnalyzer(ctx, req)
 		require.True(t, status.AsStreamingError(err).IsInvalidArgument())

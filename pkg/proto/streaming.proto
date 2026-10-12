@@ -1018,7 +1018,8 @@ message StreamingFieldAnalyzer {
     int64 collection_id = 1;
     string vchannel = 2;
     int64 field_id = 3;
-    optional int32 schema_version = 4;
+    reserved 4;
+    reserved "schema_version";
     repeated string analyzer_names = 5;
     PChannelInfo pchannel = 6;
 }

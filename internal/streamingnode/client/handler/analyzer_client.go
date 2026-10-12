@@ -3,9 +3,10 @@ package handler
 import (
 	"context"
 
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/analyzerservice"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -49,12 +50,12 @@ func (ac *analyzerClient) RunAnalyzer(ctx context.Context, req *streamingpb.Stre
 	err := retry.Handle(ctx, func() (bool, error) {
 		client, err := hc.service.GetService(ctx)
 		if err != nil {
-			return analyzerservice.Retryable(err), err
+			return isRetryableAnalyzerTransportError(err), err
 		}
 		if field == nil {
 			// With no server ID, the existing picker round-robins ready SN connections.
 			resp, err = client.RunAnalyzer(ctx, req)
-			return analyzerservice.Retryable(err), err
+			return isRetryableAnalyzerTransportError(err), err
 		}
 		assign := hc.watcher.Get(ctx, funcutil.ToPhysicalChannel(field.GetVchannel()))
 		if assign == nil {
@@ -66,7 +67,15 @@ func (ac *analyzerClient) RunAnalyzer(ctx context.Context, req *streamingpb.Stre
 		if err != nil && isPermanentFailureUntilNewAssignment(err) {
 			_ = hc.rebalanceTrigger.ReportAssignmentError(ctx, assign.Channel, err)
 		}
-		return analyzerservice.Retryable(err), err
+		return isRetryableAnalyzerTransportError(err), err
 	}, retry.Attempts(3))
 	return resp, err
+}
+
+func isRetryableAnalyzerTransportError(err error) bool {
+	if err == nil || status.IsCanceled(err) {
+		return false
+	}
+	se := status.AsStreamingError(err)
+	return se.IsWrongStreamingNode() || se.IsOnShutdown() || se.Code == streamingpb.StreamingCode_STREAMING_CODE_INNER || grpcstatus.Code(err) == codes.Unavailable
 }

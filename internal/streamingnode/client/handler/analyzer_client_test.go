@@ -3,18 +3,23 @@ package handler
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -47,7 +52,7 @@ func (*analyzerTrigger) ReportAssignmentError(context.Context, types.PChannelInf
 }
 
 func TestAnalyzerAssignmentRetry(t *testing.T) {
-	for _, scenario := range []string{"migration", "invalid", "schema mismatch", "analyzer unavailable", "unavailable"} {
+	for _, scenario := range []string{"migration", "invalid", "analyzer unavailable", "unavailable"} {
 		mockey.PatchConvey(scenario, t, func() {
 			term := int64(1)
 			mockey.Mock((*analyzerWatcher).Get).To(func(*analyzerWatcher, context.Context, string) *types.PChannelInfoAssigned {
@@ -69,8 +74,6 @@ func TestAnalyzerAssignmentRetry(t *testing.T) {
 					}
 				case "invalid":
 					return nil, status.NewInvalidArgument("bad names")
-				case "schema mismatch":
-					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrCollectionSchemaVersionNotReady)}, nil
 				case "analyzer unavailable":
 					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrServiceUnavailable)}, nil
 				case "unavailable":
@@ -88,7 +91,7 @@ func TestAnalyzerAssignmentRetry(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, 2, calls)
 				require.Equal(t, 1, reports.Times())
-			case "schema mismatch", "analyzer unavailable":
+			case "analyzer unavailable":
 				require.NoError(t, err)
 				require.Error(t, merr.Error(resp.GetStatus()))
 				require.Equal(t, 1, calls)
@@ -167,4 +170,44 @@ func TestAnalyzerDiscoveryAdmission(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAnalyzerTransportRetryPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		err   error
+		retry bool
+	}{
+		{status.NewInvalidArgument("bad tokenizer"), false},
+		{status.NewUnrecoverableError("unsupported WAL"), false},
+		{status.NewOnShutdownError("closing"), true},
+		{status.NewInner("not ready"), true},
+		{grpcstatus.Error(codes.Unavailable, "connection lost"), true},
+		{grpcstatus.Error(codes.Unimplemented, "older SN"), false},
+		{context.Canceled, false},
+		{context.DeadlineExceeded, false},
+		{nil, false},
+	} {
+		require.Equal(t, tc.retry, isRetryableAnalyzerTransportError(tc.err), "%v", tc.err)
+	}
+}
+
+type analyzerConfigResolver struct{ resolver.Builder }
+
+func (*analyzerConfigResolver) Scheme() string { panic("unpatched") }
+
+func TestAnalyzerDoesNotNestGRPCRetries(t *testing.T) {
+	mockey.PatchConvey("only AnalyzerClient retries RunAnalyzer", t, func() {
+		paramtable.Init()
+		mockey.Mock((*analyzerConfigResolver).Scheme).Return("analyzer-config-test").Build()
+		conn, err := grpc.NewClient("passthrough:///", getDialOptions(&analyzerConfigResolver{})...)
+		require.NoError(t, err)
+		defer conn.Close()
+		conn.Connect()
+		// Wait until gRPC applies the default config. Other handler RPCs keep
+		// their retry policy, while the more specific analyzer config has none.
+		require.Eventually(t, func() bool {
+			return conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName).RetryPolicy != nil
+		}, time.Second, time.Millisecond)
+		require.Nil(t, conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_RunAnalyzer_FullMethodName).RetryPolicy)
+	})
 }

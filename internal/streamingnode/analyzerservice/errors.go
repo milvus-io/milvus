@@ -5,7 +5,6 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -23,12 +22,4 @@ func PublicError(err error) error {
 		return merr.Wrap(merr.ErrServiceUnimplemented, err.Error())
 	}
 	return merr.WrapErrServiceUnavailableErr(err, "run analyzer")
-}
-
-func Retryable(err error) bool {
-	if err == nil || status.IsCanceled(err) {
-		return false
-	}
-	se := status.AsStreamingError(err)
-	return se.IsWrongStreamingNode() || se.IsOnShutdown() || se.Code == streamingpb.StreamingCode_STREAMING_CODE_INNER || grpcstatus.Code(err) == codes.Unavailable
 }

@@ -27,7 +27,7 @@ func (w *walAdaptorImpl) RunAnalyzer(ctx context.Context, req *streamingpb.Strea
 		texts[i] = string(text)
 	}
 	var tokens [][]*milvuspb.AnalyzerToken
-	ok, err := function.GetManager().RunWithAnalyzerAtSchemaVersion(ctx, field.GetCollectionId(), shard.WALFunctionRunnerKey(field.GetVchannel()), field.GetFieldId(), field.GetSchemaVersion(), func(a function.Analyzer) error {
+	ok, err := function.GetManager().RunWithAnalyzer(ctx, field.GetCollectionId(), shard.WALFunctionRunnerKey(field.GetVchannel()), field.GetFieldId(), func(a function.Analyzer) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
