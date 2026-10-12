@@ -952,9 +952,13 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 			eventType = SessionDelEvent
 		}
 		log.Debug("WatchService", zap.Any("event type", eventType))
-		w.eventCh <- &SessionEvent{
+		select {
+		case <-w.ctx.Done():
+			return
+		case w.eventCh <- &SessionEvent{
 			EventType: eventType,
 			Session:   session,
+		}:
 		}
 	}
 }

@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 func TestSessionWatchRetry(t *testing.T) {
@@ -86,12 +85,9 @@ func TestSessionWatchRetry(t *testing.T) {
 					}
 					return map[string]*Session{"node-1": {SessionRaw: SessionRaw{ServerID: 1}}}, 42, nextError(tc.getErrors, gets)
 				}).Build()
-				// Keep the real retry implementation and its ten-attempt bound,
-				// only shorten sleeps for the exhaustion cases.
-				var originalRetry func(context.Context, func() error, ...retry.Option) error
-				mockey.Mock(retry.Do).Origin(&originalRetry).To(func(ctx context.Context, fn func() error, opts ...retry.Option) error {
-					return originalRetry(ctx, fn, append(opts, retry.Sleep(time.Millisecond), retry.MaxSleepTime(2*time.Millisecond))...)
-				}).Build()
+				// Use the real retry implementation, including its backoff and
+				// ten-attempt bound. Do not forward its stack-bound callback
+				// through a runtime patch/Origin trampoline.
 				mockey.Mock((*clientv3.WatchResponse).Err).To(func(resp *clientv3.WatchResponse) error {
 					if resp.Header.Revision == -1 {
 						return rpctypes.ErrLeaderChanged

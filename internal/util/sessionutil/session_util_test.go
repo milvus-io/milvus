@@ -211,6 +211,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
 		wctx, wcancel := context.WithCancel(s.ctx)
 		return &sessionWatcher{
+			ctx:      s.ctx,
 			s:        s,
 			ctx:      wctx,
 			cancel:   wcancel,
