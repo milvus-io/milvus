@@ -111,12 +111,18 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 	pointers := metaKVPointers{kv: s.kv}
 	store := chunkManagerStore{cm: cm}
 	layout := manifest.Layout{RootPath: cm.RootPath()}
-	gc, err := pkindexgc.New(pointers, store, layout, pkindexgc.Config{
+	cfg := pkindexgc.Config{
 		Interval:       Params.DataCoordCfg.PKIndexGCInterval.GetAsDuration(time.Second),
 		Grace:          Params.DataCoordCfg.PKIndexGCGrace.GetAsDuration(time.Second),
 		RetainVersions: Params.DataCoordCfg.PKIndexManifestRetainVersions.GetAsInt(),
 		RetainDuration: Params.DataCoordCfg.PKIndexManifestRetainDuration.GetAsDuration(time.Second),
-	}, nil)
+	}
+	gc, err := pkindexgc.New(pointers, store, layout, cfg,
+		// TODO: pass the outputs of the in-flight compactions of the primary
+		// key index SSTs when that compaction exists.
+		// TODO: add to the live set the tables that a streaming node still
+		// reads on demand from object storage.
+		nil)
 	if err != nil {
 		mlog.Error(s.ctx, "init primary key index gc failed, the gc is disabled", mlog.Err(err))
 	} else {
