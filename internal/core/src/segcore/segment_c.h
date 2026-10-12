@@ -244,6 +244,13 @@ CStatus
 LoadDeletedRecord(CSegmentInterface c_segment,
                   CLoadDeletedRecordInfo deleted_record_info);
 
+CStatus
+PrewarmSegment(CTraceContext c_trace,
+               CSegmentInterface c_segment,
+               const int64_t* field_ids,
+               int64_t field_count,
+               CLoadCancellationSource source);
+
 // This function is currently used only in test.
 // Current implement supports only dropping of non-system fields.
 CStatus

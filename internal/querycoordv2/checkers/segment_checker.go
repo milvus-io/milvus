@@ -507,8 +507,12 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		return nil
 	}
 	priorityMap := make(map[int64]commonpb.LoadPriority)
+	forceSyncWarmup := make(map[int64]bool)
 	for i, s := range segments {
 		priorityMap[s.GetID()] = loadPriorities[i]
+		if partition := c.meta.GetPartition(ctx, s.GetPartitionID()); partition != nil && partition.GetForceSyncWarmup() {
+			forceSyncWarmup[s.GetID()] = true
+		}
 	}
 
 	shardSegments := lo.GroupBy(segments, func(s *datapb.SegmentInfo) string {
@@ -550,7 +554,15 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	// the same budget on the next check tick -- it never converges. Needs
 	// either backoff/a retry cap on repeated DeadlineExceeded rebuilds, or a
 	// no-progress timeout instead of a flat per-task wall-clock budget.
-	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
+	tasks := balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
+	for _, t := range tasks {
+		segmentTask, ok := t.(*task.SegmentTask)
+		if !ok {
+			continue
+		}
+		segmentTask.SetForceSyncWarmup(forceSyncWarmup[segmentTask.SegmentID()])
+	}
+	return tasks
 }
 
 func (c *SegmentChecker) createSegmentReopenTasks(ctx context.Context, segments []*meta.Segment, replica *meta.Replica) []task.Task {

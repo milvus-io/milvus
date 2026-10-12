@@ -86,6 +86,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx cont
 			ExpectedLoadFields:               currentLoadConfig.GetLoadFields(),
 			ExpectedPriority:                 commonpb.LoadPriority_LOW,
 			ExpectedUserSpecifiedReplicaMode: currentLoadConfig.GetUserSpecifiedReplicaMode(),
+			ExpectedForceSyncWarmup:          currentLoadConfig.GetForceSyncWarmup(),
 		},
 	}
 	msg, err := job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq)

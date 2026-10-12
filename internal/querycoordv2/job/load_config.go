@@ -93,6 +93,7 @@ type ExpectedLoadConfig struct {
 	ExpectedLoadFields               []int64
 	ExpectedPriority                 commonpb.LoadPriority
 	ExpectedUserSpecifiedReplicaMode bool
+	ExpectedForceSyncWarmup          bool
 }
 
 type CurrentLoadConfig struct {
@@ -118,6 +119,10 @@ func (c *CurrentLoadConfig) GetLoadFields() []int64 {
 
 func (c *CurrentLoadConfig) GetUserSpecifiedReplicaMode() bool {
 	return c.Collection.UserSpecifiedReplicaMode
+}
+
+func (c *CurrentLoadConfig) GetForceSyncWarmup() bool {
+	return c.Collection.ForceSyncWarmup
 }
 
 func (c *CurrentLoadConfig) GetReplicaNumber() map[string]int {
@@ -167,6 +172,7 @@ func (c *CurrentLoadConfig) IntoLoadConfigMessageHeader() *messagespb.AlterLoadC
 		LoadFields:               loadFields,
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: c.GetUserSpecifiedReplicaMode(),
+		ForceSyncWarmup:          c.GetForceSyncWarmup(),
 	}
 }
 
@@ -192,6 +198,7 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 		LoadFields:               loadFields,
 		Replicas:                 loadReplicaConfigs,
 		UserSpecifiedReplicaMode: req.Expected.ExpectedUserSpecifiedReplicaMode,
+		ForceSyncWarmup:          req.Expected.ExpectedForceSyncWarmup,
 	}
 	// check if the load configuration is changed; nothing to broadcast if not.
 	if previousHeader := req.Current.IntoLoadConfigMessageHeader(); proto.Equal(previousHeader, header) {
