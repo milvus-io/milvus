@@ -55,13 +55,15 @@ func TestProtoContract_FieldSetsPinned(t *testing.T) {
 		msg  proto.Message
 		want []int
 	}{
-		// Release schema audit: milvus-proto/go-api/v2 v2.6.25 and this branch's
+		// Release schema audit: the go-api/v2 revision pinned by go.mod and this branch's
 		// internalpb. Mol scalars, retrieve element metadata, and search aggregate
 		// fields from master do not exist here and remain unknown wire fields.
 		// top-level fast-pathed types (TryUnmarshal dispatch)
 		{"internalpb.RetrieveResults", &internalpb.RetrieveResults{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 13, 14, 15, 16, 17}},
-		{"milvuspb.InsertRequest", &milvuspb.InsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9}},
-		{"milvuspb.UpsertRequest", &milvuspb.UpsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}},
+		// RLS principal and skip flag are plain fields, handled by the official
+		// merge fallback; TestMutationRLSFallbackPreservesWireOrder audits them.
+		{"milvuspb.InsertRequest", &milvuspb.InsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}},
+		{"milvuspb.UpsertRequest", &milvuspb.UpsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}},
 		{"schemapb.SearchResultData", &schemapb.SearchResultData{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}},
 		// nested hand-decoded types (oneof-bearing — highest divergence risk)
 		{"schemapb.FieldData", &schemapb.FieldData{}, []int{1, 2, 3, 4, 5, 6, 7, 8}},

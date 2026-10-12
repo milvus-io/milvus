@@ -29,6 +29,51 @@ func concat(t *testing.T, msgs ...proto.Message) []byte {
 	return out
 }
 
+// These RLS fields are plain scalars delegated to protoMerge. Repeated wire
+// values, including an explicit false, must retain official last-wins behavior.
+func TestMutationRLSFallbackPreservesWireOrder(t *testing.T) {
+	cases := []struct {
+		name      string
+		message   proto.Message
+		principal protowire.Number
+		skip      protowire.Number
+	}{
+		{"insert", &milvuspb.InsertRequest{CollectionName: "c", RlsPrincipal: "first", SkipRls: true}, 10, 11},
+		{"upsert", &milvuspb.UpsertRequest{CollectionName: "c", RlsPrincipal: "first", SkipRls: true}, 12, 13},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fields := test.message.ProtoReflect().Descriptor().Fields()
+			require.Nil(t, fields.ByNumber(test.principal).ContainingOneof())
+			require.Nil(t, fields.ByNumber(test.skip).ContainingOneof())
+			wire, err := proto.Marshal(test.message)
+			require.NoError(t, err)
+			wire = protowire.AppendTag(wire, test.principal, protowire.BytesType)
+			wire = protowire.AppendString(wire, "last")
+			wire = protowire.AppendTag(wire, test.skip, protowire.VarintType)
+			wire = protowire.AppendVarint(wire, 0)
+			want := test.message.ProtoReflect().New().Interface()
+			require.NoError(t, proto.Unmarshal(wire, want))
+			require.Equal(t, "last", want.ProtoReflect().Get(fields.ByNumber(test.principal)).String())
+			require.False(t, want.ProtoReflect().Get(fields.ByNumber(test.skip)).Bool())
+			got := test.message.ProtoReflect().New().Interface()
+			handled, err := TryUnmarshal(got, wire)
+			require.True(t, handled)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(want, got), "got=%v want=%v", got, want)
+
+			// An invalid RLS principal is untrusted ingress too. The fallback
+			// must reject invalid UTF-8 exactly as the official codec does.
+			invalid := protowire.AppendTag(nil, test.principal, protowire.BytesType)
+			invalid = protowire.AppendBytes(invalid, []byte{0xff, 0xfe})
+			require.Error(t, proto.Unmarshal(invalid, want))
+			handled, err = TryUnmarshal(got, invalid)
+			require.True(t, handled)
+			require.Error(t, err)
+		})
+	}
+}
+
 // TestSingularMessageMerge verifies that a singular non-oneof embedded message
 // appearing more than once on the wire is merged field-by-field (proto3 semantics),
 // matching proto.Unmarshal exactly, rather than last-wins replaced.

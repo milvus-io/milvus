@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 )
 
-// These are the audited v2.6.25 descriptors, not master's field allowlists.
+// These are the audited descriptors pinned by the 2.6 go.mod.
 // Pin kinds as well as field numbers so a wire representation change fails.
 func TestProtoContract_ReleaseFieldKindsPinned(t *testing.T) {
 	cases := []struct {
@@ -22,8 +22,8 @@ func TestProtoContract_ReleaseFieldKindsPinned(t *testing.T) {
 		want    string
 	}{
 		{&internalpb.RetrieveResults{}, "1=message,2=message,3=int64,4=message,5=message,6=int64,7=string,8=int64,13=message,14=int64,15=bool,16=int64,17=int64"},
-		{&milvuspb.InsertRequest{}, "1=message,2=string,3=string,4=string,5=message,6=uint32,7=uint32,8=uint64,9=string"},
-		{&milvuspb.UpsertRequest{}, "1=message,2=string,3=string,4=string,5=message,6=uint32,7=uint32,8=uint64,9=bool,10=string,11=message"},
+		{&milvuspb.InsertRequest{}, "1=message,2=string,3=string,4=string,5=message,6=uint32,7=uint32,8=uint64,9=string,10=string,11=bool"},
+		{&milvuspb.UpsertRequest{}, "1=message,2=string,3=string,4=string,5=message,6=uint32,7=uint32,8=uint64,9=bool,10=string,11=message,12=string,13=bool"},
 		{&schemapb.SearchResultData{}, "1=int64,2=int64,3=message,4=float,5=message,6=int64,7=string,8=message,9=int64,10=float,11=message,12=float,13=string,14=message,15=message"},
 		{&schemapb.FieldData{}, "1=enum,2=string,3=message,4=message,5=int64,6=bool,7=bool,8=message"},
 		{&schemapb.ScalarField{}, "1=message,2=message,3=message,4=message,5=message,6=message,7=message,8=message,9=message,10=message,11=message,12=message"},
