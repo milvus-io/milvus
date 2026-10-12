@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func TestSessionWatchRetry(t *testing.T) {
@@ -67,7 +66,7 @@ func TestSessionWatchRetry(t *testing.T) {
 				require.NoError(t, err)
 				defer cli.Close()
 				s := &Session{ctx: ctx, etcdCli: cli, metaRoot: "54137-unit"}
-				w := &sessionWatcher{s: s, prefix: "node", eventCh: make(chan *SessionEvent)}
+				w := &sessionWatcher{s: s, ctx: ctx, prefix: "node", eventCh: make(chan *SessionEvent)}
 				gets, watches := 0, 0
 				nextError := func(errs []error, call int) error {
 					if call <= len(errs) {
@@ -86,12 +85,9 @@ func TestSessionWatchRetry(t *testing.T) {
 					}
 					return map[string]*Session{"node-1": {SessionRaw: SessionRaw{ServerID: 1}}}, 42, nextError(tc.getErrors, gets)
 				}).Build()
-				// Keep the real retry implementation and its ten-attempt bound,
-				// only shorten sleeps for the exhaustion cases.
-				var originalRetry func(context.Context, func() error, ...retry.Option) error
-				mockey.Mock(retry.Do).Origin(&originalRetry).To(func(ctx context.Context, fn func() error, opts ...retry.Option) error {
-					return originalRetry(ctx, fn, append(opts, retry.Sleep(time.Millisecond), retry.MaxSleepTime(2*time.Millisecond))...)
-				}).Build()
+				// Use the real retry implementation, including its backoff and
+				// ten-attempt bound. Do not forward its stack-bound callback
+				// through a runtime patch/Origin trampoline.
 				mockey.Mock((*clientv3.WatchResponse).Err).To(func(resp *clientv3.WatchResponse) error {
 					if resp.Header.Revision == -1 {
 						return rpctypes.ErrLeaderChanged
@@ -158,7 +154,8 @@ func TestSessionWatchRecoveryRevision(t *testing.T) {
 	_, err = cli.Put(ctx, key, `{"ServerID":1}`)
 	require.NoError(t, err)
 	w := &sessionWatcher{
-		s: &Session{ctx: ctx, etcdCli: cli, metaRoot: root}, prefix: "node",
+		ctx: ctx,
+		s:   &Session{ctx: ctx, etcdCli: cli, metaRoot: root}, prefix: "node",
 		eventCh: make(chan *SessionEvent, 10), validate: func(*Session) bool { return true },
 		rewatch: func(sessions map[string]*Session) error {
 			require.Equal(t, int64(1), sessions["node-1"].ServerID)
@@ -216,7 +213,8 @@ func TestSessionWatchAuthenticateLeaderChanged(t *testing.T) {
 	s := &Session{ctx: ctx, etcdCli: cli, metaRoot: root}
 	reconciles := 0
 	w := &sessionWatcher{
-		s: s, prefix: "node", eventCh: make(chan *SessionEvent, 10), validate: func(*Session) bool { return true },
+		ctx: ctx,
+		s:   s, prefix: "node", eventCh: make(chan *SessionEvent, 10), validate: func(*Session) bool { return true },
 		rewatch: func(sessions map[string]*Session) error {
 			reconciles++
 			require.Equal(t, int64(1), sessions["node-1"].ServerID)

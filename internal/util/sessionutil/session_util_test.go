@@ -208,6 +208,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 
 	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
 		return &sessionWatcher{
+			ctx:      s.ctx,
 			s:        s,
 			prefix:   "test",
 			rewatch:  rewatch,
