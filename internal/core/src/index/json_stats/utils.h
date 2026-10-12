@@ -19,6 +19,7 @@
 #include <cstring>
 #include "common/FastMem.h"
 #include <map>
+#include <new>
 #include <optional>
 #include <set>
 #include <string>
@@ -83,6 +84,8 @@ UnescapeJsonString(const std::string& escaped) {
                       escaped);
         }
         return std::string(std::string_view(elem.get_string()));
+    } catch (const std::bad_alloc&) {
+        throw;
     } catch (const SegcoreError&) {
         // Already classified above (DataFormatBroken); SegcoreError derives from
         // std::runtime_error, so without this the generic handler below would
@@ -397,6 +400,12 @@ CreateArrowField(const JsonKey& key, const JsonKeyLayoutType& key_type);
 std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
           std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
 CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
+
+// Build task-local Arrow columns without visiting the potentially much larger
+// set of keys stored in the shared BSON column. The shared builder is last.
+std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
+          std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
+CreateArrowBuildersForColumns(const std::set<JsonKey>& column_keys);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(const std::map<JsonKey, JsonKeyLayoutType>& column_map);

@@ -30,6 +30,7 @@ func newSwithableScanner(
 	writeAheadBuffer wab.ROWriteAheadBuffer,
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
+	startupBarrier *scannerStartupBarrier,
 ) switchableScanner {
 	return &catchupScanner{
 		switchableScannerImpl: switchableScannerImpl{
@@ -41,6 +42,7 @@ func newSwithableScanner(
 		},
 		deliverPolicy:          deliverPolicy,
 		exclusiveStartTimeTick: 0,
+		startupBarrier:         startupBarrier,
 	}
 }
 
@@ -109,6 +111,7 @@ func (t *oldVersionLastConfirmedTracker) Track(msgID message.MessageID) message.
 
 // catchupScanner is a scanner that make a read at underlying wal, and try to catchup the writeahead buffer then switch to tailing mode.
 type catchupScanner struct {
+	startupBarrier *scannerStartupBarrier // only the initial catchup waits for startup
 	switchableScannerImpl
 	deliverPolicy                  options.DeliverPolicy
 	exclusiveStartTimeTick         uint64 // scanner should filter out the message that less than or equal to this time tick.
@@ -206,12 +209,27 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 			if err := s.HandleMessage(ctx, msg); err != nil {
 				return nil, err
 			}
-			if msg.MessageType() != message.MessageTypeTimeTick || s.writeAheadBuffer == nil {
-				// Only timetick message is keep the same order with the write ahead buffer.
-				// So we can only use the timetick message to catchup the write ahead buffer.
+			if s.startupBarrier != nil {
+				if !s.startupBarrier.matches(msg) {
+					continue
+				}
+				// This WAB was seeded by exactly this barrier. Older barriers and
+				// TimeTicks cannot switch sources before startup state is captured.
+				ready := s.startupBarrier.resume
+				s.startupBarrier = nil
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-ready:
+				}
+			} else if msg.MessageType() != message.MessageTypeTimeTick {
+				// Ordinary catchup switches only at a TimeTick shared with the WAB.
 				continue
 			}
-			// Here's a timetick message from the scanner, make tailing read if we catch up the writeahead buffer.
+			if s.writeAheadBuffer == nil {
+				continue
+			}
+			// Switch sources only after a confirmation boundary shared with WAB.
 			if reader, err := s.writeAheadBuffer.ReadFromExclusiveTimeTick(ctx, msg.TimeTick()); err == nil {
 				s.logger.Info(ctx, "scanner consuming was interrpted because catup done",
 					mlog.Uint64("timetick", msg.TimeTick()),

@@ -207,6 +207,35 @@ class VectorIndex : public IndexBase {
         return id_map.IsValidOutId(logical_offset);
     }
 
+    void
+    ApplyValidDataByRange(int64_t logical_offset,
+                          int64_t count,
+                          TargetBitmapView valid_result) const {
+        AssertInfo(count >= 0, "validity range count is negative");
+        AssertInfo(valid_result.size() == static_cast<size_t>(count),
+                   "validity range result size mismatch");
+        GetIdMap().AndValidityByRange(
+            logical_offset,
+            static_cast<size_t>(count),
+            reinterpret_cast<uint8_t*>(valid_result.data()),
+            valid_result.offset());
+    }
+
+    void
+    ApplyValidDataByOffsets(const int64_t* offsets,
+                            int64_t count,
+                            TargetBitmapView valid_result) const {
+        AssertInfo(count >= 0, "validity offset count is negative");
+        AssertInfo(valid_result.size() == static_cast<size_t>(count),
+                   "validity offset result size mismatch");
+        GetIdMap().ApplyValidityByOffsets(
+            offsets, static_cast<size_t>(count), [&](size_t i, bool valid) {
+                if (!valid) {
+                    valid_result[i] = false;
+                }
+            });
+    }
+
     bool
     HasValidData() const {
         return !GetIdMap().ValidBitmap().empty();

@@ -322,7 +322,11 @@ func (g *GetStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 		mlog.Warn(ctx, "QueryNode statistic result error",
 			mlog.Int64("nodeID", nodeID),
 			mlog.String("reason", result.GetStatus().GetReason()))
-		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to get statistic on QueryNode ID=%d", nodeID)
+		statusErr := merr.Error(result.GetStatus())
+		if errors.Is(statusErr, merr.ErrCollectionNotLoaded) {
+			g.shardclientMgr.InvalidateShardLeaderCache([]int64{g.CollectionID})
+		}
+		return errors.Wrapf(statusErr, "fail to get statistic on QueryNode ID=%d", nodeID)
 	}
 	g.resultBuf.Insert(result)
 

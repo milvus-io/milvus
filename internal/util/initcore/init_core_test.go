@@ -276,6 +276,19 @@ func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
 	assert.False(t, applied.Load())
 }
 
+func TestLazyColumnGroupHotUpdate(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	SetupCoreConfigChangelCallback()
+	key := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.Key
+	previous := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetValue()
+	t.Cleanup(func() { assert.NoError(t, pt.Save(key, previous)) })
+	for _, value := range []string{"false", "true", "false"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.Equal(t, value == "true", getLazyColumnGroupEnabled())
+	}
+}
+
 // TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers
 // a handler under each of the two watched keys. The sentinel handler we
 // register after the helper fires whenever the dispatcher receives an event
@@ -545,6 +558,18 @@ func TestUpdateStorageV2AsyncLoadReadWindowSizeBytes(t *testing.T) {
 	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
 	updateStorageV2AsyncLoadReadWindowSizeBytes(16 * 1024 * 1024)
 	assert.EqualValues(t, 16*1024*1024, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestInitStorageV2FileSystemUsesProvidedLocalConfig(t *testing.T) {
+	params := &paramtable.ComponentParam{}
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	assert.NoError(t, params.Save(params.CommonCfg.StorageType.Key, "local"))
+	assert.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "3"))
+	// Invalid values supplied by the caller must be rejected, even when the
+	// global configuration has a valid default. This fails before entering C++.
+	assert.PanicsWithValue(t, `invalid common.storage.talon.mode: "3"`, func() {
+		_ = InitStorageV2FileSystem(params)
+	})
 }
 
 func TestInitStorageV2FileSystem(t *testing.T) {

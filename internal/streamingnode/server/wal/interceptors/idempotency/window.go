@@ -22,7 +22,6 @@ const (
 )
 
 type WindowConfig struct {
-	Enabled      bool
 	MaxBytes     int
 	MaxKeyLength int
 	Now          func() time.Time
@@ -117,7 +116,7 @@ func NewWindowFromSnapshot(config WindowConfig, snapshot *idempotencyview.Snapsh
 	// wrong reason to refuse.
 	//
 	// The snapshot may carry a key MORE THAN ONCE: the store bounds what it
-	// retains by maxRetainedBytes per pchannel while this window bounds itself
+	// retains by the Summary byte budget per pchannel while this window bounds itself
 	// by maxBytesPerWindow per vchannel, so a key evicted here and later reused
 	// is written as a second record and both can survive in the retained chunk
 	// set. The reader concatenates chunks by generation without deduplicating,

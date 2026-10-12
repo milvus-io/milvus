@@ -294,9 +294,9 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
         if (valid_row_ids_built_.load(std::memory_order_relaxed)) {
             return;
         }
+        auto chunk_pws = GetAllChunks(op_ctx);
         const auto total_chunks = num_chunks();
         const auto total_rows = NumRows();
-        auto chunk_pws = GetAllChunks(op_ctx);
 
         valid_data_.resize(total_rows);
         valid_count_per_chunk_.assign(total_chunks, 0);

@@ -121,9 +121,9 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 		CollectionNames: []string{s.collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[s.collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[s.collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[s.collectionName]
 	s.True(has)

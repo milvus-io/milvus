@@ -157,7 +157,7 @@ func (s *RawDataV2Suite) runRawDataCampaign(c rawDataCampaign) {
 		DbName: s.dbName, CollectionNames: []string{collectionName},
 	})
 	s.Require().NoError(merr.CheckRPCCall(flush, err))
-	flushedIDs := flush.GetCollSegIDs()[collectionName].GetData()
+	flushedIDs := flush.GetFlushCollSegIDs()[collectionName].GetData()
 	s.Require().NotEmpty(flushedIDs)
 	s.WaitForFlush(ctx, flushedIDs, flush.GetCollFlushTs()[collectionName], s.dbName, collectionName)
 

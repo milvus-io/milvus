@@ -268,6 +268,24 @@ func TestValidateNoDuplicateKeys(t *testing.T) {
 	}))
 }
 
+func TestGetRLSOptions(t *testing.T) {
+	principal, skip, err := GetRLSOptions(nil)
+	assert.NoError(t, err)
+	assert.Empty(t, principal)
+	assert.False(t, skip)
+
+	principal, skip, err = GetRLSOptions(Options{
+		{Key: RLSPrincipal, Value: "alice"},
+		{Key: SkipRLS, Value: "TRUE"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, "alice", principal)
+	assert.True(t, skip)
+
+	_, _, err = GetRLSOptions(Options{{Key: SkipRLS, Value: "yes"}})
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
 // Nothing bounds how many options an ImportV2 request carries -- the only ceiling
 // is the 256 MiB gRPC body, and 50k keys fit in under 1 MB. This check runs first
 // in proxy PreExecute, ahead of even the collection lookup, on the task pool shared

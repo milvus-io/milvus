@@ -26,7 +26,7 @@
 #include <vector>
 
 #include "NamedType/named_type_impl.hpp"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/IndexMeta.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
@@ -608,7 +608,7 @@ INSTANTIATE_TEST_SUITE_P(
         return name;
     });
 
-TEST(ElementFilter, GrowingSegmentArrayOffsets) {
+TEST(ElementFilter, GrowingSegmentStructElementOffsets) {
     int dim = 4;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
@@ -661,15 +661,15 @@ TEST(ElementFilter, GrowingSegmentArrayOffsets) {
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
 
-    // Both fields should share the same ArrayOffsets
-    auto offsets_vec = growing_impl->GetArrayOffsets(vec_fid);
-    auto offsets_int = growing_impl->GetArrayOffsets(int_array_fid);
+    // Both fields should share the same StructElementOffsets
+    auto offsets_vec = growing_impl->GetStructElementOffsets(vec_fid);
+    auto offsets_int = growing_impl->GetStructElementOffsets(int_array_fid);
     ASSERT_NE(offsets_vec, nullptr);
     ASSERT_NE(offsets_int, nullptr);
 
     // Should point to the same object (shared)
     ASSERT_EQ(offsets_vec, offsets_int)
-        << "Fields in same struct should share ArrayOffsets";
+        << "Fields in same struct should share StructElementOffsets";
 
     // Verify counts
     ASSERT_EQ(offsets_vec->GetRowCount(), N)
@@ -692,7 +692,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsets) {
 }
 
 TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
-    // Test out-of-order Insert handling in GrowingArrayOffsets
+    // Test out-of-order Insert handling in StructElementOffsetsGrowing
     int dim = 4;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
@@ -762,11 +762,11 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     segment->Insert(
         25, 10, batch3.row_ids_.data(), batch3.timestamps_.data(), batch3.raw_);
 
-    // Verify ArrayOffsets
+    // Verify StructElementOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
 
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
 
     // After inserting docs [0-19] (batch3 cached due to gap), committed count
@@ -1159,10 +1159,10 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
 
-    // Verify ArrayOffsets was built
+    // Verify StructElementOffsets was built
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
     ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), N * array_len);
@@ -2661,14 +2661,15 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
         dynamic_cast<SegmentInternalInterface*>(segment.get());
     ASSERT_NE(internal_segment, nullptr);
 
-    auto array_offsets = segment->GetArrayOffsets(int_array_fid);
-    ASSERT_NE(array_offsets, nullptr);
-    ASSERT_EQ(array_offsets->GetTotalElementCount(), 2);
+    auto struct_element_offsets =
+        segment->GetStructElementOffsets(int_array_fid);
+    ASSERT_NE(struct_element_offsets, nullptr);
+    ASSERT_EQ(struct_element_offsets->GetTotalElementCount(), 2);
     for (size_t row = 0; row < kTargetRow; ++row) {
-        EXPECT_EQ(array_offsets->ElementIDRangeOfRow(row),
+        EXPECT_EQ(struct_element_offsets->ElementIDRangeOfRow(row),
                   std::make_pair(0, 0));
     }
-    EXPECT_EQ(array_offsets->ElementIDRangeOfRow(kTargetRow),
+    EXPECT_EQ(struct_element_offsets->ElementIDRangeOfRow(kTargetRow),
               std::make_pair(0, 2));
 
     enum class PredicateMode {
@@ -4125,10 +4126,10 @@ TEST(ElementFilter, GrowingMultiChunkElementSearch) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
 
-    // Verify ArrayOffsets
+    // Verify StructElementOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
     ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), N * array_len);
@@ -5219,7 +5220,7 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
 
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
     ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), 1);

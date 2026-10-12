@@ -72,6 +72,16 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 		return nil, 0, merr.WrapErrParameterInvalidMsg("failed to unmarshal placeholder group: %v", err)
 	}
 
+	// Validate every sparse placeholder before any pass-through path can forward
+	// client-supplied rows to segcore, including when no type conversion is needed.
+	for _, placeholder := range phg.GetPlaceholders() {
+		if placeholder.GetType() == commonpb.PlaceholderType_SparseFloatVector {
+			if err := typeutil.ValidateSparseFloatRows(placeholder.GetValues()...); err != nil {
+				return nil, placeholder.GetType(), err
+			}
+		}
+	}
+
 	if len(phg.Placeholders) == 0 {
 		return phgBytes, 0, nil
 	}

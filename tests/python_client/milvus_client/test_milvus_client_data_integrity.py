@@ -1409,8 +1409,15 @@ def _compaction_integrity_physical_pk(logical_pk, primary_key_type):
     return f"pk-{logical_pk:020d}"
 
 
-def _compaction_integrity_output_fields(include_struct_array, include_text, include_bm25_control):
+def _compaction_integrity_output_fields(
+    include_struct_array,
+    include_text,
+    include_bm25_control,
+    include_test_sequence_id=False,
+):
     output_fields = list(COMPACTION_INTEGRITY_BASE_OUTPUT_FIELDS)
+    if include_test_sequence_id:
+        output_fields.insert(output_fields.index("explicit_test_ts") + 1, "test_sequence_id")
     if not include_struct_array:
         output_fields = [
             field_name
@@ -1628,6 +1635,7 @@ def _build_compaction_integrity_row(
     include_text,
     include_bm25_control=False,
     include_struct_array=True,
+    test_sequence_id=None,
 ):
     physical_pk = _compaction_integrity_physical_pk(logical_pk, primary_key_type)
     varchar_signature = _compaction_integrity_signature(run_id, logical_pk, explicit_test_ts, 7)
@@ -1711,6 +1719,8 @@ def _build_compaction_integrity_row(
             "field": 19,
         },
     }
+    if test_sequence_id is not None:
+        row["test_sequence_id"] = test_sequence_id
     if not include_struct_array:
         row.pop(COMPACTION_INTEGRITY_STRUCT_ARRAY_FIELD)
         for field_name in COMPACTION_INTEGRITY_NULLABLE_VECTOR_FIELDS:
@@ -1844,6 +1854,7 @@ def _canonical_compaction_integrity_cell(field_name, value, primary_key_type):
     elif field_name in {
         "id",
         "explicit_test_ts",
+        "test_sequence_id",
         "int64_value",
         "default_value",
         COMPACTION_INTEGRITY_ADDED_DEFAULT_FIELD,
@@ -2096,6 +2107,7 @@ def _snapshot_compaction_integrity_segments(segments):
         segment.segment_id: {
             "segment_id": segment.segment_id,
             "state": segment.state_name,
+            "level": getattr(segment, "level_name", None),
             "num_rows": segment.num_rows,
             "is_sorted": segment.is_sorted,
             "storage_version": segment.storage_version,
@@ -2287,6 +2299,18 @@ def _assert_compaction_integrity_v2_ddl_checkpoint(checkpoint, before_checkpoint
     return edges
 
 
+def _compaction_integrity_timeout_kwargs(remaining_timeout, deadline=None):
+    # Phase 1 keeps its existing defaults; continuous tests share a case budget.
+    if remaining_timeout is None:
+        return {}
+    remaining = remaining_timeout()
+    if deadline is not None:
+        remaining = min(remaining, deadline - time.time())
+        if remaining <= 0:
+            raise TimeoutError("compaction checkpoint deadline exceeded")
+    return {"timeout": remaining}
+
+
 def _wait_for_compaction_integrity_checkpoint(
     client,
     collection_name,
@@ -2297,6 +2321,8 @@ def _wait_for_compaction_integrity_checkpoint(
     required_task_types=None,
     expected_storage_version=None,
     timeout=120,
+    require_exact_segment_rows=True,
+    remaining_timeout=None,
 ):
     assert transition_policy in {"stable", "in_place_schema_bump", "replacement_schema_bump", "lineage"}
     if transition_policy in {"in_place_schema_bump", "replacement_schema_bump"}:
@@ -2310,7 +2336,9 @@ def _wait_for_compaction_integrity_checkpoint(
     reported_task_failures = set()
     while time.time() < deadline:
         poll_count += 1
-        all_segments = _snapshot_compaction_integrity_segments(client.list_segments(collection_name))
+        all_segments = _snapshot_compaction_integrity_segments(
+            client.list_segments(collection_name, **_compaction_integrity_timeout_kwargs(remaining_timeout, deadline))
+        )
         active_segments = {
             segment_id: segment
             for segment_id, segment in all_segments.items()
@@ -2319,11 +2347,19 @@ def _wait_for_compaction_integrity_checkpoint(
         serving_segments = {
             segment_id: segment
             for segment_id, segment in _snapshot_compaction_integrity_segments(
-                client.list_loaded_segments(collection_name)
+                client.list_loaded_segments(
+                    collection_name, **_compaction_integrity_timeout_kwargs(remaining_timeout, deadline)
+                )
             ).items()
             if segment["num_rows"] != 0
         }
-        tasks = _snapshot_compaction_integrity_tasks(client.list_compaction_tasks(collection_name))
+        tasks = _snapshot_compaction_integrity_tasks(
+            client.list_compaction_tasks(
+                collection_name, **_compaction_integrity_timeout_kwargs(remaining_timeout, deadline)
+            )
+        )
+        if remaining_timeout is not None:
+            remaining_timeout()
         _assert_compaction_integrity_task_snapshot(tasks)
         failed_tasks = _compaction_integrity_failed_tasks(tasks)
         new_task_failures = {
@@ -2380,19 +2416,23 @@ def _wait_for_compaction_integrity_checkpoint(
         serving_sealed = all(segment["state"] == "Sealed" for segment in serving_segments.values())
         active_rows = sum(segment["num_rows"] for segment in active_segments.values())
         row_count_matches = active_rows == expected_rows
+        # Mutations can leave deleted/older versions in physical segment rows;
+        # the fenced dataset verifier still requires exact logical PK/cell equality.
+        row_count_valid = row_count_matches or not require_exact_segment_rows
+        expect_empty_segments = expected_rows == 0 and (require_exact_segment_rows or not active_segments)
         storage_version_valid = (
             not storage_versions
-            if expected_rows == 0
+            if expect_empty_segments
             else (len(storage_versions) == 1 and storage_versions.issubset({2, 3}))
         )
-        if expected_storage_version is not None and expected_rows != 0:
+        if expected_storage_version is not None and not expect_empty_segments:
             storage_version_valid = storage_versions == {expected_storage_version}
         ready = (
             tasks_terminal
             and active_stable
             and serving_matches_active
             and serving_sealed
-            and row_count_matches
+            and row_count_valid
             and storage_version_valid
             and has_graph_transition
             and task_requirement_satisfied
@@ -2424,6 +2464,7 @@ def _wait_for_compaction_integrity_checkpoint(
                 f"active_stable={active_stable} "
                 f"serving_matches_active={serving_matches_active} serving_sealed={serving_sealed} "
                 f"row_count_matches={row_count_matches} graph_transition={has_graph_transition} "
+                f"require_exact_segment_rows={require_exact_segment_rows} "
                 f"task_requirement_satisfied={task_requirement_satisfied} "
                 f"new_successful_task_ids={sorted(successful_new_tasks)} transition_policy={transition_policy} "
                 f"storage_version_valid={storage_version_valid} rows={active_rows}/{expected_rows} "
@@ -2439,7 +2480,7 @@ def _wait_for_compaction_integrity_checkpoint(
             )
             return last_observation
         last_signature = signature
-        time.sleep(2)
+        time.sleep(2 if remaining_timeout is None else min(2, remaining_timeout()))
     raise AssertionError(f"collection did not reach a stable {transition_policy} checkpoint: {last_observation}")
 
 
@@ -2449,19 +2490,25 @@ def _assert_compaction_integrity_dataset(
     expected_by_pk,
     output_fields,
     primary_key_type,
+    query_filter=None,
+    remaining_timeout=None,
 ):
     assert COMPACTION_INTEGRITY_QUERY_BATCH_SIZE > 0
     log.info(
         f"data integrity validation start collection={collection_name} rows={len(expected_by_pk)} "
         f"fields={len(output_fields)} output_fields={output_fields}"
     )
-    query_filter = "id >= 0" if primary_key_type == DataType.INT64 else 'id != ""'
+    if query_filter is None:
+        query_filter = "id >= 0" if primary_key_type == DataType.INT64 else 'id != ""'
     iterator = client.query_iterator(
         collection_name,
         batch_size=COMPACTION_INTEGRITY_QUERY_BATCH_SIZE,
         filter=query_filter,
         output_fields=output_fields,
         consistency_level="Strong",
+        # Iterator.next() has no public per-page timeout override, so bound
+        # each page and check the case budget before/after it without SDK edits.
+        **({} if remaining_timeout is None else {"timeout": min(30, remaining_timeout())}),
     )
     seen_primary_keys = set()
     actual_count = 0
@@ -2477,7 +2524,11 @@ def _assert_compaction_integrity_dataset(
     total_sample_candidates = 0
     try:
         while True:
+            if remaining_timeout is not None:
+                remaining_timeout()
             batch = iterator.next()
+            if remaining_timeout is not None:
+                remaining_timeout()
             if not batch:
                 break
             batch_index += 1
@@ -2821,6 +2872,8 @@ def _assert_compaction_integrity_fenced_dataset(
     expected_storage_version,
     additional_validator=None,
     timeout=300,
+    require_exact_segment_rows=True,
+    remaining_timeout=None,
 ):
     deadline = time.time() + timeout
     attempt = 0
@@ -2828,6 +2881,8 @@ def _assert_compaction_integrity_fenced_dataset(
     while time.time() < deadline:
         attempt += 1
         remaining = max(1, deadline - time.time())
+        if remaining_timeout is not None:
+            remaining = min(remaining, remaining_timeout())
         before = _wait_for_compaction_integrity_checkpoint(
             client,
             collection_name,
@@ -2837,6 +2892,8 @@ def _assert_compaction_integrity_fenced_dataset(
             transition_policy="stable",
             expected_storage_version=expected_storage_version,
             timeout=remaining,
+            require_exact_segment_rows=require_exact_segment_rows,
+            **({} if remaining_timeout is None else {"remaining_timeout": remaining_timeout}),
         )
         validation_error = None
         data_validation_evidence = None
@@ -2848,6 +2905,7 @@ def _assert_compaction_integrity_fenced_dataset(
                 expected_by_pk,
                 output_fields,
                 primary_key_type,
+                **({} if remaining_timeout is None else {"remaining_timeout": remaining_timeout}),
             )
             if additional_validator is not None:
                 validation_result = additional_validator()
@@ -2856,6 +2914,8 @@ def _assert_compaction_integrity_fenced_dataset(
 
         remaining = max(1, deadline - time.time())
         try:
+            if remaining_timeout is not None:
+                remaining = min(remaining, remaining_timeout())
             after = _wait_for_compaction_integrity_checkpoint(
                 client,
                 collection_name,
@@ -2865,6 +2925,8 @@ def _assert_compaction_integrity_fenced_dataset(
                 transition_policy="stable",
                 expected_storage_version=expected_storage_version,
                 timeout=remaining,
+                require_exact_segment_rows=require_exact_segment_rows,
+                **({} if remaining_timeout is None else {"remaining_timeout": remaining_timeout}),
             )
         except (Exception, pytest.fail.Exception) as checkpoint_error:
             _log_compaction_integrity_evidence(
@@ -2889,6 +2951,7 @@ def _assert_compaction_integrity_fenced_dataset(
             _log_compaction_integrity_evidence(
                 "fenced_data_validation_passed",
                 collection=collection_name,
+                require_exact_segment_rows=require_exact_segment_rows,
                 attempt=attempt,
                 rows=len(expected_by_pk),
                 before_frontier=before_signature,
@@ -3470,11 +3533,14 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
         include_text,
         include_bm25_control=False,
         include_struct_array=True,
+        include_test_sequence_id=False,
+        remaining_timeout=None,
     ):
         output_fields = _compaction_integrity_output_fields(
             include_struct_array,
             include_text,
             include_bm25_control,
+            include_test_sequence_id,
         )
         schema = self.create_schema(client, auto_id=False, enable_dynamic_field=True)[0]
         if primary_key_type == DataType.INT64:
@@ -3482,6 +3548,8 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
         else:
             schema.add_field("id", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
         schema.add_field("explicit_test_ts", DataType.INT64)
+        if include_test_sequence_id:
+            schema.add_field("test_sequence_id", DataType.INT64)
         schema.add_field("bool_value", DataType.BOOL, nullable=True)
         schema.add_field("int8_value", DataType.INT8)
         schema.add_field("int16_value", DataType.INT16)
@@ -3648,6 +3716,8 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
             attempts = 0
             while True:
                 remaining = deadline - time.monotonic()
+                if remaining_timeout is not None:
+                    remaining = min(remaining, remaining_timeout())
                 if remaining <= 0:
                     raise AssertionError(
                         f"Proxy did not adopt StorageV3 within {COMPACTION_INTEGRITY_V3_ADOPTION_TIMEOUT}s "
@@ -3683,8 +3753,10 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
                 time.sleep(min(1, remaining))
             # Only schema creation probes Proxy adoption; index creation and load
             # each use the normal test timeout, not the short retry-attempt budget.
-            self.create_index(client, collection_name, index_params)
-            self.load_collection(client, collection_name)
+            self.create_index(
+                client, collection_name, index_params, **_compaction_integrity_timeout_kwargs(remaining_timeout)
+            )
+            self.load_collection(client, collection_name, **_compaction_integrity_timeout_kwargs(remaining_timeout))
         else:
             self.create_collection(
                 client,
@@ -3693,6 +3765,7 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
                 index_params=index_params,
                 consistency_level="Strong",
                 num_shards=1,
+                **_compaction_integrity_timeout_kwargs(remaining_timeout),
             )
         return output_fields, schema
 

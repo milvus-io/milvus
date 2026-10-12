@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHTTPConfig_Init(t *testing.T) {
@@ -28,6 +29,7 @@ func TestHTTPConfig_Init(t *testing.T) {
 	params.Init(NewBaseTable(SkipRemote(true)))
 	cfg := &params.HTTPCfg
 	assert.Equal(t, cfg.Enabled.GetAsBool(), true)
+	assert.True(t, cfg.EnableV1.GetAsBool())
 	assert.Equal(t, cfg.DebugMode.GetAsBool(), false)
 	assert.Equal(t, cfg.Port.GetValue(), "")
 	assert.Equal(t, cfg.AcceptTypeAllowInt64.GetValue(), "true")
@@ -58,4 +60,15 @@ func TestHTTPConfig_TimeoutOverrides(t *testing.T) {
 	assert.Equal(t, 9*time.Second, cfg.WriteTimeout.GetAsDurationByParse())
 	assert.Equal(t, 10*time.Second, cfg.IdleTimeout.GetAsDurationByParse())
 	assert.Equal(t, 2048, cfg.MaxHeaderBytes.GetAsInt())
+}
+
+func TestHTTPConfig_V1Override(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+	t.Cleanup(base.mgr.Close)
+	cfg := httpConfig{}
+	cfg.init(base)
+	assert.True(t, cfg.EnableV1.GetAsBool(), "existing deployments without this key keep V1 enabled")
+	require.NoError(t, base.Save(cfg.EnableV1.Key, "false"))
+	assert.False(t, cfg.EnableV1.GetAsBool())
+	assert.True(t, cfg.Enabled.GetAsBool(), "the route switch must not disable the HTTP listener")
 }

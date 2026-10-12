@@ -493,18 +493,16 @@ class PhyCompareFilterExpr : public Expr {
                     get_chunk_id_and_offset(right_field_, offset);
 
                 if (left_chunk_id != cached_left_chunk_id) {
-                    pw_left.emplace(
-                        segment_chunk_reader_.segment_->chunk_data<T>(
-                            op_ctx_, left_field_, left_chunk_id));
+                    pw_left.emplace(segment_chunk_reader_.ChunkData<T>(
+                        left_field_, left_chunk_id));
                     auto left_chunk = pw_left->get();
                     left_base = left_chunk.data();
                     left_validity = left_chunk.validity();
                     cached_left_chunk_id = left_chunk_id;
                 }
                 if (right_chunk_id != cached_right_chunk_id) {
-                    pw_right.emplace(
-                        segment_chunk_reader_.segment_->chunk_data<U>(
-                            op_ctx_, right_field_, right_chunk_id));
+                    pw_right.emplace(segment_chunk_reader_.ChunkData<U>(
+                        right_field_, right_chunk_id));
                     auto right_chunk = pw_right->get();
                     right_base = right_chunk.data();
                     right_validity = right_chunk.validity();
@@ -536,11 +534,9 @@ class PhyCompareFilterExpr : public Expr {
             return processed_size;
         }
 
-        auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
-            op_ctx_, left_field_, 0);
+        auto pw_left = segment_chunk_reader_.ChunkData<T>(left_field_, 0);
         auto left_chunk = pw_left.get();
-        auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
-            op_ctx_, right_field_, 0);
+        auto pw_right = segment_chunk_reader_.ChunkData<U>(right_field_, 0);
         auto right_chunk = pw_right.get();
         const T* left_data = left_chunk.data();
         const U* right_data = right_chunk.data();
@@ -615,11 +611,9 @@ class PhyCompareFilterExpr : public Expr {
 
         const auto active_count = segment_chunk_reader_.active_count_;
         for (size_t i = current_chunk_id_; i < num_chunk_; i++) {
-            auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
-                op_ctx_, left_field_, i);
+            auto pw_left = segment_chunk_reader_.ChunkData<T>(left_field_, i);
             auto left_chunk = pw_left.get();
-            auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
-                op_ctx_, right_field_, i);
+            auto pw_right = segment_chunk_reader_.ChunkData<U>(right_field_, i);
             auto right_chunk = pw_right.get();
             auto data_pos = (i == current_chunk_id_) ? current_chunk_pos_ : 0;
             auto size =
@@ -679,11 +673,11 @@ class PhyCompareFilterExpr : public Expr {
         while (processed_size < batch_size_ &&
                left_current_chunk_id_ < left_num_chunk_ &&
                right_current_chunk_id_ < right_num_chunk_) {
-            auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
-                op_ctx_, left_field_, left_current_chunk_id_);
+            auto pw_left = segment_chunk_reader_.ChunkData<T>(
+                left_field_, left_current_chunk_id_);
             auto left_chunk = pw_left.get();
-            auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
-                op_ctx_, right_field_, right_current_chunk_id_);
+            auto pw_right = segment_chunk_reader_.ChunkData<U>(
+                right_field_, right_current_chunk_id_);
             auto right_chunk = pw_right.get();
             int64_t left_chunk_size = 0;
             int64_t right_chunk_size = 0;

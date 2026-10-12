@@ -733,52 +733,24 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 }
             }
 
-            std::shared_ptr<const IArrayOffsets> array_offsets;
+            std::shared_ptr<const IStructElementOffsets> struct_element_offsets;
             if (index_ptr->IsNestedIndex()) {
-                array_offsets = segment_->GetArrayOffsets(field_id_);
-                AssertInfo(array_offsets != nullptr,
-                           "array offsets are required for nested ARRAY index");
+                struct_element_offsets =
+                    segment_->GetStructElementOffsets(field_id_);
+                AssertInfo(struct_element_offsets != nullptr,
+                           "struct element offsets are required for nested "
+                           "ARRAY index");
             }
 
-            auto to_row_offset = [&array_offsets](size_t offset) -> size_t {
-                if (array_offsets == nullptr) {
+            auto to_row_offset =
+                [&struct_element_offsets](size_t offset) -> size_t {
+                if (struct_element_offsets == nullptr) {
                     return offset;
                 }
-                auto [row_id, _] = array_offsets->ElementIDToRowID(
+                auto [row_id, _] = struct_element_offsets->ElementIDToRowID(
                     static_cast<int32_t>(offset));
                 return static_cast<size_t>(row_id);
             };
-
-            // filtering by index, get candidates.
-            std::function<bool(const milvus::proto::plan::Array& /*val*/,
-                               int64_t /*offset*/)>
-                is_same;
-
-            if (segment_->is_chunked()) {
-                is_same = [this, reverse](const milvus::proto::plan::Array& val,
-                                          int64_t offset) -> bool {
-                    auto [chunk_idx, chunk_offset] =
-                        GetChunkByOffset(field_id_, offset);
-                    auto pw = segment_->template chunk_view<milvus::ArrayView>(
-                        op_ctx_, field_id_, chunk_idx);
-                    auto chunk = pw.get();
-                    return chunk.first[chunk_offset].is_same_array(val) ^
-                           reverse;
-                };
-            } else {
-                auto size_per_chunk = segment_->size_per_chunk();
-                is_same = [this, size_per_chunk, reverse](
-                              const milvus::proto::plan::Array& val,
-                              int64_t offset) -> bool {
-                    auto chunk_idx = offset / size_per_chunk;
-                    auto chunk_offset = offset % size_per_chunk;
-                    auto pw = segment_->template chunk_data<milvus::ArrayView>(
-                        op_ctx_, field_id_, chunk_idx);
-                    auto chunk = pw.get();
-                    auto array_view = chunk.data() + chunk_offset;
-                    return array_view->is_same_array(val) ^ reverse;
-                };
-            }
 
             // collect all candidates.
             std::unordered_set<size_t> candidates;
@@ -815,9 +787,49 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 }
             }
             TargetBitmap res(active_count_, reverse);
-            // run post-filter. The filter will only be executed once in the framework.
-            for (const auto& candidate : candidates) {
-                res[candidate] = is_same(val, candidate);
+            // The cached post-filter runs once for the complete candidate set.
+            if (candidates.empty()) {
+                return res;
+            }
+            if (segment_->is_chunked()) {
+                // Candidate order is immaterial to the result bitmap. Visiting
+                // rows in order lets Raw Take reuse one pin per touched Cell.
+                std::vector<int64_t> offsets(candidates.begin(),
+                                             candidates.end());
+                std::sort(offsets.begin(), offsets.end());
+                auto resources = CaptureDataScanResources();
+                const auto& column = resources.first;
+                AssertInfo(column != nullptr,
+                           "ARRAY equality requires a data column");
+                auto take =
+                    column->Take(op_ctx_,
+                                 ChunkedColumnInterface::TakeOptions{
+                                     ChunkedColumnInterface::OffsetView::From(
+                                         offsets.data(), offsets.size()),
+                                     DataTargetType<milvus::ArrayView>(),
+                                     nullptr});
+                AssertInfo(take != nullptr && take->Size() == offsets.size(),
+                           "ARRAY equality requires one value per candidate");
+                const auto items = take->template Access<milvus::ArrayView>();
+                for (int64_t i = 0; i < items.Size(); ++i) {
+                    const auto item = items[i];
+                    // Consume the borrowed view before Take can switch pins;
+                    // GetOwn() would unnecessarily copy the array payloads.
+                    res[offsets[i]] =
+                        item.is_valid &&
+                        (item.value->is_same_array(val) ^ reverse);
+                }
+            } else {
+                auto size_per_chunk = segment_->size_per_chunk();
+                for (const auto& candidate : candidates) {
+                    auto chunk_idx = candidate / size_per_chunk;
+                    auto chunk_offset = candidate % size_per_chunk;
+                    auto pw =
+                        GetChunkData<milvus::ArrayView>(field_id_, chunk_idx);
+                    const auto& chunk = pw.get();
+                    res[candidate] =
+                        chunk.data()[chunk_offset].is_same_array(val) ^ reverse;
+                }
             }
             return res;
         },
@@ -2318,9 +2330,14 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
     // Cache lookup + full-bitset compute via helper
     if (cached_match_res_ == nullptr) {
+        // Growing text-index visibility can change after commit/reload without
+        // changing active_count_. Only sealed text results are safe to cache
+        // across requests; a null cache segment bypasses both reads and writes.
+        const auto* cache_segment =
+            segment_->type() == SegmentType::Sealed ? segment_ : nullptr;
         auto cached = exec::ExprCacheHelper::GetOrCompute(
-            segment_,
-            this->ToString(),
+            cache_segment,
+            [this]() { return this->ToString(); },
             active_count_,
             [&]() -> exec::ExprCacheHelper::ComputeResult {
                 auto pw = segment_->GetTextIndex(op_ctx_, field_id_);

@@ -21,14 +21,14 @@ is_special(char c) {
     static std::once_flag _initialized;
     static std::string special_bytes(R"(\.+*?()|[]{}^$)");
     static std::vector<bool> special_bytes_bitmap;
-    std::call_once(_initialized, []() -> void {
+    std::call_once(_initialized, []() {
         special_bytes_bitmap.resize(256);
         for (char b : special_bytes) {
-            special_bytes_bitmap[b + 128] = true;
+            special_bytes_bitmap[static_cast<unsigned char>(b)] = true;
         }
     });
 
-    return special_bytes_bitmap[c + 128];
+    return special_bytes_bitmap[static_cast<unsigned char>(c)];
 }
 
 std::string

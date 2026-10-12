@@ -40,6 +40,34 @@ func TestOwnedImmutableMessageCloneAndFinalize(t *testing.T) {
 	first.Release()
 }
 
+func TestOwnedImmutableMessageFinalizerReportsPoison(t *testing.T) {
+	for _, poisoned := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "poisoned"}[poisoned], func(t *testing.T) {
+			raw := CreateTestTimeTickSyncMessage(t, 1, 20, testMessageID("10")).
+				IntoImmutableMessage(testMessageID("11"))
+			calls := 0
+			owner := NewOwnedImmutableMessageWithFinalizer(raw, func(result bool) {
+				calls++
+				require.Equal(t, poisoned, result)
+			})
+			first, last := owner.Clone(), owner.Clone()
+			require.False(t, owner.IsPoisoned())
+			if poisoned {
+				first.PoisonedRelease()
+			} else {
+				first.Release()
+			}
+			require.Equal(t, poisoned, owner.IsPoisoned())
+			owner.Release()
+			require.Zero(t, calls)
+			last.Release()
+			last.Release()
+			require.Equal(t, 1, calls)
+			require.Panics(t, func() { owner.IsPoisoned() })
+		})
+	}
+}
+
 func TestOwnedImmutableMessageRegistersExclusiveCallbackImmediately(t *testing.T) {
 	raw := CreateTestTimeTickSyncMessage(t, 1, 20, testMessageID("10")).
 		IntoImmutableMessage(testMessageID("11"))

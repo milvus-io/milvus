@@ -18,14 +18,20 @@ package compactor
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -39,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -227,4 +234,67 @@ func genInsertData(size int, seed int64, schema *schemapb.CollectionSchema) []*s
 		buf.Append(genRow(int64(i)))
 	}
 	return []*storage.InsertData{buf}
+}
+
+// Force the native writer to retain submitted Records so this test isolates
+// FlushChunk behavior. This fixture does not measure production peak memory.
+func TestClusteringFlushChunkRetainsNativeWriterBuffers(t *testing.T) {
+	schema := clusteringWideSchema()
+	task := &clusteringCompactionTask{memoryLimit: 1 << 20, flushPool: conc.NewPool[any](1)}
+	defer task.flushPool.Release()
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	for i := 0; i < 4; i++ {
+		buffer, _ := newClusteringTestBuffer(t, schema, 64<<10, storage.StorageV2, storage.WithBufferSize(8<<20))
+		buffer.id = i
+		// Install tracking only while constructing the output builders. They
+		// retain the allocator; input records and other writers are untracked.
+		original := memory.DefaultAllocator
+		memory.DefaultAllocator = alloc
+		buffer.builder = storage.NewRecordBuilder(schema)
+		memory.DefaultAllocator = original
+		task.clusterBuffers = append(task.clusterBuffers, buffer)
+	}
+	for bucket, buffer := range task.clusterBuffers {
+		record := clusteringTestRecord(t, schema, bucket*64, 64)
+		for row := 0; row < record.Len(); row++ {
+			require.NoError(t, buffer.WriteRecord(record, row))
+		}
+		record.Release()
+		require.NoError(t, buffer.FlushChunk())
+		require.Zero(t, buffer.builder.GetRowNum())
+	}
+	before := alloc.CurrentAlloc()
+	require.Greater(t, before, int(task.memoryLimit), "tracked output buffers alone exceed the task budget")
+	require.NoError(t, task.flushLargestBuffers(context.Background()))
+	require.Equal(t, before, alloc.CurrentAlloc(), "V2 FlushChunk has not freed the submitted Arrow buffers")
+	t.Logf("forced writer buffering: limit=%d retained Arrow bytes=%d buckets=%d builderBytes=%d writerBytes=%d",
+		task.memoryLimit, before, len(task.clusterBuffers), task.clusterBuffers[0].writer.binLogMaxSize/2, 8<<20)
+	for bucket, buffer := range task.clusterBuffers {
+		require.NoError(t, buffer.Close())
+		segments := buffer.GetCompactionSegments()
+		require.Len(t, segments, 1)
+		require.EqualValues(t, 64, segments[0].NumOfRows)
+		reader, err := storage.NewBinlogRecordReader(context.Background(), segments[0].InsertLogs, schema,
+			storage.WithVersion(storage.StorageV2), storage.WithStorageConfig(buffer.writer.params.StorageConfig))
+		require.NoError(t, err)
+		rowID := bucket * 64
+		for {
+			record, err := reader.Next()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			for row := 0; row < record.Len(); row++ {
+				require.EqualValues(t, rowID, record.Column(100).(*array.Int64).Value(row))
+				vector := record.Column(103).(*array.FixedSizeBinary).Value(row)
+				for dim := 0; dim < 2048; dim++ {
+					require.Equal(t, float32(rowID+dim), math.Float32frombits(binary.LittleEndian.Uint32(vector[dim*4:])))
+				}
+				rowID++
+			}
+		}
+		reader.Close()
+		require.Equal(t, (bucket+1)*64, rowID)
+	}
+	alloc.AssertSize(t, 0)
 }

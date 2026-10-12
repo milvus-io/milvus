@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/function/pyudf"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -221,6 +222,12 @@ func (node *Proxy) TsoAllocator() taskmodel.TsoAllocator {
 	return node.tsoAllocator
 }
 
+// ResolveRLSEnforcement applies the proxy-owned SkipRLS authorization rules
+// for tasks implemented outside the root proxy package.
+func (node *Proxy) ResolveRLSEnforcement(ctx context.Context, cache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
+	return resolveRLSEnforcement(ctx, cache, rlsEnabled, rlsForce, skipRLS, dbName, collectionName, operation)
+}
+
 // IsDQLQueueFull reports whether the next DQL enqueue would be rejected with
 // TooManyRequests. The REST layer probes it (via interface assertion, like
 // GetMetaCache) to reject search/query before paying for body decoding.
@@ -369,6 +376,10 @@ func (node *Proxy) Init() error {
 	uuid.EnableRandPool()
 	mlog.Debug(node.ctx, "enable rand pool for UUIDv4 generation")
 
+	if err := pyudf.StartSupervisor(node.ctx); err != nil {
+		return merr.Wrap(err, "initialize Proxy PyUDF process")
+	}
+
 	mlog.Info(node.ctx, "init proxy done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", node.address))
 	return nil
 }
@@ -423,6 +434,14 @@ func (node *Proxy) Stop() error {
 		}
 	}()
 
+	// Notify Python before closing the scheduler so UDF execution cannot delay
+	// shutdown. The supervisor owns worker termination and reaping.
+	// Cleanup follows existing resources, even if enabled changed after startup.
+	// PyUDF cleanup errors do not fail Proxy shutdown.
+	if err := pyudf.StopSupervisor(context.Background()); err != nil {
+		mlog.Warn(node.ctx, "PyUDF supervisor cleanup failed; continuing Proxy shutdown", mlog.Err(err))
+	}
+
 	if node.rowIDAllocator != nil {
 		node.rowIDAllocator.Close()
 		mlog.Info(node.ctx, "close id allocator", mlog.String("role", typeutil.ProxyRole))
@@ -431,6 +450,10 @@ func (node *Proxy) Stop() error {
 	if node.sched != nil {
 		node.sched.Close()
 		mlog.Info(node.ctx, "close scheduler", mlog.String("role", typeutil.ProxyRole))
+	}
+
+	if err := pyudf.CloseClients(); err != nil {
+		mlog.Warn(node.ctx, "PyUDF client cleanup failed; continuing Proxy shutdown", mlog.Err(err))
 	}
 
 	for _, cb := range node.closeCallbacks {

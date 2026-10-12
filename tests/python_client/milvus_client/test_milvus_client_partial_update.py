@@ -1,4 +1,5 @@
 import random
+import time
 
 import numpy as np
 import pytest
@@ -516,9 +517,20 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         assert baseline["indexed_ids"] == [0]
         assert baseline["element_keys"] == [(0, 0), (0, 1), (3, 0)]
 
-        compact_id = self.compact(client, collection_name)[0]
-        assert compact_id > 0
+        # Flush does not wait for sort compaction. Index readiness lets sorting
+        # finish, but automatic compaction may still temporarily own the segments.
+        assert self.wait_for_index_ready(client, collection_name, index_name="vector", timeout=300), (
+            f"vector index still has pending rows for {collection_name}"
+        )
+        compact_id = -1
+        deadline = time.monotonic() + 120
+        while compact_id == -1 and (remaining := deadline - time.monotonic()) > 0:
+            compact_id, _ = self.compact(client, collection_name, timeout=remaining)
+            if compact_id == -1:
+                time.sleep(min(2, max(0, deadline - time.monotonic())))
+        assert compact_id > 0, f"no compaction accepted for {collection_name} within 120s: compact_id={compact_id}"
         assert self.wait_for_compaction_ready(client, compact_id, timeout=300)
+        assert collect_observations() == baseline
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
         assert collect_observations() == baseline

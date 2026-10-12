@@ -54,6 +54,7 @@ procedure in this document.
 | Java | `21.0.8` |
 | Connector ref | `main` (resolved when each Pod builds) |
 | Conan | `2.25.1` |
+| Avro C++ | `1.12.2` (locally exported Conan recipe, revision recorded in `evidence/avro-reference.txt`) |
 | Rust | `1.96.0` |
 | Hadoop AWS package | `org.apache.hadoop:hadoop-aws:3.4.1` |
 | OS/architecture | Linux AMD64 |
@@ -175,12 +176,30 @@ The source build needs access to:
 - Ubuntu apt repositories.
 - GitHub.
 - The Milvus JFrog Conan remote.
+- Apache's download mirror (`dlcdn.apache.org`) for Avro 1.12.2 sources.
 - SDKMAN.
 - Maven/Ivy.
 - A pip package index.
 - The Rust toolchain and crate registry.
 
 The current script uses Conan `2.25.1` and the Milvus `default-conan-local2` remote, matching the checked-out `milvus-storage` revision's CI configuration.
+
+The Rust bridge also needs `pkg-config` and `libssl-dev` to discover and link
+OpenSSL, `libclang-dev` for Rust bindgen, and `protobuf-compiler` for Lance's
+generated bindings. The build script installs these before compiling native code.
+It also bundles the apt-provided `libaio.so.1` with the native runtime libraries;
+installing `libaio-dev` only in the init container does not make it available in
+the main Spark container.
+
+The build uses Avro C++ **1.12.2**. Until the Milvus remote publishes that version,
+the script copies the C++ build instructions from a pinned Milvus recipe and
+exports a separate `libavrocpp/1.12.2@milvus/dev` recipe locally. The official
+1.12.2 source archive is verified against SHA256
+`449722c442ec9514d8e6933f9c7ccf2e0544cb75c951c25b804ea1d8e73d12bb`.
+The `milvus-storage` requirement pins the exported revision and forces transitive
+Avro requirements to use it too. Older Avro source and binary packages are not
+reused. The recipe is not uploaded to the remote, and its exact reference is
+recorded in `/opt/spark-milvus/evidence/avro-reference.txt` after a successful build.
 
 ## 5. Deploy
 

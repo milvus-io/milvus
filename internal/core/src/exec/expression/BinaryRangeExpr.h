@@ -298,6 +298,11 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     void
     DetermineExecPath() override;
 
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
+
     std::string
     ToString() const override {
         return fmt::format("{}", expr_->ToString());

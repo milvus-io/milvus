@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/futures/Future.h>
 #include <gtest/gtest.h>
 
 #include "common/EasyAssert.h"
@@ -95,6 +96,17 @@ TEST(KnowhereStatusMapping, TransientErrorsMapToRetriableCodes) {
     EXPECT_EQ(
         milvus::KnowhereStatusToErrorCode(knowhere::Status::disk_file_error),
         milvus::ErrorCode::FileReadFailed);
+}
+
+TEST(KnowhereStatusMapping, CancellationKeepsFollyCancelCode) {
+    auto result = knowhere::GuardedCall(
+        []() -> knowhere::expected<int> { throw folly::FutureCancellation(); });
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), knowhere::Status::cancelled);
+    EXPECT_EQ(milvus::KnowhereStatusToErrorCode(result.error()),
+              milvus::ErrorCode::FollyCancel);
+    EXPECT_EQ(milvus::KnowhereBuildStatusToErrorCode(result.error()),
+              milvus::ErrorCode::FollyCancel);
 }
 
 // KnowhereBuildStatusToErrorCode is the build/add-path variant: it reuses the

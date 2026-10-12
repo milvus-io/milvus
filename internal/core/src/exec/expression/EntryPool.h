@@ -18,34 +18,65 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "common/Types.h"
 #include "exec/expression/CacheCompressor.h"
-#include "exec/expression/ExprCache.h"
+
+namespace prometheus {
+class Gauge;
+}
 
 namespace milvus {
 namespace exec {
 
+// Shared by successive memory backends. A retired payload keeps its charge
+// here until its last reader releases it, even after the pool is destroyed.
+class ExprCacheMemoryBudget {
+ public:
+    explicit ExprCacheMemoryBudget(size_t capacity,
+                                   bool report_metrics = false);
+
+    bool
+    TryAcquire(size_t bytes);
+    bool
+    CanFit(size_t bytes, size_t reclaimable = 0) const;
+    void
+    Release(size_t bytes) noexcept;
+    void
+    SetCapacity(size_t capacity);
+    size_t
+    GetUsedBytes() const;
+
+ private:
+    mutable std::mutex mutex_;
+    size_t capacity_;
+    size_t used_{0};
+    prometheus::Gauge* memory_gauge_{nullptr};
+};
+
 // Pure in-memory expression result cache with Clock eviction.
 //
 // Stores compressed bitset entries in heap memory (malloc-managed).
-// Uses Clock algorithm for eviction — near-LRU quality with zero
-// Get-path lock overhead (only one atomic store per access).
+// Uses Clock algorithm for eviction — near-LRU quality with concurrent reads.
 //
 // Thread safety:
-//   - Get:  shared_lock(index) + atomic usage_count update (no write lock)
+//   - Lookup: shared_lock(index) + atomic usage_count update
+//   - Decode: immutable payload; no manager or pool lock
 //   - Put:  unique_lock(index) + potential Clock eviction
 //   - EraseSegment: unique_lock(index)
 //
 // Memory management:
-//   - Each entry owns a std::vector<char> for compressed data
+//   - Entries and active readers share immutable compressed payloads
 //   - Fragmentation handled by jemalloc/tcmalloc (Milvus's default allocator)
-//   - Total memory tracked by current_bytes_ atomic counter
+//   - Memory remains charged through the last payload reference
 
 class EntryPool {
  public:
@@ -53,13 +84,11 @@ class EntryPool {
         int64_t segment_id{0};
         uint64_t sig_hash{0};
         std::string signature;
-        int64_t active_count{0};
 
         bool
         operator==(const Key& other) const {
             return segment_id == other.segment_id &&
-                   sig_hash == other.sig_hash && signature == other.signature &&
-                   active_count == other.active_count;
+                   sig_hash == other.sig_hash && signature == other.signature;
         }
     };
 
@@ -68,28 +97,54 @@ class EntryPool {
         operator()(const Key& k) const noexcept {
             return std::hash<int64_t>()(k.segment_id) * 1315423911u ^
                    std::hash<uint64_t>()(k.sig_hash) ^
-                   std::hash<std::string>()(k.signature) ^
-                   std::hash<int64_t>()(k.active_count);
+                   std::hash<std::string>()(k.signature);
         }
     };
+
+    class Payload {
+     private:
+        friend class EntryPool;
+        struct Charge {
+            std::shared_ptr<ExprCacheMemoryBudget> budget;
+            size_t bytes{0};
+            ~Charge() {
+                if (budget) {
+                    budget->Release(bytes);
+                }
+            }
+        };
+        // Destroy the byte buffer before returning its reservation.
+        Charge charge_;
+
+     public:
+        Payload(int64_t rows, uint8_t encoding, std::vector<char> bytes)
+            : active_count(rows), comp_type(encoding), data(std::move(bytes)) {
+        }
+        Payload(const Payload&) = delete;
+        Payload&
+        operator=(const Payload&) = delete;
+
+        bool
+        Decode(TargetBitmap& result, TargetBitmap& valid) const;
+
+        const int64_t active_count;
+        const uint8_t comp_type;
+        const std::vector<char> data;
+    };
+    using Handle = std::shared_ptr<const Payload>;
 
     struct Entry {
-        Key key;
-        std::string signature;    // full expression string for exact match
-        int64_t active_count{0};  // staleness check
-        uint8_t comp_type{0};
-        std::vector<char> data;  // compressed payload (header + body)
-        std::atomic<uint8_t> usage_count{0};  // Clock: 0-5, accessed → ++
-
-        size_t
-        MemoryUsage() const {
-            return sizeof(Entry) + data.capacity() + signature.capacity() +
-                   key.signature.capacity();
-        }
+        Handle payload;
+        std::atomic<uint8_t> usage_count{1};
+        // The map owns the only Key. Rehash preserves its address; unlink this
+        // entry from Clock before erasing the map node.
+        const Key* key{nullptr};
+        Entry* prev{nullptr};
+        Entry* next{nullptr};
     };
 
-    explicit EntryPool(size_t max_bytes) : max_bytes_(max_bytes) {
-    }
+    explicit EntryPool(size_t max_bytes,
+                       std::shared_ptr<ExprCacheMemoryBudget> budget = {});
 
     ~EntryPool() = default;
 
@@ -100,20 +155,17 @@ class EntryPool {
               bool compression_enabled,
               int64_t min_eval_duration_us);
 
-    // Try to get a cached entry. On hit, fills out_result.
-    // If out_valid_all_ones is set to true, out_valid is NOT filled (caller
-    // should treat valid as all-ones, saving ~30μs of bitmap construction).
-    // Returns false on miss, signature mismatch, or staleness mismatch.
-    bool
-    Get(int64_t segment_id,
-        const std::string& signature,
-        int64_t active_count,
-        TargetBitmap& out_result,
-        TargetBitmap& out_valid);
+    // The returned handle survives erase, clear, replacement, and pool
+    // destruction. No iterator, Entry reference, or pool lock escapes Lookup.
+    Handle
+    Lookup(int64_t segment_id,
+           const std::string& signature,
+           int64_t active_count);
 
     // Insert a compressed entry. Compression is done internally.
     // May trigger Clock eviction if over capacity.
-    // Subject to frequency and latency admission control.
+    // Subject to latency admission here; the manager applies frequency
+    // admission before calling this method.
     void
     Put(int64_t segment_id,
         const std::string& signature,
@@ -126,16 +178,13 @@ class EntryPool {
     size_t
     EraseSegment(int64_t segment_id);
 
-    bool
-    HasSignature(int64_t segment_id, const std::string& signature) const;
-
     // Clear all entries.
     void
     Clear();
 
     size_t
     GetCurrentBytes() const {
-        return current_bytes_.load(std::memory_order_relaxed);
+        return budget_->GetUsedBytes();
     }
 
     size_t
@@ -145,14 +194,24 @@ class EntryPool {
     }
 
  private:
-    // Clock sweep: find and evict one entry with usage_count == 0.
-    // Entries with usage_count > 0 get decremented (one "chance" per sweep).
-    // Must be called under unique_lock.
-    void
-    EvictOne();
+    friend class EntryPoolTestPeer;
+
+    // Append before hand without changing the next victim. The same links
+    // also hold provisional eviction candidates. Requires unique_lock.
+    static void
+    LinkClockEntry(Entry*& hand, Entry* entry) noexcept;
+    static void
+    UnlinkClockEntry(Entry*& hand, Entry* entry) noexcept;
+
+    // Select Clock candidates before removing any entries. Return false
+    // without erasing entries if their immediately reclaimable bytes cannot
+    // admit the Put. Include the unheld replacement's charge in reclaimable,
+    // but leave its mapping for the caller to replace. Requires unique_lock.
+    bool
+    EvictForPut(size_t bytes, size_t reclaimable, const Entry* protected_entry);
 
     size_t max_bytes_;
-    std::atomic<size_t> current_bytes_{0};
+    std::shared_ptr<ExprCacheMemoryBudget> budget_;
 
     int64_t min_eval_duration_us_{0};
     bool compression_enabled_{true};
@@ -160,24 +219,9 @@ class EntryPool {
     mutable std::shared_mutex mutex_;
     std::unordered_map<Key, std::unique_ptr<Entry>, KeyHasher> entries_;
 
-    // Clock state: we iterate over entries_ using a persistent iterator
-    // position. Since unordered_map iteration order is stable between
-    // modifications, we track position as an index into a separate vector.
-    // Rebuilt lazily when entries are added/removed.
-    std::vector<Key> clock_keys_;  // snapshot of keys for clock sweep
-    size_t clock_hand_{0};
-    bool clock_dirty_{true};  // true when clock_keys_ needs rebuild
-
-    void
-    RebuildClockKeys() {
-        clock_keys_.clear();
-        clock_keys_.reserve(entries_.size());
-        for (const auto& [k, _] : entries_) {
-            clock_keys_.push_back(k);
-        }
-        clock_hand_ = 0;
-        clock_dirty_ = false;
-    }
+    // Intrusive circular list: membership changes only for inserted/erased
+    // entries. Neither scanning nor membership maintenance copies keys.
+    Entry* clock_hand_{nullptr};
 };
 
 }  // namespace exec

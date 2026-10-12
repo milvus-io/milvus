@@ -160,10 +160,11 @@ CachedSearchIterator::CachedSearchIterator(
     // VECTOR_ARRAY element-level search: growing stores each row as a
     // separate VectorArray with its own backing allocation, so we must
     // flatten per-chunk into a contiguous buffer that knowhere can read.
-    // array_offsets_ != nullptr is the element-level signal (multi-search-
+    // struct_element_offsets_ != nullptr is the element-level signal (multi-search-
     // multi emb-list iterator is rejected upstream, so we don't branch on
     // it here).
-    const bool is_element_level = search_info.array_offsets_ != nullptr;
+    const bool is_element_level =
+        search_info.struct_element_offsets_ != nullptr;
     if (is_element_level) {
         chunk_buffers_.reserve(source_chunks);
     }
@@ -276,13 +277,13 @@ CachedSearchIterator::CachedSearchIterator(
             const auto& offset_mapping = column->GetOffsetMapping();
             const bool has_offset_mapping =
                 offset_mapping.IsEnabled() &&
-                search_info.array_offsets_ == nullptr;
+                search_info.struct_element_offsets_ == nullptr;
             if (has_offset_mapping) {
                 chunk_size = column->GetValidCountInChunk(chunk_id);
             }
             // For element-level search on vector array field, chunk_size
             // must be the element count in this chunk, not the row count.
-            if (search_info.array_offsets_ != nullptr) {
+            if (search_info.struct_element_offsets_ != nullptr) {
                 auto elem_offsets_pw =
                     column->VectorArrayOffsets(nullptr, chunk_id);
                 chunk_size = elem_offsets_pw.get()[chunk_size];

@@ -62,12 +62,12 @@ func TestMarshalUnmarshalChunkRoundTrip(t *testing.T) {
 		"v1": {100, 102},
 		"v2": {101},
 	}
-	payload, footer, err := marshalChunk("p1", 7, 1, writeSections(records))
+	payload, footer, err := marshalChunk("p1", 7, 1, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
 	assert.NotNil(t, footer)
 	assert.Equal(t, uint64(7), footer.GetGeneration())
 	assert.Equal(t, int64(1), footer.GetTerm())
-	assert.Equal(t, uint64(100), footer.GetStartTimetick())
+	assert.Equal(t, uint64(100), footer.GetStartTimeTick())
 	assert.Equal(t, uint64(102), footer.GetEndTimetick())
 	assert.Len(t, footer.GetChunks(), 2)
 
@@ -84,7 +84,7 @@ func TestUnmarshalChunkCorrupted(t *testing.T) {
 	records := map[string][]uint64{
 		"v1": {100},
 	}
-	payload, _, err := marshalChunk("p1", 1, 1, writeSections(records))
+	payload, _, err := marshalChunk("p1", 1, 1, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
 
 	cases := map[string]func([]byte) []byte{
@@ -120,7 +120,7 @@ func TestStoreWriteReadChunk(t *testing.T) {
 	records := map[string][]uint64{
 		"v1": {100},
 	}
-	footer, _, err := store.WriteChunk(ctx, 0, writeSections(records))
+	footer, _, err := store.WriteChunk(ctx, 0, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(0), footer.GetGeneration())
 
@@ -130,13 +130,15 @@ func TestStoreWriteReadChunk(t *testing.T) {
 	assert.Equal(t, []uint64{100}, timeticks(decoded["v1"].Inserts))
 
 	// identical rewrite is a no-op.
-	_, _, err = store.WriteChunk(ctx, 0, writeSections(records))
+	_, _, err = store.WriteChunk(ctx, 0, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
 
 	// different content at the same generation is corruption.
 	_, _, err = store.WriteChunk(ctx, 0, writeSections(map[string][]uint64{
 		"v1": {101},
-	}))
+	}), testRecordCoverage(writeSections(map[string][]uint64{
+		"v1": {101},
+	})))
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrStoreCorrupted))
 }
@@ -151,19 +153,19 @@ func TestStoreWriteChunkRewriteIsIdempotent(t *testing.T) {
 	// bytes differ (a retry that spans a binary upgrade re-encodes the same
 	// records differently). Flip a byte in the header's reserved region, which
 	// no decoder checks, so bytes differ while content matches.
-	payload, _, err := marshalChunk("p1", 7, 3, writeSections(records))
+	payload, _, err := marshalChunk("p1", 7, 3, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
 	payload[11] ^= 0xff
 	assert.NoError(t, cm.Write(ctx, NewStore(cm, "p1", 3).ChunkKey(7), payload))
-	_, _, err = NewStore(cm, "p1", 3).WriteChunk(ctx, 7, writeSections(records))
+	_, _, err = NewStore(cm, "p1", 3).WriteChunk(ctx, 7, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
 
 	// An object at this key that another term wrote cannot arise -- the key
 	// carries the writing term -- so it is corruption rather than a race.
-	foreign, _, err := marshalChunk("p1", 7, 5, writeSections(records))
+	foreign, _, err := marshalChunk("p1", 7, 5, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
 	assert.NoError(t, cm.Write(ctx, NewStore(cm, "p1", 3).ChunkKey(7), foreign))
-	_, _, err = NewStore(cm, "p1", 3).WriteChunk(ctx, 7, writeSections(records))
+	_, _, err = NewStore(cm, "p1", 3).WriteChunk(ctx, 7, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrStoreCorrupted))
 }
@@ -181,10 +183,7 @@ func TestStoreManifestRoundTrip(t *testing.T) {
 			Term:       1,
 			ObjectSize: 123,
 		}},
-		PendingGc: []*streamingpb.PChannelSummaryChunkRef{{
-			Generation: 0,
-			Term:       1,
-		}},
+		Coverage: &streamingpb.SummaryCoverage{Generation: 0, Term: 1},
 	}
 	assert.NoError(t, store.WriteManifest(ctx, manifest))
 
@@ -193,7 +192,7 @@ func TestStoreManifestRoundTrip(t *testing.T) {
 	assert.True(t, found)
 	assert.Len(t, loaded.GetChunks(), 1)
 	assert.Equal(t, uint64(0), loaded.GetChunks()[0].GetGeneration())
-	assert.Len(t, loaded.GetPendingGc(), 1)
+	assert.True(t, proto.Equal(manifest.Coverage, loaded.Coverage))
 }
 
 func TestStoreManifestCorrupted(t *testing.T) {
@@ -217,19 +216,22 @@ func TestStoreProbeChunkForward(t *testing.T) {
 	records := map[string][]uint64{
 		"v1": {100},
 	}
-	_, _, err := store.WriteChunk(ctx, 1, writeSections(records))
+	_, _, err := store.WriteChunk(ctx, 1, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
-	_, _, err = store.WriteChunk(ctx, 2, writeSections(records))
+	_, _, err = store.WriteChunk(ctx, 2, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
 	// probe from generation 2 finds only generation 2.
 	entries, err := store.ProbeChunkForward(ctx, 2)
 	assert.NoError(t, err)
 	assert.Len(t, entries, 1)
 	assert.Equal(t, uint64(2), entries[0].GetGeneration())
-	// probe from 0 finds both, in order.
+	// A gap at 0 prevents adopting the later generations.
 	entries, err = store.ProbeChunkForward(ctx, 0)
-	assert.NoError(t, err)
-	assert.Len(t, entries, 2)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+	entries, err = store.ProbeChunkForward(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
 	assert.Equal(t, uint64(1), entries[0].GetGeneration())
 	assert.Equal(t, uint64(2), entries[1].GetGeneration())
 }
@@ -240,7 +242,7 @@ func TestStoreDeleteChunk(t *testing.T) {
 	records := map[string][]uint64{
 		"v1": {100},
 	}
-	_, _, err := store.WriteChunk(ctx, 0, writeSections(records))
+	_, _, err := store.WriteChunk(ctx, 0, writeSections(records), testRecordCoverage(writeSections(records)))
 	assert.NoError(t, err)
 	assert.NoError(t, store.DeleteChunk(ctx, 0, 1))
 	_, _, err = store.ReadChunk(ctx, 0, 1)
@@ -251,8 +253,8 @@ func TestStoreDeleteChunk(t *testing.T) {
 
 func TestInheritManifest(t *testing.T) {
 	previous := &streamingpb.PChannelSummaryManifest{
-		Chunks:    []*streamingpb.PChannelSummaryChunkIndexEntry{{Generation: 0}},
-		PendingGc: []*streamingpb.PChannelSummaryChunkRef{{Generation: 0}},
+		Chunks:   []*streamingpb.PChannelSummaryChunkIndexEntry{{Generation: 0}},
+		Coverage: &streamingpb.SummaryCoverage{Generation: 0},
 	}
 	discovered := []*streamingpb.PChannelSummaryChunkIndexEntry{
 		{Generation: 2},
@@ -343,12 +345,12 @@ func TestMarshalUnmarshalIdempotencySectionsRoundTrip(t *testing.T) {
 		),
 		"v2": idempotencySections(pair(102, "key-c", []int64{11}, []uint32{0})),
 	}
-	payload, footer, err := marshalChunk("p1", 7, 1, sections)
+	payload, footer, err := marshalChunk("p1", 7, 1, sections, testRecordCoverage(sections))
 	require.NoError(t, err)
 
 	// The chunk span covers every vchannel in the object, not just the first:
 	// v2's single write sits between v1's two.
-	assert.Equal(t, uint64(100), footer.GetStartTimetick())
+	assert.Equal(t, uint64(100), footer.GetStartTimeTick())
 	assert.Equal(t, uint64(103), footer.GetEndTimetick())
 	v2Index := vchannelChunkIndex(&streamingpb.PChannelSummaryChunkIndexEntry{Vchannels: footer.GetChunks()}, "v2")
 	require.NotNil(t, v2Index)
@@ -379,7 +381,7 @@ func TestMarshalIdempotencySectionOmittedWithoutKeys(t *testing.T) {
 	sections := map[string]*ChunkSections{
 		"v1": idempotencySections(pair(100, "", []int64{5}, nil)),
 	}
-	payload, footer, err := marshalChunk("p1", 1, 1, sections)
+	payload, footer, err := marshalChunk("p1", 1, 1, sections, testRecordCoverage(sections))
 	require.NoError(t, err)
 	require.Len(t, footer.GetChunks(), 1)
 	assert.NotNil(t, footer.GetChunks()[0].GetInserts())
@@ -402,7 +404,7 @@ func TestUnmarshalIdempotencySectionsRejectsMisalignedSections(t *testing.T) {
 			pair(101, "key-b", []int64{2}, []uint32{1}),
 		),
 	}
-	payload, footer, err := marshalChunk("p1", 1, 1, sections)
+	payload, footer, err := marshalChunk("p1", 1, 1, sections, testRecordCoverage(sections))
 	require.NoError(t, err)
 
 	index := proto.Clone(footer.GetChunks()[0]).(*streamingpb.VChannelSummaryChunkIndex)
@@ -414,28 +416,39 @@ func TestUnmarshalIdempotencySectionsRejectsMisalignedSections(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrStoreCorrupted))
 }
 
-// TestProbeChunkForwardStopsAtUnreadableTail covers a chunk found above the last
-// published manifest that cannot be decoded. Nothing depends on it yet -- the
-// persist that wrote it had to publish the manifest next, and failing that
-// leaves its records replayable from the WAL -- so it ends the probe rather
-// than the WAL open.
+// A corrupt durable tail may already be confirmed. Surface data corruption
+// instead of silently discarding the confirmed WAL prefix.
 func TestProbeChunkForwardStopsAtUnreadableTail(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	store := NewStore(cm, "p1", 1)
 
 	for _, gen := range []uint64{0, 1} {
-		_, _, err := store.WriteChunk(ctx, gen, writeSections(map[string][]uint64{"v1": {100 + gen}}))
+		_, _, err := store.WriteChunk(ctx, gen, writeSections(map[string][]uint64{"v1": {100 + gen}}), testRecordCoverage(writeSections(map[string][]uint64{"v1": {100 + gen}})))
 		require.NoError(t, err)
 	}
 	// Generation 2 is garbage; 3 is valid but sits behind it.
 	require.NoError(t, cm.Write(ctx, store.ChunkKey(2), []byte("not a chunk")))
-	_, _, err := store.WriteChunk(ctx, 3, writeSections(map[string][]uint64{"v1": {103}}))
+	_, _, err := store.WriteChunk(ctx, 3, writeSections(map[string][]uint64{"v1": {103}}), testRecordCoverage(writeSections(map[string][]uint64{"v1": {103}})))
 	require.NoError(t, err)
 
 	entries, err := store.ProbeChunkForward(ctx, 0)
-	require.NoError(t, err, "an unreadable probed tail must not fail the open")
-	require.Len(t, entries, 2, "the probe adopts the contiguous run below the damage")
-	assert.Equal(t, uint64(0), entries[0].GetGeneration())
-	assert.Equal(t, uint64(1), entries[1].GetGeneration())
+	require.ErrorIs(t, err, ErrStoreCorrupted)
+	require.Empty(t, entries)
+}
+
+// inheritManifest produces the manifest a new owner publishes: everything the
+// previous one knew, plus what this recovery just learned.
+func inheritManifest(
+	previous *streamingpb.PChannelSummaryManifest,
+	discovered []*streamingpb.PChannelSummaryChunkIndexEntry,
+) *streamingpb.PChannelSummaryManifest {
+	manifest := &streamingpb.PChannelSummaryManifest{}
+	if previous != nil {
+		manifest = proto.Clone(previous).(*streamingpb.PChannelSummaryManifest)
+	}
+	for _, entry := range discovered {
+		recordChunk(manifest, entry)
+	}
+	return manifest
 }

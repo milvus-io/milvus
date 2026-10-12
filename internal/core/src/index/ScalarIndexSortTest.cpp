@@ -1,9 +1,17 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <cstddef>
+#include <cmath>
+#include <cstring>
+#include <type_traits>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
+#include <random>
+#include <unordered_set>
+#include <utility>
 #include <optional>
 #include <string>
 #include <vector>
@@ -19,6 +27,7 @@
 #include "index/IndexFactory.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/ScalarIndexSort.h"
+#include "index/SortedMembership.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
@@ -53,7 +62,9 @@ class ExposedScalarIndexSort : public ScalarIndexSort<int64_t> {
 };
 
 struct ScalarSortAsyncLoadFixture {
-    explicit ScalarSortAsyncLoadFixture(std::string test_name)
+    explicit ScalarSortAsyncLoadFixture(
+        std::string test_name,
+        proto::schema::DataType type = proto::schema::DataType::Int64)
         : root_path(TestLocalPath + "/" + std::move(test_name)) {
         boost::filesystem::remove_all(root_path);
         storage::StorageConfig storage_config;
@@ -62,7 +73,7 @@ struct ScalarSortAsyncLoadFixture {
         chunk_manager = storage::CreateChunkManager(storage_config);
         fs = storage::InitArrowFileSystem(storage_config);
 
-        field_schema.set_data_type(proto::schema::DataType::Int64);
+        field_schema.set_data_type(type);
         field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
         index_meta = storage::IndexMeta{3, 101, 1000, 10000};
         ctx = storage::FileManagerContext(
@@ -170,6 +181,339 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
     EXPECT_TRUE(bitset[5]);
     EXPECT_EQ(load_index.Reverse_Lookup(5), data[5]);
 }
+
+namespace {
+
+std::vector<std::vector<int64_t>>
+MembershipQueries() {
+    constexpr auto min = std::numeric_limits<int64_t>::min();
+    constexpr auto max = std::numeric_limits<int64_t>::max();
+    constexpr size_t threshold = 128;
+    std::vector<std::vector<int64_t>> queries{
+        {}, {min}, {max}, {0}, {17, -17}, {min, max, 0, 0}};
+    std::mt19937_64 rng(53853);
+    for (size_t n : {threshold - 1, threshold, threshold + 1, size_t{4096}}) {
+        // Duplicate hits, all misses on either side, and mixed sparse probes.
+        queries.emplace_back(n, 0);
+        queries.emplace_back(n, -1000000);
+        queries.emplace_back(n, 1000000);
+        std::vector<int64_t> mixed(n);
+        for (size_t i = 0; i < n; ++i) {
+            mixed[i] = static_cast<int64_t>(rng() % 8193) - 4096;
+        }
+        mixed[0] = min;
+        mixed[1] = max;
+        mixed[2] = 0;
+        mixed[3] = 0;
+        queries.push_back(mixed);
+        std::sort(mixed.begin(), mixed.end());
+        queries.push_back(mixed);
+        std::reverse(mixed.begin(), mixed.end());
+        queries.push_back(std::move(mixed));
+    }
+    return queries;
+}
+
+void
+CheckMembership(ScalarIndexSort<int64_t>& index,
+                const std::vector<int64_t>& rows,
+                const bool* valid) {
+    ASSERT_EQ(index.Count(), rows.size());
+    auto queries = MembershipQueries();
+    queries.push_back(rows);  // Full coverage, including repeated index values.
+    for (const auto& query : queries) {
+        SCOPED_TRACE("query size=" + std::to_string(query.size()));
+        const auto original = query;
+        const auto* values = query.empty() ? nullptr : query.data();
+        const auto in = index.In(query.size(), values);
+        const auto not_in = index.NotIn(query.size(), values);
+        ASSERT_EQ(in.size(), rows.size());
+        ASSERT_EQ(not_in.size(), rows.size());
+        const std::unordered_set<int64_t> terms(query.begin(), query.end());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            const bool hit = terms.count(rows[row]) != 0;
+            const bool is_valid = valid == nullptr || valid[row];
+            ASSERT_EQ(in[row], is_valid && hit) << "row=" << row;
+            ASSERT_EQ(not_in[row], is_valid && !hit) << "row=" << row;
+        }
+        EXPECT_EQ(query, original);
+    }
+}
+
+std::vector<int64_t>
+MembershipRows(size_t n, size_t cardinality) {
+    std::vector<int64_t> rows(n);
+    for (size_t i = 0; i < n; ++i) {
+        rows[i] = 2 * static_cast<int64_t>(i % cardinality) -
+                  static_cast<int64_t>(cardinality);
+    }
+    rows.front() = std::numeric_limits<int64_t>::min();
+    rows.back() = std::numeric_limits<int64_t>::max();
+    std::mt19937_64 rng(53853);
+    std::shuffle(rows.begin(), rows.end(), rng);
+    return rows;
+}
+
+}  // namespace
+
+TEST(ScalarIndexSortMembershipTest, MatchesScanAcrossCardinalityAndNulls) {
+    for (size_t n : {1, 2, 63, 64, 65, 127, 128, 129, 2049}) {
+        for (size_t cardinality : {size_t{2}, size_t{32}, n}) {
+            const auto rows = MembershipRows(n, cardinality);
+            for (int null_mode : {0, 1, 2}) {
+                SCOPED_TRACE("rows=" + std::to_string(n) +
+                             " cardinality=" + std::to_string(cardinality) +
+                             " null_mode=" + std::to_string(null_mode));
+                auto valid = std::make_unique<bool[]>(n);
+                for (size_t i = 0; i < n; ++i) {
+                    valid[i] = null_mode == 0 || (null_mode == 1 && i % 3 != 0);
+                }
+                const auto* validity = null_mode == 0 ? nullptr : valid.get();
+                ScalarIndexSort<int64_t> index;
+                index.Build(n, rows.data(), validity);
+                CheckMembership(index, rows, validity);
+            }
+        }
+    }
+}
+
+TEST(ScalarIndexSortMembershipTest, LargeListWithFewNonNullEntries) {
+    const auto rows = MembershipRows(4096, 32);
+    auto valid = std::make_unique<bool[]>(rows.size());
+    valid[0] = valid[rows.size() / 2] = valid[rows.size() - 1] = true;
+    ScalarIndexSort<int64_t> index;
+    index.Build(rows.size(), rows.data(), valid.get());
+    ASSERT_EQ(index.Size(), 3);
+    CheckMembership(index, rows, valid.get());
+}
+
+TEST(ScalarIndexSortMembershipTest, MatchesScanAfterLegacyAndPackedReloads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    ScalarSortAsyncLoadFixture fixture("scalar_sort_membership_reload");
+    auto rows = MembershipRows(257, 32);
+    auto valid = std::make_unique<bool[]>(rows.size());
+    for (bool all_null : {false, true}) {
+        SCOPED_TRACE("all_null=" + std::to_string(all_null));
+        for (size_t i = 0; i < rows.size(); ++i) {
+            valid[i] = !all_null && i % 3 != 0;
+        }
+        ScalarIndexSort<int64_t> built(fixture.ctx);
+        built.Build(rows.size(), rows.data(), valid.get());
+        CheckMembership(built, rows, valid.get());
+        const auto stats = built.UploadUnified({});
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE("mmap=" + std::to_string(mmap));
+            Config config;
+            config[ENABLE_MMAP] = mmap;
+            config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+            config[INDEX_FILES] = stats->GetIndexFiles();
+            for (bool async : {false, true}) {
+                SCOPED_TRACE("async=" + std::to_string(async));
+                auto ctx = fixture.ctx;
+                ctx.use_async_load = async;
+                ScalarIndexSort<int64_t> loaded(ctx);
+                loaded.LoadUnified(config);
+                CheckMembership(loaded, rows, valid.get());
+            }
+            ScalarIndexSort<int64_t> legacy(fixture.ctx);
+            legacy.Load(built.Serialize({}), config);
+            CheckMembership(legacy, rows, valid.get());
+        }
+    }
+}
+
+namespace {
+
+template <typename T>
+proto::schema::DataType
+MembershipDataType() {
+    if constexpr (std::is_same_v<T, bool>)
+        return proto::schema::Bool;
+    if constexpr (std::is_same_v<T, int8_t>)
+        return proto::schema::Int8;
+    if constexpr (std::is_same_v<T, int16_t>)
+        return proto::schema::Int16;
+    if constexpr (std::is_same_v<T, int32_t>)
+        return proto::schema::Int32;
+    if constexpr (std::is_same_v<T, int64_t>)
+        return proto::schema::Int64;
+    if constexpr (std::is_same_v<T, float>)
+        return proto::schema::Float;
+    return proto::schema::Double;
+}
+
+template <typename T>
+std::vector<T>
+TypedMembershipRows(size_t n) {
+    std::vector<T> rows(n);
+    for (size_t i = 0; i < n; ++i) {
+        if constexpr (std::is_same_v<T, bool>) {
+            rows[i] = i % 2 != 0;
+        } else {
+            rows[i] = static_cast<T>(2 * static_cast<int>(i % 31) - 30);
+        }
+    }
+    if (n >= 8) {
+        rows[0] = std::numeric_limits<T>::lowest();
+        rows[1] = std::numeric_limits<T>::max();
+        if constexpr (std::is_floating_point_v<T>) {
+            rows[2] = -std::numeric_limits<T>::infinity();
+            rows[3] = std::numeric_limits<T>::infinity();
+            rows[4] = T(-0.0);
+            rows[5] = T(0.0);
+            rows[6] = std::numeric_limits<T>::denorm_min();
+            rows[7] = -std::numeric_limits<T>::denorm_min();
+            if (n >= 10) {
+                rows[8] = T(1.25);
+                rows[9] = std::nextafter(T(1.25), T(2));
+            }
+        }
+    }
+    return rows;
+}
+
+// A real bool[] also exercises ScalarIndexSort<bool>'s pointer API, without
+// relying on the packed vector<bool> specialization. Used for every type.
+template <typename T>
+std::unique_ptr<T[]>
+MembershipBuffer(const std::vector<T>& values) {
+    auto buffer = std::make_unique<T[]>(values.size());
+    std::copy(values.begin(), values.end(), buffer.get());
+    return buffer;
+}
+
+template <typename T>
+void
+CheckTypedMembership(ScalarIndexSort<T>& index,
+                     const std::vector<T>& rows,
+                     const bool* valid) {
+    std::vector<std::vector<T>> queries{{},
+                                        {T(0)},
+                                        {T(1)},
+                                        {T(1), T(0), T(1)},
+                                        rows,
+                                        std::vector<T>(129, T(0)),
+                                        std::vector<T>(4096, T(1))};
+    auto reverse = rows;
+    std::reverse(reverse.begin(), reverse.end());
+    queries.push_back(reverse);
+    if constexpr (!std::is_same_v<T, bool>) {
+        queries.push_back({std::numeric_limits<T>::lowest(),
+                           std::numeric_limits<T>::max(),
+                           T(-31),
+                           T(31)});
+    }
+    if constexpr (std::is_floating_point_v<T>) {
+        queries.push_back({T(-0.0), T(0.0), T(-0.0)});
+        queries.push_back({-std::numeric_limits<T>::infinity(),
+                           std::numeric_limits<T>::infinity()});
+        queries.push_back({std::numeric_limits<T>::denorm_min(),
+                           -std::numeric_limits<T>::denorm_min()});
+        queries.push_back({T(1.25),
+                           std::nextafter(T(1.25), T(2)),
+                           std::nextafter(T(1.25), T(0))});
+        queries.push_back({std::numeric_limits<T>::quiet_NaN()});
+        queries.push_back({T(31),
+                           std::numeric_limits<T>::quiet_NaN(),
+                           T(-0.0),
+                           std::numeric_limits<T>::quiet_NaN()});
+    }
+    ASSERT_EQ(index.Count(), rows.size());
+    for (const auto& query : queries) {
+        SCOPED_TRACE("query size=" + std::to_string(query.size()));
+        auto input = MembershipBuffer(query);
+        auto original = MembershipBuffer(query);
+        auto* values = query.empty() ? nullptr : input.get();
+        const auto in = index.In(query.size(), values);
+        const auto not_in = index.NotIn(query.size(), values);
+        ASSERT_EQ(in.size(), rows.size());
+        ASSERT_EQ(not_in.size(), rows.size());
+        bool legacy_nan_query = false;
+        if constexpr (std::is_floating_point_v<T>) {
+            legacy_nan_query = std::any_of(
+                query.begin(), query.end(), [](T v) { return std::isnan(v); });
+        }
+        for (size_t row = 0; row < rows.size(); ++row) {
+            // Keep the legacy NaN-query contract distinct from the equality
+            // scan oracle: lower/upper_bound(NaN) spans every non-NaN entry.
+            const bool hit =
+                legacy_nan_query ||
+                std::find(query.begin(), query.end(), rows[row]) != query.end();
+            const bool is_valid = !valid || valid[row];
+            ASSERT_EQ(in[row], is_valid && hit) << "row=" << row;
+            ASSERT_EQ(not_in[row], is_valid && !hit) << "row=" << row;
+        }
+        if (!query.empty()) {
+            EXPECT_EQ(
+                std::memcmp(
+                    input.get(), original.get(), query.size() * sizeof(T)),
+                0);
+        }
+    }
+}
+
+template <typename T>
+class ScalarIndexSortTypedMembershipTest : public testing::Test {};
+using MembershipTypes =
+    testing::Types<int8_t, int16_t, int32_t, int64_t, bool, float, double>;
+TYPED_TEST_SUITE(ScalarIndexSortTypedMembershipTest, MembershipTypes);
+
+TYPED_TEST(ScalarIndexSortTypedMembershipTest, ScanOracleAndInputImmutability) {
+    for (size_t n : {1, 2, 63, 64, 65, 127, 128, 129, 257}) {
+        const auto rows = TypedMembershipRows<TypeParam>(n);
+        const auto data = MembershipBuffer(rows);
+        for (int null_mode : {0, 1, 2}) {
+            SCOPED_TRACE("rows=" + std::to_string(n) +
+                         " null_mode=" + std::to_string(null_mode));
+            auto valid = std::make_unique<bool[]>(n);
+            for (size_t i = 0; i < n; ++i) {
+                valid[i] = null_mode == 0 || (null_mode == 1 && i % 3 != 0);
+            }
+            const bool* validity = null_mode == 0 ? nullptr : valid.get();
+            ScalarIndexSort<TypeParam> index;
+            index.Build(n, data.get(), validity);
+            CheckTypedMembership(index, rows, validity);
+        }
+    }
+}
+
+TYPED_TEST(ScalarIndexSortTypedMembershipTest, LegacyAndPackedReloads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    ScalarSortAsyncLoadFixture fixture("scalar_sort_typed_membership_reload",
+                                       MembershipDataType<TypeParam>());
+    const auto rows = TypedMembershipRows<TypeParam>(65);
+    const auto data = MembershipBuffer(rows);
+    auto valid = std::make_unique<bool[]>(rows.size());
+    for (bool all_null : {false, true}) {
+        SCOPED_TRACE("all_null=" + std::to_string(all_null));
+        for (size_t i = 0; i < rows.size(); ++i) {
+            valid[i] = !all_null && i % 3 != 1;
+        }
+        ScalarIndexSort<TypeParam> built(fixture.ctx);
+        built.Build(rows.size(), data.get(), valid.get());
+        const auto stats = built.UploadUnified({});
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE("mmap=" + std::to_string(mmap));
+            Config config;
+            config[ENABLE_MMAP] = mmap;
+            config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+            config[INDEX_FILES] = stats->GetIndexFiles();
+            for (bool async : {false, true}) {
+                SCOPED_TRACE("async=" + std::to_string(async));
+                auto ctx = fixture.ctx;
+                ctx.use_async_load = async;
+                ScalarIndexSort<TypeParam> loaded(ctx);
+                loaded.LoadUnified(config);
+                CheckTypedMembership(loaded, rows, valid.get());
+            }
+            ScalarIndexSort<TypeParam> legacy(fixture.ctx);
+            legacy.Load(built.Serialize({}), config);
+            CheckTypedMembership(legacy, rows, valid.get());
+        }
+    }
+}
+
+}  // namespace
 
 void
 test_stlsort_for_range(

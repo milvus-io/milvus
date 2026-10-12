@@ -49,9 +49,10 @@ func TestBroadcasterWithRK_InjectsTraceContextBeforeTaskPersist(t *testing.T) {
 	defer span.End()
 
 	b := &broadcasterWithRK{
-		broadcaster: &broadcastTaskManager{},
-		broadcastID: 11,
-		guards:      buildTestLockGuards(resourceKey),
+		broadcaster:    &broadcastTaskManager{},
+		broadcastID:    11,
+		controlChannel: "by-dev-rootcoord-dml_0_vcchan",
+		guards:         buildTestLockGuards(resourceKey),
 	}
 	_, err := b.Broadcast(ctx, msg)
 	assert.NoError(t, err)
@@ -68,7 +69,7 @@ func TestBroadcasterWithRK_InjectsTraceContextBeforeTaskPersist(t *testing.T) {
 	assert.Equal(t, expectedTraceID, broadcastSpan.SpanContext.TraceID())
 	assertSpanAttribute(t, broadcastSpan.Attributes, "message.type", message.MessageTypeDropCollection.String())
 	assertSpanInt64Attribute(t, broadcastSpan.Attributes, "broadcast.id", 11)
-	assertSpanStringSliceAttribute(t, broadcastSpan.Attributes, "broadcast.vchannels", []string{"v1", "v2"})
+	assertSpanStringSliceAttribute(t, broadcastSpan.Attributes, "broadcast.vchannels", []string{"v1", "v2", "by-dev-rootcoord-dml_0_vcchan"})
 
 	// Verify _tc was injected on the msg observed by the inner broadcast call.
 	sc := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), capturedMsg))
@@ -108,9 +109,10 @@ func TestBroadcasterWithRK_KeepsExistingTraceContext(t *testing.T) {
 	defer callerSpan.End()
 
 	b := &broadcasterWithRK{
-		broadcaster: &broadcastTaskManager{},
-		broadcastID: 11,
-		guards:      buildTestLockGuards(message.NewExclusiveCollectionNameResourceKey("db", "collection")),
+		broadcaster:    &broadcastTaskManager{},
+		broadcastID:    11,
+		controlChannel: "by-dev-rootcoord-dml_0_vcchan",
+		guards:         buildTestLockGuards(message.NewExclusiveCollectionNameResourceKey("db", "collection")),
 	}
 	_, err := b.Broadcast(callerCtx, msg)
 	assert.NoError(t, err)
@@ -129,6 +131,53 @@ func TestBroadcasterWithRK_KeepsExistingTraceContext(t *testing.T) {
 	assert.True(t, sc.IsValid(), "_tc should still be present after Broadcast")
 	assert.Equal(t, originSC.TraceID(), sc.TraceID())
 	assert.Equal(t, originSC.SpanID(), sc.SpanID())
+}
+
+func TestBroadcasterWithRK_AddsControlChannel(t *testing.T) {
+	defer mockey.UnPatchAll()
+	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
+
+	var capturedMsg message.BroadcastMutableMessage
+	mockey.Mock((*broadcastTaskManager).broadcast).To(
+		func(_ *broadcastTaskManager, _ context.Context, msg message.BroadcastMutableMessage, _ uint64, _ *lockGuards) (*types.BroadcastAppendResult, error) {
+			capturedMsg = msg
+			return &types.BroadcastAppendResult{}, nil
+		}).Build()
+
+	newB := func() *broadcasterWithRK {
+		return &broadcasterWithRK{
+			broadcaster:    &broadcastTaskManager{},
+			broadcastID:    11,
+			controlChannel: cchannel,
+			guards:         buildTestLockGuards(message.NewExclusiveCollectionNameResourceKey("db", "collection")),
+		}
+	}
+	build := func(vchannels []string) message.BroadcastMutableMessage {
+		b := message.NewDropCollectionMessageBuilderV1().
+			WithHeader(&messagespb.DropCollectionMessageHeader{}).
+			WithBody(&msgpb.DropCollectionRequest{})
+		if len(vchannels) > 0 {
+			b.WithBroadcast(vchannels)
+		} else {
+			b.WithControlChannelBroadcast()
+		}
+		return b.MustBuildBroadcast()
+	}
+
+	// The caller omits the control channel.
+	_, err := newB().Broadcast(context.Background(), build([]string{"v1", "v2"}))
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []string{"v1", "v2", cchannel}, capturedMsg.BroadcastHeader().VChannels)
+
+	// The caller supplies it: no duplicate.
+	_, err = newB().Broadcast(context.Background(), build([]string{"v1", cchannel}))
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []string{"v1", cchannel}, capturedMsg.BroadcastHeader().VChannels)
+
+	// Control channel only.
+	_, err = newB().Broadcast(context.Background(), build(nil))
+	assert.NoError(t, err)
+	assert.Equal(t, []string{cchannel}, capturedMsg.BroadcastHeader().VChannels)
 }
 
 // buildTestBroadcastMessageForTrace builds a minimal BroadcastMutableMessage for tests.

@@ -21,9 +21,9 @@ dependency, [#52579](https://github.com/milvus-io/milvus/pull/52579).
 ## Motivation
 
 The metrics port, normally 9091, also exposes process lifecycle operations,
-coordinator management, profiling, event logs, the web console, and legacy REST
-data operations. These endpoints need an authentication policy independent of
-the main service port's data-plane authorization policy.
+coordinator management, profiling, event logs, and the web console. These endpoints
+need an authentication policy independent of the main service port's data-plane
+authorization policy.
 
 `common.security.adminAuthEnabled` defaults to `false`. When enabled, operator
 endpoints require HTTP Basic authentication with the cluster's root credential.
@@ -38,9 +38,8 @@ the main service port.
 | `/management/*`, except readiness | Existing behavior | Root Basic authentication |
 | `/debug/pprof/*`, `/log/level`, `/eventlog` | Existing behavior | Root Basic authentication |
 | `/webui/`, `/telemetry`, `/api/v1/_*` | Existing behavior | Root Basic authentication |
-| Legacy REST data operations under `/api/v1` | Existing authorization policy | Existing valid-user/API-key policy if `authorizationEnabled=true`; otherwise root Basic authentication |
+| Non-underscore `/api/v1/*`, including `/api/v1/health` | Removed | Removed |
 | `/healthz`, `/livez`, `/metrics`, `/metrics_default`, `/management/check/ready` | Open | Open |
-| `/api/v1/health` | Existing authorization policy | Exempt from the new gate; existing authorization still applies |
 
 `internal/http.Register` requires explicit `AdminAuth` marking on operator
 routes and panics on an unmarked registration, even when the flag is disabled.
@@ -49,9 +48,17 @@ patterns. It is a registration guard, not a classifier for arbitrary third-party
 routers.
 
 The proxy builds its metrics-port Gin tree through `newMetricsPortEngine`.
-Its middleware classifies console routes by the `/_` prefix. The console route
-enumeration test and assembled-router test must cover newly added routes.
-Main-port HTTP handlers are registered separately.
+Only console routes under `/api/v1/_*` are mounted there, with one authentication
+middleware on their parent group. The console route enumeration test and
+assembled-router test must cover newly added routes. Main-port HTTP handlers
+are registered separately.
+
+The [HTTP V1 route retirement](20260922-http-v1-route-retirement.md) supersedes
+the original legacy REST and `/api/v1/health` policy: those routes are removed
+regardless of the authentication flags. The console API and main-port V1 vector
+API can also be disabled together using `proxy.http.enableV1`; it defaults to
+`true` and requires a restart. This does not change authentication on the
+remaining routes.
 
 Milvus routes use a private ServeMux. With authentication disabled and pprof
 enabled, more-specific legacy routes on `http.DefaultServeMux` remain reachable

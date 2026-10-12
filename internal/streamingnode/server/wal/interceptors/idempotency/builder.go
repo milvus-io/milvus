@@ -18,7 +18,6 @@ type interceptorBuilder struct{}
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	params := paramtable.Get()
 	config := sanitizeWindowConfig(WindowConfig{
-		Enabled:      params.StreamingCfg.IdempotencyEnabled.GetAsBool(),
 		MaxBytes:     int(params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize()),
 		MaxKeyLength: params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(),
 	})
@@ -32,7 +31,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 // default with a warning. maxBytes is the window's only retention bound, so a
 // non-positive value would let it grow without limit, one entry per key.
 func sanitizeWindowConfig(config WindowConfig) WindowConfig {
-	if !config.Enabled || config.MaxBytes > 0 {
+	if config.MaxBytes > 0 {
 		return config
 	}
 	fallback, err := strconv.Atoi(paramtable.Get().StreamingCfg.IdempotencyMaxBytesPerWindow.DefaultValue)

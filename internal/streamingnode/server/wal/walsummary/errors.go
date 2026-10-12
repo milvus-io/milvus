@@ -16,7 +16,11 @@
 
 package walsummary
 
-import "github.com/cockroachdb/errors"
+import (
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
 
 // ErrStoreCorrupted marks a summary store object (chunk or manifest) that cannot
 // be decoded or is internally inconsistent. It is terminal: the manifest is the
@@ -52,5 +56,5 @@ func markStoreCorrupted(err error) error {
 }
 
 func storeCorruptedf(format string, args ...any) error {
-	return markStoreCorrupted(errors.Errorf(format, args...))
+	return markStoreCorrupted(merr.WrapErrServiceInternalMsg(format, args...))
 }

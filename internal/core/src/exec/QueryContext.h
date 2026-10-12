@@ -28,7 +28,7 @@
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/Exception.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/OpContext.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
@@ -286,13 +286,14 @@ class QueryContext : public Context {
     }
 
     void
-    set_array_offsets(std::shared_ptr<const IArrayOffsets> offsets) {
-        array_offsets_ = std::move(offsets);
+    set_struct_element_offsets(
+        std::shared_ptr<const IStructElementOffsets> offsets) {
+        struct_element_offsets_ = std::move(offsets);
     }
 
-    std::shared_ptr<const IArrayOffsets>
-    get_array_offsets() const {
-        return array_offsets_;
+    std::shared_ptr<const IStructElementOffsets>
+    get_struct_element_offsets() const {
+        return struct_element_offsets_;
     }
 
     void
@@ -389,7 +390,8 @@ class QueryContext : public Context {
     query::PlanOptions plan_options_;
 
     std::string struct_name_;
-    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{
+        nullptr};
     int64_t active_element_count_{0};  // Total elements in active documents
     // Whether the current bitset has been converted to element-level.
     // Set by element-level filter/search operators after row-to-element

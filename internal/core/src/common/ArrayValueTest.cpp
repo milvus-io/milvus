@@ -31,7 +31,7 @@
 #include <utility>
 #include <vector>
 
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/ChunkWriter.h"
 #include "common/Consts.h"
 #include "common/FieldData.h"
@@ -291,7 +291,9 @@ AssertStorageV3NestedArrayResult(const proto::segcore::RetrieveResults& result,
 }
 
 void
-RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
+RunStorageV3SealedRetrieve(bool enable_mmap,
+                           bool use_take,
+                           bool lazy_manifest = false) {
     const auto unique =
         std::chrono::steady_clock::now().time_since_epoch().count();
     const auto segment_path =
@@ -308,6 +310,12 @@ RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
     const auto row_count = static_cast<int64_t>(rows.size());
 
     auto& segcore_config = segcore::SegcoreConfig::default_config();
+    const auto original_lazy_manifest =
+        segcore_config.get_lazy_column_group_enabled();
+    Defer restore_lazy_column_group([&]() {
+        segcore_config.set_lazy_column_group_enabled(original_lazy_manifest);
+    });
+    segcore_config.set_lazy_column_group_enabled(lazy_manifest);
     const auto original_chunk_rows = segcore_config.get_chunk_rows();
     DeferLambda([&]() { segcore_config.set_chunk_rows(original_chunk_rows); });
     segcore_config.set_chunk_rows(2);
@@ -392,6 +400,54 @@ RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
     auto* chunked =
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(sealed.get());
     ASSERT_NE(chunked, nullptr);
+    if (lazy_manifest) {
+        auto column =
+            chunked->TestGetPublishedStateSnapshot()->runtime->fields.at(
+                nested_field);
+        ASSERT_NE(column, nullptr);
+        auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
+        ASSERT_NE(proxy, nullptr);
+        ASSERT_TRUE(proxy->IsLazy());
+        ASSERT_FALSE(proxy->IsMaterialized());
+        if (enable_mmap) {
+            EXPECT_EQ(static_cast<segcore::SegmentInterface*>(sealed.get())
+                          ->get_field_avg_size(nested_field),
+                      0);
+            EXPECT_FALSE(proxy->IsMaterialized());
+        }
+        const std::vector<int64_t> lazy_offsets = {3, 0, 1, 2, 0};
+        EXPECT_FALSE(
+            column->CellsLoaded(lazy_offsets.data(), lazy_offsets.size()));
+
+        // The first call must materialize through BulkArrayValueAt itself,
+        // without a layout/size getter preparing the column beforehand.
+        milvus::OpContext op_ctx;
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            SCOPED_TRACE(attempt);
+            std::vector<ScalarFieldProto> actual(lazy_offsets.size());
+            size_t callback_count = 0;
+            ASSERT_NO_THROW(column->BulkArrayValueAt(
+                &op_ctx,
+                [&](ScalarFieldProto&& value, size_t i) {
+                    ASSERT_LT(i, actual.size());
+                    actual[i] = std::move(value);
+                    ++callback_count;
+                },
+                lazy_offsets.data(),
+                lazy_offsets.size()));
+            EXPECT_EQ(callback_count, lazy_offsets.size());
+            for (size_t i = 0; i < lazy_offsets.size(); ++i) {
+                AssertProtoEqual(rows[lazy_offsets[i]], actual[i]);
+            }
+            EXPECT_TRUE(
+                column->CellsLoaded(lazy_offsets.data(), lazy_offsets.size()));
+        }
+        if (enable_mmap) {
+            EXPECT_EQ(static_cast<segcore::SegmentInterface*>(sealed.get())
+                          ->get_field_avg_size(nested_field),
+                      0);
+        }
+    }
     ASSERT_GT(sealed->num_chunk(nested_field), 1);
     chunked->SetUseTakeForOutputForTesting(use_take);
 
@@ -1134,7 +1190,7 @@ TEST(ColumnarArrayChunk, SealedFactoriesUseRecursiveChunk) {
     verify_views(proxy_column);
 }
 
-TEST(ColumnarArrayChunk, SealedArrayOffsetsUseRecursiveRootOffsets) {
+TEST(ColumnarArrayChunk, SealedStructElementOffsetsUseRecursiveRootOffsets) {
     auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::Int32));
     const auto field_id = FieldId(100);
     auto field_meta = NestedArrayFieldMeta(field_id, type);
@@ -1163,15 +1219,16 @@ TEST(ColumnarArrayChunk, SealedArrayOffsetsUseRecursiveRootOffsets) {
     fields.emplace(field_id, std::shared_ptr<Chunk>(std::move(chunk)));
     std::vector<std::unique_ptr<GroupChunk>> group_chunks;
     group_chunks.push_back(std::make_unique<GroupChunk>(std::move(fields)));
-    auto translator =
-        std::make_unique<TestGroupChunkTranslator>(1,
-                                                   std::vector<int64_t>{5},
-                                                   "recursive_array_offsets",
-                                                   std::move(group_chunks));
+    auto translator = std::make_unique<TestGroupChunkTranslator>(
+        1,
+        std::vector<int64_t>{5},
+        "recursive_struct_element_offsets",
+        std::move(group_chunks));
     auto group = std::make_shared<ChunkedColumnGroup>(std::move(translator));
     ProxyChunkColumn column(group, field_id, field_meta);
 
-    auto offsets = ArrayOffsetsSealed::BuildFromColumn(column, field_meta, 5);
+    auto offsets =
+        StructElementOffsetsSealed::BuildFromColumn(column, field_meta, 5);
     EXPECT_EQ(offsets->ElementIDRangeOfRow(0), std::make_pair(0, 2));
     EXPECT_EQ(offsets->ElementIDRangeOfRow(1), std::make_pair(2, 2));
     EXPECT_EQ(offsets->ElementIDRangeOfRow(2), std::make_pair(2, 3));
@@ -1186,6 +1243,14 @@ TEST(ArrayValue, SealedStorageV3RetrieveNestedArrayFromMemoryChunk) {
 
 TEST(ArrayValue, SealedStorageV3RetrieveNestedArrayFromMmapChunk) {
     RunStorageV3SealedRetrieve(true, false);
+}
+
+TEST(ArrayValue, LazyManifestBulkArrayValueAtFromMemoryChunk) {
+    RunStorageV3SealedRetrieve(false, false, true);
+}
+
+TEST(ArrayValue, LazyManifestBulkArrayValueAtFromMmapChunk) {
+    RunStorageV3SealedRetrieve(true, false, true);
 }
 
 TEST(ArrayValue, SealedStorageV3TakeNestedArray) {

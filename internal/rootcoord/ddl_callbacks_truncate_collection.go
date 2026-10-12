@@ -22,7 +22,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -50,13 +49,10 @@ func (c *Core) broadcastTruncateCollection(ctx context.Context, req *milvuspb.Tr
 	}
 	body := &messagespb.TruncateCollectionMessageBody{}
 
-	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.VirtualChannelNames...)
 	msg := message.NewTruncateCollectionMessageBuilderV2().
 		WithHeader(header).
 		WithBody(body).
-		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err

@@ -47,7 +47,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 	for _, action := range actions {
 		switch e := action.Entry.(type) {
 		case metastore.SegmentEntry:
-			if err := kc.applySegmentEntry(ctx, b, action.Type, e); err != nil {
+			if err := kc.applySegmentEntry(ctx, b, action.Type, e, publishesSegmentVersion(e.Segment, actions)); err != nil {
 				return err
 			}
 		case metastore.SegmentIndexEntry:
@@ -240,6 +240,22 @@ func containsSegmentIndexUpdate(actions []metastore.UpdateAction) bool {
 	return false
 }
 
+// publishesSegmentVersion identifies a first Flush publication. Later compaction
+// views must not pull all previously published segment records into the final txn.
+func publishesSegmentVersion(segment *datapb.SegmentInfo, actions []metastore.UpdateAction) bool {
+	if segment.GetSealedAtDataVersion() == nil {
+		return false
+	}
+	for _, action := range actions {
+		if entry, ok := action.Entry.(metastore.DataViewEntry); ok &&
+			entry.DataView.GetCollectionId() == segment.GetCollectionID() &&
+			proto.Equal(entry.DataView.GetDataVersion(), segment.GetSealedAtDataVersion()) {
+			return true
+		}
+	}
+	return false
+}
+
 // applySegmentEntry stages the kv writes for a segment action.
 //   - ActionAdd    -> segment record + its binlog KVs (a new segment).
 //   - ActionUpdate -> segment record rewrite; the caller supplies the
@@ -249,9 +265,23 @@ func containsSegmentIndexUpdate(actions []metastore.UpdateAction) bool {
 //     handleDroppedSegment GC-compat binlog KVs.
 //   - anything else (e.g. ActionDelete: physical segment removal) is not
 //     wired yet and is rejected.
-func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t metastore.ActionType, e metastore.SegmentEntry) error {
+func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t metastore.ActionType, e metastore.SegmentEntry, publishesVersion bool) error {
 	if e.Segment == nil {
 		return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment in UpdateAction")
+	}
+	// A durable first-publication binding must never precede its DataView.
+	// Keep just the segment record (not its potentially large binlog set) in
+	// the final atomic transaction with the DataView on the chunked path.
+	save := b.Save
+	if publishesVersion {
+		segmentKey := buildSegmentPath(e.Segment.GetCollectionID(), e.Segment.GetPartitionID(), e.Segment.GetID())
+		save = func(key, value string) {
+			if key == segmentKey {
+				b.CommitSave(key, value)
+			} else {
+				b.Save(key, value)
+			}
+		}
 	}
 	switch t {
 	case metastore.ActionAdd:
@@ -271,7 +301,7 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 			return err
 		}
 		for k, v := range kvs {
-			b.Save(k, v)
+			save(k, v)
 		}
 		for _, k := range removals {
 			b.Remove(k)
@@ -289,7 +319,7 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 				return err
 			}
 			for k, v := range kvs {
-				b.Save(k, v)
+				save(k, v)
 			}
 			for _, k := range removals {
 				b.Remove(k)
@@ -301,7 +331,7 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 			return err
 		}
 		for k, v := range kvs {
-			b.Save(k, v)
+			save(k, v)
 		}
 		if len(e.Binlogs) > 0 {
 			// C26: the record-only (non-AlterEncoding) ActionUpdate persists no

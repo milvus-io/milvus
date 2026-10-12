@@ -18,10 +18,14 @@
 #include <folly/io/IOBuf.h>
 #include <sys/mman.h>
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <numeric>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -51,40 +55,84 @@ using namespace milvus::cachinglayer;
 // ChunkedColumnGroup represents a collection of group chunks
 class ChunkedColumnGroup {
  public:
+    using TranslatorFactory =
+        std::function<std::unique_ptr<Translator<GroupChunk>>(OpContext*)>;
+
     explicit ChunkedColumnGroup(
         std::unique_ptr<Translator<GroupChunk>> translator)
         : slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator))) {
         num_chunks_ = slot_->num_cells();
-        num_rows_ = GetNumRowsUntilChunk().back();
+        auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
+            slot_->meta());
+        num_rows_ = meta->num_rows_until_chunk_.back();
+        num_fields_ = meta->num_fields_;
+        memory_size_ = std::accumulate(meta->chunk_memory_size_.begin(),
+                                       meta->chunk_memory_size_.end(),
+                                       size_t{0});
+    }
+
+    // The factory owns the load-generation inputs. Row and field counts are
+    // available without creating a translator or reading file metadata.
+    explicit ChunkedColumnGroup(int64_t num_rows,
+                                size_t num_fields,
+                                TranslatorFactory factory)
+        : num_rows_(num_rows),
+          num_fields_(num_fields),
+          lazy_init_(std::make_unique<LazyInitState>(std::move(factory))) {
+        AssertInfo(lazy_init_->factory != nullptr,
+                   "deferred column group requires a translator factory");
     }
 
     virtual ~ChunkedColumnGroup() {
-        slot_->CancelWarmup();
+        CancelWarmup();
+    }
+
+    // Records how this group was loaded, not whether it is materialized now.
+    // In particular, materialization must not change load-time accounting.
+    bool
+    IsLazy() const {
+        return lazy_init_ != nullptr;
+    }
+
+    bool
+    IsMaterialized() const {
+        return GetSlotIfReady() != nullptr;
+    }
+
+    void
+    Prepare(milvus::OpContext* op_ctx) const {
+        (void)EnsureMaterialized(op_ctx);
     }
 
     void
     ManualEvictCache() const {
-        slot_->ManualEvictAll();
+        if (auto slot = GetSlotIfReady()) {
+            slot->ManualEvictAll();
+        }
     }
 
     void
     CancelWarmup() {
-        slot_->CancelWarmup();
+        if (auto slot = GetSlotIfReady()) {
+            slot->CancelWarmup();
+        }
     }
 
     // Get the number of group chunks
     size_t
     num_chunks() const {
+        EnsureMaterialized(nullptr);
         return num_chunks_;
     }
 
     PinWrapper<GroupChunk*>
     GetGroupChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const {
+        auto slot = EnsureMaterialized(op_ctx);
         AssertInfo(
             chunk_id >= 0 && chunk_id < num_chunks_,
             "[StorageV2] chunk_id out of range: " + std::to_string(chunk_id) +
                 ", num_chunks: " + std::to_string(num_chunks_));
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
+        auto ca = SemiInlineGet(slot->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<GroupChunk*>(std::move(ca), chunk);
     }
@@ -92,25 +140,32 @@ class ChunkedColumnGroup {
     std::shared_ptr<CellAccessor<GroupChunk>>
     GetGroupChunks(milvus::OpContext* op_ctx,
                    const std::vector<int64_t>& chunk_ids) {
+        auto slot = EnsureMaterialized(op_ctx);
         for (auto chunk_id : chunk_ids) {
             AssertInfo(chunk_id >= 0 && chunk_id < num_chunks_,
                        "[StorageV2] chunk_id out of range: " +
                            std::to_string(chunk_id) +
                            ", num_chunks: " + std::to_string(num_chunks_));
         }
-        return SemiInlineGet(slot_->PinCells(op_ctx, chunk_ids));
+        return SemiInlineGet(slot->PinCells(op_ctx, chunk_ids));
     }
 
     bool
     CellsLoaded(const std::vector<cachinglayer::cid_t>& cids) const {
-        return std::all_of(cids.begin(), cids.end(), [this](cid_t cid) {
-            return slot_->IsCached(cid);
-        });
+        if (cids.empty()) {
+            return true;
+        }
+        auto slot = GetSlotIfReady();
+        return slot != nullptr &&
+               std::all_of(cids.begin(), cids.end(), [&](cid_t cid) {
+                   return slot->IsCached(cid);
+               });
     }
 
     std::vector<PinWrapper<GroupChunk*>>
     GetAllGroupChunks(milvus::OpContext* op_ctx) {
-        auto ca = SemiInlineGet(slot_->PinAllCells(op_ctx));
+        auto slot = EnsureMaterialized(op_ctx);
+        auto ca = SemiInlineGet(slot->PinAllCells(op_ctx));
         std::vector<PinWrapper<GroupChunk*>> ret;
         ret.reserve(num_chunks_);
         for (size_t i = 0; i < num_chunks_; i++) {
@@ -127,18 +182,16 @@ class ChunkedColumnGroup {
 
     int64_t
     GetNumRowsUntilChunk(int64_t chunk_id) const {
+        const auto& rows = GetNumRowsUntilChunk();
         AssertInfo(
             chunk_id >= 0 && chunk_id <= num_chunks_,
             "[StorageV2] chunk_id out of range: " + std::to_string(chunk_id));
-        return GetNumRowsUntilChunk()[chunk_id];
+        return rows[chunk_id];
     }
 
     const std::vector<int64_t>&
     GetNumRowsUntilChunk() const {
-        auto meta =
-            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
-                slot_->meta());
-        return meta->num_rows_until_chunk_;
+        return GetMeta()->num_rows_until_chunk_;
     }
 
     std::pair<size_t, size_t>
@@ -178,54 +231,130 @@ class ChunkedColumnGroup {
 
     size_t
     NumFieldsInGroup() const {
-        auto meta =
-            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
-                slot_->meta());
-        return meta->num_fields_;
+        return num_fields_;
     }
 
     const index::FieldChunkMetrics*
     GetSkipMetrics(FieldId field_id, int64_t chunk_id) const {
-        if (chunk_id < 0 || static_cast<size_t>(chunk_id) >= num_chunks_) {
+        auto slot = GetSlotIfReady();
+        if (slot == nullptr || chunk_id < 0 ||
+            static_cast<size_t>(chunk_id) >= num_chunks_) {
             return nullptr;
         }
         auto meta =
             static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
-                slot_->meta());
+                slot->meta());
         return meta->FindSkipMetric(field_id.get(), chunk_id);
     }
 
     const SkipMetricsList*
     GetSkipMetricsList(FieldId field_id) const {
+        auto slot = GetSlotIfReady();
+        if (slot == nullptr) {
+            return nullptr;
+        }
         auto meta =
             static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
-                slot_->meta());
+                slot->meta());
         return meta->FindSkipMetricsList(field_id.get());
     }
 
     size_t
     memory_size() const {
-        auto meta =
-            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
-                slot_->meta());
-        size_t memory_size = 0;
-        for (auto& size : meta->chunk_memory_size_) {
-            memory_size += size;
-        }
-        return memory_size;
+        EnsureMaterialized(nullptr);
+        return memory_size_;
     }
 
 #ifdef MILVUS_UNIT_TEST
     CacheWarmupPolicy
     TestCacheWarmupPolicy() const {
-        return slot_->meta()->cache_warmup_policy;
+        return GetMeta()->cache_warmup_policy;
     }
 #endif
 
- protected:
-    mutable std::shared_ptr<CacheSlot<GroupChunk>> slot_;
-    size_t num_chunks_{0};
-    size_t num_rows_{0};
+ private:
+    using SlotPtr = std::shared_ptr<CacheSlot<GroupChunk>>;
+
+    struct LazyInitState {
+        explicit LazyInitState(TranslatorFactory factory)
+            : factory(std::move(factory)) {
+        }
+
+        TranslatorFactory factory;
+        std::mutex mutex;
+        std::atomic<bool> ready{false};
+    };
+
+    // Safe to borrow: slot_ is never reset or replaced after publication.
+    CacheSlot<GroupChunk>*
+    GetSlotIfReady() const {
+        // Ordinary groups never change their slot after construction.
+        if (!IsLazy()) {
+            return slot_.get();
+        }
+        if (!lazy_init_->ready.load(std::memory_order_acquire)) {
+            return nullptr;
+        }
+        return slot_.get();
+    }
+
+    CacheSlot<GroupChunk>*
+    EnsureMaterialized(milvus::OpContext* op_ctx) const {
+        if (!IsLazy()) {
+            return slot_.get();
+        }
+
+        if (auto slot = GetSlotIfReady()) {
+            return slot;
+        }
+
+        auto& init = *lazy_init_;
+        // Serialize construction; waiting for this lock is not cancellable.
+        std::lock_guard<std::mutex> lock(init.mutex);
+        if (auto slot = GetSlotIfReady()) {
+            return slot;
+        }
+
+        auto translator = init.factory(op_ctx);
+        auto slot = Manager::GetInstance().CreateCacheSlot(
+            std::move(translator), op_ctx);
+        auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
+            slot->meta());
+        const auto materialized_num_rows =
+            meta->num_rows_until_chunk_.empty()
+                ? int64_t{-1}
+                : meta->num_rows_until_chunk_.back();
+        AssertInfo(materialized_num_rows == num_rows_,
+                   "[StorageV2] lazy group row count mismatch: load info {}, "
+                   "manifest {}",
+                   num_rows_,
+                   materialized_num_rows);
+        num_chunks_ = slot->num_cells();
+        memory_size_ = std::accumulate(meta->chunk_memory_size_.begin(),
+                                       meta->chunk_memory_size_.end(),
+                                       size_t{0});
+
+        // Publish the complete slot and its cached chunk count and size together.
+        // Failures leave slot_ empty so the next caller can retry.
+        slot_ = std::move(slot);
+        init.factory = nullptr;
+        init.ready.store(true, std::memory_order_release);
+        return slot_.get();
+    }
+
+    const segcore::storagev2translator::GroupCTMeta*
+    GetMeta() const {
+        return static_cast<segcore::storagev2translator::GroupCTMeta*>(
+            EnsureMaterialized(nullptr)->meta());
+    }
+
+    mutable SlotPtr slot_;
+    // Published with slot_ through LazyInitState::ready.
+    mutable size_t num_chunks_{0};
+    mutable size_t memory_size_{0};
+    int64_t num_rows_{0};
+    size_t num_fields_{0};
+    std::unique_ptr<LazyInitState> lazy_init_;
 };
 
 class ProxyChunkColumn : public ChunkedColumnInterface {
@@ -257,6 +386,16 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     bool
+    IsLazy() const {
+        return group_->IsLazy();
+    }
+
+    bool
+    IsMaterialized() const {
+        return group_->IsMaterialized();
+    }
+
+    bool
     IsInMultiFieldColumnGroup() const override {
         return group_->NumFieldsInGroup() > 1;
     }
@@ -275,6 +414,18 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
     }
 
+    ScanResult
+    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const override {
+        group_->Prepare(op_ctx);
+        return ChunkedColumnInterface::Scan(op_ctx, options);
+    }
+
+    TakeResultPtr
+    Take(milvus::OpContext* op_ctx, TakeOptions options) const override {
+        group_->Prepare(op_ctx);
+        return ChunkedColumnInterface::Take(op_ctx, std::move(options));
+    }
+
     PinWrapper<const char*>
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const override {
         auto group_chunk = group_->GetGroupChunk(op_ctx, chunk_id);
@@ -284,6 +435,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     bool
     IsValid(milvus::OpContext* op_ctx, size_t offset) const override {
+        group_->Prepare(op_ctx);
         auto [chunk_id, offset_in_chunk] = group_->GetChunkIDByOffset(offset);
         auto group_chunk = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = group_chunk.get()->GetChunk(field_id_);
@@ -312,6 +464,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
         // nullable:
         if (offsets == nullptr) {
+            group_->Prepare(op_ctx);
             // Interface contract: null offsets means iterate over ALL rows
             // (see ChunkedColumnInterface::BulkIsValid). Scan chunk by chunk,
             // pinning each group chunk once — mirrors the BulkRawStringAt
@@ -381,6 +534,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     CellsLoaded(const int64_t* offsets, int64_t count) const override {
         if (count == 0) {
             return true;
+        }
+        if (!group_->IsMaterialized()) {
+            return false;
         }
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         return group_->CellsLoaded(cids);
@@ -746,6 +902,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       "variable length type(except Json)");
         }
         if (offsets == nullptr) {
+            group_->Prepare(op_ctx);
             int64_t current_offset = 0;
             for (cid_t cid = 0; cid < num_chunks(); ++cid) {
                 auto group_chunk = group_->GetGroupChunk(op_ctx, cid);
@@ -866,6 +1023,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       "[StorageV2] BulkArrayValueAt only supports nested "
                       "ARRAY columns");
         }
+        group_->Prepare(op_ctx);
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         for (int64_t i = 0; i < count; ++i) {
@@ -945,6 +1103,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         if (count == 0) {
             return;
         }
+        group_->Prepare(op_ctx);
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         std::unordered_map<cachinglayer::cid_t, Chunk*> resolved;
