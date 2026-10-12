@@ -656,21 +656,28 @@ func NewUnpinSnapshotDataTask(ctx context.Context, node taskmodel.TaskNode, req 
 }
 
 // Result returns the task's mutation/status result after execution.
-func (t *CreateDatabaseTask) Result() *commonpb.Status                               { return t.result }
-func (t *DropDatabaseTask) Result() *commonpb.Status                                 { return t.result }
-func (t *ListDatabaseTask) Result() *milvuspb.ListDatabasesResponse                  { return t.result }
-func (t *AlterDatabaseTask) Result() *commonpb.Status                                { return t.result }
-func (t *DescribeDatabaseTask) Result() *milvuspb.DescribeDatabaseResponse           { return t.result }
-func (t *CreateCollectionTask) Result() *commonpb.Status                             { return t.result }
-func (t *DropCollectionTask) Result() *commonpb.Status                               { return t.result }
-func (t *TruncateCollectionTask) Result() *milvuspb.TruncateCollectionResponse       { return t.result }
-func (t *HasCollectionTask) Result() *milvuspb.BoolResponse                          { return t.result }
-func (t *DescribeCollectionTask) Result() *milvuspb.DescribeCollectionResponse       { return t.result }
-func (t *ShowCollectionsTask) Result() *milvuspb.ShowCollectionsResponse             { return t.result }
-func (t *AddCollectionFieldTask) Result() *commonpb.Status                           { return t.result }
-func (t *AddCollectionFieldTask) OldSchema() *schemapb.CollectionSchema              { return t.oldSchema }
-func (t *AddCollectionFieldTask) SetResult(status *commonpb.Status)                  { t.result = status }
-func (t *AddCollectionStructFieldTask) Result() *commonpb.Status                     { return t.result }
+func (t *CreateDatabaseTask) Result() *commonpb.Status                         { return t.result }
+func (t *DropDatabaseTask) Result() *commonpb.Status                           { return t.result }
+func (t *ListDatabaseTask) Result() *milvuspb.ListDatabasesResponse            { return t.result }
+func (t *AlterDatabaseTask) Result() *commonpb.Status                          { return t.result }
+func (t *DescribeDatabaseTask) Result() *milvuspb.DescribeDatabaseResponse     { return t.result }
+func (t *CreateCollectionTask) Result() *commonpb.Status                       { return t.result }
+func (t *DropCollectionTask) Result() *commonpb.Status                         { return t.result }
+func (t *TruncateCollectionTask) Result() *milvuspb.TruncateCollectionResponse { return t.result }
+func (t *HasCollectionTask) Result() *milvuspb.BoolResponse                    { return t.result }
+func (t *DescribeCollectionTask) Result() *milvuspb.DescribeCollectionResponse { return t.result }
+func (t *ShowCollectionsTask) Result() *milvuspb.ShowCollectionsResponse       { return t.result }
+func (t *AddCollectionFieldTask) Result() *commonpb.Status                     { return t.result }
+func (t *AddCollectionFieldTask) OldSchema() *schemapb.CollectionSchema        { return t.oldSchema }
+func (t *AddCollectionFieldTask) SetOldSchema(schema *schemapb.CollectionSchema) {
+	t.oldSchema = schema
+}
+func (t *AddCollectionFieldTask) SetResult(status *commonpb.Status)           { t.result = status }
+func (t *AddCollectionStructFieldTask) Result() *commonpb.Status              { return t.result }
+func (t *AddCollectionStructFieldTask) OldSchema() *schemapb.CollectionSchema { return t.oldSchema }
+func (t *AddCollectionStructFieldTask) SetOldSchema(schema *schemapb.CollectionSchema) {
+	t.oldSchema = schema
+}
 func (t *AlterCollectionTask) Result() *commonpb.Status                              { return t.result }
 func (t *AlterCollectionFunctionTask) Result() *commonpb.Status                      { return t.result }
 func (t *AlterCollectionFieldTask) Result() *commonpb.Status                         { return t.result }

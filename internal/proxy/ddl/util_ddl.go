@@ -685,9 +685,19 @@ func validateStructArrayFieldMaxCapacity(structArrayField *schemapb.StructArrayF
 	return nil
 }
 
-// ValidateStructArrayField validates the struct array field schema.
-// When the struct is nullable, sub-field schemas are mutated in-place to set Nullable=true.
+// ValidateStructArrayField validates the struct array field schema. When the
+// struct is nullable, sub-field schemas are mutated in-place to set
+// Nullable=true.
 func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
+	if err := validateFieldName(structArrayField.GetName()); err != nil {
+		return err
+	}
+	return validateStructArrayField(structArrayField, schema)
+}
+
+// validateStructArrayField validates the remaining schema after the parent name
+// has been checked. Add-field validation checks the name before reserved fields.
+func validateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
 	if len(structArrayField.Fields) == 0 {
 		return merr.WrapErrParameterInvalidMsg("struct array field %s has no sub-fields", structArrayField.Name)
 	}
