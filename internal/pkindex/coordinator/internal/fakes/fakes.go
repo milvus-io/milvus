@@ -53,8 +53,12 @@ type Pointers struct {
 // NewPointers returns an empty Pointers.
 func NewPointers() *Pointers { return &Pointers{kv: map[string]string{}} }
 
-// Load returns the value of key and whether key exists.
-func (p *Pointers) Load(_ context.Context, key string) (string, bool, error) {
+// Load returns the value of key and whether key exists. It returns ctx.Err()
+// when ctx is done.
+func (p *Pointers) Load(ctx context.Context, key string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err := p.LoadErr; err != nil {
