@@ -114,6 +114,14 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     bool
     IsRowValid(int64_t logical_offset) const override;
 
+    void
+    ApplyValidDataByRange(int64_t logical_offset, int64_t count,
+                          TargetBitmapView valid_result) const override;
+
+    void
+    ApplyValidDataByOffsets(const int64_t* offsets, int64_t count,
+                            TargetBitmapView valid_result) const override;
+
     knowhere::expected<knowhere::DataSetPtr>
     CalcDistByIDs(const knowhere::DataSetPtr& query_dataset,
                   const BitsetView& bitset,
@@ -132,8 +140,9 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
         Disk,
     };
 
-    static constexpr std::array<const char*, 4> kGrowingQueryOverrides = {
-        "radius", "range_filter", "drop_ratio_search", "dim_max_score_ratio"};
+    static constexpr std::array<const char*, 5> kGrowingQueryOverrides = {
+        "radius", "range_filter", "drop_ratio_search", "dim_max_score_ratio",
+        "skip_refine"};
 
     bool
     IsGrowingGeneration() const;
