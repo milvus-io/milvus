@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -122,6 +123,31 @@ func TestOrderedReduceStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2}, queryTestIDs(chunk))
+}
+
+func TestOrderedReduceStreamMergesByOrderByField(t *testing.T) {
+	childA := &queryTestStream{recv: []queryTestRecv{
+		{chunk: newQueryTestChunk([]int64{4, 2}, []int64{10, 30})},
+	}}
+	childB := &queryTestStream{recv: []queryTestRecv{
+		{chunk: newQueryTestChunk([]int64{3, 1}, []int64{20, 40})},
+	}}
+	stream, err := NewReduceStream(
+		&internalpb.RetrieveRequest{
+			Limit: 4,
+			OrderByFields: []*planpb.OrderByField{
+				{FieldId: 101, Ascending: true},
+			},
+		},
+		[]ReduceStream{childA, childB},
+		queryChunkBytes(t, newQueryTestChunk([]int64{4, 3, 2, 1}, []int64{10, 20, 30, 40}), 4),
+	)
+	require.NoError(t, err)
+
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{4, 3, 2, 1}, queryTestIDs(chunk))
+	require.Equal(t, []int64{10, 20, 30, 40}, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 }
 
 func TestOrderedReduceStreamDefersOversizedUnitToNextChunk(t *testing.T) {

@@ -25,8 +25,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -45,6 +47,46 @@ type retrieveUnit struct {
 
 func (u retrieveUnit) pk() any {
 	return typeutil.GetPK(u.result.GetIds(), u.rowIndex)
+}
+
+func (u retrieveUnit) fieldData(fieldID int64) (*schemapb.FieldData, error) {
+	for _, field := range u.result.GetFieldsData() {
+		if field.GetFieldId() == fieldID {
+			return field, nil
+		}
+	}
+	return nil, merr.WrapErrServiceInternalMsg("Query ORDER BY field %d is missing from a child Chunk", fieldID)
+}
+
+func compareRetrieveUnits(left, right retrieveUnit, orderByFields []*planpb.OrderByField) (int, error) {
+	for _, orderByField := range orderByFields {
+		leftField, err := left.fieldData(orderByField.GetFieldId())
+		if err != nil {
+			return 0, err
+		}
+		rightField, err := right.fieldData(orderByField.GetFieldId())
+		if err != nil {
+			return 0, err
+		}
+		if leftField.GetType() != rightField.GetType() {
+			return 0, merr.WrapErrServiceInternalMsg(
+				"Query ORDER BY field %d has inconsistent child types %s and %s",
+				orderByField.GetFieldId(), leftField.GetType(), rightField.GetType())
+		}
+		comparison := compareFieldDataRows(
+			leftField,
+			int(left.rowIndex),
+			rightField,
+			int(right.rowIndex),
+			leftField.GetType(),
+			orderByField.GetAscending(),
+			orderByField.GetNullsFirst(),
+		)
+		if comparison != 0 {
+			return comparison, nil
+		}
+	}
+	return comparePK(left.pk(), right.pk()), nil
 }
 
 func (u retrieveUnit) reducibleByteSize() (int, error) {
@@ -100,16 +142,17 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 	return nil
 }
 
-// OrderedReduceStream performs the Plain Query PK-ordered merge.
+// OrderedReduceStream performs the bounded Query ordered merge.
 type OrderedReduceStream struct {
 	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
 	childBuffers []orderedChildBuffer
 
-	limit      int64
-	chunkBytes int
-	emitted    int64
-	hasLastPK  bool
-	lastPK     any
+	limit         int64
+	chunkBytes    int
+	emitted       int64
+	orderByFields []*planpb.OrderByField
+	hasLastPK     bool
+	lastPK        any
 
 	metadata        *internalpb.RetrieveResults
 	metadataEmitted bool
@@ -123,9 +166,8 @@ func NewReduceStream(request *internalpb.RetrieveRequest, childStreams []ReduceS
 	if request == nil {
 		return nil, merr.WrapErrServiceInternalMsg("NewReduceStream requires a Query request")
 	}
-	if request.GetIsCount() || len(request.GetGroupByFieldIds()) > 0 ||
-		len(request.GetAggregates()) > 0 || len(request.GetOrderByFields()) > 0 {
-		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream supports bounded Plain Query only"))
+	if request.GetIsCount() || len(request.GetGroupByFieldIds()) > 0 || len(request.GetAggregates()) > 0 {
+		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream does not support aggregation or Group By"))
 	}
 	if request.GetLimit() <= 0 {
 		return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream requires a positive limit, got %d", request.GetLimit())
@@ -140,10 +182,11 @@ func NewReduceStream(request *internalpb.RetrieveRequest, childStreams []ReduceS
 	}
 
 	return &OrderedReduceStream{
-		childStreams: reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
-		childBuffers: make([]orderedChildBuffer, len(childStreams)),
-		limit:        request.GetLimit(),
-		chunkBytes:   chunkBytes,
+		childStreams:  reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
+		childBuffers:  make([]orderedChildBuffer, len(childStreams)),
+		limit:         request.GetLimit(),
+		chunkBytes:    chunkBytes,
+		orderByFields: request.GetOrderByFields(),
 	}, nil
 }
 
@@ -168,7 +211,11 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 
 		winner := readyBuffers[0]
 		for _, candidate := range readyBuffers[1:] {
-			if comparePK(candidate.front().pk(), winner.front().pk()) < 0 {
+			comparison, err := compareRetrieveUnits(candidate.front(), winner.front(), s.orderByFields)
+			if err != nil {
+				return nil, s.fail(err)
+			}
+			if comparison < 0 {
 				winner = candidate
 			}
 		}
@@ -188,7 +235,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 			if comparison == 0 {
 				return nil, s.fail(merr.WrapErrDataIntegrityMsg("duplicate PK %v found across Query child streams", unit.pk()))
 			}
-			if comparison < 0 {
+			if len(s.orderByFields) == 0 && comparison < 0 {
 				return nil, s.fail(merr.WrapErrServiceInternalMsg("Query child streams are not ordered by primary key"))
 			}
 		}

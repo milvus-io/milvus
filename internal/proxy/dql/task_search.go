@@ -1651,7 +1651,6 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 	req := t.SearchRequest
 	if req == nil ||
 		t.aggCtx != nil ||
-		len(t.orderByFields) > 0 ||
 		req.GetIsAdvanced() ||
 		len(req.GetSubReqs()) > 0 ||
 		req.GetGroupByFieldId() > 0 ||
@@ -1786,7 +1785,12 @@ func (t *SearchTask) consumeResultStream(
 	metricType string,
 	collectMetadata func(*internalpb.SearchResults),
 ) (*milvuspb.SearchResults, string, error) {
-	limit := t.GetTopk() - t.GetOffset()
+	offset := t.GetOffset()
+	limit := t.GetTopk() - offset
+	if len(t.orderByFields) > 0 {
+		offset = 0
+		limit = t.GetTopk()
+	}
 	if limit <= 0 {
 		return nil, metricType, merr.WrapErrServiceInternalMsg("invalid final Search limit %d", limit)
 	}
@@ -1820,7 +1824,7 @@ func (t *SearchTask) consumeResultStream(
 			data,
 			chunk.GetResultData(),
 			seenPerQuery,
-			t.GetOffset(),
+			offset,
 			limit,
 			metricType,
 		)

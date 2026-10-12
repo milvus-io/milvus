@@ -331,7 +331,7 @@ func TestSearchTaskSupportsStreamingReduce(t *testing.T) {
 		{name: "group by", task: &SearchTask{SearchRequest: &internalpb.SearchRequest{GroupByFieldId: 100}}, want: false},
 		{name: "multi-field group by", task: &SearchTask{SearchRequest: &internalpb.SearchRequest{GroupByFieldIds: []int64{100, 101}}}, want: false},
 		{name: "search aggregation", task: &SearchTask{SearchRequest: &internalpb.SearchRequest{SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}, aggCtx: &search_agg.SearchAggregationContext{}}, want: false},
-		{name: "order by", task: &SearchTask{SearchRequest: &internalpb.SearchRequest{SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}, orderByFields: []OrderByField{{FieldName: "price"}}}, want: false},
+		{name: "order by", task: &SearchTask{SearchRequest: &internalpb.SearchRequest{SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}, orderByFields: []OrderByField{{FieldName: "price"}}}, want: true},
 	}
 
 	for _, test := range tests {
