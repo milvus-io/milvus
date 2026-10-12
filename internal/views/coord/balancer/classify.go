@@ -55,7 +55,9 @@ func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 
 	// 1. Desired absent → release any residual views.
 	if desired == nil {
-		if hasAnyView {
+		// Registry presence also covers SN-only Down/Unrecoverable views,
+		// whose stats contain neither an Up version nor QN placements.
+		if stats != nil {
 			return actionRelease
 		}
 		return actionNone

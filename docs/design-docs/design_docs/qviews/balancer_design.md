@@ -423,6 +423,8 @@ info used when the local state machine acquires resources.
 source hook clears the cache desired field and enqueues the collection. Orphan
 views are detected by Phase 1 and released via `RequestRelease`. No separate
 "releasing" desired state is needed; crash recovery uses the same reconciliation.
+Registry presence, rather than an Up version or QN placement, identifies residual
+shards: SN-only Down/Unrecoverable views also require RequestRelease.
 
 The DropLoadConfig acknowledgement waits for a serialized Balancer pass and
 then for all collection shard managers to leave the Registry. The pass drains

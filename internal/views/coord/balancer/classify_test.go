@@ -131,6 +131,7 @@ func TestClassify_DesiredAbsent(t *testing.T) {
 	}{
 		{"residual placements", testShardStats(nil, 0, placement(101, 1, 1, coordview.SegmentStateUp)), actionRelease},
 		{"empty Up", testShardStats(ver(1, 1, 1), 0), actionRelease},
+		{"SN-only failed or retiring view", testShardStats(nil, 0), actionRelease},
 		{"absent", nil, actionNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
