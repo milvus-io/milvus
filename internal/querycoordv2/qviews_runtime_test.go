@@ -247,6 +247,8 @@ type fakeRuntimeBalancer struct {
 	triggers []balancer.TriggerScope
 }
 
+func (b *fakeRuntimeBalancer) Reconcile(context.Context) error { return nil }
+
 func (b *fakeRuntimeBalancer) Start(context.Context) {
 	b.started = true
 }

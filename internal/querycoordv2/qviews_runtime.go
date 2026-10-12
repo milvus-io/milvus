@@ -43,6 +43,7 @@ type qviewsBalancer interface {
 	Start(ctx context.Context)
 	Stop()
 	Trigger(scopes ...balancer.TriggerScope)
+	Reconcile(ctx context.Context) error
 }
 
 type qviewsRuntime struct {

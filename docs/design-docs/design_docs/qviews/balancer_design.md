@@ -424,6 +424,16 @@ source hook clears the cache desired field and enqueues the collection. Orphan
 views are detected by Phase 1 and released via `RequestRelease`. No separate
 "releasing" desired state is needed; crash recovery uses the same reconciliation.
 
+The DropLoadConfig acknowledgement waits for a serialized Balancer pass and
+then for all collection shard managers to leave the Registry. The pass drains
+any preparation planned against the old desired state; final Registry removal
+requires node cleanup and durable QueryView deletion. The collection broadcast
+lock remains held until acknowledgement completes, so ReleaseCollection returns
+success only after cleanup and a subsequent load cannot overlap the old replica.
+An already-absent LoadConfig still takes the same cleanup barrier under the
+collection lock. Cancellation does not report successful release or undo the
+durable release intent. SN serving leases and active references remain respected.
+
 **Load status derivation**: `LoadStatus` and `LoadPercentage` are derived from view states:
 
 - **Loaded**: All shards for the collection have an Up view.
