@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	cstorage "cloud.google.com/go/storage"
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,6 +34,37 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestGcpNativeObjectStorageCopyObjectCrossBucketUsesSeparateBuckets(t *testing.T) {
+	var gotSrc *cstorage.ObjectHandle
+	var gotDst *cstorage.ObjectHandle
+	runCalled := false
+	mockCopierFrom := mockey.Mock((*cstorage.ObjectHandle).CopierFrom).To(
+		func(dst *cstorage.ObjectHandle, src *cstorage.ObjectHandle) *cstorage.Copier {
+			gotSrc = src
+			gotDst = dst
+			return &cstorage.Copier{}
+		}).Build()
+	defer mockCopierFrom.UnPatch()
+	mockRun := mockey.Mock((*cstorage.Copier).Run).To(
+		func(_ *cstorage.Copier, _ context.Context) (*cstorage.ObjectAttrs, error) {
+			runCalled = true
+			return &cstorage.ObjectAttrs{}, nil
+		}).Build()
+	defer mockRun.UnPatch()
+
+	objectStorage := &GcpNativeObjectStorage{client: &cstorage.Client{}}
+	err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", "dst-bucket", "dst-object")
+	require.NoError(t, err)
+
+	require.NotNil(t, gotSrc)
+	require.NotNil(t, gotDst)
+	assert.Equal(t, "src-bucket", gotSrc.BucketName())
+	assert.Equal(t, "src-object", gotSrc.ObjectName())
+	assert.Equal(t, "dst-bucket", gotDst.BucketName())
+	assert.Equal(t, "dst-object", gotDst.ObjectName())
+	assert.True(t, runCalled)
+}
 
 func TestGcpNativeObjectStorage(t *testing.T) {
 	ctx := context.Background()
@@ -584,5 +616,21 @@ func TestMapObjectStorageError_GCP_SentinelErrors(t *testing.T) {
 		wrappedErr := errors.Wrap(cstorage.ErrObjectNotExist, "get attrs failed")
 		result := mapObjectStorageError("test/path", wrappedErr)
 		assert.ErrorIs(t, result, merr.ErrIoKeyNotFound)
+	})
+
+	// cloud.google.com/go/storage >= v1.51 wraps not-found as
+	// fmt.Errorf("%w: %w", sentinel, *googleapi.Error).
+	notFound := &googleapi.Error{Code: http.StatusNotFound}
+
+	t.Run("MultiWrappedErrObjectNotExist", func(t *testing.T) {
+		libErr := fmt.Errorf("%w: %w", cstorage.ErrObjectNotExist, notFound)
+		result := mapObjectStorageError("test/path", libErr)
+		assert.ErrorIs(t, result, merr.ErrIoKeyNotFound)
+	})
+
+	t.Run("MultiWrappedErrBucketNotExist", func(t *testing.T) {
+		libErr := fmt.Errorf("%w: %w", cstorage.ErrBucketNotExist, notFound)
+		result := mapObjectStorageError("test/path", libErr)
+		assert.ErrorIs(t, result, merr.ErrIoBucketNotFound)
 	})
 }

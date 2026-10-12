@@ -52,10 +52,12 @@ func NewFragmentIDGenerator(start int64) FragmentIDGenerator {
 // SplitFileToFragments splits a large file into multiple fragments based on row count.
 // If totalRows <= rowLimit, returns a single fragment covering the entire file.
 // Otherwise, splits the file into multiple fragments with rowLimit rows each.
+// Every fragment shares the source file's immutable properties.
 func SplitFileToFragments(
 	filePath string,
 	totalRows int64,
 	rowLimit int64,
+	properties map[string]string,
 	fragmentIDGenerator FragmentIDGenerator,
 ) []Fragment {
 	if totalRows <= rowLimit {
@@ -65,6 +67,7 @@ func SplitFileToFragments(
 			StartRow:   0,
 			EndRow:     totalRows,
 			RowCount:   totalRows,
+			Properties: properties,
 		}}
 	}
 
@@ -80,6 +83,7 @@ func SplitFileToFragments(
 			StartRow:   start,
 			EndRow:     end,
 			RowCount:   end - start,
+			Properties: properties,
 		})
 	}
 	return fragments
@@ -154,10 +158,10 @@ func fetchRowCountsConcurrently(
 			return struct{}{}, nil
 		})
 	}
-	if err := conc.AwaitAll(futures...); err != nil {
+	if err := conc.BlockOnAll(futures...); err != nil {
 		return nil, err
 	}
-	// Post-wait ctx check: AwaitAll settles every future, so a ctx canceled
+	// Post-wait ctx check: BlockOnAll settles every future, so a ctx canceled
 	// mid-run whose workers happened to return nil would slip past the err
 	// branch above. Mirrors the pre-conc.Pool behavior.
 	if err := ctx.Err(); err != nil {
@@ -266,7 +270,7 @@ func FetchFragmentsFromExternalSourceWithRange(
 			})
 			continue
 		}
-		fragments = append(fragments, SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fragmentIDGenerator)...)
+		fragments = append(fragments, SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fi.Properties, fragmentIDGenerator)...)
 	}
 	if len(fragments) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("no data files in range [%d, %d)", fileIndexBegin, fileIndexEnd)
@@ -281,6 +285,60 @@ func FetchFragmentsFromExternalSourceWithRange(
 	return fragments, nil
 }
 
+func buildCurrentSegmentFragmentsForSegment(
+	ctx context.Context,
+	seg *datapb.SegmentInfo,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) ([]Fragment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if seg.GetManifestPath() != "" && storageConfig != nil {
+		fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig, columns)
+		if err != nil {
+			return nil, merr.Wrapf(err, "failed to read manifest for segment %d at %s", seg.GetID(), seg.GetManifestPath())
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if len(fragments) > 0 {
+			return fragments, nil
+		}
+		mlog.Warn(ctx, "manifest returned 0 fragments, using virtual fragment",
+			mlog.FieldSegmentID(seg.GetID()),
+			mlog.String("manifestPath", seg.GetManifestPath()))
+	}
+
+	return []Fragment{
+		{
+			FragmentID: seg.GetID(),
+			FilePath:   "",
+			StartRow:   0,
+			EndRow:     seg.GetNumOfRows(),
+			RowCount:   seg.GetNumOfRows(),
+		},
+	}, nil
+}
+
+func buildCurrentSegmentFragments(
+	ctx context.Context,
+	segments []*datapb.SegmentInfo,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) (SegmentFragments, error) {
+	result := make(SegmentFragments)
+	for _, seg := range segments {
+		fragments, err := buildCurrentSegmentFragmentsForSegment(ctx, seg, storageConfig, columns)
+		if err != nil {
+			return nil, err
+		}
+		result[seg.GetID()] = fragments
+	}
+	return result, nil
+}
+
 // BuildCurrentSegmentFragments builds segment to fragments mapping from current segments.
 // It reads fragment info from manifest if available, otherwise creates virtual fragments.
 // When columns is non-empty, only manifest column groups containing at least
@@ -291,33 +349,54 @@ func BuildCurrentSegmentFragments(
 	storageConfig *indexpb.StorageConfig,
 	columns []string,
 ) (SegmentFragments, error) {
-	result := make(SegmentFragments)
-	for _, seg := range segments {
-		// Try to read from manifest if available
-		if seg.GetManifestPath() != "" && storageConfig != nil {
-			fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig, columns)
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to read manifest for segment %d at %s", seg.GetID(), seg.GetManifestPath())
-			}
-			if len(fragments) > 0 {
-				result[seg.GetID()] = fragments
-				continue
-			}
-			mlog.Warn(context.TODO(), "manifest returned 0 fragments, using virtual fragment",
-				mlog.FieldSegmentID(seg.GetID()),
-				mlog.String("manifestPath", seg.GetManifestPath()))
-		}
+	return buildCurrentSegmentFragments(context.TODO(), segments, storageConfig, columns)
+}
 
-		// Virtual fragment for segments without manifest (initial state)
-		result[seg.GetID()] = []Fragment{
-			{
-				FragmentID: seg.GetID(),
-				FilePath:   "",
-				StartRow:   0,
-				EndRow:     seg.GetNumOfRows(),
-				RowCount:   seg.GetNumOfRows(),
-			},
-		}
+// BuildCurrentSegmentFragmentsConcurrently reads current segment manifests with
+// bounded concurrency. Context cancellation prevents queued reads from starting;
+// an object-store read already executing inside the manifest FFI must still return
+// before its worker can observe cancellation.
+func BuildCurrentSegmentFragmentsConcurrently(
+	ctx context.Context,
+	segments []*datapb.SegmentInfo,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+	concurrency int,
+) (SegmentFragments, error) {
+	if len(segments) == 0 || concurrency <= 1 {
+		return buildCurrentSegmentFragments(ctx, segments, storageConfig, columns)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	workers := min(concurrency, len(segments))
+	pool := conc.NewPool[struct{}](workers)
+	defer pool.Release()
+
+	fragmentsBySegment := make([][]Fragment, len(segments))
+	futures := make([]*conc.Future[struct{}], len(segments))
+	for i, seg := range segments {
+		i, seg := i, seg
+		futures[i] = pool.Submit(func() (struct{}, error) {
+			fragments, err := buildCurrentSegmentFragmentsForSegment(ctx, seg, storageConfig, columns)
+			if err != nil {
+				return struct{}{}, err
+			}
+			fragmentsBySegment[i] = fragments
+			return struct{}{}, nil
+		})
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make(SegmentFragments, len(segments))
+	for i, seg := range segments {
+		result[seg.GetID()] = fragmentsBySegment[i]
 	}
 	return result, nil
 }

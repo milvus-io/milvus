@@ -49,7 +49,14 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		}
 		return ctx, r
 	case *milvuspb.DescribeCollectionRequest:
-		if r.DbName == "" {
+		// Collection ids are cluster-unique, so an id-only describe does not use
+		// the database to resolve its target. Preserve an omitted db name here:
+		// filling it with the connection default would lose the distinction
+		// between "unknown until resolved by id" and an explicit default-db
+		// request. Name-based describes keep the historical empty => default
+		// behavior.
+		idOnly := r.GetCollectionID() > 0 && r.GetCollectionName() == ""
+		if r.DbName == "" && !idOnly {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
 		return ctx, r
@@ -306,6 +313,11 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
 		return ctx, r
+	case *milvuspb.GetCompactionPlansRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
 	case *milvuspb.AddCollectionFieldRequest:
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
@@ -332,6 +344,46 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
 		return ctx, r
+	case *milvuspb.CreateRowPolicyRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.UpdateRowPolicyRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.DropRowPolicyRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.ListRowPoliciesRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.SetRLSPrincipalTagsRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.GetRLSPrincipalTagsRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.ListRLSPrincipalsRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.DeleteRLSPrincipalTagsRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
 	case *milvuspb.CreateSnapshotRequest:
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
@@ -353,8 +405,12 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		}
 		return ctx, r
 	case *milvuspb.RestoreSnapshotRequest:
+		activeDBName := GetCurDBNameFromContextOrDefault(ctx)
 		if r.DbName == "" {
-			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+			r.DbName = activeDBName
+		}
+		if r.TargetDbName == "" {
+			r.TargetDbName = activeDBName
 		}
 		return ctx, r
 	case *milvuspb.RestoreExternalSnapshotRequest:

@@ -76,29 +76,14 @@ class Task : public std::enable_shared_from_this<Task> {
     }
 
     const std::string&
-    uuid() const {
-        return uuid_;
-    }
-
-    const std::string&
     taskid() const {
         return taskid_;
-    }
-
-    const int
-    destination() const {
-        return destination_;
     }
 
     const std::shared_ptr<QueryContext>&
     query_context() const {
         return query_context_;
     }
-
-    static void
-    Start(std::shared_ptr<Task> self,
-          uint32_t max_drivers,
-          uint32_t concurrent_split_groups = 1);
 
     static void
     RemoveDriver(std::shared_ptr<Task> self, Driver* instance) {
@@ -110,14 +95,6 @@ class Task : public std::enable_shared_from_this<Task> {
             driver_ptr = nullptr;
             self->DriverClosedLocked();
         }
-    }
-
-    bool
-    SupportsSingleThreadedExecution() const {
-        if (consumer_supplier_) {
-            return false;
-        }
-        return true;
     }
 
     RowVectorPtr
@@ -135,25 +112,8 @@ class Task : public std::enable_shared_from_this<Task> {
     SetError(const std::string& message);
 
     bool
-    IsRunning() const {
-        std::lock_guard<std::mutex> l(mutex_);
-        return (state_ == TaskState::kRunning);
-    }
-
-    bool
-    IsFinished() const {
-        std::lock_guard<std::mutex> l(mutex_);
-        return (state_ == TaskState::kFinished);
-    }
-
-    bool
     IsRunningLocked() const {
         return (state_ == TaskState::kRunning);
-    }
-
-    bool
-    IsFinishedLocked() const {
-        return (state_ == TaskState::kFinished);
     }
 
     void
@@ -172,11 +132,6 @@ class Task : public std::enable_shared_from_this<Task> {
         }
 
         num_finished_drivers_++;
-    }
-
-    void
-    RequestCancel() {
-        Terminate(TaskState::kCanceled);
     }
 
  private:

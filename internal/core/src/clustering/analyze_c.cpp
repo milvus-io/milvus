@@ -20,6 +20,7 @@
 #include "analyze_c.h"
 #include "bitset/common.h"
 #include "clustering/KmeansClustering.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "fmt/core.h"
@@ -27,9 +28,11 @@
 #include "pb/clustering.pb.h"
 #include "pb/schema.pb.h"
 #include "storage/FileManager.h"
+#include "storage/PluginLoader.h"
 #include "storage/StorageV2FSCache.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/util.h"
 #include "type_c.h"
 
 using namespace milvus;
@@ -55,6 +58,14 @@ get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
     storage_config.max_connections = config.max_connections();
     storage_config.tls_min_version = config.ssl_tls_min_version();
     storage_config.use_crc32c_checksum = config.use_crc32c_checksum();
+    storage_config.talon_mode = config.talon_mode();
+    storage_config.talon_small_read_threshold =
+        config.talon_small_read_threshold();
+    storage_config.talon_coordinator = config.talon_coordinator();
+    storage_config.talon_block_size = config.talon_block_size();
+    storage_config.talon_max_idle_per_addr = config.talon_max_idle_per_addr();
+    storage_config.talon_enable_for_external_table =
+        config.talon_enable_for_external_table();
 
     return storage_config;
 }
@@ -62,7 +73,8 @@ get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
 CStatus
 Analyze(CAnalyze* res_analyze,
         const uint8_t* serialized_analyze_info,
-        const uint64_t len) {
+        const uint64_t len,
+        const CPluginContext* plugin_context) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -78,7 +90,8 @@ Analyze(CAnalyze* res_analyze,
         milvus::storage::FieldDataMeta field_meta{analyze_info->collectionid(),
                                                   analyze_info->partitionid(),
                                                   0,
-                                                  field_id};
+                                                  field_id,
+                                                  analyze_info->field_schema()};
 
         milvus::storage::IndexMeta index_meta{
             0, field_id, analyze_info->buildid(), analyze_info->version()};
@@ -108,10 +121,38 @@ Analyze(CAnalyze* res_analyze,
             storage_config.max_connections,
             storage_config.tls_min_version,
             storage_config.use_crc32c_checksum,
+            storage_config.talon_mode,
+            storage_config.talon_small_read_threshold,
+            storage_config.talon_coordinator,
+            storage_config.talon_block_size,
+            storage_config.talon_max_idle_per_addr,
         });
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+
+        // Loon FFI properties are required by the manifest read path
+        // (GetFieldDatasFromManifest asserts they are set). They are inert for
+        // V1 segments -- cache_raw_data_to_memory_internal never reads them --
+        // so set them unconditionally rather than scanning manifest_paths.
+        // Clustering analyze runs on native (non-external) collections, so
+        // internal properties from the storage config suffice; the manifest
+        // reader falls back to column name = field_id when no
+        // storage_column_mapping is set.
+        fileManagerContext.set_loon_ffi_properties(
+            MakeInternalPropertiesFromStorageConfig(
+                ToCStorageConfig(storage_config)));
+
+        if (plugin_context != nullptr) {
+            AssertInfo(plugin_context->key != nullptr,
+                       "cipher plugin context key is null");
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        plugin_context->ez_id,
+                        plugin_context->collection_id,
+                        std::string(plugin_context->key)));
+        }
 
         if (field_type != DataType::VECTOR_FLOAT) {
             throw SegcoreError(
@@ -134,12 +175,8 @@ Analyze(CAnalyze* res_analyze,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -154,16 +191,18 @@ DeleteAnalyze(CAnalyze analyze) {
         delete real_analyze;
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
 
 CStatus
 GetAnalyzeResultMeta(CAnalyze analyze,
-                     char** centroid_path,
+                     const char** centroid_path,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
                      int64_t* id_mapping_sizes) {
@@ -176,11 +215,14 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                    "was null");
         auto real_analyze =
             reinterpret_cast<milvus::clustering::KmeansClustering*>(analyze);
-        auto res = real_analyze->GetClusteringResultMeta();
+        // Bind by reference: the pointers handed out below point into this
+        // struct's std::string members, so they must reference the object owned
+        // by real_analyze rather than a local copy that dies on return.
+        const auto& res = real_analyze->GetClusteringResultMeta();
         *centroid_path = res.centroid_path.data();
         *centroid_file_size = res.centroid_file_size;
 
-        auto& map_ = res.id_mappings;
+        const auto& map_ = res.id_mappings;
         const char** id_mapping_paths_ = (const char**)id_mapping_paths;
         size_t i = 0;
         for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
@@ -189,9 +231,11 @@ GetAnalyzeResultMeta(CAnalyze analyze,
         }
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }

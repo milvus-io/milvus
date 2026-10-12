@@ -38,10 +38,13 @@ type sealWorker struct {
 
 // NotifySealSegment is used to notify the seal worker to seal the segment.
 func (m *sealWorker) NotifySealSegment(segmentID int64, sealPolicy policy.SealPolicy) {
-	go func() {
-		// we should async notify the seal worker to avoid blocking the caller.
-		m.sealNotifier <- sealSegmentIDWithPolicy{segmentID: segmentID, sealPolicy: sealPolicy}
-	}()
+	// Keep notification bounded and non-blocking. Capacity is also scanned
+	// periodically, so dropping this low-latency hint cannot strand a segment
+	// above its soft assignment target.
+	select {
+	case m.sealNotifier <- sealSegmentIDWithPolicy{segmentID: segmentID, sealPolicy: sealPolicy}:
+	default:
+	}
 }
 
 // NotifyGrowingBytes is used to notify the seal worker to seal the segment when the total size exceeds the threshold.
@@ -80,6 +83,7 @@ func (m *sealWorker) loop() {
 			m.asyncMustSealSegment(targetSegment.segmentID, targetSegment.sealPolicy)
 		case <-timer.C:
 			m.statsManager.updateConfig()
+			m.notifyToSealSegmentWithCapacityPolicy()
 			m.notifyToSealSegmentWithTimePolicy()
 			m.notifyToSealSegmentWithBlockingL0Policy()
 		case policy := <-memoryNotifier:
@@ -88,6 +92,19 @@ func (m *sealWorker) loop() {
 		case totalBytes := <-m.growingBytesNotifier.Chan():
 			m.statsManager.updateConfig()
 			m.notifyToSealSegmentUntilLessThanLWM(policy.PolicyGrowingSegmentBytesHWM(totalBytes))
+		}
+	}
+}
+
+// notifyToSealSegmentWithCapacityPolicy notifies to seal segments that have
+// crossed their soft assignment target. It is called immediately after
+// recovery registration and periodically as a fallback for dropped hints.
+func (m *sealWorker) notifyToSealSegmentWithCapacityPolicy() {
+	segmentIDs := m.statsManager.selectSegmentsWithCapacityPolicy()
+	if len(segmentIDs) != 0 {
+		m.Logger().Info(context.TODO(), "notify to seal segments with capacity policy", mlog.Int("segmentNum", len(segmentIDs)))
+		for _, segmentID := range segmentIDs {
+			m.asyncMustSealSegment(segmentID, policy.PolicyCapacity())
 		}
 	}
 }

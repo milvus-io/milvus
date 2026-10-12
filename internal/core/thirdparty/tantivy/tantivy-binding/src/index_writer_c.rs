@@ -32,13 +32,14 @@ pub extern "C" fn tantivy_create_index(
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
     enable_user_specified_doc_id: bool,
+    enable_background_merge: bool,
 ) -> RustResult {
     let field_name_str = cstr_to_str!(field_name);
     let path_str = cstr_to_str!(path);
 
     let tantivy_index_version = match TantivyIndexVersion::from_u32(tantivy_index_version) {
         Ok(v) => v,
-        Err(e) => return RustResult::from_error(e.to_string()),
+        Err(e) => return RustResult::from_binding_error(&e),
     };
 
     match IndexWriterWrapper::new(
@@ -49,9 +50,10 @@ pub extern "C" fn tantivy_create_index(
         overall_memory_budget_in_bytes,
         tantivy_index_version,
         enable_user_specified_doc_id,
+        enable_background_merge,
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
-        Err(e) => RustResult::from_error(e.to_string()),
+        Err(e) => RustResult::from_binding_error(&e),
     }
 }
 
@@ -70,7 +72,7 @@ pub extern "C" fn tantivy_create_index_with_single_segment(
         String::from(path_str),
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
-        Err(e) => RustResult::from_error(e.to_string()),
+        Err(e) => RustResult::from_binding_error(&e),
     }
 }
 
@@ -102,7 +104,7 @@ pub extern "C" fn tantivy_create_reader_from_writer(
     let reader = unsafe { (*writer).create_reader(set_bitset) };
     match reader {
         Ok(r) => RustResult::from_ptr(create_binding(r)),
-        Err(e) => RustResult::from_error(e.to_string()),
+        Err(e) => RustResult::from_binding_error(&e),
     }
 }
 

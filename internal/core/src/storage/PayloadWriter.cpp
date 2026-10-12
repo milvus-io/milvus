@@ -21,10 +21,12 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "parquet/arrow/writer.h"
+#include "parquet/exception.h"
 #include "parquet/properties.h"
 #include "storage/PayloadStream.h"
 #include "storage/PayloadWriter.h"
 #include "storage/Util.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
 
@@ -111,7 +113,9 @@ PayloadWriter::finish() {
     AssertInfo(output_ == nullptr, "payload writer has been finished");
     std::shared_ptr<arrow::Array> array;
     auto ast = builder_->Finish(&array);
-    AssertInfo(ast.ok(), ast.ToString());
+    if (!ast.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast), ast.ToString());
+    }
 
     auto table = arrow::Table::Make(schema_, {array});
     output_ = std::make_shared<storage::PayloadOutputStream>();
@@ -128,16 +132,27 @@ PayloadWriter::finish() {
         arrow_properties = arrow_props_builder.build();
     }
 
-    ast = parquet::arrow::WriteTable(*table,
-                                     mem_pool,
-                                     output_,
-                                     1024 * 1024 * 1024,
-                                     parquet::WriterProperties::Builder()
-                                         .compression(arrow::Compression::ZSTD)
-                                         ->compression_level(3)
-                                         ->build(),
-                                     arrow_properties);
-    AssertInfo(ast.ok(), ast.ToString());
+    try {
+        ast = parquet::arrow::WriteTable(
+            *table,
+            mem_pool,
+            output_,
+            1024 * 1024 * 1024,
+            parquet::WriterProperties::Builder()
+                .compression(arrow::Compression::ZSTD)
+                ->compression_level(3)
+                ->build(),
+            arrow_properties);
+    } catch (const parquet::ParquetException& e) {
+        // parquet can throw directly (not only return a status); a narrow
+        // catch keeps the write failure typed instead of collapsing to 2001
+        // at the cgo boundary.
+        ThrowInfo(
+            ErrorCode::FileWriteFailed, "parquet write failed: {}", e.what());
+    }
+    if (!ast.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(ast), "{}", ast.ToString());
+    }
 }
 
 bool

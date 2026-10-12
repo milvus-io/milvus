@@ -28,6 +28,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/GeometryCache.h"
 #include "common/OpContext.h"
 #include "common/QueryResult.h"
 #include "common/SystemProperty.h"
@@ -37,6 +38,7 @@
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
 #include "futures/Future.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "monitor/Monitor.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -48,6 +50,12 @@
 #include "segcore/ConcurrentVector.h"
 
 namespace milvus::segcore {
+
+std::shared_ptr<milvus::exec::SimpleGeometryCache>
+SegmentInternalInterface::GetGeometryCache(FieldId field_id) const {
+    return milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
+        segment_instance_uid(), get_segment_id(), field_id);
+}
 
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
@@ -61,11 +69,12 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     Assert(results.primary_keys_.size() == 0);
     results.primary_keys_.resize(size);
 
-    auto pk_field_id_opt = get_schema().get_primary_field_id();
+    auto schema = get_schema_snapshot();
+    auto pk_field_id_opt = schema->get_primary_field_id();
     AssertInfo(pk_field_id_opt.has_value(),
                "Cannot get primary key offset from schema");
     auto pk_field_id = pk_field_id_opt.value();
-    AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
+    AssertInfo(IsPrimaryKeyDataType((*schema)[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
 
     segcore::CheckCancellation(op_ctx, get_segment_id(), "FillPrimaryKeys");
@@ -229,8 +238,10 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     auto result_rows = GetResultRowCount(retrieve_results);
     int64_t output_data_size = 0;
-    for (auto field_id : plan->field_ids_) {
-        output_data_size += get_field_avg_size(field_id) * result_rows;
+    if (result_rows > 0) {
+        for (auto field_id : plan->field_ids_) {
+            output_data_size += get_field_avg_size(field_id) * result_rows;
+        }
     }
     if (output_data_size > limit_size) {
         ThrowInfo(
@@ -492,16 +503,28 @@ SegmentInternalInterface::FillTargetEntry(
     milvus::OpContext* op_ctx) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
+    // Capture the request-scoped read snapshot once per FillTargetEntry so
+    // the per-field reads (take + bulk_subscript) don't re-capture the
+    // published state. Growing segments return a null snapshot and fall back
+    // to the virtual bulk_subscript with identical semantics.
+    auto chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this);
+    auto snapshot = CaptureReadSnapshot();
+    auto pinned =
+        chunked ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
+                : std::shared_ptr<
+                      const ChunkedSegmentSealedImpl::PublishedSegmentState>();
+
     // Fast path: use take() API for eligible output fields.
     // Use dynamic_cast to avoid adding new virtual methods (vtable layout
     // change causes SIGSEGV in cgo boundary).
-    if (auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
+    if (chunked) {
         if (chunked->TryTakeForRetrieve(plan,
                                         results,
                                         offsets,
                                         size,
                                         ignore_non_pk,
                                         fill_ids,
+                                        pinned,
                                         op_ctx)) {
             return;
         }
@@ -549,21 +572,24 @@ SegmentInternalInterface::FillTargetEntry(
             continue;
         }
 
-        if (plan->schema_->get_dynamic_field_id().has_value() &&
-            plan->schema_->get_dynamic_field_id().value() == field_id &&
-            !plan->target_dynamic_fields_.empty()) {
-            auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            auto col = bulk_subscript(
-                &local_ctx, field_id, offsets, size, target_dynamic_fields);
+        auto& field_meta = plan->schema_->operator[](field_id);
+        const std::vector<std::string>* dynamic_field_names =
+            (plan->schema_->get_dynamic_field_id().has_value() &&
+             plan->schema_->get_dynamic_field_id().value() == field_id &&
+             !plan->target_dynamic_fields_.empty())
+                ? &plan->target_dynamic_fields_
+                : nullptr;
+        auto col = BulkSubscriptWithSnapshot(this,
+                                             snapshot,
+                                             &local_ctx,
+                                             field_id,
+                                             field_meta,
+                                             offsets,
+                                             size,
+                                             dynamic_field_names);
+        if (dynamic_field_names != nullptr) {
             fields_data->AddAllocated(col.release());
             continue;
-        }
-        std::unique_ptr<DataArray> col;
-        auto& field_meta = plan->schema_->operator[](field_id);
-        if (!is_field_exist(field_id)) {
-            col = bulk_subscript_not_exist_field(field_meta, size);
-        } else {
-            col = bulk_subscript(&local_ctx, field_id, offsets, size);
         }
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
@@ -646,6 +672,10 @@ SegmentInternalInterface::Retrieve(
 
 int64_t
 SegmentInternalInterface::get_real_count() const {
+    if (get_deleted_count() == 0) {
+        return get_row_count();
+    }
+
 #if 0
     auto insert_cnt = get_row_count();
     BitsetType bitset_holder;
@@ -653,8 +683,7 @@ SegmentInternalInterface::get_real_count() const {
     mask_with_delete(bitset_holder, insert_cnt, MAX_TIMESTAMP);
     return bitset_holder.size() - bitset_holder.count();
 #endif
-    auto plan = std::make_unique<query::RetrievePlan>(
-        std::make_shared<Schema>(get_schema()));
+    auto plan = std::make_unique<query::RetrievePlan>(get_schema_snapshot());
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     milvus::plan::PlanNodePtr plannode;
     std::vector<milvus::plan::PlanNodePtr> sources;
@@ -721,11 +750,12 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
         ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
-    auto& schema = get_schema();
-    auto& field_meta = schema[field_id];
+    auto schema = get_schema_snapshot();
+    auto& field_meta = (*schema)[field_id];
     auto data_type = field_meta.get_data_type();
 
-    std::shared_lock lck(mutex_);
+    // Retrieve already holds mutex_; acquiring it again may deadlock
+    // when a writer is waiting.
     if (IsVariableDataType(data_type)) {
         if (variable_fields_avg_size_.find(field_id) ==
             variable_fields_avg_size_.end()) {
@@ -744,8 +774,18 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
                                              int64_t field_size) {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
-    auto& schema = get_schema();
-    auto& field_meta = schema[field_id];
+    auto schema = get_schema_snapshot();
+    auto& field_meta = (*schema)[field_id];
+    set_field_avg_size(field_meta, num_rows, field_size);
+}
+
+void
+SegmentInternalInterface::set_field_avg_size(const FieldMeta& field_meta,
+                                             int64_t num_rows,
+                                             int64_t field_size) {
+    auto field_id = field_meta.get_id();
+    AssertInfo(field_id.get() >= 0,
+               "invalid field id, should be greater than or equal to 0");
     auto data_type = field_meta.get_data_type();
 
     std::unique_lock lck(mutex_);
@@ -764,9 +804,12 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
     }
 }
 
-const SkipIndex&
-SegmentInternalInterface::GetSkipIndex() const {
-    return skip_index_;
+FieldSkipMetricsView
+SegmentInternalInterface::GetFieldSkipMetrics(FieldId field_id) const {
+    if (auto* sealed = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
+        return sealed->GetFieldSkipMetrics(field_id);
+    }
+    return {};
 }
 
 PinWrapper<index::TextMatchIndex*>
@@ -821,7 +864,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
         auto create_count = IsVectorArrayDataType(data_type) ? count : 0;
         auto result = CreateEmptyVectorDataArray(create_count, field_meta);
 
-        auto valid_data = result->mutable_valid_data();
+        auto valid_data = MutableFieldDataRowValidData(result.get());
         for (int64_t i = 0; i < count; ++i) {
             valid_data->Add(false);
         }
@@ -831,7 +874,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
         if (field_meta.is_nullable()) {
-            auto res = result->mutable_valid_data()->mutable_data();
+            auto res =
+                MutableFieldDataRowValidData(result.get())->mutable_data();
             for (int64_t i = 0; i < count; ++i) {
                 res[i] = true;
             }

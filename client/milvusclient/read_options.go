@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
 )
 
 const (
@@ -47,6 +47,7 @@ const (
 	spGroupBy         = `group_by_field`
 	spGroupSize       = `group_size`
 	spStrictGroupSize = `strict_group_size`
+	spOrderByFields   = `order_by_fields`
 )
 
 type SearchOption interface {
@@ -60,6 +61,8 @@ type searchOption struct {
 	collectionName             string
 	partitionNames             []string
 	namespace                  *string
+	rlsPrincipal               string
+	skipRLS                    bool
 	outputFields               []string
 	searchAggregation          *SearchAggregation
 	consistencyLevel           entity.ConsistencyLevel
@@ -83,7 +86,7 @@ type AnnRequest struct {
 	offset          int
 	templateParams  map[string]any
 
-	functionRerankers []*entity.Function
+	functionScore *entity.FunctionScore
 }
 
 func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnRequest {
@@ -172,11 +175,11 @@ func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 		request.ExprTemplateValues[key] = tmplVal
 	}
 
-	if len(r.functionRerankers) > 0 {
-		request.FunctionScore = &schemapb.FunctionScore{}
-		for _, fr := range r.functionRerankers {
-			request.FunctionScore.Functions = append(request.FunctionScore.Functions, fr.ProtoMessage())
+	if r.functionScore != nil {
+		if len(r.functionScore.Functions) == 0 {
+			return nil, errors.New("FunctionScore has no functions")
 		}
+		request.FunctionScore = r.functionScore.ProtoMessage()
 	}
 
 	return request, nil
@@ -197,8 +200,23 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 		result.Val = &schemapb.TemplateValue_BoolVal{BoolVal: v}
 	case string:
 		result.Val = &schemapb.TemplateValue_StringVal{StringVal: v}
+	case BloomFilterBlob:
+		// A client pre-built filter blob travels as raw bytes: proto3 bytes has
+		// no UTF-8 constraint, so the ~32 MB blob rides the wire with zero
+		// base64 inflation.
+		result.Val = &schemapb.TemplateValue_BytesVal{BytesVal: v}
+	case RoaringBitmapBlob:
+		// Same raw-bytes carriage as BloomFilterBlob. The two are distinct Go
+		// types rather than one []byte alias so the builders cannot be mixed up
+		// where a concrete type is expected. Note this does NOT catch pairing a
+		// bloom blob with membership_match(..., type=roaring): WithTemplateParam takes
+		// any and the expression is a string, so nothing ties the two together
+		// at the call site. That mismatch is rejected by the Proxy on the
+		// envelope magic.
+		result.Val = &schemapb.TemplateValue_BytesVal{BytesVal: v}
 	default:
-		if reflect.TypeOf(val).Kind() == reflect.Slice {
+		valueType := reflect.TypeOf(val)
+		if valueType != nil && valueType.Kind() == reflect.Slice {
 			return slice2TmplValue(val)
 		}
 		return nil, fmt.Errorf("unsupported template value type: %T", val)
@@ -209,6 +227,30 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 func slice2TmplValue(val any) (*schemapb.TemplateValue, error) {
 	arrVal := &schemapb.TemplateValue_ArrayVal{
 		ArrayVal: &schemapb.TemplateArrayValue{},
+	}
+
+	// Fast paths for the concrete slice types callers actually pass. The
+	// reflect path below rebuilds the slice element by element, which for a
+	// large `in {list}` membership set duplicates the whole list on the heap
+	// (~180 MiB for 24M int64) purely to change its static type.
+	//
+	// These paths alias the caller's backing array instead of copying it. The
+	// request is marshaled inside the Search/Query call, so the contract is
+	// the usual one for a value handed to a client call: do not mutate the
+	// slice while the call is in flight.
+	switch v := val.(type) {
+	case []int64:
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_LongData{LongData: &schemapb.LongArray{Data: v}}
+		return &schemapb.TemplateValue{Val: arrVal}, nil
+	case []string:
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_StringData{StringData: &schemapb.StringArray{Data: v}}
+		return &schemapb.TemplateValue{Val: arrVal}, nil
+	case []float64:
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_DoubleData{DoubleData: &schemapb.DoubleArray{Data: v}}
+		return &schemapb.TemplateValue{Val: arrVal}, nil
+	case []bool:
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_BoolData{BoolData: &schemapb.BoolArray{Data: v}}
+		return &schemapb.TemplateValue{Val: arrVal}, nil
 	}
 
 	rv := reflect.ValueOf(val)
@@ -306,6 +348,16 @@ func (r *AnnRequest) WithFilter(expr string) *AnnRequest {
 	return r
 }
 
+// A slice value (the value in `field in {the value}`) is NOT copied: the request built
+// by Request() aliases the caller's backing array for []int64, []string,
+// []float64 and []bool. This avoids duplicating a membership list that can
+// reach hundreds of megabytes, at the cost of a lifetime rule:
+//
+//	DO NOT mutate a slice passed here until the Search/Query call using it has
+//	returned. Mutating it earlier changes what the server sees, and mutating it
+//	after Request() changes an already-returned protobuf message.
+//
+// Pass a copy if the caller intends to keep writing to the slice.
 func (r *AnnRequest) WithTemplateParam(key string, val any) *AnnRequest {
 	r.templateParams[key] = val
 	return r
@@ -321,11 +373,36 @@ func (r *AnnRequest) WithIgnoreGrowing(ignoreGrowing bool) *AnnRequest {
 	return r
 }
 
+// WithFunctionReranker adds a scoring Function to the request. On a hybrid
+// search the score is attached to this sub-request and applied to this leg on
+// the server (server support for per-sub-request FunctionScore is in flight,
+// see https://github.com/milvus-io/milvus/issues/52956); to apply the same
+// score to every leg today, use HybridSearchOption.WithFunctionRerankers or
+// HybridSearchOption.WithFunctionScore instead.
 func (r *AnnRequest) WithFunctionReranker(fr *entity.Function) *AnnRequest {
-	r.functionRerankers = append(r.functionRerankers, fr)
+	if r.functionScore == nil {
+		r.functionScore = entity.NewFunctionScore()
+	}
+	r.functionScore.AddFunction(fr)
 	return r
 }
 
+// WithFunctionScore sets the search FunctionScore (functions plus score
+// options such as boost_mode / function_mode). It replaces any functions
+// accumulated via WithFunctionReranker, and stores a copy so the caller's
+// FunctionScore is never mutated or shared with other options.
+func (r *AnnRequest) WithFunctionScore(fs *entity.FunctionScore) *AnnRequest {
+	if fs == nil {
+		r.functionScore = nil
+		return r
+	}
+	r.functionScore = fs.Clone()
+	return r
+}
+
+// The returned request is NOT a snapshot of slice-valued template parameters:
+// it aliases the caller's backing arrays (see WithTemplateParam). Treat it as
+// valid only while those slices are unmodified.
 func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 	request, err := opt.annRequest.searchRequest()
 	if err != nil {
@@ -335,6 +412,8 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 	request.CollectionName = opt.collectionName
 	request.PartitionNames = opt.partitionNames
 	request.Namespace = opt.namespace
+	request.RlsPrincipal = opt.rlsPrincipal
+	request.SkipRls = opt.skipRLS
 	request.ConsistencyLevel = commonpb.ConsistencyLevel(opt.consistencyLevel)
 	request.UseDefaultConsistency = opt.useDefaultConsistencyLevel
 	request.OutputFields = opt.outputFields
@@ -374,11 +453,31 @@ func (opt *searchOption) WithNamespace(namespace string) *searchOption {
 	return opt
 }
 
+func (opt *searchOption) WithRLSPrincipal(principal string) *searchOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *searchOption) WithSkipRLS(skip bool) *searchOption {
+	opt.skipRLS = skip
+	return opt
+}
+
 func (opt *searchOption) WithFilter(expr string) *searchOption {
 	opt.annRequest.WithFilter(expr)
 	return opt
 }
 
+// A slice value (the value in `field in {the value}`) is NOT copied: the request built
+// by Request() aliases the caller's backing array for []int64, []string,
+// []float64 and []bool. This avoids duplicating a membership list that can
+// reach hundreds of megabytes, at the cost of a lifetime rule:
+//
+//	DO NOT mutate a slice passed here until the Search/Query call using it has
+//	returned. Mutating it earlier changes what the server sees, and mutating it
+//	after Request() changes an already-returned protobuf message.
+//
+// Pass a copy if the caller intends to keep writing to the slice.
 func (opt *searchOption) WithTemplateParam(key string, val any) *searchOption {
 	opt.annRequest.WithTemplateParam(key, val)
 	return opt
@@ -442,6 +541,11 @@ func (opt *searchOption) WithSearchAggregation(agg *SearchAggregation) *searchOp
 
 func (opt *searchOption) WithFunctionReranker(fr *entity.Function) *searchOption {
 	opt.annRequest.WithFunctionReranker(fr)
+	return opt
+}
+
+func (opt *searchOption) WithFunctionScore(fs *entity.FunctionScore) *searchOption {
+	opt.annRequest.WithFunctionScore(fs)
 	return opt
 }
 
@@ -533,6 +637,8 @@ type hybridSearchOption struct {
 	collectionName string
 	partitionNames []string
 	namespace      *string
+	rlsPrincipal   string
+	skipRLS        bool
 
 	reqs []*AnnRequest
 
@@ -540,10 +646,10 @@ type hybridSearchOption struct {
 	useDefaultConsistency bool
 	consistencyLevel      entity.ConsistencyLevel
 
-	limit             int
-	offset            int
-	reranker          Reranker
-	functionRerankers []*entity.Function
+	limit         int
+	offset        int
+	reranker      Reranker
+	functionScore *entity.FunctionScore
 }
 
 func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *hybridSearchOption {
@@ -567,6 +673,16 @@ func (opt *hybridSearchOption) WithNamespace(namespace string) *hybridSearchOpti
 	return opt
 }
 
+func (opt *hybridSearchOption) WithRLSPrincipal(principal string) *hybridSearchOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *hybridSearchOption) WithSkipRLS(skip bool) *hybridSearchOption {
+	opt.skipRLS = skip
+	return opt
+}
+
 func (opt *hybridSearchOption) WithOutputFields(outputFields ...string) *hybridSearchOption {
 	opt.outputFields = outputFields
 	return opt
@@ -577,8 +693,28 @@ func (opt *hybridSearchOption) WithReranker(reranker Reranker) *hybridSearchOpti
 	return opt
 }
 
+// WithFunctionRerankers adds a scoring Function applied to every leg of the
+// hybrid search on the server. For per-sub-request scores (server support in
+// flight, see https://github.com/milvus-io/milvus/issues/52956), attach the
+// Function to the sub-request's AnnRequest instead.
 func (opt *hybridSearchOption) WithFunctionRerankers(functionReranker *entity.Function) *hybridSearchOption {
-	opt.functionRerankers = append(opt.functionRerankers, functionReranker)
+	if opt.functionScore == nil {
+		opt.functionScore = entity.NewFunctionScore()
+	}
+	opt.functionScore.AddFunction(functionReranker)
+	return opt
+}
+
+// WithFunctionScore sets the search FunctionScore (functions plus score
+// options such as boost_mode / function_mode). It replaces any functions
+// accumulated via WithFunctionRerankers, and stores a copy so the caller's
+// FunctionScore is never mutated or shared with other options.
+func (opt *hybridSearchOption) WithFunctionScore(fs *entity.FunctionScore) *hybridSearchOption {
+	if fs == nil {
+		opt.functionScore = nil
+		return opt
+	}
+	opt.functionScore = fs.Clone()
 	return opt
 }
 
@@ -610,6 +746,8 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 		CollectionName:        opt.collectionName,
 		PartitionNames:        opt.partitionNames,
 		Namespace:             opt.namespace,
+		RlsPrincipal:          opt.rlsPrincipal,
+		SkipRls:               opt.skipRLS,
 		Requests:              requests,
 		UseDefaultConsistency: opt.useDefaultConsistency,
 		ConsistencyLevel:      commonpb.ConsistencyLevel(opt.consistencyLevel),
@@ -617,11 +755,11 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 		RankParams:            params,
 	}
 
-	if len(opt.functionRerankers) > 0 {
-		r.FunctionScore = &schemapb.FunctionScore{}
-		for _, fr := range opt.functionRerankers {
-			r.FunctionScore.Functions = append(r.FunctionScore.Functions, fr.ProtoMessage())
+	if opt.functionScore != nil {
+		if len(opt.functionScore.Functions) == 0 {
+			return nil, errors.New("FunctionScore has no functions")
 		}
+		r.FunctionScore = opt.functionScore.ProtoMessage()
 	}
 
 	return r, nil
@@ -644,6 +782,8 @@ type queryOption struct {
 	collectionName             string
 	partitionNames             []string
 	namespace                  *string
+	rlsPrincipal               string
+	skipRLS                    bool
 	queryParams                map[string]string
 	outputFields               []string
 	consistencyLevel           entity.ConsistencyLevel
@@ -652,11 +792,16 @@ type queryOption struct {
 	templateParams             map[string]any
 }
 
+// The returned request is NOT a snapshot of slice-valued template parameters:
+// it aliases the caller's backing arrays (see WithTemplateParam). Treat it as
+// valid only while those slices are unmodified.
 func (opt *queryOption) Request() (*milvuspb.QueryRequest, error) {
 	req := &milvuspb.QueryRequest{
 		CollectionName: opt.collectionName,
 		PartitionNames: opt.partitionNames,
 		Namespace:      opt.namespace,
+		RlsPrincipal:   opt.rlsPrincipal,
+		SkipRls:        opt.skipRLS,
 		OutputFields:   opt.outputFields,
 
 		Expr:                  opt.expr,
@@ -682,6 +827,16 @@ func (opt *queryOption) WithFilter(expr string) *queryOption {
 	return opt
 }
 
+// A slice value (the value in `field in {the value}`) is NOT copied: the request built
+// by Request() aliases the caller's backing array for []int64, []string,
+// []float64 and []bool. This avoids duplicating a membership list that can
+// reach hundreds of megabytes, at the cost of a lifetime rule:
+//
+//	DO NOT mutate a slice passed here until the Search/Query call using it has
+//	returned. Mutating it earlier changes what the server sees, and mutating it
+//	after Request() changes an already-returned protobuf message.
+//
+// Pass a copy if the caller intends to keep writing to the slice.
 func (opt *queryOption) WithTemplateParam(key string, val any) *queryOption {
 	opt.templateParams[key] = val
 	return opt
@@ -703,6 +858,17 @@ func (opt *queryOption) WithLimit(limit int) *queryOption {
 	return opt
 }
 
+// WithOrderByFields sorts query results by the given scalar fields.
+// Each spec is "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
+// The server requires an explicit limit when order-by fields are set.
+func (opt *queryOption) WithOrderByFields(fields ...string) *queryOption {
+	if opt.queryParams == nil {
+		opt.queryParams = make(map[string]string)
+	}
+	opt.queryParams[spOrderByFields] = strings.Join(fields, ",")
+	return opt
+}
+
 func (opt *queryOption) WithOutputFields(fieldNames ...string) *queryOption {
 	opt.outputFields = fieldNames
 	return opt
@@ -721,6 +887,16 @@ func (opt *queryOption) WithPartitions(partitionNames ...string) *queryOption {
 
 func (opt *queryOption) WithNamespace(namespace string) *queryOption {
 	opt.namespace = &namespace
+	return opt
+}
+
+func (opt *queryOption) WithRLSPrincipal(principal string) *queryOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *queryOption) WithSkipRLS(skip bool) *queryOption {
+	opt.skipRLS = skip
 	return opt
 }
 

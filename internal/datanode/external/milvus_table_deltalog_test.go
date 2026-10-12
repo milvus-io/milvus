@@ -27,9 +27,12 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -38,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -46,9 +50,47 @@ type fakeMilvusTableDeltalogReader struct {
 	nextErr  error
 	closeErr error
 	next     int
+	current  storage.Record
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestReadMilvusTableSourceFilesUsesResolvedPaths() {
+	ctx := context.Background()
+	storageConfig := &indexpb.StorageConfig{StorageType: "local"}
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		ExternalSource: "s3://minio/metadata/v1.json",
+		ExternalSpec:   `{"format":"milvus-table","extfs":{"endpoint_url":"http://minio"}}`,
+		StorageConfig:  storageConfig,
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	paths := []string{
+		"s3://minio/minio/files/insert_log/1",
+		"s3://minio/minio/files/insert_log/2",
+	}
+
+	var gotPaths []string
+	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
+		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+			s.Same(storageConfig, sc)
+			s.Equal(req.GetCollectionID(), extfs.CollectionID)
+			s.Equal(req.GetExternalSource(), extfs.Source)
+			s.Equal(req.GetExternalSpec(), extfs.Spec)
+			gotPaths = append(gotPaths, filePath)
+			return []byte(filePath), nil
+		}).Build()
+	defer patchRead.UnPatch()
+
+	data, err := task.readMilvusTableSourceFiles(ctx, paths)
+	s.NoError(err)
+	s.Equal(paths, gotPaths)
+	s.Equal([][]byte{[]byte(paths[0]), []byte(paths[1])}, data)
 }
 
 func (r *fakeMilvusTableDeltalogReader) Next() (storage.Record, error) {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	if r.nextErr != nil {
 		return nil, r.nextErr
 	}
@@ -57,10 +99,15 @@ func (r *fakeMilvusTableDeltalogReader) Next() (storage.Record, error) {
 	}
 	record := r.records[r.next]
 	r.next++
+	r.current = record
 	return record, nil
 }
 
 func (r *fakeMilvusTableDeltalogReader) Close() error {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
 	return r.closeErr
 }
 
@@ -461,21 +508,18 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 		},
 	}
 
-	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&datapb.SnapshotMetadata{
+	metadata := &datapb.SnapshotMetadata{
 		Collection: &datapb.CollectionDescription{Schema: sourceSchema},
-	})
-	s.Require().NoError(err)
-
-	mockReadMetadata := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(storageConfig *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+	}
+	mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+		To(func(source, spec string, config *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (*datapb.SnapshotMetadata, error) {
+			s.Equal(metadataPath, source)
+			s.Equal(externalSpec, spec)
+			s.Same(storageConfig, config)
 			s.Equal(s.collectionID, extfs.CollectionID)
 			s.Equal(metadataPath, extfs.Source)
 			s.Equal(externalSpec, extfs.Spec)
-			if filePath != metadataPath {
-				s.Failf("unexpected external read", "path=%s", filePath)
-				return nil, fmt.Errorf("unexpected external read %s", filePath)
-			}
-			return metadataBytes, nil
+			return metadata, nil
 		}).Build()
 	defer mockReadMetadata.UnPatch()
 
@@ -499,7 +543,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 	)
 	s.Require().NoError(err)
 	mockDeltalogReader := mockey.Mock(storage.NewDeltalogReader).
-		To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			s.Equal(schemapb.DataType_Int64, pkType)
 			s.Equal([]string{sourceDeltalogPath}, paths)
 			return &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}, nil
@@ -985,6 +1029,38 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 	s.Contains(err.Error(), "has no allocated log ID")
 }
 
+func TestGetMilvusTableSourcePKFieldMetadataErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		data    string
+		readErr error
+		wantErr error
+	}{
+		{"corrupt_metadata", `{`, nil, merr.ErrDataIntegrity},
+		{"unsupported_version", `{"format_version":99999}`, nil, merr.ErrOperationNotSupported},
+		{"read_timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, parseErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(tc.data))
+			if tc.readErr != nil {
+				parseErr = tc.readErr
+			}
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, parseErr).Build()
+			defer read.UnPatch()
+			task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{
+				ExternalSource: "s3://source-bucket/snapshots/10/metadata/20.json",
+				ExternalSpec:   `{"format":"milvus-table"}`,
+			})
+
+			field, err := task.getMilvusTableSourcePKField()
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Nil(t, field)
+			assert.Nil(t, task.milvusTableSourcePKField)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Code(err))
+		})
+	}
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestGetMilvusTableSourcePKFieldCachesSnapshotMetadata() {
 	ctx := context.Background()
 	task := NewRefreshExternalCollectionTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{
@@ -1059,7 +1135,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		s.Require().NoError(err)
 		reader := &fakeMilvusTableDeltalogReader{records: []storage.Record{record}}
 		mockReader := mockey.Mock(storage.NewDeltalogReader).
-			To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 				s.Equal(schemapb.DataType_Int64, pkType)
 				s.Equal([]string{ref.sourcePath}, paths)
 				return reader, nil
@@ -1085,7 +1161,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 		legacyRef := milvusTableDeltalogRef{sourcePath: "files/delta_log/1/2/3/10", logID: 10, numEntries: 2}
 		reader := &fakeMilvusTableDeltalogReader{}
 		mockReader := mockey.Mock(storage.NewDeltalogReader).
-			To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 				s.Equal(schemapb.DataType_Int64, pkType)
 				s.Equal([]string{legacyRef.sourcePath}, paths)
 				return reader, nil
@@ -1303,6 +1379,7 @@ func writeDeltalog(
 func readInt64Deltalog(t *testing.T, storageConfig *indexpb.StorageConfig, path string) ([]int64, []int64) {
 	t.Helper()
 	reader, err := storage.NewDeltalogReader(
+		context.Background(),
 		schemapb.DataType_Int64,
 		[]string{path},
 		storage.WithVersion(storage.StorageV3),
@@ -1322,15 +1399,12 @@ func readInt64Deltalog(t *testing.T, storageConfig *indexpb.StorageConfig, path 
 		if err != nil {
 			t.Fatalf("read deltalog: %v", err)
 		}
-		func() {
-			defer record.Release()
-			pkColumn := record.Column(0).(*array.Int64)
-			tsColumn := record.Column(common.TimeStampField).(*array.Int64)
-			for i := 0; i < record.Len(); i++ {
-				pks = append(pks, pkColumn.Value(i))
-				tss = append(tss, tsColumn.Value(i))
-			}
-		}()
+		pkColumn := record.Column(0).(*array.Int64)
+		tsColumn := record.Column(common.TimeStampField).(*array.Int64)
+		for i := 0; i < record.Len(); i++ {
+			pks = append(pks, pkColumn.Value(i))
+			tss = append(tss, tsColumn.Value(i))
+		}
 	}
 	return pks, tss
 }

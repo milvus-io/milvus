@@ -761,13 +761,12 @@ func ReadNullableTimestamptzData(pcr *FieldReader, count int64) (any, []bool, er
 
 	// 2. Initialize the target array for internal int64 timestamps (UTC microseconds).
 	int64Ts := make([]int64, 0, len(data))
-	defaultValue := pcr.field.GetDefaultValue().GetTimestamptzData()
 
 	// 3. Iterate over the string array and convert each timestamp.
 	for i, strValue := range data {
 		// Check the validity mask: If it's null, append the zero value (0) and continue.
 		if !validData[i] {
-			int64Ts = append(int64Ts, defaultValue)
+			int64Ts = append(int64Ts, 0)
 			continue
 		}
 
@@ -779,6 +778,10 @@ func ReadNullableTimestamptzData(pcr *FieldReader, count int64) (any, []bool, er
 			return nil, nil, err
 		}
 		int64Ts = append(int64Ts, tz)
+	}
+	if pcr.field.GetDefaultValue() != nil {
+		defaultValue := pcr.field.GetDefaultValue().GetTimestamptzData()
+		return fillWithDefaultValueImpl(int64Ts, defaultValue, validData, pcr.field)
 	}
 	return int64Ts, validData, nil
 }
@@ -820,22 +823,23 @@ func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error
 	if data == nil {
 		return nil, nil, nil
 	}
-	wkbValues := make([][]byte, 0)
-	defaultValueStr := pcr.field.GetDefaultValue().GetStringData()
-	defaultValue := []byte(nil)
-	if defaultValueStr != "" {
-		defaultValue, _ = pkgcommon.ConvertWKTToWKB(defaultValueStr)
-	}
+	wkbValues := make([][]byte, len(data))
 	for i, wktValue := range data {
 		if !validData[i] {
-			wkbValues = append(wkbValues, defaultValue)
 			continue
 		}
 		wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 		if err != nil {
 			return nil, nil, err
 		}
-		wkbValues = append(wkbValues, wkbValue)
+		wkbValues[i] = wkbValue
+	}
+	if pcr.field.GetDefaultValue() != nil {
+		defaultValue, err := pkgcommon.ConvertWKTToWKB(pcr.field.GetDefaultValue().GetStringData())
+		if err != nil {
+			return nil, nil, merr.WrapErrImportSysFailedMsg("invalid default value for geometry field %s", pcr.field.GetName())
+		}
+		return fillWithDefaultValueImpl(wkbValues, defaultValue, validData, pcr.field)
 	}
 	return wkbValues, validData, nil
 }

@@ -90,28 +90,28 @@ PhyIterativeElementFilterNode::GetOutput() {
     milvus::SearchResult search_result = query_context_->get_search_result();
 
     if (!search_result.element_level_) {
-        ThrowInfo(ExprInvalid,
+        ThrowInfo(UnexpectedError,
                   "PhyIterativeElementFilterNode expects element-level search "
                   "result");
     }
 
     if (!search_result.vector_iterators_.has_value()) {
-        ThrowInfo(ExprInvalid,
+        ThrowInfo(UnexpectedError,
                   "PhyIterativeElementFilterNode expects vector_iterators in "
                   "search result");
     }
 
     auto segment = query_context_->get_segment();
-    auto& field_meta =
-        segment->get_schema().GetFirstArrayFieldInStruct(struct_name_);
+    auto schema = segment->get_schema_snapshot();
+    auto& field_meta = schema->GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
-    auto array_offsets = segment->GetArrayOffsets(field_id);
-    if (array_offsets == nullptr) {
+    auto struct_element_offsets = segment->GetStructElementOffsets(field_id);
+    if (struct_element_offsets == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
-                  "IArrayOffsets not found for field {}",
+                  "IStructElementOffsets not found for field {}",
                   field_id.get());
     }
-    query_context_->set_array_offsets(array_offsets);
+    query_context_->set_struct_element_offsets(struct_element_offsets);
 
     // Step 2: Wrap each iterator with ElementFilterIterator
     auto& base_iterators = search_result.vector_iterators_.value();
@@ -137,7 +137,7 @@ PhyIterativeElementFilterNode::GetOutput() {
     // Step 4: If no doc-level predicate, collect results directly
     // (otherwise, downstream IterativeFilterNode will do this)
     if (!has_doc_predicate_) {
-        CollectResults(search_result, array_offsets.get());
+        CollectResults(search_result, struct_element_offsets.get());
     }
 
     query_context_->set_search_result(std::move(search_result));
@@ -163,7 +163,8 @@ PhyIterativeElementFilterNode::GetOutput() {
 
 void
 PhyIterativeElementFilterNode::CollectResults(
-    SearchResult& search_result, const IArrayOffsets* array_offsets) {
+    SearchResult& search_result,
+    const IStructElementOffsets* struct_element_offsets) {
     // When there's no doc-level predicate, we need to consume the iterators
     // and collect the top-K results ourselves.
     //
@@ -182,6 +183,18 @@ PhyIterativeElementFilterNode::CollectResults(
     search_result.distances_.resize(nq * topk, 0.0f);
     search_result.element_indices_.resize(nq * topk, -1);
 
+    // Resolve element_id -> (doc_id, elem_idx) once per run of ids that
+    // land in the same row: iterator output is distance-ordered, but ids
+    // from one row still arrive in clusters. Cache the last resolved
+    // row's element range [first, last) and answer in-range ids without
+    // the virtual binary-search lookup; any other id falls back to the
+    // per-element lookup, so correctness never depends on the output
+    // order. A resolved row's range is immutable, so the cache stays
+    // valid across iterators.
+    int32_t cached_doc_id = 0;
+    int32_t cached_first_elem = 0;
+    int32_t cached_last_elem = 0;  // empty range: first lookup always misses
+
     for (int64_t q = 0; q < nq; ++q) {
         auto& iterator = iterators[q];
         int64_t count = 0;
@@ -194,8 +207,21 @@ PhyIterativeElementFilterNode::CollectResults(
             }
 
             auto [element_id, distance] = result.value();
-            auto [doc_id, elem_idx] =
-                array_offsets->ElementIDToRowID(element_id);
+            int32_t doc_id;
+            int32_t elem_idx;
+            if (element_id >= cached_first_elem &&
+                element_id < cached_last_elem) {
+                doc_id = cached_doc_id;
+                elem_idx = static_cast<int32_t>(element_id) - cached_first_elem;
+            } else {
+                const auto row =
+                    struct_element_offsets->ElementIDToRowInfo(element_id);
+                doc_id = row.row_id;
+                elem_idx = row.element_index;
+                cached_doc_id = row.row_id;
+                cached_first_elem = row.row_element_start;
+                cached_last_elem = row.row_element_end;
+            }
 
             // Find insert position using binary search
             size_t pos =

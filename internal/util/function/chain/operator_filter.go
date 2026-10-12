@@ -30,7 +30,7 @@ import (
 )
 
 func init() {
-	MustRegisterOperator(types.OpTypeFilter, NewFilterOpFromRepr)
+	MustRegisterOperator(types.OpTypeFilter, NewFilterOpFromReprWithContext)
 }
 
 // FilterOp filters the DataFrame based on the boolean result of a FunctionExpr.

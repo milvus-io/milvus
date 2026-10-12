@@ -23,11 +23,16 @@ namespace milvus::index {
 using stdclock = std::chrono::high_resolution_clock;
 class TextMatchIndex : public InvertedIndexTantivy<std::string> {
  public:
-    // for growing segment.
+    // In-memory writer used by both growing segments and sealed interim index
+    // builds. Growing segments enable background merge because periodic
+    // commits would otherwise grow the segment count unbounded; sealed builds
+    // use INT64_MAX as the commit interval and disable background merge to
+    // avoid merge write amplification.
     explicit TextMatchIndex(int64_t commit_interval_in_ms,
                             const char* unique_id,
                             const char* analyzer_name,
-                            const char* analyzer_params);
+                            const char* analyzer_params,
+                            bool enable_background_merge);
     // for sealed segment to create index from raw data during loading.
     explicit TextMatchIndex(const std::string& path,
                             const char* unique_id,
@@ -45,7 +50,6 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
 
     using InvertedIndexTantivy<std::string>::Load;
 
- public:
     IndexStatsPtr
     Upload(const Config& config) override;
 
@@ -53,9 +57,8 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     UploadUnified(const Config& config) override;
 
     void
-    Load(const Config& config);
+    Load(const Config& config, milvus::OpContext* op_ctx = nullptr);
 
- public:
     void
     AddTextSealed(const std::string& text, const bool valid, int64_t offset);
 
@@ -68,9 +71,14 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
                     const bool* valids,
                     int64_t offset_begin);
 
+    // `offset_begin` is the logical offset of the batch's first row, the same
+    // doc-id space AddTextsGrowing writes into. A growing segment that already
+    // holds rows must pass the offset its caller reserved, or the batch lands
+    // on top of doc ids the index already owns.
     void
     BuildIndexFromFieldData(const std::vector<FieldDataPtr>& field_datas,
-                            bool nullable);
+                            bool nullable,
+                            int64_t offset_begin);
 
     void
     Finish();
@@ -81,7 +89,6 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     void
     Reload();
 
- public:
     void
     CreateReader(SetBitsetFn set_bitset);
 
@@ -104,7 +111,6 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     bool
     shouldTriggerCommit();
 
- private:
     mutable std::mutex mtx_;
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
@@ -119,8 +125,9 @@ class TextMatchIndexHolder {
                   return milvus::cachinglayer::ResourceUsage(0, 0);
               }
               if (mmap_enabled) {
+                  auto bitmap_bytes = index_->ValidityBitmapByteSize();
                   return milvus::cachinglayer::ResourceUsage(
-                      0, index_->ByteSize());
+                      bitmap_bytes, index_->ByteSize() - bitmap_bytes);
               } else {
                   return milvus::cachinglayer::ResourceUsage(index_->ByteSize(),
                                                              0);

@@ -90,7 +90,8 @@ func (s *StreamingNodeManager) AllocVirtualChannels(ctx context.Context, param b
 }
 
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
-// Return -1 and error if the vchannel is not found or context is canceled.
+// Return -1 and an error when no WAL assignment is available or the context is canceled.
+// Missing assignment is not proof that the virtual channel has been dropped.
 func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel string) (int64, error) {
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 	balancer, err := balance.GetWithContext(ctx)
@@ -99,7 +100,7 @@ func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel
 	}
 	serverID, ok := balancer.GetLatestWALLocated(ctx, pchannel)
 	if !ok {
-		return -1, merr.WrapErrChannelNotFound(vchannel)
+		return -1, merr.WrapErrChannelNotAvailable(vchannel)
 	}
 	return serverID, nil
 }

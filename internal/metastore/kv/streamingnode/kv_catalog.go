@@ -14,9 +14,9 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -49,7 +49,7 @@ import (
 //	        └── 456398247938
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingNodeCataLog {
 	return &catalog{
-		metaKV: metaKV,
+		metaKV: kv.NewReliableWriteMetaKv(metaKV),
 	}
 }
 
@@ -82,6 +82,9 @@ func (c *catalog) newVChannelMetaFromKV(prefix string, keys []string, values []s
 			if err := proto.Unmarshal([]byte(values[idx]), vchannel); err != nil {
 				return nil, errors.Wrapf(err, "unmarshal vchannel meta %s failed", key)
 			}
+			if vchannel.GetVchannel() != ks[0] {
+				return nil, merr.WrapErrDataIntegrityMsg("mismatched vchannel recovery meta, key %s, meta %s", ks[0], vchannel.GetVchannel())
+			}
 			vchannels[ks[0]] = vchannel
 		case 3: // {{vchannel}}/schema/{{version}}
 			// the schema path.
@@ -101,50 +104,26 @@ func (c *catalog) newVChannelMetaFromKV(prefix string, keys []string, values []s
 	}
 	vchannelsWithSchemas := make([]*streamingpb.VChannelMeta, 0, len(vchannels))
 	for vchannelName, vchannel := range vchannels {
-		schemas, ok := schemas[vchannelName]
-		if !ok {
-			panic(fmt.Sprintf("vchannel %s has no schemas in recovery info", vchannelName))
+		// Schema writes precede the base during a chunked snapshot. Only the
+		// base checkpoint publishes them; a newer schema left by an interrupted
+		// snapshot must be reconstructed by WAL replay instead of loaded here.
+		visibleSchemas := make([]*streamingpb.CollectionSchemaOfVChannel, 0, len(schemas[vchannelName]))
+		for _, schema := range schemas[vchannelName] {
+			if schema.GetCheckpointTimeTick() <= vchannel.GetCheckpointTimeTick() {
+				visibleSchemas = append(visibleSchemas, schema)
+			}
 		}
-		sort.Slice(schemas, func(i, j int) bool {
+		if len(visibleSchemas) == 0 {
+			return nil, merr.WrapErrDataIntegrityMsg("vchannel %s missing schemas in recovery info", vchannelName)
+		}
+		sort.Slice(visibleSchemas, func(i, j int) bool {
 			// order by checkpoint time tick.
-			return schemas[i].CheckpointTimeTick < schemas[j].CheckpointTimeTick
+			return visibleSchemas[i].CheckpointTimeTick < visibleSchemas[j].CheckpointTimeTick
 		})
-		vchannel.CollectionInfo.Schemas = schemas
+		vchannel.CollectionInfo.Schemas = visibleSchemas
 		vchannelsWithSchemas = append(vchannelsWithSchemas, vchannel)
 	}
 	return vchannelsWithSchemas, nil
-}
-
-// SaveVChannels save vchannel on current pchannel.
-func (c *catalog) SaveVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error {
-	kvs := make(map[string]string, 2*len(vchannels))
-	removes := make([]string, 0, 2*len(vchannels))
-	for _, info := range vchannels {
-		r, kv, err := c.getRemovalAndSaveForVChannel(pchannelName, info)
-		if err != nil {
-			return err
-		}
-		removes = append(removes, r...)
-		for k, v := range kv {
-			kvs[k] = v
-		}
-	}
-
-	// TODO: We should perform a remove and save as a transaction but current the kv interface doesn't support it.
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	if len(removes) > 0 {
-		if err := etcd.RemoveByBatchWithLimit(removes, maxTxnNum, func(partialRemoves []string) error {
-			return c.metaKV.MultiRemove(ctx, partialRemoves)
-		}); err != nil {
-			return err
-		}
-	}
-	if len(kvs) > 0 {
-		return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
-			return c.metaKV.MultiSave(ctx, partialKvs)
-		})
-	}
-	return nil
 }
 
 // getRemovalAndSaveForVChannel gets the removal and save for vchannel.
@@ -153,41 +132,39 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 	kvs := make(map[string]string, len(info.CollectionInfo.Schemas)+1)
 
 	key := buildVChannelKey(pchannelName, info.GetVchannel())
-	if info.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
-		// Dropped vchannel should be removed from meta
-		for _, schema := range info.GetCollectionInfo().GetSchemas() {
-			// Also remove the schema of the vchannel.
-			removes = append(removes, buildVChannelSchemaKey(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick()))
-		}
-		removes = append(removes, key)
-		return removes, kvs, nil
-	}
-
 	// Save the schema of the vchannel.
 	for _, schema := range info.GetCollectionInfo().GetSchemas() {
 		switch schema.State {
-		case streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED:
-			// Dropped schema should be removed from meta
-			removes = append(removes, buildVChannelSchemaKey(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick()))
-		default:
+		case streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+			streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED:
 			data, err := proto.Marshal(schema)
 			if err != nil {
-				return nil, nil, errors.Wrapf(err, "marshal schema %d at pchannel %s failed", schema.GetCheckpointTimeTick(), pchannelName)
+				return nil, nil, merr.WrapErrSerializationFailed(err, "marshal schema %d at pchannel %s", schema.GetCheckpointTimeTick(), pchannelName)
 			}
 			kvs[buildVChannelSchemaKey(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick())] = string(data)
+		default:
+			return nil, nil, merr.WrapErrDataIntegrityMsg("unknown vchannel schema state in recovery meta: vchannel %s schema %d", info.GetVchannel(), schema.GetCheckpointTimeTick())
 		}
 	}
-	// Schema is saved in the other key, so we don't need to save it in the vchannel meta.
-	// swap it first to marshal the vchannel meta without schema.
-	oldSchema := info.CollectionInfo.Schemas
+	data, err := marshalVChannelBaseMeta(pchannelName, info)
+	if err != nil {
+		return nil, nil, err
+	}
+	kvs[key] = data
+	return removes, kvs, nil
+}
+
+func marshalVChannelBaseMeta(pchannelName string, info *streamingpb.VChannelMeta) (string, error) {
+	// Schema is saved in separate keys. The caller passes a stable snapshot, so
+	// temporarily excluding it avoids an additional full-meta clone.
+	oldSchemas := info.CollectionInfo.Schemas
 	info.CollectionInfo.Schemas = nil
 	data, err := proto.Marshal(info)
-	info.CollectionInfo.Schemas = oldSchema
+	info.CollectionInfo.Schemas = oldSchemas
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "marshal vchannel %d at pchannel %s failed", info.GetVchannel(), pchannelName)
+		return "", merr.WrapErrSerializationFailed(err, "marshal vchannel %s at pchannel %s", info.GetVchannel(), pchannelName)
 	}
-	kvs[key] = string(data)
-	return removes, kvs, nil
+	return string(data), nil
 }
 
 // ListSegmentAssignment lists the segment assignment info of the pchannel.
@@ -204,47 +181,75 @@ func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string
 		if err = proto.Unmarshal([]byte(value), info); err != nil {
 			return nil, errors.Wrapf(err, "unmarshal pchannel %s failed", keys[k])
 		}
+		segmentID, err := strconv.ParseInt(typeutil.After(keys[k], prefix), 10, 64)
+		if err != nil || segmentID != info.GetSegmentId() {
+			return nil, merr.WrapErrDataIntegrityMsg("mismatched segment assignment recovery meta, key %s, meta %d", keys[k], info.GetSegmentId())
+		}
 		infos = append(infos, info)
 	}
 	return infos, nil
 }
 
-// SaveSegmentAssignments saves the segment assignment info to meta storage.
-func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName string, infos map[int64]*streamingpb.SegmentAssignmentMeta) error {
-	kvs := make(map[string]string, len(infos))
-	removes := make([]string, 0)
-	for _, info := range infos {
-		key := buildSegmentAssignmentKey(pChannelName, info.GetSegmentId())
-		if info.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
-			// Flushed segment should be removed from meta
-			removes = append(removes, key)
-			continue
-		}
+// ListQueryViews lists the StreamingNode query view recovery metadata of the pchannel.
+func (c *catalog) ListQueryViews(ctx context.Context, pChannelName string) ([]*viewpb.QueryViewOfShard, error) {
+	prefix := buildQueryViewPrefix(pChannelName)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
 
-		data, err := proto.Marshal(info)
+	views := make([]*viewpb.QueryViewOfShard, 0, len(values))
+	for idx, value := range values {
+		view := &viewpb.QueryViewOfShard{}
+		if err := proto.Unmarshal([]byte(value), view); err != nil {
+			return nil, merr.Wrapf(err, "unmarshal query view %s failed", keys[idx])
+		}
+		expectedKey, err := buildQueryViewKey(pChannelName, view.GetMeta())
 		if err != nil {
-			return errors.Wrapf(err, "marshal segment %d at pchannel %s failed", info.GetSegmentId(), pChannelName)
+			return nil, err
 		}
-		kvs[key] = string(data)
-	}
-
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	if len(removes) > 0 {
-		if err := etcd.RemoveByBatchWithLimit(removes, maxTxnNum, func(partialRemoves []string) error {
-			return c.metaKV.MultiRemove(ctx, partialRemoves)
-		}); err != nil {
-			return err
+		if typeutil.After(keys[idx], prefix) != typeutil.After(expectedKey, prefix) {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"mismatched query view recovery meta, key %s, vchannel %s",
+				keys[idx],
+				view.GetMeta().GetVchannel(),
+			)
 		}
+		views = append(views, view)
 	}
-
-	if len(kvs) > 0 {
-		return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
-			return c.metaKV.MultiSave(ctx, partialKvs)
-		})
-	}
-	return nil
+	return views, nil
 }
 
+// SaveQueryViews persists Up views and removes recovery records in every other state.
+func (c *catalog) SaveQueryViews(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard) error {
+	if len(views) == 0 {
+		return nil
+	}
+
+	saves := make(map[string]string, len(views))
+	removals := make([]string, 0)
+	for _, view := range views {
+		meta := view.GetMeta()
+		key, err := buildQueryViewKey(pChannelName, meta)
+		if err != nil {
+			return err
+		}
+		if meta.GetState() == viewpb.QueryViewState_QueryViewStateUp {
+			data, err := marshalQueryViewForPersistence(view)
+			if err != nil {
+				return merr.Wrapf(err, "marshal query view %s at pchannel %s failed", meta.GetVchannel(), pChannelName)
+			}
+			removals = removeString(removals, key)
+			saves[key] = string(data)
+			continue
+		}
+		delete(saves, key)
+		removals = append(removals, key)
+	}
+	return c.metaKV.MultiSaveAndRemove(ctx, saves, removals)
+}
+
+// SaveSegmentAssignments saves the segment assignment info to meta storage.
 // GetConsumeCheckpoint gets the consuming checkpoint of the wal.
 func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string) (*streamingpb.WALCheckpoint, error) {
 	key := buildConsumeCheckpointKey(pchannelName)
@@ -260,27 +265,6 @@ func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string)
 		return nil, err
 	}
 	return val, nil
-}
-
-// SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
-func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string, checkpoint *streamingpb.WALCheckpoint) error {
-	key := buildConsumeCheckpointKey(pchannelName)
-	value, err := proto.Marshal(checkpoint)
-	if err != nil {
-		return err
-	}
-	return c.metaKV.Save(ctx, key, string(value))
-}
-
-// SaveSalvageCheckpoint saves the salvage checkpoint, keyed by the source cluster ID.
-// Multiple salvage checkpoints can exist for a channel (one per source cluster).
-func (c *catalog) SaveSalvageCheckpoint(ctx context.Context, pchannelName string, checkpoint *commonpb.ReplicateCheckpoint) error {
-	key := buildSalvageCheckpointPath(pchannelName, checkpoint.GetClusterId())
-	value, err := proto.Marshal(checkpoint)
-	if err != nil {
-		return err
-	}
-	return c.metaKV.Save(ctx, key, string(value))
 }
 
 // GetSalvageCheckpoint gets all salvage checkpoints for a channel (one per source cluster).
@@ -318,6 +302,10 @@ func buildSegmentAssignmentPrefix(pChannelName string) string {
 	return buildWALPrefix(pChannelName) + DirectorySegmentAssign + "/"
 }
 
+func buildQueryViewPrefix(pChannelName string) string {
+	return buildWALPrefix(pChannelName) + DirectoryQueryView + "/"
+}
+
 // Key functions: return exact keys for individual records.
 
 // buildVChannelKey returns the key for a specific vchannel's metadata.
@@ -333,6 +321,42 @@ func buildVChannelSchemaKey(pChannelName string, vchannelName string, version ui
 // buildSegmentAssignmentKey returns the key for a specific segment assignment.
 func buildSegmentAssignmentKey(pChannelName string, segmentID int64) string {
 	return buildSegmentAssignmentPrefix(pChannelName) + strconv.FormatInt(segmentID, 10)
+}
+
+func buildQueryViewKey(pChannelName string, meta *viewpb.QueryViewMeta) (string, error) {
+	if meta == nil {
+		return "", merr.WrapErrServiceInternalMsg("query view meta is nil")
+	}
+	version := meta.GetVersion()
+	if version == nil || version.GetDataVersion() == nil {
+		return "", merr.WrapErrServiceInternalMsg("query view %s has nil version", meta.GetVchannel())
+	}
+	pchannel, collectionID, vchannelIndex, err := funcutil.ParseVChannel(meta.GetVchannel())
+	if err != nil {
+		return "", err
+	}
+	if pchannel != pChannelName {
+		return "", merr.WrapErrServiceInternalMsg(
+			"query view vchannel %s pchannel %s mismatches catalog pchannel %s",
+			meta.GetVchannel(),
+			pchannel,
+			pChannelName,
+		)
+	}
+	if collectionID != meta.GetCollectionId() {
+		return "", merr.WrapErrServiceInternalMsg(
+			"query view collection %d mismatches vchannel %s collection %d",
+			meta.GetCollectionId(),
+			meta.GetVchannel(),
+			collectionID,
+		)
+	}
+	dataVersion := version.GetDataVersion()
+	return fmt.Sprintf("%s%d/%d/%d/%d/%d/%d",
+		buildQueryViewPrefix(pChannelName),
+		meta.GetCollectionId(), meta.GetReplicaId(), vchannelIndex,
+		dataVersion.GetStreamingVersion(), dataVersion.GetCompactVersion(), version.GetQueryVersion(),
+	), nil
 }
 
 // buildConsumeCheckpointKey returns the key for the consume checkpoint of a pchannel.
@@ -356,4 +380,25 @@ func buildSalvageCheckpointPrefix(pchannelName string) string {
 // buildSalvageCheckpointPath builds the path for salvage checkpoint for a specific source cluster.
 func buildSalvageCheckpointPath(pchannelName, sourceClusterID string) string {
 	return buildSalvageCheckpointPrefix(pchannelName) + sourceClusterID
+}
+
+func marshalQueryViewForPersistence(view *viewpb.QueryViewOfShard) ([]byte, error) {
+	clone := proto.Clone(view).(*viewpb.QueryViewOfShard)
+	for _, queryNode := range clone.GetQueryNode() {
+		for _, partition := range queryNode.GetPartitions() {
+			partition.ReadySegmentIds = nil
+		}
+	}
+	return proto.Marshal(clone)
+}
+
+func removeString(values []string, value string) []string {
+	for idx := 0; idx < len(values); {
+		if values[idx] == value {
+			values = append(values[:idx], values[idx+1:]...)
+			continue
+		}
+		idx++
+	}
+	return values
 }

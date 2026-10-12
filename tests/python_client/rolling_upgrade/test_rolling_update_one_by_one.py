@@ -1,16 +1,17 @@
-from pprint import pformat
-from pathlib import Path
 import subprocess
-import pytest
-from time import sleep
-import yaml
-from datetime import datetime
-from utils.util_log import test_log as log
-from common.common_type import CaseLabel
-from chaos import constants
-from common.cus_resource_opts import CustomResourceOperations as CusResource
 import time
+from datetime import datetime
+from pathlib import Path
+from pprint import pformat
+from time import sleep
+
+import pytest
+import yaml
+from chaos import constants
+from common.common_type import CaseLabel
+from common.cus_resource_opts import CustomResourceOperations as CusResource
 from kubernetes import client, config
+from utils.util_log import test_log as log
 
 
 class TestBase:
@@ -44,9 +45,7 @@ def interrupt_rolling(release_name, component, timeout=60):
     log.info(f"chaos injected at {create_time}")
 
 
-def pause_and_resume_rolling(
-    metadata_name, deployment_name, namespace, updated_pod_count, pause_seconds
-):
+def pause_and_resume_rolling(metadata_name, deployment_name, namespace, updated_pod_count, pause_seconds):
     """
     Method: pause and resume the rolling update of a Deployment
     Params:
@@ -75,19 +74,13 @@ def pause_and_resume_rolling(
         res = api_instance.read_namespaced_deployment(deployment_name, namespace)
         log.info(f"deployment {deployment_name} status: {res.status}")
 
-        updated_replicas = api_instance.read_namespaced_deployment(
-            deployment_name, namespace
-        ).status.updated_replicas
+        updated_replicas = api_instance.read_namespaced_deployment(deployment_name, namespace).status.updated_replicas
 
-        replicas = api_instance.read_namespaced_deployment(
-            deployment_name, namespace
-        ).status.replicas
+        replicas = api_instance.read_namespaced_deployment(deployment_name, namespace).status.replicas
         log.info(f"updated_replicas: {updated_replicas}, replicas: {replicas}")
         if updated_replicas is None:
             updated_replicas = 0
-            log.debug(
-                f"updated_replicas: {updated_replicas}, replicas: {replicas}, no replicas updated, keep waiting"
-            )
+            log.debug(f"updated_replicas: {updated_replicas}, replicas: {replicas}, no replicas updated, keep waiting")
         if updated_replicas >= updated_pod_count and updated_replicas < replicas:
             log.debug(
                 f"updated_replicas: {updated_replicas}, replicas: {replicas}, sastisfy the condition to pause the rolling update"
@@ -134,9 +127,7 @@ def pause_and_resume_rolling(
 
 def run_cmd(cmd):
     log.info(f"cmd: {cmd}")
-    res = subprocess.Popen(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
+    res = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = res.communicate()
     output = stdout.decode("utf-8")
     log.info(f"{cmd}\n{output}\n")
@@ -144,9 +135,7 @@ def run_cmd(cmd):
 
 
 def check_querynode_upgrade_complete(release_name, namespace):
-    cmd = (
-        f"kubectl get deployment -n {namespace} | grep {release_name} | grep querynode"
-    )
+    cmd = f"kubectl get deployment -n {namespace} | grep {release_name} | grep querynode"
     output = run_cmd(cmd)
     log.info(f"querynode deployment status: {output}")
     deployments = [line.split() for line in output.strip().split("\n")]
@@ -192,7 +181,7 @@ class TestOperations(TestBase):
         paused_duration = int(paused_duration)
         origin_file_path = f"{str(Path(__file__).parent)}/milvus_crd.yaml"
         log.info(f"origin_file_path: {origin_file_path}")
-        with open(origin_file_path, "r") as f:
+        with open(origin_file_path) as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
         log.info(f"config: {pformat(config['spec']['components'])}")
         target_image = f"{new_image_repo}:{new_image_tag}"
@@ -214,7 +203,7 @@ class TestOperations(TestBase):
         for component in components:
             prefix = f"[update image for {component}]"
             # load config and update
-            with open(modified_file_path, "r") as f:
+            with open(modified_file_path) as f:
                 config = yaml.load(f, Loader=yaml.FullLoader)
             if isinstance(component, list):
                 for c in component:
@@ -254,9 +243,7 @@ class TestOperations(TestBase):
                 if "True" in output and "Healthy" in output:
                     # Check if the status remains stable for 1 minute
                     stable = True
-                    for _ in range(
-                        6
-                    ):  # Check every 10 seconds, 6 times in total (60 seconds)
+                    for _ in range(6):  # Check every 10 seconds, 6 times in total (60 seconds)
                         sleep(10)
                         output = run_cmd(cmd)
                         log.info(f"Re-check output: {output}")
@@ -265,9 +252,7 @@ class TestOperations(TestBase):
                             break
                     if component == "queryNode":
                         log.info(prefix + "add additional check for queryNode")
-                        while not check_querynode_upgrade_complete(
-                            meta_name, namespace
-                        ):
+                        while not check_querynode_upgrade_complete(meta_name, namespace):
                             print("Querynode upgrade not complete, waiting...")
                             time.sleep(10)
 

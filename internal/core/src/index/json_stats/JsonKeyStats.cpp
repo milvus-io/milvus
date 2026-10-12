@@ -14,17 +14,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <nlohmann/json.hpp>
-#include <string.h>
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <initializer_list>
 #include <iosfwd>
+#include <map>
+#include <memory>
+#include <string.h>
 #include <unordered_set>
+#include <utility>
 #include <variant>
-#include "segcore/default_fs.h"
+#include <vector>
 
 #include "NamedType/named_type_impl.hpp"
 #include "NamedType/underlying_functionalities.hpp"
@@ -38,39 +42,347 @@
 #include "common/GroupChunk.h"
 #include "common/Json.h"
 #include "common/Tracer.h"
+#include "common/Utils.h"
 #include "common/jsmn.h"
 #include "fmt/core.h"
+#include "folly/ScopeGuard.h"
+#include "folly/coro/BlockingWait.h"
+#include "folly/futures/Future.h"
+#include "futures/Executor.h"
 #include "index/Utils.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/JsonStatsBuildMemoryBudget.h"
 #include "index/json_stats/bson_builder.h"
 #include "index/json_stats/parquet_writer.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/common/metadata.h"
+#include "milvus-storage/column_groups.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/format/parquet/parquet_format_reader.h"
+#include "milvus-storage/reader.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "mmap/Types.h"
+#include "nlohmann/json.hpp"
 #include "nlohmann/detail/iterators/iteration_proxy.hpp"
 #include "nlohmann/json_fwd.hpp"
 #include "parquet/metadata.h"
-#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
-#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/storagev2translator/AsyncChunkReader.h"
+#include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/Utils.h"
+#include "segcore/default_fs.h"
+#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/MmapManager.h"
-#include "storage/Util.h"
-#include "folly/ScopeGuard.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::index {
+
+namespace {
+
+// Reader::create() exposes this synthetic JSON-stats group at index zero.
+constexpr int64_t kJsonStatsReaderColumnGroupIndex = 0;
+constexpr int64_t kJsonStatsRowsPerRange = 16 * 1024;
+constexpr size_t kJsonStatsMaterializeMinReservationBytes = 64 * 1024;
+constexpr size_t kJsonStatsMaterializeInputExpansionFactor = 2;
+constexpr size_t kJsonStatsMaterializeRowOverheadBytes = 32;
+constexpr size_t kJsonStatsMaterializeColumnOverheadBytes = 1024;
+
+struct CollectKeyInfoResult {
+    std::map<JsonKey, KeyStatsInfo> infos;
+};
+
+template <typename Func>
+void
+ForEachJsonStatsRow(const JsonStatsRowRange& range, Func&& func) {
+    int64_t visited_rows = 0;
+    for (const auto& slice : range.slices) {
+        AssertInfo(slice.data != nullptr,
+                   "json stats row range contains null field data");
+        AssertInfo(slice.row_count > 0,
+                   "json stats row range contains an empty slice");
+        AssertInfo(slice.local_begin >= 0,
+                   "json stats field data slice has negative local begin: {}",
+                   slice.local_begin);
+        AssertInfo(
+            slice.local_begin <= slice.data->get_num_rows() - slice.row_count,
+            "json stats field data slice [{}, {}) exceeds field data rows {}",
+            slice.local_begin,
+            slice.local_begin + slice.row_count,
+            slice.data->get_num_rows());
+        const auto slice_global_begin = range.global_begin + visited_rows;
+
+        for (int64_t offset = 0; offset < slice.row_count; ++offset) {
+            func(slice.data,
+                 slice.local_begin + offset,
+                 slice_global_begin + offset);
+        }
+        visited_rows += slice.row_count;
+    }
+    AssertInfo(visited_rows == range.row_count,
+               "json stats row range contains {} rows, expected {}",
+               visited_rows,
+               range.row_count);
+}
+
+size_t
+BytesForBits(size_t bit_count) {
+    return SaturatingAdd(bit_count / 8,
+                         bit_count % 8 == 0 ? size_t{0} : size_t{1});
+}
+
+size_t
+EstimateArrowFixedBufferBytes(const arrow::Schema& schema, size_t row_count) {
+    const auto validity_bytes = BytesForBits(row_count);
+    size_t buffer_bytes = 0;
+    for (const auto& field : schema.fields()) {
+        // Every materialized column can contain nulls. Account for its validity
+        // bitmap even when a dense finished array can omit that buffer.
+        buffer_bytes = SaturatingAdd(buffer_bytes, validity_bytes);
+
+        const auto& type = *field->type();
+        if (type.id() == arrow::Type::STRING ||
+            type.id() == arrow::Type::BINARY) {
+            // The variable payload is covered by the input-size estimate. This
+            // accounts for the offsets that are allocated even for null rows.
+            const auto offset_count = SaturatingAdd(row_count, size_t{1});
+            buffer_bytes = SaturatingAdd(
+                buffer_bytes,
+                SaturatingMultiply(offset_count,
+                                   sizeof(arrow::BinaryType::offset_type)));
+            continue;
+        }
+
+        const auto bit_width = type.bit_width();
+        AssertInfo(bit_width > 0,
+                   "unsupported json stats Arrow field type {}",
+                   type.ToString());
+        buffer_bytes =
+            SaturatingAdd(buffer_bytes,
+                          BytesForBits(SaturatingMultiply(
+                              row_count, static_cast<size_t>(bit_width))));
+    }
+    return buffer_bytes;
+}
+
+struct JsonStatsParquetMetadata {
+    std::shared_ptr<arrow::Schema> schema;
+    int64_t num_rows;
+};
+
+milvus_storage::api::Properties
+GetJsonStatsReadProperties() {
+    auto properties =
+        storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    if (properties == nullptr) {
+        return {};
+    }
+    return *properties;
+}
+
+// Opens one JSON-stats projection synchronously and preserves its storage
+// error classification at the Segcore boundary.
+[[nodiscard]] milvus::segcore::storagev2translator::ChunkReaderPtr
+OpenJsonStatsChunkReaderSync(
+    milvus_storage::api::Reader& reader,
+    const std::shared_ptr<std::vector<std::string>>& needed_columns,
+    const int64_t json_stats_column_group_id,
+    const int64_t segment_id) {
+    auto chunk_reader_result = reader.get_chunk_reader(
+        kJsonStatsReaderColumnGroupIndex, needed_columns);
+    if (!chunk_reader_result.ok()) {
+        const auto error =
+            milvus_storage::ToSegcoreError(chunk_reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "[JsonStats] failed to open chunk reader for column group "
+                  "{} (reader index {}) segment {}: {}",
+                  json_stats_column_group_id,
+                  kJsonStatsReaderColumnGroupIndex,
+                  segment_id,
+                  error.what());
+    }
+    return milvus::segcore::storagev2translator::ChunkReaderPtr(
+        std::move(chunk_reader_result).ValueOrDie());
+}
+
+std::string
+NoopParquetKeyRetriever(const std::string&) {
+    return {};
+}
+
+JsonStatsParquetMetadata
+ReadJsonStatsParquetMetadata(const std::string& file) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto properties = GetJsonStatsReadProperties();
+    milvus_storage::parquet::ParquetFormatReader reader(
+        fs, file, properties, {}, NoopParquetKeyRetriever);
+
+    auto open_status = reader.open();
+    if (!open_status.ok()) {
+        ThrowInfo(
+            milvus::storage::ArrowStatusToErrorCode(open_status),
+            "[JsonStats] failed to open parquet metadata reader for {}: {}",
+            file,
+            open_status.ToString());
+    }
+
+    auto row_group_result = reader.get_row_group_infos();
+    if (!row_group_result.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(row_group_result),
+                  "[JsonStats] failed to read parquet row groups for {}: {}",
+                  file,
+                  row_group_result.status().ToString());
+    }
+    auto row_groups = row_group_result.ValueOrDie();
+
+    int64_t num_rows = 0;
+    for (const auto& row_group : row_groups) {
+        num_rows +=
+            static_cast<int64_t>(row_group.end_offset - row_group.start_offset);
+    }
+
+    auto schema = reader.get_schema();
+    if (!(schema != nullptr)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "[JsonStats] failed to read parquet schema for {}",
+                  file);
+    }
+    return JsonStatsParquetMetadata{std::move(schema), num_rows};
+}
+
+FieldId
+GetJsonStatsFieldIdFromArrowField(const std::shared_ptr<arrow::Field>& field) {
+    const auto& metadata = field->metadata();
+    AssertInfo(metadata != nullptr &&
+                   metadata->Contains(milvus_storage::ARROW_FIELD_ID_KEY),
+               "json stats field id not found in metadata for field {}",
+               field->name());
+    auto result = metadata->Get(milvus_storage::ARROW_FIELD_ID_KEY);
+    if (!result.ok()) {
+        ThrowInfo(
+            milvus::storage::ArrowStatusToErrorCode(result),
+            "failed to get json stats field id from metadata for field {}: "
+            "{}",
+            field->name(),
+            result.status().ToString());
+    }
+    return FieldId(std::stoll(result.ValueOrDie()));
+}
+
+std::pair<std::vector<FieldId>, std::vector<std::string>>
+GetJsonStatsFieldsFromSchema(const std::shared_ptr<arrow::Schema>& schema) {
+    std::vector<FieldId> field_ids;
+    std::vector<std::string> field_names;
+    field_ids.reserve(schema->num_fields());
+    field_names.reserve(schema->num_fields());
+
+    for (const auto& field : schema->fields()) {
+        field_ids.push_back(GetJsonStatsFieldIdFromArrowField(field));
+        field_names.push_back(field->name());
+    }
+    return {std::move(field_ids), std::move(field_names)};
+}
+
+}  // namespace
+
+std::vector<JsonStatsRowRange>
+CreateJsonStatsRowRanges(const std::vector<FieldDataPtr>& field_datas,
+                         int64_t max_rows_per_range) {
+    AssertInfo(max_rows_per_range > 0,
+               "json stats max rows per range must be positive, got {}",
+               max_rows_per_range);
+
+    std::vector<JsonStatsRowRange> row_ranges;
+    JsonStatsRowRange current_range{};
+    int64_t global_begin = 0;
+
+    for (const auto& data : field_datas) {
+        AssertInfo(data != nullptr,
+                   "cannot create json stats row range from null field data");
+        const auto data_rows = data->get_num_rows();
+        AssertInfo(data_rows >= 0,
+                   "json stats field data has negative row count: {}",
+                   data_rows);
+
+        int64_t local_begin = 0;
+        while (local_begin < data_rows) {
+            if (current_range.row_count == 0) {
+                current_range.global_begin = global_begin + local_begin;
+            }
+
+            const auto remaining_rows =
+                max_rows_per_range - current_range.row_count;
+            const auto slice_rows =
+                std::min(data_rows - local_begin, remaining_rows);
+            current_range.slices.push_back(JsonStatsFieldDataSlice{
+                data,
+                local_begin,
+                slice_rows,
+            });
+            current_range.row_count += slice_rows;
+            local_begin += slice_rows;
+
+            if (current_range.row_count == max_rows_per_range) {
+                row_ranges.push_back(std::move(current_range));
+                current_range = JsonStatsRowRange{};
+            }
+        }
+        global_begin += data_rows;
+    }
+
+    if (current_range.row_count > 0) {
+        row_ranges.push_back(std::move(current_range));
+    }
+    return row_ranges;
+}
+
+size_t
+JsonKeyStats::EstimateJsonStatsMaterializeReservationBytes(
+    const JsonStatsRowRange& range, const arrow::Schema& schema) {
+    size_t input_bytes = 0;
+    ForEachJsonStatsRow(
+        range,
+        [&](const FieldDataPtr& data,
+            int64_t local_row,
+            int64_t /* global_row */) {
+            if (data->IsNullable() && !data->is_valid(local_row)) {
+                return;
+            }
+            auto raw_value = data->RawValue(local_row);
+            if (raw_value == nullptr) {
+                return;
+            }
+            const auto* json = static_cast<const milvus::Json*>(raw_value);
+            input_bytes = SaturatingAdd(input_bytes, json->data().size());
+        });
+
+    const auto row_count = static_cast<size_t>(range.row_count);
+    auto reservation_bytes = SaturatingMultiply(
+        input_bytes, kJsonStatsMaterializeInputExpansionFactor);
+    reservation_bytes = SaturatingAdd(
+        reservation_bytes,
+        SaturatingMultiply(row_count, kJsonStatsMaterializeRowOverheadBytes));
+    reservation_bytes = SaturatingAdd(
+        reservation_bytes,
+        SaturatingMultiply(static_cast<size_t>(schema.num_fields()),
+                           kJsonStatsMaterializeColumnOverheadBytes));
+    reservation_bytes = SaturatingAdd(
+        reservation_bytes, EstimateArrowFixedBufferBytes(schema, row_count));
+    return std::max(kJsonStatsMaterializeMinReservationBytes,
+                    reservation_bytes);
+}
 
 JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
                            bool is_load,
@@ -88,7 +400,11 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
         std::make_shared<milvus::storage::MemFileManagerImpl>(ctx);
     disk_file_manager_ =
         std::make_shared<milvus::storage::DiskFileManagerImpl>(ctx);
-    write_batch_size_ = json_stats_write_batch_size;
+    // Older coordinators can send values that bypass the Go config formatter.
+    // Normalize before choosing row ranges or passing the value to the writer.
+    write_batch_size_ = json_stats_write_batch_size > 0
+                            ? json_stats_write_batch_size
+                            : kDefaultWriteBatchSize;
     max_shredding_columns_ = json_stats_max_shredding_columns;
     shredding_ratio_threshold_ = json_stats_shredding_ratio_threshold;
     LOG_INFO(
@@ -141,8 +457,17 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
 JsonKeyStats::~JsonKeyStats() {
     bson_inverted_index_.reset();
     bson_index_cache_slot_.reset();
-    boost::filesystem::remove_all(path_);
-    LOG_INFO("remove json key stats with path: {}", path_);
+    // Destructors are implicitly noexcept: the throwing remove_all overload
+    // would let a filesystem_error during index teardown std::terminate the
+    // process, out of reach of the CGo catch machinery. Best-effort cleanup.
+    boost::system::error_code ec;
+    boost::filesystem::remove_all(path_, ec);
+    if (ec) {
+        LOG_WARN(
+            "failed to remove json key stats path {}: {}", path_, ec.message());
+    } else {
+        LOG_INFO("remove json key stats with path: {}", path_);
+    }
 }
 
 void
@@ -172,26 +497,29 @@ JsonKeyStats::TraverseJsonForStats(const char* json,
                                    std::vector<std::string>& path,
                                    std::map<JsonKey, KeyStatsInfo>& infos) {
     jsmntok current = tokens[0];
-    AssertInfo(current.type != JSMN_UNDEFINED,
-               "current token type is undefined for json: {}.",
-               json);
+    if (!(current.type != JSMN_UNDEFINED)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "current token type is undefined for json: {}.",
+                  json);
+    }
     if (current.type == JSMN_OBJECT) {
         if (!path.empty()) {
             AddKeyStatsInfo(path, JSONType::OBJECT, nullptr, infos);
         }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
-            AssertInfo(tokens[j].type == JSMN_STRING && tokens[j].size != 0,
-                       "current token type is not string for json: {} at "
-                       "type: {}, size: {}, value: {}",
-                       json,
-                       int(tokens[j].type),
-                       tokens[j].size,
-                       std::string(json + tokens[j].start,
-                                   tokens[j].end - tokens[j].start));
-            std::string key(json + tokens[j].start,
-                            tokens[j].end - tokens[j].start);
-            path.push_back(key);
+            if (!(tokens[j].type == JSMN_STRING && tokens[j].size != 0)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "current token type is not string for json: {} at "
+                          "type: {}, size: {}, value: {}",
+                          json,
+                          int(tokens[j].type),
+                          tokens[j].size,
+                          std::string(json + tokens[j].start,
+                                      tokens[j].end - tokens[j].start));
+            }
+            path.emplace_back(json + tokens[j].start,
+                              tokens[j].end - tokens[j].start);
             j++;
             int consumed = 0;
             TraverseJsonForStats(json, tokens + j, consumed, path, infos);
@@ -239,7 +567,7 @@ JsonKeyStats::TraverseJsonForStats(const char* json,
 
 void
 JsonKeyStats::CollectSingleJsonStatsInfo(
-    const char* json_str, std::map<JsonKey, KeyStatsInfo>& infos) {
+    std::string_view json_str, std::map<JsonKey, KeyStatsInfo>& infos) {
     jsmn_parser parser;
     jsmn_init(&parser);
 
@@ -248,8 +576,11 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
     std::vector<jsmntok_t> tokens(token_capacity);
 
     while (1) {
-        int r = jsmn_parse(
-            &parser, json_str, strlen(json_str), tokens.data(), token_capacity);
+        int r = jsmn_parse(&parser,
+                           json_str.data(),
+                           json_str.size(),
+                           tokens.data(),
+                           token_capacity);
         if (r < 0) {
             if (r == JSMN_ERROR_NOMEM) {
                 // Reallocate tokens array if not enough space
@@ -257,7 +588,7 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
                 tokens.resize(token_capacity);
                 continue;
             } else {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(ErrorCode::DataFormatBroken,
                           "Failed to parse Json: {}, error: {}",
                           json_str,
                           int(r));
@@ -273,7 +604,7 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
 
     int index = 0;
     std::vector<std::string> paths;
-    TraverseJsonForStats(json_str, tokens.data(), index, paths, infos);
+    TraverseJsonForStats(json_str.data(), tokens.data(), index, paths, infos);
 }
 
 std::map<JsonKey, KeyStatsInfo>
@@ -287,13 +618,106 @@ JsonKeyStats::CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas,
             if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
                 continue;
             }
-            auto json_str = static_cast<const milvus::Json*>(data->RawValue(i))
-                                ->data()
-                                .data();
+            auto json_str =
+                static_cast<const milvus::Json*>(data->RawValue(i))->data();
             CollectSingleJsonStatsInfo(json_str, infos);
         }
         num_rows += n;
     }
+    num_rows_ = num_rows;
+    return infos;
+}
+
+std::map<JsonKey, KeyStatsInfo>
+JsonKeyStats::CollectKeyInfo(const std::vector<JsonStatsRowRange>& row_ranges,
+                             bool nullable) {
+    std::map<JsonKey, KeyStatsInfo> infos;
+    if (row_ranges.empty()) {
+        num_rows_ = 0;
+        return infos;
+    }
+
+    auto* executor = milvus::futures::getJsonStatsBuildExecutor();
+    const auto max_inflight = std::min(
+        row_ranges.size(), std::max<size_t>(1, executor->numThreads()));
+
+    // Futures are kept in range-index order. Only max_inflight tasks are active
+    // at a time, so completed local maps cannot accumulate for every range.
+    std::vector<folly::Future<CollectKeyInfoResult>> futures;
+    futures.reserve(row_ranges.size());
+    size_t next_submit = 0;
+    size_t next_consume = 0;
+    std::exception_ptr first_exception;
+
+    auto submit_next = [&]() {
+        try {
+            auto range = row_ranges[next_submit];
+            auto future = folly::via(
+                executor, [this, range = std::move(range), nullable]() {
+                    std::map<JsonKey, KeyStatsInfo> local_infos;
+                    ForEachJsonStatsRow(
+                        range,
+                        [&](const FieldDataPtr& data,
+                            int64_t local_row,
+                            int64_t /* global_row */) {
+                            if ((nullable || data->IsNullable()) &&
+                                !data->is_valid(local_row)) {
+                                return;
+                            }
+                            auto json_str = static_cast<const milvus::Json*>(
+                                                data->RawValue(local_row))
+                                                ->data();
+                            CollectSingleJsonStatsInfo(json_str, local_infos);
+                        });
+                    return CollectKeyInfoResult{std::move(local_infos)};
+                });
+            futures.emplace_back(std::move(future));
+            ++next_submit;
+        } catch (...) {
+            if (first_exception == nullptr) {
+                first_exception = std::current_exception();
+            }
+        }
+    };
+
+    while (next_submit < max_inflight && first_exception == nullptr) {
+        submit_next();
+    }
+
+    int64_t num_rows = 0;
+    while (next_consume < futures.size()) {
+        try {
+            auto result = std::move(futures[next_consume]).get();
+            if (first_exception == nullptr) {
+                const auto& range = row_ranges[next_consume];
+                AssertInfo(
+                    range.global_begin == num_rows,
+                    "json stats row range starts at global row {}, expected {}",
+                    range.global_begin,
+                    num_rows);
+                for (const auto& [key, local_info] : result.infos) {
+                    infos[key].hit_row_num_ += local_info.hit_row_num_;
+                }
+                num_rows += range.row_count;
+            }
+        } catch (...) {
+            if (first_exception == nullptr) {
+                first_exception = std::current_exception();
+            }
+        }
+        ++next_consume;
+
+        if (first_exception == nullptr && next_submit < row_ranges.size()) {
+            submit_next();
+        }
+    }
+
+    // Every submitted future has been consumed before an error escapes. This
+    // keeps `this` and the FieldData referenced by worker lambdas alive.
+    if (first_exception != nullptr) {
+        std::rethrow_exception(first_exception);
+    }
+
     num_rows_ = num_rows;
     return infos;
 }
@@ -404,7 +828,7 @@ void
 JsonKeyStats::AddKeyStats(const std::vector<std::string>& path,
                           JSONType type,
                           const std::string& value,
-                          std::map<JsonKey, std::string>& values) {
+                          std::map<JsonKey, std::string>& values) const {
     auto path_str = JsonPointer(path);
     auto key = JsonKey(path_str, type);
     values[key] = value;
@@ -416,11 +840,13 @@ JsonKeyStats::TraverseJsonForBuildStats(
     jsmntok* tokens,
     int& index,
     std::vector<std::string>& path,
-    std::map<JsonKey, std::string>& values) {
+    std::map<JsonKey, std::string>& values) const {
     jsmntok current = tokens[0];
-    AssertInfo(current.type != JSMN_UNDEFINED,
-               "current token type is undefined for json: {}",
-               json);
+    if (!(current.type != JSMN_UNDEFINED)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "current token type is undefined for json: {}",
+                  json);
+    }
     if (current.type == JSMN_OBJECT) {
         if (!path.empty() && current.size == 0) {
             AddKeyStats(
@@ -433,18 +859,19 @@ JsonKeyStats::TraverseJsonForBuildStats(
         }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
-            AssertInfo(tokens[j].type == JSMN_STRING && tokens[j].size != 0,
-                       "current token type is not string for json: {} at "
-                       "type: {}, size: {}, value: {}",
-                       json,
-                       int(tokens[j].type),
-                       tokens[j].size,
-                       std::string(json + tokens[j].start,
-                                   tokens[j].end - tokens[j].start));
+            if (!(tokens[j].type == JSMN_STRING && tokens[j].size != 0)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "current token type is not string for json: {} at "
+                          "type: {}, size: {}, value: {}",
+                          json,
+                          int(tokens[j].type),
+                          tokens[j].size,
+                          std::string(json + tokens[j].start,
+                                      tokens[j].end - tokens[j].start));
+            }
 
-            std::string key(json + tokens[j].start,
-                            tokens[j].end - tokens[j].start);
-            path.push_back(key);
+            path.emplace_back(json + tokens[j].start,
+                              tokens[j].end - tokens[j].start);
             j++;
             int consumed = 0;
             TraverseJsonForBuildStats(json, tokens + j, consumed, path, values);
@@ -454,15 +881,7 @@ JsonKeyStats::TraverseJsonForBuildStats(
         index = j;
     } else if (current.type == JSMN_PRIMITIVE) {
         std::string value(json + current.start, current.end - current.start);
-        JSONType type;
-        try {
-            type = getType(value);
-        } catch (const std::exception& e) {
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "failed to get json type for value: {} with error: {}",
-                      value,
-                      e.what());
-        }
+        auto type = getType(value);
 
         if (type == JSONType::INT64) {
             AddKeyStats(path, JSONType::INT64, value, values);
@@ -506,26 +925,9 @@ JsonKeyStats::TraverseJsonForBuildStats(
     }
 }
 
-void
-JsonKeyStats::BuildKeyStatsForNullRow() {
-    // add empty value for column keys that not hit
-    for (const auto& key : column_keys_) {
-        parquet_writer_->AppendValue(key.ToColumnName(), "");
-    }
-
-    // add null bson to shared column
-    BsonDocument null_doc;
-    parquet_writer_->AppendSharedRow(null_doc.data(), null_doc.length());
-
-    parquet_writer_->AddCurrentRow();
-}
-
-void
-JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
-    LOG_TRACE("build key stats for row {} with json {} for segment {}",
-              row_id,
-              json_str,
-              segment_id_);
+bool
+JsonKeyStats::ParseJsonForBuildStats(
+    std::string_view json_str, std::map<JsonKey, std::string>& values) const {
     jsmn_parser parser;
     jsmn_init(&parser);
 
@@ -534,33 +936,63 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
     std::vector<jsmntok_t> tokens(token_capacity);
 
     while (1) {
-        int r = jsmn_parse(
-            &parser, json_str, strlen(json_str), tokens.data(), token_capacity);
+        int r = jsmn_parse(&parser,
+                           json_str.data(),
+                           json_str.size(),
+                           tokens.data(),
+                           token_capacity);
         if (r < 0) {
             if (r == JSMN_ERROR_NOMEM) {
-                // Reallocate tokens array if not enough space
                 token_capacity *= 2;
                 tokens.resize(token_capacity);
                 continue;
-            } else {
-                ThrowInfo(ErrorCode::UnexpectedError,
-                          "Failed to parse Json: {}, error: {}",
-                          json_str,
-                          int(r));
             }
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Failed to parse Json: {}, error: {}",
+                      json_str,
+                      int(r));
         }
         num_tokens = r;
         break;
     }
 
     if (num_tokens == 0) {
-        return;
+        return false;
     }
 
     int index = 0;
     std::vector<std::string> paths;
+    TraverseJsonForBuildStats(
+        json_str.data(), tokens.data(), index, paths, values);
+    return true;
+}
+
+void
+JsonKeyStats::BuildKeyStatsForNullRow() {
+    // add empty value for column keys that not hit
+    for (const auto& key : column_keys_) {
+        parquet_writer_->AppendValue(key.ToColumnName(), "");
+    }
+
+    // add an empty BSON document to the shared column
+    BsonDocument null_doc;
+    parquet_writer_->AppendSharedRow(null_doc.data(), null_doc.length());
+
+    parquet_writer_->AddCurrentRow();
+}
+
+void
+JsonKeyStats::BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id) {
+    LOG_TRACE("build key stats for row {} with json {} for segment {}",
+              row_id,
+              json_str,
+              segment_id_);
     std::map<JsonKey, std::string> values;
-    TraverseJsonForBuildStats(json_str, tokens.data(), index, paths, values);
+    if (!ParseJsonForBuildStats(json_str, values)) {
+        BuildKeyStatsForNullRow();
+        return;
+    }
+
     DomNode root;
     std::set<JsonKey> hit_keys;
     for (const auto& [key, value] : values) {
@@ -615,31 +1047,430 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
 }
 
 void
-JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
+JsonKeyStats::BuildKeyStats(const std::vector<JsonStatsRowRange>& row_ranges,
                             bool nullable) {
-    uint32_t row_id = 0;
-    for (const auto& data : field_datas) {
-        auto n = data->get_num_rows();
-        for (uint32_t i = 0; i < n; i++) {
-            if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
-                BuildKeyStatsForNullRow();
-            } else {
-                auto json_str =
-                    static_cast<const milvus::Json*>(data->RawValue(i))
-                        ->data()
-                        .data();
-
-                // some situations, such as empty json string,
-                // should be handled as null row
-                if (strlen(json_str) == 0) {
+    int64_t processed_rows = 0;
+    for (const auto& range : row_ranges) {
+        AssertInfo(range.global_begin == processed_rows,
+                   "json stats row range starts at global row {}, expected {}",
+                   range.global_begin,
+                   processed_rows);
+        ForEachJsonStatsRow(
+            range,
+            [&](const FieldDataPtr& data,
+                int64_t local_row,
+                int64_t global_row) {
+                if ((nullable || data->IsNullable()) &&
+                    !data->is_valid(local_row)) {
                     BuildKeyStatsForNullRow();
                 } else {
-                    BuildKeyStatsForRow(json_str, row_id);
+                    auto json_str = static_cast<const milvus::Json*>(
+                                        data->RawValue(local_row))
+                                        ->data();
+
+                    // some situations, such as empty json string,
+                    // should be handled as null row
+                    if (json_str.empty()) {
+                        BuildKeyStatsForNullRow();
+                    } else {
+                        BuildKeyStatsForRow(json_str,
+                                            static_cast<uint32_t>(global_row));
+                    }
                 }
-            }
-            row_id++;
+            });
+        processed_rows += range.row_count;
+    }
+    AssertInfo(processed_rows == num_rows_,
+               "materialized {} json stats rows, expected {}",
+               processed_rows,
+               num_rows_);
+}
+
+JsonKeyStats::MaterializedChunk
+JsonKeyStats::MaterializeKeyStatsRange(
+    const JsonStatsRowRange& range,
+    bool nullable,
+    const std::shared_ptr<arrow::Schema>& schema) const {
+    AssertInfo(schema != nullptr,
+               "json stats materialize schema must not be null");
+
+    auto [builders, builders_map] = CreateArrowBuildersForColumns(column_keys_);
+    AssertInfo(
+        builders.size() == static_cast<size_t>(schema->num_fields()),
+        "json stats materialize builder count {} does not match schema field "
+        "count {}",
+        builders.size(),
+        schema->num_fields());
+    // Match the pre-dispatch fixed-buffer estimate and avoid geometric
+    // over-allocation while appending a partially filled final range.
+    for (const auto& builder : builders) {
+        auto status = builder->Reserve(range.row_count);
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "failed to reserve json stats builder for {} rows: {}",
+                      range.row_count,
+                      status.ToString());
         }
     }
+
+    std::map<std::string, std::vector<int64_t>> bson_postings;
+    auto append_null_row = [&]() {
+        for (size_t i = 0; i + 1 < builders.size(); ++i) {
+            auto status = builders[i]->AppendNull();
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "failed to append null json stats value: {}",
+                          status.ToString());
+            }
+        }
+
+        BsonDocument null_doc;
+        auto shared_builder =
+            std::static_pointer_cast<arrow::BinaryBuilder>(builders.back());
+        auto status =
+            shared_builder->Append(null_doc.data(), null_doc.length());
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "failed to append empty shared json stats value: {}",
+                      status.ToString());
+        }
+    };
+
+    ForEachJsonStatsRow(
+        range,
+        [&](const FieldDataPtr& data, int64_t local_row, int64_t global_row) {
+            if ((nullable || data->IsNullable()) &&
+                !data->is_valid(local_row)) {
+                append_null_row();
+                return;
+            }
+
+            auto json_str =
+                static_cast<const milvus::Json*>(data->RawValue(local_row))
+                    ->data();
+            if (json_str.empty()) {
+                append_null_row();
+                return;
+            }
+
+            LOG_TRACE(
+                "materialize key stats for row {} with json {} for "
+                "segment {}",
+                global_row,
+                json_str,
+                segment_id_);
+            std::map<JsonKey, std::string> values;
+            if (!ParseJsonForBuildStats(json_str, values)) {
+                append_null_row();
+                return;
+            }
+
+            DomNode root;
+            std::set<JsonKey> hit_keys;
+            for (const auto& [key, value] : values) {
+                auto key_type = key_types_.find(key);
+                AssertInfo(key_type != key_types_.end(),
+                           "key {} not found in key types",
+                           key.key_);
+                if (key_type->second == JsonKeyLayoutType::SHARED) {
+                    auto path_vec = ParseJsonPointerPath(key.key_);
+                    BsonBuilder::AppendToDom(root, path_vec, value, key.type_);
+                } else {
+                    auto builder = builders_map.find(key.ToColumnName());
+                    AssertInfo(builder != builders_map.end(),
+                               "builder for key {} not found",
+                               key.ToColumnName());
+
+                    arrow::Status status;
+                    if (key.type_ == JSONType::ARRAY) {
+                        auto bson_bytes =
+                            BuildBsonArrayBytesFromJsonString(value);
+                        status = AppendJsonStatsValueToBuilder(
+                            std::string(reinterpret_cast<const char*>(
+                                            bson_bytes.data()),
+                                        bson_bytes.size()),
+                            builder->second);
+                    } else {
+                        status = AppendJsonStatsValueToBuilder(value,
+                                                               builder->second);
+                    }
+                    if (!status.ok()) {
+                        ThrowInfo(
+                            milvus::storage::ArrowStatusToErrorCode(status),
+                            "failed to append json stats value for key {}: {}",
+                            key.ToColumnName(),
+                            status.ToString());
+                    }
+                }
+                hit_keys.insert(key);
+            }
+
+            for (const auto& key : column_keys_) {
+                if (hit_keys.find(key) != hit_keys.end()) {
+                    continue;
+                }
+                auto builder = builders_map.find(key.ToColumnName());
+                AssertInfo(builder != builders_map.end(),
+                           "builder for key {} not found",
+                           key.ToColumnName());
+                auto status = builder->second->AppendNull();
+                if (!status.ok()) {
+                    ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                              "failed to append null json stats value for key "
+                              "{}: {}",
+                              key.ToColumnName(),
+                              status.ToString());
+                }
+            }
+
+            BsonDocument final_doc;
+            BsonBuilder::ConvertDomToBson(root, final_doc.get());
+            auto key_offsets = BsonBuilder::ExtractBsonKeyOffsets(
+                final_doc.data(), final_doc.length());
+            for (const auto& [key, offset] : key_offsets) {
+                bson_postings[key].push_back(EncodeInvertedIndexValue(
+                    static_cast<uint32_t>(global_row), offset));
+            }
+
+            auto shared_builder =
+                std::static_pointer_cast<arrow::BinaryBuilder>(builders.back());
+            auto status =
+                shared_builder->Append(final_doc.data(), final_doc.length());
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "failed to append shared json stats value: {}",
+                          status.ToString());
+            }
+        });
+
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    arrays.reserve(builders.size());
+    for (const auto& builder : builders) {
+        AssertInfo(builder->length() == range.row_count,
+                   "json stats materialize builder contains {} rows, "
+                   "expected {}",
+                   builder->length(),
+                   range.row_count);
+        std::shared_ptr<arrow::Array> array;
+        auto status = builder->Finish(&array);
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "failed to finish json stats materialize builder: {}",
+                      status.ToString());
+        }
+        arrays.push_back(std::move(array));
+    }
+
+    auto record_batch =
+        arrow::RecordBatch::Make(schema, range.row_count, std::move(arrays));
+    auto validate_status = record_batch->Validate();
+    if (!validate_status.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(validate_status),
+                  "invalid materialized json stats record batch: {}",
+                  validate_status.ToString());
+    }
+
+    size_t materialized_bytes = sizeof(MaterializedChunk);
+    for (const auto& array : record_batch->columns()) {
+        materialized_bytes =
+            SaturatingAdd(materialized_bytes, GetArrowArrayMemorySize(array));
+        materialized_bytes = SaturatingAdd(
+            materialized_bytes, sizeof(std::shared_ptr<arrow::Array>));
+    }
+    for (const auto& [key, postings] : bson_postings) {
+        materialized_bytes = SaturatingAdd(
+            materialized_bytes,
+            sizeof(std::pair<const std::string, std::vector<int64_t>>) +
+                3 * sizeof(void*));
+        materialized_bytes =
+            SaturatingAdd(materialized_bytes, key.capacity() + 1);
+        materialized_bytes = SaturatingAdd(
+            materialized_bytes,
+            SaturatingMultiply(postings.capacity(), sizeof(int64_t)));
+    }
+    return MaterializedChunk{
+        std::move(record_batch), std::move(bson_postings), materialized_bytes};
+}
+
+void
+JsonKeyStats::BuildKeyStatsParallel(
+    const std::vector<JsonStatsRowRange>& row_ranges, bool nullable) {
+    if (row_ranges.empty()) {
+        AssertInfo(num_rows_ == 0,
+                   "materialized 0 json stats rows, expected {}",
+                   num_rows_);
+        return;
+    }
+
+    AssertInfo(parquet_writer_ != nullptr,
+               "json stats parquet writer must be initialized before "
+               "materialize");
+    AssertInfo(bson_inverted_index_ != nullptr,
+               "json stats bson index must be initialized before materialize");
+    auto schema = parquet_writer_->GetSchema();
+    AssertInfo(schema != nullptr,
+               "json stats parquet writer schema must be initialized before "
+               "materialize");
+
+    auto* executor = milvus::futures::getJsonStatsBuildExecutor();
+    const auto max_active_tasks = std::min(
+        row_ranges.size(), std::max<size_t>(1, executor->numThreads()));
+    auto& memory_budget = JsonStatsBuildMemoryBudget::GetInstance();
+
+    struct ActiveMaterializeTask {
+        std::shared_ptr<std::atomic<size_t>> accounted_bytes;
+        folly::Future<MaterializedChunk> future;
+    };
+
+    std::vector<ActiveMaterializeTask> tasks;
+    tasks.reserve(row_ranges.size());
+    size_t next_submit = 0;
+    size_t next_consume = 0;
+    std::exception_ptr first_exception;
+
+    auto remember_exception = [&](std::exception_ptr exception) {
+        if (first_exception == nullptr) {
+            first_exception = std::move(exception);
+        }
+    };
+
+    auto submit_next = [&](bool block_for_budget) -> bool {
+        size_t reservation_bytes = 0;
+        JsonStatsRowRange range;
+        try {
+            range = row_ranges[next_submit];
+            reservation_bytes =
+                EstimateJsonStatsMaterializeReservationBytes(range, *schema);
+        } catch (...) {
+            remember_exception(std::current_exception());
+            return false;
+        }
+
+        std::shared_ptr<std::atomic<size_t>> accounted_bytes;
+        try {
+            accounted_bytes =
+                std::make_shared<std::atomic<size_t>>(reservation_bytes);
+            if (block_for_budget) {
+                memory_budget.Acquire(reservation_bytes);
+            } else if (!memory_budget.TryAcquire(reservation_bytes)) {
+                return false;
+            }
+        } catch (...) {
+            remember_exception(std::current_exception());
+            return false;
+        }
+
+        try {
+            auto future = folly::via(
+                executor,
+                [this,
+                 range = std::move(range),
+                 nullable,
+                 schema,
+                 reservation_bytes,
+                 accounted_bytes,
+                 &memory_budget]() {
+                    auto result =
+                        MaterializeKeyStatsRange(range, nullable, schema);
+                    memory_budget.ReconcileReservation(reservation_bytes,
+                                                       result.memory_bytes);
+                    accounted_bytes->store(result.memory_bytes,
+                                           std::memory_order_release);
+                    return result;
+                });
+            tasks.push_back(
+                ActiveMaterializeTask{accounted_bytes, std::move(future)});
+            ++next_submit;
+        } catch (...) {
+            memory_budget.Release(
+                accounted_bytes->load(std::memory_order_acquire));
+            remember_exception(std::current_exception());
+            return false;
+        }
+        return true;
+    };
+
+    auto refill = [&]() {
+        while (first_exception == nullptr && next_submit < row_ranges.size() &&
+               tasks.size() - next_consume < max_active_tasks) {
+            const bool block_for_budget = tasks.size() == next_consume;
+            if (!submit_next(block_for_budget)) {
+                break;
+            }
+        }
+    };
+
+    auto release_task_budget = [&](const ActiveMaterializeTask& task) {
+        memory_budget.Release(
+            task.accounted_bytes->load(std::memory_order_acquire));
+    };
+
+    auto drain_submitted_tasks = [&]() {
+        while (next_consume < tasks.size()) {
+            auto& task = tasks[next_consume];
+            try {
+                std::move(task.future).get();
+            } catch (...) {
+                remember_exception(std::current_exception());
+            }
+            release_task_budget(task);
+            ++next_consume;
+        }
+    };
+
+    refill();
+
+    int64_t processed_rows = 0;
+    while (next_consume < tasks.size()) {
+        auto& task = tasks[next_consume];
+        try {
+            auto result = std::move(task.future).get();
+            if (first_exception == nullptr) {
+                const auto& range = row_ranges[next_consume];
+                AssertInfo(range.global_begin == processed_rows,
+                           "json stats materialize result starts at global "
+                           "row {}, expected {}",
+                           range.global_begin,
+                           processed_rows);
+
+                auto status =
+                    parquet_writer_->AppendRecordBatch(result.record_batch);
+                if (!status.ok()) {
+                    ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                              "failed to append materialized json stats record "
+                              "batch: {}",
+                              status.ToString());
+                }
+                for (auto& [key, postings] : result.bson_postings) {
+                    bson_inverted_index_->AddRecords(key, std::move(postings));
+                }
+
+                processed_rows += range.row_count;
+            }
+        } catch (...) {
+            remember_exception(std::current_exception());
+        }
+        release_task_budget(task);
+        ++next_consume;
+
+        if (first_exception != nullptr) {
+            drain_submitted_tasks();
+            break;
+        }
+
+        refill();
+    }
+
+    // Consume every submitted future before propagating an error so no worker
+    // can retain references to this JsonKeyStats or its FieldData inputs.
+    if (first_exception != nullptr) {
+        std::rethrow_exception(first_exception);
+    }
+
+    AssertInfo(processed_rows == num_rows_,
+               "materialized {} json stats rows, expected {}",
+               processed_rows,
+               num_rows_);
 }
 
 std::string
@@ -749,13 +1580,35 @@ JsonKeyStats::AddBucketName(const std::string& remote_prefix) {
 void
 JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
                                  bool nullable) {
-    // collect key stats info and classify key type
-    auto infos = CollectKeyInfo(field_datas, nullable);
-    LOG_INFO("collect key infos: {} for segment {} for field {}",
-             PrintKeyInfo(infos),
-             segment_id_,
-             field_id_);
-    key_types_ = ClassifyJsonKeyLayoutType(infos);
+    const auto row_ranges =
+        CreateJsonStatsRowRanges(field_datas, kJsonStatsRowsPerRange);
+    auto* executor = milvus::futures::getJsonStatsBuildExecutor();
+    const auto executor_threads = std::max<size_t>(1, executor->numThreads());
+    const auto effective_concurrency =
+        std::min(row_ranges.size(), executor_threads);
+    const bool use_parallel_pipeline = effective_concurrency > 1;
+    LOG_INFO(
+        "json stats build selects {} pipeline for segment {} field {} with "
+        "{} row ranges, {} executor threads, and effective concurrency {}",
+        use_parallel_pipeline ? "parallel" : "serial",
+        segment_id_,
+        field_id_,
+        row_ranges.size(),
+        executor_threads,
+        effective_concurrency);
+
+    {
+        // Release collected key stats after classification, before materializing
+        // rows and accumulating BSON postings.
+        auto infos = use_parallel_pipeline
+                         ? CollectKeyInfo(row_ranges, nullable)
+                         : CollectKeyInfo(field_datas, nullable);
+        LOG_INFO("collect key infos: {} for segment {} for field {}",
+                 PrintKeyInfo(infos),
+                 segment_id_,
+                 field_id_);
+        key_types_ = ClassifyJsonKeyLayoutType(infos);
+    }
     LOG_INFO("key types infos: {} for segment {} for field {}",
              PrintJsonKeyLayoutType(key_types_),
              segment_id_,
@@ -779,11 +1632,26 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
     auto writer_context =
         ParquetWriterFactory::CreateContext(key_types_, remote_prefix);
     parquet_writer_->Init(std::move(writer_context));
-    BuildKeyStats(field_datas, nullable);
+    if (use_parallel_pipeline) {
+        // Arrow slices retain the complete backing buffers. Keep every
+        // materialized range within the writer batch limit so
+        // AppendRecordBatch can hand it off without slicing; otherwise
+        // downstream memory accounting would charge a small slice for the
+        // full range and undersize row groups.
+        const auto materialize_rows_per_range =
+            std::min(kJsonStatsRowsPerRange, write_batch_size_);
+        const auto materialize_row_ranges =
+            CreateJsonStatsRowRanges(field_datas, materialize_rows_per_range);
+        BuildKeyStatsParallel(materialize_row_ranges, nullable);
+    } else {
+        BuildKeyStats(row_ranges, nullable);
+    }
     auto close_status = parquet_writer_->Close();
-    AssertInfo(close_status.ok(),
-               "failed to close json stats parquet writer: {}",
-               close_status.ToString());
+    if (!close_status.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(close_status),
+                  "failed to close json stats parquet writer: {}",
+                  close_status.ToString());
+    }
     bson_inverted_index_->BuildIndex();
 
     // write meta file with layout type map and other metadata
@@ -793,13 +1661,8 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
 void
 JsonKeyStats::GetColumnSchemaFromParquet(int64_t column_group_id,
                                          const std::string& file) {
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: {}",
-               result.status().ToString());
-    auto file_reader = result.ValueOrDie();
-    std::shared_ptr<arrow::Schema> file_schema = file_reader->schema();
+    auto parquet_metadata = ReadJsonStatsParquetMetadata(file);
+    std::shared_ptr<arrow::Schema> file_schema = parquet_metadata.schema;
     LOG_DEBUG("get column schema: [{}] for segment {}",
               file_schema->ToString(true),
               segment_id_);
@@ -817,12 +1680,14 @@ JsonKeyStats::GetColumnSchemaFromParquet(int64_t column_group_id,
         }
 
         auto result = metadata->Get(milvus_storage::ARROW_FIELD_ID_KEY);
-        AssertInfo(result.ok(),
-                   "failed to get field id from metadata for field {}: {} "
-                   "for segment {}",
-                   field_name,
-                   result.status().ToString(),
-                   segment_id_);
+        if (!result.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                      "failed to get field id from metadata for field {}: {} "
+                      "for segment {}",
+                      field_name,
+                      result.status().ToString(),
+                      segment_id_);
+        }
         auto field_id_str = result.ValueOrDie();
         auto field_id = std::stoll(field_id_str);
         field_name_to_id_map_[field_name] = field_id;
@@ -858,9 +1723,11 @@ JsonKeyStats::GetCommonMetaFromParquet(const std::string& file) {
 
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: {}",
-               result.status().ToString());
+    if (!result.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                  "[StorageV2] Failed to create file row group reader: {}",
+                  result.status().ToString());
+    }
     auto file_reader = result.ValueOrDie();
     // get key value metadata from parquet file
     std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
@@ -913,7 +1780,7 @@ JsonKeyStats::GetCommonMetaFromParquet(const std::string& file) {
 
 void
 JsonKeyStats::LoadShreddingMeta(
-    std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files,
+    const std::vector<std::pair<int64_t, std::vector<int64_t>>>& sorted_files,
     const std::string& override_prefix) {
     if (sorted_files.empty()) {
         return;
@@ -958,45 +1825,41 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     const auto& remote_prefix = override_prefix;
 
     std::vector<std::string> files;
+    files.reserve(file_ids.size());
     for (const auto& file_id : file_ids) {
         files.emplace_back(CreateColumnGroupParquetPath(
             remote_prefix, column_group_id, file_id));
     }
 
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    auto result = milvus_storage::FileRowGroupReader::Make(fs, files[0]);
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: {}",
-               result.status().ToString());
-    auto file_reader = result.ValueOrDie();
-    std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
-        file_reader->file_metadata();
-    milvus_storage::FieldIDList field_id_list =
-        metadata->GetGroupFieldIDList().GetFieldIDList(column_group_id);
-    std::vector<FieldId> milvus_field_ids;
-    for (int i = 0; i < field_id_list.size(); ++i) {
-        milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
-    }
+    const auto first_file_metadata = ReadJsonStatsParquetMetadata(files[0]);
+    const auto [milvus_field_ids, column_names] =
+        GetJsonStatsFieldsFromSchema(first_file_metadata.schema);
+    AssertInfo(
+        !column_names.empty() && milvus_field_ids.size() == column_names.size(),
+        "[JsonStats] invalid shredding schema for column group {} "
+        "segment {}: {} field ids, {} columns",
+        column_group_id,
+        segment_id_,
+        milvus_field_ids.size(),
+        column_names.size());
 
-    // Fetch row group metadata from all files in parallel using HIGH POOL
-    // to avoid blocking the caller thread with serial S3 I/O
+    std::vector<int64_t> file_num_rows;
+    file_num_rows.reserve(files.size());
+    file_num_rows.push_back(first_file_metadata.num_rows);
+    num_rows += first_file_metadata.num_rows;
+
+    // Fetch row group metadata from remaining files in parallel using HIGH POOL
+    // to avoid blocking the caller thread with serial S3 I/O.
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     std::vector<std::future<int64_t>> futures;
-    futures.reserve(files.size());
-    for (const auto& file : files) {
-        futures.push_back(pool.Submit([&fs, file]() {
-            auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
-            auto reader = result.ValueOrDie();
-            auto row_group_meta_vector =
-                reader->file_metadata()->GetRowGroupMetadataVector();
-            return static_cast<int64_t>(row_group_meta_vector.row_num());
-        }));
+    futures.reserve(files.size() - 1);
+    for (size_t i = 1; i < files.size(); ++i) {
+        const auto& file = files[i];
+        futures.push_back(pool.Submit(
+            [file]() { return ReadJsonStatsParquetMetadata(file).num_rows; }));
     }
     // Ensure all futures are awaited even if one throws, to prevent
-    // use-after-free on captured references (&fs) in background tasks.
+    // use-after-free on captured references in background tasks.
     auto futures_guard = folly::makeGuard([&futures]() {
         for (auto& f : futures) {
             if (f.valid()) {
@@ -1008,7 +1871,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         }
     });
     for (auto& f : futures) {
-        num_rows += f.get();
+        const auto file_rows = f.get();
+        file_num_rows.push_back(file_rows);
+        num_rows += file_rows;
     }
 
     if (num_rows_ == 0) {
@@ -1018,9 +1883,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
                "num_rows is not equal to num_rows_ for segment {}",
                segment_id_);
 
-    auto enable_mmap = !mmap_filepath_.empty();
-    auto column_group_info = FieldDataInfo(
-        column_group_id, field_id_, num_rows, mmap_filepath_, false, shard_);
+    const bool enable_mmap = !mmap_filepath_.empty();
     LOG_INFO(
         "loads column group {} with num_rows {} for segment "
         "{}",
@@ -1029,45 +1892,239 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         segment_id_);
 
     std::unordered_map<FieldId, FieldMeta> field_meta_map;
-    for (const auto& inner_field_id : milvus_field_ids) {
-        auto field_name = field_id_to_name_map_[inner_field_id.get()];
+    field_meta_map.reserve(milvus_field_ids.size());
+    for (size_t i = 0; i < milvus_field_ids.size(); ++i) {
+        const auto& inner_field_id = milvus_field_ids[i];
+        const auto field_name_it =
+            field_id_to_name_map_.find(inner_field_id.get());
+        AssertInfo(field_name_it != field_id_to_name_map_.end(),
+                   "field id {} not found in json stats field map for "
+                   "segment {}",
+                   inner_field_id.get(),
+                   segment_id_);
+        const auto& field_name = field_name_it->second;
         FieldMeta field_meta(
             FieldName(field_name),
             inner_field_id,
             field_id_,
             GetPrimitiveDataType(shred_field_data_type_map_[field_name]),
             true,
-            std::nullopt);
-        field_meta_map.insert(std::make_pair(FieldId(inner_field_id.get()),
-                                             std::move(field_meta)));
+            std::nullopt,
+            column_names[i]);
+        field_meta_map.emplace(inner_field_id, std::move(field_meta));
     }
 
-    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const auto& mmap_config =
+        storage::MmapManager::GetInstance().GetMmapConfig();
+    const auto writeback_mode = mmap_config.GetMmapWriteback()
+                                    ? MmapChunkWritebackMode::FdatasyncOnFinish
+                                    : MmapChunkWritebackMode::Disabled;
 
-    auto group_chunk_metadata = milvus::segcore::LoadGroupChunkMetadata(
-        files, {}, fmt::format("seg_{}_jks_{}", segment_id_, field_id_));
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->columns = column_names;
+    column_group->format = LOON_FORMAT_PARQUET;
+    column_group->files.reserve(files.size());
+    for (size_t i = 0; i < files.size(); ++i) {
+        column_group->files.push_back(milvus_storage::api::ColumnGroupFile{
+            .path = std::move(files[i]),
+            .start_index = 0,
+            .end_index = file_num_rows[i],
+            .properties = {},
+        });
+    }
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    column_groups->push_back(std::move(column_group));
+    const auto properties = GetJsonStatsReadProperties();
+    const auto resolved_warmup_policy =
+        milvus::segcore::getCacheWarmupPolicy(warmup_policy,
+                                              /*is_vector=*/false,
+                                              /*is_index=*/false,
+                                              /*in_load_list=*/true);
+    const bool eager_load =
+        resolved_warmup_policy != CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    const bool enable_async_load =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
 
-    auto translator = std::make_unique<
-        milvus::segcore::storagev2translator::GroupChunkTranslator>(
-        segment_id_,
-        GroupChunkType::JSON_KEY_STATS,
-        field_meta_map,
-        column_group_info,
-        std::move(files),
-        std::move(group_chunk_metadata.row_group_meta_list),
-        enable_mmap,
-        mmap_config.GetMmapPopulate(),
-        milvus_field_ids.size(),
-        load_priority_,
-        warmup_policy);
+    if (eager_load) {
+        const auto needed_columns =
+            std::make_shared<std::vector<std::string>>(column_names);
+        const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
+            milvus_storage::api::Reader::create(
+                column_groups, nullptr, needed_columns, properties));
+        AssertInfo(reader != nullptr,
+                   "[JsonStats] failed to create reader for column group {} "
+                   "segment {}",
+                   column_group_id,
+                   segment_id_);
 
-    auto chunked_column_group =
-        std::make_shared<ChunkedColumnGroup>(std::move(translator));
+        milvus::segcore::storagev2translator::ChunkReaderPtr chunk_reader;
+        if (enable_async_load) {
+            std::vector<
+                milvus::segcore::storagev2translator::ChunkReaderOpenSpec>
+                open_specs{{kJsonStatsReaderColumnGroupIndex, needed_columns}};
+            auto chunk_readers = folly::coro::blockingWait(
+                milvus::segcore::storagev2translator::OpenChunkReadersAsync(
+                    /*ctx=*/nullptr,
+                    segment_id_,
+                    reader,
+                    std::move(open_specs),
+                    {.load_priority = load_priority_}));
+            AssertInfo(chunk_readers.size() == 1,
+                       "[JsonStats] async reader count mismatch for column "
+                       "group {} segment {}: expected 1, got {}",
+                       column_group_id,
+                       segment_id_,
+                       chunk_readers.size());
+            chunk_reader = std::move(chunk_readers.front());
+        } else {
+            chunk_reader = OpenJsonStatsChunkReaderSync(
+                *reader, needed_columns, column_group_id, segment_id_);
+        }
 
-    // Create ProxyChunkColumn for each field in this column group
-    for (const auto& inner_field_id : milvus_field_ids) {
-        auto field_meta = field_meta_map.at(inner_field_id);
-        auto column = std::make_shared<ProxyChunkColumn>(
+        auto translator = std::make_unique<
+            milvus::segcore::storagev2translator::ManifestGroupTranslator>(
+            segment_id_,
+            GroupChunkType::JSON_KEY_STATS,
+            column_group_id,
+            std::move(chunk_reader),
+            field_meta_map,
+            column_names,
+            column_names,
+            enable_mmap,
+            mmap_config.GetMmapPopulate(),
+            mmap_filepath_,
+            milvus_field_ids.size(),
+            load_priority_,
+            /*eager_load=*/true,
+            warmup_policy,
+            fmt::format("jks_{}", field_id_),
+            /*fallback_bytes_per_row=*/0,
+            shard_,
+            /*column_size_estimate=*/std::nullopt,
+            /*writeback_mode=*/writeback_mode,
+            /*enable_async_load=*/enable_async_load);
+
+        const auto chunked_column_group =
+            std::make_shared<ChunkedColumnGroup>(std::move(translator));
+
+        for (const auto& inner_field_id : milvus_field_ids) {
+            const auto& field_meta = field_meta_map.at(inner_field_id);
+            const auto column = std::make_shared<ProxyChunkColumn>(
+                chunked_column_group, inner_field_id, field_meta);
+
+            LOG_DEBUG(
+                "add shredding column: {}, inner_field_id:{}, for json field "
+                "{} segment "
+                "{}",
+                field_meta.get_name().get(),
+                inner_field_id.get(),
+                field_id_,
+                segment_id_);
+            shredding_columns_[field_meta.get_name().get()] = column;
+        }
+        shared_column_ = shredding_columns_.at(shared_column_field_name_);
+        return;
+    }
+
+    // Lazy JSON stats columns are loaded through per-column projected readers,
+    // same as lazy storage-v2 column-group entries. Fetch the complete estimate
+    // matrix once and pass that temporary result to each projected translator.
+    const auto all_columns =
+        std::make_shared<std::vector<std::string>>(column_names);
+    const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
+        milvus_storage::api::Reader::create(
+            column_groups, nullptr, all_columns, properties));
+    AssertInfo(reader != nullptr,
+               "[JsonStats] failed to create reader for column group {} "
+               "segment {}",
+               column_group_id,
+               segment_id_);
+
+    std::vector<std::shared_ptr<std::vector<std::string>>>
+        async_projected_columns;
+    std::vector<milvus::segcore::storagev2translator::ChunkReaderPtr>
+        async_chunk_readers;
+    milvus::segcore::storagev2translator::ColumnSizeEstimateResult
+        size_estimate;
+    if (enable_async_load) {
+        async_projected_columns.reserve(column_names.size());
+        std::vector<milvus::segcore::storagev2translator::ChunkReaderOpenSpec>
+            open_specs;
+        open_specs.reserve(column_names.size());
+        for (const auto& column_name : column_names) {
+            auto projected_columns =
+                std::make_shared<std::vector<std::string>>(1, column_name);
+            open_specs.push_back(
+                {kJsonStatsReaderColumnGroupIndex, projected_columns});
+            async_projected_columns.push_back(std::move(projected_columns));
+        }
+        async_chunk_readers = folly::coro::blockingWait(
+            milvus::segcore::storagev2translator::OpenChunkReadersAsync(
+                /*ctx=*/nullptr,
+                segment_id_,
+                reader,
+                std::move(open_specs),
+                {.load_priority = load_priority_}));
+        AssertInfo(async_chunk_readers.size() == column_names.size(),
+                   "[JsonStats] async reader count mismatch for column group "
+                   "{} segment {}: expected {}, got {}",
+                   column_group_id,
+                   segment_id_,
+                   column_names.size(),
+                   async_chunk_readers.size());
+        size_estimate =
+            milvus::segcore::storagev2translator::FetchColumnSizeEstimates(
+                *async_chunk_readers.front());
+    } else {
+        const auto estimate_chunk_reader = OpenJsonStatsChunkReaderSync(
+            *reader, all_columns, column_group_id, segment_id_);
+        size_estimate =
+            milvus::segcore::storagev2translator::FetchColumnSizeEstimates(
+                *estimate_chunk_reader);
+    }
+
+    for (size_t i = 0; i < milvus_field_ids.size(); ++i) {
+        const auto& inner_field_id = milvus_field_ids[i];
+        const auto& column_name = column_names[i];
+        const auto needed_columns =
+            enable_async_load
+                ? async_projected_columns[i]
+                : std::make_shared<std::vector<std::string>>(1, column_name);
+        auto chunk_reader =
+            enable_async_load
+                ? std::move(async_chunk_readers[i])
+                : OpenJsonStatsChunkReaderSync(
+                      *reader, needed_columns, column_group_id, segment_id_);
+
+        const auto& field_meta = field_meta_map.at(inner_field_id);
+        std::unordered_map<FieldId, FieldMeta> projected_field_meta_map;
+        projected_field_meta_map.emplace(inner_field_id, field_meta);
+        auto translator = std::make_unique<
+            milvus::segcore::storagev2translator::ManifestGroupTranslator>(
+            segment_id_,
+            GroupChunkType::JSON_KEY_STATS,
+            column_group_id,
+            std::move(chunk_reader),
+            projected_field_meta_map,
+            column_names,
+            *needed_columns,
+            enable_mmap,
+            mmap_config.GetMmapPopulate(),
+            mmap_filepath_,
+            /*num_fields=*/1,
+            load_priority_,
+            eager_load,
+            warmup_policy,
+            fmt::format("jks_{}_{}", field_id_, inner_field_id.get()),
+            /*fallback_bytes_per_row=*/0,
+            shard_,
+            /*column_size_estimate=*/size_estimate,
+            /*writeback_mode=*/writeback_mode,
+            /*enable_async_load=*/enable_async_load);
+
+        const auto chunked_column_group =
+            std::make_shared<ChunkedColumnGroup>(std::move(translator));
+        const auto column = std::make_shared<ProxyChunkColumn>(
             chunked_column_group, inner_field_id, field_meta);
 
         LOG_DEBUG(
@@ -1163,6 +2220,8 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
              static_cast<int>(load_priority_));
     shard_ = GetValueFromConfig<std::string>(config, JSON_STATS_CACHE_SHARD_KEY)
                  .value_or("");
+    auto warmup_policy =
+        GetValueFromConfig<std::string>(config, WARMUP).value_or("");
 
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
@@ -1194,7 +2253,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         } else if (file.find(JSON_STATS_META_FILE_NAME) != std::string::npos) {
             meta_files.emplace_back(abs_path);
         } else {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::DataFormatBroken,
                       "unknown file path: {} for segment {}",
                       file,
                       segment_id_);
@@ -1215,17 +2274,14 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     }
 
     // load shredding data (files are already absolute paths)
-    LoadShreddingData(shredding_data_files,
-                      config.contains(WARMUP) ? config.at(WARMUP) : "");
+    LoadShreddingData(shredding_data_files, warmup_policy);
 
     auto index_size =
         GetValueFromConfig<int64_t>(config, milvus::index::INDEX_SIZE)
             .value_or(0);
     // load shared key index (files are already absolute paths)
-    LoadSharedKeyIndex(shared_key_index_files,
-                       enable_mmap,
-                       index_size,
-                       config.contains(WARMUP) ? config.at(WARMUP) : "");
+    LoadSharedKeyIndex(
+        shared_key_index_files, enable_mmap, index_size, warmup_policy);
 }
 
 IndexStatsPtr
@@ -1235,16 +2291,19 @@ JsonKeyStats::Upload(const Config& config) {
 
     // upload meta file
     auto meta_file_path = GetMetaFilePath();
-    AssertInfo(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path),
-               "failed to upload meta file: {} for segment {}",
-               meta_file_path,
-               segment_id_);
+    if (!(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path))) {
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "failed to upload meta file: {} for segment {}",
+                  meta_file_path,
+                  segment_id_);
+    }
 
     // upload parquet file, parquet writer has already upload file to remote
-    auto shredding_remote_paths_to_size = parquet_writer_->GetPathsToSize();
-    auto shared_key_index_remote_paths_to_size =
+    const auto& shredding_remote_paths_to_size =
+        parquet_writer_->GetPathsToSize();
+    const auto& shared_key_index_remote_paths_to_size =
         bson_index_stats->GetSerializedIndexFileInfo();
-    auto meta_remote_paths_to_size =
+    const auto& meta_remote_paths_to_size =
         disk_file_manager_->GetRemotePathsToFileSize();
 
     // get all index files for meta

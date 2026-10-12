@@ -63,8 +63,9 @@ type benefitEvaluator interface {
 	// HasEnoughBenefit checks if the assignment from source to target is beneficial enough
 	// sourceScore: current score of source node
 	// targetScore: current score of target node
+	// targetAssignedScore: assigned (quota) score of target node, always non-negative
 	// resourceScore: score of the resource to be assigned
-	HasEnoughBenefit(sourceScore float64, targetScore float64, resourceScore int64) bool
+	HasEnoughBenefit(sourceScore float64, targetScore float64, targetAssignedScore float64, resourceScore int64) bool
 }
 
 // ============================================================================
@@ -128,10 +129,13 @@ type commonScoreBasedBenefitEvaluator struct{}
 // It considers:
 // 1. Score unbalance toleration factor
 // 2. Reverse unbalance toleration factor (if assignment would reverse the balance)
-func (e *commonScoreBasedBenefitEvaluator) HasEnoughBenefit(sourceScore float64, targetScore float64, resourceScore int64) bool {
-	// Check if the score diff between source and target is below tolerance
+func (e *commonScoreBasedBenefitEvaluator) HasEnoughBenefit(sourceScore float64, targetScore float64, targetAssignedScore float64, resourceScore int64) bool {
+	// Check if the score diff between source and target is below tolerance.
+	// targetAssignedScore (the target's quota) is used as the baseline instead of targetScore
+	// because targetScore is a priority (currentScore - assignedScore) and can be negative for
+	// a balance target, which would make this check pass unconditionally.
 	oldPriorityDiff := math.Abs(sourceScore - targetScore)
-	if oldPriorityDiff < targetScore*params.Params.QueryCoordCfg.ScoreUnbalanceTolerationFactor.GetAsFloat() {
+	if oldPriorityDiff < targetAssignedScore*params.Params.QueryCoordCfg.ScoreUnbalanceTolerationFactor.GetAsFloat() {
 		return false
 	}
 
@@ -154,6 +158,7 @@ func (e *commonScoreBasedBenefitEvaluator) HasEnoughBenefitForNodes(sourceNode *
 	return e.HasEnoughBenefit(
 		float64(sourceNode.getPriority()),
 		float64(targetNode.getPriority()),
+		targetNode.GetAssignedScore(),
 		int64(scoreChanges),
 	)
 }

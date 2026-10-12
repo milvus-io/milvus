@@ -18,14 +18,17 @@ package storage
 
 import (
 	"strconv"
+	"sync/atomic"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/bitutil"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -43,8 +46,41 @@ func isNullableDenseVectorArrowType(dataType schemapb.DataType) bool {
 	}
 }
 
-func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
+type appendValueDefault struct {
+	value                  *schemapb.ValueField
+	geometryWKB            []byte
+	arrayOfVectorByteWidth int
+}
+
+func newAppendValueDefault(field *schemapb.FieldSchema) (appendValueDefault, error) {
+	defaultValue := field.GetDefaultValue()
+	ret := appendValueDefault{value: defaultValue}
+	if defaultValue != nil && field.GetDataType() == schemapb.DataType_Geometry {
+		val, err := common.ConvertWKTToWKB(defaultValue.GetStringData())
+		if err != nil {
+			return ret, merr.WrapErrServiceInternalErr(err, "invalid default value for geometry field %s", field.GetName())
+		}
+		ret.geometryWKB = val
+	}
+	if field.GetDataType() == schemapb.DataType_ArrayOfVector && field.GetElementNullable() {
+		dim, err := typeutil.GetDim(field)
+		if err != nil {
+			return ret, merr.WrapErrAsSysError(
+				merr.Wrapf(err, "get dimension for ArrayOfVector field %s", field.GetName()),
+			)
+		}
+		byteWidth, err := getArrayOfVectorElementByteWidth(field.GetElementType(), int(dim))
+		if err != nil {
+			return ret, err
+		}
+		ret.arrayOfVectorByteWidth = byteWidth
+	}
+	return ret, nil
+}
+
+func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemapb.FieldSchema, appendDefault appendValueDefault) (uint64, error) {
 	// a could never be nil here
+	defaultValue := appendDefault.value
 	switch b := builder.(type) {
 	case *array.BooleanBuilder:
 		ba, ok := a.(*array.Boolean)
@@ -117,7 +153,11 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
-				b.Append(defaultValue.GetLongData())
+				if field.GetDataType() == schemapb.DataType_Timestamptz {
+					b.Append(defaultValue.GetTimestamptzData())
+				} else {
+					b.Append(defaultValue.GetLongData())
+				}
 				return 8, nil
 			}
 			b.AppendNull()
@@ -157,6 +197,10 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetDoubleData())
+				return 8, nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -189,6 +233,10 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		if ba.IsNull(idx) {
 			// could be internal $meta json
 			if defaultValue != nil {
+				if field.GetDataType() == schemapb.DataType_Geometry {
+					b.Append(appendDefault.geometryWKB)
+					return uint64(len(appendDefault.geometryWKB)), nil
+				}
 				val := defaultValue.GetBytesData()
 				b.Append(val)
 				return uint64(len(val)), nil
@@ -228,18 +276,64 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		b.Append(true)
 
 		valuesArray := la.ListValues()
-		var totalSize uint64 = 0
+		var totalSize uint64
 		valueBuilder := b.ValueBuilder()
 		switch vb := valueBuilder.(type) {
 		case *array.FixedSizeBinaryBuilder:
+			if field.GetElementNullable() {
+				return 0, merr.WrapErrServiceInternalMsg("element-nullable ArrayOfVector requires Binary child storage")
+			}
 			fixedArray, ok := valuesArray.(*array.FixedSizeBinary)
 			if !ok {
-				return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
+				return 0, merr.WrapErrDataIntegrityMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
 			}
+			byteWidth := uint64(vb.Type().(*arrow.FixedSizeBinaryType).ByteWidth)
+			vb.Reserve(int(end - start))
 			for i := start; i < end; i++ {
+				if fixedArray.IsNull(int(i)) {
+					return 0, merr.WrapErrDataIntegrityMsg(
+						"non-element-nullable ArrayOfVector contains null child at logical element %d",
+						i-start,
+					)
+				}
 				val := fixedArray.Value(int(i))
 				vb.Append(val)
-				totalSize += uint64(len(val))
+				totalSize += byteWidth
+			}
+		case *array.BinaryBuilder:
+			binaryArray, ok := valuesArray.(*array.Binary)
+			if !ok {
+				return 0, merr.WrapErrDataIntegrityMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
+			}
+			if !field.GetElementNullable() {
+				return 0, merr.WrapErrServiceInternalMsg("non-element-nullable ArrayOfVector requires FixedSizeBinary child storage")
+			}
+			byteWidth := appendDefault.arrayOfVectorByteWidth
+			if byteWidth <= 0 {
+				return 0, merr.WrapErrServiceInternalMsg("missing cached byte width for ArrayOfVector field %s", field.GetName())
+			}
+			// Binary children consume an int32 offset and one validity bit even when null.
+			childCount := end - start
+			totalSize += uint64(childCount) * uint64(arrow.Int32SizeBytes)
+			totalSize += uint64(bitutil.BytesForBits(childCount))
+			vb.Reserve(int(end - start))
+			for i := start; i < end; i++ {
+				idx := int(i)
+				if binaryArray.IsNull(idx) {
+					vb.AppendNull()
+					continue
+				}
+				val := binaryArray.Value(idx)
+				if len(val) != byteWidth {
+					return 0, merr.WrapErrDataIntegrityMsg(
+						"ArrayOfVector child at logical element %d has byte width %d, expected %d",
+						i-start,
+						len(val),
+						byteWidth,
+					)
+				}
+				vb.Append(val)
+				totalSize += uint64(byteWidth)
 			}
 		default:
 			return 0, merr.WrapErrServiceInternalMsg("unsupported value builder type in ListBuilder: %T", valueBuilder)
@@ -266,8 +360,10 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 	if schema.GetDataType() == schemapb.DataType_ArrayOfVector {
 		elementType = schema.GetElementType()
 	}
-	arrowType := serdeMap[schema.GetDataType()].arrowType(int(dim), elementType)
-	if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
+	arrowType := serdeMap[schema.GetDataType()].arrowType(int(dim), elementType, schema.GetElementNullable())
+	if schema.GetDataType() == schemapb.DataType_Text {
+		arrowType = arrow.BinaryTypes.Binary
+	} else if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
 		arrowType = arrow.BinaryTypes.Binary
 	}
 	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
@@ -325,6 +421,15 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 			bd.AppendValues(
 				lo.RepeatBy(numRows, func(_ int) []byte { return schema.GetDefaultValue().GetBytesData() }),
 				nil)
+		case schemapb.DataType_Geometry:
+			bd := builder.(*array.BinaryBuilder)
+			defaultValue, err := common.ConvertWKTToWKB(schema.GetDefaultValue().GetStringData())
+			if err != nil {
+				return nil, merr.WrapErrServiceInternalErr(err, "invalid default value for geometry field %s", schema.GetName())
+			}
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) []byte { return defaultValue }),
+				nil)
 		default:
 			return nil, merr.WrapErrServiceInternalMsg("Unexpected default value type: %s", schema.GetDataType().String())
 		}
@@ -343,17 +448,80 @@ type RecordBuilder struct {
 	fields      []*schemapb.FieldSchema
 	arrowFields []arrow.Field
 	builders    []array.Builder
+	defaults    []appendValueDefault
+	allocator   *recordBuilderAllocator
 
 	nRows int
 	size  uint64
 }
 
+// Each output batch has its own allocator counter. Records handed to a writer
+// can outlive the builder and can be released from another goroutine.
+type recordBuilderAllocator struct {
+	memory.Allocator
+	size atomic.Int64
+}
+
+func (a *recordBuilderAllocator) Allocate(size int) []byte {
+	buf := a.Allocator.Allocate(size)
+	a.size.Add(int64(len(buf)))
+	return buf
+}
+
+func (a *recordBuilderAllocator) Reallocate(size int, buf []byte) []byte {
+	oldSize := len(buf)
+	buf = a.Allocator.Reallocate(size, buf)
+	a.size.Add(int64(len(buf) - oldSize))
+	return buf
+}
+
+func (a *recordBuilderAllocator) Free(buf []byte) {
+	a.Allocator.Free(buf)
+	a.size.Add(-int64(len(buf)))
+}
+
+func (b *RecordBuilder) prepareAppendDefaults() error {
+	if b.defaults != nil {
+		return nil
+	}
+	defaults := make([]appendValueDefault, len(b.fields))
+	for i, field := range b.fields {
+		appendDefault, err := newAppendValueDefault(field)
+		if err != nil {
+			return err
+		}
+		defaults[i] = appendDefault
+	}
+	b.defaults = defaults
+	return nil
+}
+
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
+	if err := b.prepareAppendDefaults(); err != nil {
+		return err
+	}
 	for offset := start; offset < end; offset++ {
 		for i, builder := range b.builders {
 			f := b.fields[i]
 			col := rec.Column(f.FieldID)
-			size, err := appendValueAt(builder, col, offset, f.GetDefaultValue())
+			// TEXT may be decoded UTF8 or a binary LOB reference. Preserve the
+			// reader's representation instead of treating decoded text as a ref.
+			if f.GetDataType() == schemapb.DataType_Text &&
+				(col.DataType().ID() == arrow.STRING || col.DataType().ID() == arrow.BINARY) &&
+				col.DataType().ID() != builder.Type().ID() {
+				if builder.NullN() == builder.Len() {
+					// Missing TEXT fields can have been filled with binary nulls.
+					nulls := builder.Len()
+					builder.Release()
+					builder = array.NewBuilder(b.allocator, col.DataType())
+					builder.AppendNulls(nulls)
+					b.builders[i] = builder
+				} else if col.IsNull(offset) {
+					builder.AppendNull()
+					continue
+				}
+			}
+			size, err := appendValueAt(builder, col, offset, f, b.defaults[i])
 			if err != nil {
 				return merr.Wrapf(err, "failed to append value at offset %d for field %s", offset, f.GetName())
 			}
@@ -370,6 +538,13 @@ func (b *RecordBuilder) GetRowNum() int {
 
 func (b *RecordBuilder) GetSize() uint64 {
 	return b.size
+}
+
+func (b *RecordBuilder) GetMemorySize() uint64 {
+	// Count allocated Arrow buffers, including null slots, validity/offset
+	// buffers and spare capacity. Payload bytes alone can severely undercount
+	// wide nullable schemas. This excludes batches already handed to writers.
+	return uint64(b.allocator.size.Load())
 }
 
 func (b *RecordBuilder) Release() {
@@ -392,12 +567,37 @@ func (b *RecordBuilder) Build() Record {
 	}
 
 	rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(b.nRows)), field2Col)
+	// NewRecord retained every column; drop the builder-side creator refs so the
+	// record is the sole owner and columns can actually reach refcount zero.
+	for _, arr := range arrays {
+		arr.Release()
+	}
 	b.nRows = 0
 	b.size = 0
+	// NewArray transfers the buffers but keeps the allocator on each builder.
+	// Start fresh builders/counters so retained output Records cannot affect
+	// the next batch's accounting when their buffers are eventually released.
+	b.allocator = &recordBuilderAllocator{Allocator: b.allocator.Allocator}
+	for i, builder := range b.builders {
+		dataType := builder.Type()
+		builder.Release()
+		b.builders[i] = array.NewBuilder(b.allocator, dataType)
+	}
 	return rec
 }
 
 func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
+	return newRecordBuilder(schema, false)
+}
+
+// NewRecordBuilderWithFieldID uses the physical field names expected by V3
+// writers, including ExternalField overrides, so matching batches can be
+// written without rebuilding the Arrow record.
+func NewRecordBuilderWithFieldID(schema *schemapb.CollectionSchema) *RecordBuilder {
+	return newRecordBuilder(schema, true)
+}
+
+func newRecordBuilder(schema *schemapb.CollectionSchema, useFieldID bool) *RecordBuilder {
 	// assumes 5 sub fields per StructArrayField
 	fields := make([]*schemapb.FieldSchema, 0, len(schema.Fields)+len(schema.StructArrayFields)*5)
 	fields = append(fields, schema.Fields...)
@@ -407,6 +607,7 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 
 	builders := make([]array.Builder, len(fields))
 	arrowFields := make([]arrow.Field, len(fields))
+	allocator := &recordBuilderAllocator{Allocator: memory.DefaultAllocator}
 	for i, field := range fields {
 		dim, _ := typeutil.GetDim(field)
 
@@ -415,26 +616,34 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 			elementType = field.GetElementType()
 		}
 		if field.GetNullable() && isNullableDenseVectorArrowType(field.DataType) {
-			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+			builders[i] = array.NewBinaryBuilder(allocator, arrow.BinaryTypes.Binary)
 		} else if field.DataType == schemapb.DataType_Text {
 			// TEXT fields are stored as binary (LOB references) in manifest storage,
 			// so the builder must use binary type to match what the reader returns.
-			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+			builders[i] = array.NewBinaryBuilder(allocator, arrow.BinaryTypes.Binary)
 		} else {
-			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)
-			builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)
+			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType, field.GetElementNullable())
+			builders[i] = array.NewBuilder(allocator, arrowType)
 		}
-		arrowFields[i] = newRecordBuilderArrowField(field, builders[i].Type(), dim, elementType)
+		arrowFields[i] = newRecordBuilderArrowField(field, builders[i].Type(), dim, elementType, useFieldID)
 	}
 
 	return &RecordBuilder{
 		fields:      fields,
 		arrowFields: arrowFields,
 		builders:    builders,
+		allocator:   allocator,
 	}
 }
 
-func newRecordBuilderArrowField(field *schemapb.FieldSchema, arrowType arrow.DataType, dim int64, elementType schemapb.DataType) arrow.Field {
+func newRecordBuilderArrowField(field *schemapb.FieldSchema, arrowType arrow.DataType, dim int64, elementType schemapb.DataType, useFieldID bool) arrow.Field {
+	name := field.GetName()
+	if useFieldID {
+		name = strconv.FormatInt(field.GetFieldID(), 10)
+		if field.GetExternalField() != "" {
+			name = field.GetExternalField()
+		}
+	}
 	keys := []string{packed.ArrowFieldIdMetadataKey}
 	values := []string{strconv.Itoa(int(field.GetFieldID()))}
 
@@ -449,7 +658,7 @@ func newRecordBuilderArrowField(field *schemapb.FieldSchema, arrowType arrow.Dat
 	}
 
 	return arrow.Field{
-		Name:     field.GetName(),
+		Name:     name,
 		Type:     arrowType,
 		Nullable: field.GetNullable(),
 		Metadata: arrow.NewMetadata(keys, values),

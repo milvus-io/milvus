@@ -14,19 +14,11 @@
 #include <cstdio>
 #include <string>
 #include "common/EasyAssert.h"
-#include "common/Types.h"
-#include "fmt/core.h"
 #include <fcntl.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 namespace milvus {
-
-#define THROW_FILE_WRITE_ERROR(path)                                     \
-    ThrowInfo(ErrorCode::FileWriteFailed,                                \
-              fmt::format("write data to file {} failed, error code {}", \
-                          path,                                          \
-                          strerror(errno)));
 
 class File {
  public:
@@ -50,15 +42,19 @@ class File {
     static File
     Open(const std::string_view filepath, int flags, size_t buf_size) {
         int fd = open(filepath.data(), flags, S_IRUSR | S_IWUSR);
-        AssertInfo(fd != -1,
-                   "failed to create mmap file {}: {}",
-                   filepath,
-                   strerror(errno));
+        if (fd == -1) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to create mmap file {}: {}",
+                      filepath,
+                      strerror(errno));
+        }
         FILE* fs = fdopen(fd, get_mode_from_flags(flags));
-        AssertInfo(fs != nullptr,
-                   "failed to open file {}: {}",
-                   filepath,
-                   strerror(errno));
+        if (fs == nullptr) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to open file {}: {}",
+                      filepath,
+                      strerror(errno));
+        }
         auto f = File(fd, fs, std::string(filepath));
         // setup buffer size file stream will use
         setvbuf(f.fs_, nullptr, _IOFBF, buf_size);
@@ -70,41 +66,9 @@ class File {
         return fd_;
     }
 
-    std::string
-    Path() const {
-        return filepath_;
-    }
-
     ssize_t
     Write(const void* buf, size_t size) {
         return write(fd_, buf, size);
-    }
-
-    template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
-    ssize_t
-    WriteInt(T value) {
-        return write(fd_, &value, sizeof(value));
-    }
-
-    ssize_t
-    FWrite(const void* buf, size_t size) {
-        return fwrite(buf, sizeof(char), size, fs_);
-    }
-
-    template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
-    ssize_t
-    FWriteInt(T value) {
-        return fwrite(&value, 1, sizeof(value), fs_);
-    }
-
-    int
-    FFlush() {
-        return fflush(fs_);
-    }
-
-    offset_t
-    Seek(offset_t offset, int whence) {
-        return lseek(fd_, offset, whence);
     }
 
     void
@@ -141,6 +105,18 @@ class File {
     FILE* fs_;
     std::string filepath_;
 };
+
+// Best-effort eviction of a file's pages from the OS page cache.
+inline void
+EvictFilePageCache(int fd) noexcept {
+#if defined(__linux__)
+    (void)posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+#elif defined(__APPLE__)
+    (void)fcntl(fd, F_NOCACHE, 1);
+#else
+    (void)fd;
+#endif
+}
 
 class MmapFileRAII {
  public:

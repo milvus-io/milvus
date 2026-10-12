@@ -37,13 +37,24 @@ type currentSplit struct {
 	nextGroupID   int64
 	outputGroups  []ColumnGroup
 	processFields typeutil.Set[int64]
+	pendingGroups []localFormatGroup
 }
 
 func newCurrentSplit(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats) *currentSplit {
+	pendingGroup := localFormatGroup{
+		fields:      make([]int64, 0, len(fields)),
+		indices:     make([]int, 0, len(fields)),
+		localFormat: localFormatDefault,
+	}
+	for idx, field := range fields {
+		pendingGroup.fields = append(pendingGroup.fields, field.GetFieldID())
+		pendingGroup.indices = append(pendingGroup.indices, idx)
+	}
 	return &currentSplit{
 		fields:        fields,
 		stats:         stats,
 		processFields: typeutil.NewSet[int64](),
+		pendingGroups: []localFormatGroup{pendingGroup},
 	}
 }
 
@@ -63,12 +74,70 @@ func (c *currentSplit) Processed(field int64) bool {
 }
 
 func (c *currentSplit) Range(f func(idx int, field *schemapb.FieldSchema)) {
-	for idx, field := range c.fields {
-		if c.Processed(field.GetFieldID()) {
-			continue
+	for _, group := range c.RangeGroups(nil) {
+		for _, idx := range group.indices {
+			f(idx, c.fields[idx])
 		}
-		f(idx, field)
 	}
+}
+
+func (c *currentSplit) RangeGroups(match func(*schemapb.FieldSchema) bool) []localFormatGroup {
+	pendingGroups := c.pendingGroups
+	if len(pendingGroups) == 0 {
+		pendingGroups = []localFormatGroup{{}}
+		for idx, field := range c.fields {
+			pendingGroups[0].fields = append(pendingGroups[0].fields, field.GetFieldID())
+			pendingGroups[0].indices = append(pendingGroups[0].indices, idx)
+		}
+	}
+
+	groups := make([]localFormatGroup, 0, len(pendingGroups))
+	for _, pendingGroup := range pendingGroups {
+		group := localFormatGroup{
+			fields:      make([]int64, 0, len(pendingGroup.fields)),
+			indices:     make([]int, 0, len(pendingGroup.indices)),
+			localFormat: pendingGroup.localFormat,
+		}
+		for _, idx := range pendingGroup.indices {
+			field := c.fields[idx]
+			if c.Processed(field.GetFieldID()) {
+				continue
+			}
+			if match != nil && !match(field) {
+				continue
+			}
+			group.fields = append(group.fields, field.GetFieldID())
+			group.indices = append(group.indices, idx)
+		}
+		if len(group.fields) > 0 {
+			groups = append(groups, group)
+		}
+	}
+	return groups
+}
+
+func (c *currentSplit) PartitionRemainingByLocalFormat() {
+	nextGroups := make([]localFormatGroup, 0, len(c.pendingGroups))
+	for _, pendingGroup := range c.RangeGroups(nil) {
+		groupsByFormat := make(map[string]*localFormatGroup)
+		formats := make([]string, 0, 3)
+		for _, idx := range pendingGroup.indices {
+			field := c.fields[idx]
+			format := fieldLocalFormat(field)
+			group := groupsByFormat[format]
+			if group == nil {
+				formats = append(formats, format)
+				group = &localFormatGroup{localFormat: format}
+				groupsByFormat[format] = group
+			}
+			group.fields = append(group.fields, field.GetFieldID())
+			group.indices = append(group.indices, idx)
+		}
+		for _, format := range formats {
+			nextGroups = append(nextGroups, *groupsByFormat[format])
+		}
+	}
+	c.pendingGroups = nextGroups
 }
 
 // ColumnGroupSplitPolicy interface for column group split policy.
@@ -76,7 +145,7 @@ type ColumnGroupSplitPolicy interface {
 	Split(currentSplit *currentSplit) *currentSplit
 }
 
-// selectedDataTypePolicy split widt datatype (vector, text) to a new column group.
+// selectedDataTypePolicy splits wide data types (vector, text) to new column groups.
 type selectedDataTypePolicy struct{}
 
 func (p *selectedDataTypePolicy) Split(currentSplit *currentSplit) *currentSplit {
@@ -91,6 +160,39 @@ func (p *selectedDataTypePolicy) Split(currentSplit *currentSplit) *currentSplit
 
 func NewSelectedDataTypePolicy() ColumnGroupSplitPolicy {
 	return &selectedDataTypePolicy{}
+}
+
+// localFormatPolicy only partitions fields by local loading intent. It must not
+// set ColumnGroup.Format, which is physical writer metadata owned by the writer
+// configuration and existing manifests.
+type localFormatPolicy struct{}
+
+const localFormatDefault = ""
+
+type localFormatGroup struct {
+	fields      []int64
+	indices     []int
+	localFormat string
+}
+
+func fieldLocalFormat(field *schemapb.FieldSchema) string {
+	for _, kv := range field.GetTypeParams() {
+		if kv.GetKey() == common.LocalFormatKey {
+			return kv.GetValue()
+		}
+	}
+	// Keep the default value distinct from explicit raw so a server-level default
+	// can be introduced without merging fields with different local intent.
+	return localFormatDefault
+}
+
+func (p *localFormatPolicy) Split(currentSplit *currentSplit) *currentSplit {
+	currentSplit.PartitionRemainingByLocalFormat()
+	return currentSplit
+}
+
+func NewLocalFormatPolicy() ColumnGroupSplitPolicy {
+	return &localFormatPolicy{}
 }
 
 // systemColumnPolicy split system columns to a new column group
@@ -110,20 +212,16 @@ func NewSystemColumnPolicy(includePK bool, includePartKey bool, includeClusterin
 }
 
 func (p *systemColumnPolicy) Split(currentSplit *currentSplit) *currentSplit {
-	systemFields := make([]int64, 0, 3)
-	systemFieldIndices := make([]int, 0, 3)
-
-	currentSplit.Range(func(idx int, field *schemapb.FieldSchema) {
-		if field.GetFieldID() < common.StartOfUserFieldID ||
+	groups := currentSplit.RangeGroups(func(field *schemapb.FieldSchema) bool {
+		return field.GetFieldID() < common.StartOfUserFieldID ||
 			(p.includePrimaryKey && field.GetIsPrimaryKey()) ||
 			(p.includePartitionKey && field.GetIsPartitionKey()) ||
-			(p.includeClusteringKey && field.GetIsClusteringKey()) {
-			systemFields = append(systemFields, field.GetFieldID())
-			systemFieldIndices = append(systemFieldIndices, idx)
-		}
+			(p.includeClusteringKey && field.GetIsClusteringKey())
 	})
 
-	currentSplit.SplitFields(currentSplit.NextGroupID(), systemFields, systemFieldIndices)
+	for _, group := range groups {
+		currentSplit.SplitFields(currentSplit.NextGroupID(), group.fields, group.indices)
+	}
 	return currentSplit
 }
 
@@ -137,21 +235,22 @@ func NewRemanentShortPolicy(maxGroupSize int) ColumnGroupSplitPolicy {
 }
 
 func (p *remanentShortPolicy) Split(currentSplit *currentSplit) *currentSplit {
-	var shortFields []int64
-	var shortFieldIndices []int
-
-	currentSplit.Range(func(idx int, field *schemapb.FieldSchema) {
-		shortFields = append(shortFields, field.GetFieldID())
-		shortFieldIndices = append(shortFieldIndices, idx)
-		if p.maxGroupSize > 0 && len(shortFields) >= p.maxGroupSize {
-			currentSplit.SplitFields(currentSplit.NextGroupID(), shortFields, shortFieldIndices)
-			shortFields = make([]int64, 0, p.maxGroupSize)
-			shortFieldIndices = make([]int, 0, p.maxGroupSize)
+	for _, group := range currentSplit.RangeGroups(nil) {
+		shortFields := make([]int64, 0, len(group.fields))
+		shortFieldIndices := make([]int, 0, len(group.indices))
+		for i, fieldID := range group.fields {
+			shortFields = append(shortFields, fieldID)
+			shortFieldIndices = append(shortFieldIndices, group.indices[i])
+			if p.maxGroupSize > 0 && len(shortFields) >= p.maxGroupSize {
+				currentSplit.SplitFields(currentSplit.NextGroupID(), shortFields, shortFieldIndices)
+				shortFields = make([]int64, 0, p.maxGroupSize)
+				shortFieldIndices = make([]int, 0, p.maxGroupSize)
+			}
 		}
-	})
 
-	if len(shortFields) > 0 {
-		currentSplit.SplitFields(currentSplit.NextGroupID(), shortFields, shortFieldIndices)
+		if len(shortFields) > 0 {
+			currentSplit.SplitFields(currentSplit.NextGroupID(), shortFields, shortFieldIndices)
+		}
 	}
 
 	return currentSplit

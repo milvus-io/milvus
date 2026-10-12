@@ -156,6 +156,8 @@ func (g *Generator) generateHelperFunctions(info JSONMessageReflectInfo) {
 	f.Comment(fmt.Sprintf("// Type aliases for %s", baseName))
 	f.Type().Id("Mutable"+baseName).Op("=").Qual(messagePackage, "specializedMutableMessage").Types(headerType, bodyType)
 	f.Type().Id("Immutable"+baseName).Op("=").Qual(messagePackage, "SpecializedImmutableMessage").Types(headerType, bodyType)
+	f.Type().Id("OwnedImmutable"+baseName).Op("=").Qual(messagePackage, "SpecializedOwnedImmutableMessage").Types(headerType, bodyType)
+	f.Type().Id("RetainedImmutable"+baseName).Op("=").Qual(messagePackage, "SpecializedRetainedImmutableMessage").Types(headerType, bodyType)
 	f.Type().Id("Broadcast"+baseName).Op("=").Qual(messagePackage, "SpecializedBroadcastMessage").Types(headerType, bodyType)
 	f.Type().Id("BroadcastResult"+baseName).Op("=").Qual(messagePackage, "BroadcastResult").Types(headerType, bodyType)
 	f.Type().Id("AckResult"+baseName).Op("=").Qual(messagePackage, "AckResult").Types(headerType, bodyType)
@@ -187,6 +189,12 @@ func (g *Generator) generateHelperFunctions(info JSONMessageReflectInfo) {
 		// MustAsImmutable function
 		f.Comment(fmt.Sprintf("// MustAsImmutable%s converts an ImmutableMessage to Immutable%s, panics on error", baseName, baseName))
 		f.Var().Id("MustAsImmutable"+baseName).Op("=").Qual(messagePackage, "MustAsSpecializedImmutableMessage").Types(headerType, bodyType)
+		// MustAsOwnedImmutable function
+		f.Comment(fmt.Sprintf("// MustAsOwnedImmutable%s converts an OwnedImmutableMessage to OwnedImmutable%s, panics on error", baseName, baseName))
+		f.Var().Id("MustAsOwnedImmutable"+baseName).Op("=").Qual(messagePackage, "MustAsSpecializedOwnedImmutableMessage").Types(headerType, bodyType)
+		// MustAsRetainedImmutable function
+		f.Comment(fmt.Sprintf("// MustAsRetainedImmutable%s converts a RetainedImmutableMessage to RetainedImmutable%s, panics on error", baseName, baseName))
+		f.Var().Id("MustAsRetainedImmutable"+baseName).Op("=").Qual(messagePackage, "MustAsSpecializedRetainedImmutableMessage").Types(headerType, bodyType)
 		// AsBroadcast function
 		f.Comment(fmt.Sprintf("// AsBroadcast%s converts a BasicMessage to Broadcast%s", baseName, baseName))
 		f.Var().Id("AsBroadcast"+baseName).Op("=").Qual(messagePackage, "asSpecializedBroadcastMessage").Types(headerType, bodyType)

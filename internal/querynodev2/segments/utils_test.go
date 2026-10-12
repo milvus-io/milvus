@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -72,6 +73,54 @@ func TestGetSegmentRelatedDataSize(t *testing.T) {
 		assert.EqualValues(t, 100, GetSegmentRelatedDataSize(segment))
 	})
 
+	t.Run("local sealed segment uses cached log size", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			BinlogPaths: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogSize:    10,
+							MemorySize: 1000,
+						},
+					},
+				},
+			},
+		}
+		segment := &LocalSegment{
+			baseSegment: baseSegment{
+				segmentType: SegmentTypeSealed,
+				loadInfo:    atomic.NewPointer[querypb.SegmentLoadInfo](compactSegmentLoadInfoForRuntime(loadInfo)),
+			},
+			binlogSize:      atomic.NewInt64(calculateSegmentMemorySize(loadInfo)),
+			relatedDataSize: atomic.NewInt64(calculateSegmentLogSize(loadInfo)),
+		}
+
+		assert.EqualValues(t, 10, GetSegmentRelatedDataSize(segment))
+	})
+
+	t.Run("local sealed segment uses cached zero log size", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogSize: 10,
+						},
+					},
+				},
+			},
+		}
+		segment := &LocalSegment{
+			baseSegment: baseSegment{
+				segmentType: SegmentTypeSealed,
+				loadInfo:    atomic.NewPointer[querypb.SegmentLoadInfo](compactSegmentLoadInfoForRuntime(loadInfo)),
+			},
+			relatedDataSize: atomic.NewInt64(0),
+		}
+
+		assert.EqualValues(t, 0, GetSegmentRelatedDataSize(segment))
+	})
+
 	t.Run("growing segment", func(t *testing.T) {
 		segment := NewMockSegment(t)
 		segment.EXPECT().Type().Return(SegmentTypeGrowing)
@@ -103,71 +152,6 @@ func TestGetFieldSchema(t *testing.T) {
 		}, 1)
 		assert.Nil(t, filedSchema)
 		assert.Error(t, err)
-	})
-}
-
-func TestIsIndexMmapEnable(t *testing.T) {
-	paramtable.Init()
-
-	t.Run("mmap index param exist", func(t *testing.T) {
-		enable := isIndexMmapEnable(&schemapb.FieldSchema{}, &querypb.FieldIndexInfo{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MmapEnabledKey,
-					Value: "false",
-				},
-			},
-		})
-		assert.False(t, enable)
-	})
-
-	t.Run("mmap vector index param not exist", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapVectorIndex.Key, "true")
-		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapVectorIndex.Key)
-		enable := isIndexMmapEnable(&schemapb.FieldSchema{
-			DataType: schemapb.DataType_FloatVector,
-		}, &querypb.FieldIndexInfo{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: "IVF_FLAT",
-				},
-			},
-		})
-		assert.True(t, enable)
-	})
-
-	t.Run("mmap scalar index param not exist", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key, "true")
-		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key)
-		enable := isIndexMmapEnable(&schemapb.FieldSchema{
-			DataType: schemapb.DataType_String,
-		}, &querypb.FieldIndexInfo{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: "INVERTED",
-				},
-			},
-		})
-		assert.True(t, enable)
-	})
-
-	t.Run("mmap scalar index param not supported", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key, "true")
-		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key)
-		enable := isIndexMmapEnable(&schemapb.FieldSchema{
-			DataType: schemapb.DataType_String,
-		}, &querypb.FieldIndexInfo{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: "STL_SORT",
-				},
-				{Key: common.MmapEnabledKey, Value: "true"},
-			},
-		})
-		assert.False(t, enable)
 	})
 }
 
@@ -238,6 +222,16 @@ func TestGetFieldWarmupPolicy(t *testing.T) {
 		assert.Equal(t, common.WarmupAsync, policy)
 	})
 
+	t.Run("vector field TypeParams warmup is returned", func(t *testing.T) {
+		policy := getFieldWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.WarmupKey, Value: common.WarmupDisable},
+			},
+		})
+		assert.Equal(t, common.WarmupDisable, policy)
+	})
+
 	t.Run("fallback to global config for scalar field", func(t *testing.T) {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupSync)
 		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
@@ -287,86 +281,6 @@ func TestGetLoadFieldWarmupPolicy(t *testing.T) {
 
 	assert.Equal(t, common.WarmupDisable, getLoadFieldWarmupPolicy(&querypb.SegmentLoadInfo{}, field))
 	assert.Equal(t, common.WarmupSync, getLoadFieldWarmupPolicy(&querypb.SegmentLoadInfo{ForceSyncWarmup: true}, field))
-}
-
-func TestGetIndexWarmupPolicy(t *testing.T) {
-	paramtable.Init()
-
-	t.Run("index params has warmup", func(t *testing.T) {
-		policy := getIndexWarmupPolicy(
-			&schemapb.FieldSchema{DataType: schemapb.DataType_String},
-			&querypb.FieldIndexInfo{
-				IndexParams: []*commonpb.KeyValuePair{
-					{Key: common.WarmupKey, Value: common.WarmupSync},
-				},
-			},
-		)
-		assert.Equal(t, common.WarmupSync, policy)
-	})
-
-	t.Run("index params warmup propagated from collection level", func(t *testing.T) {
-		policy := getIndexWarmupPolicy(
-			&schemapb.FieldSchema{DataType: schemapb.DataType_String},
-			&querypb.FieldIndexInfo{
-				IndexParams: []*commonpb.KeyValuePair{
-					{Key: common.WarmupKey, Value: common.WarmupDisable},
-				},
-			},
-		)
-		assert.Equal(t, common.WarmupDisable, policy)
-	})
-
-	t.Run("async policy in index params is returned", func(t *testing.T) {
-		policy := getIndexWarmupPolicy(
-			&schemapb.FieldSchema{DataType: schemapb.DataType_String},
-			&querypb.FieldIndexInfo{
-				IndexParams: []*commonpb.KeyValuePair{
-					{Key: common.WarmupKey, Value: common.WarmupAsync},
-				},
-			},
-		)
-		assert.Equal(t, common.WarmupAsync, policy)
-	})
-
-	t.Run("fallback to global config for scalar index", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.Key, common.WarmupSync)
-		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.Key)
-		policy := getIndexWarmupPolicy(
-			&schemapb.FieldSchema{DataType: schemapb.DataType_String},
-			&querypb.FieldIndexInfo{},
-		)
-		assert.Equal(t, common.WarmupSync, policy)
-	})
-
-	t.Run("fallback to global config for scalar index async", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.Key, common.WarmupAsync)
-		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.Key)
-		policy := getIndexWarmupPolicy(
-			&schemapb.FieldSchema{DataType: schemapb.DataType_String},
-			&querypb.FieldIndexInfo{},
-		)
-		assert.Equal(t, common.WarmupAsync, policy)
-	})
-
-	t.Run("fallback to global config for vector index", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key, common.WarmupDisable)
-		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key)
-		policy := getIndexWarmupPolicy(
-			&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector},
-			&querypb.FieldIndexInfo{},
-		)
-		assert.Equal(t, common.WarmupDisable, policy)
-	})
-
-	t.Run("fallback to global config for vector index async", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key, common.WarmupAsync)
-		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key)
-		policy := getIndexWarmupPolicy(
-			&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector},
-			&querypb.FieldIndexInfo{},
-		)
-		assert.Equal(t, common.WarmupAsync, policy)
-	})
 }
 
 func TestGetLoadIndexWarmupPolicy(t *testing.T) {
@@ -715,6 +629,24 @@ func TestIsExternalCollectionLazyLoad(t *testing.T) {
 		assert.True(t, isExternalCollectionLazyLoad(schema))
 	})
 
+	t.Run("external_vector_without_raw_warmup_follows_vector_field", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.Key, common.WarmupDisable)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.Key)
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key, common.WarmupSync)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "ext_vector",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "source_vector",
+				},
+			},
+		}
+		assert.True(t, isExternalCollectionLazyLoad(schema))
+	})
+
 	t.Run("milvus_table_real_pk_forces_eager_load", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			ExternalSpec: `{"format":"milvus-table"}`,
@@ -731,5 +663,22 @@ func TestIsExternalCollectionLazyLoad(t *testing.T) {
 			},
 		}
 		assert.False(t, isExternalCollectionLazyLoad(schema))
+	})
+
+	t.Run("external_vector_follows_raw_field_warmup", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key, common.WarmupSync)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "ext_vector",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "source_vector",
+					TypeParams:    []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+				},
+			},
+		}
+		assert.True(t, isExternalCollectionLazyLoad(schema))
 	})
 }

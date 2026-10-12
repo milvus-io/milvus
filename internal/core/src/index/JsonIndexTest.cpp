@@ -35,6 +35,7 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -178,6 +179,7 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
 }  // namespace
 
 TEST(JsonIndexTest, TestJsonContains) {
+    milvus::test::ExprBatchSizeGuard batch_size_guard(8);
     std::vector<std::string> json_raw_data = {
         R"(1)",
         R"("a simple string")",
@@ -204,6 +206,9 @@ TEST(JsonIndexTest, TestJsonContains) {
         R"({"a": []})",
         R"({"a": [0, 2, 3]})",
         R"({"a": [{"b": 1}, 2.0, 3.0, "4", true, [1, 3.0], null]})",
+        R"({"a": [9007199254740992]})",
+        R"({"a": [9007199254740993]})",
+        R"({"a": [9007199254740994]})",
     };
 
     auto json_path = "/a";
@@ -294,6 +299,43 @@ TEST(JsonIndexTest, TestJsonContains) {
             EXPECT_TRUE(result[id]);
         }
     }
+
+    proto::plan::GenericValue int_value;
+    int_value.set_int64_val(1);
+    proto::plan::GenericValue string_value;
+    string_value.set_string_val("4");
+    auto mixed_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
+        proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+        false,
+        std::vector<proto::plan::GenericValue>{int_value, string_value});
+    auto mixed_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, mixed_expr);
+    auto mixed_result = query::ExecuteQueryExpr(
+        mixed_plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(mixed_result.count(), 3);
+    EXPECT_TRUE(mixed_result[17]);
+    EXPECT_TRUE(mixed_result[18]);
+    EXPECT_TRUE(mixed_result[24]);
+
+    proto::plan::GenericValue large_int_value;
+    large_int_value.set_int64_val(9007199254740993LL);
+    auto large_int_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
+        proto::plan::JSONContainsExpr_JSONOp_Contains,
+        true,
+        std::vector<proto::plan::GenericValue>{large_int_value});
+    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+        large_int_expr, segment.get(), json_raw_data.size()));
+    EXPECT_EQ(milvus::test::EvalExprBatchSizes(
+                  large_int_expr, segment.get(), json_raw_data.size()),
+              (std::vector<int64_t>{8, 8, 8, 4}));
+    auto large_int_plan = std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, large_int_expr);
+    auto large_int_result = query::ExecuteQueryExpr(
+        large_int_plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(large_int_result.count(), 1);
+    EXPECT_TRUE(large_int_result[26]);
 }
 
 TEST(JsonIndexTest, TestJsonCast) {
@@ -416,7 +458,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     // Build with enough rows to produce large null_offset and
     // non_exist_offset arrays (each > FILE_SLICE_SIZE = 64 bytes).
     // - invalid row   -> null_offset + non_exist_offset (8 bytes per entry)
-    // - {"b": 1}      -> non_exist_offset only (key "a" doesn't exist)
+    // - {"b": 1}      -> null_offset + non_exist_offset (key "a" doesn't
+    //                    exist, so the typed comparison value is invalid)
     // - {"a": 1.0}    -> valid data (neither offset)
     // 20 invalid + 20 missing-path rows make both files slice reliably.
     constexpr int kInvalidRows = 20;
@@ -518,7 +561,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto result = CompactIndexDatasByKey(
             INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), partial);
         EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, kInvalidRows * sizeof(size_t));
+        EXPECT_EQ(result.size_,
+                  (kInvalidRows + kMissingPathRows) * sizeof(size_t));
     }
 
     // --- Verify the fix: CompactIndexDatasByKey with non_exist_offset ---

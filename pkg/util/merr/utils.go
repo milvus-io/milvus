@@ -457,6 +457,15 @@ func WrapErrServiceUnavailableMsg(fmt string, args ...any) error {
 	return wrapMsg(ErrServiceUnavailable, fmt, args...)
 }
 
+// WrapErrServiceUnavailableErr classifies an untyped dependency or transport
+// failure as retriable service unavailability while preserving its cause.
+func WrapErrServiceUnavailableErr(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrServiceUnavailableMsg(format, args...)
+	}
+	return wrapInner(ErrServiceUnavailable, formatMsg(format, args...), err)
+}
+
 func WrapErrServiceMemoryLimitExceeded(predict, limit float32, msg ...string) error {
 	err := wrapFields(ErrServiceMemoryLimitExceeded,
 		value("predict(MB)", toMB(float64(predict))),
@@ -680,6 +689,15 @@ func WrapErrCollectionSchemaVersionNotReady(collection any, consistentSegments, 
 		fmt.Sprintf("%d/%d segments are consistent, required 100%%", consistentSegments, totalSegments),
 		value("collection", collection),
 	)
+}
+
+// WrapErrCollectionPartialUpdateConflictErr relabels a CAS rejection as a
+// non-retriable client result while preserving the original error chain.
+func WrapErrCollectionPartialUpdateConflictErr(err error, format string, args ...any) error {
+	if err == nil {
+		return wrapMsg(ErrCollectionPartialUpdateConflict, format, args...)
+	}
+	return wrapInner(ErrCollectionPartialUpdateConflict, formatMsg(format, args...), err)
 }
 
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {

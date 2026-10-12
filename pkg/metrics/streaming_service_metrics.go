@@ -41,6 +41,7 @@ const (
 	WALChannelTermLabelName               = "term"
 	WALNameLabelName                      = "wal_name"
 	WALTxnTypeLabelName                   = "txn_type"
+	WALVChannelLabelName                  = "vchannel"
 	StatusLabelName                       = statusLabelName
 	StreamingNodeLabelName                = "streaming_node"
 	NodeIDLabelName                       = nodeIDLabelName
@@ -193,6 +194,21 @@ var (
 		Buckets: messageBytesBuckets,
 	}, WALChannelLabelName)
 
+	StreamingNodePartialUpdateVersionIndexBytes = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
+		Name: "partial_update_version_index_bytes",
+		Help: "Estimated bytes used by the partial update primary-key version index",
+	})
+
+	StreamingNodePartialUpdateVersionIndexMaxBytes = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
+		Name: "partial_update_version_index_max_bytes",
+		Help: "Configured node-wide byte limit for the partial update primary-key version index",
+	})
+
+	StreamingNodePartialUpdateVersionIndexMissedWrites = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "partial_update_version_index_missed_writes_total",
+		Help: "Committed writes with primary keys omitted because the partial update version index budget was exhausted",
+	})
+
 	// WAL WAL metrics
 	WALInfo = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "info",
@@ -278,6 +294,11 @@ var (
 		Name: "growing_segment_bytes",
 		Help: "Bytes of segment growing on wal",
 	}, WALChannelLabelName, WALSegmentLevelLabelName)
+
+	WALGrowingSegmentFlushPressureBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_flush_pressure_bytes",
+		Help: "Runtime bytes used by WAL growing segment flush pressure decisions",
+	})
 
 	WALGrowingSegmentHWMBytes = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "growing_segment_hwm_bytes",
@@ -460,6 +481,11 @@ var (
 		Help: "Current info of recovery storage on current wal",
 	}, WALChannelLabelName, WALChannelTermLabelName, WALRecoveryStorageStateLabelName)
 
+	WALRecoveryObservedTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_observed_time_tick",
+		Help: "the latest timetick observed by recovery storage",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
 	WALRecoveryInMemTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "recovery_in_mem_time_tick",
 		Help: "the final timetick tick of recovery storage seen",
@@ -468,6 +494,21 @@ var (
 	WALRecoveryPersistedTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "recovery_persisted_time_tick",
 		Help: "the final persisted timetick tick of recovery storage seen",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryTailBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_tail_bytes",
+		Help: "Logical bytes observed after the catalog-published recovery checkpoint",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryBlockingBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_blocking_bytes",
+		Help: "Logical bytes observed after the continuous completed recovery frontier",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryPublishLagBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_publish_lag_bytes",
+		Help: "Logical bytes completed after the catalog-published recovery checkpoint",
 	}, WALChannelLabelName, WALChannelTermLabelName)
 
 	WALRecoveryInconsistentEventTotal = newWALCounterVec(prometheus.CounterOpts{
@@ -479,6 +520,34 @@ var (
 		Name: "recovery_is_on_persisting",
 		Help: "Is recovery storage on persisting",
 	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	// vchannel already encodes its pchannel, so these per-vchannel idempotency
+	// window metrics intentionally carry only node_id + vchannel (no redundant
+	// pchannel label). The interceptor deletes a vchannel's series on Close.
+	WALIdempotencyWindowEntries = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "idempotency_window_entries",
+		Help: "Current retained idempotency key entries in idempotency window",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyWindowInflight = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "idempotency_window_inflight",
+		Help: "Current inflight idempotency key entries in idempotency window",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyDuplicateTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_duplicate_total",
+		Help: "Total duplicate idempotent write hits",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyEvictionTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_eviction_total",
+		Help: "Total idempotency key entries evicted from idempotency windows",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyReaderDedupDropTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_reader_physical_dedup_drop_total",
+		Help: "Total physically duplicated non-timetick messages dropped by reader reorder buffer",
+	}, WALChannelLabelName, WALScannerModelLabelName)
 
 	WALDelegatorEmptyTimeTickFilteredTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "delegator_empty_time_tick_filtered_total",
@@ -616,6 +685,9 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodeConsumerTotal)
 	registry.MustRegister(StreamingNodeConsumeInflightTotal)
 	registry.MustRegister(StreamingNodeConsumeBytes)
+	registry.MustRegister(StreamingNodePartialUpdateVersionIndexBytes)
+	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMaxBytes)
+	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMissedWrites)
 
 	registerWAL(registry)
 	RegisterLoggingMetrics(registry)
@@ -642,6 +714,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALInsertBytes)
 	registry.MustRegister(WALDeleteRowsTotal)
 	registry.MustRegister(WALGrowingSegmentBytes)
+	registry.MustRegister(WALGrowingSegmentFlushPressureBytes)
 	registry.MustRegister(WALGrowingSegmentRowsTotal)
 	registry.MustRegister(WALGrowingSegmentHWMBytes)
 	registry.MustRegister(WALGrowingSegmentLWMBytes)
@@ -677,10 +750,19 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALFlusherInfo)
 	registry.MustRegister(WALFlusherTimeTick)
 	registry.MustRegister(WALRecoveryInfo)
+	registry.MustRegister(WALRecoveryObservedTimeTick)
 	registry.MustRegister(WALRecoveryInMemTimeTick)
 	registry.MustRegister(WALRecoveryPersistedTimeTick)
+	registry.MustRegister(WALRecoveryTailBytes)
+	registry.MustRegister(WALRecoveryBlockingBytes)
+	registry.MustRegister(WALRecoveryPublishLagBytes)
 	registry.MustRegister(WALRecoveryInconsistentEventTotal)
 	registry.MustRegister(WALRecoveryIsOnPersisting)
+	registry.MustRegister(WALIdempotencyWindowEntries)
+	registry.MustRegister(WALIdempotencyWindowInflight)
+	registry.MustRegister(WALIdempotencyDuplicateTotal)
+	registry.MustRegister(WALIdempotencyEvictionTotal)
+	registry.MustRegister(WALIdempotencyReaderDedupDropTotal)
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)
 	registry.MustRegister(WALFlusherEmptyTimeTickFilteredTotal)
@@ -742,6 +824,13 @@ func newStreamingNodeGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prome
 	opts.Subsystem = typeutil.StreamingNodeRole
 	labels := mergeLabel(extra...)
 	return prometheus.NewGaugeVec(opts, labels)
+}
+
+func newStreamingNodeCounterVec(opts prometheus.CounterOpts, extra ...string) *prometheus.CounterVec {
+	opts.Namespace = milvusNamespace
+	opts.Subsystem = typeutil.StreamingNodeRole
+	labels := mergeLabel(extra...)
+	return prometheus.NewCounterVec(opts, labels)
 }
 
 func newStreamingNodeHistogramVec(opts prometheus.HistogramOpts, extra ...string) *prometheus.HistogramVec {

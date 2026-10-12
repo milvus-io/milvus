@@ -51,7 +51,20 @@ type ChunkObjectInfo struct {
 // ChunkManager is to manager chunks.
 // Include Read, Write, Remove chunks.
 type ChunkManager interface {
-	// RootPath returns current root path.
+	// Paths passed to ChunkManager are complete keys in the backend namespace,
+	// and implementations never prepend RootPath themselves:
+	//   - remote keys are bucket-relative object keys that already include the
+	//     storage prefix minio.rootPath (for example, files/insert_log/...);
+	//     they are not URIs and do not start with a slash
+	//   - local keys are complete filesystem paths that already include the
+	//     storage prefix localStorage.path (for example,
+	//     /var/lib/milvus/data/insert_log/...)
+	// Storage V3 manifests and the loon filesystem use exactly the same keys
+	// (the loon filesystem is rooted at the bucket, or at "/" for local; see
+	// storagev2.LoonFSRootPath), so a path never needs conversion between the
+	// manifest, the ChunkManager and the disk. WalkWithPrefix returns FilePath
+	// values in the same namespace.
+	// RootPath returns the storage prefix (minio.rootPath or localStorage.path).
 	RootPath() string
 	// Path returns path of @filePath.
 	Path(ctx context.Context, filePath string) (string, error)

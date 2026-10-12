@@ -315,6 +315,25 @@ func NewExportSnapshotOption(name string, collectionName string, targetS3Path st
 	}
 }
 
+type GetExportSnapshotStateOption interface {
+	Request() *milvuspb.GetExportSnapshotStateRequest
+}
+
+type getExportSnapshotStateOption struct {
+	jobID int64
+}
+
+func (opt *getExportSnapshotStateOption) Request() *milvuspb.GetExportSnapshotStateRequest {
+	return &milvuspb.GetExportSnapshotStateRequest{
+		Base:  &commonpb.MsgBase{},
+		JobId: opt.jobID,
+	}
+}
+
+func NewGetExportSnapshotStateOption(jobID int64) *getExportSnapshotStateOption {
+	return &getExportSnapshotStateOption{jobID: jobID}
+}
+
 // GetRestoreSnapshotStateOption interface for getting restore snapshot state options
 type GetRestoreSnapshotStateOption interface {
 	Request() *milvuspb.GetRestoreSnapshotStateRequest

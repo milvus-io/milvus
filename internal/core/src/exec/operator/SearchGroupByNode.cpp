@@ -80,10 +80,11 @@ PhySearchGroupByNode::GetOutput() {
     auto op_context = query_context_->get_op_context();
     auto search_result = query_context_->get_search_result();
 
-    search_info_.array_offsets_ = query_context_->get_array_offsets();
+    search_info_.struct_element_offsets_ =
+        query_context_->get_struct_element_offsets();
     if (search_result.element_level_) {
-        AssertInfo(search_info_.array_offsets_ != nullptr,
-                   "Array offsets not available");
+        AssertInfo(search_info_.struct_element_offsets_ != nullptr,
+                   "Struct element offsets not available");
     }
 
     if (search_result.vector_iterators_.has_value()) {
@@ -103,7 +104,9 @@ PhySearchGroupByNode::GetOutput() {
                                     search_result.topk_per_nq_prefix_sum_,
                                     search_result.element_level_
                                         ? &search_result.element_indices_
-                                        : nullptr);
+                                        : nullptr,
+                                    &search_result,
+                                    query_context_->get_read_snapshot().get());
         search_result.composite_group_by_values_ =
             std::move(composite_group_by_values);
         search_result.group_size_ = search_info_.group_size_;

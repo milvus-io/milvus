@@ -21,31 +21,11 @@
 #include "storage/Types.h"
 
 /**
- * @brief Creates a shared pointer to Properties from CStorageConfig
- *
- * This utility function converts a CStorageConfig structure into a Properties
- * object by calling the FFI properties_create function. All configuration fields
- * from CStorageConfig are mapped to corresponding key-value pairs in Properties.
- *
- * The following fields are converted:
- * - String fields: address, bucket_name, access_key_id, access_key_value,
- *   root_path, storage_type, cloud_provider, iam_endpoint, log_level,
- *   region, ssl_ca_cert, gcp_credential_json
- * - Boolean fields: use_ssl, use_iam, use_virtual_host, use_custom_part_upload
- * - Integer fields: request_timeout_ms, max_connections
- *
- * @param c_storage_config The storage configuration to convert
- * @return std::shared_ptr<Properties> Shared pointer to the created Properties
- * @throws std::runtime_error If properties_create fails with error message from FFI
- */
-std::shared_ptr<LoonProperties>
-MakePropertiesFromStorageConfig(CStorageConfig c_storage_config);
-
-/**
  * @brief Create internal API Properties from CStorageConfig
- * Similar to MakePropertiesFromStorageConfig but creates a Properties
- * object using the internal milvus_storage::api interface instead of FFI.
- * All configuration fields from CStorageConfig are mapped to properties.
+ *
+ * Creates a Properties object using the internal milvus_storage::api
+ * interface. All configuration fields from CStorageConfig are mapped to
+ * properties.
  *
  * @param c_storage_config The storage configuration to convert
  * @return Shared pointer to milvus_storage::api::Properties
@@ -54,16 +34,22 @@ std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config);
 
 /**
- * @brief Create Properties for local filesystem storage
+ * @brief fs.root_path handed to the loon / Arrow filesystem for a storage
+ * config.
  *
- * Creates a minimal Properties object configured for local file storage
- * with the specified path as the root.
- *
- * @param c_path Local filesystem path to use as storage root
- * @return Shared pointer to Properties configured for local storage
+ * Milvus keys already carry the storage prefix: localStorage.path for local
+ * (`/var/lib/milvus/data/insert_log/...`) and minio.rootPath for remote
+ * (`files/insert_log/...`). The filesystem therefore has to be rooted at the
+ * namespace root, which is the bucket for remote (milvus-storage never
+ * applies root_path there) and "/" for local. Rooting the local
+ * SubTreeFileSystem at localStorage.path joins the prefix twice
+ * (milvus-storage #351, milvus #53051), making complete keys differ from their
+ * physical locations.
  */
-std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalLocalProperies(const char* c_path);
+inline constexpr const char* kLoonLocalFSRootPath = "/";
+
+std::string
+LoonFSRootPath(const std::string& storage_type, const std::string& root_path);
 
 /**
  * @brief Convert StorageConfig to C-style CStorageConfig
@@ -99,14 +85,15 @@ GetLoonManifest(
  * Emits two property families from a single external_spec JSON:
  *   - extfs.{collectionID}.* — storage-layer: credentials, endpoint, bucket,
  *     region, SSL, IAM. Three-layer model:
- *       Layer 0: zero-init bool fields (no fs.* inheritance — Milvus-internal
- *                credentials must never leak into external-table scope).
+ *       Layer 0: zero-init bool fields and apply the process-local External
+ *                Table IOPS policy (no fs.* IOPS inheritance).
  *       Layer 1: derive storage_type / use_ssl / bucket_name / address from
  *                the external_source URI (Milvus form by default).
  *       Layer 2: apply external_spec.extfs JSON with allowlist gating.
- *       Post-process: AWS-form swap + Tier-1/2 endpoint derivation.
+ *       Post-process: explicit endpoint_url mapping, or the legacy AWS-form
+ *       swap + Tier-1/2 endpoint derivation when endpoint_url is absent.
  *   - format-layer — per-format keys derived from spec.format (e.g.
- *     iceberg.snapshot_id when format="iceberg-table").
+ *     reader.exttable.snapshot_id when format="iceberg-table").
  *
  * The caller MUST have run ValidateExternalSource (Go side) first — this
  * function asserts non-empty scheme and host on external_source.

@@ -1,10 +1,8 @@
 package column
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 type ColumnGeometryWKT struct {
@@ -21,19 +19,12 @@ func (c *ColumnGeometryWKT) Type() entity.FieldType {
 	return entity.FieldTypeGeometry
 }
 
-// Len returns column values length.
+// Len returns the logical row count.
 func (c *ColumnGeometryWKT) Len() int {
-	return len(c.values)
+	return c.genericColumnBase.Len()
 }
 
 func (c *ColumnGeometryWKT) Slice(start, end int) Column {
-	l := c.Len()
-	if start > l {
-		start = l
-	}
-	if end == -1 || end > l {
-		end = l
-	}
 	return &ColumnGeometryWKT{
 		genericColumnBase: c.genericColumnBase.slice(start, end),
 	}
@@ -41,14 +32,11 @@ func (c *ColumnGeometryWKT) Slice(start, end int) Column {
 
 // Get returns value at index as interface{}.
 func (c *ColumnGeometryWKT) Get(idx int) (interface{}, error) {
-	if idx < 0 || idx >= c.Len() {
-		return nil, errors.New("index out of range")
-	}
-	return c.values[idx], nil
+	return c.genericColumnBase.Get(idx)
 }
 
 func (c *ColumnGeometryWKT) GetAsString(idx int) (string, error) {
-	return c.ValueByIdx(idx)
+	return c.genericColumnBase.GetAsString(idx)
 }
 
 // FieldData return column data mapped to schemapb.FieldData.
@@ -59,20 +47,12 @@ func (c *ColumnGeometryWKT) FieldData() *schemapb.FieldData {
 
 // ValueByIdx returns value of the provided index.
 func (c *ColumnGeometryWKT) ValueByIdx(idx int) (string, error) {
-	if idx < 0 || idx >= c.Len() {
-		return "", errors.New("index out of range")
-	}
-	return c.values[idx], nil
+	return c.genericColumnBase.Value(idx)
 }
 
 // AppendValue append value into column.
 func (c *ColumnGeometryWKT) AppendValue(i interface{}) error {
-	s, ok := i.(string)
-	if !ok {
-		return errors.New("expect geometry WKT type(string)")
-	}
-	c.values = append(c.values, s)
-	return nil
+	return c.genericColumnBase.AppendValue(i)
 }
 
 // Data returns column data.

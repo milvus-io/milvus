@@ -40,9 +40,14 @@ func (s *ScannerHelper) Done() <-chan struct{} {
 	return s.notifier.FinishChan()
 }
 
+// Cancel asks the scanner task to stop without waiting for it to finish.
+func (s *ScannerHelper) Cancel() {
+	s.notifier.Cancel()
+}
+
 // Close closes the scanner, block until the Finish is called.
 func (s *ScannerHelper) Close() error {
-	s.notifier.Cancel()
+	s.Cancel()
 	return s.notifier.BlockAndGetResult()
 }
 

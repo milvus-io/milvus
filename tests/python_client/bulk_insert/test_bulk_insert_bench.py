@@ -1,30 +1,26 @@
+import json
 import logging
 import time
-import pytest
-from pymilvus import DataType
-import numpy as np
+import uuid
 from pathlib import Path
+
+import pytest
+import requests
 from base.client_base import TestcaseBase
 from common import common_func as cf
-from common import common_type as ct
-from common.milvus_sys import MilvusSys
-from common.common_type import CaseLabel, CheckTasks
-from utils.util_log import test_log as log
 from common.bulk_insert_data import (
-    prepare_bulk_insert_json_files,
+    DataField as df,
+)
+from common.bulk_insert_data import (
     prepare_bulk_insert_new_json_files,
     prepare_bulk_insert_numpy_files,
     prepare_bulk_insert_parquet_files,
-    prepare_bulk_insert_csv_files,
-    DataField as df,
 )
-import json
-import requests
-import time
-import uuid
+from common.common_type import CaseLabel
+from common.milvus_sys import MilvusSys
+from pymilvus import DataType
+from utils.util_log import test_log as log
 from utils.util_log import test_log as logger
-from minio import Minio
-from minio.error import S3Error
 
 
 def logger_request_response(response, url, tt, headers, data, str_data, str_response, method):
@@ -32,19 +28,24 @@ def logger_request_response(response, url, tt, headers, data, str_data, str_resp
         data = data[:1000] + "..." + data[-1000:]
     try:
         if response.status_code == 200:
-            if ('code' in response.json() and response.json()["code"] == 200) or (
-                    'Code' in response.json() and response.json()["Code"] == 0):
+            if ("code" in response.json() and response.json()["code"] == 200) or (
+                "Code" in response.json() and response.json()["Code"] == 0
+            ):
                 logger.debug(
-                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {str_data}, \nresponse: {str_response}")
+                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {str_data}, \nresponse: {str_response}"
+                )
             else:
                 logger.debug(
-                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}")
+                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}"
+                )
         else:
             logger.debug(
-                f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}")
+                f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}"
+            )
     except Exception as e:
         logger.debug(
-            f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}, \nerror: {e}")
+            f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}, \nerror: {e}"
+        )
 
 
 class Requests:
@@ -52,69 +53,68 @@ class Requests:
         self.url = url
         self.api_key = api_key
         self.headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "RequestId": str(uuid.uuid1()),
         }
 
     def update_headers(self):
         headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "RequestId": str(uuid.uuid1()),
         }
         return headers
 
     def post(self, url, headers=None, data=None, params=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
-        str_data = data[:200] + '...' + data[-200:] if len(data) > 400 else data
+        str_data = data[:200] + "..." + data[-200:] if len(data) > 400 else data
         t0 = time.time()
         response = requests.post(url, headers=headers, data=data, params=params)
         tt = time.time() - t0
-        str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
+        str_response = response.text[:200] + "..." + response.text[-200:] if len(response.text) > 400 else response.text
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "post")
         return response
 
     def get(self, url, headers=None, params=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
-        str_data = data[:200] + '...' + data[-200:] if len(data) > 400 else data
+        str_data = data[:200] + "..." + data[-200:] if len(data) > 400 else data
         t0 = time.time()
         if data is None or data == "null":
             response = requests.get(url, headers=headers, params=params)
         else:
             response = requests.get(url, headers=headers, params=params, data=data)
         tt = time.time() - t0
-        str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
+        str_response = response.text[:200] + "..." + response.text[-200:] if len(response.text) > 400 else response.text
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "get")
         return response
 
     def put(self, url, headers=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
-        str_data = data[:200] + '...' + data[-200:] if len(data) > 400 else data
+        str_data = data[:200] + "..." + data[-200:] if len(data) > 400 else data
         t0 = time.time()
         response = requests.put(url, headers=headers, data=data)
         tt = time.time() - t0
-        str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
+        str_response = response.text[:200] + "..." + response.text[-200:] if len(response.text) > 400 else response.text
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "put")
         return response
 
     def delete(self, url, headers=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
-        str_data = data[:200] + '...' + data[-200:] if len(data) > 400 else data
+        str_data = data[:200] + "..." + data[-200:] if len(data) > 400 else data
         t0 = time.time()
         response = requests.delete(url, headers=headers, data=data)
         tt = time.time() - t0
-        str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
+        str_response = response.text[:200] + "..." + response.text[-200:] if len(response.text) > 400 else response.text
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "delete")
         return response
 
 
 class ImportJobClient(Requests):
-
     def __init__(self, endpoint, token):
         super().__init__(url=endpoint, api_key=token)
         self.endpoint = endpoint
@@ -124,31 +124,29 @@ class ImportJobClient(Requests):
 
     def update_headers(self):
         headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': str(uuid.uuid1())
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "RequestId": str(uuid.uuid1()),
         }
         return headers
 
     def list_import_jobs(self, payload, db_name="default"):
         payload["dbName"] = db_name
         data = payload
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/list'
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/list"
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def create_import_jobs(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/create'
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/create"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def get_import_job_progress(self, task_id):
-        payload = {
-            "jobId": task_id
-        }
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/get_progress'
+        payload = {"jobId": task_id}
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/get_progress"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
@@ -160,7 +158,7 @@ class ImportJobClient(Requests):
         while time.time() - t0 < timeout:
             for task_id in task_id_list:
                 res = self.get_import_job_progress(task_id)
-                if res['data']['state'] == "Completed":
+                if res["data"]["state"] == "Completed":
                     success_states[task_id] = True
                 else:
                     success_states[task_id] = False
@@ -172,22 +170,12 @@ class ImportJobClient(Requests):
         states = []
         for task_id in task_id_list:
             res = self.get_import_job_progress(task_id)
-            states.append({
-                "task_id": task_id,
-                "state": res['data']
-            })
+            states.append({"task_id": task_id, "state": res["data"]})
         return success, states
 
 
 default_vec_only_fields = [df.vec_field]
-default_multi_fields = [
-    df.vec_field,
-    df.int_field,
-    df.string_field,
-    df.bool_field,
-    df.float_field,
-    df.array_int_field
-]
+default_multi_fields = [df.vec_field, df.int_field, df.string_field, df.bool_field, df.float_field, df.array_int_field]
 default_vec_n_int_fields = [df.vec_field, df.int_field, df.array_int_field]
 
 
@@ -207,17 +195,16 @@ def entity_suffix(entities):
 
 class TestcaseBaseBulkInsert(TestcaseBase):
     import_job_client = None
+
     @pytest.fixture(scope="function", autouse=True)
     def init_minio_client(self, minio_host):
         Path("/tmp/bulk_insert_data").mkdir(parents=True, exist_ok=True)
         self._connect()
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         ms = MilvusSys()
         minio_port = "9000"
         self.minio_endpoint = f"{minio_host}:{minio_port}"
-        self.bucket_name = ms.data_nodes[0]["infos"]["system_configurations"][
-            "minio_bucket_name"
-        ]
+        self.bucket_name = ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
 
     @pytest.fixture(scope="function", autouse=True)
     def init_import_client(self, host, port, user, password):
@@ -225,7 +212,6 @@ class TestcaseBaseBulkInsert(TestcaseBase):
 
 
 class TestBulkInsertPerf(TestcaseBaseBulkInsert):
-
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("dim", [128])  # 128
@@ -233,7 +219,9 @@ class TestBulkInsertPerf(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("file_nums", [1])
     @pytest.mark.parametrize("array_len", [100])
     @pytest.mark.parametrize("enable_dynamic_field", [False])
-    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, file_size, file_nums, array_len, enable_dynamic_field):
+    def test_bulk_insert_all_field_with_parquet(
+        self, auto_id, dim, file_size, file_nums, array_len, enable_dynamic_field
+    ):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -350,7 +338,6 @@ class TestBulkInsertPerf(TestcaseBaseBulkInsert):
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt} with states:{states}")
         assert success
-
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])

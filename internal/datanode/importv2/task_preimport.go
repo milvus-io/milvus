@@ -118,11 +118,14 @@ func (t *PreImportTask) Cancel() {
 }
 
 func (t *PreImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.ctx)
+	// Share the running task's context instead of deriving a new one. The
+	// goroutines started by Execute hold the original ctx, and taskManager
+	// cancels whatever the map entry carries; a derived context would make
+	// that cancellation a no-op on the work actually in flight.
 	return &PreImportTask{
 		PreImportTask: typeutil.Clone(t.PreImportTask),
-		ctx:           ctx,
-		cancel:        cancel,
+		ctx:           t.ctx,
+		cancel:        t.cancel,
 		partitionIDs:  t.GetPartitionIDs(),
 		vchannels:     t.GetVchannels(),
 		schema:        t.GetSchema(),
@@ -139,7 +142,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		mlog.Int("bufferSize", bufferSize),
 		mlog.Int64("taskSlot", t.GetSlots()),
 		mlog.Any("files", t.req.GetImportFiles()),
-		mlog.Any("schema", t.GetSchema()),
+		mlog.FieldSchema(t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 	files := lo.Map(t.GetFileStats(),
@@ -209,6 +212,10 @@ func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) er
 			return err
 		}
 		err = CheckRowsEqual(t.GetSchema(), data)
+		if err != nil {
+			return err
+		}
+		err = CheckStructArrayConsistency(t.GetSchema(), data)
 		if err != nil {
 			return err
 		}

@@ -15,11 +15,19 @@
 // limitations under the License.
 #pragma once
 
+#include <optional>
+#include <span>
+#include <utility>
+#include <vector>
+
 #include "common/Array.h"
+#include "common/ColumnarArrayChunkBuilder.h"
+#include "common/ArrayValue.h"
 #include "common/FastMem.h"
-#include "common/VectorTrait.h"
 #include "common/Utils.h"
+#include "common/VectorTrait.h"
 #include "storage/MmapManager.h"
+#include "common/EasyAssert.h"
 
 namespace milvus {
 /**
@@ -34,9 +42,11 @@ struct FixedLengthChunk {
         : mmap_descriptor_(descriptor), size_(size) {
         auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
         data_ = (Type*)(mcm->Allocate(mmap_descriptor_, sizeof(Type) * size));
-        AssertInfo(data_ != nullptr,
-                   "failed to create a mmapchunk, map_size={}",
-                   sizeof(Type) * size);
+        if (!(data_ != nullptr)) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to create a mmapchunk, map_size={}",
+                      sizeof(Type) * size);
+        }
     };
     void*
     data() {
@@ -75,8 +85,10 @@ struct VariableLengthChunk {
         uint32_t begin,
         uint32_t length,
         const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
-        throw std::runtime_error(
-            "set should be a template specialization function");
+        ThrowInfo(
+            ErrorCode::UnexpectedError,
+            "{}",
+            std::string("set should be a template specialization function"));
     }
     const ChunkViewType<Type>&
     view(const int i) const {
@@ -95,6 +107,96 @@ struct VariableLengthChunk {
     int64_t size_ = 0;
     FixedVector<ChunkViewType<Type>> data_;
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
+};
+
+template <>
+struct VariableLengthChunk<ArrayValue> {
+ public:
+    VariableLengthChunk() = delete;
+
+    explicit VariableLengthChunk(
+        const uint64_t size, storage::MmapChunkDescriptorPtr mmap_descriptor)
+        : size_(size),
+          mmap_descriptor_(std::move(mmap_descriptor)),
+          data_(size) {
+    }
+
+    void
+    set(const ArrayValue* src,
+        uint32_t begin,
+        uint32_t length,
+        const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
+        AssertInfo(begin <= size_ && length <= size_ - begin,
+                   "failed to set nested ARRAY chunk with length {} from "
+                   "begin {}, chunk size={}",
+                   length,
+                   begin,
+                   size_);
+        if (length == 0) {
+            return;
+        }
+
+        std::vector<uint8_t> valid_data;
+        if (check_data_valid.has_value()) {
+            valid_data.resize(length);
+            for (uint32_t i = 0; i < length; ++i) {
+                valid_data[i] = check_data_valid.value()(begin + i);
+            }
+        }
+
+        auto chunk = CreateMmapColumnarArrayChunkFromValues(
+            std::span<const ArrayValue>(src, length),
+            std::span<const uint8_t>(valid_data.data(), valid_data.size()),
+            mmap_descriptor_);
+        blocks_.push_back(chunk);
+        for (size_t i = 0; i < length; ++i) {
+            data_[begin + i] = chunk->View(i);
+        }
+    }
+
+    void
+    set_rows(std::span<const ScalarFieldProto* const> rows,
+             size_t begin,
+             const proto::schema::TypeSchema& type) {
+        AssertInfo(begin <= size_ && rows.size() <= size_ - begin,
+                   "failed to set nested ARRAY chunk with length {} from "
+                   "begin {}, chunk size={}",
+                   rows.size(),
+                   begin,
+                   size_);
+        if (rows.empty()) {
+            return;
+        }
+
+        auto chunk = CreateMmapColumnarArrayChunkFromProtoRows(
+            rows, type, mmap_descriptor_);
+        blocks_.push_back(chunk);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            data_[begin + i] = chunk->View(i);
+        }
+    }
+
+    const ArrayValueView&
+    view(const int i) const {
+        return data_[i];
+    }
+
+    void*
+    data() {
+        return data_.data();
+    }
+
+    size_t
+    size() {
+        return size_;
+    }
+
+ private:
+    int64_t size_{0};
+    // Keep the descriptor alive until every Chunk tree has been destroyed.
+    storage::MmapChunkDescriptorPtr mmap_descriptor_;
+    FixedVector<ArrayValueView> data_;
+    std::vector<ColumnarArrayChunk::Ptr> blocks_;
 };
 
 // Template specialization for string
@@ -118,7 +220,10 @@ VariableLengthChunk<std::string>::set(
         total_size += src[i].size() + padding_size;
     }
     auto buf = (char*)mcm->Allocate(mmap_descriptor_, total_size);
-    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
+    if (buf == nullptr) {
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to allocate memory from mmap_manager.");
+    }
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].size() + padding_size;
         // string/varchar has default value, only take care of empty case
@@ -154,7 +259,10 @@ VariableLengthChunk<knowhere::sparse::SparseRow<SparseValueType>>::set(
         total_size += src[i].data_byte_size();
     }
     auto buf = (uint8_t*)mcm->Allocate(mmap_descriptor_, total_size);
-    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
+    if (buf == nullptr) {
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to allocate memory from mmap_manager.");
+    }
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].data_byte_size();
         uint8_t* data_ptr = buf + offset;
@@ -187,7 +295,10 @@ VariableLengthChunk<Json>::set(
         total_size += src[i].size() + padding_size;
     }
     auto buf = (char*)mcm->Allocate(mmap_descriptor_, total_size);
-    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
+    if (buf == nullptr) {
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to allocate memory from mmap_manager.");
+    }
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].size() + padding_size;
         if ((check_data_valid.has_value() &&
@@ -227,7 +338,10 @@ VariableLengthChunk<Array>::set(
     }
 
     auto buf = (char*)mcm->Allocate(mmap_descriptor_, total_size);
-    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
+    if (buf == nullptr) {
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to allocate memory from mmap_manager.");
+    }
     char* data_ptr = buf;
     for (auto i = 0; i < length; i++) {
         auto element_type = src[i].get_element_type();

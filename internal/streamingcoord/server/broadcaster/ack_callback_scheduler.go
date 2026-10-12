@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -152,7 +153,7 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 		if err != nil {
-			s.Logger().Warn(context.TODO(), "lock is occupied, delay the ack callback", mlog.Uint64("broadcastID", task.Header().BroadcastID), mlog.Err(err))
+			s.Logger().Warn(context.TODO(), "lock is occupied, delay the ack callback", mlog.FieldBroadcastID(task.Header().BroadcastID), mlog.Err(err))
 			pendingTasks = append(pendingTasks, task)
 			continue
 		}
@@ -168,7 +169,7 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 // 2. Fix incomplete broadcasts by delegating to broadcastScheduler (WAL append + ack + callback + tombstone)
 // 3. Acquire resource key lock and execute ack callback (close done channel → unblock RPC)
 func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadcastTask) {
-	logger := s.Logger().With(mlog.Uint64("broadcastID", bt.Header().BroadcastID))
+	logger := s.Logger().With(mlog.FieldBroadcastID(bt.Header().BroadcastID))
 	ctx := s.notifier.Context()
 
 	if err := bt.BlockUntilAllAck(ctx); err != nil {
@@ -212,7 +213,7 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		if !task.IsAlterReplicateConfigMessage() {
 			continue
 		}
-		s.Logger().Info(ctx, "Marking AlterReplicateConfig task with ignore=true", mlog.Uint64("broadcastID", task.Header().BroadcastID))
+		s.Logger().Info(ctx, "Marking AlterReplicateConfig task with ignore=true", mlog.FieldBroadcastID(task.Header().BroadcastID))
 
 		if err := task.MarkIgnore(); err != nil {
 			panic(fmt.Sprintf("unreachable: MarkIgnore failed on AlterReplicateConfig task %d: %v", task.Header().BroadcastID, err))
@@ -232,7 +233,7 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		}
 		s.Logger().Info(ctx,
 			"Delegating incomplete task to broadcastScheduler",
-			mlog.Uint64("broadcastID", task.Header().BroadcastID),
+			mlog.FieldBroadcastID(task.Header().BroadcastID),
 			mlog.String("messageType", task.msg.MessageType().String()),
 			mlog.Int("pendingVChannels", len(pending.pendingMessages)))
 		if _, err := s.bm.broadcastScheduler.AddTask(ctx, pending); err != nil {
@@ -245,7 +246,7 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 
 // doAckCallback executes the ack callback.
 func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (err error) {
-	logger := s.Logger().With(mlog.Uint64("broadcastID", bt.Header().BroadcastID))
+	logger := s.Logger().With(mlog.FieldBroadcastID(bt.Header().BroadcastID))
 	defer func() {
 		s.rkLockerMu.Lock()
 		g.Unlock()
@@ -273,9 +274,11 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 			TimeTick:               result.TimeTick,
 		}
 	}
-	// call the ack callback until done.
+	// call the ack callback until done, under the persisted trace context.
 	bt.ObserveAckCallbackBegin()
-	if err := s.callMessageAckCallbackUntilDone(s.notifier.Context(), msg, makeMap); err != nil {
+	if err := runAckCallbackWithTrace(s.notifier.Context(), msg, func(spanCtx context.Context) error {
+		return s.callMessageAckCallbackUntilDone(spanCtx, msg, makeMap)
+	}); err != nil {
 		return err
 	}
 	bt.ObserveAckCallbackDone()
@@ -316,9 +319,39 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 	}
 }
 
-// sortByControlChannelTimeTick sorts the tasks by the time tick of the control channel.
+// runAckCallbackWithTrace extracts the persisted trace context from the
+// broadcast task's message Properties and opens a wal.bc_callback
+// span under it, invoking fn with the new ctx. Span is always ended,
+// and errors are recorded on the span.
+func runAckCallbackWithTrace(baseCtx context.Context, msg message.BroadcastMutableMessage, fn func(ctx context.Context) error) error {
+	parentCtx := message.ExtractTraceContext(baseCtx, msg)
+	ctx, span := message.StartSpanForMessage(parentCtx, msg, message.SpanNameWALBCCallback)
+	defer span.End()
+	err := fn(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return err
+}
+
+// sortByControlChannelTimeTick sorts the tasks by the time tick of the control channel,
+// breaking ties by broadcastID.
+//
+// The tick is the primary key: it is the WAL order on the single control channel, which
+// orders every pair of tasks that shares a resource key -- the ack scheduler's only
+// ordering obligation. But a message not broadcast to the control channel has no tick
+// (ControlChannelTimeTick returns 0), and two such tasks tie. sort.Slice is not stable:
+// its permutation of tied elements depends on the whole slice, which differs between
+// clusters (different recovery info), so tied tasks could be ordered differently on the
+// primary and on a secondary. broadcastID is unique and travels with the replicated message, so
+// every cluster breaks the tie the same way.
 func sortByControlChannelTimeTick(tasks []*broadcastTask) {
 	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].ControlChannelTimeTick() < tasks[j].ControlChannelTimeTick()
+		ti, tj := tasks[i].ControlChannelTimeTick(), tasks[j].ControlChannelTimeTick()
+		if ti != tj {
+			return ti < tj
+		}
+		return tasks[i].Header().BroadcastID < tasks[j].Header().BroadcastID
 	})
 }

@@ -14,12 +14,11 @@ These tests verify correct behavior of:
 
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
-from common.common_type import CaseLabel, CheckTasks
+from common.common_type import CaseLabel
 from pymilvus import DataType
-
+from utils.util_log import test_log as log
 
 prefix = "three_valued_logic"
 default_dim = ct.default_dim
@@ -125,15 +124,11 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
 
     def ids_both_null(self):
         """IDs where both nullable_a AND nullable_b are NULL."""
-        return self.get_ids_where(
-            lambda r: r[self.nullable_a_field] is None and r[self.nullable_b_field] is None
-        )
+        return self.get_ids_where(lambda r: r[self.nullable_a_field] is None and r[self.nullable_b_field] is None)
 
     def ids_either_null(self):
         """IDs where nullable_a OR nullable_b is NULL."""
-        return self.get_ids_where(
-            lambda r: r[self.nullable_a_field] is None or r[self.nullable_b_field] is None
-        )
+        return self.get_ids_where(lambda r: r[self.nullable_a_field] is None or r[self.nullable_b_field] is None)
 
     def ids_both_not_null(self):
         """IDs where both nullable_a AND nullable_b are NOT NULL."""
@@ -143,28 +138,24 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
 
     def ids_a_not_null_and_gt(self, value):
         """IDs where nullable_a IS NOT NULL AND nullable_a > value."""
-        return self.get_ids_where(
-            lambda r: r[self.nullable_a_field] is not None and r[self.nullable_a_field] > value
-        )
+        return self.get_ids_where(lambda r: r[self.nullable_a_field] is not None and r[self.nullable_a_field] > value)
 
     def ids_a_null_or_a_gte(self, value):
         """IDs where nullable_a IS NULL OR nullable_a >= value."""
-        return self.get_ids_where(
-            lambda r: r[self.nullable_a_field] is None or r[self.nullable_a_field] >= value
-        )
+        return self.get_ids_where(lambda r: r[self.nullable_a_field] is None or r[self.nullable_a_field] >= value)
 
     def ids_a_null_or_a_gt(self, value):
         """IDs where nullable_a IS NULL OR nullable_a > value."""
-        return self.get_ids_where(
-            lambda r: r[self.nullable_a_field] is None or r[self.nullable_a_field] > value
-        )
+        return self.get_ids_where(lambda r: r[self.nullable_a_field] is None or r[self.nullable_a_field] > value)
 
     def ids_complex_nested(self):
         """IDs for NOT (((A IS NOT NULL) AND (A > 200)) AND (B IS NOT NULL))."""
         # Inner: (A NOT NULL AND A > 200) AND B NOT NULL
         inner = self.get_ids_where(
-            lambda r: (r[self.nullable_a_field] is not None and r[self.nullable_a_field] > 200)
-                      and r[self.nullable_b_field] is not None
+            lambda r: (
+                (r[self.nullable_a_field] is not None and r[self.nullable_a_field] > 200)
+                and r[self.nullable_b_field] is not None
+            )
         )
         # NOT of inner = all IDs except inner
         all_ids = set(row[self.pk_field] for row in self.datas)
@@ -172,9 +163,7 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
 
     def ids_pk_lt_and_a_null(self, pk_limit):
         """IDs where id < pk_limit AND nullable_a IS NULL."""
-        return self.get_ids_where(
-            lambda r: r[self.pk_field] < pk_limit and r[self.nullable_a_field] is None
-        )
+        return self.get_ids_where(lambda r: r[self.pk_field] < pk_limit and r[self.nullable_a_field] is None)
 
     # ========================================================================
     # Basic IS NULL / IS NOT NULL Tests
@@ -188,9 +177,9 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         expected: return rows where nullable_a is NULL
         """
         client = self._client()
-        res = self.query(client, self.collection_name,
-                        filter=f"{self.nullable_a_field} IS NULL",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client, self.collection_name, filter=f"{self.nullable_a_field} IS NULL", output_fields=[self.pk_field]
+        )[0]
 
         expected_ids = self.ids_a_is_null()
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -204,9 +193,9 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         expected: return rows where nullable_a is NOT NULL
         """
         client = self._client()
-        res = self.query(client, self.collection_name,
-                        filter=f"{self.nullable_a_field} IS NOT NULL",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client, self.collection_name, filter=f"{self.nullable_a_field} IS NOT NULL", output_fields=[self.pk_field]
+        )[0]
 
         expected_ids = self.ids_a_is_not_null()
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -226,13 +215,16 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         This is the critical bug fixed in PR #47333.
         """
         client = self._client()
-        res1 = self.query(client, self.collection_name,
-                         filter=f"{self.nullable_a_field} IS NULL",
-                         output_fields=[self.pk_field])[0]
+        res1 = self.query(
+            client, self.collection_name, filter=f"{self.nullable_a_field} IS NULL", output_fields=[self.pk_field]
+        )[0]
 
-        res2 = self.query(client, self.collection_name,
-                         filter=f"NOT ({self.nullable_a_field} IS NOT NULL)",
-                         output_fields=[self.pk_field])[0]
+        res2 = self.query(
+            client,
+            self.collection_name,
+            filter=f"NOT ({self.nullable_a_field} IS NOT NULL)",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_a_is_null()
         ids1 = sorted([r[self.pk_field] for r in res1])
@@ -247,13 +239,13 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         expected: identical results
         """
         client = self._client()
-        res1 = self.query(client, self.collection_name,
-                         filter=f"{self.nullable_a_field} IS NOT NULL",
-                         output_fields=[self.pk_field])[0]
+        res1 = self.query(
+            client, self.collection_name, filter=f"{self.nullable_a_field} IS NOT NULL", output_fields=[self.pk_field]
+        )[0]
 
-        res2 = self.query(client, self.collection_name,
-                         filter=f"NOT ({self.nullable_a_field} IS NULL)",
-                         output_fields=[self.pk_field])[0]
+        res2 = self.query(
+            client, self.collection_name, filter=f"NOT ({self.nullable_a_field} IS NULL)", output_fields=[self.pk_field]
+        )[0]
 
         expected_ids = self.ids_a_is_not_null()
         ids1 = sorted([r[self.pk_field] for r in res1])
@@ -272,9 +264,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         expected: same as IS NULL
         """
         client = self._client()
-        res = self.query(client, self.collection_name,
-                        filter=f"NOT (NOT ({self.nullable_a_field} IS NULL))",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"NOT (NOT ({self.nullable_a_field} IS NULL))",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_a_is_null()
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -288,9 +283,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         expected: same as NOT (IS NULL) = IS NOT NULL
         """
         client = self._client()
-        res = self.query(client, self.collection_name,
-                        filter=f"NOT (NOT (NOT ({self.nullable_a_field} IS NULL)))",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"NOT (NOT (NOT ({self.nullable_a_field} IS NULL)))",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_a_is_not_null()
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -308,9 +306,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         expected: rows where both fields are NULL
         """
         client = self._client()
-        res = self.query(client, self.collection_name,
-                        filter=f"({self.nullable_a_field} IS NULL) AND ({self.nullable_b_field} IS NULL)",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"({self.nullable_a_field} IS NULL) AND ({self.nullable_b_field} IS NULL)",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_both_null()
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -324,9 +325,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         expected: rows where at least one field is NULL
         """
         client = self._client()
-        res = self.query(client, self.collection_name,
-                        filter=f"({self.nullable_a_field} IS NULL) OR ({self.nullable_b_field} IS NULL)",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"({self.nullable_a_field} IS NULL) OR ({self.nullable_b_field} IS NULL)",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_either_null()
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -346,9 +350,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         Tests AND short-circuit fix in PR #47333.
         """
         client = self._client()
-        res = self.query(client, self.collection_name,
-                        filter=f"NOT (({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_b_field} IS NOT NULL))",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"NOT (({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_b_field} IS NOT NULL))",
+            output_fields=[self.pk_field],
+        )[0]
 
         # NOT (both NOT NULL) = at least one is NULL
         expected_ids = self.ids_either_null()
@@ -363,9 +370,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         expected: equivalent to (A IS NOT NULL) AND (B IS NOT NULL)
         """
         client = self._client()
-        res = self.query(client, self.collection_name,
-                        filter=f"NOT (({self.nullable_a_field} IS NULL) OR ({self.nullable_b_field} IS NULL))",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"NOT (({self.nullable_a_field} IS NULL) OR ({self.nullable_b_field} IS NULL))",
+            output_fields=[self.pk_field],
+        )[0]
 
         # NOT (either NULL) = both NOT NULL
         expected_ids = self.ids_both_not_null()
@@ -385,9 +395,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         """
         client = self._client()
         threshold = 250
-        res = self.query(client, self.collection_name,
-                        filter=f"({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_a_field} > {threshold})",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_a_field} > {threshold})",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_a_not_null_and_gt(threshold)
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -402,9 +415,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         """
         client = self._client()
         threshold = 250
-        res = self.query(client, self.collection_name,
-                        filter=f"NOT (({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_a_field} < {threshold}))",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"NOT (({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_a_field} < {threshold}))",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_a_null_or_a_gte(threshold)
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -418,9 +434,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         expected: complement of rows matching inner condition
         """
         client = self._client()
-        res = self.query(client, self.collection_name,
-                        filter=f"NOT ((({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_a_field} > 200)) AND ({self.nullable_b_field} IS NOT NULL))",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"NOT ((({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_a_field} > 200)) AND ({self.nullable_b_field} IS NOT NULL))",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_complex_nested()
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -439,9 +458,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         """
         client = self._client()
         pk_limit = 15
-        res = self.query(client, self.collection_name,
-                        filter=f"({self.pk_field} < {pk_limit}) AND ({self.nullable_a_field} IS NULL)",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"({self.pk_field} < {pk_limit}) AND ({self.nullable_a_field} IS NULL)",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_pk_lt_and_a_null(pk_limit)
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -456,9 +478,12 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         """
         client = self._client()
         threshold = 350
-        res = self.query(client, self.collection_name,
-                        filter=f"({self.nullable_a_field} IS NULL) OR ({self.nullable_a_field} > {threshold})",
-                        output_fields=[self.pk_field])[0]
+        res = self.query(
+            client,
+            self.collection_name,
+            filter=f"({self.nullable_a_field} IS NULL) OR ({self.nullable_a_field} > {threshold})",
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = self.ids_a_null_or_a_gt(threshold)
         actual_ids = sorted([r[self.pk_field] for r in res])
@@ -477,11 +502,15 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         """
         client = self._client()
         vectors = cf.gen_vectors(1, self.dim)
-        search_res = self.search(client, self.collection_name, vectors,
-                                 filter=f"NOT ({self.nullable_a_field} IS NOT NULL)",
-                                 anns_field=self.vector_field,
-                                 limit=100,
-                                 output_fields=[self.pk_field])[0]
+        search_res = self.search(
+            client,
+            self.collection_name,
+            vectors,
+            filter=f"NOT ({self.nullable_a_field} IS NOT NULL)",
+            anns_field=self.vector_field,
+            limit=100,
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = set(self.ids_a_is_null())
         # search_res[0] is the hits for the first query vector
@@ -497,11 +526,15 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         """
         client = self._client()
         vectors = cf.gen_vectors(1, self.dim)
-        search_res = self.search(client, self.collection_name, vectors,
-                                 filter=f"NOT (({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_b_field} IS NOT NULL))",
-                                 anns_field=self.vector_field,
-                                 limit=100,
-                                 output_fields=[self.pk_field])[0]
+        search_res = self.search(
+            client,
+            self.collection_name,
+            vectors,
+            filter=f"NOT (({self.nullable_a_field} IS NOT NULL) AND ({self.nullable_b_field} IS NOT NULL))",
+            anns_field=self.vector_field,
+            limit=100,
+            output_fields=[self.pk_field],
+        )[0]
 
         expected_ids = set(self.ids_either_null())
         # search_res[0] is the hits for the first query vector
@@ -558,32 +591,52 @@ class TestMilvusClientThreeValuedLogicIssue46972(TestMilvusClientV2Base):
         schema.add_field("c16", DataType.DOUBLE, nullable=True)
         schema.add_field("c17", DataType.BOOL, nullable=True)
         schema.add_field("meta_json", DataType.JSON, nullable=True)
-        schema.add_field("tags_array", DataType.ARRAY, element_type=DataType.INT64,
-                         max_capacity=50, nullable=True)
+        schema.add_field("tags_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=50, nullable=True)
 
         self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
         log.info(f"Created collection for issue #46972: {self.collection_name}")
 
         # Create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(self.vector_field, index_type="HNSW", metric_type="L2",
-                               params={"M": 32, "efConstruction": 256})
+        index_params.add_index(
+            self.vector_field, index_type="HNSW", metric_type="L2", params={"M": 32, "efConstruction": 256}
+        )
         self.create_index(client, self.collection_name, index_params=index_params)
 
         # Insert the exact test data from the issue
-        self.datas = [{
-            'id': 1051,
-            'vector': [0.1] * self.dim,
-            'c0': None, 'c1': True, 'c2': 55943, 'c3': 2379.7519128726576, 'c4': None, 'c5': True,
-            'c6': -57942, 'c7': False, 'c8': 'Vaxr5xzbWPHJazy9loD', 'c9': 1682.7331496087677,
-            'c10': None, 'c11': -62195, 'c12': False, 'c13': 71210, 'c14': None,
-            'c15': 2884.9004720171306, 'c16': 4866.809897346821, 'c17': True,
-            'meta_json': {
-                'price': 561, 'color': 'Green', 'active': False,
-                'config': {'version': 7}, 'history': [7, 20, 88], 'random_payload': 12168
-            },
-            'tags_array': [73]
-        }]
+        self.datas = [
+            {
+                "id": 1051,
+                "vector": [0.1] * self.dim,
+                "c0": None,
+                "c1": True,
+                "c2": 55943,
+                "c3": 2379.7519128726576,
+                "c4": None,
+                "c5": True,
+                "c6": -57942,
+                "c7": False,
+                "c8": "Vaxr5xzbWPHJazy9loD",
+                "c9": 1682.7331496087677,
+                "c10": None,
+                "c11": -62195,
+                "c12": False,
+                "c13": 71210,
+                "c14": None,
+                "c15": 2884.9004720171306,
+                "c16": 4866.809897346821,
+                "c17": True,
+                "meta_json": {
+                    "price": 561,
+                    "color": "Green",
+                    "active": False,
+                    "config": {"version": 7},
+                    "history": [7, 20, 88],
+                    "random_payload": 12168,
+                },
+                "tags_array": [73],
+            }
+        ]
 
         self.insert(client, self.collection_name, self.datas)
         self.flush(client, self.collection_name)
@@ -600,40 +653,46 @@ class TestMilvusClientThreeValuedLogicIssue46972(TestMilvusClientV2Base):
     def test_issue_46972_false_or_false_complex_json(self):
         """
         target: test that False OR False = False (not True) with complex JSON expressions
-        method: use the exact expressions from issue #46972
+        method: use the expressions from issue #46972
         expected: left expr is False, right expr is False, combined is False
 
         This is the critical bug fixed in PR #47333: complex expressions with
         JSON fields and nullable fields incorrectly evaluated (False OR False) as True.
+
+        Note: the original issue #46972 expressions contained bare `null is null`
+        / `null is not null` sub-terms, which only ever "worked" by accident — a
+        bare `null` used as a left-value was silently misparsed as a dynamic JSON
+        key. That misparse is now rejected at parse time (a bare `null` is not a
+        valid left-value), so those sub-terms are replaced with their exact
+        semantic equivalents `true` (`null is null`) and `false`
+        (`null is not null`). This keeps every sub-clause's boolean value — and
+        thus the False-OR-False regression coverage — identical.
         """
         client = self._client()
 
         # Block A: Left Expression (should be False for test data)
         expr_left = """
-(((meta_json["config"]["version"] == 9 or (meta_json["history"][0] > 49 or (meta_json["history"][0] > 47 and (meta_json["price"] > 294 and meta_json["price"] < 379)))) and (((meta_json["config"]["version"] == 7 or meta_json["history"][0] > 27) or (tags_array is not null or null is null)) or c17 == false)) or ((((c14 <= 863.28694295187 or (c10 != "kaKmPWPbAaEFnHzX" and c10 != "ZmBmv")) and ((c4 > 1113.2711377477458 or c13 >= -76839) or (meta_json["config"]["version"] == 3 or (meta_json["price"] > 150 and meta_json["price"] < 237)))) and c7 == false) and ((((c1 is not null and null is null) or (c12 == false and meta_json["config"]["version"] == 4)) or (((meta_json["active"] == true and meta_json["color"] == "Blue") and c12 == true) and (c6 is not null or c13 == 180192))) or (c4 < 105376.953125 or ((c15 <= 3484.876420871185 or c1 == false) or (meta_json["config"]["version"] == 9 and c10 != "OjcbvwxZ5LfV2PZNPgS7"))))))
+(((meta_json["config"]["version"] == 9 or (meta_json["history"][0] > 49 or (meta_json["history"][0] > 47 and (meta_json["price"] > 294 and meta_json["price"] < 379)))) and (((meta_json["config"]["version"] == 7 or meta_json["history"][0] > 27) or (tags_array is not null or true)) or c17 == false)) or ((((c14 <= 863.28694295187 or (c10 != "kaKmPWPbAaEFnHzX" and c10 != "ZmBmv")) and ((c4 > 1113.2711377477458 or c13 >= -76839) or (meta_json["config"]["version"] == 3 or (meta_json["price"] > 150 and meta_json["price"] < 237)))) and c7 == false) and ((((c1 is not null and true) or (c12 == false and meta_json["config"]["version"] == 4)) or (((meta_json["active"] == true and meta_json["color"] == "Blue") and c12 == true) and (c6 is not null or c13 == 180192))) or (c4 < 105376.953125 or ((c15 <= 3484.876420871185 or c1 == false) or (meta_json["config"]["version"] == 9 and c10 != "OjcbvwxZ5LfV2PZNPgS7"))))))
 """
 
         # Block B: Right Expression (should be False for test data)
         expr_right = """
-((((((c17 == false or exists(meta_json["non_exist"])) or c14 <= 5363.7872388701035) or meta_json["history"][0] > 72) or (((c4 is not null and c17 == true) and ((c2 < 60835 or c1 is null) or (c5 == false or meta_json["history"][0] > 64))) and ((c6 >= -56376 or c16 is not null) or ((c4 >= 812.9318963654309 and c16 >= 2907.7772038042867) and (meta_json["price"] > 449 and meta_json["price"] < 624))))) or (((((null is not null and c13 < 180192) or (c13 < -71746 or c17 == true)) and ((meta_json["price"] > 407 and meta_json["price"] < 521) and (c8 like "w%" or c14 > 3021.9496428003613))) and (((c12 == false or (meta_json["price"] > 412 and meta_json["price"] < 571)) or (c9 < 1264.220988053753 or c6 != 2063)) or c5 == false)) and (meta_json["active"] == true and meta_json["color"] == "Red"))) or ((((c13 != 54759 and (c7 is null and (c17 == true or c9 <= 1067.5165787120216))) and (((c11 != 36936 or meta_json["history"][0] > 59) or ((meta_json["price"] > 354 and meta_json["price"] < 528) and c9 >= 135.84002581554114)) and ((c0 > 105381.9375 or exists(meta_json["non_exist"])) or (c12 == true or meta_json is null)))) or ((((c14 >= 2547.2285277180335 and c1 == false) and (meta_json["history"][0] > 37 or json_contains(meta_json["k_11"], "o"))) and ((c9 < 2869.0647504243566 and c4 > 449.2640493406897) or (meta_json["config"]["version"] == 9 and c16 < 3626.0660282789318))) and (((c11 <= -57792 or (meta_json["price"] > 320 and meta_json["price"] < 488)) and (meta_json["active"] == false and c3 >= 105383.3671875)) or ((c13 >= -32496 and c5 == true) and (meta_json["active"] == true and meta_json["color"] == "Blue"))))) and c13 <= 180192))
+((((((c17 == false or exists(meta_json["non_exist"])) or c14 <= 5363.7872388701035) or meta_json["history"][0] > 72) or (((c4 is not null and c17 == true) and ((c2 < 60835 or c1 is null) or (c5 == false or meta_json["history"][0] > 64))) and ((c6 >= -56376 or c16 is not null) or ((c4 >= 812.9318963654309 and c16 >= 2907.7772038042867) and (meta_json["price"] > 449 and meta_json["price"] < 624))))) or (((((false and c13 < 180192) or (c13 < -71746 or c17 == true)) and ((meta_json["price"] > 407 and meta_json["price"] < 521) and (c8 like "w%" or c14 > 3021.9496428003613))) and (((c12 == false or (meta_json["price"] > 412 and meta_json["price"] < 571)) or (c9 < 1264.220988053753 or c6 != 2063)) or c5 == false)) and (meta_json["active"] == true and meta_json["color"] == "Red"))) or ((((c13 != 54759 and (c7 is null and (c17 == true or c9 <= 1067.5165787120216))) and (((c11 != 36936 or meta_json["history"][0] > 59) or ((meta_json["price"] > 354 and meta_json["price"] < 528) and c9 >= 135.84002581554114)) and ((c0 > 105381.9375 or exists(meta_json["non_exist"])) or (c12 == true or meta_json is null)))) or ((((c14 >= 2547.2285277180335 and c1 == false) and (meta_json["history"][0] > 37 or json_contains(meta_json["k_11"], "o"))) and ((c9 < 2869.0647504243566 and c4 > 449.2640493406897) or (meta_json["config"]["version"] == 9 and c16 < 3626.0660282789318))) and (((c11 <= -57792 or (meta_json["price"] > 320 and meta_json["price"] < 488)) and (meta_json["active"] == false and c3 >= 105383.3671875)) or ((c13 >= -32496 and c5 == true) and (meta_json["active"] == true and meta_json["color"] == "Blue"))))) and c13 <= 180192))
 """
 
         # Combined expression
         expr_combined = f"({expr_left}) OR ({expr_right})"
 
         # Query with left expression
-        res_left = self.query(client, self.collection_name, filter=expr_left,
-                              output_fields=[self.pk_field])[0]
+        res_left = self.query(client, self.collection_name, filter=expr_left, output_fields=[self.pk_field])[0]
         is_left_true = len(res_left) > 0
 
         # Query with right expression
-        res_right = self.query(client, self.collection_name, filter=expr_right,
-                               output_fields=[self.pk_field])[0]
+        res_right = self.query(client, self.collection_name, filter=expr_right, output_fields=[self.pk_field])[0]
         is_right_true = len(res_right) > 0
 
         # Query with combined expression
-        res_combined = self.query(client, self.collection_name, filter=expr_combined,
-                                  output_fields=[self.pk_field])[0]
+        res_combined = self.query(client, self.collection_name, filter=expr_combined, output_fields=[self.pk_field])[0]
         is_combined_true = len(res_combined) > 0
 
         log.info(f"Expr Left result: {is_left_true} (hits: {len(res_left)})")
@@ -645,8 +704,9 @@ class TestMilvusClientThreeValuedLogicIssue46972(TestMilvusClientV2Base):
         assert not is_right_true, "Right expression should be False for test data"
 
         # The critical check: False OR False should NOT be True
-        assert not is_combined_true, \
+        assert not is_combined_true, (
             f"BUG: (False OR False) evaluated to True! Combined result has {len(res_combined)} hits"
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_issue_46972_simplified_false_or_false(self):
@@ -666,12 +726,9 @@ class TestMilvusClientThreeValuedLogicIssue46972(TestMilvusClientV2Base):
         expr_right = "c4 > 100"
         expr_combined = f"({expr_left}) OR ({expr_right})"
 
-        res_left = self.query(client, self.collection_name, filter=expr_left,
-                              output_fields=[self.pk_field])[0]
-        res_right = self.query(client, self.collection_name, filter=expr_right,
-                               output_fields=[self.pk_field])[0]
-        res_combined = self.query(client, self.collection_name, filter=expr_combined,
-                                  output_fields=[self.pk_field])[0]
+        res_left = self.query(client, self.collection_name, filter=expr_left, output_fields=[self.pk_field])[0]
+        res_right = self.query(client, self.collection_name, filter=expr_right, output_fields=[self.pk_field])[0]
+        res_combined = self.query(client, self.collection_name, filter=expr_combined, output_fields=[self.pk_field])[0]
 
         log.info(f"Simplified test - Left: {len(res_left)}, Right: {len(res_right)}, Combined: {len(res_combined)}")
 
@@ -679,5 +736,4 @@ class TestMilvusClientThreeValuedLogicIssue46972(TestMilvusClientV2Base):
         assert len(res_left) == 0, "NULL > 100 should return 0 results"
         assert len(res_right) == 0, "NULL > 100 should return 0 results"
         # Combined should also be empty
-        assert len(res_combined) == 0, \
-            "Combined (NULL > 100) OR (NULL > 100) should return 0 results"
+        assert len(res_combined) == 0, "Combined (NULL > 100) OR (NULL > 100) should return 0 results"

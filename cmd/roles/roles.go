@@ -32,14 +32,19 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
+	"github.com/milvus-io/milvus/internal/storagev2"
+	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
@@ -52,7 +57,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/gc"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -69,6 +73,28 @@ func init() {
 	metrics.Register(Registry.GoRegistry)
 	metrics.RegisterMetaMetrics(Registry.GoRegistry)
 	metrics.RegisterMsgStreamMetrics(Registry.GoRegistry)
+	metrics.SetFilesystemMetricsCollectFn(func() []metrics.FilesystemMetrics {
+		entries, err := storagev2.ListFilesystemMetrics()
+		if err != nil {
+			mlog.RatedWarn(context.TODO(), rate.Every(time.Minute), "failed to list filesystem metrics", mlog.Err(err))
+			return nil
+		}
+		metricsList := make([]metrics.FilesystemMetrics, 0, len(entries))
+		for _, entry := range entries {
+			metricsList = append(metricsList, metrics.FilesystemMetrics{
+				DisplayKey:              entry.DisplayKey,
+				ReadCount:               entry.ReadCount,
+				WriteCount:              entry.WriteCount,
+				ReadBytes:               entry.ReadBytes,
+				WriteBytes:              entry.WriteBytes,
+				GetFileInfoCount:        entry.GetFileInfoCount,
+				FailedCount:             entry.FailedCount,
+				MultiPartUploadCreated:  entry.MultiPartUploadCreated,
+				MultiPartUploadFinished: entry.MultiPartUploadFinished,
+			})
+		}
+		return metricsList
+	})
 	metrics.RegisterStorageMetrics(Registry.GoRegistry)
 }
 
@@ -210,6 +236,21 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool) *conc.Fut
 
 func (mr *MilvusRoles) runCDC(ctx context.Context, localMsg bool) *conc.Future[component] {
 	return runComponent(ctx, localMsg, components.NewCDC, metrics.RegisterCDC)
+}
+
+func (mr *MilvusRoles) resolveFileResourceMode() fileresource.Mode {
+	params := paramtable.Get()
+	modes := make([]fileresource.Mode, 0, 3)
+	if mr.EnableQueryNode || mr.EnableStreamingNode {
+		modes = append(modes, fileresource.ParseMode(params.CommonCfg.QNFileResourceMode.GetValue()))
+	}
+	if mr.EnableDataNode {
+		modes = append(modes, fileresource.ParseMode(params.CommonCfg.DNFileResourceMode.GetValue()))
+	}
+	if mr.EnableProxy {
+		modes = append(modes, fileresource.ParseMode(params.CommonCfg.ProxyFileResourceMode.GetValue()))
+	}
+	return fileresource.ResolveMode(modes...)
 }
 
 // waitForAllComponentsReady waits for all components to be ready.
@@ -363,6 +404,18 @@ func (mr *MilvusRoles) handleSignals() func() {
 	}
 }
 
+// componentNum counts the components that Run will actually start.
+func (mr *MilvusRoles) componentNum() int {
+	return lo.CountBy([]bool{
+		mr.EnableProxy,
+		mr.EnableQueryNode,
+		mr.EnableDataNode,
+		mr.EnableStreamingNode,
+		mr.EnableMixCoord || (mr.EnableRootCoord && mr.EnableQueryCoord && mr.EnableDataCoord),
+		mr.EnableCDC,
+	}, func(enabled bool) bool { return enabled })
+}
+
 // Run Milvus components.
 func (mr *MilvusRoles) Run() {
 	// start signal handler, defer close func
@@ -394,14 +447,24 @@ func (mr *MilvusRoles) Run() {
 		}
 
 		params := paramtable.Get()
+		// Recover visible legacy local files before etcd and components start.
+		if !mr.migrateLocalStorageLayoutOrDie(ctx, params) {
+			return
+		}
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
-			etcd.InitEtcdServer(
+			if err := etcd.InitEtcdServer(
 				params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 				params.EtcdCfg.ConfigPath.GetValue(),
 				params.EtcdCfg.DataDir.GetValue(),
 				params.EtcdCfg.EtcdLogPath.GetValue(),
-				params.EtcdCfg.EtcdLogLevel.GetValue())
+				params.EtcdCfg.EtcdLogLevel.GetValue()); err != nil {
+				// Panic (non-zero exit) so restart policies such as systemd
+				// Restart=on-failure or docker --restart on-failure treat the
+				// startup failure as a crash rather than a clean exit.
+				mlog.Error(context.TODO(), "failed to start embedded Etcd server", mlog.Err(err))
+				panic(err)
+			}
 			defer etcd.StopEtcdServer()
 		}
 		paramtable.SetRole(typeutil.StandaloneRole)
@@ -416,10 +479,14 @@ func (mr *MilvusRoles) Run() {
 
 	// Persist immutable configurations at startup, such as mqType paramItem
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
-		// Initialize the actual walName instead of default
-		util.InitAndSelectWALName()
-		// persist immutable configs if necessary
-		if err := paramtable.GetBaseTable().Manager().ProcessImmutableConfigs(); err != nil {
+		// Resolve the actual walName instead of default
+		walName := util.InitAndSelectWALName()
+		// persist immutable configs if necessary; mq.type's literal "default" is
+		// rendered to the resolved walName so the value pinned in etcd is always
+		// a concrete WAL name (issue #51497)
+		if err := paramtable.GetBaseTable().Manager().ProcessImmutableConfigs(map[string]func(string) string{
+			paramtable.Get().MQCfg.Type.Key: func(string) string { return walName.String() },
+		}); err != nil {
 			mlog.Error(context.TODO(), "failed to process immutable configs", mlog.Err(err))
 			return
 		}
@@ -431,26 +498,24 @@ func (mr *MilvusRoles) Run() {
 	// init tracer before run any component
 	tracer.Init()
 
-	enableComponents := []bool{
-		mr.EnableProxy,
-		mr.EnableQueryNode,
-		mr.EnableDataNode,
-		mr.EnableStreamingNode,
-		mr.EnableMixCoord,
-		mr.EnableRootCoord,
-		mr.EnableQueryCoord,
-		mr.EnableDataCoord,
-		mr.EnableCDC,
-	}
-	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
-		return v
-	})
-	healthz.SetComponentNum(len(enableComponents))
+	healthz.SetComponentNum(mr.componentNum())
 
-	expr.Init()
-	expr.Register("param", paramtable.Get())
 	mr.setupLogger()
 	defer mlog.Cleanup()
+
+	// Worker nodes (querynode, datanode, streamingnode) host no credential
+	// metadata, so without this their management plane and pprof would answer
+	// 503 to root as well as to attackers once adminAuthEnabled is on. It takes
+	// the lowest-priority slot: proxy and mix coord register in-process
+	// verifiers that win, so single-process standalone never makes this RPC.
+	rootCredentialVerifier := adminauth.NewRootCredentialVerifier(ctx, mix.NewClient)
+	http.RegisterManagementVerifier(http.VerifierSlotWorker, rootCredentialVerifier.Verify)
+	defer func() {
+		http.RegisterManagementVerifier(http.VerifierSlotWorker, nil)
+		if err := rootCredentialVerifier.Close(); err != nil {
+			mlog.Warn(ctx, "close root credential verifier failed", mlog.Err(err))
+		}
+	}()
 
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)
@@ -478,11 +543,20 @@ func (mr *MilvusRoles) Run() {
 		}()
 	}
 
+	effectiveFileResourceMode := mr.resolveFileResourceMode()
+	fileresource.SetLocalMode(effectiveFileResourceMode)
+	mlog.Info(ctx, "resolved process file resource mode", mlog.String("mode", effectiveFileResourceMode.String()))
+
 	local := mr.Local
 	componentFutureMap := make(map[string]*conc.Future[component])
 
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
 		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
+		// The version-gate switcher is a cluster-wide, one-shot capability:
+		// only the MixCoord role starts it, so a single coordinator drives the
+		// flip of every version-gated config item. Other roles observe the
+		// flipped value through the regular config refresh.
+		paramtable.StartVersionGateSwitcher()
 		mixCoord := mr.runMixCoord(ctx, local)
 		componentFutureMap[typeutil.MixCoordRole] = mixCoord
 	}

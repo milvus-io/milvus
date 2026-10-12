@@ -282,13 +282,41 @@ func (c *MiniClusterV3) ShowReplicas() ([]*querypb.Replica, error) {
 
 // ShowSegments shows the segments of a collection.
 func (c *MiniClusterV3) ShowSegments(collectionName string) ([]*datapb.SegmentInfo, error) {
-	resp, err := c.MilvusClient.ShowCollections(c.ctx, &milvuspb.ShowCollectionsRequest{
+	return c.showSegmentsWithContext(c.ctx, "", collectionName)
+}
+
+// ShowSegmentsWithDB shows the segments of a collection in the given database.
+func (c *MiniClusterV3) ShowSegmentsWithDB(dbName, collectionName string) ([]*datapb.SegmentInfo, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+	defer cancel()
+	return c.showSegmentsWithContext(ctx, dbName, collectionName)
+}
+
+func (c *MiniClusterV3) showSegmentsWithContext(ctx context.Context, dbName, collectionName string) ([]*datapb.SegmentInfo, error) {
+	return showSegmentsWithContext(ctx, dbName, collectionName,
+		func(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+			return c.MilvusClient.ShowCollections(ctx, req)
+		}, c.metaWatcher.ShowSegments)
+}
+
+func showSegmentsWithContext(
+	ctx context.Context,
+	dbName string,
+	collectionName string,
+	showCollections func(context.Context, *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error),
+	showSegments func(int64) ([]*datapb.SegmentInfo, error),
+) ([]*datapb.SegmentInfo, error) {
+	resp, err := showCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err
 	}
-	return c.metaWatcher.ShowSegments(resp.CollectionIds[0])
+	if len(resp.GetCollectionIds()) == 0 {
+		return nil, fmt.Errorf("collection %q not found in database %q", collectionName, dbName)
+	}
+	return showSegments(resp.CollectionIds[0])
 }
 
 func (c *MiniClusterV3) GetContext() context.Context {
@@ -353,22 +381,35 @@ func (c *MiniClusterV3) clearRedundantNodes() {
 		}
 	}
 
+	// Snapshot the node maps while holding the lock. A node that exits on its
+	// own runs clearProcess from its watcher goroutine, which deletes from these
+	// maps under c.mu; reading them as call arguments below is an
+	// unsynchronized map read against that delete. clearNodes takes the lock
+	// itself, so the snapshot is taken before the goroutines start.
+	c.mu.Lock()
+	mixcoords := lo.MapToSlice(c.mixcoord, func(_ int64, node *process.MixcoordProcess) *process.MilvusProcess {
+		return node.MilvusProcess
+	})
+	datanodes := lo.MapToSlice(c.datanode, func(_ int64, node *process.DataNodeProcess) *process.MilvusProcess {
+		return node.MilvusProcess
+	})
+	querynodes := lo.MapToSlice(c.querynode, func(_ int64, node *process.QueryNodeProcess) *process.MilvusProcess {
+		return node.MilvusProcess
+	})
+	streamingnodes := lo.MapToSlice(c.streamingnode, func(_ int64, node *process.StreamingNodeProcess) *process.MilvusProcess {
+		return node.MilvusProcess
+	})
+	proxies := lo.MapToSlice(c.proxy, func(_ int64, node *process.ProxyProcess) *process.MilvusProcess {
+		return node.MilvusProcess
+	})
+	c.mu.Unlock()
+
 	wg.Add(5)
-	go clearNodes(c.defaultMixCoord.MilvusProcess, lo.MapToSlice(c.mixcoord, func(_ int64, node *process.MixcoordProcess) *process.MilvusProcess {
-		return node.MilvusProcess
-	}), func() { c.AddMixCoord(WithoutWaitForReady()) })
-	go clearNodes(c.defaultDataNode.MilvusProcess, lo.MapToSlice(c.datanode, func(_ int64, node *process.DataNodeProcess) *process.MilvusProcess {
-		return node.MilvusProcess
-	}), func() { c.AddDataNode(WithoutWaitForReady()) })
-	go clearNodes(c.defaultQueryNode.MilvusProcess, lo.MapToSlice(c.querynode, func(_ int64, node *process.QueryNodeProcess) *process.MilvusProcess {
-		return node.MilvusProcess
-	}), func() { c.AddQueryNode(WithoutWaitForReady()) })
-	go clearNodes(c.defaultStreamingNode.MilvusProcess, lo.MapToSlice(c.streamingnode, func(_ int64, node *process.StreamingNodeProcess) *process.MilvusProcess {
-		return node.MilvusProcess
-	}), func() { c.AddStreamingNode(WithoutWaitForReady()) })
-	go clearNodes(c.defaultProxy.MilvusProcess, lo.MapToSlice(c.proxy, func(_ int64, node *process.ProxyProcess) *process.MilvusProcess {
-		return node.MilvusProcess
-	}), func() { c.AddProxy(WithoutWaitForReady()) })
+	go clearNodes(c.defaultMixCoord.MilvusProcess, mixcoords, func() { c.AddMixCoord(WithoutWaitForReady()) })
+	go clearNodes(c.defaultDataNode.MilvusProcess, datanodes, func() { c.AddDataNode(WithoutWaitForReady()) })
+	go clearNodes(c.defaultQueryNode.MilvusProcess, querynodes, func() { c.AddQueryNode(WithoutWaitForReady()) })
+	go clearNodes(c.defaultStreamingNode.MilvusProcess, streamingnodes, func() { c.AddStreamingNode(WithoutWaitForReady()) })
+	go clearNodes(c.defaultProxy.MilvusProcess, proxies, func() { c.AddProxy(WithoutWaitForReady()) })
 	wg.Wait()
 }
 

@@ -3,14 +3,19 @@ package walmanager
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -22,6 +27,31 @@ import (
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	m.Run()
+}
+
+func TestOpenManager(t *testing.T) {
+	resource.InitForTest(t)
+
+	m, err := OpenManager()
+	assert.NoError(t, err)
+	assert.NotNil(t, m)
+	m.Close()
+}
+
+func TestPartialUpdateInterceptorRunsAfterShard(t *testing.T) {
+	builders := newInterceptorBuilders()
+	assert.Len(t, builders, 7)
+	assert.IsType(t, shard.NewInterceptorBuilder(), builders[5])
+	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[6])
+}
+
+func TestIdempotencyInterceptorRunsOutermost(t *testing.T) {
+	// A duplicate must be answered from the window before anything downstream
+	// can retry it: behind redo, a retry of a write that already landed would
+	// be redone as a second write.
+	builders := newInterceptorBuilders()
+	require.NotEmpty(t, builders)
+	assert.IsType(t, idempotency.NewInterceptorBuilder(), builders[0])
 }
 
 func TestManager(t *testing.T) {
@@ -126,4 +156,43 @@ func assertShutdownError(t *testing.T, err error) {
 	assert.Error(t, err)
 	e := status.AsStreamingError(err)
 	assert.Equal(t, e.Code, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN)
+}
+
+func TestManagerCloseCancelsOpen(t *testing.T) {
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+	)
+
+	openStarted := make(chan struct{})
+	opener := mock_wal.NewMockOpener(t)
+	opener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, oo *wal.OpenOption) (wal.WAL, error) {
+			close(openStarted)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+	opener.EXPECT().Close().Return()
+
+	m := newManager(opener)
+	openErr := make(chan error, 1)
+	go func() {
+		openErr <- m.Open(context.Background(), types.PChannelInfo{Name: "ch1", Term: 1})
+	}()
+	<-openStarted
+
+	closed := make(chan struct{})
+	go func() {
+		m.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("manager close is blocked by the in-progress wal open")
+	}
+	assert.ErrorIs(t, <-openErr, context.Canceled)
 }

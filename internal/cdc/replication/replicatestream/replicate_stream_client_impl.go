@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -27,7 +28,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
@@ -49,6 +49,10 @@ type replicateStreamClient struct {
 	channel         *meta.ReplicateChannel
 	pendingMessages MsgQueue
 	metrics         ReplicateMetrics
+	// connConfirmed records whether the target confirmed at least one message
+	// on the current connection. It decides whether the reconnect backoff is
+	// reset once the connection ends.
+	connConfirmed atomic.Bool
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -81,6 +85,16 @@ func NewReplicateStreamClient(ctx context.Context, c cluster.MilvusClient, chann
 	return rs
 }
 
+// newReconnectBackOff builds the backoff that paces reconnects of a replicate
+// stream. It is a variable so tests can observe when the backoff is reset.
+var newReconnectBackOff = func() backoff.BackOff {
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = 100 * time.Millisecond
+	b.MaxInterval = 10 * time.Second
+	b.MaxElapsedTime = 0
+	return b
+}
+
 func (r *replicateStreamClient) startInternal() {
 	defer func() {
 		mlog.Info(r.ctx, "replicate stream client closed",
@@ -90,10 +104,7 @@ func (r *replicateStreamClient) startInternal() {
 		close(r.finishedCh)
 	}()
 
-	backoff := backoff.NewExponentialBackOff()
-	backoff.InitialInterval = 100 * time.Millisecond
-	backoff.MaxInterval = 10 * time.Second
-	backoff.MaxElapsedTime = 0
+	backoff := newReconnectBackOff()
 
 	for {
 		restart := r.startReplicating(backoff)
@@ -125,7 +136,7 @@ func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needR
 
 	logger.Info(r.ctx, "replicate stream client service started")
 	r.metrics.OnConnect()
-	backoff.Reset()
+	r.connConfirmed.Store(false)
 
 	// reset client and pending messages
 	r.client = client
@@ -144,6 +155,16 @@ func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needR
 	connCancel() // Cancel the connection context
 	<-sendCh
 	<-recvCh // wait for send/recv loops to exit
+
+	// The backoff is reset only once this connection has proven healthy: the
+	// target confirmed at least one message, or the stream was closed by the
+	// idle timeout because there was nothing to send. Resetting right after
+	// CreateReplicateStream would pin the retry interval at its initial value
+	// against a target that accepts the stream but rejects every message, such
+	// as a secondary that has not been given its replicate configuration yet.
+	if r.connConfirmed.Load() || isStreamIdleTimeout(chErr) {
+		backoff.Reset()
+	}
 
 	if r.ctx.Err() != nil {
 		logger.Info(r.ctx, "close replicate stream client due to ctx done")
@@ -170,7 +191,7 @@ func (r *replicateStreamClient) Replicate(msg message.ImmutableMessage) error {
 	case <-r.ctx.Done():
 		return nil
 	default:
-		if msg.MessageType().IsSelfControlled() {
+		if msg.MessageType().IsSelfControlled() || msg.IsUnreplicable() {
 			// If no messages are being replicated, update the last replicated time tick.
 			if r.pendingMessages.Len() == 0 {
 				r.metrics.UpdateLastReplicatedTimeTick(msg.TimeTick())
@@ -224,25 +245,7 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 			}
 			if msg.MessageType() == message.MessageTypeTxn {
 				txnMsg := message.AsImmutableTxnMessage(msg)
-
-				// send txn begin message
-				beginMsg := txnMsg.Begin()
-				err := r.sendMessage(beginMsg)
-				if err != nil {
-					return err
-				}
-
-				// send txn messages
-				err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
-					return r.sendMessage(msg)
-				})
-				if err != nil {
-					return err
-				}
-
-				// send txn commit message
-				commitMsg := txnMsg.Commit()
-				err = r.sendMessage(commitMsg)
+				err = r.sendTxnMessage(txnMsg)
 				if err != nil {
 					return err
 				}
@@ -257,6 +260,8 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 }
 
 func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
+	immutableMessage := msg.IntoImmutableMessageProto()
+
 	defer func() {
 		logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("revision", r.channel.ModRevision))
 		if err != nil {
@@ -266,20 +271,34 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 			logger.Debug(r.ctx, "send message success", mlog.FieldMessage(msg))
 		}
 	}()
-	immutableMessage := msg.IntoImmutableMessageProto()
+
 	req := &milvuspb.ReplicateRequest{
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
 			ReplicateMessage: &milvuspb.ReplicateMessage{
 				SourceClusterId: r.clusterID,
-				Message: &commonpb.ImmutableMessage{
-					Id:         msg.MessageID().IntoProto(),
-					Payload:    immutableMessage.GetPayload(),
-					Properties: immutableMessage.GetProperties(),
-				},
+				Message:         immutableMessage,
 			},
 		},
 	}
 	return r.client.Send(req)
+}
+
+func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
+	// send txn begin message
+	if err = r.sendMessage(txnMsg.Begin()); err != nil {
+		return err
+	}
+
+	// send txn body messages
+	if err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
+		return r.sendMessage(msg)
+	}); err != nil {
+		return err
+	}
+
+	// send txn commit message
+	err = r.sendMessage(txnMsg.Commit())
+	return
 }
 
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
@@ -311,6 +330,7 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 			}
 			lastConfirmedMessageInfo := resp.GetReplicateConfirmedMessageInfo()
 			if lastConfirmedMessageInfo != nil {
+				r.connConfirmed.Store(true)
 				messages := r.pendingMessages.CleanupConfirmedMessages(lastConfirmedMessageInfo.GetConfirmedTimeTick())
 				for _, msg := range messages {
 					r.metrics.OnConfirmed(msg)

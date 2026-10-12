@@ -45,6 +45,21 @@ func NewConcurrentQueryStreamServer(srv QueryStreamServer) *ConcurrentQueryStrea
 	}
 }
 
+// sizeGrowthHeadroom covers the parts of the accumulated message that grow
+// without any single merge accounting for them:
+//
+//   - the varint length prefixes of the nested Ids / LongArray messages widen as
+//     the payload grows (at most 4 bytes each, and monotonically, so the whole
+//     stream is bounded by a constant rather than a per-merge cost);
+//   - AllRetrieveCount / ScannedRemoteBytes / ScannedTotalBytes are summed, so
+//     their varints widen (at most 10 bytes plus a tag each);
+//   - CostAggregation may be absent in the first result and present after a
+//     merge, appearing as a whole submessage.
+//
+// Those add up to well under 128 bytes for an entire accumulation; 256 is taken
+// once, at Put, so that the per-merge charge below can stay tight.
+const sizeGrowthHeadroom = 256
+
 type RetrieveResultCache struct {
 	result *internalpb.RetrieveResults
 	size   int
@@ -54,11 +69,27 @@ type RetrieveResultCache struct {
 func (c *RetrieveResultCache) Put(result *internalpb.RetrieveResults) {
 	if c.result == nil {
 		c.result = result
-		c.size = proto.Size(result)
+		c.size = proto.Size(result) + sizeGrowthHeadroom
 		return
 	}
 
 	c.merge(result)
+}
+
+// mergedSize reports what result will contribute to the accumulated message
+// once merge folds it in.
+//
+// merge keeps only the IDs and the counters and drops the rest of the envelope,
+// so charging proto.Size(result) is not "slightly" conservative: the sole
+// production caller is delete-by-expression, whose plan asks for the PK column
+// plus common.TimeStampField and never sets ignoreNonPk on the stream path, so
+// every incoming result carries that same PK data three times over — once in
+// Ids and twice more in FieldsData. Measured on realistic auto-id PKs and TSO
+// timestamps that is a steady 3.0x over-estimate, which would trip the 4 MiB
+// queryStreamBatchSize at ~1.3 MiB of real payload and fragment delete batches
+// (proxy produces one deleteTask per received message) by the same factor.
+func mergedSize(result *internalpb.RetrieveResults) int {
+	return proto.Size(result.GetIds())
 }
 
 func (c *RetrieveResultCache) Flush() *internalpb.RetrieveResults {
@@ -69,7 +100,12 @@ func (c *RetrieveResultCache) Flush() *internalpb.RetrieveResults {
 }
 
 func (c *RetrieveResultCache) Alloc(result *internalpb.RetrieveResults) bool {
-	return proto.Size(result)+c.size <= c.cap
+	// Charge what Put will actually charge, so the flush decision here and the
+	// accounting in merge cannot disagree about the same message.
+	if c.result == nil {
+		return proto.Size(result)+sizeGrowthHeadroom+c.size <= c.cap
+	}
+	return mergedSize(result)+c.size <= c.cap
 }
 
 func (c *RetrieveResultCache) IsFull() bool {
@@ -91,7 +127,17 @@ func (c *RetrieveResultCache) merge(result *internalpb.RetrieveResults) {
 	c.result.CostAggregation = mergeCostAggregation(c.result.GetCostAggregation(), result.GetCostAggregation())
 	c.result.ScannedRemoteBytes = c.result.GetScannedRemoteBytes() + result.GetScannedRemoteBytes()
 	c.result.ScannedTotalBytes = c.result.GetScannedTotalBytes() + result.GetScannedTotalBytes()
-	c.size = proto.Size(c.result)
+	// Accumulate rather than recompute. `c.size = proto.Size(c.result)` walked
+	// the whole accumulated message on every merge, making a stream of N
+	// results O(N^2) in the total number of IDs.
+	//
+	// mergedSize still over-estimates, by the Ids submessage's own tag and
+	// length prefix (>= 4 bytes) which appending does not duplicate. That slack
+	// is what keeps the total conservative: c.size must never fall below
+	// proto.Size(c.result), because Send uses it to hold messages under
+	// maxMsgSize. Under-estimating would emit an oversized message; the
+	// remaining sources of growth are covered once by sizeGrowthHeadroom.
+	c.size += mergedSize(result)
 }
 
 func mergeCostAggregation(a *internalpb.CostAggregation, b *internalpb.CostAggregation) *internalpb.CostAggregation {
@@ -132,7 +178,6 @@ func (s *ResultCacheServer) splitMsgToMaxSize(result *internalpb.RetrieveResults
 	case *schemapb.IDs_IntId:
 		pks := result.GetIds().GetIntId().Data
 		batch := s.maxMsgSize / 8
-		print(batch)
 		for start := 0; start < len(pks); start += batch {
 			newpks = append(newpks, &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks[start:min(start+batch, len(pks))]}}})
 		}

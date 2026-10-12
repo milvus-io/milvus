@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -122,9 +123,7 @@ func TestUpdateCommitTimestamp_RejectBelowMaxTimestampTo(t *testing.T) {
 	assert.NoError(t, meta.AddSegment(context.Background(), segWithBinlogs(1, 5000)))
 
 	err = meta.UpdateSegmentsInfo(context.Background(), UpdateCommitTimestamp(1, 3000))
-	// UpdateSegmentsInfo returns nil when the operator returns false (no-op);
-	// the assertion is on the persisted state, not the error.
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
 	assert.Equal(t, uint64(0), meta.GetSegment(context.Background(), 1).GetCommitTimestamp(),
 		"rejected update must leave commit_timestamp unchanged")
 }

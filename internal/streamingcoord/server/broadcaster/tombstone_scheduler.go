@@ -13,7 +13,12 @@ import (
 // tombstoneItem is a tombstone item with expired time.
 type tombstoneItem struct {
 	broadcastID uint64
-	createTime  time.Time // the time when the tombstone is created, when recovery, the createTime will be reset to the current time, but it's ok.
+	// createTime is when the tombstone was created. Recovery resets it to the current
+	// time, so a restart delays this tombstone's GC by up to another maxLifetime. That
+	// makes the idempotency window the tombstone backs a lower bound rather than an
+	// exact one, so any retention coupled to maxLifetime must leave margin rather than
+	// match it exactly.
+	createTime time.Time
 }
 
 // tombstoneScheduler is a scheduler for the tombstone.
@@ -61,7 +66,7 @@ func (s *tombstoneScheduler) AddPending(broadcastID uint64) {
 		// must not panic. Dropping the in-memory enqueue is safe: the task state is
 		// already persisted as TOMBSTONE (MarkAckCallbackDone) before reaching here,
 		// and will be recovered into the GC list on the next startup.
-		s.Logger().Info(context.TODO(), "tombstone scheduler is closing, skip adding pending tombstone", mlog.Uint64("broadcastID", broadcastID))
+		s.Logger().Info(context.TODO(), "tombstone scheduler is closing, skip adding pending tombstone", mlog.FieldBroadcastID(broadcastID))
 		return
 	case s.pending <- broadcastID:
 	}

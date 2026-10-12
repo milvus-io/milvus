@@ -20,7 +20,12 @@ type (
 // Otherwise, it will be sent as individual messages.
 // !!! This function do not promise the atomicity and deliver order of the messages appending.
 func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
+	return w.AppendMessagesWithOptions(ctx, msgs)
+}
+
+func (w *walAccesserImpl) AppendMessagesWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...AppendOption) AppendResponses {
 	assertValidMessage(msgs...)
+	msgs = applyOpt(msgs, opts...)
 
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		err := types.NewAppendResponseN(len(msgs))
@@ -40,8 +45,9 @@ func (w *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 	tasks := make([]vchannelTask, 0, len(dispatchedMessages))
 	guards := make([]*producer.ProduceGuard, 0, len(dispatchedMessages))
 	resp := types.NewAppendResponseN(len(msgs))
+	produceOpts := toProduceOptions(opts...)
 	for vchannel, vchannelMsgs := range dispatchedMessages {
-		g, err := w.getProducer(vchannel).BeginProduce(ctx, vchannelMsgs...)
+		g, err := w.getProducer(vchannel).BeginProduceWithOptions(ctx, vchannelMsgs, produceOpts...)
 		if err != nil {
 			for _, guard := range guards {
 				guard.Cancel()
@@ -96,12 +102,30 @@ func (w *walAccesserImpl) dispatchMessages(msgs ...message.MutableMessage) (map[
 }
 
 // applyOpt applies the append options to the message.
-func applyOpt(msg message.MutableMessage, opts ...AppendOption) message.MutableMessage {
+func applyOpt(msgs []message.MutableMessage, opts ...AppendOption) []message.MutableMessage {
 	if len(opts) == 0 {
-		return msg
+		return msgs
 	}
 	if opts[0].BarrierTimeTick > 0 {
-		msg = msg.WithBarrierTimeTick(opts[0].BarrierTimeTick)
+		for idx, msg := range msgs {
+			msgs[idx] = msg.WithBarrierTimeTick(opts[0].BarrierTimeTick)
+		}
 	}
-	return msg
+	return msgs
+}
+
+func toProduceOptions(opts ...AppendOption) []producer.ProduceOption {
+	if len(opts) == 0 {
+		return nil
+	}
+	produceOpts := make([]producer.ProduceOption, 0, len(opts))
+	for _, opt := range opts {
+		if opt.IdempotencyKey == "" {
+			continue
+		}
+		produceOpts = append(produceOpts, producer.ProduceOption{
+			IdempotencyKey: opt.IdempotencyKey,
+		})
+	}
+	return produceOpts
 }

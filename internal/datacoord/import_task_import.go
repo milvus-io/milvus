@@ -18,10 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"math"
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -29,7 +29,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -135,6 +137,25 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
+		if errors.Is(err, importid.ErrIDRangeTooSmall) {
+			// The one assemble failure a retry cannot fix: the per-file range reserved
+			// fewer ids than the file's row count, so the datanode cursor cannot cover
+			// it. Neither number changes by rescheduling, so fail the job now with the
+			// precise reason -- otherwise the job stays Importing (checkImportingJob only
+			// advances once every task is Completed) until tryTimeoutJob replaces the
+			// reason with a generic timeout message.
+			//
+			// Only the job is updated, as in preimport: the checker's tryFailingTasks
+			// marks this task Failed on the next tick.
+			if updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(),
+				UpdateJobState(internalpb.ImportJobState_Failed),
+				UpdateJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
+					WrapTaskLog(t, mlog.Err(updateErr))...)
+			}
+			return
+		}
+		t.retryTimes++
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
@@ -229,20 +250,34 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				return
 			}
 
-			// Extract actual timestamps from binlogs for segment positions
+			// Extract actual timestamps for segment positions. Prefer the
+			// producer-reported Statistics (it knows the V3 manifest-side
+			// footprint); fall back to array reconstruction for rolling
+			// upgrade where the datanode ships no Statistics.
+			// L0 imports carry only deletes; non-L0 imports carry inserts.
+			importStats := info.GetStats()
+			if importStats == nil {
+				importStats = storage.BuildStatsFromFieldBinlogs(info.GetBinlogs(), info.GetStatslogs(), info.GetBm25Logs(), info.GetDeltalogs())
+			}
 			var minTs, maxTs uint64
 			isL0Import := importutilv2.IsL0Import(job.GetOptions())
 			if isL0Import {
-				minTs, maxTs = extractTimestampFromBinlogs(info.GetDeltalogs())
+				minTs = importStats.GetDeltaTimestampFrom()
+				maxTs = importStats.GetDeltaTimestampTo()
 			} else {
-				minTs, maxTs = extractTimestampFromBinlogs(info.GetBinlogs())
+				minTs = importStats.GetTimestampFrom()
+				maxTs = importStats.GetTimestampTo()
 			}
 
 			opBinlog := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs())
 			opManifest := UpdateManifest(info.GetSegmentID(), info.GetManifestPath())
 			opState := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
 			opPosition := UpdateImportSegmentPosition(info.GetSegmentID(), minTs, maxTs)
-			err = t.meta.UpdateSegmentsInfo(context.TODO(), opBinlog, opManifest, opState, opPosition)
+			// Persist the producer-built Statistics wholesale (chained after
+			// UpdateBinlogsOperator so it wins over the array-derived value);
+			// when nil it array-derives from the arrays just set above.
+			opStats := UpdateSegmentStats(info.GetSegmentID(), info.GetStats())
+			err = t.meta.UpdateSegmentsInfo(context.TODO(), opBinlog, opManifest, opState, opPosition, opStats)
 			if err != nil {
 				updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 				if updateErr != nil {
@@ -314,23 +349,4 @@ func (t *importTask) MarshalJSON() ([]byte, error) {
 		CompleteTime: t.GetCompleteTime(),
 	}
 	return json.Marshal(importTask)
-}
-
-// extractTimestampFromBinlogs extracts min and max timestamps from binlogs.
-// The timestamps are stored in Binlog.TimestampFrom and Binlog.TimestampTo
-// by BulkPackWriterV2.writeInserts() during import sync.
-func extractTimestampFromBinlogs(binlogs []*datapb.FieldBinlog) (minTs, maxTs uint64) {
-	minTs = math.MaxUint64
-	maxTs = 0
-	for _, fieldBinlog := range binlogs {
-		for _, binlog := range fieldBinlog.GetBinlogs() {
-			if binlog.GetTimestampFrom() < minTs {
-				minTs = binlog.GetTimestampFrom()
-			}
-			if binlog.GetTimestampTo() > maxTs {
-				maxTs = binlog.GetTimestampTo()
-			}
-		}
-	}
-	return minTs, maxTs
 }

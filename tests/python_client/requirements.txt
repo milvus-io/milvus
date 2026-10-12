@@ -16,6 +16,9 @@ pytest-assume==2.4.3
 pytest-rerunfailures==14.0
 pytest_tagging==1.6.0
 pytest-html==3.1.1
+# pytest-html 3.1.1 imports py.xml; py used to arrive transitively via
+# pytest-forked until its 1.7.5 release (2026-08-08) dropped the dependency
+py==1.11.0
 delayed-assert==0.3.5
 kubernetes==17.17.0
 PyYAML==6.0.2
@@ -23,8 +26,8 @@ pytest-sugar==0.9.5
 pytest-random-order
 
 # pymilvus
-pymilvus==3.1.0rc52
-pymilvus[bulk_writer]==3.1.0rc52
+pymilvus==3.1.0rc92
+pymilvus[bulk_writer]==3.1.0rc92
 # for protobuf
 protobuf>=5.29.5
 
@@ -50,7 +53,7 @@ tenacity==8.2.3
 rich==13.7.0
 # for standby test
 etcd-sdk-python==0.0.6
-deepdiff==8.6.1
+deepdiff==8.6.2
 
 # for test result analyzer
 prettytable==3.8.0
@@ -93,3 +96,7 @@ pyiceberg[sql-sqlite]==0.8.1
 
 # for time zone
 tzdata>=2024.1
+
+
+# for function chain
+xgboost==3.3.0

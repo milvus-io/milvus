@@ -15,6 +15,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
+
+#include "common/type_c.h"
 #include "log/Log.h"
 #include "storage/plugin/PluginInterface.h"
 #include "common/EasyAssert.h"
@@ -45,10 +48,10 @@ class PluginLoader {
         void* handle = dlopen(path.c_str(), RTLD_LAZY);
         // void *handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_DEEPBIND);
         if (!handle) {
-            const char* error = dlerror();
-            ThrowInfo(
-                UnexpectedError,
-                fmt::format("Failed to load plugin: {}, err={}", path, error));
+            // ThrowInfo prints before throwing. Both the configured path and
+            // dlerror can contain protected configuration, so name only the
+            // failed stage, including at these pre-CStatus output boundaries.
+            ThrowInfo(UnexpectedError, "Failed to open plugin library");
         }
 
         // Rest error flags
@@ -61,22 +64,18 @@ class PluginLoader {
         const char* error = dlerror();
         if (error) {
             dlclose(handle);
-            ThrowInfo(UnexpectedError,
-                      fmt::format("Failed to load plugin: {}", error));
+            ThrowInfo(UnexpectedError, "Failed to find plugin factory");
         }
 
-        error = dlerror();
         auto pluginPtr = createPluginFunc();
         if (!pluginPtr) {
             dlclose(handle);
-            ThrowInfo(
-                UnexpectedError,
-                fmt::format("Failed to init plugin: {}, {}", path, error));
+            ThrowInfo(UnexpectedError, "Plugin factory returned no instance");
         }
 
         std::string pluginName = pluginPtr->getPluginName();
         if (plugins_.find(pluginName) != plugins_.end()) {
-            LOG_DEBUG("Plugin with name {} is already loaded.", pluginName);
+            LOG_DEBUG("Plugin is already loaded.");
             dlclose(handle);
             return;
         }
@@ -85,7 +84,23 @@ class PluginLoader {
         plugins_[pluginName] =
             std::shared_ptr<milvus::storage::plugin::IPlugin>(pluginPtr);
         handles_[pluginName] = handle;
-        LOG_INFO("Loaded plugin: {}", pluginName);
+        LOG_INFO("Loaded plugin");
+    }
+
+    // Visible for testing: install a plugin instance directly, bypassing
+    // dlopen, so unit tests can exercise code paths that resolve the cipher
+    // plugin through this singleton.
+    void
+    registerPluginForTest(
+        std::shared_ptr<milvus::storage::plugin::IPlugin> plugin) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        plugins_[plugin->getPluginName()] = std::move(plugin);
+    }
+
+    void
+    unregisterPluginForTest(const std::string& plugin_name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        plugins_.erase(plugin_name);
     }
 
     void
@@ -108,6 +123,32 @@ class PluginLoader {
             milvus::storage::plugin::ICipherPlugin>(p);
     }
 
+    std::shared_ptr<CPluginContext>
+    registerCipherPluginContext(int64_t ez_id,
+                                int64_t collection_id,
+                                const std::string& key) {
+        return registerCipherPluginContext(
+            ez_id, collection_id, key, getCipherPlugin());
+    }
+
+    std::shared_ptr<CPluginContext>
+    registerCipherPluginContext(
+        int64_t ez_id,
+        int64_t collection_id,
+        const std::string& key,
+        const std::shared_ptr<plugin::ICipherPlugin>& cipher_plugin) {
+        AssertInfo(cipher_plugin != nullptr, "failed to get cipher plugin");
+        cipher_plugin->Update(ez_id, collection_id, key);
+
+        // The plugin owns the key copy. Storage operations retain only the IDs
+        // needed for later encryptor/decryptor lookups.
+        auto context = std::make_shared<CPluginContext>();
+        context->ez_id = ez_id;
+        context->collection_id = collection_id;
+        context->key = nullptr;
+        return context;
+    }
+
     std::shared_ptr<milvus::storage::plugin::IPlugin>
     getPlugin(const std::string& name) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -115,15 +156,13 @@ class PluginLoader {
         return it != plugins_.end() ? it->second : nullptr;
     }
 
-    std::vector<std::string>
-    listPlugins() const {
+#ifdef MILVUS_UNIT_TEST
+    void
+    addPluginForTest(std::shared_ptr<milvus::storage::plugin::IPlugin> plugin) {
         std::lock_guard<std::mutex> lock(mutex_);
-        std::vector<std::string> names;
-        for (const auto& pair : plugins_) {
-            names.push_back(pair.first);
-        }
-        return names;
+        plugins_[plugin->getPluginName()] = std::move(plugin);
     }
+#endif
 
     void
     unload(const std::string& name) {

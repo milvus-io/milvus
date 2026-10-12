@@ -30,8 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 type SearchIteratorSuite struct {
@@ -57,6 +57,17 @@ func (s *SearchIteratorSuite) TestSearchIteratorOptionWithNamespace() {
 
 	s.Require().NoError(err)
 	s.Equal(namespace, req.GetNamespace())
+}
+
+func (s *SearchIteratorSuite) TestSearchIteratorOptionWithRLSContext() {
+	opt := NewSearchIteratorOption("coll", entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+		return rand.Float32()
+	}))).WithRLSPrincipal("alice").WithSkipRLS(true).WithBatchSize(10)
+	req, err := opt.SearchOption().Request()
+
+	s.Require().NoError(err)
+	s.Equal("alice", req.GetRlsPrincipal())
+	s.True(req.GetSkipRls())
 }
 
 func (s *SearchIteratorSuite) TestSearchIteratorInit() {
@@ -450,6 +461,18 @@ func (s *QueryIteratorSuite) TestQueryIteratorOptionWithNamespace() {
 
 	s.Require().NoError(err)
 	s.Equal(namespace, req.GetNamespace())
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorOptionWithRLSContext() {
+	req, err := NewQueryIteratorOption("coll").
+		WithRLSPrincipal("alice").
+		WithSkipRLS(true).
+		WithBatchSize(10).
+		Request()
+
+	s.Require().NoError(err)
+	s.Equal("alice", req.GetRlsPrincipal())
+	s.True(req.GetSkipRls())
 }
 
 func (s *QueryIteratorSuite) TestQueryIteratorInit() {

@@ -56,13 +56,10 @@ class PlanNode {
     virtual RowTypePtr
     output_type() const = 0;
 
-    virtual std::vector<std::shared_ptr<PlanNode>>
+    // The source list is stable for the lifetime of this node. Copy the list
+    // before modifying it to construct a rewritten plan.
+    virtual const std::vector<std::shared_ptr<PlanNode>>&
     sources() const = 0;
-
-    virtual bool
-    RequireSplits() const {
-        return false;
-    }
 
     virtual std::string
     ToString() const = 0;
@@ -108,7 +105,7 @@ class IterativeFilterNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -153,7 +150,7 @@ class FilterBitsNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -210,7 +207,7 @@ class IterativeElementFilterNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -275,7 +272,7 @@ class ElementFilterBitsNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -330,7 +327,7 @@ class ProjectNode : public PlanNode {
                                                  std::move(field_types))) {
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -374,7 +371,7 @@ class MvccNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -407,7 +404,7 @@ class RandomSampleNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -445,7 +442,7 @@ class VectorSearchNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -478,7 +475,7 @@ class SearchGroupByNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -518,7 +515,7 @@ class RescoresNode : public PlanNode {
             std::vector<milvus::DataType>{DataType::INT64});
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -577,7 +574,7 @@ class AggregationNode : public PlanNode {
         return output_type_;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -617,24 +614,6 @@ struct SortOrder {
 
     SortOrder(bool asc = true, bool nulls_first_val = false)
         : ascending(asc), nulls_first(nulls_first_val) {
-    }
-
-    /// Standard sort orders
-    static SortOrder
-    kAscNullsFirst() {
-        return SortOrder(true, true);
-    }
-    static SortOrder
-    kAscNullsLast() {
-        return SortOrder(true, false);
-    }
-    static SortOrder
-    kDescNullsFirst() {
-        return SortOrder(false, true);
-    }
-    static SortOrder
-    kDescNullsLast() {
-        return SortOrder(false, false);
     }
 };
 
@@ -692,7 +671,7 @@ class OrderByNode : public PlanNode {
         return output_type_;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -760,11 +739,6 @@ struct PlanFragment {
     int32_t num_splitgroups_{0};
 
     PlanFragment() = default;
-
-    inline bool
-    IsGroupedExecution() const {
-        return execution_strategy_ == ExecutionStrategy::kGrouped;
-    }
 
     explicit PlanFragment(std::shared_ptr<const PlanNode> top_node,
                           ExecutionStrategy strategy,

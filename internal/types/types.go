@@ -303,14 +303,20 @@ type MixCoord interface {
 
 	GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*DataCoordTopology, error)
 
+	// GetConnectedDataNodeMetrics collects metrics from DataNodes registered with DataCoord.
+	GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error)
+
 	GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*QueryCoordTopology, error)
 
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
-	NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error
+	NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error
 
 	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
 
 	ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error
+
+	// GetFileResources resolves RootCoord-owned file resources inside MixCoord.
+	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 }
 
 // MixCoordComponent is used by grpc server of MixCoord

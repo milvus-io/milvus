@@ -3,6 +3,7 @@ use std::ffi::{c_char, c_void, CStr};
 use crate::{
     array::RustResult,
     convert_to_rust_slice, cstr_to_str,
+    data_type::JsonExistValueType,
     index_reader::IndexReaderWrapper,
     ptr_to_str,
     util::{create_binding, free_binding},
@@ -22,7 +23,7 @@ pub extern "C" fn tantivy_load_index(
     let path_str = cstr_to_str!(path);
     match IndexReaderWrapper::load(path_str, load_in_mmap, set_bitset) {
         Ok(w) => RustResult::from_ptr(create_binding(w)),
-        Err(e) => RustResult::from_error(e.to_string()),
+        Err(e) => RustResult::from_binding_error(&e),
     }
 }
 
@@ -353,6 +354,18 @@ pub extern "C" fn tantivy_json_term_query_i64(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_json_term_query_u64(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    term: u64,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    unsafe { (*real).json_term_query_u64(json_path, term, bitset).into() }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_json_term_query_f64(
     ptr: *mut c_void,
     json_path: *const c_char,
@@ -408,6 +421,24 @@ pub extern "C" fn tantivy_json_terms_query_i64(
     unsafe {
         (*real)
             .json_terms_query_i64(json_path, terms, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_json_terms_query_u64(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    terms: *const u64,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe {
+        (*real)
+            .json_terms_query_u64(json_path, terms, bitset)
             .into()
     }
 }
@@ -470,11 +501,17 @@ pub extern "C" fn tantivy_json_terms_query_keyword(
 pub extern "C" fn tantivy_json_exist_query(
     ptr: *mut c_void,
     json_path: *const c_char,
+    json_subpaths: bool,
+    value_type: JsonExistValueType,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let json_path = cstr_to_str!(json_path);
-    unsafe { (*real).json_exist_query(json_path, bitset).into() }
+    unsafe {
+        (*real)
+            .json_exist_query(json_path, json_subpaths, value_type, bitset)
+            .into()
+    }
 }
 
 #[no_mangle]
@@ -483,6 +520,36 @@ pub extern "C" fn tantivy_json_range_query_i64(
     json_path: *const c_char,
     lower_bound: i64,
     higher_bound: i64,
+    lb_unbounded: bool,
+    up_unbounded: bool,
+    lb_inclusive: bool,
+    ub_inclusive: bool,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    unsafe {
+        (*real)
+            .json_range_query(
+                json_path,
+                lower_bound,
+                higher_bound,
+                lb_unbounded,
+                up_unbounded,
+                lb_inclusive,
+                ub_inclusive,
+                bitset,
+            )
+            .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_json_range_query_u64(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    lower_bound: u64,
+    higher_bound: u64,
     lb_unbounded: bool,
     up_unbounded: bool,
     lb_inclusive: bool,
@@ -627,16 +694,20 @@ pub extern "C" fn tantivy_json_prefix_query(
     unsafe { (*real).json_prefix_query(json_path, prefix, bitset).into() }
 }
 
+// The ngram entry points take (pointer, length) rather than C strings: a
+// LIKE literal may carry an interior NUL, and truncating it there would make
+// the rust side query a different literal than the one the C++ gate checked.
 #[no_mangle]
 pub extern "C" fn tantivy_ngram_match_query(
     ptr: *mut c_void,
     literal: *const c_char,
+    literal_len: usize,
     min_gram: usize,
     max_gram: usize,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    let literal = cstr_to_str!(literal);
+    let literal = ptr_to_str!(literal, literal_len);
 
     unsafe {
         (*real)
@@ -649,16 +720,18 @@ pub extern "C" fn tantivy_ngram_match_query(
 pub extern "C" fn tantivy_ngram_tokenize(
     ptr: *mut c_void,
     literals: *const *const c_char,
+    literal_lens: *const usize,
     literals_len: usize,
     min_gram: usize,
     max_gram: usize,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let literals_slice = unsafe { convert_to_rust_slice!(literals, literals_len) };
+    let lens_slice = unsafe { convert_to_rust_slice!(literal_lens, literals_len) };
 
     let mut literal_strs: Vec<&str> = Vec::with_capacity(literals_len);
-    for &lit in literals_slice {
-        literal_strs.push(cstr_to_str!(lit));
+    for (&lit, &len) in literals_slice.iter().zip(lens_slice.iter()) {
+        literal_strs.push(ptr_to_str!(lit, len));
     }
 
     unsafe {
@@ -672,9 +745,10 @@ pub extern "C" fn tantivy_ngram_tokenize(
 pub extern "C" fn tantivy_ngram_term_posting_list(
     ptr: *mut c_void,
     term: *const c_char,
+    term_len: usize,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    let term = cstr_to_str!(term);
+    let term = ptr_to_str!(term, term_len);
     unsafe { (*real).ngram_term_posting_list(term, bitset).into() }
 }

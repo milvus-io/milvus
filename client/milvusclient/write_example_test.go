@@ -21,8 +21,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/milvusclient"
 )
 
 func ExampleClient_Insert_columnbase() {

@@ -19,9 +19,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <list>
 #include <map>
 #include <optional>
+#include <unordered_set>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -39,8 +41,12 @@
 #include "folly/SharedMutex.h"
 #include "glog/logging.h"
 #include "index/InvertedIndexTantivy.h"
+#include "storage/EntryStreamUtils.h"
+#include "storage/LocalFileIOPool.h"
+#include <unordered_set>
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
+#include "index/IndexLoadUtils.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
 #include "nlohmann/detail/iterators/iter_impl.hpp"
@@ -59,6 +65,17 @@
 #include "tantivy-binding.h"
 
 namespace milvus::index {
+namespace {
+
+struct TantivyLoadContext {
+    std::shared_ptr<IndexDirectoryLoadContext> directory;
+    std::shared_ptr<std::vector<size_t>> null_offsets;
+    bool has_null{false};
+    bool load_in_mmap{true};
+};
+
+}  // namespace
+
 inline TantivyDataType
 get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
     switch (schema.data_type()) {
@@ -178,18 +195,21 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
         } else {
             auto file_path_str = iter->path().string();
             LOG_INFO("trying to add index file: {}", file_path_str);
-            AssertInfo(disk_file_manager_->AddFile(file_path_str),
-                       "failed to add index file: {}",
-                       file_path_str);
+            if (!(disk_file_manager_->AddFile(file_path_str))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "failed to add index file: {}",
+                          file_path_str);
+            }
             LOG_INFO("index file: {} added", file_path_str);
         }
     }
 
-    auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        disk_file_manager_->GetRemotePathsToFileSize();
 
     auto binary_set = Serialize(config);
     this->file_manager_->AddFile(binary_set);
-    auto remote_mem_path_to_size =
+    const auto& remote_mem_path_to_size =
         this->file_manager_->GetRemotePathsToFileSize();
 
     std::vector<SerializedIndexFileInfo> index_files;
@@ -222,7 +242,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index data");
-    auto inverted_index_files = index_files.value();
+    auto& inverted_index_files = index_files.value();
 
     // TODO: remove this log when #45590 is solved
     auto segment_id = disk_file_manager_->GetFieldDataMeta().segment_id;
@@ -249,7 +269,10 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         // the index is loaded in ram, so we can remove files in advance
         disk_file_manager_->RemoveIndexFiles();
     }
-    ComputeByteSize();
+
+    // Count() goes through wrapper_, so sealed finalization must happen after
+    // the reader has been constructed rather than in LoadIndexMetas().
+    FinalizeSealed(/*release_null_offsets=*/true);
 }
 
 template <typename T>
@@ -350,31 +373,117 @@ InvertedIndexTantivy<T>::IsNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNull",
                           tracer::GetRootSpan());
     int64_t count = Count();
-    TargetBitmap bitset(count);
 
-    // For nested index, null rows don't have elements in the index,
-    // so all elements in the index are valid (none are null).
-    // null_offset_ stores row offsets, not element offsets.
-    if (is_nested_index_) {
-        return bitset;  // All false - no element is null
+    // Same materialized bitmap as IsNotNull(), inverted.
+    if (!is_growing_) {
+        AssertInfo(valid_bitmap_ != nullptr,
+                   "sealed inverted index queried before finalization");
+        if (valid_bitmap_->size() == 0) {
+            return TargetBitmap(count);
+        }
+        AssertInfo(static_cast<int64_t>(valid_bitmap_->size()) == count,
+                   "validity bitmap not materialized for sealed inverted "
+                   "index: bitmap size {} vs count {}",
+                   valid_bitmap_->size(),
+                   count);
+        TargetBitmap bitset = valid_bitmap_->clone();
+        bitset.flip();
+        return bitset;
     }
 
-    auto fill_bitset = [this, count, &bitset]() {
+    // Growing nested results are in the element domain, while null_offset_
+    // contains row offsets. Null rows emit no elements, so every indexed
+    // element is valid and none is null.
+    if (is_nested_index_) {
+        return TargetBitmap(count);
+    }
+
+    TargetBitmap bitset(count);
+    {
+        std::shared_lock<folly::SharedMutex> lock(mutex_);
         auto end =
             std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
         for (auto iter = null_offset_.begin(); iter != end; ++iter) {
             bitset.set(*iter);
         }
-    };
+    }
+    return bitset;
+}
 
+template <typename T>
+void
+InvertedIndexTantivy<T>::MaterializeValidBitmap() {
     if (is_growing_) {
-        std::shared_lock<folly::SharedMutex> lock(mutex_);
-        fill_bitset();
-    } else {
-        fill_bitset();
+        // Growing indexes still take rows and read null_offset_ under mutex.
+        return;
+    }
+    if (valid_bitmap_ != nullptr) {
+        return;
+    }
+    int64_t count = Count();
+    if (is_nested_index_ || null_offset_.empty()) {
+        // A non-null empty bitmap marks finalization without retaining a
+        // rows/8 allocation for non-nullable fields or fields with no nulls.
+        // Nested results use the element domain: null rows emit no elements,
+        // so their materialized element validity is also all-valid even when
+        // null_offset_ still contains row offsets for persistence.
+        // Share one empty sentinel per scalar type instead of allocating one
+        // control block for every all-valid index.
+        static const auto all_valid_bitmap =
+            std::make_shared<const TargetBitmap>();
+        valid_bitmap_ = all_valid_bitmap;
+        return;
+    }
+    auto bitmap = std::make_shared<TargetBitmap>(count, true);
+    auto end =
+        std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
+    for (auto iter = null_offset_.begin(); iter != end; ++iter) {
+        bitmap->reset(*iter);
+    }
+    valid_bitmap_ = std::move(bitmap);
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::FinalizeSealed(bool release_null_offsets) {
+    set_is_growing(false);
+    MaterializeValidBitmap();
+    if (release_null_offsets) {
+        std::vector<size_t>().swap(null_offset_);
+    }
+    ComputeByteSize();
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::ApplyValidityMask(TargetBitmap& bitset) {
+    auto count = static_cast<int64_t>(bitset.size());
+    if (!is_growing_) {
+        AssertInfo(valid_bitmap_ != nullptr,
+                   "sealed inverted index queried before finalization");
+        if (valid_bitmap_->size() == 0) {
+            return;
+        }
+        AssertInfo(static_cast<int64_t>(valid_bitmap_->size()) == count,
+                   "validity bitmap size {} does not match result size {}",
+                   valid_bitmap_->size(),
+                   count);
+        bitset &= *valid_bitmap_;
+        return;
     }
 
-    return bitset;
+    // Growing nested results are in the element domain, while null_offset_
+    // contains row offsets. Segment-level validity handles null rows.
+    if (is_nested_index_) {
+        return;
+    }
+
+    std::shared_lock<folly::SharedMutex> lock(mutex_);
+    auto end =
+        std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
+    for (auto iter = null_offset_.begin(); iter != end; ++iter) {
+        bitset.reset(*iter);
+    }
 }
 
 template <typename T>
@@ -383,30 +492,40 @@ InvertedIndexTantivy<T>::IsNotNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNotNull",
                           tracer::GetRootSpan());
     int64_t count = Count();
-    TargetBitmap bitset(count, true);
 
-    // For nested index, null rows don't have elements in the index,
-    // so all elements in the index are valid.
-    // null_offset_ stores row offsets, not element offsets.
-    if (is_nested_index_) {
-        return bitset;  // All true - all elements are valid
+    // A sealed index has an immutable null set: MaterializeValidBitmap() has
+    // already built the bitmap on every path that makes the index queryable,
+    // so serving a query is just a copy.
+    if (!is_growing_) {
+        AssertInfo(valid_bitmap_ != nullptr,
+                   "sealed inverted index queried before finalization");
+        if (valid_bitmap_->size() == 0) {
+            return TargetBitmap(count, true);
+        }
+        AssertInfo(static_cast<int64_t>(valid_bitmap_->size()) == count,
+                   "validity bitmap not materialized for sealed inverted "
+                   "index: bitmap size {} vs count {}",
+                   valid_bitmap_->size(),
+                   count);
+        return valid_bitmap_->clone();
     }
 
-    auto fill_bitset = [this, count, &bitset]() {
+    // Growing nested results are in the element domain, while null_offset_
+    // contains row offsets. Null rows emit no elements, so every indexed
+    // element is valid.
+    if (is_nested_index_) {
+        return TargetBitmap(count, true);
+    }
+
+    TargetBitmap bitset(count, true);
+    {
+        std::shared_lock<folly::SharedMutex> lock(mutex_);
         auto end =
             std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
         for (auto iter = null_offset_.begin(); iter != end; ++iter) {
             bitset.reset(*iter);
         }
-    };
-
-    if (is_growing_) {
-        std::shared_lock<folly::SharedMutex> lock(mutex_);
-        fill_bitset();
-    } else {
-        fill_bitset();
     }
-
     return bitset;
 }
 
@@ -444,22 +563,7 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     wrapper_->terms_query(values, n, &bitset);
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
-
-    auto fill_bitset = [this, count, &bitset]() {
-        auto end =
-            std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
-        for (auto iter = null_offset_.begin(); iter != end; ++iter) {
-            bitset.reset(*iter);
-        }
-    };
-
-    if (is_growing_) {
-        std::shared_lock<folly::SharedMutex> lock(mutex_);
-        fill_bitset();
-    } else {
-        fill_bitset();
-    }
-
+    ApplyValidityMask(bitset);
     return bitset;
 }
 
@@ -638,7 +742,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
     wrapper_->create_reader(milvus::index::SetBitsetSealed);
     finish();
     wrapper_->reload();
-    ComputeByteSize();
+    FinalizeSealed();
 }
 
 template <typename T>
@@ -786,7 +890,8 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
             output.clear();
             for (int64_t j = 0; j < array_column[i].length(); j++) {
                 output.push_back(
-                    array_column[i].template get_data<std::string>(j));
+                    array_column[i].template get_data_unchecked<std::string>(
+                        j));
             }
             auto length = data->is_valid(i) ? output.size() : 0;
             if (!inverted_index_single_segment_) {
@@ -856,7 +961,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
             output.clear();
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                output.push_back(array->get_data<std::string>(j));
+                output.push_back(array->get_data_unchecked<std::string>(j));
             }
             wrapper_->add_data(output.data(), length, offset);
             offset += length;
@@ -902,7 +1007,11 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     for (const auto& file_path : files) {
         auto file_name = file_path.filename().string();
         int fd = open(file_path.c_str(), O_RDONLY | O_CLOEXEC);
-        AssertInfo(fd != -1, "failed to open file: {}", file_path.string());
+        if (!(fd != -1)) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to open file: {}",
+                      file_path.string());
+        }
         auto file_size = boost::filesystem::file_size(file_path);
         writer->WriteEntry(file_name, fd, file_size);
         close(fd);
@@ -921,8 +1030,9 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
                                      const Config& config) {
-    auto file_names = reader.GetMeta<std::vector<std::string>>("file_names");
-    bool has_null = reader.GetMeta<bool>("has_null");
+    auto file_names = ReadRequiredIndexMeta<std::vector<std::string>>(
+        reader.IndexMeta(), "file_names");
+    bool has_null = ReadRequiredIndexMeta<bool>(reader.IndexMeta(), "has_null");
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
     boost::filesystem::create_directories(path_);
@@ -955,7 +1065,8 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
         disk_file_manager_->RemoveIndexFiles();
     }
 
-    ComputeByteSize();
+    // V3 load path; same reason as in Load().
+    FinalizeSealed(/*release_null_offsets=*/true);
 
     LOG_INFO(
         "LoadEntries InvertedIndexTantivy done, file_count: {}, has_null: "
@@ -965,11 +1076,96 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
         load_in_mmap);
 }
 
+template <typename T>
+IndexLoadPlan
+InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
+                                  const nlohmann::json& metadata,
+                                  const Config& config) {
+    auto context = std::make_shared<TantivyLoadContext>();
+    context->has_null = ReadRequiredIndexMeta<bool>(metadata, "has_null");
+    context->load_in_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    IndexLoadPlan plan;
+    plan.load_context = context;
+    context->directory = PlanIndexDirectory(
+        directory, metadata, disk_file_manager_, context->load_in_mmap, plan);
+
+    if (!context->has_null) {
+        return plan;
+    }
+    if (!directory.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt Tantivy index: null-offset Entry is missing");
+    }
+    auto null_bytes = directory.At(INDEX_NULL_OFFSET_FILE_NAME).plaintext_size;
+    if (null_bytes % sizeof(size_t) != 0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt Tantivy index: null-offset Entry size {} is not "
+                  "a multiple of {}",
+                  null_bytes,
+                  sizeof(size_t));
+    }
+    // TODO: With a validated row count available up front, build the validity
+    // bitmap and release null_offsets as soon as this entry passes its CRC check,
+    // instead of waiting for all index files. Before sharing this overhead,
+    // admission must cover the buffer's full allocation-to-release lifetime.
+    context->null_offsets =
+        std::make_shared<std::vector<size_t>>(null_bytes / sizeof(size_t));
+    plan.entries.push_back(storage::EntryLoadPlan{
+        INDEX_NULL_OFFSET_FILE_NAME,
+        storage::MemoryEntryTarget{
+            context->null_offsets,
+            reinterpret_cast<uint8_t*>(context->null_offsets->data()),
+            null_bytes}});
+    return plan;
+}
+
+template <typename T>
+folly::coro::Task<void>
+InvertedIndexTantivy<T>::FinishLoadAsync(IndexLoadPlan& plan,
+                                         const Config& config) {
+    (void)config;
+    auto context = std::any_cast<const std::shared_ptr<TantivyLoadContext>&>(
+        plan.load_context);
+    AssertInfo(context != nullptr,
+               "InvertedIndexTantivy FinishLoadAsync context is null");
+
+    auto new_wrapper =
+        std::make_shared<TantivyIndexWrapper>(context->directory->path.c_str(),
+                                              context->load_in_mmap,
+                                              milvus::index::SetBitsetSealed);
+    std::vector<size_t> new_null_offsets;
+    if (context->has_null) {
+        AssertInfo(context->null_offsets != nullptr,
+                   "Tantivy null-offset target is null");
+        new_null_offsets = std::move(*context->null_offsets);
+    }
+
+    wrapper_ = std::move(new_wrapper);
+    null_offset_ = std::move(new_null_offsets);
+    path_ = context->directory->path;
+    FinalizeSealed(/*release_null_offsets=*/true);
+
+    LOG_INFO(
+        "FinishLoadAsync InvertedIndexTantivy done, file_count: "
+        "{}, "
+        "has_null: "
+        "{}, mmap: {}",
+        context->directory->files.size(),
+        context->has_null,
+        context->load_in_mmap);
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinishLoadAsync");
+    co_return;
+}
+
 template class InvertedIndexTantivy<bool>;
 template class InvertedIndexTantivy<int8_t>;
 template class InvertedIndexTantivy<int16_t>;
 template class InvertedIndexTantivy<int32_t>;
 template class InvertedIndexTantivy<int64_t>;
+template class InvertedIndexTantivy<uint64_t>;
 template class InvertedIndexTantivy<float>;
 template class InvertedIndexTantivy<double>;
 template class InvertedIndexTantivy<std::string>;

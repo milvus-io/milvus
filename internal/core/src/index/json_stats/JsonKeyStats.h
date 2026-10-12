@@ -22,13 +22,14 @@
 #include <algorithm>
 #include <any>
 #include <functional>
+#include <initializer_list>
 #include <istream>
-#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -39,6 +40,7 @@
 #include "bitset/bitset.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/OpContext.h"
@@ -59,27 +61,52 @@
 #include "index/json_stats/parquet_writer.h"
 #include "index/json_stats/utils.h"
 #include "log/Log.h"
+#include "mmap/ChunkedColumnFilter.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/SegcoreConfig.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
 
 class CollectSingleJsonStatsInfoAccessor;
+class CollectKeyInfoAccessor;
+class BuildKeyStatsAccessor;
 // Forward declaration of test accessor in global namespace for friend declaration
 class TraverseJsonForBuildStatsAccessor;
+class JsonStatsProjectionTestAccessor;
+class JsonStatsScanTestAccessor;
 
 namespace milvus::index {
+
+struct JsonStatsFieldDataSlice {
+    FieldDataPtr data;
+    int64_t local_begin;
+    int64_t row_count;
+};
+
+struct JsonStatsRowRange {
+    int64_t global_begin;
+    int64_t row_count;
+    std::vector<JsonStatsFieldDataSlice> slices;
+};
+
+std::vector<JsonStatsRowRange>
+CreateJsonStatsRowRanges(const std::vector<FieldDataPtr>& field_datas,
+                         int64_t max_rows_per_range);
+
 class JsonKeyStats : public ScalarIndex<std::string> {
  public:
+    static constexpr int64_t kDefaultWriteBatchSize = 81920;
+
     explicit JsonKeyStats(
         const storage::FileManagerContext& ctx,
         bool is_load,
         int64_t json_stats_max_shredding_columns = 1024,
         double json_stats_shredding_ratio_threshold = 0.3,
-        int64_t json_stats_write_batch_size = 81920,
+        int64_t json_stats_write_batch_size = kDefaultWriteBatchSize,
         uint32_t tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION);
 
     ~JsonKeyStats() override;
@@ -167,6 +194,11 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                   "IsNull not supported for JsonKeyStats");
     }
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<std::string>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override {
         ThrowInfo(ErrorCode::NotImplemented,
@@ -248,20 +280,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
         for (size_t i = 0; i < num_data_chunk; i++) {
             auto chunk_size = column->chunk_row_nums(i);
-            const bool* valid_data;
-            if (GetShreddingJsonType(path) == JSONType::STRING ||
-                GetShreddingJsonType(path) == JSONType::ARRAY) {
-                auto pw = column->StringViews(op_ctx, i);
-                valid_data = pw.get().second.data();
-                ApplyOnlyValidData(
-                    valid_data, valid_res + processed_size, chunk_size);
-            } else {
-                auto pw = column->Span(op_ctx, i);
-                auto chunk = pw.get();
-                valid_data = chunk.valid_data();
-                ApplyOnlyValidData(
-                    valid_data, valid_res + processed_size, chunk_size);
-            }
+            column->ApplyValidDataInChunk(
+                op_ctx, i, 0, chunk_size, valid_res + processed_size);
             processed_size += chunk_size;
         }
         AssertInfo(processed_size == valid_res.size(),
@@ -288,59 +308,70 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         if (shredding_columns_.find(path) == shredding_columns_.end()) {
             return processed_size;
         }
-        auto column = shredding_columns_[path];
-        auto num_data_chunk = column->num_chunks();
-        auto num_rows = column->NumRows();
-
-        for (size_t i = 0; i < num_data_chunk; i++) {
-            auto chunk_size = column->chunk_row_nums(i);
-
-            if (!skip_func || !skip_func(skip_index_, path, i)) {
-                if constexpr (std::is_same_v<T, std::string_view>) {
-                    // first is the raw data, second is valid_data
-                    // use valid_data to see if raw data is null
-                    auto pw = column->StringViews(op_ctx, i);
-                    auto [data_vec, valid_data] = pw.get();
-
-                    func(data_vec.data(),
-                         valid_data.data(),
-                         chunk_size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                } else {
-                    auto pw = column->Span(op_ctx, i);
-                    auto chunk = pw.get();
-                    const T* data = static_cast<const T*>(chunk.data());
-                    const bool* valid_data = chunk.valid_data();
-                    func(data,
-                         valid_data,
-                         chunk_size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                }
-            } else {
-                const bool* valid_data;
-                if constexpr (std::is_same_v<T, std::string_view>) {
-                    auto pw = column->StringViews(op_ctx, i);
-                    valid_data = pw.get().second.data();
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   chunk_size);
-                } else {
-                    auto pw = column->Span(op_ctx, i);
-                    auto chunk = pw.get();
-                    valid_data = chunk.valid_data();
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   chunk_size);
+        const auto& column = shredding_columns_.at(path);
+        const auto num_rows = column->NumRows();
+        AssertInfo(res.size() >= num_rows && valid_res.size() >= num_rows,
+                   "Shredding scan output is shorter than column {} rows {}",
+                   path,
+                   num_rows);
+        const auto pin_policy =
+            segcore::SegcoreConfig::default_config().get_scan_cursor_owns_pin()
+                ? ChunkedColumnInterface::ScanPinPolicy::CursorOwned
+                : ChunkedColumnInterface::ScanPinPolicy::ResultOwned;
+        auto options = ChunkedColumnInterface::ScanOptions::ForData(
+            0, TargetTypeOf<T>(), pin_policy);
+        if (skip_func) {
+            options.filter = std::make_shared<milvus::detail::ColumnFilter>(
+                milvus::detail::ColumnFilter::MetricsSource::
+                    PreloadedStatistics,
+                [&](int64_t cell_id) {
+                    return skip_func(skip_index_, path, cell_id);
+                });
+        }
+        auto cursor = column->Scan(op_ctx, options);
+        AssertInfo(cursor != nullptr,
+                   "Shredding column {} does not support data scan",
+                   path);
+        ChunkedColumnInterface::ScanBatch batch;
+        // Bound temporary string/BSON view arrays. Fixed-width values borrow
+        // the chunk's span without materializing a view array, so let Scan
+        // stop at physical chunk boundaries rather than repinning every 8192
+        // rows under ResultOwned. The full-column output bitmap is unchanged.
+        const int64_t max_batch_size = std::is_arithmetic_v<T>
+                                           ? num_rows
+                                           : DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
+        while (
+            cursor->Next(max_batch_size,
+                         ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                         &batch)) {
+            AssertInfo(batch.row_id_start == processed_size && batch.size > 0 &&
+                           batch.size <= max_batch_size &&
+                           batch.size <= num_rows - processed_size,
+                       "Invalid shredding scan batch at {}: start {}, size {}",
+                       processed_size,
+                       batch.row_id_start,
+                       batch.size);
+            auto batch_res = res + processed_size;
+            auto batch_valid_res = valid_res + processed_size;
+            if (!batch.data_skipped) {
+                func(batch.values.template data_as<T>(),
+                     batch.validity,
+                     batch.size,
+                     batch_res,
+                     batch_valid_res,
+                     values...);
+            } else if (batch.validity) {
+                // Skipping data must preserve both incoming bits for valid
+                // rows and the stats column's real NULLs (not raw JSON's).
+                for (int64_t i = 0; i < batch.size; ++i) {
+                    if (!batch.validity[i]) {
+                        batch_res[i] = false;
+                        batch_valid_res[i] = false;
+                    }
                 }
             }
-
-            processed_size += chunk_size;
+            // Consume borrowed values before advancing the cursor again.
+            processed_size += batch.size;
         }
         AssertInfo(processed_size == num_rows,
                    "Processed size {} is not equal to num_rows {}",
@@ -398,6 +429,20 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         return "";
     }
 
+    bool
+    HasAllShreddingFields(const std::string& pointer,
+                          std::initializer_list<JSONType> types) {
+        if (types.size() == 0) {
+            return false;
+        }
+        for (auto type : types) {
+            if (GetShreddingField(pointer, type).empty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     std::set<std::string>
     GetShreddingFields(const std::string& pointer,
                        std::vector<JSONType> types) {
@@ -428,7 +473,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
  private:
     void
-    CollectSingleJsonStatsInfo(const char* json_str,
+    CollectSingleJsonStatsInfo(std::string_view json_str,
                                std::map<JsonKey, KeyStatsInfo>& infos);
 
     std::string
@@ -440,8 +485,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         return ss.str();
     }
 
+    // Keep the original serial implementation for differential tests.
     std::map<JsonKey, KeyStatsInfo>
     CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas, bool nullable);
+
+    std::map<JsonKey, KeyStatsInfo>
+    CollectKeyInfo(const std::vector<JsonStatsRowRange>& row_ranges,
+                   bool nullable);
 
     void
     TraverseJsonForStats(const char* json,
@@ -473,11 +523,33 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::map<JsonKey, JsonKeyLayoutType>
     ClassifyJsonKeyLayoutType(const std::map<JsonKey, KeyStatsInfo>& infos);
 
+    // Keep the original serial implementation for differential tests.
     void
-    BuildKeyStats(const std::vector<FieldDataPtr>& field_datas, bool nullable);
+    BuildKeyStats(const std::vector<JsonStatsRowRange>& row_ranges,
+                  bool nullable);
 
     void
-    BuildKeyStatsForRow(const char* json_str, uint32_t row_id);
+    BuildKeyStatsParallel(const std::vector<JsonStatsRowRange>& row_ranges,
+                          bool nullable);
+
+    static size_t
+    EstimateJsonStatsMaterializeReservationBytes(const JsonStatsRowRange& range,
+                                                 const arrow::Schema& schema);
+
+    struct MaterializedChunk {
+        std::shared_ptr<arrow::RecordBatch> record_batch;
+        std::map<std::string, std::vector<int64_t>> bson_postings;
+        size_t memory_bytes;
+    };
+
+    MaterializedChunk
+    MaterializeKeyStatsRange(
+        const JsonStatsRowRange& range,
+        bool nullable,
+        const std::shared_ptr<arrow::Schema>& schema) const;
+
+    void
+    BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id);
 
     void
     BuildKeyStatsForNullRow();
@@ -501,55 +573,26 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     AddKeyStats(const std::vector<std::string>& path,
                 JSONType type,
                 const std::string& value,
-                std::map<JsonKey, std::string>& values);
+                std::map<JsonKey, std::string>& values) const;
+
+    bool
+    ParseJsonForBuildStats(std::string_view json_str,
+                           std::map<JsonKey, std::string>& values) const;
 
     void
     TraverseJsonForBuildStats(const char* json,
                               jsmntok* tokens,
                               int& index,
                               std::vector<std::string>& path,
-                              std::map<JsonKey, std::string>& values);
+                              std::map<JsonKey, std::string>& values) const;
 
     bool
-    IsBoolean(const std::string& str) {
+    IsBoolean(const std::string& str) const {
         return str == "true" || str == "false";
     }
 
     bool
-    IsInt8(const std::string& str) {
-        std::istringstream iss(str);
-        int8_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int8_t>::min() &&
-               num <= std::numeric_limits<int8_t>::max();
-    }
-
-    bool
-    IsInt16(const std::string& str) {
-        std::istringstream iss(str);
-        int16_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int16_t>::min() &&
-               num <= std::numeric_limits<int16_t>::max();
-    }
-
-    bool
-    IsInt32(const std::string& str) {
-        std::istringstream iss(str);
-        int64_t num;
-        iss >> num;
-
-        return !iss.fail() && iss.eof() &&
-               num >= std::numeric_limits<int32_t>::min() &&
-               num <= std::numeric_limits<int32_t>::max();
-    }
-
-    bool
-    IsInt64(const std::string& str) {
+    IsInt64(const std::string& str) const {
         std::istringstream iss(str);
         int64_t num;
         iss >> num;
@@ -558,32 +601,36 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
     bool
-    IsFloat(const std::string& str) {
+    IsFloat(const std::string& str) const {
         try {
             std::stof(str);
             return true;
-        } catch (...) {
+        } catch (const std::invalid_argument&) {
+            return false;
+        } catch (const std::out_of_range&) {
             return false;
         }
     }
 
     bool
-    IsDouble(const std::string& str) {
+    IsDouble(const std::string& str) const {
         try {
             std::stod(str);
             return true;
-        } catch (...) {
+        } catch (const std::invalid_argument&) {
+            return false;
+        } catch (const std::out_of_range&) {
             return false;
         }
     }
 
     bool
-    IsNull(const std::string& str) {
+    IsNull(const std::string& str) const {
         return str == "null";
     }
 
     JSONType
-    getType(const std::string& str) {
+    getType(const std::string& str) const {
         if (IsBoolean(str)) {
             return JSONType::BOOL;
             // TODO: add int8, int16, int32 support
@@ -612,33 +659,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                       const std::string& warmup_policy = "");
 
     void
-    ApplyValidData(const bool* valid_data,
-                   TargetBitmapView res,
-                   TargetBitmapView valid_res,
-                   const int size) {
-        if (valid_data != nullptr) {
-            for (int i = 0; i < size; i++) {
-                if (!valid_data[i]) {
-                    res[i] = valid_res[i] = false;
-                }
-            }
-        }
-    }
-
-    void
-    ApplyOnlyValidData(const bool* valid_data,
-                       TargetBitmapView valid_res,
-                       const int size) {
-        if (valid_data != nullptr) {
-            for (int i = 0; i < size; i++) {
-                if (!valid_data[i]) {
-                    valid_res[i] = false;
-                }
-            }
-        }
-    }
-
-    void
     GetColumnSchemaFromParquet(int64_t column_group_id,
                                const std::string& file);
 
@@ -653,7 +673,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
     void
     LoadShreddingMeta(
-        std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files,
+        const std::vector<std::pair<int64_t, std::vector<int64_t>>>&
+            sorted_files,
         const std::string& override_prefix = "");
 
     std::string
@@ -720,6 +741,10 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     // Friend accessor for unit tests to call private methods safely.
     friend class ::TraverseJsonForBuildStatsAccessor;
     friend class ::CollectSingleJsonStatsInfoAccessor;
+    friend class ::CollectKeyInfoAccessor;
+    friend class ::BuildKeyStatsAccessor;
+    friend class ::JsonStatsProjectionTestAccessor;
+    friend class ::JsonStatsScanTestAccessor;
 };
 
 }  // namespace milvus::index

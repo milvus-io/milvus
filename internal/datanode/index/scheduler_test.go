@@ -23,12 +23,124 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestGetStateFromError(t *testing.T) {
+	t.Run("data format broken is terminal", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(merr.SegcoreError(2024, "malformed vector data")))
+	})
+
+	t.Run("generic segcore error still retries", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry, getStateFromError(merr.SegcoreError(2001, "unexpected")))
+	})
+
+	t.Run("transient segcore error still retries", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry, getStateFromError(merr.SegcoreError(2045, "transient storage error")))
+	})
+
+	// Caller-input failures are a property of the request or of the source data, so
+	// the task fails identically on every worker and on every attempt. Retrying them
+	// turns one bad document into an unbounded re-dispatch loop.
+	t.Run("caller input segcore errors are terminal", func(t *testing.T) {
+		for _, tc := range []struct {
+			code int32
+			name string
+		}{
+			{2025, "JsonKeyInvalid"},
+			{2028, "ExprInvalid"},
+			{2032, "DimNotMatch"},
+			{2042, "InvalidParameter"},
+		} {
+			assert.Equalf(t, indexpb.JobState_JobStateFailed,
+				getStateFromError(merr.SegcoreError(tc.code, tc.name)),
+				"segcore code %d (%s) must fail instead of retrying", tc.code, tc.name)
+		}
+	})
+
+	// Codes the table marks permanent reproduce identically on every worker, so
+	// the task must give up instead of burning a slot per attempt.
+	t.Run("permanent segcore errors are terminal", func(t *testing.T) {
+		for _, tc := range []struct {
+			code int32
+			name string
+		}{
+			{2016, "BucketInvalid"},
+			{2017, "ObjectNotExist"},
+			{2024, "DataFormatBroken"},
+		} {
+			assert.Equalf(t, indexpb.JobState_JobStateFailed,
+				getStateFromError(merr.SegcoreError(tc.code, tc.name)),
+				"segcore code %d (%s) must fail instead of retrying", tc.code, tc.name)
+		}
+		// wrapped the way indexcgowrapper reports it
+		assert.Equal(t, indexpb.JobState_JobStateFailed,
+			getStateFromError(errors.Wrap(merr.SegcoreError(2017, "object not exist"),
+				"failed to create index, C Runtime Exception")))
+	})
+
+	// 2004 and 2044 are raised by broad "operation failed" branches that also
+	// carry transient storage and per-node disk failures, so a re-dispatch to
+	// another worker can still succeed.
+	t.Run("broad failure codes keep retrying", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry,
+			getStateFromError(merr.SegcoreError(2004, "failed to build disk index, disk file error")))
+		assert.Equal(t, indexpb.JobState_JobStateRetry,
+			getStateFromError(merr.SegcoreError(2044, "storage error")))
+	})
+
+	// A segment whose meta points at a binlog that is not there is Milvus state
+	// being inconsistent, not a malformed request: it stays a system error and is
+	// still terminal, because no retry can make the binlog appear.
+	t.Run("data integrity failures are terminal but stay system errors", func(t *testing.T) {
+		err := merr.WrapErrDataIntegrityMsg("field binlog not found for field %d", 116)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(err))
+		assert.NotEqual(t, merr.InputError, merr.GetErrorType(err))
+	})
+
+	// DataTypeInvalid / DataIsEmpty look like input validation but their C++
+	// producers are predominantly internal guards, so classForCode keeps them
+	// system errors and the scheduler keeps retrying them.
+	t.Run("mixed semantics codes still retry", func(t *testing.T) {
+		for _, code := range []int32{2007, 2023} {
+			assert.Equalf(t, indexpb.JobState_JobStateRetry,
+				getStateFromError(merr.SegcoreError(code, "internal guard")), "segcore code %d", code)
+		}
+	})
+
+	t.Run("input error survives wrapping", func(t *testing.T) {
+		err := errors.Wrap(merr.SegcoreError(2025, "bad json"), "failed to build json key index")
+		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(err))
+	})
+
+	t.Run("parameter invalid raised by the task itself is terminal", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateFailed,
+			getStateFromError(merr.WrapErrParameterInvalidMsg("data insert path must be not empty")))
+	})
+
+	t.Run("cancel retries and pretend-finished finishes", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry, getStateFromError(errCancel))
+		assert.Equal(t, indexpb.JobState_JobStateFinished, getStateFromError(merr.SegcoreError(2033, "cluster skip")))
+	})
+
+	t.Run("system errors are unaffected", func(t *testing.T) {
+		assert.Equal(t, indexpb.JobState_JobStateRetry,
+			getStateFromError(merr.WrapErrServiceInternalMsg("internal")))
+		assert.Equal(t, indexpb.JobState_JobStateFailed,
+			getStateFromError(merr.WrapErrIoKeyNotFound("some/key")))
+	})
+}
 
 type fakeTaskState int
 
@@ -229,4 +341,98 @@ func TestIndexTaskScheduler(t *testing.T) {
 	for _, task := range tasks {
 		assert.Equal(t, task.GetState(), indexpb.JobState_JobStateFinished)
 	}
+}
+
+func newSchedulerIndexBuildTask(t *testing.T, manager *TaskManager, buildID int64) *indexBuildTask {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	req := &workerpb.CreateJobRequest{
+		ClusterID: "test-cluster",
+		BuildID:   buildID,
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "STL_SORT"},
+		},
+		Field: &schemapb.FieldSchema{
+			FieldID:  100,
+			DataType: schemapb.DataType_Int64,
+		},
+	}
+	manager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &IndexTaskInfo{
+		State: commonpb.IndexState_InProgress,
+	})
+	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+}
+
+func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("success records execution cost", func(t *testing.T) {
+		manager := NewTaskManager(context.Background())
+		task := newSchedulerIndexBuildTask(t, manager, 1001)
+
+		preMock := mockey.Mock((*indexBuildTask).PreExecute).Return(nil).Build()
+		defer preMock.UnPatch()
+		executeMock := mockey.Mock((*indexBuildTask).Execute).Return(nil).Build()
+		defer executeMock.UnPatch()
+		postMock := mockey.Mock((*indexBuildTask).PostExecute).Return(nil).Build()
+		defer postMock.UnPatch()
+
+		scheduler := NewTaskScheduler(context.Background())
+		scheduler.processTask(task)
+
+		info := manager.GetIndexTaskInfo("test-cluster", 1001)
+		assert.NotNil(t, info)
+		assert.Equal(t, commonpb.IndexState_Finished, info.State)
+		assert.Greater(t, info.ExecStartMs, int64(0))
+		assert.GreaterOrEqual(t, info.ExecEndMs, info.ExecStartMs)
+		assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
+		assert.Equal(t, int64(1), info.CostCPUNum)
+	})
+
+	t.Run("pre execute failure still records execution end", func(t *testing.T) {
+		manager := NewTaskManager(context.Background())
+		task := newSchedulerIndexBuildTask(t, manager, 1002)
+		expectedErr := errors.New("pre execute failed")
+
+		preMock := mockey.Mock((*indexBuildTask).PreExecute).Return(expectedErr).Build()
+		defer preMock.UnPatch()
+
+		scheduler := NewTaskScheduler(context.Background())
+		scheduler.processTask(task)
+
+		info := manager.GetIndexTaskInfo("test-cluster", 1002)
+		assert.NotNil(t, info)
+		assert.Equal(t, commonpb.IndexState_Retry, info.State)
+		assert.Equal(t, expectedErr.Error(), info.FailReason)
+		assert.Greater(t, info.ExecStartMs, int64(0))
+		assert.GreaterOrEqual(t, info.ExecEndMs, info.ExecStartMs)
+		assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
+		assert.Equal(t, int64(1), info.CostCPUNum)
+	})
+
+	t.Run("vector index records build pool cpu num", func(t *testing.T) {
+		manager := NewTaskManager(context.Background())
+		task := newSchedulerIndexBuildTask(t, manager, 1003)
+
+		vecMock := mockey.Mock((*indexBuildTask).IsVectorIndex).Return(true).Build()
+		defer vecMock.UnPatch()
+		preMock := mockey.Mock((*indexBuildTask).PreExecute).Return(nil).Build()
+		defer preMock.UnPatch()
+		executeMock := mockey.Mock((*indexBuildTask).Execute).Return(nil).Build()
+		defer executeMock.UnPatch()
+		postMock := mockey.Mock((*indexBuildTask).PostExecute).Return(nil).Build()
+		defer postMock.UnPatch()
+
+		scheduler := NewTaskScheduler(context.Background())
+		scheduler.processTask(task)
+
+		info := manager.GetIndexTaskInfo("test-cluster", 1003)
+		assert.NotNil(t, info)
+		assert.Equal(t, commonpb.IndexState_Finished, info.State)
+		assert.Greater(t, info.ExecStartMs, int64(0))
+		assert.GreaterOrEqual(t, info.ExecEndMs, info.ExecStartMs)
+		assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
+		assert.Equal(t, int64(hardware.GetCPUNum()), info.CostCPUNum)
+	})
 }

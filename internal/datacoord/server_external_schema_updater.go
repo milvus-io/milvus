@@ -52,6 +52,6 @@ func (s *Server) updateExternalSchemaViaWAL(ctx context.Context, collectionID in
 	mlog.Info(ctx, "updated external schema via RootCoord after refresh",
 		mlog.FieldCollectionID(collectionID),
 		mlog.String("externalSource", externalSource),
-		mlog.String("externalSpec", externalspec.RedactExternalSpec(externalSpec)))
+		mlog.String("externalSpec", externalspec.RedactExternalSpecForLog(externalSpec)))
 	return nil
 }

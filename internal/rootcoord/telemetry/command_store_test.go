@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
@@ -377,12 +378,12 @@ func TestConfigHashConsistency(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, hash1)
 
-	// Add a config for client1 (scope: client:client1)
+	// Add a config for db1 (scope: database:db1)
 	cfgID1, _ := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType:    "push_config",
 		Payload:        []byte(`{"a": 1}`),
 		Persistent:     true,
-		TargetClientId: "client1",
+		TargetDatabase: "db1",
 	})
 
 	_, hash2, err := store.ListConfigs(ctx)
@@ -399,7 +400,7 @@ func TestConfigHashConsistency(t *testing.T) {
 		CommandType:    "push_config",
 		Payload:        []byte(`{"b": 2}`),
 		Persistent:     true,
-		TargetClientId: "client2",
+		TargetDatabase: "db2",
 	})
 
 	_, hash4, _ := store.ListConfigs(ctx)
@@ -486,13 +487,13 @@ func TestRestartBehavior_MultipleConfigs(t *testing.T) {
 		CommandType:    "push_config",
 		Payload:        []byte(`{"setting": "value1"}`),
 		Persistent:     true,
-		TargetClientId: "client1",
+		TargetDatabase: "db1",
 	})
 	cfgID2, _ := store1.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
 		CommandType:    "push_config",
 		Payload:        []byte(`{"setting": "value2"}`),
 		Persistent:     true,
-		TargetClientId: "client2",
+		TargetDatabase: "db2",
 	})
 
 	_, hash1, _ := store1.ListConfigs(ctx)
@@ -666,7 +667,7 @@ func TestPayloadPreservation(t *testing.T) {
 			CommandType:    "push_config",
 			Payload:        payload,
 			Persistent:     true,
-			TargetClientId: fmt.Sprintf("client%d", i),
+			TargetDatabase: fmt.Sprintf("db%d", i),
 		})
 		require.NoError(t, err, "failed for payload %d", i)
 	}
@@ -1060,4 +1061,109 @@ func TestListCommandsWithInfoEdgeCases(t *testing.T) {
 			assert.NotEqual(t, "expired-cmd", info.CommandID)
 		}
 	})
+}
+
+// TestPushCommandStoresTTLVerbatim pins the wire contract: the store applies no default of
+// its own, so 0 keeps meaning "no expiry" for every caller.
+//
+// No proto declaration could make this safe to do otherwise. Proto3 implicit presence means
+// a client emits nothing for an explicit 0, so "never expire" and "unspecified" arrive as
+// the same bytes; defaulting on that would convert every existing caller's deliberate
+// choice into an hour. The default belongs to the HTTP layer, which decodes JSON into a
+// pointer and really can see the difference.
+func TestPushCommandStoresTTLVerbatim(t *testing.T) {
+	ctx := context.Background()
+
+	cases := []struct {
+		name     string
+		ttl      int64
+		expected int64
+	}{
+		{"zero is no-expiry, not a default", 0, 0},
+		{"positive is honored verbatim", 120, 120},
+		{"negative means never expire", -1, -1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+			id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+				CommandType:    "show_errors",
+				TargetClientId: "client-1",
+				TtlSeconds:     tc.ttl,
+			})
+			require.NoError(t, err)
+
+			store.cacheMu.RLock()
+			cmd := store.cache.commands[id]
+			store.cacheMu.RUnlock()
+
+			require.NotNil(t, cmd)
+			assert.Equal(t, tc.expected, cmd.TTLSeconds)
+		})
+	}
+}
+
+func TestExpiredCommandIsSwept(t *testing.T) {
+	ctx := context.Background()
+	store := NewCommandStoreWithKV(newMockKV(), "/test/")
+
+	id, err := store.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+		CommandType: "show_errors",
+		TtlSeconds:  3600,
+	})
+	require.NoError(t, err)
+
+	// Backdate past the TTL, as if the client never answered.
+	store.cacheMu.Lock()
+	store.cache.commands[id].CreateTime = time.Now().UnixMilli() - 3601*1000
+	store.cacheMu.Unlock()
+
+	store.CleanupExpiredCommands(ctx)
+
+	store.cacheMu.RLock()
+	_, stillThere := store.cache.commands[id]
+	store.cacheMu.RUnlock()
+	assert.False(t, stillThere, "an uncollected command must be reclaimed on its TTL")
+}
+
+// TestOldClientExplicitZeroKeepsNoExpiry is the regression test for the compatibility trap
+// that `optional` does not close.
+//
+// ttl_seconds was a plain proto3 int64 before, and proto3 implicit presence means a zero
+// value is not serialized at all. So a client built against the old definition that
+// deliberately set 0 -- "never expire", exactly as the field is documented -- puts *nothing*
+// on the wire. A server that treats an absent field as "unspecified, use the default" turns
+// that client's deliberate choice into a one-hour expiry, silently, with no way for the
+// client to ask for the old behavior back. Adding `optional` cannot fix this: it gives
+// presence to new senders only.
+//
+// This test reconstructs that exact payload rather than describing it.
+func TestOldClientExplicitZeroKeepsNoExpiry(t *testing.T) {
+	ctx := context.Background()
+
+	// What an old client's encoder produces for TtlSeconds: 0 -- the field is simply absent.
+	onTheWire, err := proto.Marshal(&milvuspb.PushClientCommandRequest{
+		CommandType:    "show_errors",
+		TargetClientId: "legacy-client",
+	})
+	require.NoError(t, err)
+
+	var received milvuspb.PushClientCommandRequest
+	require.NoError(t, proto.Unmarshal(onTheWire, &received))
+	require.Equal(t, int64(0), received.TtlSeconds,
+		"an explicit 0 is indistinguishable from absent on the wire; that is the whole trap")
+
+	store := NewCommandStoreWithKV(newMockKV(), "/test/")
+	id, err := store.PushCommand(ctx, &received)
+	require.NoError(t, err)
+
+	store.cacheMu.RLock()
+	cmd := store.cache.commands[id]
+	store.cacheMu.RUnlock()
+
+	require.NotNil(t, cmd)
+	assert.Equal(t, int64(0), cmd.TTLSeconds,
+		"a command from a client that asked for no expiry must not silently acquire one")
 }

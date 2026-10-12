@@ -62,6 +62,7 @@
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
+#include "knowhere/index/emb_list_strategy.h"
 #include "knowhere/version.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -137,8 +138,9 @@ class TestVectorArrayStorageV2 : public testing::Test {
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
         // Prepare paths and column groups
-        std::vector<std::string> paths = {"test_data/0/10000.parquet",
-                                          "test_data/101/10001.parquet"};
+        std::vector<std::string> paths = {
+            TestLocalPath + "test_data/0/10000.parquet",
+            TestLocalPath + "test_data/101/10001.parquet"};
 
         // Create directories for the parquet files
         for (const auto& path : paths) {
@@ -292,7 +294,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
     void
     TearDown() override {
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-        (void)fs->DeleteDir("test_data");
+        (void)fs->DeleteDir(TestLocalPath + "test_data");
     }
 
  protected:
@@ -311,7 +313,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     ASSERT_TRUE(segment_->HasFieldData(vector_array_field_id));
 
     // Get the storage v2 parquet file paths that were already written in SetUp
-    std::vector<std::string> paths = {"test_data/101/10001.parquet"};
+    std::vector<std::string> paths = {TestLocalPath +
+                                      "test_data/101/10001.parquet"};
 
     // Use the existing Arrow file system from SetUp
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
@@ -390,6 +393,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         query_vec_offsets.push_back(10);
         query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                            const_cast<const size_t*>(query_vec_offsets.data()));
+        query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                           static_cast<int64_t>(query_vec_offsets.size() - 1));
 
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
         milvus::SearchInfo searchInfo;
@@ -424,7 +429,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
     ASSERT_TRUE(segment_->HasFieldData(vector_array_field_id));
 
     // Get the storage v2 parquet file paths that were already written in SetUp
-    std::vector<std::string> paths = {"test_data/101/10001.parquet"};
+    std::vector<std::string> paths = {TestLocalPath +
+                                      "test_data/101/10001.parquet"};
 
     // Use the existing Arrow file system from SetUp
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
@@ -530,6 +536,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
         query_vec_lims.push_back(10);
         query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                            const_cast<const size_t*>(query_vec_lims.data()));
+        query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                           static_cast<int64_t>(query_vec_lims.size() - 1));
 
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
         milvus::SearchInfo searchInfo;
@@ -560,7 +568,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
     auto vector_array_field_id = fields_["vector_array"];
     ASSERT_TRUE(segment_->HasFieldData(vector_array_field_id));
 
-    std::vector<std::string> paths = {"test_data/101/10001.parquet"};
+    std::vector<std::string> paths = {TestLocalPath +
+                                      "test_data/101/10001.parquet"};
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     auto storage_config = gen_local_storage_config(TestLocalPath);
     auto cm = CreateChunkManager(storage_config);
@@ -598,7 +607,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
         create_index_info.metric_type = knowhere::metric::MAX_SIM_COSINE;
         create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
         create_index_info.index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionNumber();
+            knowhere::kEmbListMetaV2MinVersion;
 
         auto emb_list_hnsw_index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
@@ -674,6 +683,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
         std::vector<size_t> query_vec_lims = {0, 3, 10};
         query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                            const_cast<const size_t*>(query_vec_lims.data()));
+        query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                           static_cast<int64_t>(query_vec_lims.size() - 1));
 
         auto search_conf = knowhere::Json{
             {knowhere::indexparam::EF, 64},

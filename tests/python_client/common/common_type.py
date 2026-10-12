@@ -160,7 +160,7 @@ compact_segment_num_threshold = 3
 compact_delta_ratio_reciprocal = 5  # compact_delta_binlog_ratio is 0.2
 compact_retention_duration = 40  # compaction travel time retention range 20s
 max_compaction_interval = 60  # the max time interval (s) from the last compaction
-max_field_num = 64  # Maximum number of fields in a collection
+max_field_num = 256  # Maximum number of fields in a collection
 max_vector_field_num = 10  # Maximum number of vector fields in a collection
 max_name_length = 255  # Maximum length of name for a collection or alias
 default_replica_num = 1
@@ -581,6 +581,8 @@ class CaseLabel:
             loadbalance testcases which need to be run in multi query nodes
         ClusterOnly:
             For functions only suitable to cluster mode
+        SparkBackfill:
+            Dedicated Spark-Milvus Backfill E2E tests
         GPU:
             For GPU supported cases
     """
@@ -592,6 +594,7 @@ class CaseLabel:
     RBAC = "RBAC"
     Loadbalance = "Loadbalance"  # loadbalance testcases which need to be run in multi query nodes
     ClusterOnly = "ClusterOnly"  # For functions only suitable to cluster mode
+    SparkBackfill = "SparkBackfill"  # Dedicated Spark-Milvus Backfill E2E tests
     MultiQueryNodes = "MultiQueryNodes"  # for 8 query nodes configs tests, such as resource group
     GPU = "GPU"
     CDC = "CDC"

@@ -6,11 +6,15 @@ import (
 	context "context"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	mock "github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
+
+	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+
+	mock "github.com/stretchr/testify/mock"
 
 	workerpb "github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 )

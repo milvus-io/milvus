@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/Utils.h"
 #include "common/bson_shim.h"
 #include "glog/logging.h"
@@ -108,30 +109,50 @@ AppendJsonElementToBson(simdjson::dom::element elem,
 
 }  // namespace
 
+// Classification lives here rather than at the call sites: every simdjson access
+// below -- the parse, the array iteration, and the element accessors inside
+// AppendJsonElementToBson -- throws simdjson_error, and a caller that forgets to
+// guard would let it escape to the cgo boundary and be flattened into the generic
+// UnexpectedError, which the build scheduler retries forever. The simdjson error
+// is mapped by the shared SimdjsonParseErrorToErrorCode, exactly as
+// UnescapeJsonString does; no code is chosen here.
 std::vector<uint8_t>
 BuildBsonArrayBytesFromJsonString(const std::string& json_array) {
-    simdjson::dom::parser parser;
-    simdjson::dom::element root = parser.parse(json_array);
-    if (root.type() != simdjson::dom::element_type::ARRAY) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "input is not a JSON array: {}",
-                  json_array);
-    }
+    try {
+        simdjson::dom::parser parser;
+        simdjson::dom::element root = parser.parse(json_array);
+        if (root.type() != simdjson::dom::element_type::ARRAY) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "input is not a JSON array: {}",
+                      json_array);
+        }
 
-    bson_t arr;
-    bson_init(&arr);
-    uint32_t i = 0;
-    char buf[16];
-    const char* idx_key = nullptr;
-    for (simdjson::dom::element elem : root.get_array()) {
-        size_t klen = bson_uint32_to_string(i, &idx_key, buf, sizeof(buf));
-        AppendJsonElementToBson(elem, &arr, idx_key, static_cast<int>(klen));
-        i++;
+        bson_t arr;
+        bson_init(&arr);
+        uint32_t i = 0;
+        char buf[16];
+        const char* idx_key = nullptr;
+        for (simdjson::dom::element elem : root.get_array()) {
+            size_t klen = bson_uint32_to_string(i, &idx_key, buf, sizeof(buf));
+            AppendJsonElementToBson(
+                elem, &arr, idx_key, static_cast<int>(klen));
+            i++;
+        }
+        std::vector<uint8_t> out(bson_get_data(&arr),
+                                 bson_get_data(&arr) + arr.len);
+        bson_destroy(&arr);
+        return out;
+    } catch (const SegcoreError&) {
+        // Already classified above; SegcoreError derives from std::runtime_error
+        // and would otherwise be swallowed by a generic handler.
+        throw;
+    } catch (const simdjson::simdjson_error& e) {
+        ThrowInfo(SimdjsonParseErrorToErrorCode(e.error()),
+                  "Failed to build bson array from json string: {}, {}",
+                  json_array,
+                  e.what());
     }
-    std::vector<uint8_t> out(bson_get_data(&arr),
-                             bson_get_data(&arr) + arr.len);
-    bson_destroy(&arr);
-    return out;
+    return {};
 }
 
 void
@@ -203,24 +224,12 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
             return DomNode(std::move(s));
         }
         case JSONType::ARRAY: {
-            try {
-                DomScalar s;
-                s.type = JSONType::ARRAY;
-                s.arr_bytes = BuildBsonArrayBytesFromJsonString(value);
-                return DomNode(std::move(s));
-            } catch (const simdjson::simdjson_error& e) {
-                ThrowInfo(
-                    ErrorCode::UnexpectedError,
-                    "Failed to build bson array (simdjson) from string: {}, {}",
-                    value,
-                    e.what());
-            } catch (const std::exception& e) {
-                ThrowInfo(
-                    ErrorCode::UnexpectedError,
-                    "Failed to build bson array (generic) from string: {}, {}",
-                    value,
-                    e.what());
-            }
+            // BuildBsonArrayBytesFromJsonString classifies its own failures; a
+            // generic catch here would rewrap the SegcoreError and lose the code.
+            DomScalar s;
+            s.type = JSONType::ARRAY;
+            s.arr_bytes = BuildBsonArrayBytesFromJsonString(value);
+            return DomNode(std::move(s));
         }
         case JSONType::OBJECT: {
             AssertInfo(value == "{}",
@@ -306,7 +315,9 @@ BsonBuilder::ExtractOffsetsRecursive(
     milvus::fastmem::FastMemcpy(&length, current_base_ptr, 4);
 
     const uint8_t* end_ptr = current_base_ptr + length - 1;
-    AssertInfo(*(end_ptr) == 0x00, "miss bson document terminator");
+    if (!(*(end_ptr) == 0x00)) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "miss bson document terminator");
+    }
 
     const uint8_t* ptr = current_base_ptr + 4;
 

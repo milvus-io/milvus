@@ -18,9 +18,12 @@ package session
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -90,7 +93,7 @@ type Cluster interface {
 	DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error
 
 	// CreateCopySegment creates a copy segment task
-	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error
+	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool) error
 	// QueryCopySegment queries the status of a copy segment task
 	QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)
 	// DropCopySegment drops a copy segment task
@@ -248,22 +251,31 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 			ret = rst
 			break
 		}
-		return ret, err
+		if ret == nil {
+			return nil, nil
+		}
+		return ret, nil
 	}
 
 	switch state {
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if len(resp.GetPayload()) > 0 {
 			return payloadResultF()
 		}
 		return defaultResult, nil
-	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+	case taskcommon.Finished:
+		if len(resp.GetPayload()) > 0 {
 			return payloadResultF()
 		}
-		panic("the compaction result payload must not be empty with Finished/Failed state")
+		return nil, merr.WrapErrCompactionResultNotFound(fmt.Sprintf(
+			"compaction task %d on node %d finished without result payload", in.GetPlanID(), nodeID))
+	case taskcommon.Failed:
+		if len(resp.GetPayload()) > 0 {
+			return payloadResultF()
+		}
+		return defaultResult, nil
 	default:
 		panic("should not happen")
 	}
@@ -638,7 +650,7 @@ func (c *cluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.
 	}
 
 	properties := taskcommon.NewProperties(nil)
-	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendClusterID(req.GetClusterID())
 	properties.AppendTaskID(req.GetTaskID())
 	properties.AppendType(taskcommon.RefreshExternalCollection)
 	properties.AppendTaskSlot(1)
@@ -696,14 +708,60 @@ func (c *cluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) 
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error {
+func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
-	properties.AppendType(taskcommon.CopySegment)
+	taskType := taskcommon.CopySegment
+	if external {
+		taskType = taskcommon.ExternalCopySegment
+	}
+	properties.AppendType(taskType)
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendCollectionID(collectionID)
-	return c.createTask(nodeID, in, properties)
+	// Query the selected worker, rather than infer capability from a version
+	// string. Unknown workers retain the original wire representation.
+	if len(in.GetTargetIndexes()) > 0 {
+		timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		cli, err := c.nm.GetClient(nodeID)
+		if err != nil {
+			return err
+		}
+		caps, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+		if err := merr.CheckRPCCall(caps.GetStatus(), err); err != nil {
+			return err
+		}
+		if !caps.GetCopySegmentSharedIndexes() {
+			in = proto.Clone(in).(*datapb.CopySegmentRequest)
+			for _, target := range in.GetTargets() {
+				target.TargetIndexes = in.GetTargetIndexes()
+			}
+			in.TargetIndexes = nil
+		}
+	}
+	err := c.createTask(nodeID, in, properties)
+	if external {
+		return normalizeExternalCopyCreateError(err)
+	}
+	return err
+}
+
+// normalizeExternalCopyCreateError translates the response emitted by workers
+// that predate ErrServiceUnimplemented into the typed capability error used by
+// current coordinators. The reason check intentionally narrows the legacy code
+// 5 match so unrelated ServiceInternal failures remain retryable.
+func normalizeExternalCopyCreateError(err error) error {
+	if err == nil || errors.Is(err, merr.ErrServiceUnimplemented) {
+		return err
+	}
+
+	legacyReason := "unrecognized task type '" + taskcommon.ExternalCopySegment + "'"
+	if errors.Is(err, merr.ErrServiceInternal) && strings.Contains(err.Error(), legacyReason) {
+		return merr.WrapErrServiceUnimplemented(err)
+	}
+	return err
 }
 
 func (c *cluster) QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {

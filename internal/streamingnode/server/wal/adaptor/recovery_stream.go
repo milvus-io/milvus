@@ -1,9 +1,12 @@
 package adaptor
 
 import (
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -14,28 +17,44 @@ var (
 )
 
 // newRecoveryStreamBuilder creates a new recovery stream builder.
-func newRecoveryStreamBuilder(roWALImpls *roWALAdaptorImpl) *recoveryStreamBuilderImpl {
+func newRecoveryStreamBuilder(roWALImpls *roWALAdaptorImpl, buffer wab.ROWriteAheadBuffer, liveReady <-chan struct{}) *recoveryStreamBuilderImpl {
 	return &recoveryStreamBuilderImpl{
 		roWALAdaptorImpl: roWALImpls,
 		basicWAL:         roWALImpls.roWALImpls.(walimpls.WALImpls),
+		writeAheadBuffer: buffer,
+		liveReady:        liveReady,
 	}
 }
 
 // recoveryStreamBuilerImpl is the implementation of RecoveryStreamBuilder.
 type recoveryStreamBuilderImpl struct {
 	*roWALAdaptorImpl
-	basicWAL walimpls.WALImpls
+	basicWAL         walimpls.WALImpls
+	writeAheadBuffer wab.ROWriteAheadBuffer
+	liveReady        <-chan struct{}
 }
 
 // Build builds a recovery stream.
 func (b *recoveryStreamBuilderImpl) Build(param recovery.BuildRecoveryStreamParam) recovery.RecoveryStream {
-	scanner := newRecoveryScannerAdaptor(b.roWALImpls, param.StartCheckpoint, b.scanMetrics.NewScannerMetrics())
+	scanner := newScannerAdaptor(
+		"recovery",
+		b.roWALImpls,
+		wal.ReadOption{
+			DeliverPolicy:          options.DeliverPolicyStartFrom(param.StartCheckpoint),
+			IgnorePauseConsumption: true,
+		},
+		b.scanMetrics.NewScannerMetrics(),
+		func() {},
+		scannerConfig{
+			writeAheadBuffer: b.writeAheadBuffer,
+			startupBarrier:   &scannerStartupBarrier{message: param.RecoveryBarrier, resume: b.liveReady},
+		},
+	)
 	recoveryStream := &recoveryStreamImpl{
-		notifier:  syncutil.NewAsyncTaskNotifier[error](),
-		param:     param,
-		scanner:   scanner,
-		ch:        make(chan message.ImmutableMessage),
-		txnBuffer: nil,
+		notifier: syncutil.NewAsyncTaskNotifier[error](),
+		scanner:  scanner,
+		ch:       make(chan message.ImmutableMessage),
+		onFatal:  b.markUnavailable,
 	}
 	go recoveryStream.execute()
 	return recoveryStream
@@ -47,11 +66,10 @@ func (b *recoveryStreamBuilderImpl) RWWALImpls() walimpls.WALImpls {
 
 // recoveryStreamImpl is the implementation of RecoveryStream.
 type recoveryStreamImpl struct {
-	notifier  *syncutil.AsyncTaskNotifier[error]
-	scanner   *scannerAdaptorImpl
-	param     recovery.BuildRecoveryStreamParam
-	ch        chan message.ImmutableMessage
-	txnBuffer *utility.TxnBuffer
+	notifier *syncutil.AsyncTaskNotifier[error]
+	scanner  *scannerAdaptorImpl
+	ch       chan message.ImmutableMessage
+	onFatal  func(error)
 }
 
 // Chan returns the channel of the recovery stream.
@@ -64,19 +82,16 @@ func (r *recoveryStreamImpl) Error() error {
 	return r.notifier.BlockAndGetResult()
 }
 
-// TxnBuffer returns the uncommitted txn buffer after recovery stream is done.
+// TxnBuffer returns the independent snapshot captured before the startup
+// barrier was delivered. The scanner retains its own live buffer.
 func (r *recoveryStreamImpl) TxnBuffer() *utility.TxnBuffer {
-	if err := r.notifier.BlockAndGetResult(); err != nil {
-		panic("TxnBuffer should only be called after recovery stream is done")
-	}
-	return r.txnBuffer
+	return r.scanner.startupTxnBuffer
 }
 
 // Close closes the recovery stream.
 func (r *recoveryStreamImpl) Close() error {
 	r.notifier.Cancel()
-	err := r.notifier.BlockAndGetResult()
-	return err
+	return r.notifier.BlockAndGetResult()
 }
 
 // execute starts the recovery stream.
@@ -84,10 +99,6 @@ func (r *recoveryStreamImpl) execute() (err error) {
 	defer func() {
 		close(r.ch)
 		r.scanner.Close()
-		if err == nil {
-			// get the txn buffer after the consuming is done.
-			r.txnBuffer = r.scanner.txnBuffer
-		}
 		r.notifier.Finish(err)
 	}()
 
@@ -111,14 +122,14 @@ func (r *recoveryStreamImpl) execute() (err error) {
 			// canceled.
 			return r.notifier.Context().Err()
 		case downstream <- pendingMessage:
-			if pendingMessage.TimeTick() == r.param.EndTimeTick {
-				// reach the end of recovery stream, stop the consuming.
-				return nil
-			}
 			pendingMessage = nil
 		case msg, ok := <-upstream:
 			if !ok {
-				return r.scanner.Error()
+				err := r.scanner.Error()
+				if err != nil && r.notifier.Context().Err() == nil {
+					r.onFatal(err)
+				}
+				return err
 			}
 			pendingMessage = msg
 		}

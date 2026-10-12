@@ -20,8 +20,8 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
 )
 
 type SearchIteratorOption interface {
@@ -72,6 +72,16 @@ func (opt *searchIteratorOption) WithPartitions(partitionNames ...string) *searc
 
 func (opt *searchIteratorOption) WithNamespace(namespace string) *searchIteratorOption {
 	opt.searchOption.WithNamespace(namespace)
+	return opt
+}
+
+func (opt *searchIteratorOption) WithRLSPrincipal(principal string) *searchIteratorOption {
+	opt.searchOption.WithRLSPrincipal(principal)
+	return opt
+}
+
+func (opt *searchIteratorOption) WithSkipRLS(skip bool) *searchIteratorOption {
+	opt.searchOption.WithSkipRLS(skip)
 	return opt
 }
 
@@ -172,6 +182,8 @@ type queryIteratorOption struct {
 	collectionName             string
 	partitionNames             []string
 	namespace                  *string
+	rlsPrincipal               string
+	skipRLS                    bool
 	outputFields               []string
 	expr                       string
 	batchSize                  int
@@ -185,6 +197,8 @@ func (opt *queryIteratorOption) Request() (*milvuspb.QueryRequest, error) {
 		CollectionName:        opt.collectionName,
 		PartitionNames:        opt.partitionNames,
 		Namespace:             opt.namespace,
+		RlsPrincipal:          opt.rlsPrincipal,
+		SkipRls:               opt.skipRLS,
 		OutputFields:          opt.outputFields,
 		Expr:                  opt.expr,
 		ConsistencyLevel:      opt.consistencyLevel.CommonConsistencyLevel(),
@@ -220,6 +234,16 @@ func (opt *queryIteratorOption) WithPartitions(partitionNames ...string) *queryI
 
 func (opt *queryIteratorOption) WithNamespace(namespace string) *queryIteratorOption {
 	opt.namespace = &namespace
+	return opt
+}
+
+func (opt *queryIteratorOption) WithRLSPrincipal(principal string) *queryIteratorOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *queryIteratorOption) WithSkipRLS(skip bool) *queryIteratorOption {
+	opt.skipRLS = skip
 	return opt
 }
 

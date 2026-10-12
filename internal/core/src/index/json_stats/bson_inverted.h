@@ -55,6 +55,9 @@ class BsonInvertedIndex {
     AddRecord(const std::string& key, uint32_t row_id, uint32_t offset);
 
     void
+    AddRecords(const std::string& key, std::vector<int64_t> records);
+
+    void
     BuildIndex();
 
     void
@@ -70,17 +73,6 @@ class BsonInvertedIndex {
               const std::function<void(const uint32_t* row_id_array,
                                        const uint32_t* offset_array,
                                        const int64_t array_len)>& visitor);
-
-    void
-    TermQueryEach(
-        const std::string& path,
-        const std::function<void(uint32_t row_id, uint32_t offset)>& each);
-
-    bool
-    KeyExists(const std::string& key) {
-        auto array = wrapper_->term_query_i64(key);
-        return array.array_.len != 0;
-    }
 
     cachinglayer::ResourceUsage
     CellByteSize() const {

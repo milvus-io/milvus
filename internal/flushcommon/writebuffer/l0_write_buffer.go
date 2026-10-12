@@ -62,11 +62,14 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	wb.mut.Lock()
 
 	for _, inData := range insertData {
-		if wb.useGrowingSourceFlush {
+		if wb.allowGrowingSourceFlush {
 			targetOffset := wb.growingSourceTargetOffset(inData.segmentID, inData.rowNum)
 			decision := wb.decideGrowingFlushSource(inData.segmentID, targetOffset, endPos)
 			if decision.sourceType == metacache.FlushSourceGrowing {
-				wb.recordGrowingSourceProgress(inData, startPos, endPos, schemaVersion, targetOffset)
+				if err := wb.recordGrowingSourceProgress(inData, startPos, endPos, schemaVersion, targetOffset); err != nil {
+					wb.mut.Unlock()
+					return err
+				}
 				continue
 			}
 		}
@@ -106,7 +109,14 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 
 // bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
 func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
-	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos, schemaVersion)
+	if err := wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		PartitionID:   inData.partitionID,
+		SegmentID:     inData.segmentID,
+		StartPos:      startPos,
+		SchemaVersion: schemaVersion,
+	}); err != nil {
+		return err
+	}
 	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)

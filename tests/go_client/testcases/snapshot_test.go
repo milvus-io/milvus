@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -78,6 +78,25 @@ func waitForRestoreComplete(ctx context.Context, mc *base.MilvusClient, jobID in
 	return nil, fmt.Errorf("timeout waiting for restore to complete: jobID=%d", jobID)
 }
 
+func waitForExportComplete(ctx context.Context, mc *base.MilvusClient, jobID int64, timeout time.Duration) (*milvuspb.ExportSnapshotInfo, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		info, err := mc.GetExportSnapshotState(ctx, client.NewGetExportSnapshotStateOption(jobID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to get export state: %w", err)
+		}
+		switch info.GetState() {
+		case milvuspb.ExportSnapshotState_ExportSnapshotCompleted:
+			return info, nil
+		case milvuspb.ExportSnapshotState_ExportSnapshotFailed:
+			return info, fmt.Errorf("export snapshot failed: jobID=%d, reason=%s", jobID, info.GetReason())
+		default:
+			time.Sleep(time.Second)
+		}
+	}
+	return nil, fmt.Errorf("timeout waiting for export to complete: jobID=%d", jobID)
+}
+
 // waitForAllIndexesBuilt polls DescribeIndex for each index in the collection until all indexes
 // have finished building (PendingIndexRows == 0 and TotalRows == IndexedRows).
 // If the collection has no indexes, the function returns immediately.
@@ -126,7 +145,10 @@ func waitForAllIndexesBuilt(ctx context.Context, mc *base.MilvusClient, collName
 
 // TestCreateSnapshot tests creating a snapshot for a collection
 func TestCreateSnapshot(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -176,7 +198,10 @@ func TestCreateSnapshot(t *testing.T) {
 
 // TestSnapshotRestoreWithMultiSegment tests the complete snapshot restore workflow with data operations
 func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -313,9 +338,225 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	common.CheckErr(t, err, true)
 }
 
+// CreateSnapshot must persist growing inserts and deletes without a preceding Flush.
+func TestSnapshotRestoreWithoutExplicitFlush(t *testing.T) {
+	ctx := hp.CreateContext(t, 3*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	collName := common.GenRandomString(snapshotPrefix, 8)
+	restoredName := "restored_" + collName
+	snapshotName := "unflushed_" + collName
+	require.NoError(t, mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim).
+		WithAutoID(false).WithShardNum(2)))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, collName))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(restoredName))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.NoError(t, err)
+	hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), hp.TNewDataOption().TWithNb(100))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(collName).WithInt64IDs("id", []int64{0, 1, 2}))
+	require.NoError(t, err)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName)))
+
+	// Later inserts and deletes must not become part of the snapshot.
+	hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), hp.TNewDataOption().TWithNb(10).TWithStart(100))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(collName).WithInt64IDs("id", []int64{3, 4, 5}))
+	require.NoError(t, err)
+	jobID, err := mc.RestoreSnapshot(ctx, client.NewRestoreSnapshotOption(snapshotName, collName, restoredName))
+	require.NoError(t, err)
+	_, err = waitForRestoreComplete(ctx, mc, jobID, time.Minute)
+	require.NoError(t, err)
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredName))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	result, err := mc.Query(ctx, client.NewQueryOption(restoredName).
+		WithFilter("id >= 0").WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Equal(t, 97, result.ResultCount)
+	ids := make([]int64, 0, result.ResultCount)
+	for i := 0; i < result.ResultCount; i++ {
+		id, err := result.Fields[0].GetAsInt64(i)
+		require.NoError(t, err)
+		ids = append(ids, id)
+	}
+	expected := make([]int64, 97)
+	for i := range expected {
+		expected[i] = int64(i + 3)
+	}
+	require.ElementsMatch(t, expected, ids)
+}
+
+// TestSnapshotRestoreExternalReferenced restores directly from CreateSnapshot metadata.
+// This covers the referenced layout, where metadata still points at the original
+// Milvus storage files instead of an exported self-contained bundle.
+func TestSnapshotRestoreExternalReferenced(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	insertBatchSize := 1000
+	collName := common.GenRandomString(snapshotPrefix, 6)
+	schema := client.SimpleCreateCollectionOptions(collName, common.DefaultDim)
+	schema.WithAutoID(false)
+	err := mc.CreateCollection(ctx, schema)
+	common.CheckErr(t, err, true)
+
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	insertOpt := hp.TNewDataOption().TWithNb(insertBatchSize)
+	_, insertRes := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), insertOpt)
+	require.Equal(t, insertBatchSize, insertRes.IDs.Len())
+
+	err = flushWithRetry(ctx, mc, collName)
+	common.CheckErr(t, err, true)
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
+
+	snapshotName := fmt.Sprintf("external_restore_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("Snapshot for external restore testing"))
+	common.CheckErr(t, err, true)
+
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, collName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, snapshotName, snapshotInfo.GetName())
+	require.NotEmpty(t, snapshotInfo.GetS3Location())
+
+	restoredCollName := fmt.Sprintf("restored_external_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
+	jobID, err := mc.RestoreExternalSnapshot(ctx,
+		client.NewRestoreExternalSnapshotOption(
+			restoredCollName,
+			snapshotInfo.GetS3Location(),
+		))
+	common.CheckErr(t, err, true)
+
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
+	common.CheckErr(t, err, true)
+
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
+	common.CheckErr(t, err, true)
+	require.True(t, has)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	queryRes, err := mc.Query(ctx,
+		client.NewQueryOption(restoredCollName).
+			WithOutputFields(common.QueryCountFieldName).
+			WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	count, _ := queryRes.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), count)
+
+	err = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapshotName, collName))
+	common.CheckErr(t, err, true)
+}
+
+// TestSnapshotRestoreExternalSelfContained restores from ExportSnapshot output.
+// This covers the self-contained bundle layout under targetRoot/snapshots and
+// targetRoot/files.
+func TestSnapshotRestoreExternalSelfContained(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	insertBatchSize := 1000
+	collName := common.GenRandomString(snapshotPrefix, 6)
+	schema := client.SimpleCreateCollectionOptions(collName, common.DefaultDim)
+	schema.WithAutoID(false)
+	err := mc.CreateCollection(ctx, schema)
+	common.CheckErr(t, err, true)
+
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	insertOpt := hp.TNewDataOption().TWithNb(insertBatchSize)
+	_, insertRes := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), insertOpt)
+	require.Equal(t, insertBatchSize, insertRes.IDs.Len())
+
+	err = flushWithRetry(ctx, mc, collName)
+	common.CheckErr(t, err, true)
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
+
+	snapshotName := fmt.Sprintf("external_export_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("Snapshot for exported external restore testing"))
+	common.CheckErr(t, err, true)
+
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, collName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, snapshotName, snapshotInfo.GetName())
+	require.NotEmpty(t, snapshotInfo.GetS3Location())
+
+	exportRoot := fmt.Sprintf("snapshot_export_%s", common.GenRandomString(snapshotPrefix, 6))
+	exportJobID, err := mc.ExportSnapshot(ctx,
+		client.NewExportSnapshotOption(snapshotName, collName, exportRoot))
+	common.CheckErr(t, err, true)
+	require.NotZero(t, exportJobID)
+	exportInfo, err := waitForExportComplete(ctx, mc, exportJobID, 2*time.Minute)
+	common.CheckErr(t, err, true)
+	require.Positive(t, exportInfo.GetTotalBytes())
+	metadataURI := exportInfo.GetSnapshotMetadataUri()
+	require.NotEmpty(t, metadataURI)
+	require.NotEqual(t, snapshotInfo.GetS3Location(), metadataURI)
+
+	restoredCollName := fmt.Sprintf("restored_export_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
+	jobID, err := mc.RestoreExternalSnapshot(ctx,
+		client.NewRestoreExternalSnapshotOption(
+			restoredCollName,
+			metadataURI,
+		))
+	common.CheckErr(t, err, true)
+
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
+	common.CheckErr(t, err, true)
+
+	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
+	common.CheckErr(t, err, true)
+	require.True(t, has)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	queryRes, err := mc.Query(ctx,
+		client.NewQueryOption(restoredCollName).
+			WithOutputFields(common.QueryCountFieldName).
+			WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	count, _ := queryRes.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), count)
+
+	err = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapshotName, collName))
+	common.CheckErr(t, err, true)
+}
+
 // TestSnapshotRestoreWithMultiShardMultiPartition tests the complete snapshot restore workflow with data operations
 func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -465,7 +706,10 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 
 // TestSnapshotRestoreWithMultiFields tests snapshot restore with all supported field types
 func TestSnapshotRestoreWithMultiFields(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -669,10 +913,13 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 	common.CheckErr(t, err, true)
 }
 
-// TestSnapshotRestoreEmptyCollection tests snapshot and restore of an empty collection
-// Verifies that schema and indexes are preserved correctly without any data
+// TestSnapshotRestoreEmptyCollection tests snapshot and restore of an empty collection.
+// It verifies that collection metadata, schema, and indexes are preserved without any data.
 func TestSnapshotRestoreEmptyCollection(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -714,8 +961,19 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 		WithField(stringArrayField).
 		WithDynamicFieldEnabled(true)
 
-	// Create collection with 3 shards
-	createOpt := client.NewCreateCollectionOption(collName, schema).WithShardNum(3)
+	// Create collection with non-default metadata and 3 shards.
+	expectedProperties := map[string]string{
+		common.CollectionTTLSeconds:         "360",
+		"collection.autocompaction.enabled": "false",
+		common.MmapEnabled:                  "false",
+		"allow_insert_auto_id":              "false",
+	}
+	createOpt := client.NewCreateCollectionOption(collName, schema).
+		WithShardNum(3).
+		WithConsistencyLevel(entity.ClBounded)
+	for key, value := range expectedProperties {
+		createOpt.WithProperty(key, value)
+	}
 	err := mc.CreateCollection(ctx, createOpt)
 	common.CheckErr(t, err, true)
 	collectionsToClean := []string{collName}
@@ -809,6 +1067,11 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 	// Step 10: Get restored collection info
 	restoredColl, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(restoredCollName))
 	common.CheckErr(t, err, true)
+	require.Equal(t, originalColl.ConsistencyLevel, restoredColl.ConsistencyLevel, "Consistency level should match")
+	for key, expectedValue := range expectedProperties {
+		require.Equal(t, expectedValue, originalColl.Properties[key], "Source collection property should match")
+		require.Equal(t, expectedValue, restoredColl.Properties[key], "Restored collection property should match")
+	}
 
 	// Step 11: Verify schema matches
 	mlog.Info(context.TODO(), "Verifying schema consistency")
@@ -940,7 +1203,10 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 // This test verifies that JSON stats (both legacy json_key_index_log and new json_stats formats)
 // are correctly preserved and restored during snapshot operations
 func TestSnapshotRestoreWithJSONStats(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1153,7 +1419,10 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 // TestSnapshotRestoreAfterDropPartitionAndCollection tests snapshot restore functionality
 // after dropping partitions and the entire collection
 func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1345,7 +1614,10 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 // Verifies that ListSnapshots with db-level filtering returns only snapshots
 // belonging to collections in the specified database.
 func TestSnapshotCrossDatabase(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1419,7 +1691,10 @@ func TestSnapshotCrossDatabase(t *testing.T) {
 // 3. Drop collection B, restore A1 again to collection C
 // 4. Verify both A and C can load and query/search
 func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1576,7 +1851,10 @@ func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
 // This covers the bug where CopySegmentResult.index_infos used fieldID as map key,
 // causing only the last index per field to survive (overwriting earlier ones).
 func TestSnapshotRestoreWithMultipleJSONPathIndexes(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)

@@ -264,6 +264,14 @@ var (
 			Help:      "garbage collection running count",
 		}, []string{nodeIDLabelName})
 
+	GarbageCollectorInvalidManifestCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "gc_invalid_manifest_count",
+			Help:      "number of times garbage collection is blocked by an invalid segment manifest index entry",
+		}, []string{nodeIDLabelName})
+
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -434,6 +442,31 @@ var (
 			Name:      "snapshot_active_pins",
 			Help:      "number of active (un-expired) pins on a given source snapshot",
 		}, []string{collectionIDLabelName, "snapshot_name"})
+
+	DataCoordSnapshotExportActiveJobs = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_export_active_jobs",
+			Help:      "number of snapshot export jobs currently executing",
+		})
+
+	DataCoordSnapshotExportTerminalJobs = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_export_terminal_jobs_total",
+			Help:      "number of snapshot export jobs that reached a terminal state",
+		}, []string{statusLabelName})
+
+	DataCoordSnapshotExportJobLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_export_job_latency",
+			Help:      "total latency of snapshot export jobs in milliseconds",
+			Buckets:   longTaskBuckets,
+		}, []string{statusLabelName})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -468,11 +501,15 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(CopySegmentJobLatency)
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
+	registry.MustRegister(GarbageCollectorInvalidManifestCount)
 	registry.MustRegister(DataCoordTaskExecuteLatency)
 	registry.MustRegister(IndexStatsTaskNum)
 	registry.MustRegister(TaskVersion)
 	registry.MustRegister(TaskNumInGlobalScheduler)
 	registry.MustRegister(DataCoordSnapshotActivePins)
+	registry.MustRegister(DataCoordSnapshotExportActiveJobs)
+	registry.MustRegister(DataCoordSnapshotExportTerminalJobs)
+	registry.MustRegister(DataCoordSnapshotExportJobLatency)
 	registerStreamingCoord(registry)
 }
 

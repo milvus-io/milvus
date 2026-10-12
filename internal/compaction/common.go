@@ -93,7 +93,7 @@ func readDeltalogsV1(
 
 	for _, deltalog := range deltalogs {
 		for _, binlog := range deltalog.Binlogs {
-			reader, err := storage.NewDeltalogReader(pkType, []string{binlog.GetLogPath()}, option...)
+			reader, err := storage.NewDeltalogReader(ctx, pkType, []string{binlog.GetLogPath()}, option...)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -118,7 +118,7 @@ func readDeltalogsV2(
 	paths []string,
 	option ...storage.RwOption,
 ) ([]storage.PrimaryKey, []typeutil.Timestamp, error) {
-	reader, err := storage.NewDeltalogReader(pkType, paths,
+	reader, err := storage.NewDeltalogReader(ctx, pkType, paths,
 		append(option, storage.WithVersion(storage.StorageV3))...)
 	if err != nil {
 		return nil, nil, err

@@ -4,14 +4,15 @@
 #include <optional>
 #include <utility>
 
-#include "cachinglayer/LoadingOverheadTracker.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "common/common_type_c.h"
 #include "common/resource_c.h"
 #include "fmt/core.h"
 #include "glog/logging.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "log/Log.h"
@@ -20,7 +21,6 @@
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
-#include "storage/EntryStreamUtils.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -80,44 +80,40 @@ SealedIndexTranslator::SealedIndexTranslator(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
-    load_resource_request_ = EstimateLoadResource();
-
-    auto scalar_version =
-        milvus::index::GetValueFromConfig<int32_t>(
-            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-            .value_or(1);
-    if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
-        auto budget_capacity = static_cast<int64_t>(
-            milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-                .CapacityBytes());
-        auto memory_upper_bound =
-            budget_capacity == 0
-                ? milvus::cachinglayer::LoadingOverheadTracker::kUnlimited
-                      .memory_bytes
-                : budget_capacity;
-        auto upper_bound =
-            milvus::cachinglayer::ResourceUsage{memory_upper_bound, int64_t{0}};
-        meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
-            upper_bound, milvus::segcore::kLoadTransientOverheadGroup};
+    // As with manifest readers, cached reloads use the mode whose resources
+    // were reserved. New translators observe the current rollout switch.
+    const bool use_async_load = file_manager_context_.use_async_load.value_or(
+        storagev2translator::StorageV2AsyncLoadEnabled());
+    file_manager_context_.use_async_load = use_async_load;
+    const bool is_vector = IsVectorDataType(index_load_info_.field_type);
+    if (!is_vector) {
+        auto resources =
+            milvus::index::IndexFactory::GetInstance()
+                .ScalarIndexFileLoadResource(index_load_info_.field_type,
+                                             index_load_info_.index_size,
+                                             index_load_info_.index_params,
+                                             index_load_info_.enable_mmap,
+                                             index_load_info_.num_rows,
+                                             index_load_info_.index_files,
+                                             file_manager_context_);
+        load_resource_request_ =
+            index_load_info_.load_resource_request.value_or(resources.request);
+        meta_.loading_overhead_config = std::move(resources.overhead);
+        return;
     }
-}
 
-LoadResourceRequest
-SealedIndexTranslator::EstimateLoadResource() const {
-    if (index_load_info_.load_resource_request.has_value()) {
-        return *index_load_info_.load_resource_request;
-    }
-    return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-        index_load_info_.field_type,
-        index_load_info_.element_type,
-        index_load_info_.index_engine_version,
-        index_load_info_.index_size,
-        index_load_info_.index_params,
-        index_load_info_.enable_mmap,
-        index_load_info_.num_rows,
-        index_load_info_.dim,
-        index_load_info_.index_files,
-        file_manager_context_);
+    const auto estimated =
+        milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+            index_load_info_.field_type,
+            index_load_info_.element_type,
+            index_load_info_.index_engine_version,
+            index_load_info_.index_size,
+            index_load_info_.index_params,
+            index_load_info_.enable_mmap,
+            index_load_info_.num_rows,
+            index_load_info_.dim);
+    load_resource_request_ =
+        index_load_info_.load_resource_request.value_or(estimated);
 }
 
 size_t
@@ -135,6 +131,9 @@ std::pair<milvus::cachinglayer::ResourceUsage,
 SealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     // this is an estimation, error could be up to 20%.
+    // Preserve the historical 2x disk safety margin for temporary file growth
+    // during writes. final_disk_cost is already counted as loaded resource, so
+    // the file overhead is the remainder of 2 * max_disk_cost.
     return {milvus::cachinglayer::ResourceUsage(
                 load_resource_request_.final_memory_cost,
                 load_resource_request_.final_disk_cost),
@@ -187,13 +186,15 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
         milvus::index::GetValueFromConfig<int32_t>(
             config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
-    if (scalar_version >= 3 && !IsVectorDataType(index_info_.field_type)) {
+    if (!IsVectorDataType(index_info_.field_type) &&
+        (scalar_version >= 3 ||
+         index_info_.index_type == milvus::index::FMINDEX_INDEX_TYPE)) {
         config_[milvus::index::COLLECTION_ID] =
             file_manager_context_.fieldDataMeta.collection_id;
-        LOG_INFO("load V3 scalar index with configs: {}", config_.dump());
+        LOG_DEBUG("load V3 scalar index with configs: {}", config_.dump());
         index->LoadUnified(config_, ctx);
     } else {
-        LOG_INFO("load index with configs: {}", config_.dump());
+        LOG_DEBUG("load index with configs: {}", config_.dump());
         index->Load(ctx_, config_);
     }
 

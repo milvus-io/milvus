@@ -47,11 +47,12 @@ static std::function<GroupByValueType(int64_t)>
 CreateFieldGetter(milvus::OpContext* op_ctx,
                   const segcore::SegmentInternalInterface& segment,
                   FieldId field_id,
+                  const segcore::SegmentReadSnapshot* snapshot,
                   std::optional<std::string> json_path = std::nullopt,
                   std::optional<DataType> json_type = std::nullopt,
                   bool strict_cast = false) {
     auto getter = GetDataGetter<T, InnerRawType>(
-        op_ctx, segment, field_id, json_path, json_type, strict_cast);
+        op_ctx, segment, field_id, json_path, json_type, strict_cast, snapshot);
     return
         [getter](int64_t idx) -> GroupByValueType { return getter->Get(idx); };
 }
@@ -62,7 +63,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
     const std::vector<FieldId>& field_ids,
     const std::optional<std::string>& json_path,
     const std::optional<DataType>& json_type,
-    bool strict_cast)
+    bool strict_cast,
+    const segcore::SegmentReadSnapshot* snapshot)
     : field_count_(field_ids.size()) {
     getters_.reserve(field_ids.size());
 
@@ -72,24 +74,29 @@ MultiFieldDataGetter::MultiFieldDataGetter(
 
         switch (data_type) {
             case DataType::INT8:
-                getter = CreateFieldGetter<int8_t>(op_ctx, segment, field_id);
+                getter = CreateFieldGetter<int8_t>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::INT16:
-                getter = CreateFieldGetter<int16_t>(op_ctx, segment, field_id);
+                getter = CreateFieldGetter<int16_t>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::INT32:
-                getter = CreateFieldGetter<int32_t>(op_ctx, segment, field_id);
+                getter = CreateFieldGetter<int32_t>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::INT64:
             case DataType::TIMESTAMPTZ:
-                getter = CreateFieldGetter<int64_t>(op_ctx, segment, field_id);
+                getter = CreateFieldGetter<int64_t>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::BOOL:
-                getter = CreateFieldGetter<bool>(op_ctx, segment, field_id);
+                getter = CreateFieldGetter<bool>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::VARCHAR:
-                getter =
-                    CreateFieldGetter<std::string>(op_ctx, segment, field_id);
+                getter = CreateFieldGetter<std::string>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::JSON:
                 if (json_type.has_value()) {
@@ -99,6 +106,7 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
                                 strict_cast);
@@ -108,6 +116,7 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
                                 strict_cast);
@@ -117,6 +126,7 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
                                 strict_cast);
@@ -126,6 +136,7 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
                                 strict_cast);
@@ -135,6 +146,7 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
                                 strict_cast);
@@ -145,6 +157,7 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                     op_ctx,
                                     segment,
                                     field_id,
+                                    snapshot,
                                     json_path,
                                     json_type,
                                     strict_cast);
@@ -160,6 +173,7 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                         op_ctx,
                         segment,
                         field_id,
+                        snapshot,
                         json_path,
                         json_type,
                         strict_cast);
@@ -173,13 +187,6 @@ MultiFieldDataGetter::MultiFieldDataGetter(
         }
         getters_.push_back(std::move(getter));
     }
-}
-
-CompositeGroupKey
-MultiFieldDataGetter::Get(int64_t idx) const {
-    CompositeGroupKey key(field_count_);
-    GetInto(idx, key);
-    return key;
 }
 
 void
@@ -228,10 +235,11 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
         int64_t row_offset = raw_offset;
         int32_t element_index = -1;
         if (is_element_id) {
-            AssertInfo(search_info.array_offsets_ != nullptr,
-                       "Array offsets not available for element-level search");
+            AssertInfo(search_info.struct_element_offsets_ != nullptr,
+                       "Struct element offsets not available for element-level "
+                       "search");
             auto [doc_id, elem_idx] =
-                search_info.array_offsets_->ElementIDToRowID(
+                search_info.struct_element_offsets_->ElementIDToRowID(
                     static_cast<int32_t>(raw_offset));
             row_offset = doc_id;
             element_index = elem_idx;
@@ -273,7 +281,21 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<int64_t>& seg_offsets,
               std::vector<float>& distances,
               std::vector<size_t>& topk_per_nq_prefix_sum,
-              std::vector<int32_t>* element_indices) {
+              std::vector<int32_t>* element_indices,
+              SearchResult* search_result,
+              const segcore::SegmentReadSnapshot* snapshot) {
+    if (TryStrictGroupFilteredSearch(op_ctx,
+                                     iterators,
+                                     search_info,
+                                     segment,
+                                     search_result,
+                                     composite_group_by_values,
+                                     seg_offsets,
+                                     distances,
+                                     topk_per_nq_prefix_sum,
+                                     snapshot)) {
+        return;
+    }
     // Get field IDs for group by
     AssertInfo(!search_info.group_by_field_ids_.empty(),
                "group_by_field_ids must be set for group by search");
@@ -296,7 +318,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                                                field_ids,
                                                search_info.json_path_,
                                                search_info.json_type_,
-                                               search_info.strict_cast_);
+                                               search_info.strict_cast_,
+                                               snapshot);
 
     topk_per_nq_prefix_sum.push_back(0);
     for (const auto& iterator : iterators) {

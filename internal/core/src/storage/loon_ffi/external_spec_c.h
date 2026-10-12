@@ -24,9 +24,10 @@ extern "C" {
  * produced by loon_properties_create from StorageConfig), this function
  * parses external_source + external_spec and appends:
  *   - extfs.{collection_id}.* storage-layer properties (credentials,
- *     endpoint, AWS-form rewrite, Tier-1/2 derivation)
+ *     explicit endpoint mapping, process-local IOPS policy, AWS-form
+ *     rewrite, Tier-1/2 derivation)
  *   - format-layer properties derived from spec.format (e.g.
- *     iceberg.snapshot_id when format="iceberg-table")
+ *     reader.exttable.snapshot_id when format="iceberg-table")
  *
  * Idempotent over reallocation: the function frees existing LoonProperty
  * entries and rebuilds the array with the merged key set, so the caller
@@ -39,7 +40,9 @@ LoonFFIResult
 loon_properties_inject_external_spec(LoonProperties* properties,
                                      int64_t collection_id,
                                      const char* external_source,
-                                     const char* external_spec);
+                                     const char* external_spec,
+                                     uint32_t iops_initial_rate,
+                                     uint32_t iops_max_rate);
 
 #ifdef __cplusplus
 }

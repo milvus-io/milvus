@@ -31,9 +31,10 @@ type ReplicateManagerRecoverParam struct {
 // It will recover the replicate manager from the initial recover snapshot.
 // If the wal is on replicating mode, it will recover the replicate state.
 func RecoverReplicateManager(param *ReplicateManagerRecoverParam) (ReplicatesManager, error) {
-	replicateConfigHelper, err := replicateutil.NewConfigHelper(param.CurrentClusterID, param.InitialRecoverSnapshot.Checkpoint.ReplicateConfig)
+	replicateConfig := param.InitialRecoverSnapshot.PChannelControl.GetReplicateConfig()
+	replicateConfigHelper, err := replicateutil.NewConfigHelper(param.CurrentClusterID, replicateConfig)
 	if err != nil {
-		return nil, newReplicateViolationErrorForConfig(param.InitialRecoverSnapshot.Checkpoint.ReplicateConfig, err)
+		return nil, newReplicateViolationErrorForConfig(replicateConfig, err)
 	}
 	salvageCheckpoints := make(map[string]*utility.ReplicateCheckpoint, len(param.SalvageCheckpoints))
 	for _, cp := range param.SalvageCheckpoints {
@@ -108,6 +109,12 @@ func (impl *replicatesManagerImpl) BeginReplicateMessage(ctx context.Context, ms
 	if msg.MessageType().IsSelfControlled() {
 		if rh != nil {
 			return nil, status.NewIgnoreOperation("wal self-controlled message cannot be replicated")
+		}
+		return nil, ErrNotHandledByReplicateManager
+	}
+	if msg.IsUnreplicable() {
+		if rh != nil {
+			return nil, status.NewIgnoreOperation("wal unreplicable message cannot be replicated")
 		}
 		return nil, ErrNotHandledByReplicateManager
 	}

@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "common/ChunkWriter.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
@@ -41,7 +42,10 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/external_spec_c.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "test_utils/cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -68,6 +72,25 @@ class ScopedRejectRemoteVectorOutput {
 
  private:
     bool old_value_;
+};
+
+class ScopedExternalIopsConfig {
+ public:
+    ScopedExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate)
+        : old_config_(milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetExternalIopsConfig()) {
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(initial_rate, max_rate);
+    }
+
+    ~ScopedExternalIopsConfig() {
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(old_config_.initial_rate,
+                                   old_config_.max_rate);
+    }
+
+ private:
+    milvus::storage::ExternalIopsConfig old_config_;
 };
 
 std::string
@@ -501,10 +524,11 @@ AssertNullableDenseVectorTake(DataType data_type, int64_t dim) {
     ASSERT_EQ(results->fields_data_size(), 1);
 
     const auto& retrieved = results->fields_data(0);
-    ASSERT_EQ(retrieved.valid_data_size(), 3);
-    EXPECT_TRUE(retrieved.valid_data(0));
-    EXPECT_FALSE(retrieved.valid_data(1));
-    EXPECT_TRUE(retrieved.valid_data(2));
+    const auto& retrieved_valid_data = GetFieldDataRowValidData(retrieved);
+    ASSERT_EQ(retrieved_valid_data.size(), 3);
+    EXPECT_TRUE(retrieved_valid_data[0]);
+    EXPECT_FALSE(retrieved_valid_data[1]);
+    EXPECT_TRUE(retrieved_valid_data[2]);
     ASSERT_EQ(retrieved.vectors().dim(), dim);
 
     std::string actual;
@@ -534,10 +558,11 @@ AssertNullableDenseVectorTake(DataType data_type, int64_t dim) {
         search_plan.get(), offsets.data(), offsets.size(), search_results);
     ASSERT_TRUE(ok);
     auto& searched = search_results.output_fields_data_.at(info.vec_id);
-    ASSERT_EQ(searched->valid_data_size(), 3);
-    EXPECT_TRUE(searched->valid_data(0));
-    EXPECT_FALSE(searched->valid_data(1));
-    EXPECT_TRUE(searched->valid_data(2));
+    const auto& searched_valid_data = GetFieldDataRowValidData(*searched);
+    ASSERT_EQ(searched_valid_data.size(), 3);
+    EXPECT_TRUE(searched_valid_data[0]);
+    EXPECT_FALSE(searched_valid_data[1]);
+    EXPECT_TRUE(searched_valid_data[2]);
     ASSERT_EQ(searched->vectors().dim(), dim);
 }
 
@@ -564,10 +589,11 @@ AssertNullableSparseVectorTake() {
     ASSERT_EQ(results->fields_data_size(), 1);
 
     const auto& retrieved = results->fields_data(0);
-    ASSERT_EQ(retrieved.valid_data_size(), 3);
-    EXPECT_TRUE(retrieved.valid_data(0));
-    EXPECT_FALSE(retrieved.valid_data(1));
-    EXPECT_TRUE(retrieved.valid_data(2));
+    const auto& retrieved_valid_data = GetFieldDataRowValidData(retrieved);
+    ASSERT_EQ(retrieved_valid_data.size(), 3);
+    EXPECT_TRUE(retrieved_valid_data[0]);
+    EXPECT_FALSE(retrieved_valid_data[1]);
+    EXPECT_TRUE(retrieved_valid_data[2]);
     const auto& sparse = retrieved.vectors().sparse_float_vector();
     ASSERT_EQ(sparse.contents_size(), 2);
     EXPECT_EQ(sparse.contents(0), row0);
@@ -581,10 +607,11 @@ AssertNullableSparseVectorTake() {
         search_plan.get(), offsets.data(), offsets.size(), search_results);
     ASSERT_TRUE(ok);
     auto& searched = search_results.output_fields_data_.at(info.vec_id);
-    ASSERT_EQ(searched->valid_data_size(), 3);
-    EXPECT_TRUE(searched->valid_data(0));
-    EXPECT_FALSE(searched->valid_data(1));
-    EXPECT_TRUE(searched->valid_data(2));
+    const auto& searched_valid_data = GetFieldDataRowValidData(*searched);
+    ASSERT_EQ(searched_valid_data.size(), 3);
+    EXPECT_TRUE(searched_valid_data[0]);
+    EXPECT_FALSE(searched_valid_data[1]);
+    EXPECT_TRUE(searched_valid_data[2]);
     const auto& search_sparse = searched->vectors().sparse_float_vector();
     ASSERT_EQ(search_sparse.contents_size(), 2);
     EXPECT_EQ(search_sparse.contents(0), row0);
@@ -1006,6 +1033,58 @@ CreateExternalSegment(SegmentSealedUPtr& holder,
     return dynamic_cast<ChunkedSegmentSealedImpl*>(holder.get());
 }
 
+std::shared_ptr<ChunkedColumnInterface>
+BuildExternalTextColumn(const FieldMeta& field_meta) {
+    arrow::BinaryBuilder builder;
+    EXPECT_TRUE(builder.Append("external text 0").ok());
+    EXPECT_TRUE(builder.AppendNull().ok());
+    EXPECT_TRUE(builder.Append("external text 2").ok());
+    auto array = builder.Finish().ValueOrDie();
+
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(
+        create_chunk(field_meta, arrow::ArrayVector{std::move(array)}));
+
+    auto translator = std::make_unique<TestChunkTranslator>(
+        std::vector<int64_t>{3}, "", std::move(chunks));
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+            std::move(translator), nullptr);
+    return MakeChunkedColumnBase(DataType::TEXT, std::move(slot), field_meta);
+}
+
+void
+LoadExternalTextColumnForTesting(ChunkedSegmentSealedImpl* segment,
+                                 const SchemaPtr& schema,
+                                 FieldId field_id) {
+    auto current = segment->TestGetPublishedStateSnapshot();
+    auto runtime = segment->TestCloneMutableRuntimeResourceState();
+
+    ChunkedSegmentSealedImpl::StateDelta initial_delta;
+    initial_delta.schema = current->schema;
+    initial_delta.load_info = current->load_info;
+    initial_delta.runtime = segment->TestFreezeRuntimeResourceState(runtime);
+    initial_delta.commit_ts = current->commit_ts;
+    auto staged = segment->TestBuildNextPublishedState(current, initial_delta);
+
+    ChunkedSegmentSealedImpl::StateDelta final_delta;
+    final_delta.schema = current->schema;
+    final_delta.load_info = current->load_info;
+    final_delta.commit_ts = current->commit_ts;
+
+    auto column = BuildExternalTextColumn(schema->operator[](field_id));
+    segment->TestStageLoadFieldDataThenPublish(field_id,
+                                               column,
+                                               3,
+                                               DataType::TEXT,
+                                               schema,
+                                               runtime,
+                                               staged.get(),
+                                               current,
+                                               final_delta,
+                                               [] {});
+}
+
 // Mock Reader that always returns an error from take().
 class ErrorMockTakeReader : public milvus_storage::api::Reader {
  public:
@@ -1161,6 +1240,7 @@ BuildExternalSchemaWithArray() {
                                DataType::ARRAY,
                                DataType::INT32,
                                true,
+                               false,
                                std::optional<DefaultValueType>{std::nullopt},
                                "array_col"));
 
@@ -1332,10 +1412,11 @@ TEST(ExternalTakeTest, TryTakeForRetrieve_NullableVectorUsesCompactData) {
 
     auto& vec_data = results->fields_data(0);
     ASSERT_EQ(vec_data.field_id(), info.vec_id.get());
-    ASSERT_EQ(vec_data.valid_data_size(), 3);
-    EXPECT_TRUE(vec_data.valid_data(0));
-    EXPECT_FALSE(vec_data.valid_data(1));
-    EXPECT_TRUE(vec_data.valid_data(2));
+    const auto& valid_data = GetFieldDataRowValidData(vec_data);
+    ASSERT_EQ(valid_data.size(), 3);
+    EXPECT_TRUE(valid_data[0]);
+    EXPECT_FALSE(valid_data[1]);
+    EXPECT_TRUE(valid_data[2]);
 
     auto& fv = vec_data.vectors().float_vector();
     ASSERT_EQ(fv.data_size(), 2 * kVecDim);
@@ -1429,10 +1510,11 @@ TEST(ExternalTakeTest, TryTakeForRetrieve_NullableBinaryVectorUsesCompactData) {
 
     auto& binary_vec = results->fields_data(0);
     ASSERT_EQ(binary_vec.field_id(), info.binary_vec_id.get());
-    ASSERT_EQ(binary_vec.valid_data_size(), 3);
-    EXPECT_TRUE(binary_vec.valid_data(0));
-    EXPECT_FALSE(binary_vec.valid_data(1));
-    EXPECT_TRUE(binary_vec.valid_data(2));
+    const auto& valid_data = GetFieldDataRowValidData(binary_vec);
+    ASSERT_EQ(valid_data.size(), 3);
+    EXPECT_TRUE(valid_data[0]);
+    EXPECT_FALSE(valid_data[1]);
+    EXPECT_TRUE(valid_data[2]);
     EXPECT_EQ(binary_vec.vectors().binary_vector(),
               BuildDenseVectorBytesForRows({0, 2}, kBinaryVecDim / 8, 11));
 }
@@ -1565,10 +1647,11 @@ TEST(ExternalTakeTest, TryTakeForSearch_NullableVectorUsesCompactData) {
     ASSERT_TRUE(ok);
 
     auto& vec_data = results.output_fields_data_.at(info.vec_id);
-    ASSERT_EQ(vec_data->valid_data_size(), 3);
-    EXPECT_TRUE(vec_data->valid_data(0));
-    EXPECT_FALSE(vec_data->valid_data(1));
-    EXPECT_TRUE(vec_data->valid_data(2));
+    const auto& valid_data = GetFieldDataRowValidData(*vec_data);
+    ASSERT_EQ(valid_data.size(), 3);
+    EXPECT_TRUE(valid_data[0]);
+    EXPECT_FALSE(valid_data[1]);
+    EXPECT_TRUE(valid_data[2]);
 
     auto& fv = vec_data->vectors().float_vector();
     ASSERT_EQ(fv.data_size(), 2 * kVecDim);
@@ -1673,8 +1756,9 @@ TEST(ExternalTakeTest, TryTakeForRetrieve_FallbackNonExternal) {
     EXPECT_FALSE(ok);
 }
 
-// Test fallback: returns false when size exceeds threshold
-TEST(ExternalTakeTest, TryTakeForRetrieve_FallbackOverThreshold) {
+// Segment-local result size does not make a second policy decision. The
+// request gate is the only result-count policy input.
+TEST(ExternalTakeTest, TryTakeForRetrieve_LargeSegmentUsesRequestGate) {
     auto [schema,
           bool_id,
           int8_id,
@@ -1685,18 +1769,24 @@ TEST(ExternalTakeTest, TryTakeForRetrieve_FallbackOverThreshold) {
           double_id,
           varchar_id,
           vec_id] = BuildExternalSchema();
-    auto holder = CreateSealedSegment(schema);
-    auto* segment = dynamic_cast<ChunkedSegmentSealedImpl*>(holder.get());
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
 
     auto plan = std::make_unique<query::RetrievePlan>(schema);
     plan->field_ids_ = {int64_id};
+    plan->take_for_output_allowed_ = true;
 
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
-    // Size > 10000 threshold
     std::vector<int64_t> offsets(10001, 0);
     bool ok = segment->TryTakeForRetrieve(
         plan.get(), results, offsets.data(), 10001, false, false);
-    EXPECT_FALSE(ok);
+    EXPECT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 1);
+    EXPECT_EQ(results->fields_data(0).scalars().long_data().data_size(),
+              offsets.size());
 }
 
 // Test fallback: returns false when reader is null
@@ -2330,8 +2420,9 @@ TEST(ExternalTakeTest, TryTakeForSearch_FallbackNonExternal) {
     EXPECT_FALSE(ok);
 }
 
-// size > threshold → returns false
-TEST(ExternalTakeTest, TryTakeForSearch_FallbackOverThreshold) {
+// Segment-local result size does not make a second policy decision. The
+// request gate is the only result-count policy input.
+TEST(ExternalTakeTest, TryTakeForSearch_LargeSegmentUsesRequestGate) {
     auto [schema,
           bool_id,
           int8_id,
@@ -2342,17 +2433,23 @@ TEST(ExternalTakeTest, TryTakeForSearch_FallbackOverThreshold) {
           double_id,
           varchar_id,
           vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
     SegmentSealedUPtr holder;
     auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
 
     auto plan = std::make_unique<query::Plan>(schema);
     plan->target_entries_ = {int64_id};
+    plan->take_for_output_allowed_ = true;
 
     SearchResult results;
     std::vector<int64_t> offsets(10001, 0);
     bool ok = segment->TestTryTakeForSearch(
         plan.get(), offsets.data(), 10001, results);
-    EXPECT_FALSE(ok);
+    EXPECT_TRUE(ok);
+    auto& field_data = results.output_fields_data_.at(int64_id);
+    EXPECT_EQ(field_data->scalars().long_data().data_size(), offsets.size());
 }
 
 // Unsupported data type (ARRAY) in search → clears results, returns false
@@ -2373,7 +2470,7 @@ TEST(ExternalTakeTest, TryTakeForSearch_UnsupportedType) {
     EXPECT_TRUE(results.output_fields_data_.empty());
 }
 
-// ---------- Access mode threshold logic tests ----------
+// ---------- Access mode and request gate tests ----------
 
 // use_take_for_output=false: TryTakeForRetrieve returns false
 TEST(ExternalTakeAccessMode, RetrieveDisabledReturnsFalse) {
@@ -2432,6 +2529,101 @@ TEST(ExternalTakeAccessMode, RetrieveEnabledUsesTake) {
     ASSERT_TRUE(ok);
     ASSERT_EQ(results->fields_data_size(), 1);
     EXPECT_EQ(results->fields_data(0).scalars().long_data().data_size(), size);
+}
+
+TEST(ExternalTakeAccessMode, RetrieveRequestGateDisabledReturnsFalse) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {int64_id};
+    plan->take_for_output_allowed_ = false;
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    int64_t offset = 0;
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, &offset, 1, false, false);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(results->fields_data_size(), 0);
+}
+
+TEST(ExternalTakeAccessMode, RequestGateDisabledFallsBackForExternalText) {
+    auto info = BuildExternalSchema();
+    auto text_id = FieldId(109);
+    info.schema->AddField(FieldMeta(FieldName("text_col"),
+                                    text_id,
+                                    DataType::TEXT,
+                                    65535,
+                                    true,
+                                    std::nullopt,
+                                    "text_col"));
+
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetUseTakeForOutputForTesting(true);
+    LoadExternalTextColumnForTesting(segment, info.schema, text_id);
+
+    auto retrieve_plan = std::make_unique<query::RetrievePlan>(info.schema);
+    retrieve_plan->field_ids_ = {text_id};
+    retrieve_plan->take_for_output_allowed_ = false;
+
+    auto retrieve_results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+    static_cast<SegmentInternalInterface*>(segment)->FillTargetEntry(
+        nullptr,
+        retrieve_plan.get(),
+        retrieve_results,
+        offsets.data(),
+        offsets.size(),
+        false,
+        false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 1);
+    const auto& retrieved = retrieve_results->fields_data(0);
+    EXPECT_EQ(retrieved.field_id(), text_id.get());
+    const auto& retrieve_valid = GetFieldDataRowValidData(retrieved);
+    ASSERT_EQ(retrieve_valid.size(), offsets.size());
+    EXPECT_TRUE(retrieve_valid[0]);
+    EXPECT_FALSE(retrieve_valid[1]);
+    EXPECT_TRUE(retrieve_valid[2]);
+    const auto& retrieve_text = retrieved.scalars().string_data().data();
+    ASSERT_EQ(retrieve_text.size(), offsets.size());
+    EXPECT_EQ(retrieve_text[0], "external text 0");
+    EXPECT_TRUE(retrieve_text[1].empty());
+    EXPECT_EQ(retrieve_text[2], "external text 2");
+
+    auto search_plan = std::make_unique<query::Plan>(info.schema);
+    search_plan->target_entries_ = {text_id};
+    search_plan->take_for_output_allowed_ = false;
+    SearchResult search_results;
+    search_results.seg_offsets_ = offsets;
+    search_results.distances_.resize(offsets.size());
+    segment->TestFillTargetEntry(search_plan.get(), search_results);
+
+    const auto& searched = *search_results.output_fields_data_.at(text_id);
+    const auto& search_valid = GetFieldDataRowValidData(searched);
+    ASSERT_EQ(search_valid.size(), offsets.size());
+    EXPECT_TRUE(search_valid[0]);
+    EXPECT_FALSE(search_valid[1]);
+    EXPECT_TRUE(search_valid[2]);
+    const auto& search_text = searched.scalars().string_data().data();
+    ASSERT_EQ(search_text.size(), offsets.size());
+    EXPECT_EQ(search_text[0], "external text 0");
+    EXPECT_TRUE(search_text[1].empty());
+    EXPECT_EQ(search_text[2], "external text 2");
 }
 
 TEST(ExternalTakeAccessMode, RetrieveRejectRemoteVectorOutputReturnsFalse) {
@@ -2524,6 +2716,34 @@ TEST(ExternalTakeAccessMode, SearchEnabledUsesTake) {
     EXPECT_EQ(int64_arr->scalars().long_data().data(0), 0);
     EXPECT_EQ(int64_arr->scalars().long_data().data(1), 20000);
     EXPECT_EQ(int64_arr->scalars().long_data().data(2), 40000);
+}
+
+TEST(ExternalTakeAccessMode, SearchRequestGateDisabledReturnsFalse) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(schema);
+    plan->target_entries_ = {int64_id};
+    plan->take_for_output_allowed_ = false;
+
+    SearchResult results;
+    int64_t offset = 0;
+    bool ok = segment->TestTryTakeForSearch(plan.get(), &offset, 1, results);
+    EXPECT_FALSE(ok);
+    EXPECT_TRUE(results.output_fields_data_.empty());
 }
 
 TEST(ExternalTakeAccessMode, SearchRejectRemoteVectorOutputReturnsFalse) {
@@ -2832,6 +3052,89 @@ TEST(InjectExtfsAllowlist, AllowlistedKeyIsApplied) {
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_ssl")), "true");
 }
 
+TEST(InjectExtfsAllowlist, EndpointURLSelectsExplicitEndpointMode) {
+    struct Case {
+        std::string endpoint_url;
+        std::string expected_address;
+        std::string expected_use_ssl;
+    };
+    std::vector<Case> cases = {
+        {"http://rook-ceph-rgw.storage.svc:80",
+         "http://rook-ceph-rgw.storage.svc:80",
+         "false"},
+        {"HTTPS://s3.example.com/", "https://s3.example.com", "true"},
+    };
+
+    for (const auto& c : cases) {
+        milvus_storage::api::Properties props;
+        const int64_t coll_id = 42;
+        std::string spec =
+            R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","cloud_provider":"aws","region":"us-west-2","endpoint_url":")" +
+            c.endpoint_url + R"("}})";
+
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://my-bucket/object", spec);
+
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+                  c.expected_address);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+                  "my-bucket");
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_ssl")),
+                  c.expected_use_ssl);
+        // endpoint_url is a public alias for address, not a milvus-storage
+        // property. It must never be forwarded under the extfs namespace.
+        EXPECT_EQ(props.count("extfs.42.endpoint_url"), 0u);
+    }
+}
+
+TEST(InjectExtfsAllowlist, EndpointURLRejectsFragments) {
+    const std::vector<std::string> endpoint_urls = {
+        "http://host#", "http://host/#", "http://host#fragment"};
+
+    for (const auto& endpoint_url : endpoint_urls) {
+        SCOPED_TRACE(endpoint_url);
+        milvus_storage::api::Properties props;
+        std::string spec = R"({"format":"parquet","extfs":{"endpoint_url":")" +
+                           endpoint_url + R"("}})";
+
+        EXPECT_THROW(::InjectExternalSpecProperties(
+                         props, 42, "s3://my-bucket/object", spec),
+                     milvus::SegcoreError);
+    }
+}
+
+TEST(InjectExtfsAllowlist, EndpointURLErrorsRedactRawValue) {
+    const std::string marker = "endpoint-credential-marker";
+    const std::vector<std::string> endpoint_urls = {
+        marker, "ftp://" + marker, "http://user:" + marker + "@host"};
+
+    for (const auto& endpoint_url : endpoint_urls) {
+        SCOPED_TRACE(endpoint_url);
+        milvus_storage::api::Properties props;
+        std::string spec = R"({"format":"parquet","extfs":{"endpoint_url":")" +
+                           endpoint_url + R"("}})";
+
+        try {
+            ::InjectExternalSpecProperties(
+                props, 42, "s3://my-bucket/object", spec);
+            FAIL() << "expected invalid endpoint URL to be rejected";
+        } catch (const milvus::SegcoreError& error) {
+            EXPECT_EQ(std::string(error.what()).find(marker),
+                      std::string::npos);
+        }
+    }
+}
+
+TEST(InjectExtfsAllowlist, EndpointURLRejectsEndpointFormSource) {
+    milvus_storage::api::Properties props;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"endpoint_url":"http://rook-ceph-rgw:80"}})";
+
+    EXPECT_THROW(::InjectExternalSpecProperties(
+                     props, 42, "s3://localhost:9000/my-bucket/object", spec),
+                 milvus::SegcoreError);
+}
+
 TEST(InjectExtfsAllowlist, UnknownKeyIsDropped) {
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
@@ -2946,6 +3249,161 @@ TEST(InjectExtfsAllowlist, NoBaselineLeakFromFsProperties) {
               "MILVUS_INTERNAL_AK");
 }
 
+// minio.maxConnections must reach the external read path. milvus-storage
+// builds each external filesystem from its extfs.<name>.* keys alone, with no
+// fs.* fallback, so without this mirroring the setting is a silent no-op on
+// every external read and the library's built-in default applies instead.
+// The Go FFI path (loon_properties_inject_external_spec) rebuilds the map from
+// a flat LoonProperties, so fs.max_connections arrives as a std::string.
+TEST(InjectExtfsInheritedFields, MaxConnectionsMirroredFromStringVariant) {
+    milvus_storage::api::Properties props;
+    props["fs.max_connections"] = std::string("237");
+
+    ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.max_connections")),
+              "237");
+    // The fs.* baseline is left intact for the Milvus-internal bucket.
+    EXPECT_EQ(std::get<std::string>(props.at("fs.max_connections")), "237");
+}
+
+// The C++ index-build path goes through MakeInternalPropertiesFromStorageConfig
+// -> api::SetValue, which resolves fs.max_connections against the registry and
+// stores it as UINT32 rather than a string.
+TEST(InjectExtfsInheritedFields, MaxConnectionsMirroredFromTypedVariant) {
+    milvus_storage::api::Properties props;
+    ASSERT_EQ(
+        milvus_storage::api::SetValue(props, PROPERTY_FS_MAX_CONNECTIONS, "64"),
+        std::nullopt);
+    ASSERT_TRUE(
+        std::holds_alternative<uint32_t>(props.at("fs.max_connections")))
+        << "precondition: the registry types fs.max_connections as UINT32";
+
+    ::InjectExternalSpecProperties(props, 7, "s3://my-bucket/key", "");
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.7.max_connections")), "64");
+}
+
+// Nothing to inherit: the key stays absent so milvus-storage applies its own
+// default instead of a bogus zero.
+TEST(InjectExtfsInheritedFields, MaxConnectionsAbsentWhenUnset) {
+    milvus_storage::api::Properties props;
+
+    ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+    EXPECT_EQ(props.count("extfs.42.max_connections"), 0u);
+}
+
+// Present-but-zero must be treated as unset, in both variant shapes. A
+// producer that leaves MaxConnections at 0 -- a pre-upgrade DataCoord, or
+// common.storageType=local while the external data lives on S3 -- would
+// otherwise have that 0 mirrored into the extfs scope, where it *overrides*
+// milvus-storage's registered default of 100 and caps the external S3 client
+// at max(io_capacity, 25). Leaving the key absent keeps the 100.
+TEST(InjectExtfsInheritedFields, MaxConnectionsZeroTreatedAsUnset) {
+    {
+        milvus_storage::api::Properties props;
+        props["fs.max_connections"] = std::string("0");
+
+        ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+        EXPECT_EQ(props.count("extfs.42.max_connections"), 0u)
+            << "string \"0\" must not be mirrored";
+    }
+    {
+        milvus_storage::api::Properties props;
+        props["fs.max_connections"] = uint32_t(0);
+
+        ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+        EXPECT_EQ(props.count("extfs.42.max_connections"), 0u)
+            << "integral 0 must not be mirrored either";
+    }
+}
+
+// The producers themselves must not emit fs.max_connections when unset, so the
+// zero never reaches the extfs mirror (or the internal bucket's S3 client) in
+// the first place.
+TEST(MakePropertiesFromStorageConfig, MaxConnectionsZeroOmitted) {
+    CStorageConfig config{};
+    config.max_connections = 0;
+    auto props = MakeInternalPropertiesFromStorageConfig(config);
+    ASSERT_NE(props, nullptr);
+    EXPECT_EQ(props->count(PROPERTY_FS_MAX_CONNECTIONS), 0u);
+
+    config.max_connections = 237;
+    auto props_set = MakeInternalPropertiesFromStorageConfig(config);
+    ASSERT_NE(props_set, nullptr);
+    ASSERT_EQ(props_set->count(PROPERTY_FS_MAX_CONNECTIONS), 1u);
+    EXPECT_EQ(std::get<uint32_t>(props_set->at(PROPERTY_FS_MAX_CONNECTIONS)),
+              uint32_t(237));
+}
+
+// max_connections is server-side capacity config, not part of the external
+// source's identity: a user-supplied external_spec must not be able to set it.
+TEST(InjectExtfsInheritedFields, MaxConnectionsNotOverridableBySpec) {
+    milvus_storage::api::Properties props;
+    props["fs.max_connections"] = std::string("100");
+    std::string spec =
+        R"({"format":"parquet","extfs":{"max_connections":"9999"}})";
+
+    ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.max_connections")),
+              "100");
+}
+
+TEST(InjectExtfsInheritedFields, ExternalIopsDefaults) {
+    ScopedExternalIopsConfig config(2000, 5000);
+    milvus_storage::api::Properties props;
+
+    ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.iops_initial_rate")),
+              "2000");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.iops_max_rate")),
+              "5000");
+    EXPECT_EQ(props.count("fs.iops_initial_rate"), 0u);
+    EXPECT_EQ(props.count("fs.iops_max_rate"), 0u);
+}
+
+TEST(InjectExtfsInheritedFields, ExternalIopsConfiguredAndNotOverridable) {
+    ScopedExternalIopsConfig config(3000, 0);
+    milvus_storage::api::Properties props;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"iops_initial_rate":"9000","iops_max_rate":"10000"}})";
+
+    ::InjectExternalSpecProperties(props, 7, "s3://my-bucket/key", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.7.iops_initial_rate")),
+              "3000");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.7.iops_max_rate")), "0");
+}
+
+TEST(InjectExtfsInheritedFields, CAbiIopsConfigIsCallLocal) {
+    ScopedExternalIopsConfig singleton_config(7000, 8000);
+    LoonProperties properties{};
+
+    auto result = loon_properties_inject_external_spec(
+        &properties, 42, "s3://my-bucket/key", "", 3000, 0);
+    const std::string error = result.message != nullptr ? result.message : "";
+    EXPECT_EQ(result.err_code, loon_errcode_success) << error;
+    loon_ffi_free_result(&result);
+
+    EXPECT_STREQ(loon_properties_get(&properties, "extfs.42.iops_initial_rate"),
+                 "3000");
+    EXPECT_STREQ(loon_properties_get(&properties, "extfs.42.iops_max_rate"),
+                 "0");
+
+    const auto singleton_after =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .GetExternalIopsConfig();
+    EXPECT_EQ(singleton_after.initial_rate, 7000);
+    EXPECT_EQ(singleton_after.max_rate, 8000);
+
+    loon_properties_free(&properties);
+}
+
 // Azure endpoint derivation: AWS-form URI with cp=azure + region resolves via
 // DeriveEndpoint to the sovereign-cloud bare authority. Swap relocates URI
 // host (container) into bucket_name. AzureFileSystemProducer requires
@@ -2965,6 +3423,41 @@ TEST(InjectExtfsAllowlist, AzurePublicCloudWithExplicitRegion) {
               "core.windows.net");
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.cloud_provider")),
               "azure");
+}
+
+TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec = R"({
+        "format":"parquet",
+        "extfs":{
+            "access_key_id":"myacct",
+            "cloud_provider":"azure",
+            "region":"westus3",
+            "azure_client_id":"client",
+            "azure_tenant_id":"tenant",
+            "azure_credential_endpoint":"https://broker.example.com/v1/credentials/assume-role"
+        }
+    })";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "azure://core.windows.net/container/path", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+              "core.windows.net");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+              "container");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_id")),
+              "myacct");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.azure_client_id")),
+              "client");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.azure_tenant_id")),
+              "tenant");
+    EXPECT_EQ(
+        std::get<std::string>(props.at("extfs.42.azure_credential_endpoint")),
+        "https://broker.example.com/v1/credentials/assume-role");
+    EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
+    EXPECT_EQ(props.count("extfs.42.request_timeout_ms"), 0u);
 }
 
 TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
@@ -3148,17 +3641,95 @@ TEST(InjectExtfsAllowlist, AnonymousLayer0SkippedWithStalePreseed) {
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.anonymous")), "true");
 }
 
-TEST(InjectExtfsAllowlist, IcebergSnapshotIDAcceptsString) {
-    milvus_storage::api::Properties props;
-    const int64_t coll_id = 42;
-    std::string spec =
-        R"({"format":"iceberg-table","snapshot_id":"5320540205222981137"})";
+TEST(InjectExtfsAllowlist, IcebergSnapshotID) {
+    for (
+        const std::string spec : {
+            R"({"format":"iceberg-table","snapshot_id":"5320540205222981137"})",
+            R"({"format":"iceberg-table","snapshot_id":5320540205222981137})",
+            R"({"snapshot_id":"5320540205222981137","format":"iceberg-table"})",
+            R"({"snapshot_id":5320540205222981137,"format":"iceberg-table"})",
+        }) {
+        SCOPED_TRACE(spec);
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(
+            props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
 
-    ::InjectExternalSpecProperties(
-        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        // Read the same typed property as IcebergFormat::explore so a stale
+        // property key cannot silently fall back to the latest snapshot.
+        const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
+            props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+        ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
+        EXPECT_EQ(*snapshot_id, 5320540205222981137LL);
+    }
+}
 
-    EXPECT_EQ(std::get<std::string>(props.at("iceberg.snapshot_id")),
-              "5320540205222981137");
+TEST(InjectExtfsAllowlist, IcebergSnapshotIDCAbiRoundTrip) {
+    for (
+        const std::string spec : {
+            R"({"format":"iceberg-table","snapshot_id":"5320540205222981137"})",
+            R"({"format":"iceberg-table","snapshot_id":5320540205222981137})",
+            R"({"snapshot_id":"5320540205222981137","format":"iceberg-table"})",
+            R"({"snapshot_id":5320540205222981137,"format":"iceberg-table"})",
+        }) {
+        SCOPED_TRACE(spec);
+        LoonProperties properties{};
+        auto result = loon_properties_inject_external_spec(
+            &properties,
+            42,
+            "s3://s3.amazonaws.com/bucket/key",
+            spec.c_str(),
+            2000,
+            5000);
+        const std::string error =
+            result.message != nullptr ? result.message : "";
+        EXPECT_EQ(result.err_code, loon_errcode_success) << error;
+        loon_ffi_free_result(&result);
+
+        EXPECT_STREQ(loon_properties_get(&properties,
+                                         PROPERTY_READER_EXTTABLE_SNAPSHOT_ID),
+                     "5320540205222981137");
+        milvus_storage::api::Properties round_tripped;
+        const auto conversion_error = milvus_storage::api::ConvertFFIProperties(
+            round_tripped, &properties);
+        loon_properties_free(&properties);
+        ASSERT_FALSE(conversion_error.has_value())
+            << conversion_error.value_or("");
+        const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
+            round_tripped, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+        ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
+        EXPECT_EQ(*snapshot_id, 5320540205222981137LL);
+    }
+}
+
+TEST(InjectExtfsAllowlist, InvalidIcebergSnapshotIDIsRejected) {
+    for (const std::string spec : {
+             R"({"format":"iceberg-table","snapshot_id":-2})",
+             R"({"format":"iceberg-table","snapshot_id":"-2"})",
+             R"({"snapshot_id":-2,"format":"iceberg-table"})",
+             R"({"snapshot_id":"-2","format":"iceberg-table"})",
+         }) {
+        SCOPED_TRACE(spec);
+        milvus_storage::api::Properties props;
+        EXPECT_THROW(::InjectExternalSpecProperties(
+                         props, 42, "s3://s3.amazonaws.com/bucket/key", spec),
+                     milvus::SegcoreError);
+
+        LoonProperties properties{};
+        auto result = loon_properties_inject_external_spec(
+            &properties,
+            42,
+            "s3://s3.amazonaws.com/bucket/key",
+            spec.c_str(),
+            2000,
+            5000);
+        EXPECT_EQ(result.err_code, loon_errcode_invalid_properties);
+        const std::string error =
+            result.message != nullptr ? result.message : "";
+        EXPECT_NE(error.find("reader.exttable.snapshot_id"), std::string::npos);
+        EXPECT_NE(error.find("-2"), std::string::npos);
+        loon_ffi_free_result(&result);
+        loon_properties_free(&properties);
+    }
 }
 
 // ============================================================
@@ -3184,6 +3755,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          dim,
                          std::nullopt,
                          nullable,
+                         false,
                          external_field);
     }
     if (IsVectorDataType(data_type)) {
@@ -3211,6 +3783,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          data_type,
                          element_type,
                          nullable,
+                         false,
                          std::optional<DefaultValueType>{std::nullopt},
                          external_field);
     }

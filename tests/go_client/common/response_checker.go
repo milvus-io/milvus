@@ -12,10 +12,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -264,12 +264,12 @@ func CheckOutputFields(t *testing.T, expFields []string, actualColumns []column.
 
 // CheckSearchResult check search result, check nq, topk, ids, score
 func CheckSearchResult(t *testing.T, actualSearchResults []client.ResultSet, expNq int, expTopK int) {
-	require.Equalf(t, len(actualSearchResults), expNq, fmt.Sprintf("Expected nq=%d, actual SearchResultsLen=%d", expNq, len(actualSearchResults)))
+	require.Equalf(t, expNq, len(actualSearchResults), fmt.Sprintf("Expected nq=%d, actual SearchResultsLen=%d", expNq, len(actualSearchResults)))
 	require.Len(t, actualSearchResults, expNq)
 	for _, actualSearchResult := range actualSearchResults {
-		require.Equalf(t, actualSearchResult.ResultCount, expTopK, fmt.Sprintf("Expected topK=%d, actual ResultCount=%d", expTopK, actualSearchResult.ResultCount))
-		require.Equalf(t, actualSearchResult.IDs.Len(), expTopK, fmt.Sprintf("Expected topK=%d, actual IDsLen=%d", expTopK, actualSearchResult.IDs.Len()))
-		require.Equalf(t, len(actualSearchResult.Scores), expTopK, fmt.Sprintf("Expected topK=%d, actual ScoresLen=%d", expTopK, len(actualSearchResult.Scores)))
+		require.Equalf(t, expTopK, actualSearchResult.ResultCount, fmt.Sprintf("Expected topK=%d, actual ResultCount=%d", expTopK, actualSearchResult.ResultCount))
+		require.Equalf(t, expTopK, actualSearchResult.IDs.Len(), fmt.Sprintf("Expected topK=%d, actual IDsLen=%d", expTopK, actualSearchResult.IDs.Len()))
+		require.Equalf(t, expTopK, len(actualSearchResult.Scores), fmt.Sprintf("Expected topK=%d, actual ScoresLen=%d", expTopK, len(actualSearchResult.Scores)))
 	}
 }
 

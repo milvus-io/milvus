@@ -694,6 +694,10 @@ func (coord *MixCoordMock) ShowCollectionIDs(ctx context.Context, req *rootcoord
 	panic("implements me")
 }
 
+func (coord *MixCoordMock) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return &rootcoordpb.GetRLSMetadataResponse{}, nil
+}
+
 func (coord *MixCoordMock) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {
@@ -812,11 +816,18 @@ func (coord *MixCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.Sho
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
+	// mirror DescribeCollection: an empty CollectionName means the caller
+	// addressed the collection by id -- the proxy's id-primary partition fill
+	// shows partitions BY id (empty name) -- so resolve from req.CollectionID.
+	usingID := req.CollectionName == ""
 	collID, exist := coord.collName2ID[req.CollectionName]
-	if !exist {
+	if !exist && !usingID {
 		return &milvuspb.ShowPartitionsResponse{
 			Status: merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)),
 		}, nil
+	}
+	if usingID {
+		collID = req.CollectionID
 	}
 
 	coord.partitionMtx.RLock()
@@ -1296,6 +1307,38 @@ func (coord *MixCoordMock) OperatePrivilegeGroup(ctx context.Context, req *milvu
 	return &commonpb.Status{}, nil
 }
 
+func (coord *MixCoordMock) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*milvuspb.ListRowPoliciesResponse, error) {
+	return &milvuspb.ListRowPoliciesResponse{}, nil
+}
+
+func (coord *MixCoordMock) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return &milvuspb.GetRLSPrincipalTagsResponse{}, nil
+}
+
+func (coord *MixCoordMock) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest, opts ...grpc.CallOption) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return &milvuspb.ListRLSPrincipalsResponse{}, nil
+}
+
+func (coord *MixCoordMock) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (coord *MixCoordMock) Flush(ctx context.Context, req *datapb.FlushRequest, opts ...grpc.CallOption) (*datapb.FlushResponse, error) {
 	panic("implement me")
 }
@@ -1736,8 +1779,14 @@ func (coord *MixCoordMock) RestoreSnapshot(ctx context.Context, req *datapb.Rest
 
 func (coord *MixCoordMock) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest, opts ...grpc.CallOption) (*datapb.ExportSnapshotResponse, error) {
 	return &datapb.ExportSnapshotResponse{
-		Status:              merr.Success(),
-		SnapshotMetadataUri: req.GetTargetS3Path() + "/snapshots/100/metadata/1.json",
+		Status: merr.Success(),
+		JobId:  1,
+	}, nil
+}
+
+func (coord *MixCoordMock) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetExportSnapshotStateResponse, error) {
+	return &datapb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
 	}, nil
 }
 
@@ -1858,6 +1907,10 @@ func (coord *MixCoordMock) BackupEzk(ctx context.Context, req *internalpb.Backup
 
 func (coord *MixCoordMock) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
 	return &milvuspb.ClientHeartbeatResponse{}, nil
+}
+
+func (coord *MixCoordMock) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return &rootcoordpb.ListClientCommandsResponse{}, nil
 }
 
 func (coord *MixCoordMock) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {

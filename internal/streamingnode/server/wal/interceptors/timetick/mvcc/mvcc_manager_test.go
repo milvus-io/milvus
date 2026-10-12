@@ -77,3 +77,17 @@ func createTestMessage(
 	msg.EXPECT().TxnContext().Return(nil).Maybe()
 	return msg
 }
+
+func TestCommitImportAdvancesMVCCWithoutInserts(t *testing.T) {
+	manager := NewMVCCManager(100)
+	commit := message.NewCommitImportMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.CommitImportMessageHeader{CollectionId: 1, JobId: 10}).
+		WithBody(&message.CommitImportMessageBody{}).MustBuildMutable().WithTimeTick(200)
+	manager.UpdateMVCC(commit)
+	assert.Equal(t, VChannelMVCC{Timetick: 200}, manager.GetMVCCOfVChannel("v1"))
+	tick := message.NewTimeTickMessageBuilderV1().WithAllVChannel().
+		WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).
+		MustBuildMutable().WithTimeTick(200)
+	manager.UpdateMVCC(tick)
+	assert.Equal(t, VChannelMVCC{Timetick: 200, Confirmed: true}, manager.GetMVCCOfVChannel("v1"))
+}

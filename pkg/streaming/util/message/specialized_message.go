@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -160,13 +161,13 @@ func (m *specializedMutableMessageImpl[H, B]) Header() H {
 }
 
 // Body returns the message body.
-func (m *specializedMutableMessageImpl[H, B]) Body() (B, error) {
-	return unmarshalProtoB[B](m.Payload())
+func (m *specializedMutableMessageImpl[H, B]) Body(ctx context.Context) (B, error) {
+	return decodeProtoB[B](ctx, m)
 }
 
 // MustBody returns the message body.
 func (m *specializedMutableMessageImpl[H, B]) MustBody() B {
-	b, err := m.Body()
+	b, err := m.Body(context.Background())
 	if err != nil {
 		panic(fmt.Sprintf("failed to unmarshal specialized body,%s", err.Error()))
 	}
@@ -231,17 +232,40 @@ func (m *specializedImmutableMessageImpl[H, B]) Header() H {
 }
 
 // Body returns the message body.
-func (m *specializedImmutableMessageImpl[H, B]) Body() (B, error) {
-	return unmarshalProtoB[B](m.Payload())
+func (m *specializedImmutableMessageImpl[H, B]) Body(ctx context.Context) (B, error) {
+	return decodeProtoB[B](ctx, m)
 }
 
 // Must Body returns the message body.
 func (m *specializedImmutableMessageImpl[H, B]) MustBody() B {
-	b, err := m.Body()
+	b, err := m.Body(context.Background())
 	if err != nil {
 		panic(fmt.Sprintf("failed to unmarshal specialized body, %s, %s", m.MessageID().String(), err.Error()))
 	}
 	return b
+}
+
+// ErrMalformedBody marks a message body that was read but can not be unmarshaled.
+var ErrMalformedBody = errors.New("malformed message body")
+
+// decodeProtoB decodes the payload of msg and unmarshals it into the body type.
+// A failure to read the payload, such as a canceled context or a decryption
+// failure, is returned as is; an unmarshal failure wraps ErrMalformedBody.
+func decodeProtoB[B proto.Message](ctx context.Context, msg interface {
+	decodePayload(ctx context.Context) ([]byte, error)
+},
+) (B, error) {
+	payload, err := msg.decodePayload(ctx)
+	if err != nil {
+		var nilBody B
+		return nilBody, err
+	}
+	body, err := unmarshalProtoB[B](payload)
+	if err != nil {
+		// Wrap instead of Mark, so that both the standard and the cockroachdb errors.Is find the sentinel.
+		return body, errors.Wrap(ErrMalformedBody, err.Error())
+	}
+	return body, nil
 }
 
 func unmarshalProtoB[B proto.Message](data []byte) (B, error) {
