@@ -1048,13 +1048,16 @@ class V1RemoteSource::Impl {
 
         const auto& paths = Paths(name);
         CheckCancelled("V1/V2 artifact disk cache");
+        const auto first_new_path = disk_manager->GetLocalFilePaths().size();
         if (storage_namespace == ArtifactStorageNamespace::TextLog) {
             disk_manager->CacheTextLogToDisk(paths, load_priority);
         } else {
             disk_manager->CacheIndexToDisk(paths, load_priority);
         }
         CheckCancelled("V1/V2 artifact disk cache");
-        for (const auto& local : disk_manager->GetLocalFilePaths()) {
+        const auto& local_paths = disk_manager->GetLocalFilePaths();
+        for (size_t i = first_new_path; i < local_paths.size(); ++i) {
+            const auto& local = local_paths[i];
             if (SourceBaseName(local) == name) {
                 RecordOrValidateEntrySize(name, LocalFileSize(local), local);
                 staged_files.emplace(std::string(name), local);

@@ -234,5 +234,21 @@ TEST_F(V1FileSourceTest, CrossFilesystemMoveCopiesAndRemovesCache) {
     EXPECT_TRUE(CachedFiles().empty());
 }
 
+TEST_F(V1FileSourceTest, RepeatedTransfersFindEachNewlyAppendedCachePath) {
+    auto source = Source();
+    for (size_t iteration = 0; iteration < 16; ++iteration) {
+        SCOPED_TRACE(iteration);
+        const auto name = iteration % 2 == 0 ? "first" : "second";
+        const auto before = manager_->whole_reads.load();
+        const auto target =
+            root_->Path() + "/repeat/" + std::to_string(iteration);
+        const auto paths = source->ReadEntriesToLocalDir({name}, target);
+        ASSERT_EQ(paths.size(), 1);
+        EXPECT_EQ(ReadFile(paths.front()), entries_.at(name));
+        EXPECT_GT(manager_->whole_reads.load(), before);
+        EXPECT_TRUE(CachedFiles().empty());
+    }
+}
+
 }  // namespace
 }  // namespace milvus::storage::test
