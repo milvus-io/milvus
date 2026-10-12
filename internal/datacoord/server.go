@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/dataview"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
@@ -53,7 +54,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -101,15 +101,17 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli        *clientv3.Client
-	tikvCli        *txnkv.Client
-	address        string
-	watchClient    kv.WatchKV
-	kv             kv.MetaKv
-	metaRootPath   string
-	meta           *meta
-	segmentManager Manager
-	allocator      allocator.Allocator
+	etcdCli                             *clientv3.Client
+	tikvCli                             *txnkv.Client
+	address                             string
+	watchClient                         kv.WatchKV
+	kv                                  kv.MetaKv
+	metaRootPath                        string
+	meta                                *meta
+	dataViewManager                     DataViewManager
+	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
+	segmentManager                      Manager
+	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
@@ -127,7 +129,8 @@ type Server struct {
 	copySegmentInspector CopySegmentInspector
 	copySegmentChecker   CopySegmentChecker
 
-	snapshotManager SnapshotManager
+	snapshotManager       SnapshotManager
+	snapshotExportManager *snapshotExportManager
 
 	compactionTrigger        trigger
 	compactionInspector      CompactionInspector
@@ -171,6 +174,7 @@ type Server struct {
 
 type FileResourceObserver interface {
 	InitDataCoord(manager session.NodeManager)
+	IsEmpty() bool
 	Notify()
 }
 
@@ -220,7 +224,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 	for _, opt := range opts {
 		opt(s)
 	}
-	expr.Register("datacoord", s)
 	return s
 }
 
@@ -343,7 +346,12 @@ func (s *Server) initDataCoord() error {
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.broadcastCommitImportMessage)
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
+		commitImport:        s.broadcastCommitImportMessage,
+		rollbackImport:      s.broadcastRollbackImportMessage,
+		assignImportIDRange: s.broadcastUpdateImportMessage,
+		getReplicationRole:  s.getReplicationRole,
+	})
 
 	// init file resource observer
 	if s.fileResourceObserver != nil {
@@ -372,7 +380,7 @@ func (s *Server) initDataCoord() error {
 	mlog.Info(s.ctx, "init copy segment inspector and checker done")
 
 	// Initialize snapshot manager
-	s.snapshotManager = NewSnapshotManager(
+	snapshotManager := NewSnapshotManager(
 		s.meta,
 		s.meta.snapshotMeta,
 		s.copySegmentMeta,
@@ -382,11 +390,17 @@ func (s *Server) initDataCoord() error {
 		s.getChannelsByCollectionID,
 		s.indexEngineVersionManager,
 	)
+	s.snapshotManager = snapshotManager
+	snapshotExportMeta, err := newSnapshotExportMeta(s.ctx, s.meta.catalog)
+	if err != nil {
+		return err
+	}
+	s.snapshotExportManager = newSnapshotExportManager(s.ctx, snapshotExportMeta, snapshotManager)
+	snapshotManager.exportManager = s.snapshotExportManager
 	mlog.Info(s.ctx, "init snapshot manager done")
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
-	RegisterDDLCallbacks(s)
 	mlog.Info(s.ctx, "init datacoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 
 	return nil
@@ -450,6 +464,10 @@ func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
 	s.mixCoord = mixCoord
 }
 
+func (s *Server) SetDataViewCollectionRecoveryValidator(validator dataview.CollectionRecoveryValidator) {
+	s.dataViewCollectionRecoveryValidator = validator
+}
+
 func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNodeClient, error)) {
 	s.dataNodeCreator = f
 }
@@ -482,6 +500,7 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		dataViewGC:       s.dataViewManager,
 	})
 }
 
@@ -623,24 +642,50 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if s.meta != nil {
 		return nil
 	}
+	catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+	var recoveredMeta *meta
 	reloadEtcdFn := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
-		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
-		if err != nil {
-			return err
-		}
-
-		// Load collection information asynchronously
-		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
-		go func() {
-			_ = retry.Do(s.ctx, func() error {
-				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
-			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
-		}()
-		return nil
+		recoveredMeta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		return err
 	}
-	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
+	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+	// Retry each recovery phase independently: a later metadata error must
+	// not repeat newMeta's successful object-storage manifest scan.
+	if err := retry.Do(s.ctx, func() error {
+		return recoveredMeta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+
+	collections := recoveredMeta.GetCollections()
+	collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
+	collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
+		return c.ID, c.VChannelNames
+	})
+	var manager dataview.Manager
+	if err := retry.Do(s.ctx, func() error {
+		var err error
+		manager, err = dataview.RecoverManager(
+			s.ctx,
+			catalog,
+			s.dataViewCollectionRecoveryValidator,
+			recoveredMeta.loadableProjection,
+			collectionIDs,
+			collectionVChannels,
+		)
+		return err
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+	// Publish only fully recovered metadata. A failed later phase must not
+	// make a subsequent initMeta call return early with partial state.
+	recoveredMeta.dataViewManager = manager
+	s.meta = recoveredMeta
+	s.dataViewManager = manager
+	return nil
 }
 
 func (s *Server) initAnalyzeInspector() {
@@ -723,8 +768,16 @@ func (s *Server) startServerLoop() {
 
 	// Start external collection refresh manager (includes inspector and checker)
 	s.externalCollectionRefreshManager.Start()
+	if s.snapshotExportManager != nil {
+		s.snapshotExportManager.Start()
+	}
+
+	// The DataView recompute worker was already started at RecoverManager
+	// construction (bounded by s.ctx); nothing to do here.
 
 	s.garbageCollector.start()
+
+	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {
@@ -864,7 +917,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			}
 
 			// notify file manager sync file resource to new node
-			if s.fileResourceObserver != nil {
+			if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
 				s.fileResourceObserver.Notify()
 			}
 		case sessionutil.SessionDelEvent:
@@ -963,23 +1016,17 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		}
 	}
 
-	insertFileNum := 0
-	for _, fieldBinlog := range segment.GetBinlogs() {
-		insertFileNum += len(fieldBinlog.GetBinlogs())
-	}
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
-
+	// Insert / delta counts come from Statistics. Stats array is iterated
+	// because Statistics doesn't carry a per-segment stat-file count — V3
+	// reports 0, matching the manifest-driven layout.
+	stats := segment.EnsureStats()
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(stats.GetInsertBinlogCount()))
 	statFileNum := 0
 	for _, fieldBinlog := range segment.GetStatslogs() {
 		statFileNum += len(fieldBinlog.GetBinlogs())
 	}
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
-
-	deleteFileNum := 0
-	for _, filedBinlog := range segment.GetDeltalogs() {
-		deleteFileNum += len(filedBinlog.GetBinlogs())
-	}
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(stats.GetDeltaBinlogCount()))
 
 	mlog.Info(ctx, "flush segment complete", mlog.Int64("id", segmentID))
 	return nil
@@ -1047,6 +1094,10 @@ func (s *Server) Stop() error {
 	mlog.Info(s.ctx, "datacoord server shutdown")
 	s.garbageCollector.close()
 	mlog.Info(s.ctx, "datacoord garbage collector stopped")
+	if s.snapshotExportManager != nil {
+		s.snapshotExportManager.Close()
+		mlog.Info(s.ctx, "datacoord snapshot export manager stopped")
+	}
 
 	if s.meta != nil {
 		s.meta.GetSnapshotMeta().Close()

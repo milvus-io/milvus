@@ -15,5 +15,3 @@ def endpoint(request):
 @pytest.fixture
 def token(request):
     return request.config.getoption("--token")
-
-

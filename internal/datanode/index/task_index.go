@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/util"
@@ -35,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -94,6 +97,16 @@ func (it *indexBuildTask) parseParams() {
 }
 
 func (it *indexBuildTask) Reset() {
+	// Reset runs from processTask's deferred cleanup on every exit path, including
+	// the canceled one where PostExecute -- the only other place that releases the
+	// index -- is skipped. Without this the native index built by Execute is never
+	// freed. Delete is idempotent, so releasing here after a normal PostExecute is
+	// a no-op.
+	if it.index != nil {
+		if err := it.index.Delete(); err != nil {
+			mlog.Warn(it.ctx, "failed to release index object on task reset", mlog.Err(err))
+		}
+	}
 	it.ident = ""
 	it.cancel = nil
 	it.ctx = nil
@@ -118,6 +131,19 @@ func (it *indexBuildTask) Name() string {
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
+	it.observeStateMetrics(state)
+}
+
+// SetStateWithCost stores the final state/failReason together with the
+// execution-end cost bookkeeping in one TaskManager critical section, so a
+// concurrent QueryTask can never observe a final cost paired with a stale
+// in-progress state.
+func (it *indexBuildTask) SetStateWithCost(state indexpb.JobState, failReason string, endMs, costTimeMs int64) {
+	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), endMs, costTimeMs, commonpb.IndexState(state), failReason)
+	it.observeStateMetrics(state)
+}
+
+func (it *indexBuildTask) observeStateMetrics(state indexpb.JobState) {
 	if state == indexpb.JobState_JobStateFinished {
 		metrics.DataNodeBuildIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(it.tr.ElapseSpan().Seconds())
 		metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(it.queueDur.Milliseconds()))
@@ -223,6 +249,25 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+func redactBuildIndexParamsForLog(params *indexcgopb.BuildIndexInfo) *indexcgopb.BuildIndexInfo {
+	if params == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(params).(*indexcgopb.BuildIndexInfo)
+	if config := redacted.GetStorageConfig(); config != nil {
+		redactStorageCredentialsForLog(
+			&config.AccessKeyID,
+			&config.SecretAccessKey,
+			&config.SslCACert,
+			&config.GcpCredentialJSON,
+		)
+	}
+	redacted.ExternalSource = externalspec.RedactExternalSource(redacted.GetExternalSource())
+	redacted.ExternalSpec = externalspec.RedactExternalSpecForLog(redacted.GetExternalSpec())
+	return redacted
+}
+
 func (it *indexBuildTask) Execute(ctx context.Context) error {
 	log := mlog.With(
 		mlog.String("clusterID", it.req.GetClusterID()),
@@ -260,23 +305,30 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	storageConfig := &indexcgopb.StorageConfig{
-		Address:           it.req.GetStorageConfig().GetAddress(),
-		AccessKeyID:       it.req.GetStorageConfig().GetAccessKeyID(),
-		SecretAccessKey:   it.req.GetStorageConfig().GetSecretAccessKey(),
-		UseSSL:            it.req.GetStorageConfig().GetUseSSL(),
-		BucketName:        it.req.GetStorageConfig().GetBucketName(),
-		RootPath:          it.req.GetStorageConfig().GetRootPath(),
-		UseIAM:            it.req.GetStorageConfig().GetUseIAM(),
-		IAMEndpoint:       it.req.GetStorageConfig().GetIAMEndpoint(),
-		StorageType:       it.req.GetStorageConfig().GetStorageType(),
-		UseVirtualHost:    it.req.GetStorageConfig().GetUseVirtualHost(),
-		Region:            it.req.GetStorageConfig().GetRegion(),
-		CloudProvider:     it.req.GetStorageConfig().GetCloudProvider(),
-		RequestTimeoutMs:  it.req.GetStorageConfig().GetRequestTimeoutMs(),
-		SslCACert:         it.req.GetStorageConfig().GetSslCACert(),
-		GcpCredentialJSON: it.req.GetStorageConfig().GetGcpCredentialJSON(),
-		SslTlsMinVersion:  it.req.GetStorageConfig().GetSslTlsMinVersion(),
-		UseCrc32CChecksum: it.req.GetStorageConfig().GetUseCrc32CChecksum(),
+		Address:                     it.req.GetStorageConfig().GetAddress(),
+		AccessKeyID:                 it.req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:             it.req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:                      it.req.GetStorageConfig().GetUseSSL(),
+		BucketName:                  it.req.GetStorageConfig().GetBucketName(),
+		RootPath:                    it.req.GetStorageConfig().GetRootPath(),
+		UseIAM:                      it.req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:                 it.req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:                 it.req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:              it.req.GetStorageConfig().GetUseVirtualHost(),
+		Region:                      it.req.GetStorageConfig().GetRegion(),
+		CloudProvider:               it.req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs:            it.req.GetStorageConfig().GetRequestTimeoutMs(),
+		MaxConnections:              it.req.GetStorageConfig().GetMaxConnections(),
+		SslCACert:                   it.req.GetStorageConfig().GetSslCACert(),
+		GcpCredentialJSON:           it.req.GetStorageConfig().GetGcpCredentialJSON(),
+		SslTlsMinVersion:            it.req.GetStorageConfig().GetSslTlsMinVersion(),
+		UseCrc32CChecksum:           it.req.GetStorageConfig().GetUseCrc32CChecksum(),
+		TalonMode:                   it.req.GetStorageConfig().GetTalonMode(),
+		TalonSmallReadThreshold:     it.req.GetStorageConfig().GetTalonSmallReadThreshold(),
+		TalonCoordinator:            it.req.GetStorageConfig().GetTalonCoordinator(),
+		TalonBlockSize:              it.req.GetStorageConfig().GetTalonBlockSize(),
+		TalonMaxIdlePerAddr:         it.req.GetStorageConfig().GetTalonMaxIdlePerAddr(),
+		TalonEnableForExternalTable: it.req.GetStorageConfig().GetTalonEnableForExternalTable(),
 	}
 
 	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))
@@ -326,7 +378,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		buildIndexParams.ExternalSource = it.req.GetExternalSource()
 		buildIndexParams.ExternalSpec = it.req.GetExternalSpec()
 	}
-	log.Info(ctx, "create index", mlog.Any("buildIndexParams", buildIndexParams))
+	log.Info(ctx, "create index", mlog.Any("buildIndexParams", redactBuildIndexParamsForLog(buildIndexParams)))
 
 	// set plugin context after logging the indexParams to avoid logging sensitive data
 	if it.pluginContext != nil {

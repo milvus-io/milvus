@@ -1,209 +1,104 @@
 # Expression Filtering Tests
 
-This directory contains comprehensive test modules for Milvus client expression filtering capabilities.
+This directory contains focused Milvus client expression filtering tests. The suite combines long-standing scalar/JSON baseline tests with newer coverage for regression issues, filtering matrix gaps, special scalar types, StructArray predicates, and index consistency.
+
+For the detailed coverage table, see [coverage_matrix.md](coverage_matrix.md). Keep that matrix updated when adding or removing filtering coverage in this directory.
 
 ## Test Modules
 
-### 1. `test_milvus_client_scalar_expression_filtering_optimized.py`
-**Primary test module for comprehensive scalar expression filtering**
+| Module | Role | Main Coverage |
+|---|---|---|
+| `test_milvus_client_scalar_filtering.py` | Baseline scalar/array/JSON correctness | Scalar and ARRAY expression generation, Python eval oracle, scalar index consistency, LIKE escaping, INT64 overflow and 3VL corner cases |
+| `test_milvus_client_json_filtering.py` | Baseline JSON UNKNOWN semantics | JSON missing/null/type-mismatch behavior, growing/sealed segment coverage, JSON path/flat index behavior, query/search consistency |
+| `test_filter_regressions.py` | Issue-driven regression and boolean rewrite coverage | JSON mixed-type OR/IN regressions, expression order permutations, equivalence rewrites, fanout, segment-mode probes |
+| `test_filtering_expression_matrix.py` | Compact deterministic expression matrix | Focused scalar, ARRAY, JSON, NULL, NOT, arithmetic, composition, and negative-message cases with explicit expected IDs |
+| `test_filtering_index_consistency.py` | Focused index consistency and index negative cases | Shared plain/indexed fields, materialized scalar and JSON path indexes, boundary cases, meaningful index errors |
+| `test_filtering_special_types.py` | Documented special filtering types | TIMESTAMPTZ, analyzer VARCHAR text/phrase match, GEOMETRY and RTREE consistency |
+| `test_filter_expression_issue_mining.py` | GitHub expressions issue mining | Empty template params, bitwise controls, NULL literal rejection, INT64 overflow generalization |
+| `test_filtering_additional_l2.py` | Additional L2 gaps | StructArray full filtering matrix, StructArray sub-field indexes, RANDOM_SAMPLE |
+| `filtering_case_matrix.py` | Shared deterministic case data | Reusable row builders and case matrices for the focused filtering modules |
+| `expression_test_utils.py` | Shared test helpers | Query ID helpers, minimal vector index helpers, segment-mode and index-readiness utilities |
 
-**Features:**
-- Tests all Milvus-supported scalar data types (INT8, INT16, INT32, INT64, BOOL, FLOAT, DOUBLE, VARCHAR, ARRAY, JSON)
-- Covers all operators: Comparison (==, !=, >, <, >=, <=), Range (IN, LIKE), Arithmetic (+, -, *, /, %, **), Logical (AND, OR, NOT), Null (IS NULL, IS NOT NULL)
-- Single collection design with multiple index types for efficiency
-- Index consistency verification (same results for indexed vs non-indexed fields)
-- Comprehensive error handling and failure debugging
-- Automatic reproduction script generation
-- Test complex Json expression (JSON[JSON], JSON[LIST[JSON]], JSON[JSON[LIST]], etc)
+## Baseline Versus Added Coverage
 
-**Key Design:**
-- One collection containing all data types
-- Each data type has multiple fields representing different index types
-- 10% of data is NULL to test IS NULL/IS NOT NULL operators
-- Specific VARCHAR patterns: `str_xxx`, `xxx_str`, `xxx_str_xxx`
-- Comprehensive LIKE pattern coverage with escape handling
-- Create examples of typed, dynamic, and shared keys in json
-- Generate expressions to valida query result
+The two original baseline modules are intentionally kept:
 
-### 2. `test_milvus_client_scalar_expression_filtering.py`
-**Legacy comprehensive scalar expression filtering test**
+- `test_milvus_client_scalar_filtering.py` is broad and oracle-driven. It uses deterministic boundary values plus generated expressions to validate scalar, ARRAY, JSON, and scalar-index behavior.
+- `test_milvus_client_json_filtering.py` is the canonical suite for JSON UNKNOWN behavior. It uses fixed expected IDs across raw, indexed, growing, sealed, query, and search paths.
 
-**Features:**
-- Original comprehensive test implementation
-- Multiple collection approach
-- Extensive test coverage for all data types and operators
-- Detailed validation logic
+The newer modules do not replace those baselines. They add reviewable, deterministic nodes for coverage that was missing or too implicit:
 
-### 3. `test_milvus_client_random_expression_generator.py`
-**Random expression generation for edge case testing**
+- issue regressions and generalized mining cases;
+- meaningful negative-path error messages;
+- special scalar types such as TIMESTAMPTZ, text-enabled VARCHAR, and GEOMETRY;
+- materialized index assertions for HNSW vector, scalar, JSON path, and StructArray sub-field indexes;
+- StructArray filtering, MATCH-family predicates, NULL/empty semantics, and query/search/delete API behavior;
+- compact mixed-expression stress cases without a cartesian explosion of collections.
 
-**Features:**
-- Generates random complex expressions
-- Tests edge cases and unusual combinations
-- Stress testing for expression parsing
-- Random data generation with various patterns
+Some basic scalar, ARRAY, and JSON expressions overlap semantically with the baseline modules. Those focused cases are kept as small matrix anchors with explicit IDs, while the baseline modules remain the broad oracle-based tests.
 
-## Data Type Coverage
+## Coverage Dimensions
 
-### Supported Scalar Types
-- **Numeric**: INT8, INT16, INT32, INT64, FLOAT, DOUBLE
-- **Boolean**: BOOL
-- **String**: VARCHAR
-- **Array**: ARRAY (with all element types)
-- **JSON**: JSON (with complex nested structures)
+The current suite covers:
 
-### Array Element Types
-- All scalar types: INT8, INT16, INT32, INT64, BOOL, FLOAT, DOUBLE, VARCHAR
+- scalar types: `INT8`, `INT16`, `INT32`, `INT64`, `FLOAT`, `DOUBLE`, `BOOL`, `VARCHAR`;
+- compound types: `ARRAY`, `JSON`, `ARRAY<STRUCT>`;
+- special types: `TIMESTAMPTZ`, analyzer-enabled `VARCHAR`, `GEOMETRY`;
+- operators: comparison, `IN`, `NOT IN`, `LIKE`, arithmetic, bitwise `&`/`|`/`^`, logical `AND`/`OR`/`NOT`, `IS NULL`, `IS NOT NULL`;
+- functions: `array_contains*`, `array_length`, `json_contains*`, text/phrase match, geometry functions, StructArray `element_filter` and MATCH family, `RANDOM_SAMPLE`;
+- indexes: no-index plus materialized `INVERTED`, `BITMAP`, `TRIE`, `STL_SORT`, `NGRAM`, `RTREE`, JSON path cast indexes, StructArray sub-field scalar indexes, and issue-specific `HNSW` fixtures;
+- segment modes: sealed, growing, and mixed where relevant;
+- API paths: query and delete for general filtering correctness, plus issue-specific search and hybrid-search regressions and controls.
 
-## Operator Coverage
+Focused fixtures that claim real index coverage insert and flush 3000 rows, require `state=Finished` with `indexed_rows == total_rows == 3000` and zero pending rows, and assert index name, field, and type. Plain/indexed twin fields reuse the same logical values so the index is the only semantic difference. The mixed-segment fixture separately proves 3000 sealed indexed rows plus visible growing rows before checking exact query results.
 
-### Comparison Operators
-- `==`, `!=`, `>`, `<`, `>=`, `<=`
+See [coverage_matrix.md](coverage_matrix.md) for maintained coverage-family mappings to representative pytest nodes.
 
-### Range Operators
-- `IN` (with array indexing support)
-- `LIKE` (with comprehensive pattern coverage)
+## Running
 
-### Arithmetic Operators
-- `+`, `-`, `*`, `/`, `%`, `**`
+From `tests/python_client`, using an activated Python 3.12 virtual environment:
 
-### Logical Operators
-- `AND`, `OR`, `NOT`
-
-### Null Operators
-- `IS NULL`, `IS NOT NULL`
-
-### Array Functions
-- Array indexing: `field[index]`
-
-### JSON Functions
-- JSON key access: `field['key']`
-
-## Index Type Support
-
-### Scalar Index Types
-| Data Types                                               | INVERTED | BITMAP | STL_SORT | Trie | NGRAM | AUTOINDEX |
-|:---------------------------------------------------------|:--------:|:------:|:--------:|:----:|:-----:|:---------:|
-| INT8, INT16, INT32, INT64                                |   yes    |  yes   |   yes    |  no  |  no   |    yes    |
-| BOOL                                                     |   yes    |  yes   |    no    |  no  |  no   |    yes    |
-| FLOAT, DOUBLE                                            |   yes    |   no   |   yes    |  no  |  no   |    yes    |
-| VARCHAR                                                  |   yes    |  yes   |    no    | yes  |  yes  |    yes    |
-| JSON                                                     |   yes    |   no   |    no    |  no  |  yes* |    yes    |
-| ARRAY (elements: BOOL, INT8, INT16, INT32, INT64, VARCHAR) |   yes    |  yes   |    no    |  no  |  no   |    yes    |
-| ARRAY (elements: FLOAT, DOUBLE)                          |   yes    |   no   |    no    |  no  |  no   |    yes    |
-
-*JSON fields require `json_path` and `json_cast_type: "varchar"` parameters for NGRAM index
-
-### NGRAM Index Specific Features
-
-The NGRAM index is specialized for efficient text partial matching and fuzzy search on VARCHAR and JSON fields.
-
-**Supported Fields:**
-- **VARCHAR**: Direct text content indexing
-- **JSON**: Requires `json_path` parameter to specify the JSON field path (e.g., `field_name['key']`)
-
-**Index Parameters:**
-- `min_gram`: Minimum n-gram length (required, positive integer)
-- `max_gram`: Maximum n-gram length (required, positive integer, ≥ min_gram)
-- `json_path`: JSON field path for JSON fields (e.g., `"json_field['body']"`)
-- `json_cast_type`: Must be `"varchar"` for JSON fields
-
-**Performance Characteristics:**
-- Optimized for LIKE queries with `%` and `_` wildcards
-- Two-phase query execution: n-gram filtering + secondary validation
-- Query strings shorter than `min_gram` fall back to full table scan
-- Supports multilingual text including Chinese, Japanese, and Korean
-
-**Example Index Creation:**
-```python
-# VARCHAR field
-index_params.add_index(
-    field_name="content",
-    index_type="NGRAM",
-    params={"min_gram": 2, "max_gram": 3}
-)
-
-# JSON field
-index_params.add_index(
-    field_name="json_field",
-    index_type="NGRAM",
-    params={
-        "min_gram": 2,
-        "max_gram": 3,
-        "json_path": "json_field['body']",
-        "json_cast_type": "varchar"
-    }
-)
-```
-
-## Test Features
-
-### Error Handling
-- Parsing error detection and skipping
-- Graceful handling of unsupported expressions
-- Detailed error reporting
-
-### Debugging Support
-- Automatic debug info saving on failure
-- Parquet file export for test data
-- Reproduction script generation
-- Schema and configuration preservation
-
-### Validation Logic
-- Ground truth calculation using Python lambdas
-- Result count and ID verification
-- Index consistency verification
-
-### LIKE Pattern Coverage
-- Prefix patterns: `str%`
-- Suffix patterns: `%str`
-- Contains patterns: `%str%`
-- Single character wildcard: `str_`, `_str`
-- Combination patterns: `str_%`, `%_str`
-- Escape patterns: `str\%`, `str\_`
-
-**NGRAM Index Optimization:**
-- LIKE queries on VARCHAR and JSON fields with NGRAM index are automatically optimized
-- Query performance significantly improves for pattern matching operations
-- Supports all LIKE patterns with `%` and `_` wildcards
-- Automatic fallback to full scan when query length < `min_gram`
-
-## Usage
-
-### Running Tests
 ```bash
-# Run optimized test
-pytest test_milvus_client_scalar_expression_filtering_optimized.py
-
-# Run legacy comprehensive test
-pytest test_milvus_client_scalar_expression_filtering.py
-
-# Run random expression generator
-pytest test_milvus_client_random_expression_generator.py
-
-# Run NGRAM index specific tests
-pytest ../../testcases/indexes/test_ngram.py
+python -m pytest milvus_client/expressions --collect-only -q
 ```
 
-### Debug Information
-On test failure, debug information is automatically saved to `/tmp/ci_logs/`:
-- Test data as Parquet files
-- Collection schema and configuration
-- Failed expressions list
-- Reproduction script
+Run the baseline scalar and JSON suites:
 
-### Reproduction Script
-The generated reproduction script can:
-- Rebuild the entire test environment
-- Recreate schema, data, and indexes
-- Re-run failed expressions
-- Validate results
+```bash
+python -m pytest \
+  milvus_client/expressions/test_milvus_client_scalar_filtering.py \
+  milvus_client/expressions/test_milvus_client_json_filtering.py
+```
 
-## Design Principles
+Run the focused added suites:
 
-1. **Comprehensive Coverage**: Test all supported data types, operators, and index types (including NGRAM)
-2. **Efficiency**: Single collection design for optimal performance
-3. **Reliability**: Robust error handling and debugging
-4. **Maintainability**: Clear code structure and documentation
-5. **Reproducibility**: Automatic failure reproduction capabilities
-6. **Index Optimization**: Validate performance improvements with specialized indexes like NGRAM
+```bash
+python -m pytest -n 4 --dist loadgroup \
+  milvus_client/expressions/test_filter_regressions.py \
+  milvus_client/expressions/test_filtering_expression_matrix.py \
+  milvus_client/expressions/test_filtering_index_consistency.py \
+  milvus_client/expressions/test_filtering_special_types.py \
+  milvus_client/expressions/test_filter_expression_issue_mining.py \
+  milvus_client/expressions/test_filtering_additional_l2.py
+```
+
+Read-only focused suites use class-scoped shared collections where their schema and index requirements match. Segment lifecycle, destructive operations, and schema-isolation cases remain independent. When running with xdist, pass `--dist loadgroup` so tests with the same `xdist_group` stay on one worker and reuse their prepared collection.
+Use pytest-tagging's `--tags L0`, `--tags L1`, or `--tags L2` when validating a single level.
+
+For remote validation, pass the standard Python client options, for example:
+
+```bash
+python -m pytest -n 4 --dist loadgroup milvus_client/expressions/test_filtering_additional_l2.py \
+  --host "${MILVUS_HOST}" --port "${MILVUS_PORT:-19530}" -q -s --tb=short --disable-warnings
+```
+
+## Maintenance Rules
+
+- Add broad generated scalar/ARRAY expression behavior to `test_milvus_client_scalar_filtering.py`.
+- Add JSON missing/null/type-mismatch UNKNOWN behavior to `test_milvus_client_json_filtering.py`.
+- Add issue-specific regressions to `test_filter_regressions.py` or `test_filter_expression_issue_mining.py`.
+- Add compact deterministic matrix gaps to `test_filtering_expression_matrix.py`.
+- Add index consistency or index negative cases to `test_filtering_index_consistency.py`.
+- Add TIMESTAMPTZ, text, and GEOMETRY cases to `test_filtering_special_types.py`.
+- Add StructArray and RANDOM_SAMPLE gaps to `test_filtering_additional_l2.py`.
+- Update [coverage_matrix.md](coverage_matrix.md) when changing meaningful coverage.

@@ -130,7 +130,7 @@ func (s *StorageV1SerializerSuite) getDeleteBuffer() *storage.DeleteData {
 	buf := &storage.DeleteData{}
 	for i := 0; i < 10; i++ {
 		pk := storage.NewInt64PrimaryKey(int64(i + 1))
-		ts := tsoutil.ComposeTSByTime(time.Now(), 0)
+		ts := tsoutil.ComposeTSByTime(time.Now())
 		buf.Append(pk, ts)
 	}
 	return buf
@@ -222,7 +222,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		pack.WithFlush()
 
 		bfs := s.getBfs()
-		segInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+		segInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 		metacache.UpdateNumOfRows(1000)(segInfo)
 		s.mockCache.EXPECT().GetSegmentByID(s.segmentID).Return(segInfo, true)
 

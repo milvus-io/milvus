@@ -23,9 +23,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/row"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/row"
 )
 
 // ResultSet is struct for search result set.
@@ -254,15 +254,23 @@ func (ds DataSet) fillData(data reflect.Value, dataType reflect.Type, idx int) e
 			if err != nil {
 				return err
 			}
+			converted, err := row.CoerceValue(fieldType.Elem(), val)
+			if err != nil {
+				return err
+			}
 			ptr := reflect.New(fieldType.Elem())
-			ptr.Elem().Set(reflect.ValueOf(val))
+			ptr.Elem().Set(reflect.ValueOf(converted))
 			field.Set(ptr)
 		} else {
 			val, err := ds[i].Get(idx)
 			if err != nil {
 				return err
 			}
-			field.Set(reflect.ValueOf(val))
+			converted, err := row.CoerceValue(fieldType, val)
+			if err != nil {
+				return err
+			}
+			field.Set(reflect.ValueOf(converted))
 		}
 	}
 	return nil

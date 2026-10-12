@@ -20,6 +20,7 @@
 
 #include <cstring>
 #include <cmath>
+#include <concepts>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -45,6 +46,40 @@ namespace milvus {
 
 #define VEC_FIELD_DATA(data_array, type) \
     (data_array->vectors().type##_vector().data())
+
+inline const google::protobuf::RepeatedField<bool>&
+GetFieldDataRowValidData(const DataArray& field_data) {
+    // New payloads normally store validity in the field-specific ScalarField
+    // or VectorField. FieldData.valid_data is kept as a fallback for legacy
+    // payloads that do not contain field-specific validity.
+    if (field_data.has_scalars() &&
+        field_data.scalars().valid_data_size() > 0) {
+        return field_data.scalars().valid_data();
+    }
+    if (field_data.has_vectors() &&
+        field_data.vectors().valid_data_size() > 0) {
+        return field_data.vectors().valid_data();
+    }
+    return field_data.valid_data();
+}
+
+inline google::protobuf::RepeatedField<bool>*
+MutableFieldDataRowValidData(DataArray* field_data) {
+    field_data->clear_valid_data();
+    if (field_data->has_scalars()) {
+        return field_data->mutable_scalars()->mutable_valid_data();
+    }
+    if (field_data->has_vectors()) {
+        return field_data->mutable_vectors()->mutable_valid_data();
+    }
+    auto data_type = static_cast<DataType>(field_data->type());
+    AssertInfo(data_type != DataType::NONE,
+               "cannot set valid_data without FieldData type");
+    if (IsVectorDataType(data_type)) {
+        return field_data->mutable_vectors()->mutable_valid_data();
+    }
+    return field_data->mutable_scalars()->mutable_valid_data();
+}
 
 using CheckDataValid = std::function<bool(size_t)>;
 using SparseValueType = typename knowhere::sparse_u32_f32::ValueType;
@@ -105,14 +140,19 @@ GenIdsDataset(const int64_t count, const int64_t* ids) {
 inline DatasetPtr
 GenResultDataset(const int64_t nq,
                  const int64_t topk,
-                 const int64_t* ids,
-                 const float* distance) {
+                 std::unique_ptr<int64_t[]> ids,
+                 std::unique_ptr<float[]> distance) {
     auto ret_ds = std::make_shared<Dataset>();
+    // Dataset setters can allocate. Keep the arrays owned by the guards until
+    // every setter succeeds, including when only one pointer was installed.
+    ret_ds->SetIsOwner(false);
     ret_ds->SetRows(nq);
     ret_ds->SetDim(topk);
-    ret_ds->SetIds(ids);
-    ret_ds->SetDistance(distance);
+    ret_ds->SetIds(ids.get());
+    ret_ds->SetDistance(distance.get());
     ret_ds->SetIsOwner(true);
+    ids.release();
+    distance.release();
     return ret_ds;
 }
 
@@ -150,13 +190,6 @@ EscapeLikePattern(const std::string& literal) {
 }
 
 inline int64_t
-upper_align(int64_t value, int64_t align) {
-    Assert(align > 0);
-    auto groups = value / align + (value % align != 0);
-    return groups * align;
-}
-
-inline int64_t
 upper_div(int64_t value, int64_t align) {
     Assert(align > 0);
     auto groups = value / align + (value % align != 0);
@@ -185,12 +218,99 @@ KnowhereStatusString(knowhere::Status status) {
     return knowhere::Status2String(status);
 }
 
-inline std::vector<IndexType>
-DISK_INDEX_LIST() {
-    static std::vector<IndexType> ret{
-        knowhere::IndexEnum::INDEX_DISKANN,
-    };
-    return ret;
+// Map a knowhere::Status to a segcore ErrorCode. This is a switch with NO
+// `default:` plus a post-switch fallback, wrapped in -Werror=switch: when
+// knowhere adds a Status, this stops compiling until the new value is
+// classified here, instead of silently collapsing into KnowhereError. The
+// post-switch `return` keeps the function total and guards out-of-range values
+// without suppressing the exhaustiveness warning.
+//
+// Most of knowhere's input-bucket statuses become InvalidParameter, with three
+// deliberate exceptions pulled out of "input": not_implemented /
+// invalid_instruction_set are capability gaps (a feature or CPU-feature gap such
+// as SCANN needing AVX2; the request itself is fine) -> Unsupported; and
+// invalid_serialized_index_type is an incompatible-version / corrupt serialized
+// index read back from storage -> DataFormatBroken. malloc_error and
+// disk_file_error keep their retriable-on-the-Go-side codes. Every remaining
+// inner error -> KnowhereError.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
+inline ErrorCode
+KnowhereStatusToErrorCode(knowhere::Status status) {
+    switch (status) {
+        // Caller-input errors -> InvalidParameter (non-retriable input).
+        case knowhere::Status::invalid_args:
+        case knowhere::Status::invalid_param_in_json:
+        case knowhere::Status::out_of_range_in_json:
+        case knowhere::Status::type_conflict_in_json:
+        case knowhere::Status::invalid_metric_type:
+        case knowhere::Status::invalid_value_in_json:
+        case knowhere::Status::arithmetic_overflow:
+        case knowhere::Status::invalid_index_error:
+        case knowhere::Status::invalid_cluster_error:
+            return ErrorCode::InvalidParameter;
+        // Index lifecycle/state failures are server-side, not the caller's
+        // request: empty_index is "index not loaded" (e.g. DiskANN), and
+        // (not|already)_trained are internal build-state violations. Blaming
+        // the request would make lb_policy stop replica failover.
+        case knowhere::Status::empty_index:
+        case knowhere::Status::index_not_trained:
+        case knowhere::Status::index_already_trained:
+            return ErrorCode::KnowhereError;
+        // A binary set that fails to deserialize is a corrupt/incompatible
+        // persisted index, same bucket as invalid_serialized_index_type.
+        case knowhere::Status::invalid_binary_set:
+            return ErrorCode::DataFormatBroken;
+        // Capability gaps (feature / CPU-feature not available): the request is
+        // fine, so this is Unsupported, not malformed input.
+        case knowhere::Status::not_implemented:
+        case knowhere::Status::invalid_instruction_set:
+            return ErrorCode::Unsupported;
+        // Incompatible-version / corrupt serialized index read back from storage.
+        case knowhere::Status::invalid_serialized_index_type:
+            return ErrorCode::DataFormatBroken;
+        case knowhere::Status::malloc_error:
+            return ErrorCode::MemAllocateFailed;
+        case knowhere::Status::disk_file_error:
+            return ErrorCode::FileReadFailed;
+        case knowhere::Status::cancelled:
+            return ErrorCode::FollyCancel;
+        // Server-side inner errors -> generic KnowhereError. timeout is
+        // Cardinal-only (BuildAsync cancel-or-build-timeout, not a search
+        // timeout) and conflates cancel with timeout, so it stays here rather
+        // than mapping to a retriable code.
+        case knowhere::Status::success:
+        case knowhere::Status::faiss_inner_error:
+        case knowhere::Status::hnsw_inner_error:
+        case knowhere::Status::diskann_inner_error:
+        case knowhere::Status::cuvs_inner_error:
+        case knowhere::Status::cardinal_inner_error:
+        case knowhere::Status::cuda_runtime_error:
+        case knowhere::Status::cluster_inner_error:
+        case knowhere::Status::timeout:
+        case knowhere::Status::internal_error:
+        case knowhere::Status::sparse_inner_error:
+        case knowhere::Status::brute_force_inner_error:
+        case knowhere::Status::emb_list_inner_error:
+        case knowhere::Status::aisaq_error:
+        case knowhere::Status::knowhere_inner_error:
+            return ErrorCode::KnowhereError;
+    }
+    return ErrorCode::KnowhereError;
+}
+#pragma GCC diagnostic pop
+
+// Build/add-path variant of KnowhereStatusToErrorCode. It reuses the same
+// (drift-guarded) classification, but reports the generic KnowhereError bucket
+// as IndexBuildError to preserve the "index build failed" context that the build
+// call sites want. Every finer code passes through unchanged, so a build-time
+// OOM (malloc_error -> MemAllocateFailed) or disk read failure (disk_file_error
+// -> FileReadFailed) stays retriable instead of collapsing into a permanent
+// build error, and capability / corrupt-index statuses keep their precise codes.
+inline ErrorCode
+KnowhereBuildStatusToErrorCode(knowhere::Status status) {
+    auto code = KnowhereStatusToErrorCode(status);
+    return code == ErrorCode::KnowhereError ? ErrorCode::IndexBuildError : code;
 }
 
 template <typename T>
@@ -198,11 +318,6 @@ inline bool
 is_in_list(const T& t, std::function<std::vector<T>()> list_func) {
     auto l = list_func();
     return std::find(l.begin(), l.end(), t) != l.end();
-}
-
-inline bool
-is_in_disk_list(const IndexType& index_type) {
-    return is_in_list<IndexType>(index_type, DISK_INDEX_LIST);
 }
 
 template <typename T>
@@ -237,15 +352,6 @@ IsInteger(const std::string& str) {
 }
 
 inline std::string
-PrintBitsetTypeView(const BitsetTypeView& view) {
-    std::stringstream ss;
-    for (auto i = 0; i < view.size(); ++i) {
-        ss << int(view[i]);
-    }
-    return ss.str();
-}
-
-inline std::string
 GetCommonPrefix(const std::string& str1, const std::string& str2) {
     size_t len = std::min(str1.length(), str2.length());
     size_t i = 0;
@@ -273,26 +379,39 @@ inline knowhere::sparse::SparseRow<SparseValueType>
 CopyAndWrapSparseRow(const void* data,
                      size_t size,
                      const bool validate = false) {
+    // Length is a memory-safety requirement even when value validation is off.
+    // Check before allocating a whole number of cells and copying all bytes.
+    if (size % knowhere::sparse::SparseRow<SparseValueType>::element_size() !=
+        0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Invalid size for sparse row data");
+    }
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
     milvus::fastmem::FastMemcpy(row.data(), data, size);
     if (validate) {
-        AssertInfo(size % knowhere::sparse::SparseRow<
-                              SparseValueType>::element_size() ==
-                       0,
-                   "Invalid size for sparse row data");
         for (size_t i = 0; i < num_elements; ++i) {
             auto element = row[i];
-            AssertInfo(std::isfinite(element.val),
-                       "Invalid sparse row: NaN or Inf value");
-            AssertInfo(element.val >= 0, "Invalid sparse row: negative value");
-            AssertInfo(
-                element.id < std::numeric_limits<uint32_t>::max(),
-                "Invalid sparse row: id should be smaller than uint32 max");
+            if (!(std::isfinite(element.val))) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "Invalid sparse row: NaN or Inf value");
+            }
+            if (!(element.val >= 0)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "Invalid sparse row: negative value");
+            }
+            if (!(element.id < std::numeric_limits<uint32_t>::max())) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "Invalid sparse row: id should be smaller than uint32 max");
+            }
             if (i > 0) {
-                AssertInfo(row[i - 1].id < element.id,
-                           "Invalid sparse row: id should be strict ascending");
+                if (!(row[i - 1].id < element.id)) {
+                    ThrowInfo(
+                        ErrorCode::DataFormatBroken,
+                        "Invalid sparse row: id should be strict ascending");
+                }
             }
         }
     }
@@ -384,6 +503,27 @@ lowerString(const std::string& str) {
     return ret;
 }
 
+// Adds unsigned integers and clamps overflow to the result type's maximum
+// value. Operands may differ in type; the result uses their common type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingAdd(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
+    constexpr auto max = std::numeric_limits<T>::max();
+    return rhs > max - lhs ? max : lhs + rhs;
+}
+
+// Multiplies unsigned integers and clamps overflow to the result type's
+// maximum value. Operands may differ in type; the result uses their common
+// type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingMultiply(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
+    constexpr auto max = std::numeric_limits<T>::max();
+    return lhs != 0 && rhs > max / lhs ? max : lhs * rhs;
+}
+
 template <typename T>
 T
 checkPlus(const T& a, const T& b, const char* typeName = "integer") {
@@ -393,7 +533,9 @@ checkPlus(const T& a, const T& b, const char* typeName = "integer") {
     T result;
     bool overflow = __builtin_add_overflow(a, b, &result);
     if (UNLIKELY(overflow)) {
-        ThrowInfo(DataTypeInvalid, "{} overflow: {} + {}", typeName, a, b);
+        // Valid input values can overflow an aggregate accumulator. This is an
+        // execution failure, not an invalid caller-provided data type.
+        ThrowInfo(UnexpectedError, "{} overflow: {} + {}", typeName, a, b);
     }
     return result;
 #else
@@ -416,76 +558,11 @@ checkPlus(const T& a, const T& b, const char* typeName = "integer") {
     // If b == 0, no overflow possible
 
     if (UNLIKELY(overflow)) {
-        ThrowInfo(DataTypeInvalid, "{} overflow: {} + {}", typeName, a, b);
+        // Valid input values can overflow an aggregate accumulator. This is an
+        // execution failure, not an invalid caller-provided data type.
+        ThrowInfo(UnexpectedError, "{} overflow: {} + {}", typeName, a, b);
     }
     return a + b;
-#endif
-}
-
-template <typename T>
-T
-checkedMultiply(const T& a, const T& b, const char* typeName = "integer") {
-    static_assert(std::is_integral_v<T>,
-                  "checkedMultiply requires integral type");
-#if defined(__GNUC__) || defined(__clang__)
-    // Use compiler builtin for GCC/Clang
-    T result;
-    bool overflow = __builtin_mul_overflow(a, b, &result);
-    if (UNLIKELY(overflow)) {
-        ThrowInfo(DataTypeInvalid, "{} overflow: {} * {}", typeName, a, b);
-    }
-    return result;
-#else
-    // Portable fallback for MSVC and other compilers
-    constexpr T max_val = std::numeric_limits<T>::max();
-    constexpr T min_val = std::numeric_limits<T>::min();
-
-    // Handle zero case: no overflow if either operand is zero
-    if (a == 0 || b == 0) {
-        return 0;
-    }
-
-    bool overflow = false;
-
-    if constexpr (std::is_signed_v<T>) {
-        // Signed type: handle MIN edge case and use absolute values
-        if (a == min_val) {
-            // Special case: if a is MIN, only safe multiplications are with
-            // 0 (already handled), 1, or -1
-            if (b != 1 && b != -1) {
-                overflow = true;
-            }
-        } else if (b == min_val) {
-            // Special case: if b is MIN, only safe multiplications are with
-            // 0 (already handled), 1, or -1
-            if (a != 1 && a != -1) {
-                overflow = true;
-            }
-        } else {
-            // Use division-based check: |a| > max_val / |b| implies overflow
-            // Compute absolute values carefully to avoid overflow
-            T abs_a = (a < 0) ? -a : a;
-            T abs_b = (b < 0) ? -b : b;
-
-            // Check: abs_a > max_val / abs_b
-            // This works because both operands are not MIN (handled above)
-            // and not zero (handled above)
-            if (abs_a > max_val / abs_b) {
-                overflow = true;
-            }
-        }
-    } else {
-        // Unsigned type: simpler case
-        // Check: a > max_val / b
-        if (a > max_val / b) {
-            overflow = true;
-        }
-    }
-
-    if (UNLIKELY(overflow)) {
-        ThrowInfo(DataTypeInvalid, "{} overflow: {} * {}", typeName, a, b);
-    }
-    return a * b;
 #endif
 }
 

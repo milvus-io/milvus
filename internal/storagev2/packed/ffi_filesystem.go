@@ -93,13 +93,32 @@ func ReadFile(
 	return ReadFileWithExternalSpec(storageConfig, filePath, ExternalSpecContext{})
 }
 
-// ReadFileWithExternalSpec reads an entire file after injecting external spec
-// filesystem aliases. This is used when the input path belongs to an external
-// object store described by external_spec.extfs.
+// ReadFileWithExternalSpec reads a resolved external path, such as a path from
+// an explore result or a Milvus manifest, using external_spec.extfs aliases.
+// Raw source snapshot paths are handled by the source metadata entry points.
 func ReadFileWithExternalSpec(
 	storageConfig *indexpb.StorageConfig,
 	filePath string,
 	extfs ExternalSpecContext,
+) ([]byte, error) {
+	return readFileWithExternalSpec(storageConfig, filePath, extfs, externalPathResolved)
+}
+
+// readExternalSourceFile interprets a raw source metadata path before reading it.
+// Keep this distinction at source ingestion, not at downstream storage readers.
+func readExternalSourceFile(
+	storageConfig *indexpb.StorageConfig,
+	filePath string,
+	extfs ExternalSpecContext,
+) ([]byte, error) {
+	return readFileWithExternalSpec(storageConfig, filePath, extfs, externalPathSource)
+}
+
+func readFileWithExternalSpec(
+	storageConfig *indexpb.StorageConfig,
+	filePath string,
+	extfs ExternalSpecContext,
+	pathForm externalPathForm,
 ) ([]byte, error) {
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
@@ -110,7 +129,7 @@ func ReadFileWithExternalSpec(
 		return nil, merr.Wrap(err, "inject extfs")
 	}
 
-	filesystemPath, normalizedFilePath, err := normalizeExternalPathForFilesystem(filePath, cProperties, extfs)
+	filesystemPath, normalizedFilePath, err := normalizeExternalPathForFilesystemForm(filePath, cProperties, extfs, pathForm)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "normalize external file path")
 	}
@@ -140,12 +159,21 @@ func ReadFileWithExternalSpec(
 	return C.GoBytes(unsafe.Pointer(outData), C.int(outSize)), nil
 }
 
-func normalizeExternalPathForFilesystem(path string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, string, error) {
+func normalizeExternalResolvedPathForFilesystem(path string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, string, error) {
+	return normalizeExternalPathForFilesystemForm(path, properties, extfs, externalPathResolved)
+}
+
+func normalizeExternalPathForFilesystemForm(
+	path string,
+	properties *C.LoonProperties,
+	extfs ExternalSpecContext,
+	pathForm externalPathForm,
+) (string, string, error) {
 	if extfs.Source == "" || path == "" || properties == nil {
 		return path, path, nil
 	}
 
-	filesystemPath, err := resolveExternalSourceRelativePath(path, properties, extfs)
+	filesystemPath, err := resolveExternalRelativePath(path, properties, extfs, pathForm)
 	if err != nil {
 		return "", "", err
 	}

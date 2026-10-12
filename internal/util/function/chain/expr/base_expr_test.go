@@ -24,6 +24,9 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 )
 
 type BaseExprTestSuite struct {
@@ -72,178 +75,131 @@ func (s *BaseExprTestSuite) TestBaseExprIsRunnableEmptyStages() {
 }
 
 // =============================================================================
-// GetStringParam Tests
+// ParamReader Tests
 // =============================================================================
 
-func (s *BaseExprTestSuite) TestGetStringParamSuccess() {
-	params := map[string]interface{}{"key": "value"}
-	val, err := GetStringParam(params, "func", "key", true)
+func (s *BaseExprTestSuite) TestParamReaderString() {
+	r := types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": stringParam("value")})
+	val, err := r.String("key", true)
 	s.Require().NoError(err)
 	s.Equal("value", val)
-}
 
-func (s *BaseExprTestSuite) TestGetStringParamMissingRequired() {
-	params := map[string]interface{}{}
-	_, err := GetStringParam(params, "func", "key", true)
-	s.Error(err)
-	s.Contains(err.Error(), "missing required parameter")
-}
+	_, err = r.String("missing", true)
+	s.ErrorContains(err, "missing required parameter")
 
-func (s *BaseExprTestSuite) TestGetStringParamMissingOptional() {
-	params := map[string]interface{}{}
-	val, err := GetStringParam(params, "func", "key", false)
+	val, err = r.String("missing", false)
 	s.Require().NoError(err)
 	s.Equal("", val)
+
+	_, err = types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": intParam(1)}).String("key", true)
+	s.ErrorContains(err, "must be a string")
 }
 
-func (s *BaseExprTestSuite) TestGetStringParamWrongType() {
-	params := map[string]interface{}{"key": 123}
-	_, err := GetStringParam(params, "func", "key", true)
-	s.Error(err)
-	s.Contains(err.Error(), "must be a string")
-}
-
-// =============================================================================
-// GetFloat64Param Tests
-// =============================================================================
-
-func (s *BaseExprTestSuite) TestGetFloat64ParamFloat64() {
-	params := map[string]interface{}{"key": float64(3.14)}
-	val, err := GetFloat64Param(params, "func", "key", true, 0)
+func (s *BaseExprTestSuite) TestParamReaderFloat64() {
+	r := types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{
+		"double": doubleParam(3.14),
+		"int":    intParam(42),
+	})
+	val, err := r.Float64("double", true, 0)
 	s.Require().NoError(err)
 	s.InDelta(3.14, val, 1e-9)
-}
 
-func (s *BaseExprTestSuite) TestGetFloat64ParamFloat32() {
-	params := map[string]interface{}{"key": float32(2.5)}
-	val, err := GetFloat64Param(params, "func", "key", true, 0)
-	s.Require().NoError(err)
-	s.InDelta(2.5, val, 1e-5)
-}
-
-func (s *BaseExprTestSuite) TestGetFloat64ParamInt() {
-	params := map[string]interface{}{"key": 42}
-	val, err := GetFloat64Param(params, "func", "key", true, 0)
+	val, err = r.Float64("int", true, 0)
 	s.Require().NoError(err)
 	s.InDelta(42.0, val, 1e-9)
-}
 
-func (s *BaseExprTestSuite) TestGetFloat64ParamInt64() {
-	params := map[string]interface{}{"key": int64(100)}
-	val, err := GetFloat64Param(params, "func", "key", true, 0)
-	s.Require().NoError(err)
-	s.InDelta(100.0, val, 1e-9)
-}
-
-func (s *BaseExprTestSuite) TestGetFloat64ParamInt32() {
-	params := map[string]interface{}{"key": int32(50)}
-	val, err := GetFloat64Param(params, "func", "key", true, 0)
-	s.Require().NoError(err)
-	s.InDelta(50.0, val, 1e-9)
-}
-
-func (s *BaseExprTestSuite) TestGetFloat64ParamMissingRequired() {
-	params := map[string]interface{}{}
-	_, err := GetFloat64Param(params, "func", "key", true, 0)
-	s.Error(err)
-	s.Contains(err.Error(), "missing required parameter")
-}
-
-func (s *BaseExprTestSuite) TestGetFloat64ParamMissingOptionalDefault() {
-	params := map[string]interface{}{}
-	val, err := GetFloat64Param(params, "func", "key", false, 99.9)
+	val, err = r.Float64("missing", false, 99.9)
 	s.Require().NoError(err)
 	s.InDelta(99.9, val, 1e-9)
+
+	_, err = types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": stringParam("bad")}).Float64("key", true, 0)
+	s.ErrorContains(err, "must be a number")
 }
 
-func (s *BaseExprTestSuite) TestGetFloat64ParamWrongType() {
-	params := map[string]interface{}{"key": "not_a_number"}
-	_, err := GetFloat64Param(params, "func", "key", true, 0)
-	s.Error(err)
-	s.Contains(err.Error(), "must be a number")
-}
-
-// =============================================================================
-// ParseStringSliceParam Tests
-// =============================================================================
-
-func (s *BaseExprTestSuite) TestParseStringSliceParamStringSlice() {
-	params := map[string]interface{}{"key": []string{"a", "b", "c"}}
-	val, err := ParseStringSliceParam(params, "func", "key")
+func (s *BaseExprTestSuite) TestParamReaderInt64() {
+	r := types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{
+		"int":    intParam(42),
+		"double": doubleParam(42.0),
+	})
+	val, err := r.Int64("int", true, 0)
 	s.Require().NoError(err)
-	s.Equal([]string{"a", "b", "c"}, val)
-}
+	s.Equal(int64(42), val)
 
-func (s *BaseExprTestSuite) TestParseStringSliceParamInterfaceSlice() {
-	params := map[string]interface{}{"key": []interface{}{"x", "y"}}
-	val, err := ParseStringSliceParam(params, "func", "key")
+	val, err = r.Int64("double", true, 0)
 	s.Require().NoError(err)
-	s.Equal([]string{"x", "y"}, val)
+	s.Equal(int64(42), val)
+
+	_, err = types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": doubleParam(1.5)}).Int64("key", true, 0)
+	s.ErrorContains(err, "must be an integer")
 }
 
-func (s *BaseExprTestSuite) TestParseStringSliceParamMissing() {
-	params := map[string]interface{}{}
-	_, err := ParseStringSliceParam(params, "func", "key")
-	s.Error(err)
-	s.Contains(err.Error(), "missing required parameter")
-}
-
-func (s *BaseExprTestSuite) TestParseStringSliceParamWrongType() {
-	params := map[string]interface{}{"key": "not_an_array"}
-	_, err := ParseStringSliceParam(params, "func", "key")
-	s.Error(err)
-	s.Contains(err.Error(), "must be a string array")
-}
-
-func (s *BaseExprTestSuite) TestParseStringSliceParamNonStringElement() {
-	params := map[string]interface{}{"key": []interface{}{"ok", 123}}
-	_, err := ParseStringSliceParam(params, "func", "key")
-	s.Error(err)
-	s.Contains(err.Error(), "must be a string")
-}
-
-// =============================================================================
-// ParseFloat64SliceParam Tests
-// =============================================================================
-
-func (s *BaseExprTestSuite) TestParseFloat64SliceParamFloat64Slice() {
-	params := map[string]interface{}{"key": []float64{1.1, 2.2, 3.3}}
-	val, err := ParseFloat64SliceParam(params, "func", "key")
+func (s *BaseExprTestSuite) TestParamReaderBool() {
+	r := types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": boolParam(true)})
+	val, err := r.Bool("key", true, false)
 	s.Require().NoError(err)
-	s.Equal([]float64{1.1, 2.2, 3.3}, val)
-}
+	s.True(val)
 
-func (s *BaseExprTestSuite) TestParseFloat64SliceParamInterfaceSlice() {
-	params := map[string]interface{}{"key": []interface{}{float64(1.0), float32(2.0), 3, int64(4), int32(5)}}
-	val, err := ParseFloat64SliceParam(params, "func", "key")
+	val, err = r.Bool("missing", false, true)
 	s.Require().NoError(err)
-	s.Equal(5, len(val))
-	s.InDelta(1.0, val[0], 1e-9)
-	s.InDelta(2.0, val[1], 1e-5)
-	s.InDelta(3.0, val[2], 1e-9)
-	s.InDelta(4.0, val[3], 1e-9)
-	s.InDelta(5.0, val[4], 1e-9)
+	s.True(val)
+
+	_, err = types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": stringParam("bad")}).Bool("key", true, false)
+	s.ErrorContains(err, "must be a bool")
 }
 
-func (s *BaseExprTestSuite) TestParseFloat64SliceParamMissingOptional() {
-	params := map[string]interface{}{}
-	val, err := ParseFloat64SliceParam(params, "func", "key")
+func (s *BaseExprTestSuite) TestParamReaderStringSlice() {
+	r := types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": arrayParam(stringParam("a"), stringParam("b"))})
+	val, err := r.StringSlice("key", true)
+	s.Require().NoError(err)
+	s.Equal([]string{"a", "b"}, val)
+
+	_, err = r.StringSlice("missing", true)
+	s.ErrorContains(err, "missing required parameter")
+
+	_, err = types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": stringParam("bad")}).StringSlice("key", true)
+	s.ErrorContains(err, "must be a string array")
+
+	_, err = types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": arrayParam(stringParam("ok"), intParam(1))}).StringSlice("key", true)
+	s.ErrorContains(err, "must be a string")
+}
+
+func (s *BaseExprTestSuite) TestParamReaderFloat64Slice() {
+	r := types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": arrayParam(doubleParam(1.1), intParam(2))})
+	val, err := r.Float64Slice("key", true)
+	s.Require().NoError(err)
+	s.Equal([]float64{1.1, 2.0}, val)
+
+	val, err = r.Float64Slice("missing", false)
 	s.Require().NoError(err)
 	s.Nil(val)
+
+	_, err = types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": stringParam("bad")}).Float64Slice("key", true)
+	s.ErrorContains(err, "must be a number array")
+
+	_, err = types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"key": arrayParam(doubleParam(1.0), stringParam("bad"))}).Float64Slice("key", true)
+	s.ErrorContains(err, "must be a number")
 }
 
-func (s *BaseExprTestSuite) TestParseFloat64SliceParamWrongType() {
-	params := map[string]interface{}{"key": "not_an_array"}
-	_, err := ParseFloat64SliceParam(params, "func", "key")
-	s.Error(err)
-	s.Contains(err.Error(), "must be a number array")
-}
+func (s *BaseExprTestSuite) TestParamReaderKeyValuePairs() {
+	r := types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{
+		"s": stringParam("value"),
+		"i": intParam(8),
+		"f": doubleParam(0.5),
+		"b": boolParam(true),
+	})
+	kvs, err := r.KeyValuePairs()
+	s.Require().NoError(err)
+	values := map[string]string{}
+	for _, kv := range kvs {
+		values[kv.Key] = kv.Value
+	}
+	s.Equal("value", values["s"])
+	s.Equal("8", values["i"])
+	s.Equal("0.5", values["f"])
+	s.Equal("true", values["b"])
 
-func (s *BaseExprTestSuite) TestParseFloat64SliceParamNonNumericElement() {
-	params := map[string]interface{}{"key": []interface{}{1.0, "bad"}}
-	_, err := ParseFloat64SliceParam(params, "func", "key")
-	s.Error(err)
-	s.Contains(err.Error(), "must be a number")
+	_, err = types.NewParamReader("func", map[string]*schemapb.FunctionParamValue{"bad": arrayParam(stringParam("x"))}).KeyValuePairs()
+	s.ErrorContains(err, "must be scalar")
 }
 
 // =============================================================================

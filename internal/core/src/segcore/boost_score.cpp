@@ -19,16 +19,19 @@
 #include <arrow/array/array_primitive.h>
 #include <arrow/c/bridge.h>
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
 #include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
 #include "futures/Executor.h"
 #include "futures/Future.h"
 #include "pb/plan.pb.h"
@@ -36,6 +39,7 @@
 #include "query/PlanProto.h"
 #include "rescores/BoostScoreRunner.h"
 #include "segcore/SegmentInterface.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace {
 
@@ -96,13 +100,14 @@ std::shared_ptr<milvus::rescores::Scorer>
 ParseScorer(milvus::query::Plan* plan,
             const void* serialized_score_function,
             int64_t serialized_score_function_size) {
-    milvus::proto::plan::ScoreFunction score_function;
-    auto ok = score_function.ParseFromArray(serialized_score_function,
-                                            serialized_score_function_size);
+    auto score_function =
+        std::make_unique<milvus::proto::plan::ScoreFunction>();
+    auto ok = score_function->ParseFromArray(serialized_score_function,
+                                             serialized_score_function_size);
     AssertInfo(ok, "failed to parse score function");
 
     milvus::query::ProtoParser parser(plan->schema_);
-    return parser.ParseScorer(score_function);
+    return parser.ParseScorer(std::move(score_function));
 }
 
 OffsetChunks
@@ -113,10 +118,13 @@ BuildScorerOffsetChunks(ArrowArray* offset_chunks,
     for (auto chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
         auto offset_array_result = arrow::ImportArray(
             &offset_chunks[chunk_idx], &offset_schemas[chunk_idx]);
-        AssertInfo(offset_array_result.ok(),
-                   "failed to import offset chunk {}: {}",
-                   chunk_idx,
-                   offset_array_result.status().ToString());
+        if (!offset_array_result.ok()) {
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(offset_array_result),
+                "failed to import offset chunk {}: {}",
+                chunk_idx,
+                offset_array_result.status().ToString());
+        }
         auto offset_array = offset_array_result.ValueOrDie();
         if (offset_array->length() == 0) {
             continue;
@@ -139,6 +147,39 @@ ComputeScorerScoresOnPreparedChunks(
     float* const* output_score_chunks,
     bool* const* output_has_score_chunks,
     const folly::CancellationToken& cancel_token = folly::CancellationToken()) {
+    // Observe a pre-cancelled request before doing anything at all --
+    // including the all-empty fast path below, which the per-chunk loop's
+    // cancellation check used to cover before the fast path existed.
+    milvus::futures::throwIfCancelled(cancel_token);
+
+    // Nothing to score: skip the whole setup. Bailing out here matters for a
+    // non-native filter (text match, GIS) -- otherwise it would scan the whole
+    // segment to build a bitset no chunk ever consumes.
+    auto has_offsets = std::any_of(
+        scorer_offset_chunks.begin(),
+        scorer_offset_chunks.end(),
+        [](const auto& scorer_offsets) { return !scorer_offsets.empty(); });
+    if (!has_offsets) {
+        return;
+    }
+
+    // Preflight before the potentially expensive whole-segment filter
+    // evaluation below (ComputeNonNativeFilterBitset): catch a null
+    // per-chunk output pointer before doing any work rather than midway
+    // through the chunk loop.
+    for (auto chunk_idx = 0; chunk_idx < scorer_offset_chunks.size();
+         ++chunk_idx) {
+        if (scorer_offset_chunks[chunk_idx].empty()) {
+            continue;
+        }
+        AssertInfo(output_score_chunks[chunk_idx] != nullptr,
+                   "output score chunk {} is null",
+                   chunk_idx);
+        AssertInfo(output_has_score_chunks[chunk_idx] != nullptr,
+                   "output has score chunk {} is null",
+                   chunk_idx);
+    }
+
     auto active_count = segment->get_active_count(timestamp);
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         DEAFULT_QUERY_ID,
@@ -159,6 +200,16 @@ ComputeScorerScoresOnPreparedChunks(
     query_context->set_op_context(&op_context);
     auto exec_context = milvus::exec::ExecContext(query_context.get());
 
+    // A filter that cannot consume offset input (text match, GIS) is
+    // evaluated over the whole segment; do that once here instead of once
+    // per offset chunk inside ComputeScorerScores.
+    // The compiled filter is reused across chunks too: deciding native vs
+    // non-native already builds it, and a native filter would otherwise be
+    // recompiled (and its scalar indexes re-pinned) once per chunk.
+    std::unique_ptr<milvus::exec::ExprSet> filter_expr_set;
+    auto filter_bitset = milvus::rescores::ComputeNonNativeFilterBitset(
+        &exec_context, scorer, &filter_expr_set);
+
     for (auto chunk_idx = 0; chunk_idx < scorer_offset_chunks.size();
          ++chunk_idx) {
         milvus::futures::throwIfCancelled(cancel_token);
@@ -166,13 +217,7 @@ ComputeScorerScoresOnPreparedChunks(
         if (scorer_offsets.empty()) {
             continue;
         }
-        AssertInfo(output_score_chunks[chunk_idx] != nullptr,
-                   "output score chunk {} is null",
-                   chunk_idx);
-        AssertInfo(output_has_score_chunks[chunk_idx] != nullptr,
-                   "output has score chunk {} is null",
-                   chunk_idx);
-
+        // Output pointers were validated by the preflight above.
         milvus::rescores::ComputeScorerScores(
             &exec_context,
             &op_context,
@@ -180,7 +225,9 @@ ComputeScorerScoresOnPreparedChunks(
             scorer,
             scorer_offsets,
             output_score_chunks[chunk_idx],
-            output_has_score_chunks[chunk_idx]);
+            output_has_score_chunks[chunk_idx],
+            filter_bitset.has_value() ? &filter_bitset.value() : nullptr,
+            filter_expr_set.get());
     }
 }
 
@@ -229,9 +276,8 @@ ComputeScorerScoresOnOffsetChunks(CSegmentInterface c_segment,
                                             output_score_chunks,
                                             output_has_score_chunks);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CFuture*
@@ -297,17 +343,40 @@ AsyncComputeScorerScoresOnOffsetChunks(CSegmentInterface c_segment,
         return static_cast<CFuture*>(static_cast<void*>(
             static_cast<milvus::futures::IFuture*>(future.release())));
     } catch (std::exception& e) {
+        // Keep the ORIGINAL error code (a typed SegcoreError from preflight
+        // must not collapse into UnexpectedError) while still prefixing the
+        // preflight context the caller-side diagnostics rely on.
+        auto code = milvus::UnexpectedError;
+        if (auto* se = dynamic_cast<const milvus::SegcoreError*>(&e)) {
+            code = se->get_error_code();
+        }
         std::string error_msg = e.what();
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getSearchCPUExecutor(),
             milvus::futures::ExecutePriority::HIGH,
-            [error_msg = std::move(error_msg)](
+            [code, error_msg = std::move(error_msg)](
                 folly::CancellationToken cancel_token) -> bool* {
                 (void)cancel_token;
-                ThrowInfo(milvus::UnexpectedError,
+                ThrowInfo(code,
                           "AsyncComputeScorerScoresOnOffsetChunks preflight "
                           "failed: {}",
                           error_msg);
+                return nullptr;
+            });
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    } catch (...) {
+        // A non-std exception (folly's own) would otherwise escape this
+        // extern-C entry and terminate the process; mirror the error-future
+        // construction above so the caller still gets a destroyable future.
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getSearchCPUExecutor(),
+            milvus::futures::ExecutePriority::HIGH,
+            [](folly::CancellationToken cancel_token) -> bool* {
+                (void)cancel_token;
+                ThrowInfo(milvus::UnexpectedError,
+                          "AsyncComputeScorerScoresOnOffsetChunks preflight "
+                          "failed: unknown exception");
                 return nullptr;
             });
         return static_cast<CFuture*>(static_cast<void*>(

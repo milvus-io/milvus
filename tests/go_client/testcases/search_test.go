@@ -12,10 +12,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -1475,7 +1475,9 @@ func TestSearchInvalidSparseVector(t *testing.T) {
 		}
 		vector, _ := entity.NewSliceSparseEmbedding(positions, values)
 		_, errSearch2 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector}).WithConsistencyLevel(entity.ClStrong))
-		common.CheckErr(t, errSearch2, false, "Invalid sparse row: id should be strict ascending")
+		// Proxy validates sparse placeholders before forwarding them to segcore,
+		// so search reports the same Proxy error as insert does for duplicate indices.
+		common.CheckErr(t, errSearch2, false, "unsorted or same indices in sparse float vector")
 	}
 }
 

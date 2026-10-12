@@ -56,20 +56,29 @@ var (
 	warmupPool atomic.Pointer[conc.Pool[any]]
 	warmupOnce sync.Once
 
+	// mutatePool serves the online write CGO path (segment Insert/Delete).
+	// It is isolated from the load/management work on DynamicPool so that a
+	// burst of segment loading (e.g. delta-log replay after compaction) cannot
+	// starve online insert/delete, which would otherwise stall tSafe advancement.
+	mutatePool     atomic.Pointer[conc.Pool[any]]
+	mutatePoolOnce sync.Once
+
+	// deletePool is the outer dispatch pool for DeleteBatch fan-out across
+	// segments. It MUST stay separate from mutatePool: each dispatched task
+	// calls segment.Delete which submits the CGO onto mutatePool and waits, so
+	// sharing one pool would risk a nested-submit deadlock.
 	deletePool     atomic.Pointer[conc.Pool[struct{}]]
 	deletePoolOnce sync.Once
 
 	bfPool      atomic.Pointer[conc.Pool[any]]
 	bfApplyOnce sync.Once
 
-	bm25LoadPool atomic.Pointer[conc.Pool[any]]
-	bm25PoolOnce sync.Once
-
 	// intentionally leaked CGO tag names
 	cgoTagSQ      = C.CString("CGO_SQ")
 	cgoTagLoad    = C.CString("CGO_LOAD")
 	cgoTagDynamic = C.CString("CGO_DYN")
 	cgoTagWarmup  = C.CString("CGO_WARMUP")
+	cgoTagMutate  = C.CString("CGO_MUTATE")
 )
 
 // initSQPool initialize
@@ -94,9 +103,18 @@ func initSQPool() {
 	})
 }
 
+func dynamicPoolSize() int {
+	size := hardware.GetCPUNum() * paramtable.Get().QueryNodeCfg.DynamicPoolSizeFactor.GetAsInt()
+	if size < 1 {
+		size = hardware.GetCPUNum()
+	}
+	return size
+}
+
 func initDynamicPool() {
 	dynOnce.Do(func() {
-		size := hardware.GetCPUNum()
+		pt := paramtable.Get()
+		size := dynamicPoolSize()
 		pool := conc.NewPool[any](
 			size,
 			conc.WithPreAlloc(false),
@@ -108,6 +126,7 @@ func initDynamicPool() {
 		)
 
 		dp.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.DynamicPoolSizeFactor.Key, config.NewHandler("qn.dynamicpool.sizefactor", ResizeDynamicPool))
 		mlog.Info(context.TODO(), "init dynamicPool done", mlog.Int("size", size))
 	})
 }
@@ -133,18 +152,6 @@ func initLoadPool() {
 	})
 }
 
-func initBM25LoadPool() {
-	bm25PoolOnce.Do(func() {
-		pt := paramtable.Get()
-		poolSize := float64(hardware.GetCPUNum()) * pt.CommonCfg.BM25LoadThreadCoreCoefficient.GetAsFloat()
-		pool := conc.NewPool[any](int(poolSize))
-		bm25LoadPool.Store(pool)
-
-		pt.Watch(pt.CommonCfg.BM25LoadThreadCoreCoefficient.Key, config.NewHandler("qn.bm25loadpool.bm25loadthreadcorecoefficient", ResizeBM25LoadPool))
-		mlog.Info(context.TODO(), "init BM25LoadPool done", mlog.Int("size", int(poolSize)))
-	})
-}
-
 func initWarmupPool() {
 	warmupOnce.Do(func() {
 		pt := paramtable.Get()
@@ -162,6 +169,35 @@ func initWarmupPool() {
 
 		warmupPool.Store(pool)
 		pt.Watch(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, config.NewHandler("qn.warmpool.lowpriority", ResizeWarmupPool))
+		mlog.Info(context.TODO(), "init warmupPool done", mlog.Int("size", poolSize))
+	})
+}
+
+func mutatePoolSize() int {
+	size := hardware.GetCPUNum() * paramtable.Get().QueryNodeCfg.MutatePoolSizeFactor.GetAsInt()
+	if size < 1 {
+		size = hardware.GetCPUNum()
+	}
+	return size
+}
+
+func initMutatePool() {
+	mutatePoolOnce.Do(func() {
+		pt := paramtable.Get()
+		size := mutatePoolSize()
+		pool := conc.NewPool[any](
+			size,
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(func() {
+				runtime.LockOSThread()
+				C.SetThreadName(cgoTagMutate)
+			}), // lock os thread for cgo thread disposal
+		)
+
+		mutatePool.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, config.NewHandler("qn.mutatepool.sizefactor", ResizeMutatePool))
+		mlog.Info(context.TODO(), "init mutatePool done", mlog.Int("size", size))
 	})
 }
 
@@ -178,10 +214,22 @@ func initBFApplyPool() {
 	})
 }
 
+func deletePoolSize() int {
+	size := hardware.GetCPUNum() * paramtable.Get().QueryNodeCfg.DeletePoolSizeFactor.GetAsInt()
+	if size < 1 {
+		size = hardware.GetCPUNum()
+	}
+	return size
+}
+
 func initDeletePool() {
 	deletePoolOnce.Do(func() {
-		pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0))
+		pt := paramtable.Get()
+		size := deletePoolSize()
+		pool := conc.NewPool[struct{}](size)
 		deletePool.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.DeletePoolSizeFactor.Key, config.NewHandler("qn.deletepool.sizefactor", ResizeDeletePool))
+		mlog.Info(context.TODO(), "init deletePool done", mlog.Int("size", size))
 	})
 }
 
@@ -217,9 +265,11 @@ func GetDeletePool() *conc.Pool[struct{}] {
 	return deletePool.Load()
 }
 
-func GetBM25LoadPool() *conc.Pool[any] {
-	initBM25LoadPool()
-	return bm25LoadPool.Load()
+// GetMutatePool returns the singleton pool for online write cgo operations
+// (segment Insert/Delete).
+func GetMutatePool() *conc.Pool[any] {
+	initMutatePool()
+	return mutatePool.Load()
 }
 
 func ResizeSQPool(evt *config.Event) {
@@ -256,11 +306,21 @@ func ResizeBFApplyPool(evt *config.Event) {
 	}
 }
 
-func ResizeBM25LoadPool(evt *config.Event) {
+func ResizeMutatePool(evt *config.Event) {
 	if evt.HasUpdated {
-		pt := paramtable.Get()
-		newSize := float64(hardware.GetCPUNum()) * pt.CommonCfg.BM25LoadThreadCoreCoefficient.GetAsFloat()
-		resizePool(GetBM25LoadPool(), int(newSize), "BM25LoadPool")
+		resizePool(GetMutatePool(), mutatePoolSize(), "MutatePool")
+	}
+}
+
+func ResizeDynamicPool(evt *config.Event) {
+	if evt.HasUpdated {
+		resizePool(GetDynamicPool(), dynamicPoolSize(), "DynamicPool")
+	}
+}
+
+func ResizeDeletePool(evt *config.Event) {
+	if evt.HasUpdated {
+		resizePool(GetDeletePool(), deletePoolSize(), "DeletePool")
 	}
 }
 
@@ -281,8 +341,8 @@ func CollectPoolStats() []metrics.PoolStats {
 		{"DynamicPool", GetDynamicPool()},
 		{"LoadPool", GetLoadPool()},
 		{"WarmupPool", GetWarmupPool()},
+		{"MutatePool", GetMutatePool()},
 		{"BFApplyPool", GetBFApplyPool()},
-		{"BM25LoadPool", GetBM25LoadPool()},
 		{"DeletePool", GetDeletePool()},
 	}
 
@@ -298,7 +358,7 @@ func CollectPoolStats() []metrics.PoolStats {
 	return stats
 }
 
-func resizePool(pool *conc.Pool[any], newSize int, tag string) {
+func resizePool[T any](pool *conc.Pool[T], newSize int, tag string) {
 	log := mlog.With(
 		mlog.String("poolTag", tag),
 		mlog.Int("newSize", newSize),

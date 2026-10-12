@@ -23,9 +23,13 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "bitset/bitset.h"
@@ -38,9 +42,14 @@
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "index/BitmapIndex.h"
+#include "index/InvertedIndexTantivy.h"
+#include "index/SkipIndex.h"
+#include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
@@ -49,17 +58,572 @@
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "query/Utils.h"
+#include "storage/Util.h"
+#include "storage/ChunkManager.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+
+namespace {
+
+proto::plan::GenericValue
+Int64Value(int64_t value) {
+    proto::plan::GenericValue val;
+    val.set_int64_val(value);
+    return val;
+}
+
+void
+SetInt64ArrayFieldData(GeneratedData& raw_data,
+                       FieldId field_id,
+                       const std::vector<std::vector<int64_t>>& rows) {
+    ASSERT_EQ(raw_data.raw_->num_rows(), static_cast<int64_t>(rows.size()));
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != field_id.get()) {
+            continue;
+        }
+
+        auto* arrays =
+            field_data->mutable_scalars()->mutable_array_data()->mutable_data();
+        arrays->Clear();
+        for (const auto& row : rows) {
+            auto* array_data = arrays->Add();
+            array_data->mutable_long_data()->mutable_data()->Add(
+                row.data(), row.data() + row.size());
+        }
+        return;
+    }
+    FAIL() << "field id not found: " << field_id.get();
+}
+
+void
+AssertColumnVector(const ColumnVectorPtr& vec,
+                   const std::vector<bool>& expected_bits,
+                   const std::vector<bool>& expected_valid,
+                   const std::string& label) {
+    ASSERT_EQ(vec->size(), expected_bits.size()) << label;
+    ASSERT_EQ(expected_bits.size(), expected_valid.size()) << label;
+    BitsetTypeView bits(vec->GetRawData(), vec->size());
+    BitsetTypeView valid(vec->GetValidRawData(), vec->size());
+    for (size_t i = 0; i < expected_bits.size(); ++i) {
+        EXPECT_EQ(bits[i], expected_bits[i]) << label << ", row " << i;
+        EXPECT_EQ(valid[i], expected_valid[i]) << label << ", row " << i;
+    }
+}
+
+std::vector<uint8_t>
+BuildValidBitmap(const FixedVector<bool>& valid_data) {
+    std::vector<uint8_t> valid_bitmap((valid_data.size() + 7) / 8, 0);
+    for (size_t i = 0; i < valid_data.size(); ++i) {
+        if (valid_data[i]) {
+            valid_bitmap[i >> 3] |= 1 << (i & 0x07);
+        }
+    }
+    return valid_bitmap;
+}
+
+int64_t
+CountValidRows(const FixedVector<bool>& valid_data) {
+    return std::count(valid_data.begin(), valid_data.end(), true);
+}
+
+std::vector<float>
+MakeCompactFloatVectors(int64_t valid_count, int64_t dim) {
+    std::vector<float> vectors(valid_count * dim);
+    for (int64_t i = 0; i < valid_count; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>(i * dim + d);
+        }
+    }
+    return vectors;
+}
+
+std::shared_ptr<expr::NullExpr>
+MakeVectorNullExpr(FieldId field_id,
+                   bool nullable,
+                   proto::plan::NullExpr_NullOp op,
+                   DataType data_type = DataType::VECTOR_FLOAT) {
+    return std::make_shared<expr::NullExpr>(
+        expr::ColumnInfo(field_id, data_type, {}, nullable), op);
+}
+
+std::shared_ptr<plan::FilterBitsNode>
+MakeVectorNullPlan(FieldId field_id,
+                   bool nullable,
+                   proto::plan::NullExpr_NullOp op,
+                   DataType data_type = DataType::VECTOR_FLOAT) {
+    return std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID,
+        MakeVectorNullExpr(field_id, nullable, op, data_type));
+}
+
+IndexMetaPtr
+MakeFloatVectorIndexMeta(FieldId field_id, int64_t dim, int64_t max_rows) {
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {"metric_type", knowhere::metric::L2},
+        {"nlist", "1"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        field_id, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> field_map = {
+        {field_id, field_index_meta}};
+    return std::make_shared<CollectionIndexMeta>(max_rows,
+                                                 std::move(field_map));
+}
+
+SegmentSealedUPtr
+MakeSealedVectorIndexOnlySegment(const SchemaPtr& schema,
+                                 FieldId vector_fid,
+                                 const FixedVector<bool>& valid_data,
+                                 int64_t dim,
+                                 const std::string& cache_key) {
+    const auto row_count = static_cast<int64_t>(valid_data.size());
+    const auto valid_count = CountValidRows(valid_data);
+    auto vectors =
+        MakeCompactFloatVectors(std::max<int64_t>(valid_count, 1), dim);
+    auto indexing = GenVecIndexing(valid_count,
+                                   dim,
+                                   vectors.data(),
+                                   knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+    auto vec_indexing = dynamic_cast<index::VectorIndex*>(indexing.get());
+    AssertInfo(vec_indexing != nullptr, "invalid generated vector index");
+
+    std::unique_ptr<bool[]> valid_data_bool(new bool[row_count]);
+    for (int64_t i = 0; i < row_count; ++i) {
+        valid_data_bool[i] = valid_data[i];
+    }
+    vec_indexing->SetIdMapType(knowhere::IdMap::Type::SEALED);
+    vec_indexing->GetIdMap().AddFromData(
+        knowhere::IdMapData::FromValidData(valid_data_bool.get(), row_count));
+    vec_indexing->GetIdMap().FinalizeVectorIds();
+
+    TargetBitmap range_storage(row_count + 6, false);
+    auto range_result = range_storage.view(3, row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        range_result[i] = true;
+    }
+    vec_indexing->ApplyValidDataByRange(0, row_count, range_result);
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(range_result[i], valid_data[i]) << "range row " << i;
+    }
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_FALSE(range_storage[i]);
+        EXPECT_FALSE(range_storage[row_count + 3 + i]);
+    }
+
+    const std::vector<int64_t> offsets = {-1, 0, 1, row_count - 1, row_count};
+    TargetBitmap offset_result(offsets.size(), true);
+    vec_indexing->ApplyValidDataByOffsets(
+        offsets.data(), offsets.size(), TargetBitmapView(offset_result));
+    EXPECT_FALSE(offset_result[0]);
+    EXPECT_EQ(offset_result[1], valid_data[0]);
+    EXPECT_EQ(offset_result[2], valid_data[1]);
+    EXPECT_EQ(offset_result[3], valid_data[row_count - 1]);
+    EXPECT_FALSE(offset_result[4]);
+
+    auto sealed_segment = CreateSealedSegment(schema);
+    LoadIndexInfo load_index_info;
+    load_index_info.collection_id = kCollectionID;
+    load_index_info.partition_id = kPartitionID;
+    load_index_info.segment_id = kSegmentID;
+    load_index_info.field_id = vector_fid.get();
+    load_index_info.field_type = DataType::VECTOR_FLOAT;
+    load_index_info.element_type = DataType::NONE;
+    load_index_info.enable_mmap = false;
+    load_index_info.index_size = 0;
+    load_index_info.dim = dim;
+    load_index_info.num_rows = row_count;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.cache_index =
+        CreateTestCacheIndex(cache_key, std::move(indexing));
+    sealed_segment->LoadIndex(load_index_info);
+    return sealed_segment;
+}
+
+BitsetType
+ExecuteQueryExprWithBatchSize(std::shared_ptr<plan::FilterBitsNode> filter_plan,
+                              const SegmentInternalInterface* segment,
+                              int64_t active_count,
+                              Timestamp timestamp,
+                              int64_t batch_size) {
+    auto plan_fragment = plan::PlanFragment(filter_plan);
+    auto query_config = std::make_shared<milvus::exec::QueryConfig>(
+        std::unordered_map<std::string, std::string>{
+            {milvus::exec::QueryConfig::kExprEvalBatchSize,
+             std::to_string(batch_size)}});
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID,
+        segment,
+        active_count,
+        timestamp,
+        0,
+        0,
+        milvus::query::PlanOptions(),
+        query_config);
+    auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+    AssertInfo(row != nullptr,
+               "ExecuteTask returned null row vector for query expression");
+    AssertInfo(
+        row->childrens().size() == 1,
+        "query expr operator's result vector's children size not equal one");
+    auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
+    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    BitsetType query_view(view);
+    query_view.flip();
+    return query_view;
+}
+
+void
+AssertVectorNullExprMatches(const SegmentInternalInterface* segment,
+                            FieldId field_id,
+                            bool nullable,
+                            const FixedVector<bool>& valid_data,
+                            int64_t row_count,
+                            DataType data_type = DataType::VECTOR_FLOAT) {
+    std::vector<
+        std::pair<proto::plan::NullExpr_NullOp, std::function<bool(bool)>>>
+        testcases = {
+            {proto::plan::NullExpr_NullOp_IsNull,
+             [](bool valid) { return !valid; }},
+            {proto::plan::NullExpr_NullOp_IsNotNull,
+             [](bool valid) { return valid; }},
+        };
+
+    for (auto [op, ref_func] : testcases) {
+        auto plan = MakeVectorNullPlan(field_id, nullable, op, data_type);
+        auto final = ExecuteQueryExpr(plan, segment, row_count, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), row_count);
+        for (int64_t i = 0; i < row_count; ++i) {
+            ASSERT_EQ(final[i], ref_func(valid_data[i]))
+                << "segment type " << segment->type() << ", row " << i;
+        }
+
+        auto batched_final = ExecuteQueryExprWithBatchSize(
+            plan, segment, row_count, MAX_TIMESTAMP, 17);
+        ASSERT_EQ(batched_final.size(), row_count);
+        for (int64_t i = 0; i < row_count; ++i) {
+            ASSERT_EQ(batched_final[i], ref_func(valid_data[i]))
+                << "segment type " << segment->type() << ", batch row " << i;
+        }
+
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(row_count / 2);
+        for (int64_t i = 0; i < row_count; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan.get(), segment, row_count, MAX_TIMESTAMP, &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        ASSERT_EQ(view.size(), offsets.size());
+        for (int64_t i = 0; i < static_cast<int64_t>(offsets.size()); ++i) {
+            ASSERT_EQ(view[i], ref_func(valid_data[offsets[i]]))
+                << "segment type " << segment->type() << ", offset row "
+                << offsets[i];
+        }
+    }
+}
+
+void
+AssertSegmentFieldValidDataByOffsets(
+    const SegmentInternalInterface* segment,
+    FieldId field_id,
+    const std::vector<int64_t>& offsets,
+    const std::vector<bool>& expected_valid_data) {
+    ASSERT_EQ(offsets.size(), expected_valid_data.size());
+
+    TargetBitmap valid_res(offsets.size(), true);
+    segment->ApplyFieldValidDataByOffsets(nullptr,
+                                          field_id,
+                                          offsets.data(),
+                                          offsets.size(),
+                                          TargetBitmapView(valid_res));
+    for (size_t i = 0; i < expected_valid_data.size(); ++i) {
+        EXPECT_EQ(valid_res[i], expected_valid_data[i])
+            << "segment type " << segment->type() << ", offset index " << i
+            << ", offset " << offsets[i];
+    }
+}
+
+// Keep the real sealed loading and expression paths, but count the legacy
+// materialization that used to create a complete ArrayView vector per hit.
+class ArrayEqualityCountingSegment : public ChunkedSegmentSealedImpl {
+ public:
+    using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+    mutable int64_t materialized_array_rows = 0;
+    mutable int64_t data_resource_reads = 0;
+
+    std::pair<std::shared_ptr<ChunkedColumnInterface>, FieldSkipMetricsView>
+    GetDataScanResources(FieldId field_id) const override {
+        ++data_resource_reads;
+        return ChunkedSegmentSealedImpl::GetDataScanResources(field_id);
+    }
+
+ protected:
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
+    chunk_array_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        auto views = ChunkedSegmentSealedImpl::chunk_array_view_impl(
+            op_ctx, field_id, chunk_id, offset_len);
+        materialized_array_rows += views.get().first.size();
+        return views;
+    }
+};
+
+class ArrayEqualityCountingIndex : public index::InvertedIndexTantivy<int64_t> {
+ public:
+    using InvertedIndexTantivy::InvertedIndexTantivy;
+    int64_t callback_calls = 0;
+
+    void
+    BuildForTest(const FieldDataPtr& data) {
+        BuildWithFieldData({data});
+        wrapper_->create_reader(milvus::index::SetBitsetSealed);
+        finish();
+        wrapper_->reload();
+        FinalizeSealed();
+    }
+
+    void
+    InApplyCallback(size_t n,
+                    const int64_t* values,
+                    const std::function<void(size_t)>& callback) override {
+        ++callback_calls;
+        InvertedIndexTantivy::InApplyCallback(n, values, callback);
+    }
+};
+
+}  // namespace
+
+TEST(Expr, TestNonNullableOrdinaryVectorNullExprCoversAllDTypes) {
+    constexpr int64_t N = 8;
+    constexpr int64_t dim = 16;
+    const std::vector<DataType> vector_types = {
+        DataType::VECTOR_FLOAT,
+        DataType::VECTOR_BINARY,
+        DataType::VECTOR_FLOAT16,
+        DataType::VECTOR_BFLOAT16,
+        DataType::VECTOR_SPARSE_U32_F32,
+        DataType::VECTOR_INT8,
+    };
+
+    for (auto data_type : vector_types) {
+        auto schema = std::make_shared<Schema>();
+        auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+        auto vector_fid = schema->AddDebugField(
+            "embedding", data_type, dim, knowhere::metric::L2, false);
+        schema->set_primary_field_id(i64_fid);
+
+        auto sealed_segment = CreateSealedSegment(schema);
+        FixedVector<bool> all_valid(N, true);
+        AssertVectorNullExprMatches(
+            sealed_segment.get(), vector_fid, false, all_valid, N, data_type);
+    }
+}
+
+TEST(Expr, TestArraySubscriptMissingElementIsUnknown) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid =
+        schema->AddDebugField("long_array", DataType::ARRAY, DataType::INT64);
+    auto struct_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT64, false);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int N = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 2);
+    std::vector<std::vector<int64_t>> rows = {{1, 2}, {}, {3}};
+    SetInt64ArrayFieldData(raw_data, long_array_fid, rows);
+    SetInt64ArrayFieldData(raw_data, struct_array_fid, rows);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = seg->PreInsert(N);
+    seg->Insert(offset,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_promote, nullptr);
+
+    struct Case {
+        std::string name;
+        milvus::expr::TypedExprPtr expr;
+        std::vector<bool> bits;
+        std::vector<bool> valid;
+        std::vector<bool> not_bits;
+        std::vector<bool> not_valid;
+    };
+
+    auto make_cases = [](const expr::ColumnInfo& column) {
+        std::vector<proto::plan::GenericValue> term_values{Int64Value(2)};
+        return std::vector<Case>{
+            {"equal",
+             std::make_shared<expr::UnaryRangeFilterExpr>(
+                 column, proto::plan::OpType::Equal, Int64Value(2)),
+             {true, false, false},
+             {true, false, false},
+             {false, false, false},
+             {true, false, false}},
+            {"not_equal",
+             std::make_shared<expr::UnaryRangeFilterExpr>(
+                 column, proto::plan::OpType::NotEqual, Int64Value(2)),
+             {false, false, false},
+             {true, false, false},
+             {true, false, false},
+             {true, false, false}},
+            {"binary_range",
+             std::make_shared<expr::BinaryRangeFilterExpr>(
+                 column, Int64Value(1), Int64Value(3), false, false),
+             {true, false, false},
+             {true, false, false},
+             {false, false, false},
+             {true, false, false}},
+            {"term",
+             std::make_shared<expr::TermFilterExpr>(column, term_values),
+             {true, false, false},
+             {true, false, false},
+             {false, false, false},
+             {true, false, false}},
+            {"arith",
+             std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                 column,
+                 proto::plan::OpType::Equal,
+                 proto::plan::ArithOpType::Add,
+                 Int64Value(3),
+                 Int64Value(1)),
+             {true, false, false},
+             {true, false, false},
+             {false, false, false},
+             {true, false, false}},
+        };
+    };
+
+    std::vector<std::pair<std::string, FieldId>> fields = {
+        {"array", long_array_fid},
+        {"struct_array", struct_array_fid},
+    };
+    for (const auto& [field_name, field_id] : fields) {
+        auto column =
+            expr::ColumnInfo(field_id, DataType::ARRAY, DataType::INT64, {"1"});
+        for (const auto& testcase : make_cases(column)) {
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, testcase.expr);
+            auto vec = milvus::test::gen_filter_res(
+                plan.get(), seg_promote, N, MAX_TIMESTAMP);
+            AssertColumnVector(vec,
+                               testcase.bits,
+                               testcase.valid,
+                               field_name + " " + testcase.name);
+
+            exec::OffsetVector offsets = {1, 0, 2};
+            auto offset_vec = milvus::test::gen_filter_res(
+                plan.get(), seg_promote, N, MAX_TIMESTAMP, &offsets);
+            AssertColumnVector(
+                offset_vec,
+                {testcase.bits[1], testcase.bits[0], testcase.bits[2]},
+                {testcase.valid[1], testcase.valid[0], testcase.valid[2]},
+                field_name + " " + testcase.name + " offsets");
+
+            auto not_expr = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, testcase.expr);
+            auto not_plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, not_expr);
+            auto not_vec = milvus::test::gen_filter_res(
+                not_plan.get(), seg_promote, N, MAX_TIMESTAMP);
+            AssertColumnVector(not_vec,
+                               testcase.not_bits,
+                               testcase.not_valid,
+                               "not " + field_name + " " + testcase.name);
+
+            auto final =
+                ExecuteQueryExpr(not_plan, seg_promote, N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            for (int i = 0; i < N; ++i) {
+                EXPECT_EQ(final[i],
+                          testcase.not_bits[i] && testcase.not_valid[i])
+                    << "not " << field_name << " " << testcase.name << ", row "
+                    << i;
+            }
+        }
+    }
+}
+
+TEST(Expr, TestArrayElementPredicateWithoutNestedPathThrows) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid =
+        schema->AddDebugField("long_array", DataType::ARRAY, DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int N = 2;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 2);
+    SetInt64ArrayFieldData(raw_data, long_array_fid, {{1, 2}, {3, 4}});
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = seg->PreInsert(N);
+    seg->Insert(offset,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_promote, nullptr);
+
+    auto whole_array_column =
+        expr::ColumnInfo(long_array_fid, DataType::ARRAY, DataType::INT64);
+    std::vector<proto::plan::GenericValue> term_values{Int64Value(2)};
+    std::vector<std::pair<std::string, expr::TypedExprPtr>> cases = {
+        {"unary",
+         std::make_shared<expr::UnaryRangeFilterExpr>(
+             whole_array_column, proto::plan::OpType::Equal, Int64Value(2))},
+        {"binary_range",
+         std::make_shared<expr::BinaryRangeFilterExpr>(
+             whole_array_column, Int64Value(1), Int64Value(3), false, false)},
+        {"term",
+         std::make_shared<expr::TermFilterExpr>(whole_array_column,
+                                                term_values)},
+        {"arith",
+         std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+             whole_array_column,
+             proto::plan::OpType::Equal,
+             proto::plan::ArithOpType::Add,
+             Int64Value(3),
+             Int64Value(1))},
+    };
+
+    for (const auto& [name, typed_expr] : cases) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           typed_expr);
+        EXPECT_ANY_THROW({
+            auto vec = milvus::test::gen_filter_res(
+                plan.get(), seg_promote, N, MAX_TIMESTAMP);
+            (void)vec;
+        }) << name;
+    }
+}
 
 TEST(Expr, TestArrayRange) {
     std::vector<std::tuple<std::string,
@@ -70,7 +634,7 @@ TEST(Expr, TestArrayRange) {
             {"1 < long_array[0] < 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 < val && val < 10000;
              }},
             // binary_range_expr: 1 < long_array[1024] < 10000
@@ -80,14 +644,14 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 < val && val < 10000;
              }},
             // binary_range_expr: 1 <= long_array[0] < 10000
             {"1 <= long_array[0] < 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 <= val && val < 10000;
              }},
             // binary_range_expr: 1 <= long_array[1024] < 10000
@@ -97,14 +661,14 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 <= val && val < 10000;
              }},
             // binary_range_expr: 1 < long_array[0] <= 10000
             {"1 < long_array[0] <= 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 < val && val <= 10000;
              }},
             // binary_range_expr: 1 < long_array[1024] <= 10000
@@ -114,14 +678,14 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 < val && val <= 10000;
              }},
             // binary_range_expr: 1 <= long_array[0] <= 10000
             {"1 <= long_array[0] <= 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 <= val && val <= 10000;
              }},
             // binary_range_expr: 1 <= long_array[1024] <= 10000
@@ -131,84 +695,84 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 <= val && val <= 10000;
              }},
             // binary_range_expr: "aaa" <= string_array[0] <= "zzz"
             {R"("aaa" <= string_array[0] <= "zzz")",
              "string",
              [](milvus::Array& array) {
-                 auto val = array.get_data<std::string_view>(0);
+                 auto val = array.get_data_unchecked<std::string_view>(0);
                  return "aaa" <= val && val <= "zzz";
              }},
             // binary_range_expr: 1.1 <= double_array[0] <= 2048.12
             {"1.1 <= double_array[0] <= 2048.12",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return 1.1 <= val && val <= 2048.12;
              }},
             // unary_range_expr: long_array[0] >= 10000
             {"long_array[0] >= 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val >= 10000;
              }},
             // unary_range_expr: long_array[0] > 2000
             {"long_array[0] > 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val > 2000;
              }},
             // unary_range_expr: long_array[0] <= 2000
             {"long_array[0] <= 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val <= 2000;
              }},
             // unary_range_expr: long_array[0] < 2000
             {"long_array[0] < 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val < 2000;
              }},
             // unary_range_expr: long_array[0] == 2000
             {"long_array[0] == 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val == 2000;
              }},
             // unary_range_expr: long_array[0] != 2000
             {"long_array[0] != 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val != 2000;
              }},
             // unary_range_expr: bool_array[0] == false
             {"bool_array[0] == false",
              "bool",
              [](milvus::Array& array) {
-                 auto val = array.get_data<bool>(0);
+                 auto val = array.get_data_unchecked<bool>(0);
                  return !val;
              }},
             // unary_range_expr: string_array[0] == "abc"
             {R"(string_array[0] == "abc")",
              "string",
              [](milvus::Array& array) {
-                 auto val = array.get_data<std::string_view>(0);
+                 auto val = array.get_data_unchecked<std::string_view>(0);
                  return val == "abc";
              }},
             // unary_range_expr: double_array[0] == 2.2
             {"double_array[0] == 2.2",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val == 2.2;
              }},
             // unary_range_expr: double_array[1024] == 2.2
@@ -218,7 +782,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val == 2.2;
              }},
             // unary_range_expr: double_array[1024] != 2.2
@@ -228,7 +792,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val != 2.2;
              }},
             // unary_range_expr: double_array[1024] >= 2.2
@@ -238,7 +802,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val >= 2.2;
              }},
             // unary_range_expr: double_array[1024] > 2.2
@@ -248,7 +812,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val > 2.2;
              }},
             // unary_range_expr: double_array[1024] <= 2.2
@@ -258,7 +822,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val <= 2.2;
              }},
             // unary_range_expr: double_array[1024] < 2.2
@@ -268,7 +832,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val < 2.2;
              }},
 
@@ -462,12 +1026,204 @@ TEST(Expr, TestArrayEqual) {
             auto array = milvus::Array(long_array_col[i]);
             std::vector<int64_t> array_values(array.length());
             for (int j = 0; j < array.length(); ++j) {
-                array_values.push_back(array.get_data<int64_t>(j));
+                array_values.push_back(array.get_data_unchecked<int64_t>(j));
             }
             auto ref = ref_func(array_values);
             ASSERT_EQ(ans, ref);
             if (i % 2 == 0) {
                 ASSERT_EQ(view[int(i / 2)], ref);
+            }
+        }
+    }
+}
+
+TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
+    constexpr int64_t N = 1536;
+    for (bool nested : {false, true}) {
+        for (bool mmap : {false, true}) {
+            for (bool sparse : {false, true}) {
+                SCOPED_TRACE(fmt::format(
+                    "nested={}, mmap={}, sparse={}", nested, mmap, sparse));
+                auto schema = std::make_shared<Schema>();
+                const auto pk = schema->AddDebugField("id", DataType::INT64);
+                const auto field_name = nested ? "structA[array]" : "array";
+                const auto field = schema->AddDebugField(
+                    field_name, DataType::ARRAY, DataType::INT64, true);
+                schema->set_primary_field_id(pk);
+                auto raw_data = DataGen(schema, N);
+                const std::vector<std::vector<int64_t>> patterns{
+                    {1, 2, 1}, {1, 1, 2}, {1, 2}, {1, 2, 1, 1}, {}, {4, 5}};
+                std::vector<std::vector<int64_t>> rows(N);
+                std::vector<bool> validity(N, true);
+                for (int64_t i = 0; i < N; ++i) {
+                    rows[i] = sparse ? std::vector<int64_t>{4, 5}
+                                     : patterns[i % patterns.size()];
+                    validity[i] = i % 11 != 0;
+                }
+                if (sparse) {
+                    rows[1] = {1, 2, 1};
+                    rows[N / 2] = {1, 1, 2};
+                    rows[N - 1] = {1, 2, 1};
+                }
+                ArrayEqualityCountingSegment segment(
+                    schema,
+                    empty_index_meta,
+                    SegcoreConfig::default_config(),
+                    kSegmentID + nested * 4 + mmap * 2 + sparse);
+                LoadGeneratedDataIntoSegment(
+                    raw_data, &segment, mmap, {field.get()});
+
+                FixedVector<Array> arrays;
+                std::vector<uint8_t> valid_bitmap((N + 7) / 8, 0);
+                for (int64_t i = 0; i < N; ++i) {
+                    ScalarFieldProto row;
+                    for (auto value : rows[i]) {
+                        row.mutable_long_data()->add_data(value);
+                    }
+                    arrays.emplace_back(row);
+                    if (validity[i]) {
+                        valid_bitmap[i >> 3] |= 1 << (i & 7);
+                    }
+                }
+                auto field_data = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                field_data->FillFieldData(
+                    arrays.data(), valid_bitmap.data(), N, 0);
+                // Different physical chunk sizes exercise global candidate
+                // offsets on both sides of the boundary.
+                constexpr int64_t split = 513;
+                auto first = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                auto second = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                first->FillFieldData(
+                    arrays.data(), valid_bitmap.data(), split, 0);
+                second->FillFieldData(arrays.data() + split,
+                                      valid_bitmap.data(),
+                                      N - split,
+                                      split);
+                auto load_info = PrepareSingleFieldInsertBinlog(
+                    kCollectionID,
+                    kPartitionID,
+                    kSegmentID,
+                    field.get(),
+                    {first, second},
+                    storage::RemoteChunkManagerSingleton::GetInstance()
+                        .GetRemoteChunkManager(),
+                    mmap ? "./data/mmap-test" : "");
+                segment.LoadFieldData(load_info);
+                ASSERT_EQ(segment.num_chunk_data(field), 2);
+                if (nested) {
+                    ASSERT_NE(segment.GetStructElementOffsets(field), nullptr);
+                }
+                proto::schema::FieldSchema field_schema;
+                field_schema.set_name(field_name);
+                field_schema.set_fieldid(field.get());
+                field_schema.set_data_type(proto::schema::DataType::Array);
+                field_schema.set_element_type(proto::schema::DataType::Int64);
+                field_schema.set_nullable(true);
+                storage::FileManagerContext index_ctx;
+                index_ctx.fieldDataMeta = storage::FieldDataMeta{kCollectionID,
+                                                                 kPartitionID,
+                                                                 kSegmentID,
+                                                                 field.get(),
+                                                                 field_schema};
+                index_ctx.indexMeta =
+                    storage::IndexMeta{kSegmentID, field.get(), 4100, 4100};
+                auto index = std::make_unique<ArrayEqualityCountingIndex>(
+                    index::TANTIVY_INDEX_LATEST_VERSION,
+                    index_ctx,
+                    false,
+                    true,
+                    nested);
+                index->BuildForTest(field_data);
+                auto* index_ptr = index.get();
+                LoadIndexInfo info;
+                info.field_id = field.get();
+                info.field_type = DataType::ARRAY;
+                info.element_type = DataType::INT64;
+                info.index_params = GenIndexParams(index.get());
+                info.cache_index = CreateTestCacheIndex(
+                    "array_equality_candidates", std::move(index));
+                segment.LoadIndex(info);
+                ASSERT_TRUE(segment.HasIndex(field));
+
+                const std::vector<std::vector<int64_t>> targets{
+                    {1, 2, 1}, {9, 9}, {}};
+                for (const auto& target : targets) {
+                    for (bool reverse : {false, true}) {
+                        proto::plan::GenericValue value;
+                        auto* array = value.mutable_array_val();
+                        array->set_element_type(proto::schema::DataType::Int64);
+                        array->set_same_type(true);
+                        for (auto element : target) {
+                            array->add_array()->set_int64_val(element);
+                        }
+                        auto expression =
+                            std::make_shared<expr::UnaryRangeFilterExpr>(
+                                expr::ColumnInfo(field,
+                                                 DataType::ARRAY,
+                                                 DataType::INT64,
+                                                 {},
+                                                 true),
+                                reverse ? proto::plan::NotEqual
+                                        : proto::plan::Equal,
+                                value);
+                        auto query_config = std::make_shared<exec::QueryConfig>(
+                            std::unordered_map<std::string, std::string>{
+                                {exec::QueryConfig::kExprEvalBatchSize,
+                                 "128"}});
+                        auto query_context =
+                            std::make_shared<exec::QueryContext>(
+                                DEAFULT_QUERY_ID,
+                                &segment,
+                                N,
+                                MAX_TIMESTAMP,
+                                0,
+                                0,
+                                query::PlanOptions(),
+                                query_config);
+                        exec::ExecContext exec_context(query_context.get());
+                        exec::ExprSet exprs({expression}, &exec_context);
+                        exec::EvalCtx eval_ctx(&exec_context);
+                        segment.materialized_array_rows = 0;
+                        segment.data_resource_reads = 0;
+                        index_ptr->callback_calls = 0;
+                        int64_t processed = 0;
+                        while (processed < N) {
+                            std::vector<VectorPtr> results;
+                            exprs.Eval(0, 1, true, eval_ctx, results);
+                            ASSERT_EQ(results.size(), 1);
+                            ASSERT_NE(results[0], nullptr);
+                            auto result = milvus::test::GetColumnVectorForTest(
+                                results[0]);
+                            ASSERT_GT(result->size(), 0);
+                            ASSERT_LE(result->size(), 128);
+                            BitsetTypeView bits(result->GetRawData(),
+                                                result->size());
+                            BitsetTypeView valid(result->GetValidRawData(),
+                                                 result->size());
+                            for (int64_t i = 0; i < result->size(); ++i) {
+                                const auto row = processed + i;
+                                EXPECT_EQ(valid[i], validity[row]) << row;
+                                EXPECT_EQ(bits[i],
+                                          validity[row] &&
+                                              ((rows[row] == target) ^ reverse))
+                                    << row;
+                            }
+                            processed += result->size();
+                        }
+                        ASSERT_EQ(processed, N);
+                        if (!target.empty()) {
+                            // Both the index and exact array recheck execute;
+                            // later expression batches reuse the cached bitmap.
+                            EXPECT_GT(index_ptr->callback_calls, 0);
+                            EXPECT_EQ(segment.data_resource_reads,
+                                      target.front() == 1 ? 1 : 0);
+                            EXPECT_EQ(segment.materialized_array_rows, 0);
+                        }
+                    }
+                }
             }
         }
     }
@@ -548,6 +1304,98 @@ TEST(Expr, TestArrayNullExpr) {
             auto ref = ref_func(valid);
             ASSERT_EQ(ans, ref);
         }
+    }
+}
+
+TEST(Expr, TestArrayNullExprWithBitmapIndex) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid = schema->AddDebugField(
+        "long_array", DataType::ARRAY, DataType::INT64, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int N = 128;
+    auto raw_data = DataGen(schema, N, 44, 0, 1, 3);
+    auto valid_data = raw_data.get_col_valid(long_array_fid);
+    auto long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    FixedVector<Array> arrays;
+    arrays.reserve(N);
+    std::vector<uint8_t> valid_bitmap((N + 7) / 8, 0);
+    for (int i = 0; i < N; ++i) {
+        arrays.emplace_back(long_array_col[i]);
+        if (valid_data[i]) {
+            valid_bitmap[i >> 3] |= 1 << (i & 0x07);
+        }
+    }
+
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::INT64, true);
+    field_data->FillFieldData(arrays.data(), valid_bitmap.data(), N, 0);
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("long_array");
+    field_schema.set_fieldid(long_array_fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int64);
+    field_schema.set_nullable(true);
+    storage::FileManagerContext ctx;
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID,
+        kPartitionID,
+        kSegmentID,
+        long_array_fid.get(),
+        field_schema,
+    };
+    ctx.indexMeta =
+        storage::IndexMeta{kSegmentID, long_array_fid.get(), 4000, 4000};
+
+    auto bitmap_index =
+        std::make_unique<index::BitmapIndex<int64_t>>(ctx, false);
+    bitmap_index->BuildWithFieldData({field_data});
+    ASSERT_FALSE(bitmap_index->IsNestedIndex());
+    ASSERT_EQ(bitmap_index->Count(), N);
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = long_array_fid.get();
+    load_index_info.field_type = DataType::ARRAY;
+    load_index_info.element_type = DataType::INT64;
+    load_index_info.index_params = GenIndexParams(bitmap_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("array_bitmap", std::move(bitmap_index));
+    segment->LoadIndex(load_index_info);
+
+    auto null_expr = std::make_shared<expr::NullExpr>(
+        expr::ColumnInfo(
+            long_array_fid, DataType::ARRAY, DataType::INT64, {}, true),
+        proto::plan::NullExpr_NullOp_IsNull);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, null_expr);
+
+    auto final = ExecuteQueryExpr(plan, segment.get(), N, MAX_TIMESTAMP);
+    ASSERT_EQ(final.size(), N);
+    for (int i = 0; i < N; ++i) {
+        ASSERT_EQ(final[i], !valid_data[i]) << "row " << i;
+    }
+
+    milvus::exec::OffsetVector offsets;
+    offsets.reserve(N / 2);
+    for (int i = 0; i < N; ++i) {
+        if (i % 2 == 0) {
+            offsets.emplace_back(i);
+        }
+    }
+    auto col_vec = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), N, MAX_TIMESTAMP, &offsets);
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    ASSERT_EQ(view.size(), offsets.size());
+    for (int i = 0; i < offsets.size(); ++i) {
+        ASSERT_EQ(view[i], !valid_data[offsets[i]])
+            << "offset row " << offsets[i];
     }
 }
 
@@ -658,6 +1506,288 @@ TEST(Expr, TestStructArrayParentNullExprUsesRepresentativeSubField) {
     (void)fakevec_fid;
 }
 
+TEST(Expr, TestFloatVectorNullExpr) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 128;
+    constexpr int64_t dim = 16;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 10, 1, false, true, false, 50);
+    auto valid_data = raw_data.get_col_valid(vector_fid);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+    AssertSegmentFieldValidDataByOffsets(
+        growing_segment,
+        vector_fid,
+        {-1, 0, 1, N - 1, N},
+        {false, valid_data[0], valid_data[1], valid_data[N - 1], false});
+
+    auto valid_count = CountValidRows(valid_data);
+    auto vectors = MakeCompactFloatVectors(valid_count, dim);
+    auto valid_bitmap = BuildValidBitmap(valid_data);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    field_data->FillFieldData(vectors.data(), valid_bitmap.data(), N, 0);
+
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto sealed_segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                          kPartitionID,
+                                                          kSegmentID,
+                                                          vector_fid.get(),
+                                                          {field_data},
+                                                          cm);
+    sealed_segment->LoadFieldData(field_data_info);
+    ASSERT_TRUE(sealed_segment->HasFieldData(vector_fid));
+
+    std::array<const SegmentInternalInterface*, 2> segments = {
+        static_cast<const SegmentInternalInterface*>(growing_segment),
+        static_cast<const SegmentInternalInterface*>(sealed_segment.get())};
+    for (auto* segment : segments) {
+        AssertVectorNullExprMatches(segment, vector_fid, true, valid_data, N);
+    }
+}
+
+TEST(Expr, TestFloatVectorNullExprUsesGrowingIndexValidity) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 64;
+    constexpr int64_t dim = 16;
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 64;
+    interim_config.nlist = 1;
+    interim_config.nprobe = 1;
+    interim_config.dense_vector_interim_index_type =
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+    config.set_build_ratio(0.1F);
+
+    auto growing = CreateGrowingSegment(
+        schema, MakeFloatVectorIndexMeta(vector_fid, dim, 100), 1, config);
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 10, 1, false, true, false, 20);
+    auto valid_data = raw_data.get_col_valid(vector_fid);
+
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+    const auto& field_indexing =
+        growing_segment->get_indexing_record().get_vec_field_indexing(
+            vector_fid);
+    ASSERT_GE(CountValidRows(valid_data), field_indexing.get_build_threshold());
+    ASSERT_TRUE(
+        growing_segment->get_indexing_record().SyncDataWithIndex(vector_fid));
+    auto indexing = field_indexing.get_segment_indexing();
+    auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+    ASSERT_NE(vec_index, nullptr);
+    ASSERT_TRUE(vec_index->HasValidData());
+
+    AssertSegmentFieldValidDataByOffsets(growing_segment,
+                                         vector_fid,
+                                         {-1, 0, 1, 2, 17, 18, N - 1, N},
+                                         {false,
+                                          valid_data[0],
+                                          valid_data[1],
+                                          valid_data[2],
+                                          valid_data[17],
+                                          valid_data[18],
+                                          valid_data[N - 1],
+                                          false});
+
+    AssertVectorNullExprMatches(
+        growing_segment, vector_fid, true, valid_data, N);
+}
+
+TEST(Expr, TestFloatVectorNullExprConjunctSkipMovesCursor) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 64;
+    auto raw_data =
+        DataGen(schema, N, 42, 0, 1, 10, 1, false, false, false, 17);
+    auto valid_data = raw_data.get_col_valid(vector_fid);
+    ASSERT_FALSE(valid_data[0]);
+    ASSERT_TRUE(valid_data[17]);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    auto gate_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(i64_fid, DataType::INT64, {}, false),
+        proto::plan::OpType::GreaterEqual,
+        Int64Value(17));
+    auto vector_not_null = MakeVectorNullExpr(
+        vector_fid, true, proto::plan::NullExpr_NullOp_IsNotNull);
+    auto and_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, gate_expr, vector_not_null);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, and_expr);
+
+    auto final = ExecuteQueryExprWithBatchSize(
+        plan, growing_segment, N, MAX_TIMESTAMP, 17);
+    ASSERT_EQ(final.size(), N);
+    for (int64_t i = 0; i < N; ++i) {
+        ASSERT_EQ(final[i], i >= 17 && valid_data[i]) << "row " << i;
+    }
+}
+
+TEST(Expr, TestFloatVectorNullExprAllNull) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 128;
+    constexpr int64_t dim = 16;
+    auto raw_data =
+        DataGen(schema, N, 42, 0, 1, 10, 1, false, true, false, 100);
+    auto valid_data = raw_data.get_col_valid(vector_fid);
+    ASSERT_EQ(CountValidRows(valid_data), 0);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    auto valid_bitmap = BuildValidBitmap(valid_data);
+    auto vectors = MakeCompactFloatVectors(0, dim);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    field_data->FillFieldData(vectors.data(), valid_bitmap.data(), N, 0);
+
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto sealed_segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                          kPartitionID,
+                                                          kSegmentID,
+                                                          vector_fid.get(),
+                                                          {field_data},
+                                                          cm);
+    sealed_segment->LoadFieldData(field_data_info);
+    ASSERT_TRUE(sealed_segment->HasFieldData(vector_fid));
+
+    std::array<const SegmentInternalInterface*, 2> segments = {
+        static_cast<const SegmentInternalInterface*>(growing_segment),
+        static_cast<const SegmentInternalInterface*>(sealed_segment.get())};
+    for (auto* segment : segments) {
+        AssertVectorNullExprMatches(segment, vector_fid, true, valid_data, N);
+    }
+}
+
+TEST(Expr, TestFloatVectorNullExprUsesIndexValidityWithoutFieldData) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 128;
+    constexpr int64_t dim = 16;
+    FixedVector<bool> valid_data(N);
+    for (int64_t i = 0; i < N; ++i) {
+        valid_data[i] = i % 3 != 0;
+    }
+
+    auto assert_index_only_case = [&](const FixedVector<bool>& expected_valid,
+                                      const std::string& cache_key) {
+        auto sealed_segment = MakeSealedVectorIndexOnlySegment(
+            schema, vector_fid, expected_valid, dim, cache_key);
+        ASSERT_TRUE(sealed_segment->HasIndex(vector_fid));
+        ASSERT_FALSE(sealed_segment->HasFieldData(vector_fid));
+
+        AssertVectorNullExprMatches(
+            sealed_segment.get(), vector_fid, true, expected_valid, N);
+        AssertSegmentFieldValidDataByOffsets(sealed_segment.get(),
+                                             vector_fid,
+                                             {-1, 0, 1, 2, N - 1, N},
+                                             {false,
+                                              expected_valid[0],
+                                              expected_valid[1],
+                                              expected_valid[2],
+                                              expected_valid[N - 1],
+                                              false});
+    };
+
+    assert_index_only_case(valid_data, "vector_null_expr_mixed");
+
+    FixedVector<bool> all_null_valid_data(N, false);
+    assert_index_only_case(all_null_valid_data, "vector_null_expr_all_null");
+
+    FixedVector<bool> all_valid_data(N, true);
+    assert_index_only_case(all_valid_data, "vector_null_expr_all_valid");
+}
+
+TEST(Expr, TestNonNullableFloatVectorNullExpr) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto vector_fid = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2, false);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 128;
+    FixedVector<bool> all_valid(N, true);
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 10, 1, false, true, false, 0);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    auto sealed_segment = CreateSealedSegment(schema);
+
+    std::array<const SegmentInternalInterface*, 2> segments = {
+        static_cast<const SegmentInternalInterface*>(growing_segment),
+        static_cast<const SegmentInternalInterface*>(sealed_segment.get())};
+    for (auto* segment : segments) {
+        AssertVectorNullExprMatches(segment, vector_fid, false, all_valid, N);
+    }
+}
+
 TEST(Expr, TestVectorArrayNullExpr) {
     auto schema = std::make_shared<Schema>();
     auto fakevec_fid = schema->AddDebugField(
@@ -693,7 +1823,7 @@ TEST(Expr, TestVectorArrayNullExpr) {
     for (int i = 0; i < N; ++i) {
         if (valid_data[i]) {
             valid_bitmap[i >> 3] |= 1 << (i & 0x07);
-            vector_arrays.emplace_back(vector_array_col[i]);
+            vector_arrays.emplace_back(vector_array_col[i], false);
         }
     }
 
@@ -805,7 +1935,7 @@ TEST(Expr, TestVectorArrayLengthExpr) {
     for (int i = 0; i < N; ++i) {
         if (valid_data[i]) {
             valid_bitmap[i >> 3] |= 1 << (i & 0x07);
-            vector_arrays.emplace_back(vector_array_col[i]);
+            vector_arrays.emplace_back(vector_array_col[i], false);
         }
     }
 
@@ -923,6 +2053,7 @@ TEST(Expr, PraseArrayContainsExpr) {
                      FieldId(101),
                      DataType::ARRAY,
                      DataType::INT64,
+                     false,
                      false);
     ScopedSchemaHandle schema_handle(*schema);
 
@@ -1053,7 +2184,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["bool"][i]);
             std::vector<bool> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<bool>(j));
+                res.push_back(array.get_data_unchecked<bool>(j));
             }
             ASSERT_EQ(ans, check(res)) << "@" << i;
             if (i % 2 == 0) {
@@ -1119,7 +2250,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["double"][i]);
             std::vector<double> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<double>(j));
+                res.push_back(array.get_data_unchecked<double>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1174,7 +2305,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["float"][i]);
             std::vector<float> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<float>(j));
+                res.push_back(array.get_data_unchecked<float>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1239,7 +2370,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["int"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1295,7 +2426,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1359,7 +2490,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["string"][i]);
             std::vector<std::string_view> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<std::string_view>(j));
+                res.push_back(array.get_data_unchecked<std::string_view>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1431,7 +2562,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1462,7 +2593,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["string"][i]);
             std::vector<std::string_view> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<std::string_view>(j));
+                res.push_back(array.get_data_unchecked<std::string_view>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1492,7 +2623,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1532,7 +2663,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1572,11 +2703,125 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["string"][i]);
             std::vector<std::string_view> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<std::string_view>(j));
+                res.push_back(array.get_data_unchecked<std::string_view>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
     }
+}
+
+TEST(Expr, TestArrayContainsFloatLiteralCastsToElementType) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto float_array_fid =
+        schema->AddDebugField("float_array", DataType::ARRAY, DataType::FLOAT);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    constexpr int N = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 3);
+
+    constexpr double target_1 = 492710.03520180425;
+    constexpr double target_2 = 38241.68284883746;
+    bool replaced_array_field = false;
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != float_array_fid.get()) {
+            continue;
+        }
+
+        auto* arrays =
+            field_data->mutable_scalars()->mutable_array_data()->mutable_data();
+        arrays->Clear();
+
+        auto* matched = arrays->Add();
+        matched->mutable_float_data()->add_data(static_cast<float>(target_1));
+        matched->mutable_float_data()->add_data(static_cast<float>(target_2));
+
+        auto* close_but_different = arrays->Add();
+        close_but_different->mutable_float_data()->add_data(
+            static_cast<float>(target_1) + 1.0F);
+        close_but_different->mutable_float_data()->add_data(
+            static_cast<float>(target_2) + 1.0F);
+
+        arrays->Add();
+        replaced_array_field = true;
+        break;
+    }
+    ASSERT_TRUE(replaced_array_field);
+
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_promote, nullptr);
+
+    auto make_float_value = [](double target) {
+        proto::plan::GenericValue value;
+        value.set_float_val(target);
+        return value;
+    };
+
+    auto make_values = [&](std::vector<double> targets) {
+        std::vector<proto::plan::GenericValue> values;
+        values.reserve(targets.size());
+        for (auto target : targets) {
+            values.push_back(make_float_value(target));
+        }
+        return values;
+    };
+
+    auto expect_only_first_match =
+        [&](const std::shared_ptr<plan::FilterBitsNode>& plan) {
+            auto result = ExecuteQueryExpr(plan, seg_promote, N, MAX_TIMESTAMP);
+            ASSERT_EQ(result.size(), N);
+            EXPECT_TRUE(result[0]);
+            EXPECT_FALSE(result[1]);
+            EXPECT_FALSE(result[2]);
+        };
+
+    auto check = [&](proto::plan::JSONContainsExpr_JSONOp op,
+                     std::vector<double> targets) {
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(float_array_fid, DataType::ARRAY, DataType::FLOAT),
+            op,
+            true,
+            make_values(std::move(targets)));
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        expect_only_first_match(plan);
+    };
+
+    check(proto::plan::JSONContainsExpr_JSONOp_Contains, {target_1});
+    check(proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+          {target_1, target_2});
+    check(proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+          {target_1, target_2});
+
+    auto element_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(
+            float_array_fid, DataType::ARRAY, DataType::FLOAT, {"0"}),
+        proto::plan::OpType::Equal,
+        make_float_value(target_1));
+    expect_only_first_match(std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, element_expr));
+
+    auto array_value = make_float_value(0);
+    auto* array = array_value.mutable_array_val();
+    array->set_same_type(true);
+    array->set_element_type(proto::schema::DataType::Float);
+    array->add_array()->set_float_val(target_1);
+    array->add_array()->set_float_val(target_2);
+
+    auto array_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(float_array_fid, DataType::ARRAY, DataType::FLOAT),
+        proto::plan::OpType::Equal,
+        array_value);
+    expect_only_first_match(std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, array_expr));
 }
 
 TEST(Expr, TestArrayContainsEmptyValues) {
@@ -1701,239 +2946,292 @@ TEST(Expr, TestArrayBinaryArith) {
             {"int_array[0] + 2 == 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 == 5;
              }},
             // int_array[0] + 2 != 5
             {"int_array[0] + 2 != 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 != 5;
              }},
             // int_array[0] + 2 > 5
             {"int_array[0] + 2 > 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 > 5;
              }},
             // int_array[0] + 2 >= 5
             {"int_array[0] + 2 >= 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 >= 5;
              }},
             // int_array[0] + 2 < 5
             {"int_array[0] + 2 < 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 < 5;
              }},
             // int_array[0] + 2 <= 5
             {"int_array[0] + 2 <= 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 <= 5;
              }},
             // long_array[0] - 1 == 144
             {"long_array[0] - 1 == 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 == 144;
              }},
             // long_array[0] - 1 != 144
             {"long_array[0] - 1 != 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 != 144;
              }},
             // long_array[0] - 1 > 144
             {"long_array[0] - 1 > 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 > 144;
              }},
             // long_array[0] - 1 >= 144
             {"long_array[0] - 1 >= 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 >= 144;
              }},
             // long_array[0] - 1 < 144
             {"long_array[0] - 1 < 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 < 144;
              }},
             // long_array[0] - 1 <= 144
             {"long_array[0] - 1 <= 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 <= 144;
              }},
             // float_array[0] + 2.2 == 133.2
             {"float_array[0] + 2.2 == 133.2",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val + 2.2 == 133.2;
              }},
             // float_array[0] + 2.2 != 133.2
             {"float_array[0] + 2.2 != 133.2",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val + 2.2 != 133.2;
              }},
             // double_array[0] - 11.1 == 125.7
             {"double_array[0] - 11.1 == 125.7",
              "double",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val - 11.1 == 125.7;
              }},
             // double_array[0] - 11.1 != 125.7
             {"double_array[0] - 11.1 != 125.7",
              "double",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val - 11.1 != 125.7;
              }},
             // long_array[0] * 2 == 8
             {"long_array[0] * 2 == 8",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 == 8;
              }},
             // long_array[0] * 2 != 20
             {"long_array[0] * 2 != 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 != 20;
              }},
             // long_array[0] * 2 > 20
             {"long_array[0] * 2 > 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 > 20;
              }},
             // long_array[0] * 2 >= 20
             {"long_array[0] * 2 >= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 >= 20;
              }},
             // long_array[0] * 2 < 20
             {"long_array[0] * 2 < 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 < 20;
              }},
             // long_array[0] * 2 <= 20
             {"long_array[0] * 2 <= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 <= 20;
              }},
             // long_array[0] / 2 == 8
             {"long_array[0] / 2 == 8",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 == 8;
              }},
             // long_array[0] / 2 != 20
             {"long_array[0] / 2 != 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 != 20;
              }},
             // long_array[0] / 2 > 20
             {"long_array[0] / 2 > 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 > 20;
              }},
             // long_array[0] / 2 >= 20
             {"long_array[0] / 2 >= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 >= 20;
              }},
             // long_array[0] / 2 < 20
             {"long_array[0] / 2 < 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 < 20;
              }},
             // long_array[0] / 2 <= 20
             {"long_array[0] / 2 <= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 <= 20;
              }},
             // long_array[0] % 3 == 0
             {"long_array[0] % 3 == 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 == 0;
              }},
             // long_array[0] % 3 != 2
             {"long_array[0] % 3 != 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 != 2;
              }},
             // long_array[0] % 3 > 2
             {"long_array[0] % 3 > 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 > 2;
              }},
             // long_array[0] % 3 >= 2
             {"long_array[0] % 3 >= 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 >= 2;
              }},
             // long_array[0] % 3 < 2
             {"long_array[0] % 3 < 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 < 2;
              }},
             // long_array[0] % 3 <= 2
             {"long_array[0] % 3 <= 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 <= 2;
+             }},
+            // Bitwise AND/OR/XOR over an array integer element. long_array
+            // values span a wide range, so OR/XOR clauses use a mid-range
+            // threshold to keep the result mixed; AND clauses test low bits.
+            {"(long_array[0] & 1) == 0",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data_unchecked<int64_t>(0);
+                 return (val & 1) == 0;
+             }},
+            {"(long_array[0] & 1) != 0",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data_unchecked<int64_t>(0);
+                 return (val & 1) != 0;
+             }},
+            {"(long_array[0] & 8) == 8",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data_unchecked<int64_t>(0);
+                 return (val & 8) == 8;
+             }},
+            {"(long_array[0] | 4) < 5000",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data_unchecked<int64_t>(0);
+                 return (val | 4) < 5000;
+             }},
+            {"(long_array[0] ^ 15) < 5000",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data_unchecked<int64_t>(0);
+                 return (val ^ 15) < 5000;
+             }},
+            // Shift / bitwise-NOT over an array integer element. ~ is rewritten
+            // to (x ^ -1), exercising the same BitXor array path.
+            {"(long_array[0] >> 1) < 5000",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data_unchecked<int64_t>(0);
+                 return (int64_t(val) >> 1) < 5000;
+             }},
+            {"(long_array[0] >> 2) >= 0",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data_unchecked<int64_t>(0);
+                 return (int64_t(val) >> 2) >= 0;
+             }},
+            {"~long_array[0] != 0",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data_unchecked<int64_t>(0);
+                 return (~int64_t(val)) != 0;
              }},
             // float_array[1024] + 2.2 == 133.2
             {"float_array[1024] + 2.2 == 133.2",
@@ -1942,7 +3240,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val + 2.2 == 133.2;
              }},
             // float_array[1024] + 2.2 != 133.2
@@ -1952,7 +3250,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val + 2.2 != 133.2;
              }},
             // double_array[1024] - 11.1 == 125.7
@@ -1962,7 +3260,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val - 11.1 == 125.7;
              }},
             // double_array[1024] - 11.1 != 125.7
@@ -1972,7 +3270,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val - 11.1 != 125.7;
              }},
             // long_array[1024] * 2 == 8
@@ -1982,7 +3280,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val * 2 == 8;
              }},
             // long_array[1024] * 2 != 20
@@ -1992,7 +3290,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val * 2 != 20;
              }},
             // long_array[1024] / 2 == 8
@@ -2002,7 +3300,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val / 2 == 8;
              }},
             // long_array[1024] / 2 != 20
@@ -2012,7 +3310,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val / 2 != 20;
              }},
             // long_array[1024] % 3 == 0
@@ -2022,7 +3320,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val % 3 == 0;
              }},
             // long_array[1024] % 3 != 2
@@ -2032,7 +3330,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val % 3 != 2;
              }},
             // array_length(int_array) == 10
@@ -2144,13 +3442,15 @@ TEST(Expr, TestArrayStringMatch) {
          "abc",
          {"0"},
          [](milvus::Array& array) {
-             return PrefixMatch(array.get_data<std::string_view>(0), "abc");
+             return PrefixMatch(array.get_data_unchecked<std::string_view>(0),
+                                "abc");
          }},
         {OpType::PrefixMatch,
          "def",
          {"1"},
          [](milvus::Array& array) {
-             return PrefixMatch(array.get_data<std::string_view>(1), "def");
+             return PrefixMatch(array.get_data_unchecked<std::string_view>(1),
+                                "def");
          }},
         {OpType::PrefixMatch,
          "def",
@@ -2159,7 +3459,8 @@ TEST(Expr, TestArrayStringMatch) {
              if (array.length() <= 1024) {
                  return false;
              }
-             return PrefixMatch(array.get_data<std::string_view>(1024), "def");
+             return PrefixMatch(
+                 array.get_data_unchecked<std::string_view>(1024), "def");
          }},
     };
     //vector_anns:<field_id:201 predicates:<unary_range_expr:<column_info:<field_id:131 data_type:Array nested_path:"0" element_type:VarChar > op:PrefixMatch value:<string_val:"abc" > > > query_info:<> placeholder_tag:"$0" >
@@ -2263,7 +3564,7 @@ TEST(Expr, TestArrayInTerm) {
             {"long_array[0] in [1, 2, 3]",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val == 1 || val == 2 || val == 3;
              }},
             // term_expr: long_array[0] in [] (empty list)
@@ -2274,7 +3575,7 @@ TEST(Expr, TestArrayInTerm) {
             {"bool_array[0] in [false, false]",
              "bool",
              [](milvus::Array& array) {
-                 auto val = array.get_data<bool>(0);
+                 auto val = array.get_data_unchecked<bool>(0);
                  return !val;
              }},
             // term_expr: bool_array[0] in [] (empty list)
@@ -2285,7 +3586,7 @@ TEST(Expr, TestArrayInTerm) {
             {"float_array[0] in [1.23, 124.31]",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val == 1.23 || val == 124.31;
              }},
             // term_expr: float_array[0] in [] (empty list)
@@ -2296,7 +3597,7 @@ TEST(Expr, TestArrayInTerm) {
             {R"(string_array[0] in ["abc", "idhgf1s"])",
              "string",
              [](milvus::Array& array) {
-                 auto val = array.get_data<std::string_view>(0);
+                 auto val = array.get_data_unchecked<std::string_view>(0);
                  return val == "abc" || val == "idhgf1s";
              }},
             // term_expr: string_array[0] in [] (empty list)
@@ -2310,7 +3611,7 @@ TEST(Expr, TestArrayInTerm) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<std::string_view>(1024);
+                 auto val = array.get_data_unchecked<std::string_view>(1024);
                  return val == "abc" || val == "idhgf1s";
              }},
         };
@@ -2394,7 +3695,7 @@ TEST(Expr, TestTermInArray) {
          {},
          [](milvus::Array& array) {
              for (int i = 0; i < array.length(); ++i) {
-                 auto val = array.get_data<int64_t>(i);
+                 auto val = array.get_data_unchecked<int64_t>(i);
                  if (val == 100) {
                      return true;
                  }
@@ -2405,7 +3706,7 @@ TEST(Expr, TestTermInArray) {
          {},
          [](milvus::Array& array) {
              for (int i = 0; i < array.length(); ++i) {
-                 auto val = array.get_data<int64_t>(i);
+                 auto val = array.get_data_unchecked<int64_t>(i);
                  if (val == 1024) {
                      return true;
                  }
@@ -2711,4 +4012,156 @@ TEST(Expr, TestArrayContainsForStruct) {
                 << "Distances should be sorted in ascending order (with index)";
         }
     }
+}
+
+// The index path converts the term list only when the index result is not
+// cached. Evaluating a sealed segment larger than one batch, without the
+// single-pass optimization, checks that every later batch sees the same,
+// deduplicated terms as the first one.
+TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto str_array_fid = schema->AddDebugField(
+        "string_array", DataType::ARRAY, DataType::VARCHAR);
+    schema->set_primary_field_id(i64_fid);
+
+    // more than two default-size (8192) batches
+    constexpr int N = 20000;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 3);
+    auto str_array_col = raw_data.get_col<ScalarFieldProto>(str_array_fid);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    FixedVector<Array> arrays;
+    arrays.reserve(N);
+    for (int i = 0; i < N; ++i) {
+        arrays.emplace_back(str_array_col[i]);
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::VARCHAR, false);
+    field_data->FillFieldData(arrays.data(), N);
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("string_array");
+    field_schema.set_fieldid(str_array_fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::VarChar);
+    auto field_meta = storage::FieldDataMeta{
+        kCollectionID,
+        kPartitionID,
+        kSegmentID,
+        str_array_fid.get(),
+        field_schema,
+    };
+    auto index_meta =
+        storage::IndexMeta{kSegmentID, str_array_fid.get(), 4001, 4001};
+
+    // Build, serialize and reload so the index is in its query-ready state.
+    auto root_path =
+        fmt::format("{}/array_contains_across_batches", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    auto build_index =
+        std::make_unique<index::BitmapIndex<std::string>>(ctx, false);
+    build_index->BuildWithFieldData({field_data});
+    auto binary_set = build_index->Serialize({});
+    auto bitmap_index =
+        std::make_unique<index::BitmapIndex<std::string>>(ctx, false);
+    bitmap_index->Load(binary_set, {});
+    ASSERT_FALSE(bitmap_index->IsNestedIndex());
+    ASSERT_EQ(bitmap_index->Count(), N);
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = str_array_fid.get();
+    load_index_info.field_type = DataType::ARRAY;
+    load_index_info.element_type = DataType::VARCHAR;
+    load_index_info.index_params = GenIndexParams(bitmap_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("array_bitmap_str", std::move(bitmap_index));
+    segment->LoadIndex(load_index_info);
+
+    auto row_values = [&](int i) {
+        auto array = milvus::Array(str_array_col[i]);
+        std::vector<std::string> res;
+        for (int j = 0; j < array.length(); ++j) {
+            res.emplace_back(array.get_data_unchecked<std::string_view>(j));
+        }
+        return res;
+    };
+    auto contains = [](const std::vector<std::string>& values,
+                       const std::string& t) {
+        return std::find(values.begin(), values.end(), t) != values.end();
+    };
+
+    // Targets: every distinct element of the first rows; each is listed
+    // twice in the expression so the converted list must deduplicate.
+    std::vector<std::string> targets;
+    std::unordered_set<std::string> seen;
+    for (int i = 0; i < 300; ++i) {
+        for (auto& v : row_values(i)) {
+            if (seen.insert(v).second) {
+                targets.push_back(v);
+            }
+        }
+    }
+    ASSERT_GT(targets.size(), 1);
+
+    auto run =
+        [&](proto::plan::JSONContainsExpr_JSONOp op,
+            const std::vector<std::string>& terms,
+            const std::function<bool(const std::vector<std::string>&)>& check) {
+            std::vector<proto::plan::GenericValue> vals;
+            for (const auto& t : terms) {
+                proto::plan::GenericValue gv;
+                gv.set_string_val(t);
+                vals.push_back(gv);
+                vals.push_back(gv);
+            }
+            auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+                expr::ColumnInfo(
+                    str_array_fid, DataType::ARRAY, DataType::VARCHAR),
+                op,
+                true,
+                vals);
+
+            auto evaluation =
+                milvus::test::EvalExprInBatches(expr, segment.get(), N);
+            ASSERT_GT(evaluation.batch_sizes.size(), 2);
+            ASSERT_EQ(evaluation.result->size(), N);
+            BitsetTypeView bits(evaluation.result->GetRawData(), N);
+            int matched = 0;
+            for (int i = 0; i < N; ++i) {
+                bool expected = check(row_values(i));
+                matched += expected;
+                ASSERT_EQ(bits[i], expected) << "row " << i;
+            }
+            ASSERT_GT(matched, 0);
+            ASSERT_LT(matched, N);
+        };
+
+    run(proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+        targets,
+        [&](const std::vector<std::string>& values) {
+            for (const auto& t : targets) {
+                if (contains(values, t)) {
+                    return true;
+                }
+            }
+            return false;
+        });
+
+    std::vector<std::string> all_terms{targets[0], targets[1]};
+    run(proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+        all_terms,
+        [&](const std::vector<std::string>& values) {
+            return contains(values, all_terms[0]) &&
+                   contains(values, all_terms[1]);
+        });
 }

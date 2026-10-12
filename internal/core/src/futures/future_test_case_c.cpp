@@ -50,6 +50,9 @@ future_create_test_case(int interval, int loop_cnt, int case_no) {
                 case 3:
                     throw milvus::SegcoreError(milvus::NotImplemented,
                                                "case 3");
+                case 4:
+                    throw milvus::SegcoreError(milvus::FieldNotLoaded,
+                                               "case 4");
             }
             return new int(case_no);
         });

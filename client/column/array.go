@@ -18,7 +18,7 @@ package column
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 // columnArrayBase implement `Column` interface
@@ -32,7 +32,6 @@ func (c *columnArrayBase[T]) FieldData() *schemapb.FieldData {
 	fd := &schemapb.FieldData{
 		Type:      schemapb.DataType_Array,
 		FieldName: c.name,
-		ValidData: c.validData,
 	}
 
 	data := make([]*schemapb.ScalarField, 0, c.Len())
@@ -49,6 +48,9 @@ func (c *columnArrayBase[T]) FieldData() *schemapb.FieldData {
 				},
 			},
 		},
+	}
+	if c.nullable {
+		setFieldDataValidData(fd, c.validData)
 	}
 	return fd
 }
@@ -210,5 +212,11 @@ type ColumnVarCharArray struct {
 func NewColumnVarCharArray(fieldName string, data [][]string) *ColumnVarCharArray {
 	return &ColumnVarCharArray{
 		columnArrayBase: newArrayBase(fieldName, data, entity.FieldTypeVarChar),
+	}
+}
+
+func (c *ColumnVarCharArray) Slice(start, end int) Column {
+	return &ColumnVarCharArray{
+		columnArrayBase: c.columnArrayBase.slice(start, end),
 	}
 }

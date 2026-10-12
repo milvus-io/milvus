@@ -101,7 +101,6 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 	}, nil)
 
 	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
 
 	ctx := context.Background()
 
@@ -133,12 +132,6 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 		err = am.AddAnalyzeTask(t)
 		s.NoError(err)
 		s.Equal(7, len(am.GetAllTasks()))
-	})
-
-	s.Run("DropAnalyzeTask", func() {
-		err := am.DropAnalyzeTask(ctx, 7)
-		s.NoError(err)
-		s.Equal(6, len(am.GetAllTasks()))
 	})
 
 	s.Run("UpdateVersion", func() {
@@ -197,7 +190,6 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 	s.Equal(2, len(am.GetAllTasks()))
 
 	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
-	catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
 	s.Run("AddAnalyzeTask", func() {
 		t := &indexpb.AnalyzeTask{
 			CollectionID: s.collectionID,
@@ -209,12 +201,6 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 		err := am.AddAnalyzeTask(t)
 		s.Error(err)
 		s.Nil(am.GetTask(1111))
-	})
-
-	s.Run("DropAnalyzeTask", func() {
-		err := am.DropAnalyzeTask(ctx, 1)
-		s.Error(err)
-		s.NotNil(am.GetTask(1))
 	})
 
 	s.Run("UpdateVersion", func() {

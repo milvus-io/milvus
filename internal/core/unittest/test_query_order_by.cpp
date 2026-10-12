@@ -21,6 +21,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "exec/QueryContext.h"
 #include "common/Consts.h"
+#include "common/Exception.h"
 #include "common/FieldData.h"
 #include "pb/plan.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -143,10 +144,10 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
         schema_->set_primary_field_id(str_fid);
 
         num_rows_ = 20;
-        auto raw_data =
+        raw_data_ =
             DataGen(schema_, num_rows_, 42, 0, 1, 10, false, false, false);
 
-        auto segment = CreateSealedWithFieldDataLoaded(schema_, raw_data);
+        auto segment = CreateSealedWithFieldDataLoaded(schema_, raw_data_);
         segment_ = SegmentSealedSPtr(segment.release());
 
         milvus::exec::expression::FunctionFactory& factory =
@@ -282,6 +283,7 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
     SegmentSealedSPtr segment_;
     std::shared_ptr<Schema> schema_;
     std::map<std::string, FieldId> field_map_;
+    GeneratedData raw_data_;
 };
 
 INSTANTIATE_TEST_SUITE_P(QueryOrderBySuite,
@@ -580,6 +582,82 @@ TEST_P(QueryOrderByTest, OrderByWithDeferredFields) {
     auto& deferred_data = results->fields_data(2);
     auto count = deferred_data.scalars().double_data().data_size();
     EXPECT_GT(count, 0);
+}
+
+TEST_P(QueryOrderByTest, OrderByWithDenseVectorOutput) {
+    auto pk_fid = field_map_[string_field];
+    auto double_fid = field_map_[double_field];
+    auto vector_fid = field_map_[vector_field];
+
+    proto::plan::PlanNode plan_node;
+    plan_node.add_output_field_ids(pk_fid.get());
+    plan_node.add_output_field_ids(vector_fid.get());
+
+    auto* query = plan_node.mutable_query();
+    query->set_limit(10);
+    // Sort on the random double column, not the VARCHAR PK: DataGen pre-sorts
+    // VARCHAR, so a PK sort would make the segment offsets handed to the
+    // deferred bulk fetch the identity permutation and leave the vector
+    // reordering unexercised.
+    auto* order_by = query->add_order_by_fields();
+    order_by->set_field_id(double_fid.get());
+    order_by->set_ascending(true);
+    order_by->set_nulls_first(false);
+
+    auto parser = milvus::query::ProtoParser(schema_);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+    EXPECT_EQ(plan->plan_node_->deferred_field_ids_,
+              std::vector<FieldId>{vector_fid});
+    EXPECT_EQ(plan->plan_node_->pipeline_field_ids_,
+              (std::vector<FieldId>{pk_fid, double_fid, SegmentOffsetFieldID}));
+
+    auto results = segment_->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+
+    // Pipeline columns [pk, double] + deferred vector.
+    ASSERT_EQ(results->fields_data_size(), 3);
+    const auto& pk_data = results->fields_data(0);
+    const auto& double_data = results->fields_data(1);
+    const auto& vector_data = results->fields_data(2);
+    auto row_count = pk_data.scalars().string_data().data_size();
+    ASSERT_GT(row_count, 0);
+    EXPECT_LE(row_count, query->limit());
+    EXPECT_EQ(vector_data.field_id(), vector_fid.get());
+    EXPECT_EQ(vector_data.vectors().dim(), 16);
+    ASSERT_EQ(vector_data.vectors().float_vector().data_size(), row_count * 16);
+
+    if (!GetParam()) {
+        // Non-nullable double: the returned sort column must be ascending.
+        for (int i = 1; i < row_count; i++) {
+            EXPECT_LE(double_data.scalars().double_data().data(i - 1),
+                      double_data.scalars().double_data().data(i));
+        }
+    }
+
+    // Verify each deferred vector row carries the payload of the ORIGINAL row
+    // selected by the sort: map returned PK -> original segment offset, then
+    // compare the vector payload element-wise against the generated data.
+    auto raw_pks = raw_data_.get_col<std::string>(pk_fid);
+    auto raw_vectors = raw_data_.get_col<float>(vector_fid);
+    std::map<std::string, int64_t> pk_to_offset;
+    for (int64_t i = 0; i < num_rows_; i++) {
+        pk_to_offset[raw_pks[i]] = i;
+    }
+    bool permuted = false;
+    for (int i = 0; i < row_count; i++) {
+        auto offset = pk_to_offset.at(pk_data.scalars().string_data().data(i));
+        permuted = permuted || (offset != i);
+        for (int d = 0; d < 16; d++) {
+            EXPECT_EQ(vector_data.vectors().float_vector().data(i * 16 + d),
+                      raw_vectors[offset * 16 + d])
+                << "vector mismatch at result row " << i << " dim " << d
+                << " (segment offset " << offset << ")";
+        }
+    }
+    // The double sort must actually permute rows relative to insertion order;
+    // an identity mapping would mean the deferred fetch path was never
+    // exercised — the exact gap this test guards against.
+    EXPECT_TRUE(permuted);
 }
 
 TEST_P(QueryOrderByTest, OrderByInt16Asc) {

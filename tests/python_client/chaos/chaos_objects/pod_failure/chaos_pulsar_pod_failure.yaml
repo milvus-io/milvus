@@ -10,6 +10,7 @@ spec:
     labelSelectors:
       release: milvus-chaos
       app: pulsarv3
+      component: proxy
   mode: fixed
   value: "1"
   action: pod-failure

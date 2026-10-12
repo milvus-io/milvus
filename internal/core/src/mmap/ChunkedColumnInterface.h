@@ -16,19 +16,66 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <vector>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/ArrayValue.h"
 #include "common/Chunk.h"
+#include "common/EasyAssert.h"
 #include "common/OffsetMapping.h"
+#include "common/SealedOffsetMapping.h"
 #include "common/bson_view.h"
+#include "mmap/ChunkedColumnScanCommon.h"
+#include "index/FieldChunkMetricsProvider.h"
 namespace milvus {
+
+namespace index {
+class FieldChunkMetrics;
+}  // namespace index
 
 using namespace milvus::cachinglayer;
 
-class ChunkedColumnInterface {
+class ChunkedColumnInterface : public FieldChunkMetricsProvider {
  public:
-    virtual ~ChunkedColumnInterface() = default;
+    using TargetType = milvus::TargetType;
+    using ValueView = milvus::ValueView;
+    using ScanBatch = milvus::ScanBatch;
+    using ScanReadMode = milvus::ScanReadMode;
+    using ScanCursor = milvus::ScanCursor;
+    using ScanPinPolicy = milvus::ScanPinPolicy;
+    using ScanOptions = milvus::ScanOptions;
+    using ScanResult = milvus::ScanResult;
+    using OffsetView = milvus::OffsetView;
+    using OwnedTakeData = milvus::OwnedTakeData;
+    template <typename T>
+    using TakeItem = milvus::TakeItem<T>;
+    using TakeItemState = milvus::TakeItemState;
+    using TakeOptions = milvus::TakeOptions;
+    using TakeResult = milvus::TakeResult;
+    using TakeResultPtr = milvus::TakeResultPtr;
+
+    ~ChunkedColumnInterface() override = default;
+
+    // Optional per-cell skip metrics owned by this column's generation.
+    // Storage V2 proxy columns override both accessors; an ordinary V1 column
+    // has no metrics and must fail open (never skip).
+    const index::FieldChunkMetrics*
+    GetSkipMetrics(int64_t) const override {
+        return nullptr;
+    }
+
+    // Declare list support with no list: a FieldSkipMetricsView resolved on a
+    // V1 column then never prunes and never calls GetSkipMetrics per cell.
+    // Without this override the base class answers "no list support" and the
+    // view would fall back to one virtual call per cell just to learn nullptr.
+    std::optional<const SkipMetricsList*>
+    GetSkipMetricsList() const override {
+        return static_cast<const SkipMetricsList*>(nullptr);
+    }
 
     // Check if this column is part of a multi-field column group.
     // Used to guard DropFieldData from breaking shared storage.
@@ -96,20 +143,26 @@ class ChunkedColumnInterface {
     virtual bool
     CellsLoaded(const int64_t* offsets, int64_t count) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const = 0;
 
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(milvus::OpContext* op_ctx,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    // ArrayValueView is non-owning. The returned PinWrapper keeps the backing
+    // ColumnarArrayChunk alive for the lifetime of the views.
+    virtual PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    ArrayValueViews(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
+    virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
         int64_t chunk_id,
@@ -128,6 +181,12 @@ class ChunkedColumnInterface {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(milvus::OpContext* op_ctx,
+                             int64_t chunk_id,
+                             const FixedVector<int32_t>& offsets) const = 0;
 
     // Convert a global offset to (chunk_id, offset_in_chunk) pair
     virtual std::pair<size_t, size_t>
@@ -164,21 +223,17 @@ class ChunkedColumnInterface {
                    offset,
                    size,
                    chunk->RowNums());
-        auto& valid_data = chunk->Valid();
-        AssertInfo(
-            offset + size <= static_cast<int64_t>(valid_data.size()),
-            "Valid-data range out of valid-data bounds, offset: {}, size: {}, "
-            "valid-data size: {}",
-            offset,
-            size,
-            valid_data.size());
-        auto valid_data_ptr = valid_data.data() + offset;
-        for (int64_t i = 0; i < size; ++i) {
-            if (!valid_data_ptr[i]) {
-                valid_result[i] = false;
-            }
-        }
+        chunk->ApplyValidityMask(offset, size, valid_result);
     }
+
+    virtual ScanResult
+    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const;
+
+    // Convenience positional access. Backends consume segment offsets without
+    // exposing physical Cell/file locations. Results preserve input order and
+    // duplicates.
+    virtual TakeResultPtr
+    Take(milvus::OpContext* op_ctx, TakeOptions options) const;
 
     // Get number of rows before a specific chunk
     virtual int64_t
@@ -214,6 +269,19 @@ class ChunkedColumnInterface {
         return offset_mapping_;
     }
 
+    const std::vector<size_t>&
+    GetValidArrayOffsetsInChunk(int64_t chunk_id) const {
+        AssertInfo(!valid_array_offsets_per_chunk_.empty(),
+                   "Valid array offsets are not built for nullable column");
+        AssertInfo(chunk_id >= 0 &&
+                       chunk_id < static_cast<int64_t>(
+                                      valid_array_offsets_per_chunk_.size()),
+                   "Chunk id {} out of range, valid array offset chunks {}",
+                   chunk_id,
+                   valid_array_offsets_per_chunk_.size());
+        return valid_array_offsets_per_chunk_[chunk_id];
+    }
+
     virtual void
     BuildValidRowIds(milvus::OpContext* op_ctx) {
         if (!IsNullable()) {
@@ -226,9 +294,9 @@ class ChunkedColumnInterface {
         if (valid_row_ids_built_.load(std::memory_order_relaxed)) {
             return;
         }
+        auto chunk_pws = GetAllChunks(op_ctx);
         const auto total_chunks = num_chunks();
         const auto total_rows = NumRows();
-        auto chunk_pws = GetAllChunks(op_ctx);
 
         valid_data_.resize(total_rows);
         valid_count_per_chunk_.assign(total_chunks, 0);
@@ -246,6 +314,7 @@ class ChunkedColumnInterface {
             valid_count_per_chunk_[i] = valid_count;
             logical_offset += rows;
         }
+        BuildValidArrayOffsetsInChunks(chunk_pws);
 
         num_valid_rows_until_chunk_.clear();
         num_valid_rows_until_chunk_.reserve(total_chunks + 1);
@@ -331,6 +400,16 @@ class ChunkedColumnInterface {
     }
 
     virtual void
+    BulkArrayValueAt(milvus::OpContext* op_ctx,
+                     std::function<void(ScalarFieldProto&&, size_t)> fn,
+                     const int64_t* offsets,
+                     int64_t count) const {
+        ThrowInfo(
+            ErrorCode::Unsupported,
+            "BulkArrayValueAt only supported for recursive ARRAY columns");
+    }
+
+    virtual void
     BulkVectorArrayAt(milvus::OpContext* op_ctx,
                       std::function<void(VectorFieldProto&&, size_t)> fn,
                       const int64_t* offsets,
@@ -338,15 +417,6 @@ class ChunkedColumnInterface {
         ThrowInfo(
             ErrorCode::Unsupported,
             "BulkVectorArrayAt only supported for ChunkedVectorArrayColumn");
-    }
-
-    static bool
-    IsPrimitiveDataType(DataType data_type) {
-        return data_type == DataType::INT8 || data_type == DataType::INT16 ||
-               data_type == DataType::INT32 || data_type == DataType::INT64 ||
-               data_type == DataType::FLOAT || data_type == DataType::DOUBLE ||
-               data_type == DataType::BOOL ||
-               data_type == DataType::TIMESTAMPTZ;
     }
 
     static bool
@@ -373,12 +443,72 @@ class ChunkedColumnInterface {
     }
 
  protected:
+    using TakeCellPin = std::function<PinWrapper<Chunk*>(int64_t)>;
+
+    // Return a generation-stable accessor used by the default Raw Take
+    // implementation to pin one Cell at a time after Take() returns. The
+    // accessor must own the cache resources it needs; it must not capture a
+    // bare column pointer. The caller keeps op_ctx alive until borrowed access
+    // and any GetOwn() materialization are complete.
+    virtual TakeCellPin
+    MakeTakeCellPin(milvus::OpContext* op_ctx) const {
+        return {};
+    }
+
+    // Return the immutable physical planner owned by this Column generation.
+    // Scan/Take implementations may use it, but callers must not observe Cell
+    // geometry through the Column API.
+    const ColumnPlanner&
+    Planner() const;
+
+    // Keep immutable generation geometry alive for lazy backend work that may
+    // outlive the concrete Column object (for example a Raw TakeResult).
+    std::shared_ptr<const ColumnPlanner>
+    PlannerHandle() const;
+
+    virtual std::unique_ptr<ColumnPlanner>
+    BuildPlanner() const;
+
+    virtual std::optional<DataType>
+    GetDefaultScanDataType() const {
+        return std::nullopt;
+    }
+
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
     std::vector<int64_t> num_valid_rows_until_chunk_;
+    std::vector<std::vector<size_t>> valid_array_offsets_per_chunk_;
     SealedOffsetMapping offset_mapping_;
     std::atomic<bool> valid_row_ids_built_{false};
     std::mutex offset_mapping_build_mutex_;
+
+    virtual void
+    BuildValidArrayOffsetsInChunks(
+        const std::vector<PinWrapper<Chunk*>>& chunk_pws) {
+    }
+
+    void
+    BuildVectorArrayValidOffsets(
+        const std::vector<PinWrapper<Chunk*>>& chunk_pws) {
+        valid_array_offsets_per_chunk_.assign(chunk_pws.size(), {});
+        for (size_t i = 0; i < chunk_pws.size(); ++i) {
+            auto chunk = static_cast<VectorArrayChunk*>(chunk_pws[i].get());
+            auto logical_offsets = chunk->Offsets();
+            auto& valid_offsets = valid_array_offsets_per_chunk_[i];
+            valid_offsets.reserve(valid_count_per_chunk_[i] + 1);
+            valid_offsets.push_back(0);
+
+            size_t total = 0;
+            const auto rows = chunk->RowNums();
+            for (int64_t j = 0; j < rows; ++j) {
+                if (!chunk->isValid(j)) {
+                    continue;
+                }
+                total += logical_offsets[j + 1] - logical_offsets[j];
+                valid_offsets.push_back(total);
+            }
+        }
+    }
 
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {
@@ -411,6 +541,10 @@ class ChunkedColumnInterface {
         }
         return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
     }
+
+ private:
+    mutable std::once_flag planner_once_;
+    mutable std::shared_ptr<ColumnPlanner> planner_;
 };
 
 }  // namespace milvus

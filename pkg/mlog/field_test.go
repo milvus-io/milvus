@@ -3,6 +3,7 @@
 package mlog
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // Test all String type field constructors
@@ -436,6 +439,30 @@ func TestStringerField(t *testing.T) {
 	assert.Equal(t, expected, field)
 }
 
+func TestFieldSchemaRedactsExternalCredentials(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:           "external_collection",
+		ExternalSource: "s3://ACCESS_SENTINEL:SECRET_SENTINEL@bucket/path",
+		ExternalSpec:   `{"format":"parquet","extfs":{"access_key_value":"SPEC_SENTINEL"}}`,
+	}
+
+	var output bytes.Buffer
+	encoderConfig := zap.NewProductionEncoderConfig()
+	logger := zap.New(zapcore.NewCore(
+		zapcore.NewJSONEncoder(encoderConfig),
+		zapcore.AddSync(&output),
+		zap.DebugLevel,
+	))
+	logger.Info("schema", FieldSchema(schema))
+
+	assert.Contains(t, output.String(), "external_collection")
+	assert.Contains(t, output.String(), "<redacted>")
+	assert.NotContains(t, output.String(), "ACCESS_SENTINEL")
+	assert.NotContains(t, output.String(), "SECRET_SENTINEL")
+	assert.NotContains(t, output.String(), "SPEC_SENTINEL")
+	assert.Contains(t, schema.GetExternalSource(), "ACCESS_SENTINEL")
+}
+
 // Test all FieldXXX helper functions from field_enum.go
 func TestFieldHelperFunctions(t *testing.T) {
 	// FieldNodeID
@@ -512,6 +539,7 @@ func TestFieldHelperFunctions(t *testing.T) {
 	f = FieldBroadcastID(800)
 	assert.Equal(t, keyBroadcastID, f.Key)
 	assert.Equal(t, int64(800), f.Integer)
+	assert.Equal(t, zapcore.Uint64Type, f.Type)
 
 	// FieldJobID
 	f = FieldJobID(900)
@@ -607,7 +635,6 @@ func TestFieldXXXOptpropagatedInt64Field(t *testing.T) {
 		{"FieldIndexID", func(opts ...FieldOption) Field { return FieldIndexID(500, opts...) }, keyIndexID},
 		{"FieldFieldID", func(opts ...FieldOption) Field { return FieldFieldID(600, opts...) }, keyFieldID},
 		{"FieldTaskID", func(opts ...FieldOption) Field { return FieldTaskID(700, opts...) }, keyTaskID},
-		{"FieldBroadcastID", func(opts ...FieldOption) Field { return FieldBroadcastID(800, opts...) }, keyBroadcastID},
 		{"FieldJobID", func(opts ...FieldOption) Field { return FieldJobID(900, opts...) }, keyJobID},
 		{"FieldBuildID", func(opts ...FieldOption) Field { return FieldBuildID(1000, opts...) }, keyBuildID},
 	}
@@ -625,6 +652,14 @@ func TestFieldXXXOptpropagatedInt64Field(t *testing.T) {
 			assert.True(t, isPropagatedField(&f), "field with OptPropagated should be propagated")
 		})
 	}
+}
+
+func TestFieldBroadcastIDOptPropagated(t *testing.T) {
+	f := FieldBroadcastID(^uint64(0), OptPropagated())
+	assert.Equal(t, keyBroadcastID, f.Key)
+	assert.Equal(t, zapcore.Uint64Type, f.Type)
+	assert.True(t, isPropagatedField(&f))
+	assert.Equal(t, "18446744073709551615", getPropagatedValue(&f))
 }
 
 // Test OptPropagated on string FieldXXX functions

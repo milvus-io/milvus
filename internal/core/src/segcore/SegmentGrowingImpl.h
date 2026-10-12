@@ -39,7 +39,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
 #include "segcore/TextLobSpillover.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
@@ -181,16 +181,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
     FillAbsentFields();
 
  private:
-    // Build geometry cache for inserted data
+    // Build geometry cache for inserted data. reserved_offset is the batch's
+    // reserved absolute segment offset: cache rows are written at absolute
+    // offsets so a retried batch overwrites its own slots instead of
+    // re-appending (see SimpleGeometryCache::AppendDataAt).
     void
     BuildGeometryCacheForInsert(FieldId field_id,
                                 const DataArray* data_array,
+                                int64_t reserved_offset,
                                 int64_t num_rows);
 
-    // Build geometry cache for loaded field data
+    // Build geometry cache for loaded field data; reserved_offset as above.
     void
     BuildGeometryCacheForLoad(FieldId field_id,
-                              const std::vector<FieldDataPtr>& field_data);
+                              const std::vector<FieldDataPtr>& field_data,
+                              int64_t reserved_offset);
 
  public:
     const InsertRecord<false>&
@@ -208,14 +213,19 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.timestamp_index_.get_max_timestamp();
     }
 
-    std::shared_mutex&
-    get_chunk_mutex() const {
-        return chunk_mutex_;
+    SchemaPtr
+    get_schema_snapshot() const override {
+        return std::atomic_load_explicit(&schema_, std::memory_order_acquire);
     }
 
-    const Schema&
-    get_schema() const override {
-        return *schema_;
+    FieldId
+    get_primary_key_field_id() const {
+        return primary_key_field_id_;
+    }
+
+    DataType
+    get_primary_key_data_type() const {
+        return primary_key_data_type_;
     }
 
     // return count of index that has index, i.e., [0, num_chunk_index) have built index
@@ -262,7 +272,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    try_remove_chunks(FieldId fieldId);
+    try_remove_chunks(FieldId fieldId, const Schema& schema);
 
     void
     search_batch_pks(
@@ -276,19 +286,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     size_t
     GetMemoryUsageInBytes() const override {
         return stats_.mem_size.load() + deleted_record_.mem_size();
-    }
-
-    // Returns the total disk usage of TEXT LOB spillover files in bytes.
-    // Used by Go-side sync policies for back-pressure.
-    uint64_t
-    GetTextSpilloverDiskUsage() const {
-        uint64_t total = 0;
-        for (const auto& [field_id, spillover] : text_lob_spillovers_) {
-            if (spillover) {
-                total += spillover->GetDiskUsage();
-            }
-        }
-        return total;
     }
 
     int64_t
@@ -430,6 +427,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
                                ->Register()),
           segcore_config_(segcore_config),
           schema_(std::move(schema)),
+          primary_key_field_id_(schema_->get_primary_field_id().value_or(
+              FieldId(INVALID_FIELD_ID))),
+          primary_key_data_type_(
+              primary_key_field_id_.get() == INVALID_FIELD_ID
+                  ? DataType::NONE
+                  : schema_->operator[](primary_key_field_id_).get_data_type()),
           index_meta_(indexMeta),
           insert_record_(
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
@@ -447,7 +450,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
               segment_id) {
         this->CreateTextIndexes();
         this->InitializeTextLobSpillovers();
-        this->InitializeArrayOffsets();
+        this->InitializeStructElementOffsets();
         this->UpdateResourceTracking();
     }
 
@@ -455,12 +458,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
         // Clean up geometry cache for all fields in this segment
         auto& cache_manager =
             milvus::exec::SimpleGeometryCacheManager::Instance();
-        cache_manager.RemoveSegmentCaches(ctx_, get_segment_id());
-
-        if (ctx_) {
-            GEOS_finish_r(ctx_);
-            ctx_ = nullptr;
-        }
+        cache_manager.RemoveSegmentCaches(segment_instance_uid(),
+                                          get_segment_id());
 
         // Original mmap cleanup logic
         if (mmap_descriptor_ != nullptr) {
@@ -507,10 +506,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasIndex(FieldId field_id) const override {
-        if (!is_field_exist(field_id)) {
+        auto schema = get_schema_snapshot();
+        if (!schema->has_field(field_id)) {
             return false;
         }
-        auto& field_meta = schema_->operator[](field_id);
+        auto& field_meta = schema->operator[](field_id);
         if ((IsVectorDataType(field_meta.get_data_type()) ||
              IsGeometryType(field_meta.get_data_type())) &&
             indexing_record_.SyncDataWithIndex(field_id)) {
@@ -524,11 +524,17 @@ class SegmentGrowingImpl : public SegmentGrowing {
     PinIndex(milvus::OpContext* op_ctx,
              FieldId field_id,
              bool include_ngram = false) const override {
-        if (!HasIndex(field_id)) {
+        auto schema = get_schema_snapshot();
+        if (!schema->has_field(field_id)) {
             return {};
         }
 
-        auto& field_meta = schema_->operator[](field_id);
+        auto& field_meta = schema->operator[](field_id);
+        if (!(IsVectorDataType(field_meta.get_data_type()) ||
+              IsGeometryType(field_meta.get_data_type())) ||
+            !indexing_record_.SyncDataWithIndex(field_id)) {
+            return {};
+        }
 
         // For geometry fields, return segment-level index (RTree doesn't use chunks)
         if (IsGeometryType(field_meta.get_data_type())) {
@@ -583,6 +589,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return true;
     }
 
+    bool
+    CanReadRawVectorFromIndex(FieldId field_id) const {
+        return indexing_record_.HasRawData(field_id);
+    }
+
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first_n(int64_t limit, const BitsetTypeView& bitset) const override {
         return insert_record_.pk2offset_->find_first_n(limit, bitset);
@@ -592,10 +603,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override {
         return insert_record_.pk2offset_->find_first_n_element(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
 
     bool
@@ -613,8 +624,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     is_field_exist(FieldId field_id) const override {
-        return schema_->get_fields().find(field_id) !=
-               schema_->get_fields().end();
+        auto schema = get_schema_snapshot();
+        return schema->get_fields().find(field_id) !=
+               schema->get_fields().end();
     }
 
     /**
@@ -639,10 +651,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return nullptr;
     }
 
-    std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const override {
-        auto it = array_offsets_map_.find(field_id);
-        if (it != array_offsets_map_.end()) {
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const override {
+        std::shared_lock lock(struct_element_offsets_map_mutex_);
+        auto it = struct_element_offsets_map_.find(field_id);
+        if (it != struct_element_offsets_map_.end()) {
             return it->second;
         }
         return nullptr;
@@ -650,7 +663,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     struct ValidResult {
         int64_t valid_count = 0;
         std::unique_ptr<bool[]> valid_data;
-        std::vector<int64_t> valid_offsets;
+        // NULL filtering preserves logical segment offsets and their order.
+        std::vector<int64_t> valid_logical_offsets;
     };
 
     ValidResult
@@ -675,6 +689,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     ResourceUsage
     EstimateSegmentResourceUsage() const;
 
+    ResourceUsage
+    EstimateSegmentResourceUsage(const Schema& schema) const;
+
     void
     ApplyFieldValidData(milvus::OpContext* op_ctx,
                         FieldId field_id,
@@ -682,6 +699,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
                         int64_t offset,
                         int64_t size,
                         TargetBitmapView valid_result) const override;
+
+    void
+    ApplyFieldValidDataByRange(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               int64_t logical_offset,
+                               int64_t count,
+                               TargetBitmapView valid_result) const override;
 
     void
     ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
@@ -699,21 +723,28 @@ class SegmentGrowingImpl : public SegmentGrowing {
                     FieldId field_id,
                     int64_t chunk_id) const override;
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     chunk_string_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     chunk_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    chunk_array_value_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
+
+    PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
@@ -734,6 +765,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t chunk_id,
         const FixedVector<int32_t>& offsets) const override;
 
+    PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    chunk_array_value_views_by_offsets(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override;
+
     void
     check_search(const query::Plan* plan) const override {
         Assert(plan);
@@ -748,8 +786,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
     fill_empty_field(const FieldMeta& field_meta);
 
     void
-    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
-                                     int64_t row_count);
+    EnsureStructElementOffsetsForField(const FieldMeta& field_meta,
+                                       int64_t row_count);
+
+    void
+    EnsureStructElementOffsetsForField(const FieldMeta& field_meta,
+                                       int64_t row_count,
+                                       const Schema& schema);
 
     /**
      * @brief Update resource tracking by refunding old estimate and charging new
@@ -765,6 +808,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     UpdateResourceTracking();
 
+    void
+    UpdateResourceTracking(const Schema& schema);
+
  private:
     void
     AddTexts(FieldId field_id,
@@ -775,6 +821,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     CreateTextIndexes();
+
+    std::unique_ptr<index::TextMatchIndex>
+    BuildTextIndexForMeta(const FieldMeta& field_meta);
 
     /**
      * @brief Initialize TEXT LOB spillover files for each TEXT field
@@ -828,21 +877,27 @@ class SegmentGrowingImpl : public SegmentGrowing {
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        int64_t index);
+        int64_t index,
+        int64_t row_limit);
 
     void
-    InitializeArrayOffsets();
+    InitializeStructElementOffsets();
 
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
+    FieldId primary_key_field_id_{INVALID_FIELD_ID};
+    DataType primary_key_data_type_{DataType::NONE};
     IndexMetaPtr index_meta_;
 
     // inserted fields data and row_ids, timestamps
     InsertRecord<false> insert_record_;
 
-    mutable std::shared_mutex chunk_mutex_;
+    // No chunk lock. Readers pin the generation they walk via
+    // VectorBase::acquire_chunks(); try_remove_chunks swaps the container's
+    // collection out and lets the last pin holder free it. Reclamation and
+    // reads no longer exclude each other in either direction.
 
     // small indexes for every chunk
     IndexingRecord indexing_record_;
@@ -857,14 +912,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
 
-    // field_id -> ArrayOffsetsGrowing (for fast lookup via GetArrayOffsets)
-    // Multiple field_ids from the same struct point to the same ArrayOffsetsGrowing
-    std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsGrowing>>
-        array_offsets_map_;
+    // field_id -> StructElementOffsetsGrowing (for fast lookup via GetStructElementOffsets)
+    // Multiple field_ids from the same struct point to the same StructElementOffsetsGrowing
+    std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsGrowing>>
+        struct_element_offsets_map_;
 
     // Representative field_id for each struct (used to extract array lengths during Insert)
     // One field_id per struct, since all fields in the same struct have identical array lengths
     std::unordered_set<FieldId> struct_representative_fields_;
+
+    mutable std::shared_mutex struct_element_offsets_map_mutex_;
 
     // Tracked resource usage for refund-then-charge pattern
     // This stores the last estimated resource usage that was charged to the cache manager

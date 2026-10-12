@@ -183,6 +183,67 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRange) {
         {R"(age64 + 500 <= 2500)",
          [](int64_t v) { return (v + 500) <= 2500; },
          DataType::INT64},
+        // Bitwise AND/OR/XOR test cases for BinaryArithOpEvalRangeExpr,
+        // covering all six comparison ops across integer field widths.
+        // Masks/thresholds are chosen so each clause yields a MIX of true and
+        // false rows for DataGen's value ranges (int8 wraps to [-128,127],
+        // int16/int32 in [0,2000), int64 pk is a large random) -- a clause that
+        // is constant-true/false cannot catch an operator or comparison bug.
+        // AND
+        {R"((age8 & 1) == 1)",
+         [](int8_t v) { return (v & 1) == 1; },
+         DataType::INT8},
+        {R"((age8 & 2) != 0)",
+         [](int8_t v) { return (v & 2) != 0; },
+         DataType::INT8},
+        {R"((age32 & 8) >= 8)",
+         [](int32_t v) { return (v & 8) >= 8; },
+         DataType::INT32},
+        {R"((age64 & 12) == 4)",
+         [](int64_t v) { return (v & 12) == 4; },
+         DataType::INT64},
+        {R"((age64 & 7) > 3)",
+         [](int64_t v) { return (v & 7) > 3; },
+         DataType::INT64},
+        {R"((age64 & 8) == 8)",
+         [](int64_t v) { return (v & 8) == 8; },
+         DataType::INT64},
+        // OR (mid-range threshold keeps the result mixed)
+        {R"((age16 | 8) < 1000)",
+         [](int16_t v) { return (v | 8) < 1000; },
+         DataType::INT16},
+        {R"((age32 | 4) <= 1000)",
+         [](int32_t v) { return (v | 4) <= 1000; },
+         DataType::INT32},
+        // XOR (mid-range threshold keeps the result mixed)
+        {R"((age16 ^ 7) > 100)",
+         [](int16_t v) { return (v ^ 7) > 100; },
+         DataType::INT16},
+        {R"((age32 ^ 1023) < 1000)",
+         [](int32_t v) { return (v ^ 1023) < 1000; },
+         DataType::INT32},
+        // Shift (<<, >>) and bitwise NOT (~, rewritten to ^ -1) test cases.
+        // Shift amounts are in [0, 64); the executor widens to int64 before
+        // shifting, so the reference computes on int64_t too. Thresholds keep
+        // each clause's result mixed for DataGen's value ranges.
+        {R"((age16 << 1) >= 1000)",
+         [](int16_t v) { return (int64_t(v) << 1) >= 1000; },
+         DataType::INT16},
+        {R"((age16 >> 1) < 500)",
+         [](int16_t v) { return (int64_t(v) >> 1) < 500; },
+         DataType::INT16},
+        {R"((age32 << 2) > 400)",
+         [](int32_t v) { return (int64_t(v) << 2) > 400; },
+         DataType::INT32},
+        {R"((age32 >> 2) <= 250)",
+         [](int32_t v) { return (int64_t(v) >> 2) <= 250; },
+         DataType::INT32},
+        {R"(~age8 != 0)",
+         [](int8_t v) { return (~int64_t(v)) != 0; },
+         DataType::INT8},
+        {R"(~age32 < -1000)",
+         [](int32_t v) { return (~int64_t(v)) < -1000; },
+         DataType::INT32},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -633,6 +694,58 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeNullable) {
                  return (v + 500) <= 2500;
              },
              DataType::INT64},
+            // Bitwise AND/OR/XOR on nullable fields: a null row must NOT match
+            // (filter returns false), and a valid row must match the bitwise
+            // reference. Thresholds keep each clause's result mixed.
+            {R"((age8 & 1) == 1)",
+             [](int8_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (v & 1) == 1;
+             },
+             DataType::INT8},
+            {R"((age16 | 8) < 1000)",
+             [](int16_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (v | 8) < 1000;
+             },
+             DataType::INT16},
+            {R"((age32 ^ 1023) < 1000)",
+             [](int32_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (v ^ 1023) < 1000;
+             },
+             DataType::INT32},
+            {R"((age64_nullable & 8) == 8)",
+             [](int64_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (v & 8) == 8;
+             },
+             DataType::INT64},
+            // Shift / bitwise-NOT on nullable fields: null rows must NOT match.
+            {R"((age16 >> 1) < 500)",
+             [](int16_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (int64_t(v) >> 1) < 500;
+             },
+             DataType::INT16},
+            {R"(~age8 != 0)",
+             [](int8_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (~int64_t(v)) != 0;
+             },
+             DataType::INT8},
         };
 
     auto schema = std::make_shared<Schema>();
@@ -886,6 +999,108 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                      array_length = array.count_elements();
                  }
                  return array_length != 4;
+             }},
+            // Bitwise AND/OR/XOR test cases over a JSON integer field.
+            // json["int"] is a large random value, so OR/XOR clauses compare
+            // against a mid-range threshold (1e9) to stay mixed; AND clauses
+            // test low bits directly.
+            {R"((json["int"] & 1) == 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val & 1) == 0;
+             }},
+            {R"((json["int"] & 1) != 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val & 1) != 0;
+             }},
+            {R"((json["int"] | 4) > 1000000000)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val | 4) > 1000000000;
+             }},
+            {R"((json["int"] & 6) >= 2)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val & 6) >= 2;
+             }},
+            {R"((json["int"] ^ 1023) > 1000000000)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val ^ 1023) > 1000000000;
+             }},
+            {R"((json["int"] & 8) == 8)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val & 8) == 8;
+             }},
+            // Bitwise over a JSON value physically stored as a double:
+            // the executor extracts it via at_numeric()'s get_double() branch
+            // (not the int64 branch) and casts through int64_t, exactly as '%'
+            // does. json["double"] is a whole-number-valued double, so the
+            // int64_t cast is exact and parity stays mixed across rows.
+            {R"((json["double"] & 1) == 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"double"});
+                 auto val = json.template at<double>(pointer).value();
+                 return (int64_t(val) & 1) == 0;
+             }},
+            {R"((json["double"] & 1) != 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"double"});
+                 auto val = json.template at<double>(pointer).value();
+                 return (int64_t(val) & 1) != 0;
+             }},
+            // Bitwise over a non-numeric JSON value: at_numeric() errors, so the
+            // row is UNKNOWN and therefore does not match either comparison.
+            // json["string"] holds a JSON string, never a number.
+            {R"((json["string"] & 1) == 0)",
+             [](const milvus::Json&) {
+                 // non-numeric -> non-match -> EQ is constant false
+                 return false;
+             }},
+            {R"((json["string"] & 1) != 0)",
+             [](const milvus::Json&) {
+                 // non-numeric -> UNKNOWN -> false
+                 return false;
+             }},
+            // Shift / bitwise-NOT over a JSON integer field. ~ is rewritten to
+            // (x ^ -1), so it exercises the same BitXor JSON path.
+            {R"((json["int"] >> 1) < 1000000000)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) >> 1) < 1000000000;
+             }},
+            {R"((json["int"] >> 2) >= 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) >> 2) >= 0;
+             }},
+            {R"((json["int"] << 1) != 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) << 1) != 0;
+             }},
+            {R"((json["int"] >> 1) != 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) >> 1) != 0;
+             }},
+            {R"(~json["int"] < 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (~int64_t(val)) < 0;
              }},
             // Test cases for BinaryArithOpEvalRangeExpr GT of various data types
             {R"(json["int"] + 1 > 2)",
@@ -1731,6 +1946,111 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloat) {
         }
     }
 }
+
+TEST_P(ExprTest, TestJsonBinaryArithMissingPathIsUnknown) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    std::vector<std::string> json_strs = {
+        R"({"a": 1, "arr": [1]})",
+        R"({"a": 2, "arr": []})",
+        R"({})",
+        R"({"a": "bad", "arr": "bad"})",
+        R"({"a": null, "arr": null})",
+    };
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_strs.size());
+    for (const auto& json_str : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json_str));
+    }
+    json_field->add_json_data(jsons);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
+
+    auto run_expr = [&](const expr::TypedExprPtr& expr) {
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final =
+            ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), json_strs.size());
+
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(json_strs.size());
+        for (int64_t i = 0; i < static_cast<int64_t>(json_strs.size()); ++i) {
+            offsets.emplace_back(i);
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP, &offsets);
+        BitsetTypeView offset_view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(offset_view.size(), json_strs.size());
+        std::vector<bool> offset_bits(offset_view.size());
+        for (size_t i = 0; i < offset_view.size(); ++i) {
+            offset_bits[i] = offset_view[i];
+        }
+        return std::pair<BitsetType, std::vector<bool>>(std::move(final),
+                                                        std::move(offset_bits));
+    };
+
+    auto expect_bits = [](const BitsetType& final,
+                          const std::vector<bool>& offset,
+                          const std::vector<bool>& expected) {
+        ASSERT_EQ(final.size(), expected.size());
+        ASSERT_EQ(offset.size(), expected.size());
+        for (size_t i = 0; i < expected.size(); ++i) {
+            EXPECT_EQ(final[i], expected[i]) << "row " << i;
+            EXPECT_EQ(offset[i], expected[i]) << "offset row " << i;
+        }
+    };
+
+    proto::plan::GenericValue two;
+    two.set_int64_val(2);
+    proto::plan::GenericValue one;
+    one.set_int64_val(1);
+    auto not_equal = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        OpType::NotEqual,
+        ArithOpType::Add,
+        two,
+        one);
+    auto [ne_final, ne_offset] = run_expr(not_equal);
+    expect_bits(ne_final, ne_offset, {false, true, false, false, false});
+
+    auto greater_than = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        OpType::GreaterThan,
+        ArithOpType::Add,
+        two,
+        one);
+    auto not_greater_than = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, greater_than);
+    auto [not_gt_final, not_gt_offset] = run_expr(not_greater_than);
+    expect_bits(
+        not_gt_final, not_gt_offset, {true, false, false, false, false});
+
+    proto::plan::GenericValue zero;
+    zero.set_int64_val(0);
+    auto array_length_equal_zero =
+        std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"arr"}),
+            OpType::Equal,
+            ArithOpType::ArrayLength,
+            zero,
+            zero);
+    auto [len_final, len_offset] = run_expr(array_length_equal_zero);
+    expect_bits(len_final, len_offset, {false, true, false, false, false});
+}
+
 TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloatNullable) {
     struct Testcase {
         double right_operand;
@@ -2005,6 +2325,36 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
             {"age32 % 100 <= 0",
              [](int32_t v) { return (v % 100) <= 0; },
              DataType::INT32},
+            // Bitwise AND/OR/XOR tests on the scalar-sort index path.
+            // Thresholds chosen to keep each clause's result mixed.
+            {"(age8 & 1) == 1",
+             [](int8_t v) { return (v & 1) == 1; },
+             DataType::INT8},
+            {"(age16 | 8) < 1000",
+             [](int16_t v) { return (v | 8) < 1000; },
+             DataType::INT16},
+            {"(age32 ^ 1023) < 1000",
+             [](int32_t v) { return (v ^ 1023) < 1000; },
+             DataType::INT32},
+            {"(age32 & 8) >= 8",
+             [](int32_t v) { return (v & 8) >= 8; },
+             DataType::INT32},
+            {"(age64 & 12) == 4",
+             [](int64_t v) { return (v & 12) == 4; },
+             DataType::INT64},
+            {"(age64 & 8) == 8",
+             [](int64_t v) { return (v & 8) == 8; },
+             DataType::INT64},
+            // Shift / bitwise-NOT on the scalar-sort index path.
+            {"(age16 >> 1) < 500",
+             [](int16_t v) { return (int64_t(v) >> 1) < 500; },
+             DataType::INT16},
+            {"(age32 << 1) >= 1000",
+             [](int32_t v) { return (int64_t(v) << 1) >= 1000; },
+             DataType::INT32},
+            {"~age8 != 0",
+             [](int8_t v) { return (~int64_t(v)) != 0; },
+             DataType::INT8},
         };
 
     auto schema = std::make_shared<Schema>();

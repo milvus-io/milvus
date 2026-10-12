@@ -4,10 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -503,6 +505,128 @@ func TestStreamingEnableChecker(t *testing.T) {
 	m.RegisterStreamingEnabledNotifier(n2)
 	assert.Error(t, n.Context().Err())
 	assert.Error(t, n2.Context().Err())
+}
+
+func TestMarkStreamingHasEnabledWaitsForListenersBeforePublishing(t *testing.T) {
+	ctx := context.Background()
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	require.NoError(t, err)
+
+	n := syncutil.NewAsyncTaskNotifier[struct{}]()
+	m.RegisterStreamingEnabledNotifier(n)
+
+	listenerCanceled := make(chan struct{})
+	releaseListener := make(chan struct{})
+	go func() {
+		<-n.Context().Done()
+		close(listenerCanceled)
+		<-releaseListener
+		n.Finish(struct{}{})
+	}()
+
+	markDone := make(chan error, 1)
+	go func() {
+		markDone <- m.MarkStreamingHasEnabled(ctx)
+	}()
+	<-listenerCanceled
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- m.WaitUntilStreamingEnabled(ctx)
+	}()
+
+	select {
+	case err := <-waitDone:
+		close(releaseListener)
+		require.NoError(t, <-markDone)
+		t.Fatalf("streaming enabled was published before listener completion: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	select {
+	case err := <-markDone:
+		t.Fatalf("MarkStreamingHasEnabled returned before listener finished: %v", err)
+	default:
+	}
+
+	close(releaseListener)
+	require.NoError(t, <-markDone)
+	require.NoError(t, <-waitDone)
+	assert.True(t, m.IsStreamingEnabledOnce())
+}
+
+func TestMarkStreamingHasEnabledWakesParkedWaiters(t *testing.T) {
+	ctx := context.Background()
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	require.NoError(t, err)
+
+	n := syncutil.NewAsyncTaskNotifier[struct{}]()
+	m.RegisterStreamingEnabledNotifier(n)
+
+	listenerCanceled := make(chan struct{})
+	releaseListener := make(chan struct{})
+	go func() {
+		<-n.Context().Done()
+		close(listenerCanceled)
+		<-releaseListener
+		n.Finish(struct{}{})
+	}()
+
+	m.cond.L.Lock()
+	parkedWaiter := m.cond.WaitChan()
+
+	markDone := make(chan error, 1)
+	go func() {
+		markDone <- m.MarkStreamingHasEnabled(ctx)
+	}()
+	<-listenerCanceled
+
+	select {
+	case <-parkedWaiter:
+		close(releaseListener)
+		require.NoError(t, <-markDone)
+		t.Fatal("streaming enable waiter was woken before listener completion")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseListener)
+	require.NoError(t, <-markDone)
+
+	select {
+	case <-parkedWaiter:
+	case <-time.After(time.Second):
+		t.Fatal("streaming enable waiter was not woken after listener completion")
+	}
 }
 
 func TestChannelManagerWatch(t *testing.T) {

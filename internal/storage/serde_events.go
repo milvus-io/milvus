@@ -203,9 +203,9 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 					elementType = f.GetElementType()
 				}
 
-				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy)
+				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy, f.GetElementNullable())
 				if err != nil {
-					return merr.WrapErrServiceInternalMsg("deserialize error on type %s: %v", dt, err)
+					return merr.Wrapf(err, "deserialize error on type %s", dt)
 				}
 				m[j] = d // TODO: avoid memory copy here.
 			}
@@ -429,17 +429,60 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 		return nil, err
 	}
 
-	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
 	types := make(map[FieldID]schemapb.DataType, len(allFieldsSchema))
-	elementTypes := make(map[FieldID]schemapb.DataType, len(allFieldsSchema)) // For ArrayOfVector
+	textRefFields := make(map[FieldID]struct{})
+	for _, f := range allFieldsSchema {
+		types[f.FieldID] = f.DataType
+	}
+	for _, vv := range v {
+		m := vv.Value.(map[FieldID]any)
+		for fid, value := range m {
+			if types[fid] != schemapb.DataType_Text {
+				continue
+			}
+			switch value.(type) {
+			case TextLobRef:
+				textRefFields[fid] = struct{}{}
+			}
+		}
+	}
+	if len(textRefFields) > 0 {
+		fields := make([]arrow.Field, arrowSchema.NumFields())
+		for i := 0; i < arrowSchema.NumFields(); i++ {
+			fields[i] = arrowSchema.Field(i)
+			if i < len(allFieldsSchema) {
+				if _, ok := textRefFields[allFieldsSchema[i].FieldID]; ok {
+					fields[i].Type = arrow.BinaryTypes.Binary
+				}
+			}
+		}
+		arrowSchema = arrow.NewSchema(fields, nil)
+	}
+
+	type arrayOfVectorSerdeConfig struct {
+		elementType     schemapb.DataType
+		dim             int
+		elementNullable bool
+	}
+	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
+	arrayOfVectorConfigs := make(map[FieldID]arrayOfVectorSerdeConfig, len(allFieldsSchema))
 	for i, f := range allFieldsSchema {
 		if f.DataType == schemapb.DataType_ArrayOfVector {
-			elementTypes[f.FieldID] = f.GetElementType()
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return nil, merr.WrapErrAsSysError(
+					merr.Wrapf(err, "get dimension for ArrayOfVector field %s", f.GetName()),
+				)
+			}
+			arrayOfVectorConfigs[f.FieldID] = arrayOfVectorSerdeConfig{
+				elementType:     f.GetElementType(),
+				dim:             int(dim),
+				elementNullable: f.GetElementNullable(),
+			}
 		}
 
 		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowSchema.Field(i).Type)
 		builders[f.FieldID].Reserve(len(v)) // reserve space to avoid copy
-		types[f.FieldID] = f.DataType
 	}
 
 	for _, vv := range v {
@@ -451,14 +494,9 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 				panic("unknown type")
 			}
 
-			// Get element type for ArrayOfVector, otherwise use None
-			elementType := schemapb.DataType_None
-			if types[fid] == schemapb.DataType_ArrayOfVector {
-				elementType = elementTypes[fid]
-			}
-
-			if err := typeEntry.serialize(builders[fid], e, elementType); err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("serialize error on type %s: %v", types[fid], err)
+			config := arrayOfVectorConfigs[fid]
+			if err := typeEntry.serialize(builders[fid], e, config.elementType, config.dim, config.elementNullable); err != nil {
+				return nil, merr.Wrapf(err, "serialize error on type %s", types[fid])
 			}
 		}
 	}
@@ -499,9 +537,10 @@ type CompositeBinlogRecordWriter struct {
 	rowNum        int64
 
 	// results
-	fieldBinlogs map[FieldID]*datapb.FieldBinlog
-	statsLog     *datapb.FieldBinlog
-	bm25StatsLog map[FieldID]*datapb.FieldBinlog
+	fieldBinlogs  map[FieldID]*datapb.FieldBinlog
+	statsLog      *datapb.FieldBinlog
+	bm25StatsLog  map[FieldID]*datapb.FieldBinlog
+	statsBlobSize int64
 
 	flushedUncompressed uint64
 	options             []StreamWriterOption
@@ -694,6 +733,9 @@ func (c *CompositeBinlogRecordWriter) writeStats() error {
 	// Extract single PK stats from map
 	for _, statsLog := range pkStatsMap {
 		c.statsLog = statsLog
+		for _, l := range statsLog.GetBinlogs() {
+			c.statsBlobSize += l.GetMemorySize()
+		}
 		break
 	}
 
@@ -711,8 +753,17 @@ func (c *CompositeBinlogRecordWriter) writeStats() error {
 		return err
 	}
 	c.bm25StatsLog = bm25StatsLog
+	for _, fb := range bm25StatsLog {
+		for _, l := range fb.GetBinlogs() {
+			c.statsBlobSize += l.GetMemorySize()
+		}
+	}
 
 	return nil
+}
+
+func (c *CompositeBinlogRecordWriter) GetStatsBlobSize() int64 {
+	return c.statsBlobSize
 }
 
 func (c *CompositeBinlogRecordWriter) GetExpirQuantiles() []int64 {

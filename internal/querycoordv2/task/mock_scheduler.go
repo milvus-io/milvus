@@ -523,7 +523,8 @@ func (_c *MockScheduler_Stop_Call) RunAndReturn(run func()) *MockScheduler_Stop_
 func NewMockScheduler(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockScheduler {
+},
+) *MockScheduler {
 	mock := &MockScheduler{}
 	mock.Mock.Test(t)
 

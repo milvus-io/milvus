@@ -37,6 +37,12 @@
 namespace milvus {
 namespace index {
 
+// Shares the persisted-type and legacy standalone-file compatibility rules
+// between async resource admission and actual hybrid loading.
+ScalarIndexType
+ResolvePackedHybridIndexType(const nlohmann::json& metadata,
+                             const Config& config);
+
 /*
 * @brief Implementation of hybrid index  
 * @details This index only for scalar type.
@@ -50,6 +56,10 @@ class HybridScalarIndex : public ScalarIndex<T> {
         uint32_t tantivy_index_version,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
+
+    HybridScalarIndex(uint32_t tantivy_index_version,
+                      const storage::FileManagerContext& file_manager_context,
+                      bool is_nested_index);
 
     ~HybridScalarIndex() override = default;
 
@@ -70,6 +80,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     ScalarIndexType
     GetIndexType() const override {
         return ScalarIndexType::HYBRID;
+    }
+
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
     }
 
     void
@@ -100,6 +115,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->IsNull();
     }
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override {
         return internal_index_->IsNotNull();
@@ -111,8 +131,9 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     bool
-    ShouldUseOp(proto::plan::OpType op) const override {
-        return internal_index_->ShouldUseOp(op);
+    ShouldUseOp(proto::plan::OpType op,
+                const std::string& pattern = "") const override {
+        return internal_index_->ShouldUseOp(op, pattern);
     }
 
     bool
@@ -142,6 +163,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     std::optional<T>
     Reverse_Lookup(size_t offset) const override {
         return internal_index_->Reverse_Lookup(offset);
+    }
+
+    bool
+    SupportFastReverseLookup() const override {
+        return internal_index_->SupportFastReverseLookup();
     }
 
     int64_t
@@ -176,6 +202,14 @@ class HybridScalarIndex : public ScalarIndex<T> {
     void
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
+
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
  protected:
     ScalarIndexType
@@ -215,10 +249,15 @@ class HybridScalarIndex : public ScalarIndex<T> {
     int32_t bitmap_index_cardinality_limit_;
     ScalarIndexType low_cardinality_index_type_;
     ScalarIndexType high_cardinality_index_type_;
+    // Resolved scalar index engine version from the last Build() call;
+    // gates whether nested (struct sub-field) high-cardinality data may
+    // select STL_SORT (see kNestedHybridStlSortMinVersion).
+    int32_t scalar_index_version_{0};
     proto::schema::DataType field_type_;
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
     storage::FileManagerContext file_manager_context_;
+    bool is_nested_index_{false};
 
     // `tantivy_index_version_` is used to control which kind of tantivy index should be used.
     // There could be the case where milvus version of read node is lower than the version of index builder node(and read node

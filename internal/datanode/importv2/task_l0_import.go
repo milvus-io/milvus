@@ -116,15 +116,18 @@ func (t *L0ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 }
 
 func (t *L0ImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.ctx)
 	infos := make(map[int64]*datapb.ImportSegmentInfo)
 	for id, info := range t.segmentsInfo {
 		infos[id] = typeutil.Clone(info)
 	}
+	// Share the running task's context instead of deriving a new one. The
+	// goroutines started by Execute hold the original ctx, and taskManager
+	// cancels whatever the map entry carries; a derived context would make
+	// that cancellation a no-op on the work actually in flight.
 	return &L0ImportTask{
 		ImportTaskV2: typeutil.Clone(t.ImportTaskV2),
-		ctx:          ctx,
-		cancel:       cancel,
+		ctx:          t.ctx,
+		cancel:       t.cancel,
 		segmentsInfo: infos,
 		req:          t.req,
 		allocator:    t.allocator,
@@ -141,7 +144,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 		mlog.Int("bufferSize", bufferSize),
 		mlog.Int64("taskSlot", t.GetSlots()),
 		mlog.Any("files", t.req.GetFiles()),
-		mlog.Any("schema", t.GetSchema()),
+		mlog.FieldSchema(t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
@@ -252,7 +255,7 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		}
 		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
 			segmentID, partitionID, t.GetCollectionID(), channel, nil, data,
-			nil, t.req.GetStorageVersion(), false, t.req.GetStorageConfig())
+			nil, storage.StorageV2, false, t.req.GetStorageConfig())
 		if err != nil {
 			return nil, nil, err
 		}

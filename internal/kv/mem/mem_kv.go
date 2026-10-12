@@ -18,6 +18,7 @@ package memkv
 
 import (
 	"context"
+	"math"
 	"strings"
 	"sync"
 
@@ -38,6 +39,12 @@ var _ kv.TxnKV = (*MemoryKV)(nil)
 type MemoryKV struct {
 	sync.RWMutex
 	tree *btree.BTree
+}
+
+// MaxTxnOps reports no practical limit: every write is applied under the lock,
+// so any batch commits "atomically" in one shot.
+func (kv *MemoryKV) MaxTxnOps() int {
+	return math.MaxInt32
 }
 
 // NewMemoryKV returns an in-memory kvBase for testing.
@@ -275,6 +282,30 @@ func (kv *MemoryKV) LoadWithPrefix(ctx context.Context, key string) ([]string, [
 		return true
 	})
 	return keys, values, nil
+}
+
+// WalkWithPrefix visits matching entries in key order until the callback
+// returns an error. paginationSize is irrelevant for the in-memory store.
+func (kv *MemoryKV) WalkWithPrefix(ctx context.Context, prefix string, _ int, fn func([]byte, []byte) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	kv.RLock()
+	defer kv.RUnlock()
+
+	var walkErr error
+	kv.tree.AscendGreaterOrEqual(memoryKVItem{key: prefix}, func(i btree.Item) bool {
+		if walkErr = ctx.Err(); walkErr != nil {
+			return false
+		}
+		item := i.(memoryKVItem)
+		if !strings.HasPrefix(item.key, prefix) {
+			return false
+		}
+		walkErr = fn([]byte(item.key), item.value.ByteSlice())
+		return walkErr == nil
+	})
+	return walkErr
 }
 
 // LoadBytesWithPrefix returns all keys & values with given prefix.

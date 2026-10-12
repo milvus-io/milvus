@@ -83,3 +83,7 @@ It can. Any data written to the old primary but not yet replicated to the standb
 ### How much data can be lost during force failover?
 
 The potential data loss is bounded by CDC lag at the time the primary becomes unavailable.
+
+### Can I import data while replication is active?
+
+Yes. In a replicating cluster, imports must run in two-phase-commit (2PC) mode. See [Bulk Import in CDC Replication Mode](./05-cdc-2pc-import.md).

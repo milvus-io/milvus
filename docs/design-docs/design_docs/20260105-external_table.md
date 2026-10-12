@@ -114,7 +114,8 @@ The following features are explicitly **NOT supported** for external tables in t
 |  +---------------------------------------------------------------+      |
 |  +---------------------------------------------------------------+      |
 |  |              Stats Inspector (LIMITED for external)            |      |
-|  |  - TextIndexJob enabled; JSON/BM25 inspector jobs skipped       |      |
+|  |  - TextIndexJob enabled; JSON enabled for StorageV3 manifests   |      |
+|  |  - BM25 inspector jobs skipped                                 |      |
 |  +---------------------------------------------------------------+      |
 |  +---------------------------------------------------------------+      |
 |  |              UpdateExternalCollectionTask                      |      |
@@ -583,14 +584,23 @@ if collection.IsExternal() {
 **File**: `internal/datacoord/stats_inspector.go`
 
 External collections allow text-index stats tasks for persisted `text_match`
-support. Other stats task types are still skipped:
+support. They also allow JSON key stats tasks for StorageV3 segments that have
+already committed a manifest path, because the stats result can be written back
+through the manifest. Other stats task types are still skipped:
 
 ```go
 func (si *statsInspector) SubmitStatsTask(..., subJobType indexpb.StatsSubJob, ...) {
-    if si.isExternalCollection(segment.GetCollectionID()) &&
-        subJobType != indexpb.StatsSubJob_TextIndexJob {
-        log.Info("skip submit stats task for external collection")
-        return nil
+    if si.isExternalCollection(segment.GetCollectionID()) {
+        if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob &&
+            !canBuildExternalJSONKeyIndex(segment) {
+            log.Info("skip submit external json stats task without v3 manifest")
+            return nil
+        }
+        if subJobType != indexpb.StatsSubJob_TextIndexJob &&
+            subJobType != indexpb.StatsSubJob_JsonKeyIndexJob {
+            log.Info("skip submit stats task for external collection")
+            return nil
+        }
     }
     // ... submit task
 }
@@ -599,7 +609,7 @@ func (si *statsInspector) SubmitStatsTask(..., subJobType indexpb.StatsSubJob, .
 | Stats Task Type | Status |
 |-----------------|--------|
 | Text Index Stats | Enabled for persisted `text_match` support |
-| JSON Key Index Stats | Disabled |
+| JSON Key Index Stats | Enabled only for StorageV3 external segments with a non-empty manifest path |
 | BM25 Stats | Disabled; BM25 function stats are generated during refresh |
 
 ### 5.3 Write Operations Blocked
@@ -730,7 +740,11 @@ func (loader *segmentLoader) Load(...) {
 
 ### 7.1 Task Flow Overview
 
-External table data refresh is **manually triggered** through the `RefreshExternalTable` API. This design provides users with full control over when data synchronization occurs and allows them to track progress.
+External table data refresh is **manually triggered** through the
+`RefreshExternalTable` API. This design provides users with full control over
+when data synchronization occurs and allows them to track progress. One
+refresh job can be split into multiple parallel tasks, while segment metadata
+is applied once at the job level after all tasks finish.
 
 ```
                             Client
@@ -753,14 +767,14 @@ External table data refresh is **manually triggered** through the `RefreshExtern
                               |
                               | Schedule job execution
                               v
-                    CreateTaskOnWorker
+                  CreateTaskOnWorker(s)
                               |
                               v
-                        DataNode
+                       DataNode(s)
                 (ExternalCollectionManager)
                               |
                               v
-                    UpdateExternalTask
+             RefreshExternalCollectionTask
                               |
     +-------------------------+-------------------------+
     |                         |                         |
@@ -772,12 +786,12 @@ from source         current segments       fragments to new
                               v
                     Create manifests
                               |
-                              | Report progress
+                              | Persist task results
                               v
                         DataCoord
-                  (UpdateJobProgress callback)
+              (Aggregate after all tasks finish)
                               |
-                              | Update job state & progress
+                              | Apply one job-level result
                               v
                     ExternalCollectionTaskMeta
                               |
@@ -811,7 +825,7 @@ segments             segments              segments
               | (Scheduler picks up job)
               v
        +------+------+
-       | InProgress  |  <-- DataNode executing refresh task
+       | InProgress  |  <-- DataNodes executing refresh tasks
        +------+------+
               |
         +-----+-----+
@@ -827,6 +841,129 @@ segments             segments              segments
 - **InProgress**: Job is actively being executed by DataNode
 - **Completed**: Job finished successfully, segments updated
 - **Failed**: Job encountered an error, reason stored in job info
+
+### 7.1.2 Parallel Task Partitioning and Segment Ownership
+
+Parallel refresh partitions the newly explored external files, but existing
+segments cannot be partitioned independently from those files. A DataNode
+decides whether an existing segment can be kept by checking whether every old
+fragment is present in the task's newly explored fragment set. If a segment is
+sent to a task that sees only part of its files, the task would incorrectly
+treat the fragments owned by a sibling task as removed.
+
+To prevent this, DataCoord builds one file-level ownership plan for the whole
+job. The plan guarantees:
+
+1. Every explored file index belongs to exactly one continuous task range.
+2. Every baseline segment is owned by exactly one task.
+3. The owner task's file range contains every still-existing file referenced
+   by that segment.
+4. A task receives only the baseline segments it owns.
+5. Segment changes are applied once at the job level, never independently by
+   sibling tasks.
+
+The relevant implementation is in:
+
+- `internal/datacoord/external_collection_refresh_manager.go`
+- `internal/datacoord/external_collection_refresh_planner.go`
+- `internal/datacoord/task_refresh_external_collection.go`
+- `internal/datanode/external/task_update.go`
+
+#### Planning Inputs
+
+DataCoord performs `Explore` once per planning attempt and writes the complete,
+ordered file list to a shared explore manifest. All tasks in one successfully
+published plan use that manifest. If planning fails before publication, a retry
+may run `Explore` again and create a new attempt manifest. DataCoord then reads
+the manifests of all currently healthy segments as that attempt's baseline and
+builds:
+
+- `file path -> explored file index`
+- `segment ID -> old fragment file paths`
+
+Task file ranges are half-open indexes into the shared manifest:
+`[file_index_begin, file_index_end)`.
+
+#### Base File Ranges
+
+`dataCoord.externalCollectionFilesPerTask` controls the target size of the
+initial split. For `N` explored files and target `T`:
+
+```text
+base_task_count = ceil(N / T)
+base_chunk_size = ceil(N / base_task_count)
+```
+
+DataCoord then creates balanced continuous base ranges of
+`base_chunk_size` files. Therefore, the parameter controls the initial task
+count and approximate task size; it is not a hard final limit.
+
+For example, 10 files with a target of 6 produce two balanced base ranges of
+5 files instead of ranges of 6 and 4.
+
+#### Continuous-Range Closure
+
+For each baseline segment, DataCoord finds the minimum and maximum indexes of
+the segment's old file paths that are still present in the new explore result.
+All base ranges between those two indexes must be merged into one task range.
+The segment is owned by the task containing its first still-existing file.
+
+Range merging is transitive. Consider eight files and a target of two files
+per task:
+
+```text
+Base ranges:
+T0 = [f0, f1]    T1 = [f2, f3]
+T2 = [f4, f5]    T3 = [f6, f7]
+
+S1 references f1 and f4  => merge T0 through T2
+S2 references f5 and f6  => merge T2 through T3
+
+Closure:
+T0 through T3 become one task because the two required ranges overlap at T2.
+```
+
+This closure may remove several base boundaries. In the extreme case, chained
+segment references can merge every base range and the job falls back to one
+task. Conversely, when no segment crosses a base boundary, the original base
+task count is preserved.
+
+The planner operates at file-path level. DataNode still performs the exact
+fragment comparison using `(file_path, start_row, end_row)`. File-level
+planning is sufficient because all fragments of one explored file are read by
+the same task range.
+
+#### Missing Files and New Files
+
+- If only some old files of a segment remain, the surviving files determine
+  its owner and closure range. DataNode sees the missing old fragment and
+  correctly rebuilds or removes the segment.
+- If none of a segment's old files remain, the segment is conservatively owned
+  by the first task. That task validates the segment as removed.
+- Newly added files do not need segment ownership. They are processed by the
+  task whose file range contains them, so a task may legitimately own no old
+  segments.
+
+#### Persisted Plan and Execution
+
+Each `ExternalCollectionRefreshTask` persists:
+
+- `explore_manifest_path`
+- `file_index_begin` and `file_index_end`
+- `ownership_plan_version`
+- `owned_segment_ids`
+
+After publication, persisting ownership makes task retries and DataCoord
+restart recovery use the same plan. At dispatch time, DataCoord reloads only
+`owned_segment_ids` and sends those segments, together with the task's file
+range, to DataNode.
+
+Each successful DataNode task returns `kept_segments` and `updated_segments`.
+DataCoord persists these per-task results without changing segment metadata.
+After all sibling tasks finish, DataCoord validates the results against the
+persisted ownership plan, aggregates them, and performs one job-level segment
+update. Baseline segments that are neither kept nor updated are removed in
+that single apply operation.
 
 ### 7.2 ExternalCollectionScheduler
 
@@ -1095,6 +1232,7 @@ func ReadFragmentsFromManifest(
 | `external.collection.job.retention.duration` | How long to keep completed/failed jobs | 24h |
 | `external.collection.job.max.concurrent` | Max concurrent refresh jobs | 2 |
 | `external.collection.job.timeout` | Timeout for a single refresh job | 1h |
+| `dataCoord.externalCollectionFilesPerTask` | Target files per base refresh task; ownership closure may produce larger final tasks | 10,000 |
 
 ---
 

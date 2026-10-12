@@ -81,6 +81,13 @@ GetStructNameForArrayField(const FieldMeta& field_meta) {
 
 class Schema {
  public:
+    Schema() = default;
+
+    Schema(const Schema& other);
+
+    Schema&
+    operator=(const Schema& other);
+
     FieldId
     AddDebugField(const std::string& name,
                   DataType data_type,
@@ -133,22 +140,32 @@ class Schema {
     AddDebugField(const std::string& name,
                   DataType data_type,
                   DataType element_type,
-                  bool nullable = false) {
+                  bool nullable = false,
+                  bool element_nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, data_type, element_type, nullable);
+        this->AddField(FieldName(name),
+                       field_id,
+                       data_type,
+                       element_type,
+                       nullable,
+                       element_nullable);
         return field_id;
     }
 
     FieldId
     AddDebugArrayField(const std::string& name,
                        DataType element_type,
-                       bool nullable) {
+                       bool nullable,
+                       bool element_nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, DataType::ARRAY, element_type, nullable);
+        this->AddField(FieldName(name),
+                       field_id,
+                       DataType::ARRAY,
+                       element_type,
+                       nullable,
+                       element_nullable);
         return field_id;
     }
 
@@ -178,7 +195,8 @@ class Schema {
                              DataType element_type,
                              int64_t dim,
                              std::optional<knowhere::MetricType> metric_type,
-                             bool nullable = false) {
+                             bool nullable = false,
+                             bool element_nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         auto field_meta = FieldMeta(FieldName(name),
@@ -187,7 +205,8 @@ class Schema {
                                     element_type,
                                     dim,
                                     metric_type,
-                                    nullable);
+                                    nullable,
+                                    element_nullable);
         this->AddField(std::move(field_meta));
         return field_id;
     }
@@ -235,9 +254,18 @@ class Schema {
              const FieldId id,
              DataType data_type,
              DataType element_type,
-             bool nullable) {
-        auto field_meta = FieldMeta(
-            name, id, data_type, element_type, nullable, std::nullopt);
+             bool nullable,
+             bool element_nullable) {
+        auto field_meta = FieldMeta(name,
+                                    id,
+                                    data_type,
+                                    element_type,
+                                    nullable,
+                                    element_nullable,
+                                    std::nullopt,
+                                    std::string{},
+                                    LOCAL_FORMAT_RAW,
+                                    std::nullopt);
         this->AddField(std::move(field_meta));
     }
 
@@ -456,9 +484,11 @@ class Schema {
     ConvertToArrowSchema() const;
 
     /// Convert to Arrow schema with field ID strings as field names,
-    /// used by Loon FFI / milvus-storage Reader.
+    /// used by Loon FFI / milvus-storage Reader. Internal StorageV3 TEXT
+    /// column groups store encoded LOB references as binary bytes, so callers
+    /// loading those column groups can request TEXT fields as Binary.
     const ArrowSchemaPtr
-    ConvertToLoonArrowSchema() const;
+    ConvertToLoonArrowSchema(bool text_lob_as_binary = false) const;
 
     // Mirrors pkg/util/typeutil.StorageColumnResolver in Go. Keep both sides
     // aligned when changing external physical-column rules.
@@ -541,6 +571,7 @@ class Schema {
 
     void
     AddField(FieldMeta&& field_meta) {
+        std::atomic_store(&loon_arrow_lob_schema_cache_, ArrowSchemaPtr{});
         auto field_name = field_meta.get_name();
         auto field_id = field_meta.get_id();
         AssertInfo(!name_ids_.count(field_name), "duplicated field name");
@@ -627,15 +658,13 @@ class Schema {
     std::pair<bool, std::string>
     WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
 
+    std::pair<bool, std::string>
+    CollectionWarmupPolicy(bool is_vector, bool is_index) const;
+
     // True if the field carries FieldSchema::is_function_output.
     bool
     is_function_output(const FieldId& field_id) const {
         return function_output_field_ids_.count(field_id) > 0;
-    }
-
-    const std::unordered_set<FieldId>&
-    function_output_field_ids() const {
-        return function_output_field_ids_;
     }
 
     void
@@ -650,6 +679,9 @@ class Schema {
     }
 
  private:
+    // Keep Schema's copy constructor and assignment operator in sync with
+    // these members. Runtime-only caches, such as loon_arrow_lob_schema_cache_,
+    // are intentionally reset instead of copied.
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;
 
@@ -701,8 +733,9 @@ class Schema {
     std::unordered_set<FieldId> function_output_field_ids_;
 
     bool is_milvus_table_external_ = false;
+
+    mutable ArrowSchemaPtr loon_arrow_lob_schema_cache_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
-using SafeSchemaPtr = std::atomic<SchemaPtr*>;
 }  // namespace milvus

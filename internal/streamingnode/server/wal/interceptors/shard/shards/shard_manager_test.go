@@ -2,14 +2,18 @@ package shards
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -19,14 +23,17 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestShardManager(t *testing.T) {
@@ -37,7 +44,7 @@ func TestShardManager(t *testing.T) {
 		Term: 1,
 	}
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
@@ -51,65 +58,52 @@ func TestShardManager(t *testing.T) {
 		ChannelInfo: channel,
 		WAL:         f,
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			VChannels: map[string]*streamingpb.VChannelMeta{
-				"v1": {
-					Vchannel: "v1",
-					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: 1,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: 2},
-							{PartitionId: 3},
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"v1": {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionIDs: []int64{2, 3},
+					},
+					"v2": {
+						VChannel:     "v2",
+						CollectionID: 4,
+						PartitionIDs: []int64{5, 6},
+					},
+				},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{
+					1001: {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionID:  2,
+						SegmentID:    1001,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         100,
+							ModifiedBinarySize:    50,
+							CreateSegmentTimeTick: 101,
 						},
 					},
-				},
-				"v2": {
-					Vchannel: "v2",
-					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: 4,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: 5},
-							{PartitionId: 6},
+					1002: {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionID:  3,
+						SegmentID:    1002,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         100,
+							ModifiedBinarySize:    0,
+							CreateSegmentTimeTick: 100,
 						},
 					},
-				},
-			},
-			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
-				1001: {
-					CollectionId:   1,
-					PartitionId:    2,
-					SegmentId:      1001,
-					State:          streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
-					StorageVersion: 2,
-					Stat: &streamingpb.SegmentAssignmentStat{
-						MaxBinarySize:         100,
-						ModifiedBinarySize:    50,
-						CreateSegmentTimeTick: 101,
-					},
-				},
-				1002: {
-					CollectionId:   1,
-					PartitionId:    3,
-					SegmentId:      1002,
-					State:          streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
-					StorageVersion: 2,
-					Stat: &streamingpb.SegmentAssignmentStat{
-						MaxBinarySize:         100,
-						ModifiedBinarySize:    0,
-						CreateSegmentTimeTick: 100,
-					},
-				},
-				1013: {
-					CollectionId:   4,
-					PartitionId:    5,
-					SegmentId:      1013,
-					State:          streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
-					StorageVersion: 2,
-					Stat: &streamingpb.SegmentAssignmentStat{
-						MaxBinarySize:         100,
-						ModifiedBinarySize:    0,
-						CreateSegmentTimeTick: 100,
+					1013: {
+						VChannel:     "v2",
+						CollectionID: 4,
+						PartitionID:  5,
+						SegmentID:    1013,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         100,
+							ModifiedBinarySize:    0,
+							CreateSegmentTimeTick: 100,
+						},
 					},
 				},
 			},
@@ -258,8 +252,62 @@ func TestShardManager(t *testing.T) {
 		WithTimeTick(600).
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(7))
+	dropped := m.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 2}]
+	surviving := m.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 3}]
+	droppedSegment := dropped.GetSegmentManager(1001)
+	survivingSegment := surviving.GetSegmentManager(1002)
+	allocMetric := metrics.WALSegmentAllocTotal.WithLabelValues(paramtable.GetStringNodeID(), channel.Name)
+	removedMetric := metrics.WALSegmentFlushedTotal.WithLabelValues(paramtable.GetStringNodeID(), channel.Name, string(policy.PolicyNamePartitionRemoved))
+	fencedMetric := metrics.WALSegmentFlushedTotal.WithLabelValues(paramtable.GetStringNodeID(), channel.Name, string(policy.PolicyNameFenced))
+	allocBefore := testutil.ToFloat64(allocMetric)
+	removedBefore := testutil.ToFloat64(removedMetric)
+	fencedBefore := testutil.ToFloat64(fencedMetric)
 	m.DropPartition(message.MustAsImmutableDropPartitionMessageV1(dropPartitionMsg))
 	assert.ErrorIs(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 1, PartitionID: 2}), ErrPartitionNotFound)
+	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 1, PartitionID: 3}))
+	assert.True(t, droppedSegment.IsFlushed())
+	assert.True(t, survivingSegment.IsFlushed())
+	assert.Equal(t, policy.PolicyNamePartitionRemoved, droppedSegment.SealPolicy().Policy)
+	assert.Equal(t, policy.PolicyNameFenced, survivingSegment.SealPolicy().Policy)
+	assert.Equal(t, allocBefore-2, testutil.ToFloat64(allocMetric))
+	assert.Equal(t, removedBefore+1, testutil.ToFloat64(removedMetric))
+	assert.Equal(t, fencedBefore+1, testutil.ToFloat64(fencedMetric))
+	assert.Empty(t, dropped.segments)
+	assert.Empty(t, surviving.segments)
+	assert.Equal(t, uint64(600), surviving.fencedAssignTimeTick)
+	_, err = m.AssignSegment(&AssignSegmentRequest{CollectionID: 1, PartitionID: 3, TimeTick: 600})
+	assert.ErrorIs(t, err, ErrFencedAssign)
+	assert.False(t, m.partitionManagers[PartitionUniqueKey{CollectionID: 4, PartitionID: 5}].GetSegmentManager(1013).IsFlushed())
+
+	// Surviving partitions can accept later Inserts through a new segment.
+	surviving.onAllocating = make(chan struct{})
+	m.CreateSegment(message.MustAsImmutableCreateSegmentMessageV2(
+		message.NewCreateSegmentMessageBuilderV2().
+			WithVChannel("v1").
+			WithHeader(&message.CreateSegmentMessageHeader{
+				CollectionId: 1, PartitionId: 3, SegmentId: 1004, StorageVersion: 2, MaxSegmentSize: 150,
+			}).
+			WithBody(&message.CreateSegmentMessageBody{}).
+			MustBuildMutable().WithTimeTick(610).WithLastConfirmedUseMessageID().
+			IntoImmutableMessage(rmq.NewRmqID(8))))
+	assignment, err := m.AssignSegment(&AssignSegmentRequest{
+		CollectionID: 1, PartitionID: 3, TimeTick: 620,
+		ModifiedMetrics: stats.ModifiedMetrics{Rows: 1, BinarySize: 20},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1004), assignment.SegmentID)
+	assignment.Ack()
+
+	// A repeated drop of an absent partition still fences the surviving ones.
+	m.DropPartition(message.MustAsImmutableDropPartitionMessageV1(
+		message.NewDropPartitionMessageBuilderV1().
+			WithVChannel("v1").
+			WithHeader(&message.DropPartitionMessageHeader{CollectionId: 1, PartitionId: 2}).
+			WithBody(&msgpb.DropPartitionRequest{}).
+			MustBuildMutable().WithTimeTick(650).WithLastConfirmedUseMessageID().
+			IntoImmutableMessage(rmq.NewRmqID(9))))
+	assert.Empty(t, surviving.segments)
+	assert.Equal(t, uint64(650), surviving.fencedAssignTimeTick)
 
 	dropCollectionMsg := message.NewDropCollectionMessageBuilderV1().
 		WithVChannel("v1").
@@ -294,6 +342,61 @@ func TestShardManager(t *testing.T) {
 	m.Close()
 }
 
+func TestRecoverShardManagerFromWritePathRecoverySnapshot(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+	channel := types.PChannelInfo{Name: "test_write_path_recovery", Term: 1}
+	w := mock_wal.NewMockWAL(t)
+	w.EXPECT().IsAvailable().Return(true).Maybe()
+	future := syncutil.NewFuture[wal.WAL]()
+	future.Set(w)
+
+	schema := &schemapb.CollectionSchema{
+		Name:    "recovered_collection",
+		Version: 7,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	manager := RecoverShardManager(&ShardManagerRecoverParam{
+		ChannelInfo: channel,
+		WAL:         future,
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"v1": {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionIDs: []int64{2},
+						Schema:       schema,
+					},
+				},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{
+					1001: {
+						VChannel:     "v1",
+						CollectionID: 1,
+						PartitionID:  2,
+						SegmentID:    1001,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         100,
+							ModifiedBinarySize:    50,
+							CreateSegmentTimeTick: 101,
+						},
+					},
+				},
+			},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 300},
+		},
+		TxnManager: &mockedTxnManager{},
+	}).(*shardManagerImpl)
+	defer manager.Close()
+
+	require.NoError(t, manager.CheckIfCollectionExists(1))
+	require.Contains(t, manager.collections[1].PartitionIDs, int64(2))
+	require.Equal(t, int32(7), manager.collections[1].SchemaVersion())
+	require.Contains(t, manager.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 2}].segments, int64(1001))
+}
+
 func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
@@ -307,7 +410,7 @@ func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t 
 	}
 	appendCh := make(chan *message.CreateSegmentMessageHeader, 1)
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -326,32 +429,25 @@ func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t 
 		ChannelInfo: channel,
 		WAL:         f,
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			VChannels: map[string]*streamingpb.VChannelMeta{
-				"v_text": {
-					Vchannel: "v_text",
-					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: 10,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: 20},
-						},
-						Schemas: []*streamingpb.CollectionSchemaOfVChannel{
-							{
-								Schema: &schemapb.CollectionSchema{
-									Name:    "text_collection",
-									Version: 7,
-									Fields: []*schemapb.FieldSchema{
-										{FieldID: 100, DataType: schemapb.DataType_Int64},
-										{FieldID: 101, DataType: schemapb.DataType_Text},
-									},
-								},
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"v_text": {
+						VChannel:     "v_text",
+						CollectionID: 10,
+						PartitionIDs: []int64{20},
+						Schema: &schemapb.CollectionSchema{
+							Name:    "text_collection",
+							Version: 7,
+							Fields: []*schemapb.FieldSchema{
+								{FieldID: 100, DataType: schemapb.DataType_Int64},
+								{FieldID: 101, DataType: schemapb.DataType_Text},
 							},
 						},
 					},
 				},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
 			},
-			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
-			Checkpoint:         &recovery.WALCheckpoint{TimeTick: 100},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 100},
 		},
 		TxnManager: &mockedTxnManager{},
 	}).(*shardManagerImpl)
@@ -385,7 +481,7 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 		Term: 1,
 	}
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
@@ -399,9 +495,11 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 		ChannelInfo: channel,
 		WAL:         f,
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			VChannels:          map[string]*streamingpb.VChannelMeta{},
-			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{},
-			Checkpoint:         &recovery.WALCheckpoint{TimeTick: 100},
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels:       map[string]moduleapi.VChannelWritePathRecoveryState{},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
+			},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 100},
 		},
 		TxnManager: &mockedTxnManager{},
 	}).(*shardManagerImpl)
@@ -491,7 +589,29 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int32(4), ver)
 	assert.True(t, m.collections[104].HasTextField())
-	assert.True(t, m.collections[104].UseGrowingSourceFlush())
+	assert.True(t, m.collections[104].RequiresStorageV3())
+	assert.False(t, m.collections[104].AllowGrowingSourceFlush())
+
+	legacySchema := proto.Clone(textSchema).(*schemapb.CollectionSchema)
+	legacySchema.Version = 5
+	legacySchemaBytes, err := proto.Marshal(legacySchema)
+	require.NoError(t, err)
+	createMsgLegacySchema := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("v_legacy_schema").
+		WithHeader(&message.CreateCollectionMessageHeader{
+			CollectionId: 105,
+			PartitionIds: []int64{205},
+		}).
+		WithBody(&msgpb.CreateCollectionRequest{Schema: legacySchemaBytes}).
+		MustBuildMutable().
+		WithTimeTick(275).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(14))
+	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createMsgLegacySchema))
+
+	storedLegacySchema, err := m.GetCollectionSchema(105, legacySchema.GetVersion())
+	require.NoError(t, err)
+	require.True(t, proto.Equal(legacySchema, storedLegacySchema))
 
 	// Test 3: Create collection without schema (legacy), then check version
 	createMsgNoSchema := message.NewCreateCollectionMessageBuilderV1().
@@ -637,13 +757,91 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	m.Close()
 }
 
+func TestShardManagerGetPrimaryKeyDescriptor(t *testing.T) {
+	newSchema := func(version int32, fieldID int64, dataType schemapb.DataType) *streamingpb.CollectionSchemaOfVChannel {
+		return &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Version: version,
+				Fields: []*schemapb.FieldSchema{{
+					FieldID:      fieldID,
+					DataType:     dataType,
+					IsPrimaryKey: true,
+				}},
+			},
+		}
+	}
+
+	t.Run("returns cached descriptor", func(t *testing.T) {
+		info := &CollectionInfo{}
+		info.setSchema(newSchema(2, 100, schemapb.DataType_Int64))
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		descriptor, err := m.GetPrimaryKeyDescriptor(10, 2)
+		assert.NoError(t, err)
+		assert.Equal(t, PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}, descriptor)
+		assert.NotNil(t, info.primaryKey)
+	})
+
+	t.Run("refreshes descriptor with schema", func(t *testing.T) {
+		info := &CollectionInfo{}
+		info.setSchema(newSchema(1, 100, schemapb.DataType_Int64))
+		info.setSchema(newSchema(2, 101, schemapb.DataType_VarChar))
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		descriptor, err := m.GetPrimaryKeyDescriptor(10, latestCollectionSchemaVersion)
+		assert.NoError(t, err)
+		assert.Equal(t, PrimaryKeyDescriptor{FieldID: 101, DataType: schemapb.DataType_VarChar}, descriptor)
+	})
+
+	t.Run("reads existing uncached collection info", func(t *testing.T) {
+		info := &CollectionInfo{Schema: newSchema(1, 100, schemapb.DataType_Int64)}
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		descriptor, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.NoError(t, err)
+		assert.Equal(t, PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}, descriptor)
+		assert.Nil(t, info.primaryKey)
+	})
+
+	t.Run("collection not found", func(t *testing.T) {
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{}}
+		_, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.ErrorIs(t, err, ErrCollectionNotFound)
+	})
+
+	t.Run("schema not found", func(t *testing.T) {
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: {}}}
+		_, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.ErrorIs(t, err, ErrCollectionSchemaNotFound)
+	})
+
+	t.Run("schema version mismatch", func(t *testing.T) {
+		info := &CollectionInfo{}
+		info.setSchema(newSchema(2, 100, schemapb.DataType_Int64))
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		_, err := m.GetPrimaryKeyDescriptor(10, 1)
+		assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
+	})
+
+	t.Run("schema has no primary key", func(t *testing.T) {
+		info := &CollectionInfo{Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101}}},
+		}}
+		m := &shardManagerImpl{collections: map[int64]*CollectionInfo{10: info}}
+
+		_, err := m.GetPrimaryKeyDescriptor(10, latestCollectionSchemaVersion)
+		assert.Error(t, err)
+	})
+}
+
 // newShardManagerWithGrowingSegment builds a minimal shard manager that has
 // collection collID / partition partID / growing segment segID pre-loaded.
 func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64) *shardManagerImpl {
 	t.Helper()
 	channel := types.PChannelInfo{Name: "test_alter_channel", Term: 1}
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
@@ -657,28 +855,25 @@ func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64
 		ChannelInfo: channel,
 		WAL:         f,
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
-			VChannels: map[string]*streamingpb.VChannelMeta{
-				"v_alter": {
-					Vchannel: "v_alter",
-					State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
-					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-						CollectionId: collID,
-						Partitions: []*streamingpb.PartitionInfoOfVChannel{
-							{PartitionId: partID},
-						},
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"v_alter": {
+						VChannel:     "v_alter",
+						CollectionID: collID,
+						PartitionIDs: []int64{partID},
 					},
 				},
-			},
-			SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
-				segID: {
-					CollectionId: collID,
-					PartitionId:  partID,
-					SegmentId:    segID,
-					State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
-					Stat: &streamingpb.SegmentAssignmentStat{
-						MaxBinarySize:         200,
-						ModifiedBinarySize:    100,
-						CreateSegmentTimeTick: 50,
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{
+					segID: {
+						VChannel:     "v_alter",
+						CollectionID: collID,
+						PartitionID:  partID,
+						SegmentID:    segID,
+						Stat: &streamingpb.SegmentAssignmentStat{
+							MaxBinarySize:         200,
+							ModifiedBinarySize:    100,
+							CreateSegmentTimeTick: 50,
+						},
 					},
 				},
 			},
@@ -686,6 +881,69 @@ func newShardManagerWithGrowingSegment(t *testing.T, collID, partID, segID int64
 		},
 		TxnManager: &mockedTxnManager{},
 	}).(*shardManagerImpl)
+}
+
+func TestAsyncFlushSegmentDoesNotHoldShardManagerLockWhileWaitingForWAL(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
+	const (
+		collID = int64(10)
+		partID = int64(20)
+		segID  = int64(3001)
+	)
+	m := newShardManagerWithGrowingSegment(t, collID, partID, segID)
+	readyWAL := m.wal.Get()
+	pendingWAL := syncutil.NewFuture[wal.WAL]()
+	m.wal = pendingWAL
+	for _, pm := range m.partitionManagers {
+		pm.wal = pendingWAL
+	}
+
+	flushDone := make(chan struct{})
+	go func() {
+		m.AsyncFlushSegment(utils.SealSegmentSignal{
+			SegmentBelongs: utils.SegmentBelongs{
+				PChannel:     m.Channel().Name,
+				VChannel:     "v_alter",
+				CollectionID: collID,
+				PartitionID:  partID,
+				SegmentID:    segID,
+			},
+			SealPolicy: policy.PolicyCapacity(),
+		})
+		close(flushDone)
+	}()
+	select {
+	case <-flushDone:
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	schemaReadDone := make(chan struct{})
+	go func() {
+		m.GetAllCollectionSchemaInfos()
+		close(schemaReadDone)
+	}()
+
+	select {
+	case <-schemaReadDone:
+	case <-time.After(200 * time.Millisecond):
+		pendingWAL.Set(readyWAL)
+		<-flushDone
+		<-schemaReadDone
+		m.Close()
+		t.Fatal("schema read blocked on shard manager lock while flush waited for WAL readiness")
+	}
+
+	select {
+	case <-flushDone:
+	case <-time.After(time.Second):
+		pendingWAL.Set(readyWAL)
+		<-flushDone
+		m.Close()
+		t.Fatal("async flush blocked while waiting for WAL readiness")
+	}
+	m.Close()
 }
 
 func TestAlterCollectionSchemaChange(t *testing.T) {
@@ -832,17 +1090,17 @@ func TestCollectionInfoSchemaVersion(t *testing.T) {
 	assert.Equal(t, int32(3), ci.SchemaVersion())
 }
 
-func TestCollectionInfoUseGrowingSourceFlush(t *testing.T) {
+func TestCollectionInfoAllowGrowingSourceFlush(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
-	assert.False(t, (*CollectionInfo)(nil).UseGrowingSourceFlush())
+	assert.False(t, (*CollectionInfo)(nil).AllowGrowingSourceFlush())
 	ci := &CollectionInfo{}
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
 	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{}
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
 	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -851,12 +1109,12 @@ func TestCollectionInfoUseGrowingSourceFlush(t *testing.T) {
 		},
 	}
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	assert.True(t, ci.UseGrowingSourceFlush())
+	assert.True(t, ci.AllowGrowingSourceFlush())
 }
 
-func TestCollectionInfoUseGrowingSourceFlush_TextField(t *testing.T) {
+func TestCollectionInfoAllowGrowingSourceFlush_TextField(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
@@ -874,7 +1132,183 @@ func TestCollectionInfoUseGrowingSourceFlush_TextField(t *testing.T) {
 		},
 	}
 	assert.True(t, ci.HasTextField())
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
+	assert.True(t, ci.RequiresStorageV3())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	assert.True(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
+	assert.True(t, ci.AllowGrowingSourceFlush())
+}
+
+func TestCollectionInfoRuntimeFlushSize(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.CommonCfg.UseLoonFFI.Key, "true")
+	params.Save(params.CommonCfg.EnableGrowingSourceFlush.Key, "true")
+	params.Save(params.QueryNodeCfg.EnableInterminSegmentIndex.Key, "true")
+	params.Save(params.QueryNodeCfg.GrowingMmapEnabled.Key, "false")
+	params.Save(params.QueryNodeCfg.DenseVectorInterminIndexType.Key, "IVF_FLAT_CC")
+	params.Save(params.QueryNodeCfg.InterimIndexMemExpandRate.Key, "1.25")
+	params.Save(params.QueryNodeCfg.InterimIndexSubDim.Key, "16")
+	params.Save(params.QueryNodeCfg.InterimIndexRefineQuantType.Key, "NONE")
+	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
+	defer params.Reset(params.CommonCfg.EnableGrowingSourceFlush.Key)
+	defer params.Reset(params.QueryNodeCfg.EnableInterminSegmentIndex.Key)
+	defer params.Reset(params.QueryNodeCfg.GrowingMmapEnabled.Key)
+	defer params.Reset(params.QueryNodeCfg.DenseVectorInterminIndexType.Key)
+	defer params.Reset(params.QueryNodeCfg.InterimIndexMemExpandRate.Key)
+	defer params.Reset(params.QueryNodeCfg.InterimIndexSubDim.Key)
+	defer params.Reset(params.QueryNodeCfg.InterimIndexRefineQuantType.Key)
+
+	metrics := stats.ModifiedMetrics{Rows: 10, BinarySize: 100}
+	vectorInfo := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{
+						FieldID:  101,
+						DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.Equal(t, uint64(6500), vectorInfo.RuntimeFlushSize(metrics))
+
+	scalarInfo := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+				},
+			},
+		},
+	}
+	assert.Equal(t, metrics.BinarySize, scalarInfo.RuntimeFlushSize(metrics))
+
+	params.Save(params.QueryNodeCfg.DenseVectorInterminIndexType.Key, "SCANN_DVR")
+	assert.Equal(t, uint64(2660), vectorInfo.RuntimeFlushSize(metrics))
+	params.Save(params.QueryNodeCfg.InterimIndexRefineQuantType.Key, "FLOAT16")
+	assert.Equal(t, uint64(5220), vectorInfo.RuntimeFlushSize(metrics))
+	params.Save(params.QueryNodeCfg.InterimIndexRefineQuantType.Key, "NONE")
+	params.Save(params.QueryNodeCfg.DenseVectorInterminIndexType.Key, "IVF_FLAT_CC")
+
+	sparseInfo := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{FieldID: 101, DataType: schemapb.DataType_SparseFloatVector},
+				},
+			},
+		},
+	}
+	assert.Equal(t, metrics.BinarySize+metrics.Rows*uint64(typeutil.GetSparseFloatVectorEstimateLength()), sparseInfo.RuntimeFlushSize(metrics))
+
+	params.Save(params.QueryNodeCfg.GrowingMmapEnabled.Key, "true")
+	assert.Equal(t, metrics.BinarySize, vectorInfo.RuntimeFlushSize(metrics))
+	assert.Equal(t, metrics.BinarySize, sparseInfo.RuntimeFlushSize(metrics))
+	params.Save(params.QueryNodeCfg.GrowingMmapEnabled.Key, "false")
+
+	params.Save(params.QueryNodeCfg.EnableInterminSegmentIndex.Key, "false")
+	assert.Equal(t, metrics.BinarySize, vectorInfo.RuntimeFlushSize(metrics))
+	params.Save(params.QueryNodeCfg.EnableInterminSegmentIndex.Key, "true")
+
+	params.Save(params.CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	assert.Equal(t, metrics.BinarySize, vectorInfo.RuntimeFlushSize(metrics))
+}
+
+func TestCollectionInfoRuntimeFlushSizeEdgeCases(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.CommonCfg.UseLoonFFI.Key, "true")
+	params.Save(params.CommonCfg.EnableGrowingSourceFlush.Key, "true")
+	params.Save(params.QueryNodeCfg.EnableInterminSegmentIndex.Key, "true")
+	params.Save(params.QueryNodeCfg.GrowingMmapEnabled.Key, "false")
+	params.Save(params.QueryNodeCfg.DenseVectorInterminIndexType.Key, "IVF_FLAT_CC")
+	params.Save(params.QueryNodeCfg.InterimIndexMemExpandRate.Key, "2")
+	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
+	defer params.Reset(params.CommonCfg.EnableGrowingSourceFlush.Key)
+	defer params.Reset(params.QueryNodeCfg.EnableInterminSegmentIndex.Key)
+	defer params.Reset(params.QueryNodeCfg.GrowingMmapEnabled.Key)
+	defer params.Reset(params.QueryNodeCfg.DenseVectorInterminIndexType.Key)
+	defer params.Reset(params.QueryNodeCfg.InterimIndexMemExpandRate.Key)
+
+	vectorInfo := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{
+						FieldID:  101,
+						DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.Equal(t, uint64(100), vectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 0, BinarySize: 100}))
+	assert.Equal(t, uint64(0), vectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 10, BinarySize: 0}))
+	assert.Equal(t, uint64(math.MaxUint64), vectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: math.MaxUint64, BinarySize: math.MaxUint64 - 1}))
+
+	binaryVectorInfo := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{
+						FieldID:  101,
+						DataType: schemapb.DataType_BinaryVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.Equal(t, uint64(100), binaryVectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 10, BinarySize: 100}))
+
+	int8VectorInfo := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{
+						FieldID:  101,
+						DataType: schemapb.DataType_Int8Vector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.Equal(t, uint64(100), int8VectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 10, BinarySize: 100}))
+
+	invalidDimInfo := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{
+						FieldID:  101,
+						DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "bad"},
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.Equal(t, uint64(100), invalidDimInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 10, BinarySize: 100}))
 }

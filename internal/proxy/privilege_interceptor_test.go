@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -79,7 +82,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = InitMetaCache(ctx, client)
+		_, err = initMetaCache(ctx, client)
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{
 			DbName:         "default",
@@ -198,7 +201,7 @@ func TestPrivilegeInterceptorRequestDBName(t *testing.T) {
 			},
 		}, nil
 	}
-	err := InitMetaCache(context.Background(), client)
+	_, err := initMetaCache(context.Background(), client)
 	assert.NoError(t, err)
 
 	// Both users connect WITHOUT useDatabase, so the connection-context db is
@@ -228,6 +231,79 @@ func TestPrivilegeInterceptorRequestDBName(t *testing.T) {
 	})
 }
 
+func TestPrivilegeInterceptorStatisticsRBAC(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer privilege.CleanPrivilegeCache()
+
+	const (
+		username       = "stats_user"
+		roleName       = "role_stats"
+		collectionName = "coll_stats"
+		partitionName  = "part_stats"
+	)
+
+	ctx := GetContext(context.Background(), username+":pwd")
+	client := &MockMixCoordClientInterface{}
+
+	initPolicy := func(policyInfos []string) {
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status:      merr.Success(),
+				PolicyInfos: policyInfos,
+				UserRoles: []string{
+					funcutil.EncodeUserRoleCache(username, roleName),
+				},
+			}, nil
+		}
+		_, err := initMetaCache(ctx, client)
+		require.NoError(t, err)
+	}
+
+	collectionReq := func() *milvuspb.GetCollectionStatisticsRequest {
+		return &milvuspb.GetCollectionStatisticsRequest{
+			DbName:         util.DefaultDBName,
+			CollectionName: collectionName,
+		}
+	}
+	partitionReq := func() *milvuspb.GetPartitionStatisticsRequest {
+		return &milvuspb.GetPartitionStatisticsRequest{
+			DbName:         util.DefaultDBName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		}
+	}
+
+	assertDenied := func(t *testing.T, req interface{}) {
+		_, err := PrivilegeInterceptor(ctx, req)
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	}
+	assertAllowed := func(t *testing.T, req interface{}) {
+		_, err := PrivilegeInterceptor(ctx, req)
+		assert.NoError(t, err)
+	}
+
+	t.Run("authenticated principal without GetStatistics is denied", func(t *testing.T) {
+		initPolicy([]string{
+			funcutil.PolicyForPrivilege(roleName, commonpb.ObjectType_Collection.String(), collectionName, commonpb.ObjectPrivilege_PrivilegeLoad.String(), util.DefaultDBName),
+		})
+
+		assertDenied(t, collectionReq())
+		assertDenied(t, partitionReq())
+	})
+
+	t.Run("GetStatistics grant allows statistics requests", func(t *testing.T) {
+		initPolicy([]string{
+			funcutil.PolicyForPrivilege(roleName, commonpb.ObjectType_Collection.String(), collectionName, commonpb.ObjectPrivilege_PrivilegeGetStatistics.String(), util.DefaultDBName),
+		})
+
+		assertAllowed(t, collectionReq())
+		assertAllowed(t, partitionReq())
+	})
+}
+
 // TestPrivilegeInterceptorClusterLevel guards the cluster-level half of the
 // #50678 fix: cluster-level privileges (e.g. CreateDatabase/DropDatabase) are
 // not scoped to a specific database, so they are authorized globally (AnyWord),
@@ -253,7 +329,7 @@ func TestPrivilegeInterceptorClusterLevel(t *testing.T) {
 			},
 		}, nil
 	}
-	err := InitMetaCache(context.Background(), client)
+	_, err := initMetaCache(context.Background(), client)
 	assert.NoError(t, err)
 
 	t.Run("cluster grant authorizes CreateDatabase regardless of namespace", func(t *testing.T) {
@@ -306,7 +382,7 @@ func TestPrivilegeInterceptorDatabaseLevel(t *testing.T) {
 			},
 		}, nil
 	}
-	err := InitMetaCache(context.Background(), client)
+	_, err := initMetaCache(context.Background(), client)
 	assert.NoError(t, err)
 
 	// erin connects without useDatabase (context db = default); grant is on db_target.
@@ -363,7 +439,7 @@ func TestPrivilegeInterceptorRenameCollection(t *testing.T) {
 			},
 		}, nil
 	}
-	err := InitMetaCache(context.Background(), client)
+	_, err := initMetaCache(context.Background(), client)
 	assert.NoError(t, err)
 
 	t.Run("same-db rename allowed with database-admin on that db", func(t *testing.T) {
@@ -395,6 +471,86 @@ func TestPrivilegeInterceptorRenameCollection(t *testing.T) {
 	})
 }
 
+// TestPrivilegeInterceptorRestoreSnapshot covers restore authorization across
+// database boundaries. Same-database restore uses the collection-scoped grant,
+// while cross-database restore requires the same privilege at db="*" scope.
+func TestPrivilegeInterceptorRestoreSnapshot(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_collection", commonpb.ObjectType_Collection.String(), "orders", commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(), "tenant_a"),
+				funcutil.PolicyForPrivilege("role_cluster", commonpb.ObjectType_Collection.String(), "orders", commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(), util.AnyWord),
+				funcutil.PolicyForPrivilege("role_cluster", commonpb.ObjectType_Collection.String(), "payroll", commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(), util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("collection_admin", "role_collection"),
+				funcutil.EncodeUserRoleCache("cluster_admin", "role_cluster"),
+			},
+		}, nil
+	}
+	cache := mustInitMetaCacheForTest(context.Background(), client).(*MetaCache)
+	cache.SeedCollectionForTest("tenant_a", "payroll", 100, "orders_alias")
+	interceptor := PrivilegeInterceptorWithMetaCache(func() Cache { return cache })
+
+	t.Run("same database restore uses collection grant", func(t *testing.T) {
+		_, err := interceptor(GetContext(context.Background(), "collection_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+			TargetDbName:   "tenant_a",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("omitted target database uses active database", func(t *testing.T) {
+		_, err := interceptor(GetContextWithDB(context.Background(), "collection_admin:pwd", "tenant_a"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("omitted target database detects cross database restore", func(t *testing.T) {
+		_, err := interceptor(GetContextWithDB(context.Background(), "collection_admin:pwd", "tenant_b"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("cross database restore rejects collection grant", func(t *testing.T) {
+		_, err := interceptor(GetContext(context.Background(), "collection_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+			TargetDbName:   "tenant_b",
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("cross database restore accepts cluster scoped grant", func(t *testing.T) {
+		_, err := interceptor(GetContext(context.Background(), "cluster_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+			TargetDbName:   "tenant_b",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("cross database restore resolves alias in source database", func(t *testing.T) {
+		_, err := interceptor(GetContext(context.Background(), "cluster_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders_alias",
+			TargetDbName:   "tenant_b",
+		})
+		assert.NoError(t, err)
+	})
+}
+
 func TestRootShouldBindRole(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
@@ -404,7 +560,7 @@ func TestRootShouldBindRole(t *testing.T) {
 		Params.Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
 		defer Params.Reset(Params.CommonCfg.RootShouldBindRole.Key)
 
-		InitEmptyGlobalCache()
+		InitEmptyMetaCacheForTest()
 		_, err := PrivilegeInterceptor(rootCtx, &milvuspb.LoadCollectionRequest{
 			CollectionName: "col1",
 		})
@@ -415,7 +571,7 @@ func TestRootShouldBindRole(t *testing.T) {
 		Params.Save(Params.CommonCfg.RootShouldBindRole.Key, "true")
 		defer Params.Reset(Params.CommonCfg.RootShouldBindRole.Key)
 
-		InitEmptyGlobalCache()
+		InitEmptyMetaCacheForTest()
 		_, err := PrivilegeInterceptor(rootCtx, &milvuspb.LoadCollectionRequest{
 			CollectionName: "col1",
 		})
@@ -427,6 +583,72 @@ func TestRootShouldBindRole(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	})
+}
+
+func TestCheckSkipRLSPrivilege(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
+	defer Params.Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer privilege.CleanPrivilegeCache()
+	var metaCache Cache
+
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+	assert.NoError(t, checkSkipRLSPrivilege(context.Background(), metaCache, "db1", "coll1", "query"))
+
+	enforce, err := resolveRLSEnforcement(context.Background(), metaCache, false, true, true, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.False(t, enforce)
+
+	enforce, err = resolveRLSEnforcement(context.Background(), metaCache, true, true, false, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.True(t, enforce)
+
+	enforce, err = resolveRLSEnforcement(context.Background(), metaCache, true, false, true, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.False(t, enforce)
+
+	_, err = resolveRLSEnforcement(context.Background(), metaCache, true, true, true, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Contains(t, err.Error(), "rls.force")
+
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	ctx := GetContext(context.Background(), "alice:123456")
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status:      merr.Success(),
+			PolicyInfos: nil,
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("alice", "role1"),
+			},
+		}, nil
+	}
+	metaCache = mustInitMetaCacheForTest(ctx, client)
+	err = checkSkipRLSPrivilege(ctx, metaCache, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Contains(t, err.Error(), "SkipRLS")
+	_, err = resolveRLSEnforcement(ctx, metaCache, true, false, true, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "coll1", commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(), "db1"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("alice", "role1"),
+			},
+		}, nil
+	}
+	metaCache = mustInitMetaCacheForTest(ctx, client)
+	assert.NoError(t, checkSkipRLSPrivilege(ctx, metaCache, "db1", "coll1", "query"))
+	enforce, err = resolveRLSEnforcement(ctx, metaCache, true, false, true, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.False(t, enforce)
+	_, err = resolveRLSEnforcement(ctx, metaCache, true, true, true, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
 func TestResourceGroupPrivilege(t *testing.T) {
@@ -458,7 +680,8 @@ func TestResourceGroupPrivilege(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client)
+		_, err = initMetaCache(ctx, client)
+		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: "rg",
@@ -508,7 +731,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client)
+		_, err = initMetaCache(ctx, client)
+		assert.NoError(t, err)
 		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
@@ -564,7 +788,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client)
+		_, err = initMetaCache(ctx, client)
+		assert.NoError(t, err)
 		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
@@ -620,7 +845,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client)
+		_, err = initMetaCache(ctx, client)
+		assert.NoError(t, err)
 		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
@@ -724,7 +950,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client)
+		_, err = initMetaCache(ctx, client)
+		assert.NoError(t, err)
 		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
@@ -790,7 +1017,8 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client)
+		_, err = initMetaCache(ctx, client)
+		assert.NoError(t, err)
 		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{})
@@ -837,7 +1065,8 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client)
+		_, err = initMetaCache(ctx, client)
+		assert.NoError(t, err)
 		defer privilege.CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SelectUserRequest{})
@@ -852,4 +1081,142 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
 		assert.Error(t, err)
 	})
+}
+
+func TestCheckClusterPrivilege_AuthorizationDisabled(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	err := CheckClusterPrivilege(context.Background(), &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "authorization disabled must short-circuit to allow")
+}
+
+func TestCheckClusterPrivilege_RootBypass(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+	ctx := GetContext(context.Background(), "root:123456")
+
+	err := CheckClusterPrivilege(ctx, &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "root must bypass when rootShouldBindRole is false; "+
+		"this is what keeps milvus-backup working unchanged")
+}
+
+func TestCheckClusterPrivilege_NoAuthInfo(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	err := CheckClusterPrivilege(context.Background(), &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.Error(t, err, "a ctx without auth metadata must be refused, not allowed")
+}
+
+// TestCheckClusterPrivilege_GrantedUserIsAllowed proves the gate can actually be
+// opened by granting the privilege, using the same policy encoding the RBAC API
+// stores. Without this, every other test here is consistent with a gate nobody
+// can ever pass -- which would look identical in CI and break every non-root
+// milvus-backup deployment in production.
+func TestCheckClusterPrivilege_GrantedUserIsAllowed(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_importer", commonpb.ObjectType_Global.String(), "*",
+					commonpb.ObjectPrivilege_PrivilegeImportBinlog.String(), util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("importer", "role_importer"),
+			},
+		}, nil
+	}
+	// initMetaCache also seeds the privilege cache from ListPolicy, which is
+	// what this test needs; the same helper is used at the top of this file.
+	mustInitMetaCacheForTest(context.Background(), client)
+
+	err := CheckClusterPrivilege(GetContext(context.Background(), "importer:123456"),
+		&internalpb.ImportRequest{}, milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "a user holding the granted privilege must be allowed; "+
+		"if this fails the gate is unopenable and binlog import is dead for every non-root user")
+
+	err = CheckClusterPrivilege(GetContext(context.Background(), "alice:123456"),
+		&internalpb.ImportRequest{}, milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted,
+		"a user without the grant must still be refused")
+}
+
+// TestClusterPrivilegePathsAgree pins the two cluster-privilege entry points to
+// the same decision. CheckClusterPrivilege repeats the preconditions of
+// enforceClusterPrivilege rather than sharing them (they differ only in error
+// shape, ctx write-back and the audit report), so a condition added to one and
+// not the other would silently split who is allowed in. The shared
+// implementation belongs in its own change; until then this test is what
+// catches the drift.
+func TestClusterPrivilegePathsAgree(t *testing.T) {
+	paramtable.Init()
+	privilegeName := commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_importer", commonpb.ObjectType_Global.String(), "*",
+					privilegeName, util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("importer", "role_importer"),
+			},
+		}, nil
+	}
+	mustInitMetaCacheForTest(context.Background(), client)
+
+	cases := []struct {
+		name          string
+		authorization string
+		rootBindRole  string
+		ctx           context.Context
+		wantAllowed   bool
+	}{
+		{"authorization disabled", "false", "false", context.Background(), true},
+		{"root bypass", "true", "false", GetContext(context.Background(), "root:123456"), true},
+		{"root bound to roles", "true", "true", GetContext(context.Background(), "root:123456"), false},
+		{"no auth info", "true", "false", context.Background(), false},
+		{"granted user", "true", "false", GetContext(context.Background(), "importer:123456"), true},
+		{"ungranted user", "true", "false", GetContext(context.Background(), "alice:123456"), false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, tt.authorization)
+			paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, tt.rootBindRole)
+			defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+			defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+			checkErr := CheckClusterPrivilege(tt.ctx, &internalpb.ImportRequest{},
+				milvuspb.MilvusService_Import_FullMethodName, privilegeName)
+			_, enforceErr := enforceClusterPrivilege(tt.ctx, privilegeName)
+
+			assert.Equal(t, tt.wantAllowed, checkErr == nil, "CheckClusterPrivilege")
+			assert.Equal(t, checkErr == nil, enforceErr == nil,
+				"the two cluster-privilege paths disagree on this input")
+		})
+	}
 }

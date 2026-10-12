@@ -1,20 +1,19 @@
-import random
-from sklearn import preprocessing
-import numpy as np
-import sys
 import json
+import random
+import sys
 import time
-from utils import constant
-from utils.utils import gen_collection_name
-from utils.util_log import test_log as logger
+
+import numpy as np
 import pytest
 from base.testbase import TestBase
-from utils.utils import (get_data_by_payload, get_common_fields_by_data)
+from sklearn import preprocessing
+from utils import constant
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name, get_common_fields_by_data, get_data_by_payload
 
 
 @pytest.mark.L0
 class TestInsertVector(TestBase):
-
     @pytest.mark.parametrize("insert_round", [2, 1])
     @pytest.mark.parametrize("nb", [100, 10, 1])
     @pytest.mark.parametrize("dim", [32, 128])
@@ -33,13 +32,13 @@ class TestInsertVector(TestBase):
             "dimension": dim,
             "primaryField": primary_field,
             "vectorField": vector_field,
-            "autoID":True,
+            "autoID": True,
         }
         rsp = self.collection_client.collection_create(collection_payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         # insert data
         for i in range(insert_round):
             data = get_data_by_payload(collection_payload, nb)
@@ -50,8 +49,8 @@ class TestInsertVector(TestBase):
             body_size = sys.getsizeof(json.dumps(payload))
             logger.info(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 200
-            assert rsp['data']['insertCount'] == nb
+            assert rsp["code"] == 200
+            assert rsp["data"]["insertCount"] == nb
         logger.info("finished")
 
     @pytest.mark.L0
@@ -67,10 +66,10 @@ class TestInsertVector(TestBase):
             "dimension": 768,
         }
         rsp = self.collection_client.collection_create(collection_payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         # insert data
         nb = 300
         for i in range(insert_round):
@@ -82,8 +81,8 @@ class TestInsertVector(TestBase):
             body_size = sys.getsizeof(json.dumps(payload))
             logger.info(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 200
-            assert rsp['data']['insertCount'] == nb
+            assert rsp["code"] == 200
+            assert rsp["data"]["insertCount"] == nb
 
 
 @pytest.mark.L1
@@ -100,15 +99,16 @@ class TestInsertVectorNegative(TestBase):
             "dimension": dim,
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = self.collection_client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         # insert data
         nb = 10
         data = [
             {
                 "vector": [np.float64(random.random()) for _ in range(dim)],
-            } for _ in range(nb)
+            }
+            for _ in range(nb)
         ]
         payload = {
             "collectionName": name,
@@ -119,7 +119,7 @@ class TestInsertVectorNegative(TestBase):
         client = self.vector_client
         client.api_key = "invalid_api_key"
         rsp = client.vector_insert(payload)
-        assert rsp['code'] == 1800
+        assert rsp["code"] == 1800
 
     def test_insert_vector_with_invalid_collection_name(self):
         """
@@ -134,9 +134,9 @@ class TestInsertVectorNegative(TestBase):
             "dimension": dim,
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = self.collection_client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         # insert data
         nb = 100
         data = get_data_by_payload(payload, nb)
@@ -147,7 +147,7 @@ class TestInsertVectorNegative(TestBase):
         body_size = sys.getsizeof(json.dumps(payload))
         logger.info(f"body size: {body_size / 1024 / 1024} MB")
         rsp = self.vector_client.vector_insert(payload)
-        assert rsp['code'] == 1
+        assert rsp["code"] == 1
 
     def test_insert_vector_with_invalid_database_name(self):
         """
@@ -161,9 +161,9 @@ class TestInsertVectorNegative(TestBase):
             "dimension": dim,
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = self.collection_client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         # insert data
         nb = 10
         data = get_data_by_payload(payload, nb)
@@ -175,7 +175,7 @@ class TestInsertVectorNegative(TestBase):
         logger.info(f"body size: {body_size / 1024 / 1024} MB")
         success = False
         rsp = self.vector_client.vector_insert(payload, db_name="invalid_database")
-        assert rsp['code'] == 800
+        assert rsp["code"] == 800
 
     def test_insert_vector_with_mismatch_dim(self):
         """
@@ -189,15 +189,16 @@ class TestInsertVectorNegative(TestBase):
             "dimension": dim,
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         rsp = self.collection_client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         # insert data
         nb = 1
         data = [
             {
                 "vector": [np.float64(random.random()) for _ in range(dim + 1)],
-            } for i in range(nb)
+            }
+            for i in range(nb)
         ]
         payload = {
             "collectionName": name,
@@ -206,13 +207,12 @@ class TestInsertVectorNegative(TestBase):
         body_size = sys.getsizeof(json.dumps(payload))
         logger.info(f"body size: {body_size / 1024 / 1024} MB")
         rsp = self.vector_client.vector_insert(payload)
-        assert rsp['code'] == 1804
-        assert rsp['message'] == "fail to deal the insert data"
+        assert rsp["code"] == 1804
+        assert rsp["message"] == "fail to deal the insert data"
 
 
 @pytest.mark.L0
 class TestSearchVector(TestBase):
-
     @pytest.mark.parametrize("metric_type", ["IP", "L2"])
     def test_search_vector_with_simple_payload(self, metric_type):
         """
@@ -230,14 +230,14 @@ class TestSearchVector(TestBase):
             "vector": vector_to_search,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         limit = int(payload.get("limit", 100))
         assert len(res) == limit
-        ids = [item['id'] for item in res]
+        ids = [item["id"] for item in res]
         assert len(ids) == len(set(ids))
-        distance = [item['distance'] for item in res]
+        distance = [item["distance"] for item in res]
         if metric_type == "L2":
             assert distance == sorted(distance)
         if metric_type == "IP":
@@ -268,16 +268,16 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         if sum_limit_offset > max_search_sum_limit_offset:
-            assert rsp['code'] == 65535
+            assert rsp["code"] == 65535
             return
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         limit = int(payload.get("limit", 100))
         assert len(res) == limit
-        ids = [item['id'] for item in res]
+        ids = [item["id"] for item in res]
         assert len(ids) == len(set(ids))
-        distance = [item['distance'] for item in res]
+        distance = [item["distance"] for item in res]
         if metric_type == "L2":
             assert distance == sorted(distance)
         if metric_type == "IP":
@@ -310,10 +310,10 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         if offset + limit > constant.MAX_SUM_OFFSET_AND_LIMIT:
-            assert rsp['code'] == 90126
+            assert rsp["code"] == 90126
             return
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         assert len(res) == limit
         for item in res:
@@ -345,15 +345,15 @@ class TestSearchVector(TestBase):
             "offset": 0,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         assert len(res) <= limit
         for item in res:
             uid = item.get("uid")
             eval(filter_expr)
 
-    @pytest.mark.parametrize("filter_expr", ["name > \"placeholder\"", "name like \"placeholder%\""])
+    @pytest.mark.parametrize("filter_expr", ['name > "placeholder"', 'name like "placeholder%"'])
     def test_search_vector_with_complex_varchar_filter(self, filter_expr):
         """
         Search a vector with a simple payload
@@ -386,8 +386,8 @@ class TestSearchVector(TestBase):
             "offset": 0,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         assert len(res) <= limit
         for item in res:
@@ -398,9 +398,9 @@ class TestSearchVector(TestBase):
             if "like" in filter_expr:
                 assert name.startswith(prefix)
 
-    @pytest.mark.parametrize("filter_expr", ["uid < 100 and name > \"placeholder\"",
-                                             "uid < 100 and name like \"placeholder%\""
-                                             ])
+    @pytest.mark.parametrize(
+        "filter_expr", ['uid < 100 and name > "placeholder"', 'uid < 100 and name like "placeholder%"']
+    )
     def test_search_vector_with_complex_int64_varchar_and_filter(self, filter_expr):
         """
         Search a vector with a simple payload
@@ -433,8 +433,8 @@ class TestSearchVector(TestBase):
             "offset": 0,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         assert len(res) <= limit
         for item in res:
@@ -474,7 +474,7 @@ class TestSearchVectorNegative(TestBase):
             "offset": 0,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 1
+        assert rsp["code"] == 1
 
     @pytest.mark.parametrize("offset", [-1, 100_001])
     def test_search_vector_with_invalid_offset(self, offset):
@@ -499,7 +499,7 @@ class TestSearchVectorNegative(TestBase):
             "offset": offset,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 1
+        assert rsp["code"] == 1
 
     def test_search_vector_with_illegal_api_key(self):
         """
@@ -542,10 +542,10 @@ class TestSearchVectorNegative(TestBase):
 
 @pytest.mark.L0
 class TestQueryVector(TestBase):
-
-    @pytest.mark.parametrize("expr", ["10+20 <= uid < 20+30", "uid in [1,2,3,4]",
-                                      "uid > 0", "uid >= 0", "uid > 0",
-                                      "uid > -100 and uid < 100"])
+    @pytest.mark.parametrize(
+        "expr",
+        ["10+20 <= uid < 20+30", "uid in [1,2,3,4]", "uid > 0", "uid >= 0", "uid > 0", "uid > -100 and uid < 100"],
+    )
     @pytest.mark.parametrize("include_output_fields", [True, False])
     @pytest.mark.parametrize("partial_fields", [True, False])
     def test_query_vector_with_int64_filter(self, expr, include_output_fields, partial_fields):
@@ -557,36 +557,30 @@ class TestQueryVector(TestBase):
         schema_payload, data = self.init_collection(name)
         output_fields = get_common_fields_by_data(data)
         if partial_fields:
-            output_fields = output_fields[:len(output_fields) // 2]
+            output_fields = output_fields[: len(output_fields) // 2]
             if "uid" not in output_fields:
                 output_fields.append("uid")
         else:
             output_fields = output_fields
 
         # query data
-        payload = {
-            "collectionName": name,
-            "filter": expr,
-            "limit": 100,
-            "offset": 0,
-            "outputFields": output_fields
-        }
+        payload = {"collectionName": name, "filter": expr, "limit": 100, "offset": 0, "outputFields": output_fields}
         if not include_output_fields:
             payload.pop("outputFields")
-            if 'vector' in output_fields:
+            if "vector" in output_fields:
                 output_fields.remove("vector")
         time.sleep(5)
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         for r in res:
-            uid = r['uid']
+            uid = r["uid"]
             assert eval(expr) is True
             for field in output_fields:
                 assert field in r
 
-    @pytest.mark.parametrize("filter_expr", ["name > \"placeholder\"", "name like \"placeholder%\""])
+    @pytest.mark.parametrize("filter_expr", ['name > "placeholder"', 'name like "placeholder%"'])
     @pytest.mark.parametrize("include_output_fields", [True, False])
     def test_query_vector_with_varchar_filter(self, filter_expr, include_output_fields):
         """
@@ -619,8 +613,8 @@ class TestQueryVector(TestBase):
         if not include_output_fields:
             payload.pop("outputFields")
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         assert len(res) <= limit
         for item in res:
@@ -638,7 +632,7 @@ class TestQueryVector(TestBase):
         """
         max_sum_of_limit_offset = 16384
         name = gen_collection_name()
-        filter_expr = "name > \"placeholder\""
+        filter_expr = 'name > "placeholder"'
         self.name = name
         nb = 200
         dim = 128
@@ -665,10 +659,10 @@ class TestQueryVector(TestBase):
         }
         rsp = self.vector_client.vector_query(payload)
         if sum_of_limit_offset > max_sum_of_limit_offset:
-            assert rsp['code'] == 1
+            assert rsp["code"] == 1
             return
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         assert len(res) <= limit
         for item in res:
@@ -682,7 +676,6 @@ class TestQueryVector(TestBase):
 
 @pytest.mark.L0
 class TestGetVector(TestBase):
-
     def test_get_vector_with_simple_payload(self):
         """
         Search a vector with a simple payload
@@ -699,12 +692,12 @@ class TestGetVector(TestBase):
             "vector": vector_to_search,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         limit = int(payload.get("limit", 100))
         assert len(res) == limit
-        ids = [item['id'] for item in res]
+        ids = [item["id"] for item in res]
         assert len(ids) == len(set(ids))
         payload = {
             "collectionName": name,
@@ -712,12 +705,12 @@ class TestGetVector(TestBase):
             "id": ids[0],
         }
         rsp = self.vector_client.vector_get(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {res}")
         logger.info(f"res: {len(res)}")
         for item in res:
-            assert item['id'] == ids[0]
+            assert item["id"] == ids[0]
 
     @pytest.mark.L0
     @pytest.mark.parametrize("id_field_type", ["list", "one"])
@@ -739,12 +732,12 @@ class TestGetVector(TestBase):
             "filter": f"uid in {uids}",
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         ids = []
         for r in res:
-            ids.append(r['id'])
+            ids.append(r["id"])
         logger.info(f"ids: {len(ids)}")
         id_to_get = None
         if id_field_type == "list":
@@ -757,14 +750,10 @@ class TestGetVector(TestBase):
             else:
                 id_to_get = 0
         # get by id list
-        payload = {
-            "collectionName": name,
-            "outputFields": output_fields,
-            "id": id_to_get
-        }
+        payload = {"collectionName": name, "outputFields": output_fields, "id": id_to_get}
         rsp = self.vector_client.vector_get(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         if isinstance(id_to_get, list):
             if include_invalid_id:
                 assert len(res) == len(id_to_get) - 1
@@ -775,11 +764,11 @@ class TestGetVector(TestBase):
                 assert len(res) == 0
             else:
                 assert len(res) == 1
-        for r in rsp['data']:
+        for r in rsp["data"]:
             if isinstance(id_to_get, list):
-                assert r['id'] in id_to_get
+                assert r["id"] in id_to_get
             else:
-                assert r['id'] == id_to_get
+                assert r["id"] == id_to_get
             if include_output_fields:
                 for field in output_fields:
                     assert field in r
@@ -787,7 +776,6 @@ class TestGetVector(TestBase):
 
 @pytest.mark.L0
 class TestDeleteVector(TestBase):
-
     @pytest.mark.parametrize("include_invalid_id", [True, False])
     @pytest.mark.parametrize("id_field_type", ["list", "one"])
     def test_delete_vector_default(self, id_field_type, include_invalid_id):
@@ -807,12 +795,12 @@ class TestDeleteVector(TestBase):
             "filter": f"uid in {uids}",
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         ids = []
         for r in res:
-            ids.append(r['id'])
+            ids.append(r["id"])
         logger.info(f"ids: {len(ids)}")
         id_to_get = None
         if id_field_type == "list":
@@ -828,12 +816,9 @@ class TestDeleteVector(TestBase):
             if len(id_to_get) >= 100:
                 id_to_get = id_to_get[-100:]
         # delete by id list
-        payload = {
-            "collectionName": name,
-            "id": id_to_get
-        }
+        payload = {"collectionName": name, "id": id_to_get}
         rsp = self.vector_client.vector_delete(payload)
-        assert rsp['code'] == 200
+        assert rsp["code"] == 200
         logger.info(f"delete res: {rsp}")
 
         # verify data deleted
@@ -845,12 +830,12 @@ class TestDeleteVector(TestBase):
         }
         time.sleep(5)
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        assert len(rsp['data']) == 0
+        assert rsp["code"] == 200
+        assert len(rsp["data"]) == 0
 
 
 @pytest.mark.L1
-class TestDeleteVector(TestBase):
+class TestDeleteVectorNegative(TestBase):
     def test_delete_vector_with_invalid_api_key(self):
         """
         Delete a vector with an invalid api key
@@ -870,23 +855,20 @@ class TestDeleteVector(TestBase):
             "filter": f"uid in {uids}",
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         ids = []
         for r in res:
-            ids.append(r['id'])
+            ids.append(r["id"])
         logger.info(f"ids: {len(ids)}")
         id_to_get = ids
         # delete by id list
-        payload = {
-            "collectionName": name,
-            "id": id_to_get
-        }
+        payload = {"collectionName": name, "id": id_to_get}
         client = self.vector_client
         client.api_key = "invalid_api_key"
         rsp = client.vector_delete(payload)
-        assert rsp['code'] == 1800
+        assert rsp["code"] == 1800
 
     def test_delete_vector_with_invalid_collection_name(self):
         """
@@ -899,18 +881,12 @@ class TestDeleteVector(TestBase):
         # query data
         # expr = f"id in {[i for i in range(10)]}".replace("[", "(").replace("]", ")")
         expr = "id > 0"
-        payload = {
-            "collectionName": name,
-            "filter": expr,
-            "limit": 3000,
-            "offset": 0,
-            "outputFields": ["id", "uid"]
-        }
+        payload = {"collectionName": name, "filter": expr, "limit": 3000, "offset": 0, "outputFields": ["id", "uid"]}
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
-        id_list = [r['id'] for r in res]
+        id_list = [r["id"] for r in res]
         delete_expr = f"id in {[i for i in id_list[:10]]}"
         # query data before delete
         payload = {
@@ -918,11 +894,11 @@ class TestDeleteVector(TestBase):
             "filter": delete_expr,
             "limit": 3000,
             "offset": 0,
-            "outputFields": ["id", "uid"]
+            "outputFields": ["id", "uid"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
         # delete data
         payload = {
@@ -930,7 +906,7 @@ class TestDeleteVector(TestBase):
             "filter": delete_expr,
         }
         rsp = self.vector_client.vector_delete(payload)
-        assert rsp['code'] == 1
+        assert rsp["code"] == 1
 
     def test_delete_vector_with_non_primary_key(self):
         """
@@ -940,18 +916,12 @@ class TestDeleteVector(TestBase):
         self.name = name
         self.init_collection(name, dim=128, nb=300)
         expr = "uid > 0"
-        payload = {
-            "collectionName": name,
-            "filter": expr,
-            "limit": 3000,
-            "offset": 0,
-            "outputFields": ["id", "uid"]
-        }
+        payload = {"collectionName": name, "filter": expr, "limit": 3000, "offset": 0, "outputFields": ["id", "uid"]}
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         logger.info(f"res: {len(res)}")
-        id_list = [r['uid'] for r in res]
+        id_list = [r["uid"] for r in res]
         delete_expr = f"uid in {[i for i in id_list[:10]]}"
         # query data before delete
         payload = {
@@ -959,11 +929,11 @@ class TestDeleteVector(TestBase):
             "filter": delete_expr,
             "limit": 3000,
             "offset": 0,
-            "outputFields": ["id", "uid"]
+            "outputFields": ["id", "uid"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 200
-        res = rsp['data']
+        assert rsp["code"] == 200
+        res = rsp["data"]
         num_before_delete = len(res)
         logger.info(f"res: {len(res)}")
         # delete data
@@ -978,7 +948,7 @@ class TestDeleteVector(TestBase):
             "filter": delete_expr,
             "limit": 3000,
             "offset": 0,
-            "outputFields": ["id", "uid"]
+            "outputFields": ["id", "uid"],
         }
         time.sleep(1)
         rsp = self.vector_client.vector_query(payload)

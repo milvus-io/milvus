@@ -21,9 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
@@ -123,17 +125,25 @@ func TestResumableProducer(t *testing.T) {
 	rp.Close()
 }
 
-func createRealInsertMessage(t *testing.T, vchannel string) message.MutableMessage {
-	msg := message.NewInsertMessageBuilderV1().
+func createRealInsertMessage(t *testing.T, vchannel string, properties ...map[string]string) message.MutableMessage {
+	builder := message.NewInsertMessageBuilderV1().
+		WithProperties(firstProperties(properties...)).
 		WithHeader(&message.InsertMessageHeader{
 			CollectionId: 1,
 		}).
 		WithBody(&msgpb.InsertRequest{
 			CollectionID: 1,
 		}).
-		WithVChannel(vchannel).
-		MustBuildMutable()
+		WithVChannel(vchannel)
+	msg := builder.MustBuildMutable()
 	return msg
+}
+
+func firstProperties(properties ...map[string]string) map[string]string {
+	if len(properties) == 0 {
+		return nil
+	}
+	return properties[0]
 }
 
 func TestResumableProducer_BeginProduce(t *testing.T) {
@@ -435,6 +445,45 @@ func TestResumableProducer_ConcurrentProduce(t *testing.T) {
 		err := <-errCh
 		assert.NoError(t, err)
 	}
+}
+
+func TestResumableProducerReturnsPartialUpdateCASError(t *testing.T) {
+	rejectProducer := &partialUpdateCASRejectProducer{}
+	appendCalls := 0
+	m := mockey.Mock((*partialUpdateCASRejectProducer).Append).To(
+		func(*partialUpdateCASRejectProducer, context.Context, message.MutableMessage) (*types.AppendResult, error) {
+			appendCalls++
+			if appendCalls > 1 {
+				return nil, context.Canceled
+			}
+			return nil, status.NewPartialUpdateRetryable("conflict")
+		},
+	).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*partialUpdateCASRejectProducer).IsAvailable).Return(true).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*partialUpdateCASRejectProducer).Available).Return(make(chan struct{})).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*partialUpdateCASRejectProducer).Close).Return().Build()
+	defer m.UnPatch()
+
+	rp := NewResumableProducer(func(context.Context, *handler.ProducerOptions) (producer.Producer, error) {
+		return rejectProducer, nil
+	}, &ProducerOptions{PChannel: "partial-update-cas"})
+	defer rp.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result, err := rp.produceInternal(ctx, createRealInsertMessage(t, "test-v"))
+
+	require.Error(t, err)
+	require.True(t, status.AsStreamingError(err).IsPartialUpdateRetryableCAS())
+	require.Nil(t, result)
+	require.Equal(t, 1, appendCalls)
+}
+
+type partialUpdateCASRejectProducer struct {
+	producer.Producer
 }
 
 func TestResumableProducer_ProduceAfterClose(t *testing.T) {

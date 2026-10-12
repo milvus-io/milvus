@@ -6,9 +6,7 @@ import (
 	context "context"
 
 	broadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -104,12 +102,12 @@ func (_c *MockBroadcaster_Close_Call) RunAndReturn(run func()) *MockBroadcaster_
 	return _c
 }
 
-// GetPendingCreateCollectionResources provides a mock function with no fields
-func (_m *MockBroadcaster) GetPendingCreateCollectionResources() map[int64][]int64 {
+// GetPendingSchemaFileResources provides a mock function with no fields
+func (_m *MockBroadcaster) GetPendingSchemaFileResources() map[int64][]int64 {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetPendingCreateCollectionResources")
+		panic("no return value specified for GetPendingSchemaFileResources")
 	}
 
 	var r0 map[int64][]int64
@@ -124,29 +122,29 @@ func (_m *MockBroadcaster) GetPendingCreateCollectionResources() map[int64][]int
 	return r0
 }
 
-// MockBroadcaster_GetPendingCreateCollectionResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPendingCreateCollectionResources'
-type MockBroadcaster_GetPendingCreateCollectionResources_Call struct {
+// MockBroadcaster_GetPendingSchemaFileResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPendingSchemaFileResources'
+type MockBroadcaster_GetPendingSchemaFileResources_Call struct {
 	*mock.Call
 }
 
-// GetPendingCreateCollectionResources is a helper method to define mock.On call
-func (_e *MockBroadcaster_Expecter) GetPendingCreateCollectionResources() *MockBroadcaster_GetPendingCreateCollectionResources_Call {
-	return &MockBroadcaster_GetPendingCreateCollectionResources_Call{Call: _e.mock.On("GetPendingCreateCollectionResources")}
+// GetPendingSchemaFileResources is a helper method to define mock.On call
+func (_e *MockBroadcaster_Expecter) GetPendingSchemaFileResources() *MockBroadcaster_GetPendingSchemaFileResources_Call {
+	return &MockBroadcaster_GetPendingSchemaFileResources_Call{Call: _e.mock.On("GetPendingSchemaFileResources")}
 }
 
-func (_c *MockBroadcaster_GetPendingCreateCollectionResources_Call) Run(run func()) *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+func (_c *MockBroadcaster_GetPendingSchemaFileResources_Call) Run(run func()) *MockBroadcaster_GetPendingSchemaFileResources_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *MockBroadcaster_GetPendingCreateCollectionResources_Call) Return(_a0 map[int64][]int64) *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+func (_c *MockBroadcaster_GetPendingSchemaFileResources_Call) Return(_a0 map[int64][]int64) *MockBroadcaster_GetPendingSchemaFileResources_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockBroadcaster_GetPendingCreateCollectionResources_Call) RunAndReturn(run func() map[int64][]int64) *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+func (_c *MockBroadcaster_GetPendingSchemaFileResources_Call) RunAndReturn(run func() map[int64][]int64) *MockBroadcaster_GetPendingSchemaFileResources_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -326,6 +324,79 @@ func (_c *MockBroadcaster_WithSecondaryClusterResourceKey_Call) Return(_a0 broad
 }
 
 func (_c *MockBroadcaster_WithSecondaryClusterResourceKey_Call) RunAndReturn(run func(context.Context) (broadcaster.BroadcastAPI, error)) *MockBroadcaster_WithSecondaryClusterResourceKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WithUnreplicableResourceKeys provides a mock function with given fields: ctx, resourceKeys
+func (_m *MockBroadcaster) WithUnreplicableResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	_va := make([]interface{}, len(resourceKeys))
+	for _i := range resourceKeys {
+		_va[_i] = resourceKeys[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WithUnreplicableResourceKeys")
+	}
+
+	var r0 broadcaster.BroadcastAPI
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ResourceKey) (broadcaster.BroadcastAPI, error)); ok {
+		return rf(ctx, resourceKeys...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ResourceKey) broadcaster.BroadcastAPI); ok {
+		r0 = rf(ctx, resourceKeys...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(broadcaster.BroadcastAPI)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, ...message.ResourceKey) error); ok {
+		r1 = rf(ctx, resourceKeys...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroadcaster_WithUnreplicableResourceKeys_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithUnreplicableResourceKeys'
+type MockBroadcaster_WithUnreplicableResourceKeys_Call struct {
+	*mock.Call
+}
+
+// WithUnreplicableResourceKeys is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resourceKeys ...message.ResourceKey
+func (_e *MockBroadcaster_Expecter) WithUnreplicableResourceKeys(ctx interface{}, resourceKeys ...interface{}) *MockBroadcaster_WithUnreplicableResourceKeys_Call {
+	return &MockBroadcaster_WithUnreplicableResourceKeys_Call{Call: _e.mock.On("WithUnreplicableResourceKeys",
+		append([]interface{}{ctx}, resourceKeys...)...)}
+}
+
+func (_c *MockBroadcaster_WithUnreplicableResourceKeys_Call) Run(run func(ctx context.Context, resourceKeys ...message.ResourceKey)) *MockBroadcaster_WithUnreplicableResourceKeys_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]message.ResourceKey, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(message.ResourceKey)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_WithUnreplicableResourceKeys_Call) Return(_a0 broadcaster.BroadcastAPI, _a1 error) *MockBroadcaster_WithUnreplicableResourceKeys_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroadcaster_WithUnreplicableResourceKeys_Call) RunAndReturn(run func(context.Context, ...message.ResourceKey) (broadcaster.BroadcastAPI, error)) *MockBroadcaster_WithUnreplicableResourceKeys_Call {
 	_c.Call.Return(run)
 	return _c
 }

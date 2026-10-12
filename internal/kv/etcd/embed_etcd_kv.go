@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -51,6 +52,12 @@ type EmbedEtcdKV struct {
 	closeOnce sync.Once
 
 	requestTimeout time.Duration
+}
+
+// MaxTxnOps returns etcd's configured per-transaction operation limit
+// (metastore.maxEtcdTxnNum); embedded etcd shares the same server-side cap.
+func (kv *EmbedEtcdKV) MaxTxnOps() int {
+	return paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
 }
 
 func retry(attempts int, sleep time.Duration, fn func() error) error {

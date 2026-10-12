@@ -14,13 +14,23 @@ PWD 	  := $(shell pwd)
 GOPATH	:= $(shell $(GO) env GOPATH)
 SHELL 	:= /bin/bash
 OBJPREFIX := "github.com/milvus-io/milvus/cmd/milvus"
-MILVUS_GO_BUILD_TAGS := "dynamic,sonic,with_jemalloc"
+# Temporary synchronization workaround for the race between Go plugin loading
+# and github.com/bytedance/sonic/loader registering JIT moduledata. All Go
+# plugins loaded by Milvus must use the same tag and linker flag.
+SONIC_PLUGIN_SYNC_TAG := bytedance_tango
+SONIC_PLUGIN_SYNC_LDFLAG := -checklinkname=0
+MILVUS_GO_BUILD_TAGS := dynamic,sonic,with_jemalloc,$(SONIC_PLUGIN_SYNC_TAG)
 
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
 PGO_PATH := $(PWD)/configs/pgo
 OS := $(shell uname -s)
 mode = Release
+
+# Optional persistent root for Cargo build artifacts. Individual Rust
+# workspaces select their own subdirectories below this root.
+MILVUS_CARGO_TARGET_ROOT ?=
+export MILVUS_CARGO_TARGET_ROOT
 
 # Set disk_index default based on OS
 # macOS (Darwin) does not support aio, so disable disk_index
@@ -59,6 +69,11 @@ ifdef USE_SVS
 	use_svs = ${USE_SVS}
 endif
 
+with_crt = OFF
+ifdef WITH_CRT
+	with_crt = ${WITH_CRT}
+endif
+
 # FIPS: default OFF. Set MILVUS_FIPS_ENABLED=ON to enable BoringCrypto.
 GOEXPERIMENT_FLAG :=
 ifeq ($(MILVUS_FIPS_ENABLED),ON)
@@ -73,7 +88,7 @@ MOCKERY_VERSION := 2.53.3
 MOCKERY_OUTPUT := $(shell $(INSTALL_PATH)/mockery --version 2>/dev/null)
 INSTALL_MOCKERY := $(findstring $(MOCKERY_VERSION),$(MOCKERY_OUTPUT))
 # gci
-GCI_VERSION := 0.11.2
+GCI_VERSION := 0.13.4
 GCI_OUTPUT := $(shell $(INSTALL_PATH)/gci --version 2>/dev/null)
 INSTALL_GCI := $(findstring $(GCI_VERSION),$(GCI_OUTPUT))
 # gofumpt
@@ -113,14 +128,14 @@ build-go:
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		$(GOEXPERIMENT_FLAG) CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
-		-tags $(MILVUS_GO_BUILD_TAGS) -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
+		$(GOEXPERIMENT_FLAG) CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
+		-tags "$(MILVUS_GO_BUILD_TAGS)" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 milvus-gpu: build-cpp-gpu print-gpu-build-info
 	@echo "Building Milvus-gpu ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS_GPU)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
+		CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS_GPU)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
 		-tags "$(MILVUS_GO_BUILD_TAGS),cuda" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:
@@ -207,8 +222,7 @@ lint-fix: getdeps
 	@$(INSTALL_PATH)/gofumpt -l -w tests/go_client/
 	@$(INSTALL_PATH)/gofumpt -l -w tests/integration/
 	@echo "Running gci fix"
-# Skip boring_enabled.go: gci misclassifies crypto/boring (a std lib package) as third-party, conflicting with gofumpt
-	@find cmd/ -name '*.go' ! -name 'boring_enabled.go' | xargs $(INSTALL_PATH)/gci write --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
+	@$(INSTALL_PATH)/gci write cmd/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write internal/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write pkg/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write client/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
@@ -229,6 +243,8 @@ static-check: getdeps
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 	@echo "Start check go_client e2e package"
 	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml
+	@echo "Start check segcore error boundaries"
+	@$(PWD)/scripts/check_segcore_error_boundaries.sh
 
 verifiers: build-cpp getdeps cppcheck rustcheck fmt static-check
 
@@ -248,9 +264,25 @@ meta-migration:
     		-tags dynamic -o $(INSTALL_PATH)/meta-migration $(MIGRATION_PATH)/main.go 1>/dev/null
 
 INTERATION_PATH = $(PWD)/tests/integration
-integration-test: getdeps
-	@echo "Building integration tests ..."
-	@(env bash $(PWD)/scripts/run_intergration_test.sh "$(INSTALL_PATH)/gotestsum --")
+CMEK_FIXTURE_PATH = $(INSTALL_PATH)/cmek-fixtures
+
+.PHONY: build-cmek-fixtures integration-test integration-test-base integration-test-cmek
+.NOTPARALLEL: integration-test
+
+build-cmek-fixtures:
+	@echo "Building CMEK fixture plugins ..."
+	@(env GO="$(GO)" bash $(PWD)/scripts/build_cmek_fixtures.sh "$(CMEK_FIXTURE_PATH)")
+
+integration-test: MILVUS_INTEGRATION_COVERAGE_APPEND = true
+integration-test: integration-test-base integration-test-cmek
+
+integration-test-base: getdeps
+	@echo "Running integration tests excluding CMEK ..."
+	@(bash $(PWD)/scripts/run_intergration_test.sh --exclude-package ./cmek "$(INSTALL_PATH)/gotestsum --")
+
+integration-test-cmek: getdeps build-cmek-fixtures
+	@echo "Running CMEK scalar-index integration tests ..."
+	@(env MILVUS_CMEK_FIXTURE_DIR="$(CMEK_FIXTURE_PATH)" MILVUS_INTEGRATION_COVERAGE_APPEND="$(MILVUS_INTEGRATION_COVERAGE_APPEND)" bash $(PWD)/scripts/run_intergration_test.sh --package ./cmek "$(INSTALL_PATH)/gotestsum --")
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
@@ -292,21 +324,33 @@ generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
+generate-segcore-codes:
+	@echo "Generating segcore error code list from milvus-common ..."
+	@(env bash $(PWD)/scripts/generate_segcore_codes.sh)
+
+# CI gate: regenerate the segcore code list and fail on drift, so a
+# milvus-common pin bump that adds an ErrorCode cannot ship without the
+# generated snapshot (and therefore the classForCode switch) catching up.
+# Mirrors check-proto-product.
+check-segcore-codes-product: generate-segcore-codes
+	@git diff --exit-code -- pkg/util/merr/segcore_codes_gen.go || \
+		(echo "segcore_codes_gen.go is out of date with milvus-common's EasyAssert.h; run 'make generate-segcore-codes' and classify any new code in classForCode" && exit 1)
+
 build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-gpu: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp gpu library ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-unittest: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with unittest ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-coverage: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)
@@ -592,6 +636,14 @@ mmap-migration:
     		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
     		GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
     		-tags dynamic -o $(INSTALL_PATH)/mmap-migration $(MMAP_MIGRATION_PATH)/main.go 1>/dev/null
+
+# Wire-format limits that segcore and Go both enforce are one contract with two
+# compilers, and nothing else in the build links them. Generating segcore's copy
+# from the Go one removes the second copy rather than checking it; the checked-in
+# header is what C++ compiles against, so it has to be committed.
+generate-cpp-constants:
+	@echo "Generating segcore's copy of the MRB1 limits from the Go constants"
+	@source $(PWD)/scripts/setenv.sh && $(GO) run $(PWD)/cmd/tools/genmrb1limits
 
 generate-parser:
 	@echo "Updating milvus expression parser"

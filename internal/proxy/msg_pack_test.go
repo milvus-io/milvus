@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,51 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
 
-func TestGenInsertMsgsByPartitionSingleOversizedRow(t *testing.T) {
-	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "64"))
-	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
-
-	fieldData := &schemapb.FieldData{
-		Type:      schemapb.DataType_VarChar,
-		FieldId:   101,
-		FieldName: "large_text",
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_StringData{
-					StringData: &schemapb.StringArray{
-						Data: []string{strings.Repeat("x", 1024)},
-					},
-				},
-			},
-		},
-	}
-	insertMsg := &msgstream.InsertMsg{
-		BaseMsg: msgstream.BaseMsg{
-			Ctx:        context.Background(),
-			HashValues: []uint32{1},
-		},
-		InsertRequest: &msgpb.InsertRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_Insert,
-				SourceID: paramtable.GetNodeID(),
-			},
-			DbName:         "default",
-			CollectionName: "test_collection",
-			PartitionName:  "test_partition",
-			NumRows:        1,
-			FieldsData:     []*schemapb.FieldData{fieldData},
-			Timestamps:     []uint64{1},
-			RowIDs:         []int64{1},
-			Version:        msgpb.InsertDataVersion_ColumnBased,
-		},
-	}
-
-	msgs, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg)
-	assert.NoError(t, err)
-	assert.Len(t, msgs, 1)
-	assert.Equal(t, uint64(1), msgs[0].(*msgstream.InsertMsg).GetNumRows())
-}
-
 func TestRepackInsertData(t *testing.T) {
 	nb := 10
 	hash := testutils.GenerateHashKeys(nb)
@@ -92,9 +46,6 @@ func TestRepackInsertData(t *testing.T) {
 
 	mix := NewMixCoordMock()
 	defer mix.Close()
-
-	cache := NewMockCache(t)
-	globalMetaCache = cache
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, mix, paramtable.GetNodeID())
 	assert.NoError(t, err)
@@ -165,7 +116,7 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 
 	mix := NewMixCoordMock()
 
-	err := InitMetaCache(ctx, mix)
+	_, err := initMetaCache(ctx, mix)
 	assert.NoError(t, err)
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, mix, paramtable.GetNodeID())

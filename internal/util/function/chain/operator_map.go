@@ -28,7 +28,7 @@ import (
 )
 
 func init() {
-	MustRegisterOperator(types.OpTypeMap, NewMapOpFromRepr)
+	MustRegisterOperator(types.OpTypeMap, NewMapOpFromReprWithContext)
 }
 
 // MapOp applies a function to specified columns of the DataFrame.
@@ -145,10 +145,14 @@ func (o *MapOp) String() string {
 
 // NewMapOpFromRepr creates a MapOp from an OperatorRepr.
 func NewMapOpFromRepr(repr *OperatorRepr) (Operator, error) {
+	return NewMapOpFromReprWithContext(repr, types.FunctionBuildContext{})
+}
+
+func NewMapOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error) {
 	if repr.Function == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("map operator requires function")
 	}
-	fn, err := FunctionFromRepr(repr.Function)
+	fn, err := FunctionFromReprWithContext(repr.Function, buildCtx)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("map function: %v", err)
 	}

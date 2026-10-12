@@ -10,5 +10,15 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 add_source_at_current_directory_recursively()
+
+# These files intentionally define matching translation-unit-local helpers.
+# Keep them separate when the target uses unity builds.
+set_source_files_properties(
+    VectorDiskIndex.cpp
+    VectorMemIndex.cpp
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+
 add_library(milvus_index OBJECT ${SOURCE_FILES})
-target_link_libraries(milvus_index PUBLIC milvus_conan_deps)
+# libsais (PUBLIC) propagates its include dir so the vendored FM-index sources
+# under fmindex/ can #include "libsais.h"; milvus_core links the objects (below).
+target_link_libraries(milvus_index PUBLIC milvus_conan_deps libsais)

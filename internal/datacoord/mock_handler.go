@@ -5,6 +5,8 @@ package datacoord
 import (
 	context "context"
 
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	storage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -115,29 +117,29 @@ func (_c *NMockHandler_FinishDropChannel_Call) RunAndReturn(run func(string, int
 	return _c
 }
 
-// GenSnapshot provides a mock function with given fields: ctx, collectionID
-func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64) (*SnapshotData, error) {
-	ret := _m.Called(ctx, collectionID)
+// GenSnapshot provides a mock function with given fields: ctx, collectionID, channelSeekPositions
+func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64, channelSeekPositions []*msgpb.MsgPosition) (*storage.SnapshotData, error) {
+	ret := _m.Called(ctx, collectionID, channelSeekPositions)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GenSnapshot")
 	}
 
-	var r0 *SnapshotData
+	var r0 *storage.SnapshotData
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) (*SnapshotData, error)); ok {
-		return rf(ctx, collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []*msgpb.MsgPosition) (*storage.SnapshotData, error)); ok {
+		return rf(ctx, collectionID, channelSeekPositions)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64) *SnapshotData); ok {
-		r0 = rf(ctx, collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []*msgpb.MsgPosition) *storage.SnapshotData); ok {
+		r0 = rf(ctx, collectionID, channelSeekPositions)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*SnapshotData)
+			r0 = ret.Get(0).(*storage.SnapshotData)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
-		r1 = rf(ctx, collectionID)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, []*msgpb.MsgPosition) error); ok {
+		r1 = rf(ctx, collectionID, channelSeekPositions)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -153,23 +155,24 @@ type NMockHandler_GenSnapshot_Call struct {
 // GenSnapshot is a helper method to define mock.On call
 //   - ctx context.Context
 //   - collectionID int64
-func (_e *NMockHandler_Expecter) GenSnapshot(ctx interface{}, collectionID interface{}) *NMockHandler_GenSnapshot_Call {
-	return &NMockHandler_GenSnapshot_Call{Call: _e.mock.On("GenSnapshot", ctx, collectionID)}
+//   - channelSeekPositions []*msgpb.MsgPosition
+func (_e *NMockHandler_Expecter) GenSnapshot(ctx interface{}, collectionID interface{}, channelSeekPositions interface{}) *NMockHandler_GenSnapshot_Call {
+	return &NMockHandler_GenSnapshot_Call{Call: _e.mock.On("GenSnapshot", ctx, collectionID, channelSeekPositions)}
 }
 
-func (_c *NMockHandler_GenSnapshot_Call) Run(run func(ctx context.Context, collectionID int64)) *NMockHandler_GenSnapshot_Call {
+func (_c *NMockHandler_GenSnapshot_Call) Run(run func(ctx context.Context, collectionID int64, channelSeekPositions []*msgpb.MsgPosition)) *NMockHandler_GenSnapshot_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
+		run(args[0].(context.Context), args[1].(int64), args[2].([]*msgpb.MsgPosition))
 	})
 	return _c
 }
 
-func (_c *NMockHandler_GenSnapshot_Call) Return(_a0 *SnapshotData, _a1 error) *NMockHandler_GenSnapshot_Call {
+func (_c *NMockHandler_GenSnapshot_Call) Return(_a0 *storage.SnapshotData, _a1 error) *NMockHandler_GenSnapshot_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, int64) (*SnapshotData, error)) *NMockHandler_GenSnapshot_Call {
+func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, int64, []*msgpb.MsgPosition) (*storage.SnapshotData, error)) *NMockHandler_GenSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

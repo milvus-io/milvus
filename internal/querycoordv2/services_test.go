@@ -140,7 +140,7 @@ func initStreamingSystem() {
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
 				MessageID:              walimplstest.NewTestMessageID(1),
-				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 				LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
 			}
 		}
@@ -153,6 +153,7 @@ func initStreamingSystem() {
 
 	mb := mock_broadcaster.NewMockBroadcaster(t)
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithUnreplicableResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().Close().Return().Maybe()
@@ -2122,9 +2123,37 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 			})
 		}
 	}
-	suite.broker.EXPECT().
-		GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).
-		Return(vChannels, segmentBinlogs, nil).Maybe()
+	getRecoveryInfo := func(_ context.Context, _ int64, partitionIDs ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+		if len(partitionIDs) == 0 {
+			return vChannels, segmentBinlogs, nil
+		}
+		partitionSet := typeutil.NewSet(partitionIDs...)
+		filteredSegments := lo.Filter(segmentBinlogs, func(segment *datapb.SegmentInfo, _ int) bool {
+			return partitionSet.Contain(segment.GetPartitionID())
+		})
+		return vChannels, filteredSegments, nil
+	}
+	for partitionNum := 0; partitionNum <= len(suite.partitions[collection])+1; partitionNum++ {
+		partitionArgs := make([]interface{}, 0, partitionNum)
+		for i := 0; i < partitionNum; i++ {
+			partitionArgs = append(partitionArgs, mock.Anything)
+		}
+		suite.broker.EXPECT().
+			GetRecoveryInfoV2(mock.Anything, collection, partitionArgs...).
+			RunAndReturn(getRecoveryInfo).
+			Maybe()
+	}
+
+	for segmentNum := 0; segmentNum <= len(segmentBinlogs); segmentNum++ {
+		indexArgs := make([]interface{}, 0, segmentNum)
+		for i := 0; i < segmentNum; i++ {
+			indexArgs = append(indexArgs, mock.Anything)
+		}
+		suite.broker.EXPECT().
+			GetIndexInfo(mock.Anything, collection, indexArgs...).
+			Return(nil, nil).
+			Maybe()
+	}
 }
 
 func (suite *ServiceSuite) expectLoadMetaRPCs() {
@@ -2499,16 +2528,10 @@ func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionUsesDefaultLoadFields(
 		}
 		resourceGroups := []string{"rg1", "rg2"}
 
-		var captured *querypb.LoadPartitionsRequest
-		mockey.Mock((*Server).broadcastAlterLoadConfigCollectionV2ForLoadPartitions).
-			To(func(s *Server, ctx context.Context, req *querypb.LoadPartitionsRequest) error {
-				captured = req
-				return nil
-			}).
-			Build()
+		mockey.Mock((*Server).broadcastAlterLoadConfigCollectionV2ForLoadPartitions).Return(nil).Build()
 		mockey.Mock((*Server).waitPrewarmPartitionLoaded).Return(nil).Build()
 
-		err := suite.server.ensurePrewarmPartitionLoaded(ctx, &querypb.PrewarmRequest{
+		req := &querypb.PrewarmRequest{
 			Schema:         schema,
 			Namespace:      &namespace,
 			CollectionID:   collectionID,
@@ -2516,18 +2539,20 @@ func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionUsesDefaultLoadFields(
 			Priority:       commonpb.LoadPriority_LOW,
 			ReplicaNumber:  3,
 			ResourceGroups: resourceGroups,
-		})
+		}
+		loadReq := newPrewarmLoadPartitionsRequest(req)
+
+		err := suite.server.ensurePrewarmPartitionLoaded(ctx, req)
 
 		suite.NoError(err)
-		suite.Require().NotNil(captured)
-		suite.Equal(collectionID, captured.GetCollectionID())
-		suite.Equal([]int64{partitionID}, captured.GetPartitionIDs())
-		suite.Empty(captured.GetFieldIndexID())
-		suite.Empty(captured.GetLoadFields())
-		suite.Equal(commonpb.LoadPriority_LOW, captured.GetPriority())
-		suite.EqualValues(3, captured.GetReplicaNumber())
-		suite.Equal(resourceGroups, captured.GetResourceGroups())
-		suite.True(captured.GetForceSyncWarmup())
+		suite.Equal(collectionID, loadReq.GetCollectionID())
+		suite.Equal([]int64{partitionID}, loadReq.GetPartitionIDs())
+		suite.Empty(loadReq.GetFieldIndexID())
+		suite.Empty(loadReq.GetLoadFields())
+		suite.Equal(commonpb.LoadPriority_LOW, loadReq.GetPriority())
+		suite.EqualValues(3, loadReq.GetReplicaNumber())
+		suite.Equal(resourceGroups, loadReq.GetResourceGroups())
+		suite.True(loadReq.GetForceSyncWarmup())
 	})
 }
 

@@ -23,7 +23,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -104,12 +103,12 @@ func getTaskSlotUsage(task Compactor) int64 {
 
 func (e *executor) Enqueue(task Compactor) (bool, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	planID := task.GetPlanID()
 
 	// Check for duplicate task
 	if _, exists := e.tasks[planID]; exists {
+		e.mu.Unlock()
 		mlog.Warn(context.TODO(), "duplicated compaction task",
 			mlog.Int64("planID", planID),
 			mlog.String("channel", task.GetChannelName()))
@@ -123,6 +122,7 @@ func (e *executor) Enqueue(task Compactor) (bool, error) {
 		state:     datapb.CompactionTaskState_executing,
 		result:    nil,
 	}
+	e.mu.Unlock()
 
 	e.taskCh <- task
 	return true, nil
@@ -138,23 +138,20 @@ func (e *executor) Slots() int64 {
 // completeTask updates task state to completed and adjusts slot usage
 func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResult) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	if task, exists := e.tasks[planID]; exists {
-		task.compactor.Complete()
-
-		// Update state based on result
+		// Update state based on result. A result may now carry a terminal
+		// failed state with a typed FailStatus; take the state from the result
+		// so the failure survives to the DataCoord query instead of collapsing
+		// to a synthetic bare failure.
 		if result != nil {
-			task.state = datapb.CompactionTaskState_completed
+			if result.GetState() == datapb.CompactionTaskState_unknown {
+				result.State = datapb.CompactionTaskState_completed
+			}
+			task.state = result.GetState()
 			task.result = result
 		} else {
 			task.state = datapb.CompactionTaskState_failed
-		}
-
-		// Publish filesystem metrics after compaction task completion
-		storageConfig := task.compactor.GetStorageConfig()
-		if _, err := storagev2.PublishFilesystemMetricsWithConfig(storageConfig); err != nil {
-			mlog.Warn(context.TODO(), "failed to publish filesystem metrics", mlog.Err(err))
 		}
 
 		// Adjust slot usage
@@ -162,7 +159,13 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 		if e.usingSlots < 0 {
 			e.usingSlots = 0
 		}
+		e.mu.Unlock()
+
+		task.compactor.Complete()
+		return
 	}
+
+	e.mu.Unlock()
 }
 
 func (e *executor) RemoveTask(planID int64) {
@@ -208,7 +211,16 @@ func (e *executor) executeTask(task Compactor) {
 	result, err := task.Compact()
 	if err != nil {
 		log.Warn(context.TODO(), "compaction task failed", mlog.Err(err))
-		e.completeTask(task.GetPlanID(), nil)
+		// Carry the typed error back to DataCoord instead of reducing it to a
+		// bare failed state: the code/reason let DataCoord persist a diagnosable
+		// fail_reason and decide retryability (e.g. requeue an OOM).
+		e.completeTask(task.GetPlanID(), &datapb.CompactionPlanResult{
+			PlanID:     task.GetPlanID(),
+			State:      datapb.CompactionTaskState_failed,
+			Channel:    task.GetChannelName(),
+			Type:       task.GetCompactionType(),
+			FailStatus: merr.Status(err),
+		})
 		return
 	}
 

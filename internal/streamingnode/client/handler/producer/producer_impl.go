@@ -259,7 +259,7 @@ func (p *producerImpl) sendLoop() (err error) {
 			// Store the request to pending request map.
 			p.pendingRequests.Store(requestID, req)
 			// Send the produce message to server.
-			if err := p.grpcStreamClient.SendProduceMessage(requestID, req.msg); err != nil {
+			if err := p.grpcStreamClient.SendProduceMessage(req.ctx, requestID, req.msg); err != nil {
 				// If send failed, remove the request from pending request map and return error to client.
 				p.notifyRequest(requestID, produceResponse{
 					err: err,

@@ -34,6 +34,12 @@ func (sl *shardLeaders) Get(channel string) []NodeInfo {
 	return sl.shardLeaders[channel]
 }
 
+// GetShardLeaderList is deliberately unscoped: it is the fan-out of
+// LBPolicyImpl.Execute, and a resource-group-scoped request still has to cover
+// every shard of the collection. A shard the group cannot serve must surface
+// as a retriable error from selectNode, never as a missing channel here --
+// Execute does not cross-check the channel count, so a missing channel is a
+// silently partial answer. See FilterByResourceGroup.
 func (sl *shardLeaders) GetShardLeaderList() []string {
 	return lo.Keys(sl.shardLeaders)
 }

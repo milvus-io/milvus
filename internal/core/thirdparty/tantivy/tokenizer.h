@@ -1,12 +1,14 @@
 #pragma once
 
 #include "tantivy-binding.h"
+#include "tantivy-error.h"
 #include "rust-binding.h"
 #include "rust-hashmap.h"
 #include "tantivy/rust-array.h"
 #include "token-stream.h"
 #include "log/Log.h"
 #include "common/Utils.h"
+#include "common/EasyAssert.h"
 namespace milvus::tantivy {
 
 struct Tokenizer {
@@ -17,9 +19,8 @@ struct Tokenizer {
         auto shared_params = std::make_shared<std::string>(params);
         auto res = RustResultWrapper(
             tantivy_create_analyzer(shared_params->c_str(), ""));
-        AssertInfo(res.result_->success,
-                   "Tokenizer creation failed: {}",
-                   res.result_->error);
+        AssertTantivyOk(
+            res, "Tokenizer creation failed: {}", res.result_->error);
         ptr_ = res.result_->value.ptr._0;
     }
 
@@ -28,9 +29,8 @@ struct Tokenizer {
         auto shared_extra_info = std::make_shared<std::string>(extra_info);
         auto res = RustResultWrapper(tantivy_create_analyzer(
             shared_params->c_str(), shared_extra_info->c_str()));
-        AssertInfo(res.result_->success,
-                   "Tokenizer creation failed: {}",
-                   res.result_->error);
+        AssertTantivyOk(
+            res, "Tokenizer creation failed: {}", res.result_->error);
         ptr_ = res.result_->value.ptr._0;
     }
 
@@ -75,9 +75,7 @@ set_tokenizer_options(std::string&& params) {
     auto shared_params = std::make_shared<std::string>(params);
     auto res =
         RustResultWrapper(tantivy_set_analyzer_options(shared_params->c_str()));
-    AssertInfo(res.result_->success,
-               "Set analyzer option failed: {}",
-               res.result_->error);
+    AssertTantivyOk(res, "Set analyzer option failed: {}", res.result_->error);
 }
 
 inline std::pair<int64_t*, size_t>
@@ -86,9 +84,8 @@ validate_analyzer(std::string&& params, std::string&& extra_info) {
     auto shared_extra_info = std::make_shared<std::string>(extra_info);
     auto res = RustResultWrapper(tantivy_validate_analyzer(
         shared_params->c_str(), shared_extra_info->c_str()));
-    AssertInfo(res.result_->success,
-               "Validate analyzer params failed: {}",
-               res.result_->error);
+    AssertTantivyOk(
+        res, "Validate analyzer params failed: {}", res.result_->error);
     auto array_wrapper =
         RustArrayI64Wrapper(std::move(res.result_->value.rust_array_i64._0));
     auto* array = array_wrapper.array_.array;
@@ -98,7 +95,7 @@ validate_analyzer(std::string&& params, std::string&& extra_info) {
     if (len > 0) {
         result = static_cast<int64_t*>(malloc(len * sizeof(int64_t)));
         if (result == nullptr) {
-            throw std::bad_alloc();
+            ThrowInfo(ErrorCode::MemAllocateFailed, "allocation failed");
         }
         std::memcpy(result,
                     array,

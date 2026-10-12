@@ -189,6 +189,42 @@ func TestStartReleaseAll(t *testing.T) {
 	assert.Equal(t, LoadStateReleased, l.state)
 }
 
+func TestStartReleaseAllWaitsAfterTimeoutUntilRefCntZero(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key, "0.05")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
+
+	l := NewLoadStateLock(LoadStateDataLoaded)
+	assert.True(t, l.PinIfNotReleased())
+
+	ch := make(chan LoadStateLockGuard, 1)
+	go func() {
+		ch <- l.StartReleaseAll()
+	}()
+
+	select {
+	case g := <-ch:
+		if g != nil {
+			g.Done(nil)
+		}
+		l.Unpin()
+		t.Fatal("StartReleaseAll returned before refcnt dropped to zero")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	l.Unpin()
+
+	select {
+	case g := <-ch:
+		assert.NotNil(t, g)
+		g.Done(nil)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("StartReleaseAll did not return after refcnt dropped to zero")
+	}
+
+	assert.False(t, l.PinIfNotReleased())
+}
+
 func TestWaitOrPanic(t *testing.T) {
 	paramtable.Init()
 
@@ -208,19 +244,39 @@ func TestWaitOrPanic(t *testing.T) {
 		assert.True(t, executed)
 	})
 
-	t.Run("timeout_panic", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key, "1")
+	t.Run("timeout_keeps_waiting", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key, "0.05")
 		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
 
 		l := NewLoadStateLock(LoadStateOnlyMeta)
 		executed := false
+		ch := make(chan struct{})
 
-		assert.NotPanics(t, func() {
+		go func() {
 			l.waitOrPanic(func(state loadStateEnum) bool {
 				return state == LoadStateDataLoaded
-			}, noop)
-		})
+			}, func() { executed = true })
+			close(ch)
+		}()
+
+		select {
+		case <-ch:
+			t.Fatal("waitOrPanic returned before the predicate became ready")
+		case <-time.After(200 * time.Millisecond):
+		}
 		assert.False(t, executed)
+
+		g, err := l.StartLoadData()
+		assert.NoError(t, err)
+		assert.NotNil(t, g)
+		g.Done(nil)
+
+		select {
+		case <-ch:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("waitOrPanic did not return after the predicate became ready")
+		}
+		assert.True(t, executed)
 	})
 }
 

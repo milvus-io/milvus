@@ -22,6 +22,7 @@
 #include <type_traits>
 
 #include "Types.h"
+#include "ValidityView.h"
 #include "VectorTrait.h"
 #include "TypeTraits.h"
 
@@ -39,7 +40,16 @@ class SpanBase {
                       int64_t row_count,
                       int64_t element_sizeof)
         : data_(data),
-          valid_data_(valid_data),
+          validity_(ValidityView::FromExpanded(valid_data)),
+          row_count_(row_count),
+          element_sizeof_(element_sizeof) {
+    }
+    explicit SpanBase(const void* data,
+                      ValidityView validity,
+                      int64_t row_count,
+                      int64_t element_sizeof)
+        : data_(data),
+          validity_(validity),
           row_count_(row_count),
           element_sizeof_(element_sizeof) {
     }
@@ -59,14 +69,19 @@ class SpanBase {
         return data_;
     }
 
-    const bool*
-    valid_data() const {
-        return valid_data_;
+    ValidityView
+    validity() const {
+        return validity_;
+    }
+
+    bool
+    is_valid(int64_t offset) const {
+        return !validity_ || validity_[offset];
     }
 
  private:
     const void* data_;
-    const bool* valid_data_{nullptr};
+    ValidityView validity_;
     int64_t row_count_;
     int64_t element_sizeof_;
 };
@@ -82,7 +97,11 @@ class Span<T,
  public:
     using embedded_type = T;
     explicit Span(const T* data, const bool* valid_data, int64_t row_count)
-        : data_(data), valid_data_(valid_data), row_count_(row_count) {
+        : Span(data, ValidityView::FromExpanded(valid_data), row_count) {
+    }
+
+    explicit Span(const T* data, ValidityView validity, int64_t row_count)
+        : data_(data), validity_(validity), row_count_(row_count) {
     }
 
     explicit Span(std::string_view data, bool* valid_data) {
@@ -90,12 +109,12 @@ class Span<T,
     }
 
     operator SpanBase() const {
-        return SpanBase(data_, valid_data_, row_count_, sizeof(T));
+        return SpanBase(data_, validity_, row_count_, sizeof(T));
     }
 
     explicit Span(const SpanBase& base)
         : Span(reinterpret_cast<const T*>(base.data()),
-               base.valid_data(),
+               base.validity(),
                base.row_count()) {
         assert(base.element_sizeof() == sizeof(T));
     }
@@ -110,9 +129,14 @@ class Span<T,
         return data_;
     }
 
-    const bool*
-    valid_data() const {
-        return valid_data_;
+    ValidityView
+    validity() const {
+        return validity_;
+    }
+
+    bool
+    is_valid(int64_t offset) const {
+        return !validity_ || validity_[offset];
     }
 
     const T&
@@ -127,7 +151,7 @@ class Span<T,
 
  private:
     const T* data_;
-    const bool* valid_data_;
+    ValidityView validity_;
     int64_t row_count_;
 };
 

@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -28,9 +29,15 @@
 #include "index/Index.h"
 #include "index/IndexInfo.h"
 #include "index/ScalarIndex.h"
+#include "cachinglayer/LoadingOverhead.h"
 #include "storage/FileManager.h"
 
 namespace milvus::index {
+
+struct ScalarIndexLoadResources {
+    LoadResourceRequest request;
+    std::optional<cachinglayer::LoadingOverheadConfig> overhead;
+};
 
 class IndexFactory {
  public:
@@ -39,7 +46,6 @@ class IndexFactory {
     IndexFactory
     operator=(const IndexFactory&) = delete;
 
- public:
     static IndexFactory&
     GetInstance() {
         // thread-safe enough after c++ 11
@@ -47,6 +53,9 @@ class IndexFactory {
 
         return instance;
     }
+
+    static bool
+    CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
 
     LoadResourceRequest
     IndexLoadResource(DataType field_type,
@@ -57,18 +66,6 @@ class IndexFactory {
                       bool mmap_enable,
                       int64_t num_rows,
                       int64_t dim);
-
-    LoadResourceRequest
-    IndexLoadResource(DataType field_type,
-                      DataType element_type,
-                      IndexVersion index_version,
-                      uint64_t index_size_in_bytes,
-                      const std::map<std::string, std::string>& index_params,
-                      bool mmap_enable,
-                      int64_t num_rows,
-                      int64_t dim,
-                      const std::vector<std::string>& index_files,
-                      const storage::FileManagerContext& file_manager_context);
 
     LoadResourceRequest
     VecIndexLoadResource(DataType field_type,
@@ -89,16 +86,19 @@ class IndexFactory {
         bool mmap_enable,
         int64_t num_rows);
 
-    LoadResourceRequest
-    ScalarIndexLoadResource(
+    // Inspects persisted metadata for the mode captured in the file context.
+    // Estimates remain valid across worker and admission-limit updates.
+    // Packed TextMatch files use the text-log prefix (is_index_file=false).
+    ScalarIndexLoadResources
+    ScalarIndexFileLoadResource(
         DataType field_type,
-        IndexVersion index_version,
-        uint64_t index_size_in_bytes,
+        uint64_t index_size,
         const std::map<std::string, std::string>& index_params,
         bool mmap_enable,
         int64_t num_rows,
         const std::vector<std::string>& index_files,
-        const storage::FileManagerContext& file_manager_context);
+        const storage::FileManagerContext& context,
+        bool is_index_file = true);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
@@ -129,13 +129,6 @@ class IndexFactory {
     IndexBasePtr
     CreateCompositeScalarIndex(
         const CreateIndexInfo& create_index_info,
-        const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
-
-    // For types like Json, XML, etc
-    IndexBasePtr
-    CreateComplexScalarIndex(
-        IndexType index_type,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
@@ -173,6 +166,12 @@ class IndexFactory {
             storage::FileManagerContext());
 
     IndexBasePtr
+    CreateNestedIndexHybrid(
+        int32_t tantivy_index_version,
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
+
+    IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info,
                       const storage::FileManagerContext& file_manager_context =
                           storage::FileManagerContext());
@@ -181,6 +180,16 @@ class IndexFactory {
     // CreateIndex(DataType dtype, const IndexType& index_type);
  private:
     FRIEND_TEST(StringIndexMarisaTest, Reverse);
+
+    // Shared representation costs, parameterized by the reader's transient bytes.
+    LoadResourceRequest
+    ScalarIndexLoadResourceWithOverhead(
+        DataType field_type,
+        uint64_t index_size_in_bytes,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        uint64_t stream_memory_overhead);
 
     template <typename T>
     ScalarIndexPtr<T>

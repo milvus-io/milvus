@@ -49,6 +49,7 @@ const (
 	ycProvider           string = "yc"
 	zillizProvider       string = "zilliz"
 	geminiProvider       string = "gemini"
+	huggingFaceProvider  string = "huggingface"
 )
 
 func hasEmptyString(texts []string) bool {
@@ -72,7 +73,10 @@ func TextEmbeddingInputsCheck(name string, fields []*schemapb.FieldSchema) error
 		return merr.WrapErrParameterInvalidMsg("TextEmbedding function input field must be a VARCHAR/TEXT field") //nolint:staticcheck // starts with proper noun
 	}
 
-	if fields[0].Nullable {
+	// An externally-mapped input's nullability is inferred from the external
+	// source during resolution, not declared by the user, so it is not judged
+	// by the user-schema rule.
+	if fields[0].Nullable && fields[0].GetExternalField() == "" {
 		return merr.WrapErrParameterInvalidMsg("function input field cannot be nullable: function %s, field %s", name, fields[0].GetName())
 	}
 	return nil
@@ -143,8 +147,10 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 		embP, newProviderErr = NewZillizEmbeddingProvider(base.outputFields[0], functionSchema, conf, extraInfo)
 	case geminiProvider:
 		embP, newProviderErr = NewGeminiEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
+	case huggingFaceProvider:
+		embP, newProviderErr = NewHuggingFaceEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg("unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, ycProvider, zillizProvider, geminiProvider)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, ycProvider, zillizProvider, geminiProvider, huggingFaceProvider)
 	}
 
 	if newProviderErr != nil {

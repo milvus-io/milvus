@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -447,7 +448,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 		TimestampMax: math.MaxUint64 - 1,
 	}
 
-	msgTs := tsoutil.GetCurrentTime()
+	msgTs := tsoutil.ComposeTSByTime(time.Now())
 	dataFactory := NewDataFactory()
 	insertMessages := dataFactory.GetMsgStreamTsInsertMsgs(2, insertChannelName, msgTs)
 
@@ -470,15 +471,15 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
-			BeginTimestamp: tsoutil.GetCurrentTime(),
-			EndTimestamp:   tsoutil.GetCurrentTime(),
+			BeginTimestamp: tsoutil.ComposeTSByTime(time.Now()),
+			EndTimestamp:   tsoutil.ComposeTSByTime(time.Now()),
 			HashValues:     []uint32{0},
 		},
 		TimeTickMsg: &msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     typeutil.UniqueID(0),
-				Timestamp: tsoutil.GetCurrentTime(),
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 				SourceID:  0,
 			},
 		},

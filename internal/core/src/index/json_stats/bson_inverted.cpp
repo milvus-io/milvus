@@ -77,6 +77,25 @@ BsonInvertedIndex::AddRecord(const std::string& key,
 }
 
 void
+BsonInvertedIndex::AddRecords(const std::string& key,
+                              std::vector<int64_t> records) {
+    if (records.empty()) {
+        return;
+    }
+
+    auto& destination = inverted_index_map_[key];
+    if (destination.empty()) {
+        destination = std::move(records);
+        return;
+    }
+
+    // Let vector retain spare capacity from its geometric growth. Reserving
+    // exactly the required size for every chunk would reallocate and copy the
+    // entire accumulated postings list on nearly every merge.
+    destination.insert(destination.end(), records.begin(), records.end());
+}
+
+void
 BsonInvertedIndex::BuildIndex() {
     if (wrapper_ == nullptr) {
         if (tantivy_index_exist(path_.c_str())) {
@@ -116,9 +135,10 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
         // index_files are absolute remote paths (basePath already prepended by caller)
         disk_file_manager_->CacheJsonStatsSharedIndexToDisk(index_files,
                                                             priority);
-        AssertInfo(tantivy_index_exist(path_.c_str()),
-                   "index dir not exist: {}",
-                   path_);
+        if (!(tantivy_index_exist(path_.c_str()))) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken, "index dir not exist: {}", path_);
+        }
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
             path_.c_str(), load_in_mmap, milvus::index::SetBitsetUnused);
         if (!load_in_mmap) {
@@ -152,14 +172,17 @@ BsonInvertedIndex::UploadIndex() {
             LOG_WARN("{} is a directory", file_path);
         } else {
             LOG_INFO("trying to add bson inverted index file: {}", file_path);
-            AssertInfo(disk_file_manager_->AddJsonSharedIndexLog(file_path),
-                       "failed to add bson inverted index file: {}",
-                       file_path);
+            if (!(disk_file_manager_->AddJsonSharedIndexLog(file_path))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "failed to add bson inverted index file: {}",
+                          file_path);
+            }
             LOG_INFO("bson inverted index file: {} added", file_path);
         }
     }
 
-    auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        disk_file_manager_->GetRemotePathsToFileSize();
 
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size());
@@ -200,30 +223,6 @@ BsonInvertedIndex::TermQuery(
     }
 
     visitor(row_id_array.data(), offset_array.data(), array_len);
-}
-
-void
-BsonInvertedIndex::TermQueryEach(
-    const std::string& path,
-    const std::function<void(uint32_t row_id, uint32_t offset)>& each) {
-    AssertInfo(wrapper_ != nullptr,
-               "bson inverted index wrapper is not initialized");
-    auto start = std::chrono::steady_clock::now();
-    auto array = wrapper_->term_query_i64(path);
-    auto end = std::chrono::steady_clock::now();
-    LOG_TRACE("term query time:{}",
-              std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-                  .count());
-    auto array_len = array.array_.len;
-    LOG_TRACE("json stats shared column filter size:{} with path:{}",
-              array_len,
-              path);
-
-    for (int64_t i = 0; i < array_len; i++) {
-        auto value = array.array_.array[i];
-        auto [row_id, offset] = DecodeInvertedIndexValue(value);
-        each(row_id, offset);
-    }
 }
 
 }  // namespace milvus::index

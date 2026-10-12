@@ -18,10 +18,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	milvuscommon "github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -191,12 +191,18 @@ func externalSegmentPrefixes(cfg minioConfig, collectionID int64) []string {
 	return []string{base}
 }
 
+const managementRedactedValue = "*****"
+
 func minIOConfigWithServerRootPath(t *testing.T, cfg minioConfig) minioConfig {
 	t.Helper()
 
 	rootPath, err := hp.GetServerConfig("minio.rootPath")
 	if err != nil {
 		t.Logf("Use fallback MinIO root path %q: failed to read Milvus config: %v", cfg.rootPath, err)
+		return cfg
+	}
+	if rootPath == managementRedactedValue {
+		t.Logf("Use fallback MinIO root path %q: Milvus config is redacted", cfg.rootPath)
 		return cfg
 	}
 	cfg.rootPath = strings.Trim(rootPath, "/")

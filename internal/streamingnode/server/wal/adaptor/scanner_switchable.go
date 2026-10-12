@@ -30,6 +30,7 @@ func newSwithableScanner(
 	writeAheadBuffer wab.ROWriteAheadBuffer,
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
+	startupBarrier *scannerStartupBarrier,
 ) switchableScanner {
 	return &catchupScanner{
 		switchableScannerImpl: switchableScannerImpl{
@@ -41,6 +42,7 @@ func newSwithableScanner(
 		},
 		deliverPolicy:          deliverPolicy,
 		exclusiveStartTimeTick: 0,
+		startupBarrier:         startupBarrier,
 	}
 }
 
@@ -109,10 +111,12 @@ func (t *oldVersionLastConfirmedTracker) Track(msgID message.MessageID) message.
 
 // catchupScanner is a scanner that make a read at underlying wal, and try to catchup the writeahead buffer then switch to tailing mode.
 type catchupScanner struct {
+	startupBarrier *scannerStartupBarrier // only the initial catchup waits for startup
 	switchableScannerImpl
 	deliverPolicy                  options.DeliverPolicy
 	exclusiveStartTimeTick         uint64 // scanner should filter out the message that less than or equal to this time tick.
 	oldVersionLastConfirmedTracker *oldVersionLastConfirmedTracker
+	chunkAssembler                 message.ChunkAssembler
 }
 
 func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
@@ -127,6 +131,9 @@ func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
 		}
 		switchedScanner, err := s.consumeWithScanner(ctx, scanner)
 		if err != nil {
+			if errors.Is(err, message.ErrCorruptedChunk) {
+				return nil, err
+			}
 			s.logger.Warn(ctx, "scanner consuming was interrpurted with error, start a backoff", mlog.Err(err))
 			continue
 		}
@@ -143,6 +150,21 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 		case msg, ok := <-scanner.Chan():
 			if !ok {
 				return nil, scanner.Error()
+			}
+
+			// The underlying durable WAL exposes physical records. Reassemble all
+			// chunk versions here so every later stage sees exactly one complete
+			// logical message. In particular, v0 conversion parses the body and
+			// must never observe an individual payload slice.
+			assembled, handled, err := s.chunkAssembler.Push(msg)
+			if err != nil {
+				return nil, err
+			}
+			if handled {
+				if assembled == nil {
+					continue
+				}
+				msg = assembled
 			}
 
 			if msg.Version() == message.VersionOld {
@@ -169,6 +191,11 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				if err != nil {
 					panic("unrechable: unexpected error found: " + err.Error())
 				}
+				if msg.MessageType() == message.MessageTypeTimeTick {
+					// A raw v0 TimeTick has no message-type property, so Push cannot
+					// recognize it as a cleanup barrier until conversion completes.
+					s.chunkAssembler.AdvanceTimeTick(msg.TimeTick())
+				}
 			}
 
 			if msg.TimeTick() <= s.exclusiveStartTimeTick {
@@ -176,15 +203,33 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				// when we switch from tailing mode to catchup mode.
 				continue
 			}
+			if shouldStartConsumeSpan(msg) {
+				startConsumeSpanForMessage(ctx, msg)
+			}
 			if err := s.HandleMessage(ctx, msg); err != nil {
 				return nil, err
 			}
-			if msg.MessageType() != message.MessageTypeTimeTick || s.writeAheadBuffer == nil {
-				// Only timetick message is keep the same order with the write ahead buffer.
-				// So we can only use the timetick message to catchup the write ahead buffer.
+			if s.startupBarrier != nil {
+				if !s.startupBarrier.matches(msg) {
+					continue
+				}
+				// This WAB was seeded by exactly this barrier. Older barriers and
+				// TimeTicks cannot switch sources before startup state is captured.
+				ready := s.startupBarrier.resume
+				s.startupBarrier = nil
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-ready:
+				}
+			} else if msg.MessageType() != message.MessageTypeTimeTick {
+				// Ordinary catchup switches only at a TimeTick shared with the WAB.
 				continue
 			}
-			// Here's a timetick message from the scanner, make tailing read if we catch up the writeahead buffer.
+			if s.writeAheadBuffer == nil {
+				continue
+			}
+			// Switch sources only after a confirmation boundary shared with WAB.
 			if reader, err := s.writeAheadBuffer.ReadFromExclusiveTimeTick(ctx, msg.TimeTick()); err == nil {
 				s.logger.Info(ctx, "scanner consuming was interrpted because catup done",
 					mlog.Uint64("timetick", msg.TimeTick()),
@@ -267,6 +312,10 @@ func (s *tailingScanner) Do(ctx context.Context) (switchableScanner, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Do not start wal.catchup_consume or overwrite _tc in tailing mode.
+		// WriteAheadBuffer readers share the same immutable message instance,
+		// including its properties map, across all tailing consumers on this
+		// pchannel. Mutating trace context here would race with other readers.
 		if err := s.HandleMessage(ctx, tailingImmutableMesasge{msg}); err != nil {
 			return nil, err
 		}
@@ -292,4 +341,18 @@ func isTailingScanImmutableMessage(msg message.ImmutableMessage) (message.Immuta
 		return msg.ImmutableMessage, true
 	}
 	return msg, false
+}
+
+func shouldStartConsumeSpan(msg message.ImmutableMessage) bool {
+	if msg.TxnContext() == nil {
+		return true
+	}
+	return msg.MessageType() == message.MessageTypeCommitTxn
+}
+
+func startConsumeSpanForMessage(ctx context.Context, msg message.ImmutableMessage) {
+	ctx = message.ExtractTraceContext(ctx, msg)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALCatchupConsume)
+	message.OverwriteTraceContext(ctx, msg)
+	span.End()
 }

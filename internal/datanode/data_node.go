@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -129,7 +128,6 @@ func NewDataNode(ctx context.Context) *DataNode {
 	node.taskManager = index.NewTaskManager(ctx2)
 	node.externalCollectionManager = external.NewExternalCollectionManager(ctx2, 8)
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	expr.Register("datanode", node)
 	return node
 }
 
@@ -196,7 +194,7 @@ func (node *DataNode) Init() error {
 		syncMgr := syncmgr.NewSyncManager(nil)
 		node.syncMgr = syncMgr
 
-		fileMode := fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue())
+		fileMode := fileresource.GetLocalMode()
 		if fileMode == fileresource.SyncMode {
 			storageConfig := compaction.CreateStorageConfig()
 			if storageConfig.GetStorageType() != "local" && storageConfig.GetAddress() == "" {
@@ -221,9 +219,14 @@ func (node *DataNode) Init() error {
 		err := index.InitSegcore(serverID)
 		if err != nil {
 			initError = err
+			return
 		}
 
-		analyzer.InitOptions()
+		if err := analyzer.InitOptions(); err != nil {
+			log.Error(node.ctx, "DataNode init analyzer options failed", mlog.Err(err))
+			initError = err
+			return
+		}
 		log.Info(node.ctx, "init datanode done", mlog.String("Address", node.address))
 	})
 	return initError
@@ -257,6 +260,15 @@ func (node *DataNode) Start() error {
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		// Eagerly construct the goroutine pools up front so the first Prometheus
+		// scrape reads them without triggering pool creation / warmup as a side effect.
+		initPools()
+		metrics.SetDataNodePoolCollectFn(
+			fmt.Sprint(node.GetNodeID()),
+			collectPoolStats,
+		)
+
 		mlog.Info(node.ctx, "datanode start successfully")
 	})
 	return startErr

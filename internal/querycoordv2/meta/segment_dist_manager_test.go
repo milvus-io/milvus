@@ -112,6 +112,64 @@ func (suite *SegmentDistManagerSuite) TestVersion() {
 	suite.Greater(v2, v1)
 }
 
+func (suite *SegmentDistManagerSuite) TestPatch() {
+	suite.Run("empty delta", func() {
+		suite.SetupTest()
+		dist := suite.dist
+		v1 := dist.GetVersion()
+		before := dist.GetByFilter(WithNodeID(suite.nodes[0]))
+
+		dist.Patch(suite.nodes[0], nil, nil)
+
+		v2 := dist.GetVersion()
+		after := dist.GetByFilter(WithNodeID(suite.nodes[0]))
+		suite.Equal(v1, v2)
+		suite.Equal(before, after)
+	})
+
+	suite.Run("remove last segment", func() {
+		suite.SetupTest()
+		dist := suite.dist
+		v1 := dist.GetVersion()
+
+		dist.Patch(suite.nodes[0], nil, []int64{1, 2})
+
+		v2 := dist.GetVersion()
+		segments := dist.GetByFilter(WithNodeID(suite.nodes[0]))
+		suite.Greater(v2, v1)
+		suite.Empty(segments)
+	})
+
+	suite.Run("upsert segments", func() {
+		suite.SetupTest()
+		dist := suite.dist
+		v1 := dist.GetVersion()
+		replaced := suite.segments[1].Clone()
+		replaced.PartitionID = suite.partitions[1]
+		added := SegmentFromInfo(&datapb.SegmentInfo{
+			ID:            5,
+			CollectionID:  suite.collection,
+			PartitionID:   suite.partitions[0],
+			InsertChannel: "dmc2",
+		})
+
+		dist.Patch(suite.nodes[0], []*Segment{replaced, added}, nil)
+
+		v2 := dist.GetVersion()
+		segments := dist.GetByFilter(WithNodeID(suite.nodes[0]))
+		suite.Greater(v2, v1)
+		suite.Len(segments, 3)
+		suite.AssertIDs(segments, 1, 2, 5)
+		suite.AssertNode(segments, suite.nodes[0])
+		segment1 := dist.GetByFilter(WithNodeID(suite.nodes[0]), WithSegmentID(1))
+		suite.Require().Len(segment1, 1)
+		suite.Equal(suite.partitions[1], segment1[0].GetPartitionID())
+		segment5 := dist.GetByFilter(WithNodeID(suite.nodes[0]), WithSegmentID(5))
+		suite.Require().Len(segment5, 1)
+		suite.Equal("dmc2", segment5[0].GetInsertChannel())
+	})
+}
+
 func (suite *SegmentDistManagerSuite) TestNodeOffline() {
 	dist := suite.dist
 

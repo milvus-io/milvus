@@ -100,10 +100,11 @@ impl IndexWriterWrapperImpl {
         path: String,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
+        enable_background_merge: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
-            "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5",
-            field_name, data_type
+            "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5, enable_background_merge: {}",
+            field_name, data_type, enable_background_merge
         );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, field_name, data_type);
@@ -113,6 +114,12 @@ impl IndexWriterWrapperImpl {
         let index = Index::create_in_dir(path.clone(), schema)?;
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        if !enable_background_merge {
+            // Sealed index builds keep the segments produced by the writer's
+            // memory-budget flushes. Disable policy-driven background merges to
+            // avoid additional write amplification during the build.
+            index_writer.set_merge_policy(Box::new(tantivy_5::merge_policy::NoMergePolicy));
+        }
         Ok(IndexWriterWrapperImpl {
             field,
             index_writer: Either::Left(index_writer),
@@ -287,16 +294,13 @@ impl IndexWriterWrapperImpl {
         match self.index_writer {
             Either::Left(mut index_writer) => {
                 index_writer.commit()?;
-
-                // merge all segments
-                let segment_ids = index_writer.index().searchable_segment_ids()?;
-                if segment_ids.len() > 1 {
-                    let _ = index_writer.merge(&segment_ids).wait();
-                }
-
                 index_writer.garbage_collect_files().wait()?;
 
                 index_writer.wait_merging_threads()?;
+
+                let metas = self._index.searchable_segment_metas()?;
+                let segment_ids: Vec<_> = metas.iter().map(|m| m.id().uuid_string()).collect();
+                info!("tantivy index_writer finish, segments: {:?}", segment_ids);
             }
             Either::Right(single_segment_index_writer) => {
                 single_segment_index_writer

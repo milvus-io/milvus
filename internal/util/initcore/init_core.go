@@ -32,7 +32,9 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
+	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -145,19 +147,41 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	if params.CommonCfg.StorageType.GetValue() == "local" {
-		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
+		return initLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue(), params)
 	}
 	return InitRemoteArrowFileSystem(params)
 }
 
+// InitExternalIopsConfig publishes the process-local policy used only when
+// External Table filesystem properties are injected.
+func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
+	status := C.InitExternalIopsConfig(
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
+	return HandleCStatus(&status, "InitExternalIopsConfig failed")
+}
+
 func InitLocalArrowFileSystem(path string) error {
+	return initLocalArrowFileSystem(path, paramtable.Get())
+}
+
+func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) error {
 	cRootPath := C.CString(path)
 	cStorageType := C.CString("local")
+	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
+	defer C.free(unsafe.Pointer(cTalonCoordinator))
 	defer C.free(unsafe.Pointer(cRootPath))
 	defer C.free(unsafe.Pointer(cStorageType))
 	storageConfig := C.CStorageConfig{
-		root_path:    cRootPath,
-		storage_type: cStorageType,
+		root_path:                       cRootPath,
+		storage_type:                    cStorageType,
+		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
+		talon_coordinator:               cTalonCoordinator,
+		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
+		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
+		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
 	}
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
@@ -177,6 +201,8 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
 	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
 	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
+	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
+	defer C.free(unsafe.Pointer(cTalonCoordinator))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -191,30 +217,44 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
 	defer C.free(unsafe.Pointer(cTLSMinVersion))
 	storageConfig := C.CStorageConfig{
-		address:                cAddress,
-		bucket_name:            cBucketName,
-		access_key_id:          cAccessKey,
-		access_key_value:       cAccessValue,
-		root_path:              cRootPath,
-		storage_type:           cStorageType,
-		iam_endpoint:           cIamEndPoint,
-		cloud_provider:         cCloudProvider,
-		useSSL:                 C.bool(params.MinioCfg.UseSSL.GetAsBool()),
-		sslCACert:              cSslCACert,
-		useIAM:                 C.bool(params.MinioCfg.UseIAM.GetAsBool()),
-		log_level:              cLogLevel,
-		region:                 cRegion,
-		useVirtualHost:         C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		requestTimeoutMs:       C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
-		gcp_credential_json:    cGcpCredentialJSON,
-		use_custom_part_upload: true,
-		max_connections:        C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
-		tls_min_version:        cTLSMinVersion,
-		use_crc32c_checksum:    C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		address:                         cAddress,
+		bucket_name:                     cBucketName,
+		access_key_id:                   cAccessKey,
+		access_key_value:                cAccessValue,
+		root_path:                       cRootPath,
+		storage_type:                    cStorageType,
+		iam_endpoint:                    cIamEndPoint,
+		cloud_provider:                  cCloudProvider,
+		useSSL:                          C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:                       cSslCACert,
+		useIAM:                          C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:                       cLogLevel,
+		region:                          cRegion,
+		useVirtualHost:                  C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs:                C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		gcp_credential_json:             cGcpCredentialJSON,
+		use_custom_part_upload:          true,
+		max_connections:                 C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
+		tls_min_version:                 cTLSMinVersion,
+		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
+		talon_coordinator:               cTalonCoordinator,
+		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
+		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
+		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
 	}
 
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
+}
+
+// SetArrowFSChunkManagerEnabled selects the segcore remote chunk manager
+// backend for this process: milvus-storage Arrow FileSystem vs the legacy
+// AWS-SDK based implementations. Must run during component init, before any
+// remote chunk manager is created (segment load, index build/load).
+func SetArrowFSChunkManagerEnabled(params *paramtable.ComponentParam) {
+	C.SetArrowFileSystemChunkManagerEnabled(C.bool(params.CommonCfg.UseArrowFSChunkManager.GetAsBool()))
 }
 
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
@@ -236,6 +276,8 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
 	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
 	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
+	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
+	defer C.free(unsafe.Pointer(cTalonCoordinator))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -250,25 +292,31 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
 	defer C.free(unsafe.Pointer(cTLSMinVersion))
 	storageConfig := C.CStorageConfig{
-		address:             cAddress,
-		bucket_name:         cBucketName,
-		access_key_id:       cAccessKey,
-		access_key_value:    cAccessValue,
-		root_path:           cRootPath,
-		storage_type:        cStorageType,
-		iam_endpoint:        cIamEndPoint,
-		cloud_provider:      cCloudProvider,
-		useSSL:              C.bool(params.MinioCfg.UseSSL.GetAsBool()),
-		sslCACert:           cSslCACert,
-		useIAM:              C.bool(params.MinioCfg.UseIAM.GetAsBool()),
-		log_level:           cLogLevel,
-		region:              cRegion,
-		useVirtualHost:      C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		requestTimeoutMs:    C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
-		gcp_credential_json: cGcpCredentialJSON,
-		max_connections:     C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
-		tls_min_version:     cTLSMinVersion,
-		use_crc32c_checksum: C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		address:                         cAddress,
+		bucket_name:                     cBucketName,
+		access_key_id:                   cAccessKey,
+		access_key_value:                cAccessValue,
+		root_path:                       cRootPath,
+		storage_type:                    cStorageType,
+		iam_endpoint:                    cIamEndPoint,
+		cloud_provider:                  cCloudProvider,
+		useSSL:                          C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:                       cSslCACert,
+		useIAM:                          C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:                       cLogLevel,
+		region:                          cRegion,
+		useVirtualHost:                  C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs:                C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		gcp_credential_json:             cGcpCredentialJSON,
+		max_connections:                 C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
+		tls_min_version:                 cTLSMinVersion,
+		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
+		talon_coordinator:               cTalonCoordinator,
+		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
+		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
+		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)
@@ -297,6 +345,7 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
 		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
 		mmap_populate:            C.bool(params.QueryNodeCfg.MmapPopulate.GetAsBool()),
+		mmap_writeback:           C.bool(params.QueryNodeCfg.MmapWriteback.GetAsBool()),
 		json_stats_enable_mmap:   C.bool(params.QueryNodeCfg.MmapJSONStats.GetAsBool()),
 		json_stats_mmap_path:     cJSONStatsMmapPath,
 	}
@@ -384,6 +433,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
 
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
 	cacheTouchWindowMs := C.int64_t(params.QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
 	backgroundEvictionEnabled := C.bool(params.QueryNodeCfg.TieredBackgroundEvictionEnabled.GetAsBool())
@@ -400,6 +450,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 
 	prefetchPoolThreads := C.uint32_t(hardware.GetCPUNum() * params.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt())
 
+	C.SegcoreSetLazyColumnGroupEnabled(lazyColumnGroupEnabled)
 	C.ConfigureTieredStorage(scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
@@ -421,6 +472,10 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	)
 
 	return nil
+}
+
+func getLazyColumnGroupEnabled() bool {
+	return bool(C.SegcoreGetLazyColumnGroupEnabled())
 }
 
 func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
@@ -454,8 +509,10 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 
+	C.SegcoreSetLazyColumnGroupEnabled(lazyColumnGroupEnabled)
 	C.UpdateTieredStorageConfig(
 		loadingTimeoutMs,
 		warmupLoadingTimeoutMs,
@@ -501,6 +558,72 @@ func InitDiskFileWriterConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitDiskFileWriterConfig failed")
 }
 
+// maxStorageReaderThreadPoolSize bounds common.storage.readerThreadPoolSize.
+// The value is operational sanity far above any useful pool (reads are
+// network-bound); its real job is to reject values that would wrap when
+// narrowed to int32 (e.g. 4294967296 -> 0, silently disabling the pool).
+const maxStorageReaderThreadPoolSize = 1024
+
+// maxIndexBuildReadWindowBytes mirrors the limit enforced by
+// InitIndexBuildReadWindow in storage_c.cpp (milvus-storage validates
+// reader.record_batch_max_size in [1, 4GB]). It is duplicated here so both
+// values can be checked before either one is applied; the C side stays
+// authoritative for callers that bypass this function.
+const maxIndexBuildReadWindowBytes = 4 << 30
+
+// loonReaderConfigMu serializes InitLoonReaderConfig. Config-event handlers
+// run inline on the updating goroutine and the dispatcher gives no ordering
+// guarantee across concurrent updates, so two writers (say 16 then 8) could
+// otherwise read the paramtable in one order and reach
+// C.InitLoonReaderThreadPool in the reverse one, leaving the pool at 16 while
+// the paramtable reports 8 — and the resize is not idempotent, so nothing
+// later repairs it. The lock covers read-then-apply rather than just the
+// apply, so whichever caller acquires it last also reads the newest values
+// and installs them last.
+var loonReaderConfigMu sync.Mutex
+
+// InitLoonReaderConfig applies the milvus-storage (loon) reader concurrency
+// settings: the global reader thread pool size (chunk/file-level read
+// fan-out) and the index-build read window (how many bytes one prefetch
+// round may span, which bounds how many row groups download in parallel per
+// round). Both default to 0 = pre-existing sequential behavior.
+//
+// Both values are validated before either is applied. Resizing the global
+// reader pool is not revertible through config (it cannot be destroyed at
+// runtime), so applying it and only then rejecting the window would leave a
+// hot-reload half-applied with nothing but a generic failure log to show it.
+func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
+	loonReaderConfigMu.Lock()
+	defer loonReaderConfigMu.Unlock()
+
+	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
+	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.readerThreadPoolSize must be in [0, %d], got %d",
+			maxStorageReaderThreadPoolSize, poolSize)
+	}
+	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
+	if window < 0 || window > maxIndexBuildReadWindowBytes {
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.indexBuildReadWindowBytes must be in [0, %d], got %d",
+			maxIndexBuildReadWindowBytes, window)
+	}
+	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
+	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
+		return err
+	}
+	status = C.InitIndexBuildReadWindow(C.int64_t(window))
+	return HandleCStatus(&status, "InitIndexBuildReadWindow failed")
+}
+
+// EffectiveLoonReaderThreadPoolSize returns the pool size actually in effect,
+// which differs from the configured value when the pool already exists: it
+// cannot be destroyed at runtime, so lowering the setting to 0 does not take
+// effect until restart.
+func EffectiveLoonReaderThreadPoolSize() int32 {
+	return int32(C.GetLoonReaderThreadPoolSize())
+}
+
 func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	arrowReaderConfig := C.CArrowReaderConfig{
 		hole_size_limit_bytes:  C.int64_t(params.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
@@ -508,6 +631,29 @@ func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	}
 	status := C.InitArrowReaderConfig(arrowReaderConfig)
 	return HandleCStatus(&status, "InitArrowReaderConfig failed")
+}
+
+// InitExternalVectorNullPolicy publishes the process-wide normalization policy
+// used by both QueryNode external reads and DataNode index builds. The setting
+// is intentionally startup-only so one task cannot observe different semantics
+// across record batches.
+func InitExternalVectorNullPolicy(params *paramtable.ComponentParam) error {
+	policy := strings.ToLower(strings.TrimSpace(params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue()))
+	switch policy {
+	case "error":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(false))
+	case "null":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(true))
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.externalVector.partialNullPolicy must be one of [error, null], got %q",
+			params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue())
+	}
+	return nil
+}
+
+func externalVectorPartialNullAsRowNullEnabled() bool {
+	return bool(C.GetExternalVectorPartialNullAsRowNull())
 }
 
 var coreParamCallbackInitOnce sync.Once
@@ -523,10 +669,7 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().CommonCfg.LoadTransientBudgetBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			UpdateLoadTransientBudgetBytes(paramtable.Get().CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
-			return nil
-		})
+		registerStorageV2AsyncLoadReadWindowConfig(paramtable.Get())
 
 		paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			factor, err := strconv.ParseFloat(newValue, 64)
@@ -605,6 +748,15 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().CommonCfg.EnableDriverPrefetch.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultDriverPrefetchEnable(enable)
+			return nil
+		})
+
 		paramtable.Get().CommonCfg.EnabledJSONKeyStats.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -663,6 +815,21 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.InterimIndexGrowingBuildThreadRate.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			rate, err := strconv.ParseFloat(newValue, 32)
+			if err != nil {
+				return err
+			}
+			// ParseFloat accepts "Inf" and "NaN"; reject them here so the
+			// operator gets an error instead of a silently clamped value.
+			if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
+				return merr.WrapErrParameterInvalidMsg(
+					"%s must be a finite non-negative number, got %s", key, newValue)
+			}
+			C.SegcoreSetGrowingIndexBuildThreadRate(C.float(rate))
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -684,8 +851,10 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.ExprResCacheMode.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheMinEvalDurationUs.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheAdmissionThreshold.RegisterCallback(updateExprResCacheConfigCallback)
+		paramtable.Get().QueryNodeCfg.ExprResCacheMaterializationMaxBytes.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheMemMaxBytes.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheMemCompressionEnabled.RegisterCallback(updateExprResCacheConfigCallback)
+		paramtable.Get().QueryNodeCfg.ExprResCacheMemEnableGrowing.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheDiskMaxBytes.RegisterCallback(updateExprResCacheConfigCallback)
 		paramtable.Get().QueryNodeCfg.ExprResCacheDiskMaxFileSizeBytes.RegisterCallback(updateExprResCacheConfigCallback)
 
@@ -700,10 +869,17 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredLazyColumnGroupEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
 
 func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
+	targetVersion := C.int64_t(params.QueryNodeCfg.InterimIndexTargetIndexVersion.GetAsInt64())
+	status := C.SegcoreSetInterimIndexTargetVersion(targetVersion)
+	if err := HandleCStatus(&status, "SegcoreSetInterimIndexTargetVersion failed"); err != nil {
+		return err
+	}
+
 	enableInterminIndex := C.bool(params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool())
 	C.SegcoreSetEnableInterminSegmentIndex(enableInterminIndex)
 
@@ -725,9 +901,12 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	indexBuildRatio := C.float(params.QueryNodeCfg.InterimIndexBuildRatio.GetAsFloat())
 	C.SegcoreSetIndexBuildRatio(indexBuildRatio)
 
+	growingBuildThreadRate := C.float(params.QueryNodeCfg.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+	C.SegcoreSetGrowingIndexBuildThreadRate(growingBuildThreadRate)
+
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))
-	status := C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
+	status = C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
 	statErr := HandleCStatus(&status, "InitInterminIndexConfig failed")
 	if statErr != nil {
 		return statErr
@@ -745,6 +924,18 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 func InitGeometryCache(params *paramtable.ComponentParam) error {
 	enableGeometryCache := C.bool(params.QueryNodeCfg.EnableGeometryCache.GetAsBool())
 	C.SegcoreSetEnableGeometryCache(enableGeometryCache)
+	return nil
+}
+
+func InitGISSplitFusion(params *paramtable.ComponentParam) error {
+	enableGISSplitFusion := C.bool(params.QueryNodeCfg.EnableGISSplitFusion.GetAsBool())
+	C.SegcoreSetEnableGISSplitFusion(enableGISSplitFusion)
+	return nil
+}
+
+func InitScanPinPolicy(params *paramtable.ComponentParam) error {
+	cursorOwnsPin := C.bool(params.QueryNodeCfg.ScanCursorOwnsPin.GetAsBool())
+	C.SegcoreSetScanCursorOwnsPin(cursorOwnsPin)
 	return nil
 }
 
@@ -799,7 +990,7 @@ func serializeHeaders(headerstr string) string {
 func InitPluginLoader() error {
 	if hookutil.IsClusterEncryptionEnabled() {
 		cSoPath := C.CString(paramtable.GetCipherParams().SoPathCpp.GetValue())
-		mlog.Info(context.TODO(), "Init PluginLoader", mlog.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
+		mlog.Info(context.TODO(), "Init PluginLoader")
 		defer C.free(unsafe.Pointer(cSoPath))
 		status := C.InitPluginLoader(cSoPath)
 		return HandleCStatus(&status, "InitPluginLoader failed")

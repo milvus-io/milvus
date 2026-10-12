@@ -1,0 +1,62 @@
+# Overlay for nightly jobs that run Milvus metadata on TiKV.
+#
+# Usage:
+#   helm upgrade --install ... \
+#     -f tests/_helm/values/nightly/distributed-woodpecker \
+#     -f tests/_helm/values/nightly/tikv
+#
+# Deploy the TiKV dependency first with:
+#   tests/_helm/scripts/deploy-nightly-tikv.sh
+#
+# etcd intentionally remains enabled in the base values files. Milvus still uses
+# etcd for discovery/session/lease/election paths; this overlay only moves
+# persistent metadata to TiKV.
+
+tikvMetaEnv: &tikvMetaEnv
+- name: MILVUS_RELEASE_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.labels['app.kubernetes.io/instance']
+- name: MILVUS_CONF_METASTORE_TYPE
+  value: tikv
+- name: MILVUS_CONF_TIKV_ENDPOINTS
+  value: "$(MILVUS_RELEASE_NAME)-tikv-pd:2379"
+- name: MILVUS_CONF_TIKV_ROOT_PATH
+  value: "$(MILVUS_RELEASE_NAME)"
+- name: MILVUS_CONF_TIKV_REQUEST_TIMEOUT
+  value: "10000"
+- name: MILVUS_CONF_TIKV_SNAPSHOT_SCAN_SIZE
+  value: "256"
+
+standalone:
+  extraEnv: *tikvMetaEnv
+
+rootCoordinator:
+  extraEnv: *tikvMetaEnv
+
+queryCoordinator:
+  extraEnv: *tikvMetaEnv
+
+dataCoordinator:
+  extraEnv: *tikvMetaEnv
+
+indexCoordinator:
+  extraEnv: *tikvMetaEnv
+
+mixCoordinator:
+  extraEnv: *tikvMetaEnv
+
+proxy:
+  extraEnv: *tikvMetaEnv
+
+queryNode:
+  extraEnv: *tikvMetaEnv
+
+dataNode:
+  extraEnv: *tikvMetaEnv
+
+indexNode:
+  extraEnv: *tikvMetaEnv
+
+streamingNode:
+  extraEnv: *tikvMetaEnv

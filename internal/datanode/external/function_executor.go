@@ -351,7 +351,6 @@ func streamBatches(
 		}
 
 		batch, err := storage.RecordToInsertData(rec, executionSchema, requiredInputFields)
-		rec.Release()
 		if err != nil {
 			return totalRows, merr.Wrap(err, "record to InsertData")
 		}

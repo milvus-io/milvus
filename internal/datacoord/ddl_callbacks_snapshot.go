@@ -18,9 +18,15 @@ package datacoord
 
 import (
 	"context"
+	"sort"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // createSnapshotV2AckCallback handles the callback for CreateSnapshot DDL message.
@@ -34,7 +40,20 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 	log.Info(ctx, "createSnapshotV2AckCallback received")
 
 	// Create snapshot - ID is allocated inside CreateSnapshot
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds)
+	positions := make([]*msgpb.MsgPosition, 0, len(result.Results))
+	for channel, fence := range result.Results {
+		if funcutil.IsControlChannel(channel) {
+			continue
+		}
+		positions = append(positions, &msgpb.MsgPosition{
+			ChannelName: channel,
+			Timestamp:   fence.TimeTick,
+			MsgID:       adaptor.MustGetMQWrapperIDFromMessage(fence.LastConfirmedMessageID).Serialize(),
+			WALName:     commonpb.WALName(fence.LastConfirmedMessageID.WALName()),
+		})
+	}
+	sort.Slice(positions, func(i, j int) bool { return positions[i].GetChannelName() < positions[j].GetChannelName() })
+	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, positions)
 	if err != nil {
 		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err
@@ -98,12 +117,42 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 		mlog.String("snapshotName", header.SnapshotName),
 		mlog.FieldCollectionID(header.CollectionId),
 		mlog.FieldJobID(header.JobId),
+		mlog.Bool("external", header.External),
+		mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(header.SnapshotS3Location)),
+		mlog.Bool("externalSpecSet", header.GetExternalSpec() != ""),
 	)
 	log.Info(ctx, "restoreSnapshotV2AckCallback received")
 
 	// Restore data (create copy segment job)
 	// Use the pre-allocated jobID from the WAL message for idempotency
-	jobID, err := s.snapshotManager.RestoreData(ctx, header.SourceCollectionId, header.SnapshotName, header.CollectionId, header.JobId, header.PinId)
+	var (
+		jobID int64
+		err   error
+	)
+	if header.GetExternal() {
+		// External restores do not have a local snapshot catalog entry or pin.
+		// The WAL header carries the metadata URI and external_spec needed to
+		// recreate the source storage in the async copy job.
+		jobID, err = s.snapshotManager.RestoreExternalData(
+			ctx,
+			header.SourceCollectionId,
+			header.SnapshotName,
+			header.SnapshotS3Location,
+			header.CollectionId,
+			header.JobId,
+			header.GetExternalSpec(),
+			header.GetSnapshotFingerprint(),
+		)
+	} else {
+		jobID, err = s.snapshotManager.RestoreData(
+			ctx,
+			header.SourceCollectionId,
+			header.SnapshotName,
+			header.CollectionId,
+			header.JobId,
+			header.PinId,
+		)
+	}
 	if err != nil {
 		log.Error(ctx, "failed to restore data", mlog.Err(err))
 		return err

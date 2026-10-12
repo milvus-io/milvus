@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -763,7 +764,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -786,7 +787,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -809,7 +810,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -832,7 +833,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -855,7 +856,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -879,7 +880,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -902,7 +903,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -1042,7 +1043,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -1066,7 +1067,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -1089,7 +1090,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, dim int
 				FieldId: field.FieldID,
 			}
 			if field.GetNullable() {
-				f.ValidData = testutils.GenerateBoolArray(numRows)
+				typeutil.SetFieldDataValidData(f, testutils.GenerateBoolArray(numRows))
 			}
 			msg.FieldsData = append(msg.FieldsData, f)
 			for _, d := range data {
@@ -1125,8 +1126,145 @@ func TestRowBasedTransferInsertMsgToInsertRecord(t *testing.T) {
 	schema, _, _ := genAllFieldsSchema(dim, false)
 	msg, _, _ := genRowBasedInsertMsg(numRows, dim)
 
-	_, err := TransferInsertMsgToInsertRecord(schema, msg)
+	_, skippedFields, err := TransferInsertMsgToInsertRecord(schema, msg)
 	assert.NoError(t, err)
+	assert.Nil(t, skippedFields)
+}
+
+func TestColumnBasedTransferInsertMsgToInsertRecordSkipDroppedField(t *testing.T) {
+	// Simulate WAL replay after drop-field: the payload still carries the column of
+	// a since-dropped field, which must be skipped instead of forwarded to segcore.
+	schema := &schemapb.CollectionSchema{
+		Name: "test_skip_dropped_field",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int64},
+		},
+	}
+	numRows := 4
+	msg, _, _ := genColumnBasedInsertMsg(schema, numRows, 8)
+	msg.FieldsData = append(msg.FieldsData, &schemapb.FieldData{
+		Type:      schemapb.DataType_VarChar,
+		FieldName: "dropped",
+		FieldId:   158,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: []string{"a", "b", "c", "d"}},
+				},
+			},
+		},
+	})
+
+	record, skippedFields, err := TransferInsertMsgToInsertRecord(schema, msg)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(numRows), record.GetNumRows())
+	fieldIDs := lo.Map(record.GetFieldsData(), func(fd *schemapb.FieldData, _ int) int64 {
+		return fd.GetFieldId()
+	})
+	assert.ElementsMatch(t, []int64{100, 101}, fieldIDs)
+	assert.Equal(t, []int64{158}, skippedFields)
+}
+
+func TestColumnBasedTransferInsertMsgToInsertRecord_ElementNullableArray(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "element_nullable_array",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:         101,
+				Name:            "arr",
+				DataType:        schemapb.DataType_Array,
+				ElementType:     schemapb.DataType_Int64,
+				ElementNullable: true,
+			},
+		},
+	}
+	msg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			NumRows: 2,
+			Version: msgpb.InsertDataVersion_ColumnBased,
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   100,
+					FieldName: "pk",
+					Type:      schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+							},
+						},
+					},
+				},
+				{
+					FieldId:   101,
+					FieldName: "arr",
+					Type:      schemapb.DataType_Array,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_ArrayData{
+								ArrayData: &schemapb.ArrayArray{
+									ElementType: schemapb.DataType_Int64,
+									Data: []*schemapb.ScalarField{
+										{
+											Data: &schemapb.ScalarField_LongData{
+												LongData: &schemapb.LongArray{Data: []int64{10, 0}},
+											},
+											ValidData: []bool{true, false},
+										},
+										{
+											Data: &schemapb.ScalarField_LongData{
+												LongData: &schemapb.LongArray{Data: []int64{20}},
+											},
+											ValidData: []bool{true},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	record, _, err := TransferInsertMsgToInsertRecord(schema, msg)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), record.GetNumRows())
+	require.Len(t, record.GetFieldsData(), 2)
+	arrayData := record.GetFieldsData()[1].GetScalars().GetArrayData()
+	require.Len(t, arrayData.GetData(), 2)
+	assert.Equal(t, []bool{true, false}, arrayData.GetData()[0].GetValidData())
+	assert.Equal(t, []int64{10, 0}, arrayData.GetData()[0].GetLongData().GetData())
+}
+
+func TestTransferInsertDataToInsertRecord_ElementNullableArrayOfVectorAllowsNullRowPlaceholder(t *testing.T) {
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			101: &VectorArrayFieldData{
+				Dim:             2,
+				ElementType:     schemapb.DataType_FloatVector,
+				Nullable:        true,
+				ElementNullable: true,
+				ValidData:       []bool{false},
+				Data:            []*schemapb.VectorField{{}},
+			},
+		},
+	}
+
+	record, err := TransferInsertDataToInsertRecord(insertData)
+	require.NoError(t, err)
+	require.Len(t, record.GetFieldsData(), 1)
+	field := record.GetFieldsData()[0]
+	assert.Equal(t, []bool{false}, typeutil.GetFieldDataValidData(field))
+	require.Len(t, field.GetVectors().GetVectorArray().GetData(), 1)
+	assert.Nil(t, field.GetVectors().GetVectorArray().GetData()[0].GetData())
 }
 
 func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
@@ -1435,6 +1573,69 @@ func TestColumnBasedInsertMsgToInsertDataNullable(t *testing.T) {
 	}
 }
 
+func TestColumnBasedInsertMsgToInsertDataValidDataSources(t *testing.T) {
+	validData := []bool{true, false}
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "value",
+				DataType: schemapb.DataType_Int64,
+				Nullable: true,
+			},
+		},
+	}
+	makeMsg := func(legacyValidData, scalarValidData []bool) *msgstream.InsertMsg {
+		return &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				NumRows: 2,
+				Version: msgpb.InsertDataVersion_ColumnBased,
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldId:   100,
+						FieldName: "value",
+						Type:      schemapb.DataType_Int64,
+						ValidData: legacyValidData,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								ValidData: scalarValidData,
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{10, 0}},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	for _, test := range []struct {
+		name    string
+		legacy  []bool
+		current []bool
+		wantErr bool
+	}{
+		{name: "legacy fallback", legacy: validData},
+		{name: "field-specific", current: validData},
+		{name: "matching dual sources", legacy: validData, current: validData},
+		{name: "mismatched dual sources", legacy: validData, current: []bool{false, true}, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			insertData, err := ColumnBasedInsertMsgToInsertData(makeMsg(test.legacy, test.current), schema)
+			if test.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "different legacy and field-specific valid_data")
+				return
+			}
+
+			require.NoError(t, err)
+			fieldData := insertData.Data[100].(*Int64FieldData)
+			assert.Equal(t, validData, fieldData.ValidData)
+		})
+	}
+}
+
 func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorNonCompactData(t *testing.T) {
 	validData := []bool{true, false, true}
 	makeSchema := func(dataType schemapb.DataType, dim string) *schemapb.CollectionSchema {
@@ -1460,6 +1661,7 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorNonCompactData(t *
 		}
 	}
 	makeMsg := func(dataType schemapb.DataType, vectors *schemapb.VectorField) *msgstream.InsertMsg {
+		vectors.ValidData = validData
 		return &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				FieldsData: []*schemapb.FieldData{
@@ -1479,7 +1681,6 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorNonCompactData(t *
 						Type:      dataType,
 						FieldName: "vec",
 						FieldId:   101,
-						ValidData: validData,
 						Field:     &schemapb.FieldData_Vectors{Vectors: vectors},
 					},
 				},
@@ -1550,7 +1751,7 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorNonCompactData(t *
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "compact")
 
-			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			_, _, err = TransferInsertMsgToInsertRecord(schema, msg)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "compact")
 		})
@@ -1581,6 +1782,7 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorPartialRowData(t *
 		}
 	}
 	makeMsg := func(dataType schemapb.DataType, vectors *schemapb.VectorField) *msgstream.InsertMsg {
+		vectors.ValidData = []bool{true, false}
 		return &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				FieldsData: []*schemapb.FieldData{
@@ -1600,7 +1802,6 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorPartialRowData(t *
 						Type:      dataType,
 						FieldName: "vec",
 						FieldId:   101,
-						ValidData: []bool{true, false},
 						Field:     &schemapb.FieldData_Vectors{Vectors: vectors},
 					},
 				},
@@ -1658,7 +1859,7 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorPartialRowData(t *
 			_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
 			require.Error(t, err)
 
-			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			_, _, err = TransferInsertMsgToInsertRecord(schema, msg)
 			require.Error(t, err)
 		})
 	}
@@ -1927,7 +2128,7 @@ func TestMergeInsertData(t *testing.T) {
 			Infos: nil,
 		}
 
-		MergeInsertData(d1, d2)
+		require.NoError(t, MergeInsertData(d1, d2))
 
 		f, ok := d1.Data[common.RowIDField]
 		assert.True(t, ok)
@@ -2165,7 +2366,7 @@ func TestMergeInsertData(t *testing.T) {
 			Infos: nil,
 		}
 
-		MergeInsertData(d1, d2)
+		require.NoError(t, MergeInsertData(d1, d2))
 
 		f, ok := d1.Data[common.RowIDField]
 		assert.True(t, ok)
@@ -3342,8 +3543,8 @@ func TestMergeVectorArrayField(t *testing.T) {
 			Nullable:    true,
 		}
 
-		MergeFieldData(data, 100, field1)
-		MergeFieldData(data, 100, field2)
+		require.NoError(t, MergeFieldData(data, 100, field1))
+		require.NoError(t, MergeFieldData(data, 100, field2))
 
 		merged := data.Data[100].(*VectorArrayFieldData)
 		assert.Equal(t, 4, len(merged.Data))
@@ -3361,11 +3562,66 @@ func TestMergeVectorArrayField(t *testing.T) {
 			Nullable:    false,
 		}
 
-		MergeFieldData(data, 100, field)
+		require.NoError(t, MergeFieldData(data, 100, field))
 
 		merged := data.Data[100].(*VectorArrayFieldData)
 		assert.Equal(t, 1, len(merged.Data))
 		assert.Nil(t, merged.ValidData)
+	})
+}
+
+func TestMergeFieldDataRejectsElementNullableMismatch(t *testing.T) {
+	t.Run("array", func(t *testing.T) {
+		data := &InsertData{Data: make(map[FieldID]FieldData)}
+		row := &schemapb.ScalarField{
+			Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}},
+			ValidData: []bool{true},
+		}
+		existing := &ArrayFieldData{
+			ElementType:     schemapb.DataType_Int64,
+			Data:            []*schemapb.ScalarField{row},
+			ElementNullable: true,
+		}
+		incoming := &ArrayFieldData{
+			ElementType: schemapb.DataType_Int64,
+			Data: []*schemapb.ScalarField{{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{2}}},
+			}},
+		}
+
+		require.NoError(t, MergeFieldData(data, 100, existing))
+		err := MergeFieldData(data, 100, incoming)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "inconsistent element_nullable")
+		merged := data.Data[100].(*ArrayFieldData)
+		require.True(t, merged.ElementNullable)
+		require.Len(t, merged.Data, 1)
+	})
+
+	t.Run("array of vector preflight", func(t *testing.T) {
+		buffer := &InsertData{Data: make(map[FieldID]FieldData)}
+		nullableRow := makeFloatVec(2, 1, 2)
+		nullableRow.ValidData = []bool{true}
+		first := &InsertData{Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				Dim:             2,
+				ElementType:     schemapb.DataType_FloatVector,
+				Data:            []*schemapb.VectorField{nullableRow},
+				ElementNullable: true,
+			},
+		}}
+		second := &InsertData{Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				Dim:         2,
+				ElementType: schemapb.DataType_FloatVector,
+				Data:        []*schemapb.VectorField{makeFloatVec(2, 3, 4)},
+			},
+		}}
+
+		err := MergeInsertData(buffer, first, second)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "inconsistent element_nullable")
+		require.Empty(t, buffer.Data)
 	})
 }
 
@@ -3379,7 +3635,7 @@ func TestMergeInsertDataNullableSparseAllNullPreservesValidData(t *testing.T) {
 		},
 	}}
 
-	MergeInsertData(buffer, allNull)
+	require.NoError(t, MergeInsertData(buffer, allNull))
 
 	merged := buffer.Data[100].(*SparseFloatVectorFieldData)
 	require.True(t, merged.Nullable)
@@ -3413,7 +3669,8 @@ func TestTransferInsertDataToInsertRecord_NullableArrayOfVector(t *testing.T) {
 	for _, fd := range record.FieldsData {
 		if fd.FieldId == 100 {
 			found = true
-			assert.Equal(t, []bool{true, false}, fd.GetValidData())
+			assert.Nil(t, fd.GetValidData())
+			assert.Equal(t, []bool{true, false}, fd.GetVectors().GetValidData())
 			assert.NotNil(t, fd.GetVectors().GetVectorArray())
 			assert.Equal(t, 2, len(fd.GetVectors().GetVectorArray().GetData()))
 		}

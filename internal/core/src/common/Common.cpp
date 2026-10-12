@@ -22,7 +22,7 @@
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "log/Log.h"
-#include "storage/EntryStreamUtils.h"
+#include "storage/LoadAdmissionController.h"
 #include "tantivy-binding.h"
 
 namespace milvus {
@@ -34,6 +34,7 @@ std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE(DEFAULT_DELETE_DUMP_BATCH_SIZE);
 std::atomic<bool> ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION(
     DEFAULT_ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION);
 std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
+std::atomic<bool> ENABLE_DRIVER_PREFETCH(DEFAULT_ENABLE_DRIVER_PREFETCH);
 
 std::atomic<bool> JSON_KEY_STATS_ENABLED(DEFAULT_JSON_KEY_STATS_ENABLED);
 
@@ -56,9 +57,20 @@ SetLoadTransientBudgetBytes(int64_t bytes) {
         LOG_WARN("ignore invalid load transient budget bytes: {}", bytes);
         return;
     }
-    storage::TransientMemoryBudget::SetLoadTransientBudgetBytes(
+    storage::LoadAdmissionController::SetLoadTransientBudgetBytes(
         static_cast<size_t>(bytes));
     LOG_INFO("set load transient budget bytes: {}", bytes);
+}
+
+void
+SetLoadAdmissionSlots(int64_t slots) {
+    if (slots < 0) {
+        LOG_WARN("ignore invalid load admission slots: {}", slots);
+        return;
+    }
+    storage::LoadAdmissionController::GetInstance().SetCapacitySlots(
+        static_cast<size_t>(slots));
+    LOG_INFO("set load admission slots: {}", slots);
 }
 
 void
@@ -80,6 +92,13 @@ SetDefaultOptimizeExprEnable(bool val) {
     OPTIMIZE_EXPR_ENABLED.store(val);
     LOG_INFO("set default optimize expr enabled: {}",
              OPTIMIZE_EXPR_ENABLED.load());
+}
+
+void
+SetDefaultDriverPrefetchEnable(bool val) {
+    ENABLE_DRIVER_PREFETCH.store(val);
+    LOG_INFO("set default driver prefetch enabled: {}",
+             ENABLE_DRIVER_PREFETCH.load());
 }
 
 void

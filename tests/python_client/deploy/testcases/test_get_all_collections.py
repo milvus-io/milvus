@@ -1,17 +1,19 @@
 import json
-import pytest
 
+import pytest
 from base.client_base import TestcaseBase
-from deploy.common import get_deploy_test_collections
 from common.common_type import CaseLabel
+from deploy.common import get_deploy_test_collections
 from utils.util_log import test_log as log
 
 
 class TestGetCollections(TestcaseBase):
-    """ Test case of getting all collections """
+    """Test case of getting all collections"""
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_get_collections_by_prefix(self,):
+    def test_get_collections_by_prefix(
+        self,
+    ):
         self._connect()
         all_collections = self.utility_wrap.list_collections()[0]
         all_collections = [c_name for c_name in all_collections if "deploy_test" in c_name]

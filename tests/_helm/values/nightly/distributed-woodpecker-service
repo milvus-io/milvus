@@ -19,7 +19,7 @@ woodpecker:
   enabled: true
   image:
     repository: harbor.milvus.io/woodpecker/woodpecker
-    tag: master-latest
+    tag: v0.1.45
     pullPolicy: Always
 streaming:
   enabled: true
@@ -89,9 +89,10 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
-    proxy:
-      http:
-        enabled: true
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     common:
       storage:
         enablev2: true
@@ -101,13 +102,14 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
+      targetVecIndexVersion: 11
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 5
       compaction:
         storageVersion:
           enabled: true
         storageFormat:
           enabled: true
-      targetVecIndexVersion: 10
-      compaction:
         bumpSchemaVersion:
           enabled: true
       gc:

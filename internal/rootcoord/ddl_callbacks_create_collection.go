@@ -24,9 +24,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	streamingbroadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -37,6 +38,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type collectionDataViewCreator interface {
+	CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) error
+}
 
 func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
 	schema := &schemapb.CollectionSchema{}
@@ -82,9 +87,8 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		return err
 	}
 
-	// set up the broadcast virtual channels and control channel, then make a broadcast message.
-	broadcastChannel := make([]string, 0, createCollectionTask.Req.ShardsNum+1)
-	broadcastChannel = append(broadcastChannel, streaming.WAL().ControlChannel())
+	// set up the broadcast virtual channels, then make a broadcast message.
+	broadcastChannel := make([]string, 0, createCollectionTask.Req.ShardsNum)
 	for i := 0; i < int(createCollectionTask.Req.ShardsNum); i++ {
 		broadcastChannel = append(broadcastChannel, createCollectionTask.body.VirtualChannelNames[i])
 	}
@@ -94,9 +98,11 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		WithBroadcast(broadcastChannel).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
-		// Do NOT release file resources here: the broadcast task is already in the
-		// scheduler and will retry until success. refCnt will be decremented when
-		// the collection is eventually dropped.
+		// Once the broadcast task is created, it will retry until success and owns
+		// the reserved refs. If the task was not created, release the reservation.
+		if streamingbroadcaster.IsBroadcastTaskNotCreated(err) {
+			createCollectionTask.releaseFileResources()
+		}
 		return err
 	}
 	return nil
@@ -113,6 +119,13 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 				return merr.Wrap(err, "failed to create collection shard")
 			}
 		}
+	}
+	creator, ok := c.mixCoord.(collectionDataViewCreator)
+	if !ok {
+		mlog.Warn(ctx, "MixCoord does not support DataView collection creation",
+			mlog.FieldCollectionID(header.CollectionId))
+	} else if err := creator.CreateCollectionDataView(ctx, header.CollectionId, body.VirtualChannelNames); err != nil {
+		return merr.Wrap(err, "failed to create collection data view")
 	}
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {

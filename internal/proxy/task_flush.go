@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -34,7 +35,7 @@ type flushTask struct {
 	mixCoord types.MixCoordClient
 	result   *milvuspb.FlushResponse
 
-	chMgr channelsMgr
+	chMgr channelmgr.ChannelsMgr
 }
 
 func (t *flushTask) TraceCtx() context.Context {

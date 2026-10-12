@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -166,9 +168,9 @@ func TestManager(t *testing.T) {
 func TestManagerRecoverAndFailAll(t *testing.T) {
 	resource.InitForTest(t)
 	now := time.Now()
-	beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now, 0), 10*time.Millisecond)
-	beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTime(now, 1), 10*time.Millisecond)
-	beginMsg3 := newImmutableBeginTxnMessageWithVChannel("v1", 3, tsoutil.ComposeTSByTime(now, 2), 10*time.Millisecond)
+	beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now), 10*time.Millisecond)
+	beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTimeWithLogical(now, 1), 10*time.Millisecond)
+	beginMsg3 := newImmutableBeginTxnMessageWithVChannel("v1", 3, tsoutil.ComposeTSByTimeWithLogical(now, 2), 10*time.Millisecond)
 	builders := map[message.TxnID]*message.ImmutableTxnMessageBuilder{
 		message.TxnID(1): message.NewImmutableTxnMessageBuilder(beginMsg1),
 		message.TxnID(2): message.NewImmutableTxnMessageBuilder(beginMsg2),
@@ -180,7 +182,7 @@ func TestManagerRecoverAndFailAll(t *testing.T) {
 		WithHeader(&message.InsertMessageHeader{}).
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable().
-		WithTimeTick(tsoutil.ComposeTSByTime(now, 3)).
+		WithTimeTick(tsoutil.ComposeTSByTimeWithLogical(now, 3)).
 		WithLastConfirmedUseMessageID().
 		WithTxnContext(message.TxnContext{
 			TxnID:     message.TxnID(1),
@@ -211,6 +213,29 @@ func TestWithContext(t *testing.T) {
 
 	session = GetTxnSessionFromContext(ctx)
 	assert.NotNil(t, session)
+}
+
+func TestTxnSessionRejectCommitAdmission(t *testing.T) {
+	metrics := metricsutil.NewTxnMetrics("p1")
+	defer metrics.Close()
+	session := newTxnSession("v1", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 10, metrics.BeginTxn())
+	cleanupCalled := atomic.NewInt32(0)
+	session.RegisterCleanup(func() {
+		cleanupCalled.Inc()
+	}, 0)
+
+	err := session.RequestCommitAndWait(context.Background(), 11)
+	require.NoError(t, err)
+
+	session.RejectCommit()
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+	require.Equal(t, int32(1), cleanupCalled.Load())
+	require.NotPanics(t, func() {
+		session.Cleanup()
+		session.Cleanup()
+		session.Cleanup()
+	})
+	require.Equal(t, int32(1), cleanupCalled.Load())
 }
 
 func TestRollbackAllInFlightTransactions(t *testing.T) {
@@ -306,8 +331,8 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 	t.Run("RollbackWithRecoveredSessions", func(t *testing.T) {
 		// Create a manager with recovered sessions
 		now := time.Now()
-		beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now, 0), 10*time.Minute)
-		beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTime(now, 1), 10*time.Minute)
+		beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now), 10*time.Minute)
+		beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTimeWithLogical(now, 1), 10*time.Minute)
 
 		builders := map[message.TxnID]*message.ImmutableTxnMessageBuilder{
 			message.TxnID(1): message.NewImmutableTxnMessageBuilder(beginMsg1),

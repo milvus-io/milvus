@@ -25,13 +25,6 @@
 
 namespace milvus::segcore {
 
-enum class IndexConfigLevel {
-    UNKNOWN = 0,
-    SUPPORT = 1,
-    COMPATIBLE = 2,
-    SYSTEM_ASSIGN = 3
-};
-
 // this is the config used for generating growing index or the temp sealed index
 // when the segment is sealed before the index is built.
 class VecIndexConfig {
@@ -49,16 +42,16 @@ class VecIndexConfig {
     GetBuildThreshold() const noexcept;
 
     knowhere::IndexType
-    GetIndexType() noexcept;
+    GetIndexType() const noexcept;
 
     knowhere::MetricType
-    GetMetricType() noexcept;
+    GetMetricType() const noexcept;
 
     knowhere::Json
-    GetBuildBaseParams(DataType data_type);
+    GetBuildBaseParams(DataType data_type) const;
 
     SearchInfo
-    GetSearchConf(const SearchInfo& searchInfo);
+    GetSearchConf(const SearchInfo& searchInfo) const;
 
  private:
     const SegcoreConfig& config_;

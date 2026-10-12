@@ -1,0 +1,15 @@
+# Milvus agent guides
+
+These guides describe current Milvus subsystems from the source-code point of
+view. Each subsystem entry is an index; read its linked documents before
+changing that subsystem.
+
+- [Observability](observability/README.md): logging, metrics, tracing, and
+  observability debugging.
+- [Streaming system](streaming-system/streaming-system.md): WAL, channels,
+  DDL/DCL execution, recovery storage, and replication.
+- [Storage path contract](storage/path_contract.md): complete keys, local upgrade
+  compatibility, and GC ownership boundaries.
+
+Update these guides with the code when an invariant, interface, or ownership
+boundary changes.

@@ -1,13 +1,11 @@
 from itertools import cycle
-import pytest
 
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
-from pymilvus import Function, FunctionType, DataType, LexicalHighlighter
+from pymilvus import DataType, Function, FunctionType, LexicalHighlighter
 
 prefix = "client_insert"
 epsilon = ct.epsilon
@@ -18,10 +16,10 @@ default_dim = ct.default_dim
 default_limit = ct.default_limit
 default_search_exp = "id >= 0"
 exp_res = "exp_res"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
+default_search_string_exp = 'varchar >= "0"'
+default_search_mix_exp = 'int64 >= 0 && varchar >= "0"'
 default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
+default_json_search_exp = 'json_field["number"] >= 0'
 perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
@@ -48,6 +46,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
     so we need to init the collection with pre-defined data
     #########################################################
     """
+
     @pytest.fixture(scope="module", autouse=True)
     def prepare_highlighter_collection(self, request):
         """
@@ -59,17 +58,8 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         if client.has_collection(collection_name):
             client.drop_collection(collection_name)
 
-        analyzer_params = {
-            "tokenizer": "standard"
-        }
-        analyzer_params_2 = {
-            "tokenizer": {
-                "type": "jieba",
-                "dict": ["结巴分词器"],
-                "mode": "exact",
-                "hmm": False
-            }
-        }
+        analyzer_params = {"tokenizer": "standard"}
+        analyzer_params_2 = {"tokenizer": {"type": "jieba", "dict": ["结巴分词器"], "mode": "exact", "hmm": False}}
         multi_analyzer_params = {
             "by_field": "language",
             "analyzers": {
@@ -80,115 +70,142 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             "alias": {"chinese": "zh", "eng": "en"},
         }
         schema = client.create_schema(auto_id=False, enable_dynamic_field=True)
-        schema.add_field(field_name=default_primary_key_field_name,
-                         datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name=default_vector_field_name,
-                         datatype=DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(field_name="language",
-                         datatype=DataType.VARCHAR, max_length=16)
-        schema.add_field(field_name=default_text_field_name, datatype=DataType.VARCHAR, nullable=True, max_length=2000, enable_analyzer=True,
-                         analyzer_params=analyzer_params)
-        schema.add_field(field_name=default_text_field_name_chinese, datatype=DataType.VARCHAR, nullable=True, max_length=2000, enable_analyzer=True,
-                         analyzer_params=analyzer_params_2)
-        schema.add_field(field_name=default_text_field_name_no_BM25, datatype=DataType.VARCHAR, nullable=True, max_length=2000, enable_analyzer=True,
-                         analyzer_params=analyzer_params_2)
-        schema.add_field(field_name=default_text_field_name_multi_analyzer, datatype=DataType.VARCHAR, nullable=True, max_length=2000, enable_analyzer=True,
-                         multi_analyzer_params=multi_analyzer_params)
-        schema.add_field(field_name=default_sparse_vector_field_name,
-                         datatype=DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_field(field_name=default_sparse_vector_field_name_chinese,
-                         datatype=DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_field(field_name=default_sparse_vector_field_name_multi_analyzer,
-                         datatype=DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field(field_name=default_primary_key_field_name, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name=default_vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name="language", datatype=DataType.VARCHAR, max_length=16)
+        schema.add_field(
+            field_name=default_text_field_name,
+            datatype=DataType.VARCHAR,
+            nullable=True,
+            max_length=2000,
+            enable_analyzer=True,
+            analyzer_params=analyzer_params,
+        )
+        schema.add_field(
+            field_name=default_text_field_name_chinese,
+            datatype=DataType.VARCHAR,
+            nullable=True,
+            max_length=2000,
+            enable_analyzer=True,
+            analyzer_params=analyzer_params_2,
+        )
+        schema.add_field(
+            field_name=default_text_field_name_no_BM25,
+            datatype=DataType.VARCHAR,
+            nullable=True,
+            max_length=2000,
+            enable_analyzer=True,
+            analyzer_params=analyzer_params_2,
+        )
+        schema.add_field(
+            field_name=default_text_field_name_multi_analyzer,
+            datatype=DataType.VARCHAR,
+            nullable=True,
+            max_length=2000,
+            enable_analyzer=True,
+            multi_analyzer_params=multi_analyzer_params,
+        )
+        schema.add_field(field_name=default_sparse_vector_field_name, datatype=DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field(field_name=default_sparse_vector_field_name_chinese, datatype=DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field(
+            field_name=default_sparse_vector_field_name_multi_analyzer, datatype=DataType.SPARSE_FLOAT_VECTOR
+        )
         bm25_function = Function(
             name=f"{default_text_field_name}_bm25_emb",
             function_type=FunctionType.BM25,
             input_field_names=[default_text_field_name],
             output_field_names=[default_sparse_vector_field_name],
-            params={}
+            params={},
         )
         bm25_function_2 = Function(
             name=f"{default_text_field_name_chinese}_bm25_emb",
             function_type=FunctionType.BM25,
             input_field_names=[default_text_field_name_chinese],
             output_field_names=[default_sparse_vector_field_name_chinese],
-            params={}
+            params={},
         )
         bm25_function_multi_analyzer = Function(
             name=f"{default_text_field_name_multi_analyzer}_bm25_emb",
             function_type=FunctionType.BM25,
             input_field_names=[default_text_field_name_multi_analyzer],
-            output_field_names=[
-                default_sparse_vector_field_name_multi_analyzer],
-            params={}
+            output_field_names=[default_sparse_vector_field_name_multi_analyzer],
+            params={},
         )
         schema.add_function(bm25_function)
         schema.add_function(bm25_function_2)
         schema.add_function(bm25_function_multi_analyzer)
         index_params = client.prepare_index_params()
+        index_params.add_index(field_name=default_primary_key_field_name, index_type="AUTOINDEX")
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(
-            field_name=default_primary_key_field_name, index_type="AUTOINDEX")
+            field_name=default_sparse_vector_field_name, index_type="SPARSE_INVERTED_INDEX", metric_type="BM25"
+        )
         index_params.add_index(
-            field_name=default_vector_field_name, index_type="AUTOINDEX")
-        index_params.add_index(field_name=default_sparse_vector_field_name,
-                               index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
-        index_params.add_index(field_name=default_sparse_vector_field_name_chinese,
-                               index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
-        index_params.add_index(field_name=default_sparse_vector_field_name_multi_analyzer,
-                               index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+            field_name=default_sparse_vector_field_name_chinese, index_type="SPARSE_INVERTED_INDEX", metric_type="BM25"
+        )
         index_params.add_index(
-            field_name=default_text_field_name, index_type="AUTOINDEX")
-        index_params.add_index(
-            field_name=default_text_field_name_chinese, index_type="AUTOINDEX")
-        client.create_collection(collection_name=collection_name, schema=schema,
-                                 index_params=index_params, consistency_level="Strong")
+            field_name=default_sparse_vector_field_name_multi_analyzer,
+            index_type="SPARSE_INVERTED_INDEX",
+            metric_type="BM25",
+        )
+        index_params.add_index(field_name=default_text_field_name, index_type="AUTOINDEX")
+        index_params.add_index(field_name=default_text_field_name_chinese, index_type="AUTOINDEX")
+        client.create_collection(
+            collection_name=collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
-        text = ["Is there a leakage?",
-                "A leakage of what?",
-                "I have the seat full of water! Like, full of water!",
-                "Must be water.",
-                "Let's add that to the words of wisdom",
-                "7654321 keyword 1234567",
-                "key key key key key key key key",
-                "trytrytrytrytrytry",
-                "word 1 word 12 word 123",
-                "1 2 3 4 5 6 7 8 9 10",
-                "A B C D 一二三四 milvus结巴分词器中文测试",
-                "There is a sub-word in this sentence",
-                "",
-                None,
-                ("Dusk settled gently upon Embermoor, turning streets into ribbons in twilight glow. "
-                 "In this quiet district, young Teren roamed with restless intent. He sought purpose, "
-                 "something bright enough to hush turmoil pressing within his chest.\n"
-                 "Teren’s trouble began when curious murmurs drifted through town concerning shimmering "
-                 "lights rising nightly beyond hills. Elders insisted it stemmed from old ruins, relics "
-                 "left behind by wanderers long gone. Yet no one ventured there; timid hearts kept them "
-                 "grounded.\n"
-                 "One evening, driven by stubborn courage, Teren set out alone. Crisp wind brushed his "
-                 "cheeks, guiding him through slender trees trembling under midnight hush. Crickets chirped "
-                 "rhythmically, echoing his steady footsteps. He pressed forward until dim ruins emerged, "
-                 "stones bent by centuries yet proud in their quiet endurance.\n"
-                 "Upon entering, Teren sensed something stirring—bright pulses drifting through corridors "
-                 "like living embers. One ember hovered close, swirling gently, studying him with earnest "
-                 "curiosity. It emitted tender hums resonating deep within Teren’s chest, soothing worry "
-                 "stitched into his spirit.\n"
-                 "Ember drifted higher, inviting him to follow. Teren stepped through crumbled chambers "
-                 "until they reached an inner court where hundreds curled in silent orbits—tiny spheres "
-                 "burning with soft brilliance. Together they formed swirling constellations, shimmering "
-                 "Instantly, warmth surged through him—not harsh, not wild, but gentle strength reminding "
-                 "him he belonged in this immense world. Hidden burdens loosened. He felt courage blooming, "
-                 "rooted in something deeper than fear.\n"
-                 "When dawn arrived, Ember escorting him outside, Teren turned to ruins glowing faintly "
-                 "beneath morning light. He understood now: these spirits lingered not for warning but for "
-                 "guiding tender souls seeking direction.\n"
-                 "He returned to Embermoor changed. Not every problem dissolved, yet Teren moved through "
-                 "his days with renewed stride, carrying brilliance gifted during his midnight journey."),
-                ("黄昏降临在静谧城镇，灯影沿着街道缓缓铺展。青年林舟怀着不安在巷道行走，心跳与脚步相互呼应。他渴望找到方向，却被往昔失落缠绕。"
-                 "传言提到远处丘陵夜晚会浮现微光，长者劝人别靠近，担忧未知带来风险。林舟仍被好奇牵引，选择独自前往。冷风掠过树梢，星辰悬挂高空，陪伴他穿越草径。"
-                 "残破遗迹映入眼帘，石壁布满岁月痕迹。踏入其内，柔亮光点缓缓旋转，如同呼吸般起伏。某个光点靠近他，散发温暖振动，仿佛聆听他内心低语。"
-                 "光点引领他走向空旷庭院，成群光辉在空域盘旋，编织出壮丽图景。那瞬间，林舟感到胸口释然，恐惧逐渐消散，勇气悄然生根。"
-                 "黎明到来，他回望遗迹，光辉渐隐却留存于心。归途上，他步伐坚定，明白指引并未消失，只是化作持续前行力量。每当夜色再度降临，他都会抬头微笑，感谢那段静默旅程。"),
-                "甲，甲乙，甲乙丙，甲乙丙丁，甲乙丙丁戊，甲乙丙丁戊己，甲乙丙丁戊己庚，甲乙丙丁戊己庚辛，甲乙丙丁戊己庚辛壬，甲乙丙丁戊己庚辛壬癸"]
+        text = [
+            "Is there a leakage?",
+            "A leakage of what?",
+            "I have the seat full of water! Like, full of water!",
+            "Must be water.",
+            "Let's add that to the words of wisdom",
+            "7654321 keyword 1234567",
+            "key key key key key key key key",
+            "trytrytrytrytrytry",
+            "word 1 word 12 word 123",
+            "1 2 3 4 5 6 7 8 9 10",
+            "A B C D 一二三四 milvus结巴分词器中文测试",
+            "There is a sub-word in this sentence",
+            "",
+            None,
+            (
+                "Dusk settled gently upon Embermoor, turning streets into ribbons in twilight glow. "
+                "In this quiet district, young Teren roamed with restless intent. He sought purpose, "
+                "something bright enough to hush turmoil pressing within his chest.\n"
+                "Teren’s trouble began when curious murmurs drifted through town concerning shimmering "
+                "lights rising nightly beyond hills. Elders insisted it stemmed from old ruins, relics "
+                "left behind by wanderers long gone. Yet no one ventured there; timid hearts kept them "
+                "grounded.\n"
+                "One evening, driven by stubborn courage, Teren set out alone. Crisp wind brushed his "
+                "cheeks, guiding him through slender trees trembling under midnight hush. Crickets chirped "
+                "rhythmically, echoing his steady footsteps. He pressed forward until dim ruins emerged, "
+                "stones bent by centuries yet proud in their quiet endurance.\n"
+                "Upon entering, Teren sensed something stirring—bright pulses drifting through corridors "
+                "like living embers. One ember hovered close, swirling gently, studying him with earnest "
+                "curiosity. It emitted tender hums resonating deep within Teren’s chest, soothing worry "
+                "stitched into his spirit.\n"
+                "Ember drifted higher, inviting him to follow. Teren stepped through crumbled chambers "
+                "until they reached an inner court where hundreds curled in silent orbits—tiny spheres "
+                "burning with soft brilliance. Together they formed swirling constellations, shimmering "
+                "Instantly, warmth surged through him—not harsh, not wild, but gentle strength reminding "
+                "him he belonged in this immense world. Hidden burdens loosened. He felt courage blooming, "
+                "rooted in something deeper than fear.\n"
+                "When dawn arrived, Ember escorting him outside, Teren turned to ruins glowing faintly "
+                "beneath morning light. He understood now: these spirits lingered not for warning but for "
+                "guiding tender souls seeking direction.\n"
+                "He returned to Embermoor changed. Not every problem dissolved, yet Teren moved through "
+                "his days with renewed stride, carrying brilliance gifted during his midnight journey."
+            ),
+            (
+                "黄昏降临在静谧城镇，灯影沿着街道缓缓铺展。青年林舟怀着不安在巷道行走，心跳与脚步相互呼应。他渴望找到方向，却被往昔失落缠绕。"
+                "传言提到远处丘陵夜晚会浮现微光，长者劝人别靠近，担忧未知带来风险。林舟仍被好奇牵引，选择独自前往。冷风掠过树梢，星辰悬挂高空，陪伴他穿越草径。"
+                "残破遗迹映入眼帘，石壁布满岁月痕迹。踏入其内，柔亮光点缓缓旋转，如同呼吸般起伏。某个光点靠近他，散发温暖振动，仿佛聆听他内心低语。"
+                "光点引领他走向空旷庭院，成群光辉在空域盘旋，编织出壮丽图景。那瞬间，林舟感到胸口释然，恐惧逐渐消散，勇气悄然生根。"
+                "黎明到来，他回望遗迹，光辉渐隐却留存于心。归途上，他步伐坚定，明白指引并未消失，只是化作持续前行力量。每当夜色再度降临，他都会抬头微笑，感谢那段静默旅程。"
+            ),
+            "甲，甲乙，甲乙丙，甲乙丙丁，甲乙丙丁戊，甲乙丙丁戊己，甲乙丙丁戊己庚，甲乙丙丁戊己庚辛，甲乙丙丁戊己庚辛壬，甲乙丙丁戊己庚辛壬癸",
+        ]
 
         l = len(text)
 
@@ -208,6 +225,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
                     self.drop_collection(self._client(), COLLECTION_NAME)
             except Exception:
                 pass
+
         request.addfinalizer(teardown)
 
     """
@@ -215,6 +233,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
     #  The following are valid test cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_highlighter_basic(self):
         """
@@ -227,15 +246,17 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         pre_tags = ["<<<<<<<"]
         post_tags = [">>>>>>"]
-        highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags,
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=10,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=pre_tags,
+            post_tags=post_tags,
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=10,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
 
-        expected = [[f"{pre_tags[0]}water{post_tags[0]}."],
-                    [f"{pre_tags[0]}water{post_tags[0]}! Lik"]]
+        expected = [[f"{pre_tags[0]}water{post_tags[0]}."], [f"{pre_tags[0]}water{post_tags[0]}! Lik"]]
 
         results = client.search(
             collection_name,
@@ -243,25 +264,25 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         # assert to make sure the results are not empty
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name]['fragments'] in expected
+            assert result["highlight"][default_text_field_name]["fragments"] in expected
 
         results = client.search(
-            collection_name, 
+            collection_name,
             ["water"],
             search_params=search_params,
             anns_field=default_sparse_vector_field_name_multi_analyzer,
-            output_fields=[default_text_field_name_multi_analyzer], 
-            highlighter = highlight
+            output_fields=[default_text_field_name_multi_analyzer],
+            highlighter=highlight,
         )
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name_multi_analyzer]['fragments'] in expected
+            assert result["highlight"][default_text_field_name_multi_analyzer]["fragments"] in expected
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_multiple_tags(self):
@@ -275,11 +296,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         pre_tags = ["{", "<", "="]
         post_tags = ["}", ">", "="]
-        highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags,
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=100,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=pre_tags,
+            post_tags=post_tags,
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=100,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
 
         expected = []
@@ -295,14 +319,13 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         # assert to make sure the results are not empty
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name]['fragments'] == [
-                expected]
+            assert result["highlight"][default_text_field_name]["fragments"] == [expected]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_fragment_parameters(self):
@@ -321,33 +344,40 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         # row 0 corresponds to fragment_size = 1   column 0 corresponds to num_of_fragments = 0
         # row 1 corresponds to fragment_size = 9   column 1 corresponds to num_of_fragments = 1
         # row 2 corresponds to fragment_size = 100 column 2 corresponds to num_of_fragments = 2
-        expected = [[[[]], [["{water}"]],                                       [['{water}'], ["{water}", "{water}"]]],
-                    [[[]], [['{water}.'], ['{water}! Li']],
-                        [['{water}.'], ['{water}! Li', '{water}!']]],
-                    [[[]], [['{water}.'], ['{water}! Like, full of {water}!']], [['{water}.'], ['{water}! Like, full of {water}!']]]]
+        expected = [
+            [[[]], [["{water}"]], [["{water}"], ["{water}", "{water}"]]],
+            [[[]], [["{water}."], ["{water}! Li"]], [["{water}."], ["{water}! Li", "{water}!"]]],
+            [
+                [[]],
+                [["{water}."], ["{water}! Like, full of {water}!"]],
+                [["{water}."], ["{water}! Like, full of {water}!"]],
+            ],
+        ]
 
         for i, size in enumerate(fragment_size):
             for j, num in enumerate(num_of_fragments):
-                highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                               highlight_search_text=True,
-                                               fragment_offset=0,
-                                               fragment_size=size,
-                                               num_of_fragments=num)
-                search_params = {"params": {
-                    "nlist": 128}, "metric_type": "BM25"}
+                highlight = LexicalHighlighter(
+                    pre_tags=["{"],
+                    post_tags=["}"],
+                    highlight_search_text=True,
+                    fragment_offset=0,
+                    fragment_size=size,
+                    num_of_fragments=num,
+                )
+                search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
                 results = client.search(
                     collection_name,
                     ["water"],
                     search_params=search_params,
                     anns_field=default_sparse_vector_field_name,
                     output_fields=[default_text_field_name],
-                    highlighter=highlight
+                    highlighter=highlight,
                 )
 
                 # assert to make sure the results are not empty
                 assert results[0] != []
                 for result in results[0]:
-                    assert result['highlight'][default_text_field_name]['fragments'] in expected[i][j]
+                    assert result["highlight"][default_text_field_name]["fragments"] in expected[i][j]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_fragment_offset(self):
@@ -361,16 +391,24 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         fragment_offset = [0, 5, 100]
 
-        expected = [[["=water="],         ['=water=', '=water=']],
-                    [['t be =water='],    ['l of =water=', 'l of =water=']],
-                    [['Must be =water='], ['I have the seat full of =water=', 'I have the seat full of water! Like, full of =water=']]]
+        expected = [
+            [["=water="], ["=water=", "=water="]],
+            [["t be =water="], ["l of =water=", "l of =water="]],
+            [
+                ["Must be =water="],
+                ["I have the seat full of =water=", "I have the seat full of water! Like, full of =water="],
+            ],
+        ]
 
         for i, offset in enumerate(fragment_offset):
-            highlight = LexicalHighlighter(pre_tags=["="], post_tags=["="],
-                                           highlight_search_text=True,
-                                           fragment_offset=offset,
-                                           fragment_size=5,
-                                           num_of_fragments=2)
+            highlight = LexicalHighlighter(
+                pre_tags=["="],
+                post_tags=["="],
+                highlight_search_text=True,
+                fragment_offset=offset,
+                fragment_size=5,
+                num_of_fragments=2,
+            )
             search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
             results = client.search(
                 collection_name,
@@ -378,13 +416,13 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
                 search_params=search_params,
                 anns_field=default_sparse_vector_field_name,
                 output_fields=[default_text_field_name],
-                highlighter=highlight
+                highlighter=highlight,
             )
 
             # assert to make sure the results are not empty
             assert results[0] != []
             for result in results[0]:
-                assert result['highlight'][default_text_field_name]['fragments'] in expected[i]
+                assert result["highlight"][default_text_field_name]["fragments"] in expected[i]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_number(self):
@@ -397,13 +435,15 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
 
-        expected = [[['word {1}'], ['{1} 2 3']],
-                    [['7654321 keyword {1234567}']]]
-        highlight = LexicalHighlighter(pre_tags=["{", "<"], post_tags=["}", ">"],
-                                       highlight_search_text=True,
-                                       fragment_offset=100,
-                                       fragment_size=5,
-                                       num_of_fragments=2)
+        expected = [[["word {1}"], ["{1} 2 3"]], [["7654321 keyword {1234567}"]]]
+        highlight = LexicalHighlighter(
+            pre_tags=["{", "<"],
+            post_tags=["}", ">"],
+            highlight_search_text=True,
+            fragment_offset=100,
+            fragment_size=5,
+            num_of_fragments=2,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
 
         results = client.search(
@@ -412,14 +452,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         for i, result in enumerate(results):
             # assert to make sure the results are not empty
             assert result != []
             for res in result:
-                assert res['highlight'][default_text_field_name]['fragments'] in expected[i]
+                assert res["highlight"][default_text_field_name]["fragments"] in expected[i]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_offset_greater_than_fragment_size(self):
@@ -432,11 +472,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
         expected = ["4321 {keyword}"]
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=5,
-                                       fragment_size=1,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=5,
+            fragment_size=1,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         results = client.search(
             collection_name,
@@ -444,13 +487,13 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         # assert to make sure the results are not empty
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name]['fragments'] == expected
+            assert result["highlight"][default_text_field_name]["fragments"] == expected
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_search_sentence(self):
@@ -462,17 +505,21 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = COLLECTION_NAME
-        expected = [['{A} {leakage} {of}', 'e of {what}?'],
-                    ['re a {leakage}'],
-                    ['{A} B C D 一二'],
-                    ['full {of} wa', 'full {of} wa'],
-                    ['ords {of} wi']
-                    ]
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=5,
-                                       fragment_size=10,
-                                       num_of_fragments=10)
+        expected = [
+            ["{A} {leakage} {of}", "e of {what}?"],
+            ["re a {leakage}"],
+            ["{A} B C D 一二"],
+            ["full {of} wa", "full {of} wa"],
+            ["ords {of} wi"],
+        ]
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=5,
+            fragment_size=10,
+            num_of_fragments=10,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         results = client.search(
             collection_name,
@@ -480,13 +527,13 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         # assert to make sure the results are not empty
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name]['fragments'] in expected
+            assert result["highlight"][default_text_field_name]["fragments"] in expected
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_nonexistent_keyword(self):
@@ -499,19 +546,22 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
         expected = []
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=1,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=1,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         results = client.search(
             collection_name,
-            ["nonexistent", "", "NULL", "None", "null", 'NaN'],
+            ["nonexistent", "", "NULL", "None", "null", "NaN"],
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         for result in results:
@@ -528,11 +578,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
         expected = ["{sub}"]
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=1,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=1,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         results = client.search(
             collection_name,
@@ -540,13 +593,13 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         # assert to make sure the results are not empty
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name]['fragments'] == expected
+            assert result["highlight"][default_text_field_name]["fragments"] == expected
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_long_tags(self):
@@ -561,11 +614,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         pre_tags = ["{" * 999]
         post_tags = ["}" * 999]
         expected = [f"{pre_tags[0]}water{post_tags[0]}"]
-        highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags,
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=1,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=pre_tags,
+            post_tags=post_tags,
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=1,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         results = client.search(
             collection_name,
@@ -573,13 +629,13 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         # assert to make sure the results are not empty
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name]['fragments'] == expected
+            assert result["highlight"][default_text_field_name]["fragments"] == expected
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_long_search_text(self):
@@ -592,11 +648,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
         expected = ["{Embermoor}", "{Embermoor}"]
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=1,
-                                       num_of_fragments=10)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=1,
+            num_of_fragments=10,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         results = client.search(
             collection_name,
@@ -604,12 +663,12 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
         # assert to make sure the results are not empty
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name]['fragments'] == expected
+            assert result["highlight"][default_text_field_name]["fragments"] == expected
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_lower_upper_case(self):
@@ -621,11 +680,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = COLLECTION_NAME
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=100,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=100,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         results = client.search(
             collection_name,
@@ -633,7 +695,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
         assert results[0] == []
 
@@ -648,11 +710,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
         expected = ["{二}"]
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=1,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=1,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
 
         results = client.search(
@@ -661,13 +726,13 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name_chinese,
             output_fields=[default_text_field_name_chinese],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         # assert to make sure the results are not empty
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name_chinese]['fragments'] == expected
+            assert result["highlight"][default_text_field_name_chinese]["fragments"] == expected
 
         expected = ["{结巴分词器}"]
         results = client.search(
@@ -676,11 +741,11 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name_chinese,
             output_fields=[default_text_field_name_chinese],
-            highlighter=highlight
+            highlighter=highlight,
         )
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name_chinese]['fragments'] == expected
+            assert result["highlight"][default_text_field_name_chinese]["fragments"] == expected
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_chinese_characters_long_text(self):
@@ -693,11 +758,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
         expected = ["{呼}", "{如同呼吸般起伏}"]
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=1,
-                                       num_of_fragments=10)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=1,
+            num_of_fragments=10,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
 
         results = client.search(
@@ -706,11 +774,11 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name_chinese,
             output_fields=[default_text_field_name_chinese],
-            highlighter=highlight
+            highlighter=highlight,
         )
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name_chinese]['fragments'] == expected
+            assert result["highlight"][default_text_field_name_chinese]["fragments"] == expected
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_with_query(self):
@@ -724,16 +792,18 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         pre_tags = ["<<<<<<<"]
         post_tags = [">>>>>>"]
-        highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags,
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=10,
-                                       num_of_fragments=1,
-                                       highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}])
+        highlight = LexicalHighlighter(
+            pre_tags=pre_tags,
+            post_tags=post_tags,
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=10,
+            num_of_fragments=1,
+            highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}],
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
 
-        expected = [[f"{pre_tags[0]}water{post_tags[0]}."],
-                    [f"{pre_tags[0]}water{post_tags[0]}! Lik"]]
+        expected = [[f"{pre_tags[0]}water{post_tags[0]}."], [f"{pre_tags[0]}water{post_tags[0]}! Lik"]]
 
         results = client.search(
             collection_name,
@@ -741,13 +811,13 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name,
             output_fields=[default_text_field_name],
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         # assert to make sure the results are not empty
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name]['fragments'] in expected
+            assert result["highlight"][default_text_field_name]["fragments"] in expected
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_text_match(self):
@@ -759,16 +829,20 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = COLLECTION_NAME
-        expected = ['{water}! Like, full of <water>!']
+        expected = ["{water}! Like, full of <water>!"]
 
-        highlight = LexicalHighlighter(pre_tags=["{", "<"], post_tags=["}", ">"],
-                                       highlight_search_text=False,
-                                       highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
+        highlight = LexicalHighlighter(
+            pre_tags=["{", "<"],
+            post_tags=["}", ">"],
+            highlight_search_text=False,
+            highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}],
+        )
 
         new_search_params = {"metric_type": "COSINE"}
 
-        vector = client.query(collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[
-                              default_vector_field_name])[0][default_vector_field_name]
+        vector = client.query(
+            collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[default_vector_field_name]
+        )[0][default_vector_field_name]
 
         results = client.search(
             collection_name,
@@ -777,18 +851,21 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             anns_field=default_vector_field_name,
             output_fields=[default_text_field_name_no_BM25],
             limit=1,
-            highlighter=highlight
+            highlighter=highlight,
         )
 
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name_no_BM25]['fragments'] == expected
+            assert result["highlight"][default_text_field_name_no_BM25]["fragments"] == expected
 
         # test with mismatched tags
-        expected = ['{water}! Like, full of {water>!']
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}", ">"],
-                                       highlight_search_text=False,
-                                       highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
+        expected = ["{water}! Like, full of {water>!"]
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}", ">"],
+            highlight_search_text=False,
+            highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}],
+        )
 
         results = client.search(
             collection_name,
@@ -797,19 +874,22 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             anns_field=default_vector_field_name,
             output_fields=[default_text_field_name_no_BM25],
             limit=1,
-            highlighter=highlight
+            highlighter=highlight,
         )
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name_no_BM25]['fragments'] == expected
+            assert result["highlight"][default_text_field_name_no_BM25]["fragments"] == expected
 
         # test with num_of_fragments > 1
-        expected = ['{water}', '{water}']
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=False,
-                                       fragment_size=1,
-                                       num_of_fragments=10,
-                                       highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
+        expected = ["{water}", "{water}"]
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=False,
+            fragment_size=1,
+            num_of_fragments=10,
+            highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}],
+        )
 
         results = client.search(
             collection_name,
@@ -818,19 +898,23 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             anns_field=default_vector_field_name,
             output_fields=[default_text_field_name_no_BM25],
             limit=1,
-            highlighter=highlight
+            highlighter=highlight,
         )
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name_no_BM25]['fragments'] == expected
+            assert result["highlight"][default_text_field_name_no_BM25]["fragments"] == expected
 
         # test no match
         expected = []
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=False,
-                                       highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "nonexistent"}])
-        vector = client.query(collection_name, filter=f"{default_primary_key_field_name} == 1", output_fields=[
-                              default_vector_field_name])[0][default_vector_field_name]
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=False,
+            highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "nonexistent"}],
+        )
+        vector = client.query(
+            collection_name, filter=f"{default_primary_key_field_name} == 1", output_fields=[default_vector_field_name]
+        )[0][default_vector_field_name]
         results = client.search(
             collection_name,
             [vector],
@@ -838,9 +922,9 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             anns_field=default_vector_field_name,
             output_fields=[default_text_field_name_no_BM25],
             limit=1,
-            highlighter=highlight
+            highlighter=highlight,
         )
-        assert results[0][0]["highlight"][default_text_field_name_no_BM25]['fragments'] == expected
+        assert results[0][0]["highlight"][default_text_field_name_no_BM25]["fragments"] == expected
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="skip for now wait for future optimization")
@@ -854,11 +938,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
         expected = ["{甲乙丙丁戊己庚辛壬}"]
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=1,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=1,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         results = client.search(
             collection_name,
@@ -866,17 +953,18 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             search_params=search_params,
             anns_field=default_sparse_vector_field_name_chinese,
             output_fields=[default_text_field_name_chinese],
-            highlighter=highlight
+            highlighter=highlight,
         )
         assert results[0] != []
         for result in results[0]:
-            assert result['highlight'][default_text_field_name_chinese]['fragments'] == expected
+            assert result["highlight"][default_text_field_name_chinese]["fragments"] == expected
 
     """
     ******************************************************************
     #  The following are invalid test cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("fragment_size", [0, -1, 0.1])
     def test_milvus_client_highlighter_fragment_size_invalid(self, fragment_size):
@@ -888,15 +976,17 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = COLLECTION_NAME
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=fragment_size,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=fragment_size,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
 
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"invalid fragment_size: {fragment_size}: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid fragment_size: {fragment_size}: invalid parameter"}
         self.search(
             client,
             collection_name,
@@ -906,7 +996,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             output_fields=[default_text_field_name],
             highlighter=highlight,
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -920,14 +1010,16 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = COLLECTION_NAME
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=fragment_offset,
-                                       fragment_size=10,
-                                       num_of_fragments=10)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=fragment_offset,
+            fragment_size=10,
+            num_of_fragments=10,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"invalid fragment_offset: {fragment_offset}: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid fragment_offset: {fragment_offset}: invalid parameter"}
         self.search(
             client,
             collection_name,
@@ -937,7 +1029,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             output_fields=[default_text_field_name],
             highlighter=highlight,
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -951,14 +1043,16 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = COLLECTION_NAME
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=10,
-                                       num_of_fragments=num_of_fragments)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=10,
+            num_of_fragments=num_of_fragments,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"invalid num_of_fragments: {num_of_fragments}: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid num_of_fragments: {num_of_fragments}: invalid parameter"}
         self.search(
             client,
             collection_name,
@@ -968,7 +1062,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             output_fields=[default_text_field_name],
             highlighter=highlight,
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -983,18 +1077,24 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         pre_tags = ["<<<<<<<"]
         post_tags = [">>>>>>"]
-        highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags,
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=10,
-                                       num_of_fragments=1,
-                                       highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}])
+        highlight = LexicalHighlighter(
+            pre_tags=pre_tags,
+            post_tags=post_tags,
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=10,
+            num_of_fragments=1,
+            highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}],
+        )
         search_params = {"metric_type": "COSINE"}
-        vector = client.query(collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[
-                              default_vector_field_name])[0][default_vector_field_name]
+        vector = client.query(
+            collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[default_vector_field_name]
+        )[0][default_vector_field_name]
 
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"Search highlight only support with metric type \"BM25\" but was: : invalid parameter"}
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: 'Search highlight only support with metric type "BM25" but was: : invalid parameter',
+        }
         self.search(
             client,
             collection_name,
@@ -1004,7 +1104,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             output_fields=[default_text_field_name],
             highlighter=highlight,
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1019,19 +1119,25 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         pre_tags = ["<<<<<<<"]
         post_tags = [">>>>>>"]
-        highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags,
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=10,
-                                       num_of_fragments=1,
-                                       highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}])
+        highlight = LexicalHighlighter(
+            pre_tags=pre_tags,
+            post_tags=post_tags,
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=10,
+            num_of_fragments=1,
+            highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}],
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
-        vector = client.query(collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[
-                              default_vector_field_name])[0][default_vector_field_name]
+        vector = client.query(
+            collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[default_vector_field_name]
+        )[0][default_vector_field_name]
 
         # textMatch with BM25 anns field
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"please provide varchar/text for BM25 Function based search, got FloatVector: invalid parameter"}
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "please provide varchar/text for BM25 Function based search, got FloatVector: invalid parameter",
+        }
         self.search(
             client,
             collection_name,
@@ -1041,12 +1147,14 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             output_fields=[default_text_field_name],
             highlighter=highlight,
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         # highlight search text with vector anns field
-        error = {ct.err_code: 5,
-                 ct.err_msg: f"service internal error: Search with highlight failed, input field of BM25 annsField not found"}
+        error = {
+            ct.err_code: 5,
+            ct.err_msg: "service internal error: Search with highlight failed, input field of BM25 annsField not found",
+        }
         self.search(
             client,
             collection_name,
@@ -1056,7 +1164,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             output_fields=[default_text_field_name],
             highlighter=highlight,
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1070,16 +1178,22 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
 
-        highlight = LexicalHighlighter(pre_tags=["{", "<"], post_tags=["}", ">"],
-                                       highlight_search_text=True,
-                                       highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
+        highlight = LexicalHighlighter(
+            pre_tags=["{", "<"],
+            post_tags=["}", ">"],
+            highlight_search_text=True,
+            highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}],
+        )
 
         new_search_params = {"metric_type": "COSINE"}
 
-        vector = client.query(collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[
-                              default_vector_field_name])[0][default_vector_field_name]
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"Search highlight only support with metric type \"BM25\" but was: : invalid parameter"}
+        vector = client.query(
+            collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[default_vector_field_name]
+        )[0][default_vector_field_name]
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: 'Search highlight only support with metric type "BM25" but was: : invalid parameter',
+        }
         self.search(
             client,
             collection_name,
@@ -1090,7 +1204,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             limit=1,
             highlighter=highlight,
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1104,14 +1218,16 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         client = self._client()
         collection_name = COLLECTION_NAME
 
-        highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=10,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=["{"],
+            post_tags=["}"],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=10,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "does not enable match"}
+        error = {ct.err_code: 1100, ct.err_msg: "does not enable match"}
 
         self.search(
             client,
@@ -1123,7 +1239,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             highlighter=highlight,
             filter=f'TEXT_MATCH({default_text_field_name}, "seat")',
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1136,14 +1252,16 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = COLLECTION_NAME
-        highlight = LexicalHighlighter(pre_tags=[], post_tags=[],
-                                       highlight_search_text=True,
-                                       fragment_offset=0,
-                                       fragment_size=10,
-                                       num_of_fragments=1)
+        highlight = LexicalHighlighter(
+            pre_tags=[],
+            post_tags=[],
+            highlight_search_text=True,
+            fragment_offset=0,
+            fragment_size=10,
+            num_of_fragments=1,
+        )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"pre_tags cannot be empty list: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: "pre_tags cannot be empty list: invalid parameter"}
         self.search(
             client,
             collection_name,
@@ -1153,5 +1271,5 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             output_fields=[default_text_field_name],
             highlighter=highlight,
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )

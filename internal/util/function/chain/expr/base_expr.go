@@ -22,6 +22,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -58,115 +59,16 @@ func (b *BaseExpr) IsRunnable(stage string) bool {
 	return b.supportStages.Contain(stage)
 }
 
-// =============================================================================
-// Parameter Parsing Functions
-// =============================================================================
-
-// GetStringParam extracts a string parameter from the params map.
-// funcName is used for error message prefixing.
-func GetStringParam(params map[string]interface{}, funcName, key string, required bool) (string, error) {
-	val, ok := params[key]
-	if !ok {
-		if required {
-			return "", merr.WrapErrParameterInvalidMsg("%s: missing required parameter %q", funcName, key)
+func (b *BaseExpr) ValidateArgs(args []*schemapb.FunctionChainExprArg) error {
+	for i, arg := range args {
+		if arg == nil {
+			return merr.WrapErrParameterInvalidMsg("%s: expr arg[%d] is nil", b.name, i)
 		}
-		return "", nil
-	}
-
-	strVal, ok := val.(string)
-	if !ok {
-		return "", merr.WrapErrParameterInvalidMsg("%s: parameter %q must be a string, got %T", funcName, key, val)
-	}
-	return strVal, nil
-}
-
-// GetFloat64Param extracts a float64 parameter from the params map.
-// funcName is used for error message prefixing.
-func GetFloat64Param(params map[string]interface{}, funcName, key string, required bool, defaultVal float64) (float64, error) {
-	val, ok := params[key]
-	if !ok {
-		if required {
-			return 0, merr.WrapErrParameterInvalidMsg("%s: missing required parameter %q", funcName, key)
+		if _, ok := arg.GetArg().(*schemapb.FunctionChainExprArg_Literal); ok {
+			return merr.WrapErrParameterInvalidMsg("%s: literal expr arg[%d] is not supported", b.name, i)
 		}
-		return defaultVal, nil
 	}
-
-	switch v := val.(type) {
-	case float64:
-		return v, nil
-	case float32:
-		return float64(v), nil
-	case int:
-		return float64(v), nil
-	case int64:
-		return float64(v), nil
-	case int32:
-		return float64(v), nil
-	default:
-		return 0, merr.WrapErrParameterInvalidMsg("%s: parameter %q must be a number, got %T", funcName, key, val)
-	}
-}
-
-// ParseStringSliceParam extracts a string slice parameter from the params map.
-// funcName is used for error message prefixing.
-func ParseStringSliceParam(params map[string]interface{}, funcName, key string) ([]string, error) {
-	val, ok := params[key]
-	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("%s: missing required parameter %q", funcName, key)
-	}
-
-	switch v := val.(type) {
-	case []string:
-		return v, nil
-	case []interface{}:
-		result := make([]string, len(v))
-		for i, item := range v {
-			str, ok := item.(string)
-			if !ok {
-				return nil, merr.WrapErrParameterInvalidMsg("%s: parameter %q[%d] must be a string, got %T", funcName, key, i, item)
-			}
-			result[i] = str
-		}
-		return result, nil
-	default:
-		return nil, merr.WrapErrParameterInvalidMsg("%s: parameter %q must be a string array, got %T", funcName, key, val)
-	}
-}
-
-// ParseFloat64SliceParam extracts a float64 slice parameter from the params map.
-// funcName is used for error message prefixing.
-// Returns nil if the parameter is not present (optional parameter).
-func ParseFloat64SliceParam(params map[string]interface{}, funcName, key string) ([]float64, error) {
-	val, ok := params[key]
-	if !ok {
-		return nil, nil // optional, return nil if not present
-	}
-
-	switch v := val.(type) {
-	case []float64:
-		return v, nil
-	case []interface{}:
-		result := make([]float64, len(v))
-		for i, item := range v {
-			switch num := item.(type) {
-			case float64:
-				result[i] = num
-			case float32:
-				result[i] = float64(num)
-			case int:
-				result[i] = float64(num)
-			case int64:
-				result[i] = float64(num)
-			case int32:
-				result[i] = float64(num)
-			default:
-				return nil, merr.WrapErrParameterInvalidMsg("%s: parameter %q[%d] must be a number, got %T", funcName, key, i, item)
-			}
-		}
-		return result, nil
-	default:
-		return nil, merr.WrapErrParameterInvalidMsg("%s: parameter %q must be a number array, got %T", funcName, key, val)
-	}
+	return nil
 }
 
 // =============================================================================
@@ -190,6 +92,6 @@ func GetNumericValue(arr arrow.Array, idx int) (float64, error) {
 	case *array.Float64:
 		return a.Value(idx), nil
 	default:
-		return 0, merr.WrapErrServiceInternalMsg("unsupported input column type %T, expected numeric type", arr)
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported input column type %T, expected numeric type", arr)
 	}
 }

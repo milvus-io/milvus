@@ -388,7 +388,7 @@ func (rmq *rocksmq) allocMsgID(topicName string, delta int) (UniqueID, UniqueID,
 
 		if msgID == DefaultMessageID {
 			// initialize a new message id if not found the latest msg in the topic
-			msgID = UniqueID(tsoutil.ComposeTSByTime(time.Now(), 0))
+			msgID = UniqueID(tsoutil.ComposeTSByTime(time.Now()))
 			mlog.Warn(rmq.ctx, "init new message id", mlog.String("topicName", topicName), mlog.Err(err))
 		}
 		mlog.Info(rmq.ctx, "init the latest message id done", mlog.String("topicName", topicName), mlog.Int64("msgID", msgID))

@@ -60,9 +60,6 @@ class SealedIndexTranslator
     }
 
  private:
-    LoadResourceRequest
-    EstimateLoadResource() const;
-
     struct IndexLoadInfo {
         bool enable_mmap;
         std::string mmap_dir_path;

@@ -82,7 +82,7 @@ func (suite *StreamPipelineSuite) TestBasic() {
 	}
 }
 
-func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherMergesBufferedDMLPacks() {
+func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherMergesBufferedDeletePacks() {
 	suite.pipeline = NewPipelineWithStream(
 		suite.msgDispatcher,
 		0,
@@ -105,7 +105,7 @@ func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherMergesBufferedDMLPacks() 
 		BeginTs: 100,
 		EndTs:   110,
 		Msgs: []msgstream.TsMsg{
-			newInsertTsMsg(101),
+			newDeleteTsMsg(101),
 		},
 		StartPositions: []*msgpb.MsgPosition{{Timestamp: 100}},
 		EndPositions:   []*msgpb.MsgPosition{{Timestamp: 110}},
@@ -134,13 +134,49 @@ func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherMergesBufferedDMLPacks() 
 	suite.Empty(received)
 }
 
+func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherKeepsBufferedInsertPacksSeparate() {
+	suite.pipeline = NewPipelineWithStream(
+		suite.msgDispatcher,
+		0,
+		false,
+		suite.channel,
+		staticMVCCGetter{},
+		WithMsgPackBatcher(NewDMLMsgPackBatcher(func() int { return 8 })),
+	)
+
+	received := make(chan *msgstream.MsgPack, 2)
+	suite.pipeline.Add(&captureMsgPackNode{
+		BaseNode:   NewBaseNode("capture-msg-pack", 8),
+		outChannel: received,
+	})
+
+	err := suite.pipeline.ConsumeMsgStream(context2.Background(), &msgpb.MsgPosition{})
+	suite.NoError(err)
+
+	suite.inChannel <- newDMLMsgPack(100, 110, newInsertTsMsg(101))
+	suite.inChannel <- newDMLMsgPack(111, 120, newInsertTsMsg(115))
+
+	suite.pipeline.Start()
+	defer suite.pipeline.Close()
+
+	first := <-received
+	suite.Require().Equal(uint64(100), first.BeginTs)
+	suite.Require().Equal(uint64(110), first.EndTs)
+	suite.Require().Len(first.Msgs, 1)
+
+	second := <-received
+	suite.Equal(uint64(111), second.BeginTs)
+	suite.Equal(uint64(120), second.EndTs)
+	suite.Len(second.Msgs, 1)
+}
+
 func TestDMLMsgPackBatcherLimitsByTotalMessageNum(t *testing.T) {
 	maxMsgNum := 3
 	batcher := NewDMLMsgPackBatcher(func() int { return maxMsgNum })
 	input := make(chan *msgstream.MsgPack, 1)
-	input <- newDMLMsgPack(110, 120, newInsertTsMsg(111), newDeleteTsMsg(112))
+	input <- newDMLMsgPack(110, 120, newDeleteTsMsg(111), newDeleteTsMsg(112))
 
-	merged, pending := batcher.Batch(newDMLMsgPack(100, 109, newInsertTsMsg(101)), input)
+	merged, pending := batcher.Batch(newDMLMsgPack(100, 109, newDeleteTsMsg(101)), input)
 
 	require.NotNil(t, merged)
 	assert.Len(t, merged.Msgs, 3)
@@ -151,7 +187,7 @@ func TestDMLMsgPackBatcherLimitsByTotalMessageNum(t *testing.T) {
 	maxMsgNum = 2
 	input = make(chan *msgstream.MsgPack, 1)
 	input <- newDMLMsgPack(211, 220, newDeleteTsMsg(211))
-	merged, pending = batcher.Batch(newDMLMsgPack(200, 210, newInsertTsMsg(201)), input)
+	merged, pending = batcher.Batch(newDMLMsgPack(200, 210, newDeleteTsMsg(201)), input)
 
 	require.NotNil(t, merged)
 	assert.Len(t, merged.Msgs, 2)
@@ -160,8 +196,8 @@ func TestDMLMsgPackBatcherLimitsByTotalMessageNum(t *testing.T) {
 	assert.Nil(t, pending)
 
 	input = make(chan *msgstream.MsgPack, 1)
-	input <- newDMLMsgPack(311, 320, newDeleteTsMsg(311), newInsertTsMsg(312))
-	merged, pending = batcher.Batch(newDMLMsgPack(300, 310, newInsertTsMsg(301)), input)
+	input <- newDMLMsgPack(311, 320, newDeleteTsMsg(311), newDeleteTsMsg(312))
+	merged, pending = batcher.Batch(newDMLMsgPack(300, 310, newDeleteTsMsg(301)), input)
 
 	require.NotNil(t, merged)
 	assert.Len(t, merged.Msgs, 1)
@@ -170,6 +206,57 @@ func TestDMLMsgPackBatcherLimitsByTotalMessageNum(t *testing.T) {
 	require.NotNil(t, pending)
 	assert.Len(t, pending.Msgs, 2)
 	assert.Equal(t, uint64(311), pending.BeginTs)
+}
+
+func TestDMLMsgPackBatcherTreatsInsertPacksAsBarriers(t *testing.T) {
+	tests := []struct {
+		name        string
+		first       *msgstream.MsgPack
+		next        *msgstream.MsgPack
+		wantPending bool
+	}{
+		{
+			name:  "insert first does not drain next pack",
+			first: newDMLMsgPack(100, 110, newInsertTsMsg(101)),
+			next:  newDMLMsgPack(111, 120, newDeleteTsMsg(115)),
+		},
+		{
+			name:        "delete batch stops before insert",
+			first:       newDMLMsgPack(200, 210, newDeleteTsMsg(201)),
+			next:        newDMLMsgPack(211, 220, newInsertTsMsg(215)),
+			wantPending: true,
+		},
+		{
+			name:        "delete batch stops before mixed insert delete pack",
+			first:       newDMLMsgPack(230, 240, newDeleteTsMsg(231)),
+			next:        newDMLMsgPack(241, 250, newInsertTsMsg(245), newDeleteTsMsg(246)),
+			wantPending: true,
+		},
+		{
+			name:  "mixed first pack does not drain next pack",
+			first: newDMLMsgPack(300, 310, newInsertTsMsg(301), newDeleteTsMsg(302)),
+			next:  newDMLMsgPack(311, 320, newDeleteTsMsg(315)),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			batcher := NewDMLMsgPackBatcher(func() int { return 8 })
+			input := make(chan *msgstream.MsgPack, 1)
+			input <- test.next
+
+			merged, pending := batcher.Batch(test.first, input)
+
+			assert.Same(t, test.first, merged)
+			if test.wantPending {
+				assert.Same(t, test.next, pending)
+				assert.Empty(t, input)
+			} else {
+				assert.Nil(t, pending)
+				assert.Len(t, input, 1)
+			}
+		})
+	}
 }
 
 func TestStreamPipeline(t *testing.T) {

@@ -25,11 +25,15 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -49,12 +53,18 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 		collectionID int64,
 		name, description string,
 		compactionProtectionSeconds int64,
+		positions []*msgpb.MsgPosition,
 	) (int64, error) {
 		createSnapshotCalled = true
 		assert.Equal(t, int64(100), collectionID)
 		assert.Equal(t, "test_snapshot", name)
 		assert.Equal(t, "test description", description)
 		assert.Equal(t, int64(3600), compactionProtectionSeconds)
+		assert.Len(t, positions, 2)
+		assert.Equal(t, "p1_100v0", positions[0].GetChannelName())
+		assert.Equal(t, uint64(100), positions[0].GetTimestamp())
+		assert.Equal(t, "p2_100v1", positions[1].GetChannelName())
+		assert.Equal(t, uint64(200), positions[1].GetTimestamp())
 		return 1001, nil
 	}).Build()
 	defer mockCreateSnapshot.UnPatch()
@@ -82,6 +92,11 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 
 	result := message.BroadcastResultCreateSnapshotMessageV2{
 		Message: typedMsg,
+		Results: map[string]*message.AppendResult{
+			"p1_100v0":                       {TimeTick: 100, LastConfirmedMessageID: rmq.NewRmqID(10)},
+			"p2_100v1":                       {TimeTick: 200, LastConfirmedMessageID: rmq.NewRmqID(20)},
+			funcutil.GetControlChannel("p0"): {TimeTick: 999, LastConfirmedMessageID: rmq.NewRmqID(30)},
+		},
 	}
 
 	// Execute
@@ -104,6 +119,7 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_CreateError(t *testing.T) {
 		collectionID int64,
 		name, description string,
 		compactionProtectionSeconds int64,
+		positions []*msgpb.MsgPosition,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()
@@ -338,10 +354,10 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
 		ctx context.Context,
 		collectionID int64,
 		name string,
-	) (*SnapshotData, error) {
+	) (*snapshotstorage.SnapshotData, error) {
 		readSnapshotDataCalled = true
 		assert.Equal(t, "test_snapshot", name)
-		return &SnapshotData{
+		return &snapshotstorage.SnapshotData{
 			SnapshotInfo: &datapb.SnapshotInfo{Name: name},
 		}, nil
 	}).Build()
@@ -466,6 +482,63 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_RestoreDataError(t *testing.T
 	assert.Equal(t, expectedErr, err)
 }
 
+func TestDDLCallbacks_RestoreSnapshotV2AckCallback_External(t *testing.T) {
+	ctx := context.Background()
+
+	restoreExternalDataCalled := false
+	mockRestoreExternalData := mockey.Mock((*snapshotManager).RestoreExternalData).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		sourceCollectionID int64,
+		snapshotName string,
+		snapshotS3Location string,
+		collectionID int64,
+		jobID int64,
+		externalSpec string,
+		snapshotFingerprint string,
+	) (int64, error) {
+		restoreExternalDataCalled = true
+		assert.Equal(t, int64(100), sourceCollectionID)
+		assert.Equal(t, "test_snapshot", snapshotName)
+		assert.Equal(t, "s3://bucket/files/snapshots/meta.json", snapshotS3Location)
+		assert.Equal(t, int64(200), collectionID)
+		assert.Equal(t, int64(12345), jobID)
+		assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, externalSpec)
+		assert.Empty(t, snapshotFingerprint)
+		return jobID, nil
+	}).Build()
+	defer mockRestoreExternalData.UnPatch()
+
+	mockRestoreData := mockey.Mock((*snapshotManager).RestoreData).Return(int64(0), errors.New("must not call local restore")).Build()
+	defer mockRestoreData.UnPatch()
+
+	server := &Server{
+		snapshotManager: &snapshotManager{},
+	}
+	callbacks := &DDLCallbacks{Server: server}
+
+	broadcastMsg := message.NewRestoreSnapshotMessageBuilderV2().
+		WithHeader(&message.RestoreSnapshotMessageHeader{
+			SnapshotName:       "test_snapshot",
+			CollectionId:       200,
+			JobId:              12345,
+			SourceCollectionId: 100,
+			External:           true,
+			SnapshotS3Location: "s3://bucket/files/snapshots/meta.json",
+			ExternalSpec:       `{"extfs":{"region":"us-west-2"}}`,
+		}).
+		WithBody(&message.RestoreSnapshotMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	err := callbacks.restoreSnapshotV2AckCallback(ctx, message.BroadcastResultRestoreSnapshotMessageV2{
+		Message: message.MustAsBroadcastRestoreSnapshotMessageV2(broadcastMsg),
+	})
+
+	assert.NoError(t, err)
+	assert.True(t, restoreExternalDataCalled)
+}
+
 // --- Test validateRestoreSnapshotResources ---
 
 // newTestSnapshotMeta creates a snapshotMeta with initialized ConcurrentMaps for testing.
@@ -507,9 +580,9 @@ func buildValidateTestServer(t *testing.T, snapshotFound bool) *Server {
 	}
 }
 
-// buildBaseSnapshotData creates a SnapshotData with a default partition and one index.
-func buildBaseSnapshotData() *SnapshotData {
-	return &SnapshotData{
+// buildBaseSnapshotData creates a snapshotstorage.SnapshotData with a default partition and one index.
+func buildBaseSnapshotData() *snapshotstorage.SnapshotData {
+	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
 		Collection: &datapb.CollectionDescription{
 			Partitions: map[string]int64{"_default": 1},
@@ -689,7 +762,7 @@ func TestValidateRestoreSnapshotResources_SuccessNoIndexes(t *testing.T) {
 	defer m2.UnPatch()
 
 	// No indexes in snapshot data
-	snapshotData := &SnapshotData{
+	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
 		Collection: &datapb.CollectionDescription{
 			Partitions: map[string]int64{"_default": 1},
@@ -716,7 +789,7 @@ func TestValidateRestoreSnapshotResources_MultiplePartitionsAndIndexes(t *testin
 	})
 	defer m3.UnPatch()
 
-	snapshotData := &SnapshotData{
+	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
 		Collection: &datapb.CollectionDescription{
 			Partitions: map[string]int64{

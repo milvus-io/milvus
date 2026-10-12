@@ -25,10 +25,10 @@ package types
 const (
 	OpTypeMap     = "map"
 	OpTypeFilter  = "filter"
-	OpTypeSelect  = "select"
 	OpTypeSort    = "sort"
 	OpTypeLimit   = "limit"
 	OpTypeGroupBy = "group_by"
+	OpTypeMerge   = "merge"
 )
 
 // =============================================================================
@@ -54,17 +54,17 @@ const (
 // =============================================================================
 
 const (
-	// Score combine parameter keys
-	ScoreCombineParamMode    = "mode"
-	ScoreCombineParamWeights = "weights"
+	// Numeric combine parameter keys
+	NumCombineParamMode    = "mode"
+	NumCombineParamWeights = "weights"
 
-	// Score combine mode values
-	ScoreCombineModeMultiply = "multiply"
-	ScoreCombineModeSum      = "sum"
-	ScoreCombineModeMax      = "max"
-	ScoreCombineModeMin      = "min"
-	ScoreCombineModeAvg      = "avg"
-	ScoreCombineModeWeighted = "weighted"
+	// Numeric combine mode values
+	NumCombineModeMultiply = "multiply"
+	NumCombineModeSum      = "sum"
+	NumCombineModeMax      = "max"
+	NumCombineModeMin      = "min"
+	NumCombineModeAvg      = "avg"
+	NumCombineModeWeighted = "weighted"
 )
 
 // =============================================================================
@@ -76,6 +76,13 @@ const (
 	ScoreFieldName     = "$score"
 	SegOffsetFieldName = "$seg_offset"
 	GroupByFieldName   = "$group_by"
+	// ElementIndicesFieldName stores one Int32 element index per result row.
+	ElementIndicesFieldName = "$element_indices"
+)
+
+// Function Chain framework parameter keys.
+const (
+	InputDataTypesParam = "$input_data_types"
 )
 
 // =============================================================================

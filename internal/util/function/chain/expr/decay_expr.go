@@ -55,7 +55,7 @@ type decayReScorer func(origin, scale, decay, offset, distance float64) float64
 
 // DecayExpr implements FunctionExpr for decay scoring.
 // It takes a numeric input column and outputs the pure decay factor (0~1).
-// The combination with $score is handled by a subsequent ScoreCombineExpr node in the chain.
+// The combination with $score is handled by a subsequent NumCombineExpr node in the chain.
 // Column mapping is handled by MapOp.
 //
 // Expected inputs (passed from MapOp):
@@ -161,35 +161,31 @@ func NewDecayExpr(function string, origin, scale, offset, decay float64) (*Decay
 // NewDecayExprFromParams creates a DecayExpr from a parameter map.
 // This is the factory function for the function registry.
 // All parameter parsing is handled here, keeping it close to the expr definition.
-func NewDecayExprFromParams(params map[string]interface{}) (types.FunctionExpr, error) {
+func NewDecayExprFromParams(_ types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
 	const funcName = "decay"
+	reader := types.NewParamReader(funcName, cfg.Params)
 
-	// Extract function (required)
-	function, err := GetStringParam(params, funcName, FunctionKey, true)
+	function, err := reader.String(FunctionKey, true)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract origin (required)
-	origin, err := GetFloat64Param(params, funcName, OriginKey, true, 0)
+	origin, err := reader.Float64(OriginKey, true, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract scale (required)
-	scale, err := GetFloat64Param(params, funcName, ScaleKey, true, 0)
+	scale, err := reader.Float64(ScaleKey, true, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract offset (optional, default 0)
-	offset, err := GetFloat64Param(params, funcName, OffsetKey, false, 0)
+	offset, err := reader.Float64(OffsetKey, false, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract decay (optional, default 0.5)
-	decayVal, err := GetFloat64Param(params, funcName, DecayKey, false, 0.5)
+	decayVal, err := reader.Float64(DecayKey, false, 0.5)
 	if err != nil {
 		return nil, err
 	}

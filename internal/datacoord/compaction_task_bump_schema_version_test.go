@@ -158,6 +158,10 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionTa
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
+	mockVM := NewMockVersionManager(s.T())
+	mockVM.On("ResolveScalarIndexVersion").Return(int32(3))
+	s.ievm = mockVM
+
 	// Add a segment to meta
 	segmentID := int64(101)
 	err := s.meta.AddSegment(context.TODO(), &SegmentInfo{
@@ -189,6 +193,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
 	s.NotNil(plan)
 
 	// Verify plan
+	s.True(plan.GetEnableManifestDelta())
 	s.Equal(int64(1), plan.GetPlanID())
 	s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, plan.GetType())
 	s.Equal("ch-1", plan.GetChannel())
@@ -198,6 +203,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
 	s.Equal(int64(10), plan.GetSegmentBinlogs()[0].GetPartitionID())
 	s.Require().NotNil(plan.GetSchema())
 	s.Equal(task.GetTaskProto().GetSchema().GetVersion(), plan.GetSchema().GetVersion())
+	s.Equal(int32(3), plan.GetCurrentScalarIndexVersion())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequestCarriesV3ManifestAndPreAllocatedLogs() {
@@ -421,6 +427,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_timeout, task.GetTaskProto().GetState())
+		s.Equal("DataNode reported compaction timeout", task.GetTaskProto().GetFailReason())
 	})
 
 	s.Run("QueryTaskOnWorker, failed state", func() {
@@ -432,6 +439,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal("compaction failed in datanode", task.GetTaskProto().GetFailReason())
 	})
 
 	s.Run("QueryTaskOnWorker, completed with ValidateSegmentState error (segment not in meta)", func() {
@@ -504,6 +512,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 				SegmentID:      segmentID,
 				InsertLogs:     []*datapb.FieldBinlog{},
 				Manifest:       manifest,
+				BaseManifest:   manifest,
 				StorageVersion: storage.StorageV3,
 			}},
 		}, nil).Once()
@@ -600,6 +609,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal("unsupported compaction state: unknown", task.GetTaskProto().GetFailReason())
 	})
 }
 
@@ -757,6 +767,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSaveSegmentMeta() {
 					SegmentID:      segmentID,
 					StorageVersion: storage.StorageV3,
 					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
 					InsertLogs: []*datapb.FieldBinlog{
 						{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 1000, EntriesNum: 1000}}},
 						{FieldID: 102, Binlogs: []*datapb.Binlog{{LogID: 2000, EntriesNum: 1000}}},

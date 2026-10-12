@@ -13,6 +13,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Floating.
 	VisitFloating(ctx *FloatingContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#TextMatchFuzzy.
+	VisitTextMatchFuzzy(ctx *TextMatchFuzzyContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#IsNotNull.
 	VisitIsNotNull(ctx *IsNotNullContext) interface{}
 
@@ -82,6 +85,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#RandomSample.
 	VisitRandomSample(ctx *RandomSampleContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#RawString.
+	VisitRawString(ctx *RawStringContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#SpatialBinary.
 	VisitSpatialBinary(ctx *SpatialBinaryContext) interface{}
 
@@ -105,6 +111,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#TemplateVariable.
 	VisitTemplateVariable(ctx *TemplateVariableContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#MembershipMatchWithOption.
+	VisitMembershipMatchWithOption(ctx *MembershipMatchWithOptionContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#TimestamptzCompareReverse.
 	VisitTimestamptzCompareReverse(ctx *TimestamptzCompareReverseContext) interface{}
@@ -156,6 +165,12 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#Power.
 	VisitPower(ctx *PowerContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#fieldName.
+	VisitFieldName(ctx *FieldNameContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#fieldReference.
+	VisitFieldReference(ctx *FieldReferenceContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#textMatchOption.
 	VisitTextMatchOption(ctx *TextMatchOptionContext) interface{}

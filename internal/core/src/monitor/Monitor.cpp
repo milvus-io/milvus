@@ -33,7 +33,7 @@ std::map<std::string, std::string> getMap = {
 std::map<std::string, std::string> getSucMap = {
     {"persistent_data_op_type", "get"}, {"status", "success"}};
 std::map<std::string, std::string> getFailMap = {
-    {"persistent_data_op_type", "get"}};
+    {"persistent_data_op_type", "get"}, {"status", "fail"}};
 std::map<std::string, std::string> putMap = {
     {"persistent_data_op_type", "put"}};
 std::map<std::string, std::string> putSucMap = {
@@ -199,6 +199,30 @@ std::map<std::string, std::string> optimizeExprLatencyLabels{
     {"type", "optimize_expr_latency"}};
 std::map<std::string, std::string> filterRatioLabels{
     {"type", "expr_filter_ratio"}};
+std::map<std::string, std::string> gisCoarseRatioLabels{
+    {"type", "gis_coarse_ratio"}};
+std::map<std::string, std::string> gisRefineRatioLabels{
+    {"type", "gis_refine_ratio"}};
+std::map<std::string, std::string> strictGroupPhase1CandidatesLabels{
+    {"type", "phase1_candidates"}};
+std::map<std::string, std::string> strictGroupPhase2CandidatesLabels{
+    {"type", "phase2_candidates"}};
+std::map<std::string, std::string> strictGroupBatchCountLabels{
+    {"type", "batch_count"}};
+std::map<std::string, std::string>
+    strictGroup_original_remaining_candidates_Labels{
+        {"type", "original_remaining_candidates"}};
+std::map<std::string, std::string> strictGroupMembershipBuildLatencyLabels{
+    {"type", "membership_build_latency"}};
+std::map<std::string, std::string> strictGroupBitmapBuildLatencyLabels{
+    {"type", "bitmap_build_latency"}};
+std::map<std::string, std::string> strictGroupSearchLatencyLabels{
+    {"type", "strict_group_search_latency"}};
+
+const prometheus::Histogram::BucketBoundaries strictGroupCountBuckets = {
+    1,      2,       4,       8,        16,       32,       64,
+    128,    256,     512,     1024,     4096,     16384,    65536,
+    262144, 1048576, 4194304, 16777216, 67108864, 268435456};
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
                                    "[cpp]latency(us) of search on segment")
@@ -241,6 +265,55 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(internal_core_expr_filter_ratio,
                                          internal_core_search_latency,
                                          filterRatioLabels,
                                          ratioBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(internal_core_gis_coarse_ratio,
+                                         internal_core_search_latency,
+                                         gisCoarseRatioLabels,
+                                         ratioBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(internal_core_gis_refine_ratio,
+                                         internal_core_search_latency,
+                                         gisRefineRatioLabels,
+                                         ratioBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_count,
+                                   "[cpp]strict group completion counts")
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_strict_group_phase2_phase1_candidates,
+    internal_core_strict_group_phase2_count,
+    strictGroupPhase1CandidatesLabels,
+    strictGroupCountBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_strict_group_phase2_phase2_candidates,
+    internal_core_strict_group_phase2_count,
+    strictGroupPhase2CandidatesLabels,
+    strictGroupCountBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_strict_group_phase2_batch_count,
+    internal_core_strict_group_phase2_count,
+    strictGroupBatchCountLabels,
+    strictGroupCountBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_strict_group_phase2_original_remaining_candidates,
+    internal_core_strict_group_phase2_count,
+    strictGroup_original_remaining_candidates_Labels,
+    strictGroupCountBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_membership_build_latency,
+    internal_core_search_latency,
+    strictGroupMembershipBuildLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_bitmap_build_latency,
+    internal_core_search_latency,
+    strictGroupBitmapBuildLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_search_latency,
+                            internal_core_search_latency,
+                            strictGroupSearchLatencyLabels)
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(
+    internal_expr_cache_hit_total,
+    "[cpp]successful expression result cache lookups");
+DEFINE_PROMETHEUS_COUNTER(internal_expr_cache_hit_total,
+                          internal_expr_cache_hit_total,
+                          {});
+
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};
@@ -337,6 +410,16 @@ DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_search,
 DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_load,
                         internal_cgo_pool_size,
                         cgoLoadPoolLabel);
+
+std::map<std::string, std::string> untypedCgoExceptionLabel = {};
+DEFINE_PROMETHEUS_COUNTER_FAMILY(
+    internal_cgo_untyped_exception,
+    "[cpp]exceptions reaching the cgo boundary without a typed error code "
+    "(collapsed to UnexpectedError); shrinking rate = classification "
+    "coverage improving");
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_untyped_exception_total,
+                          internal_cgo_untyped_exception,
+                          untypedCgoExceptionLabel);
 
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_inflight_task_total,
                                "[cpp]async cgo inflight task");

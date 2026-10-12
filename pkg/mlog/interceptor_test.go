@@ -14,26 +14,32 @@ import (
 )
 
 func Test_extractPropagatedFromMetadata(t *testing.T) {
-	// Type-encoded keys: "mlog-s-" for string, "mlog-i-" for int64
+	// Type-encoded keys preserve their scalar types.
 	md := metadata.New(map[string]string{
 		metadataPrefixString + "collectionname": "my_collection",
 		metadataPrefixInt64 + "collectionid":    "12345",
+		metadataPrefixUint64 + "broadcastid":    "18446744073709551615",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
 	ctx = extractPropagated(ctx)
 
 	props := GetPropagated(ctx)
-	assert.Len(t, props, 2)
+	assert.Len(t, props, 3)
 	assert.Equal(t, "my_collection", props[keyCollectionName])
 	assert.Equal(t, "12345", props[keyCollectionID])
+	assert.Equal(t, "18446744073709551615", props[keyBroadcastID])
 
-	// Verify int64 field preserves type
+	// Verify numeric fields preserve their signedness.
 	fields := FieldsFromContext(ctx)
 	for _, f := range fields {
 		if f.Key == keyCollectionID {
 			assert.Equal(t, zapcore.Int64Type, f.Type)
 			assert.Equal(t, int64(12345), f.Integer)
+		}
+		if f.Key == keyBroadcastID {
+			assert.Equal(t, zapcore.Uint64Type, f.Type)
+			assert.Equal(t, int64(-1), f.Integer)
 		}
 	}
 }
@@ -89,6 +95,7 @@ func Test_injectPropagatedToMetadata(t *testing.T) {
 	ctx = WithFields(ctx,
 		propagatedStringField(keyCollectionName, "my_collection"),
 		propagatedInt64Field(keyCollectionID, 12345),
+		propagatedUint64Field(keyBroadcastID, ^uint64(0)),
 	)
 
 	ctx = injectPropagated(ctx)
@@ -97,6 +104,7 @@ func Test_injectPropagatedToMetadata(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, []string{"my_collection"}, md.Get(metadataPrefixString+"collectionname"))
 	assert.Equal(t, []string{"12345"}, md.Get(metadataPrefixInt64+"collectionid"))
+	assert.Equal(t, []string{"18446744073709551615"}, md.Get(metadataPrefixUint64+"broadcastid"))
 }
 
 func Test_injectPropagatedNoPropagatedFields(t *testing.T) {
@@ -126,6 +134,7 @@ func TestRoundTripPropagation(t *testing.T) {
 	clientCtx = WithFields(clientCtx,
 		propagatedStringField(keyCollectionName, "test_collection"),
 		propagatedInt64Field(keyCollectionID, 99999),
+		propagatedUint64Field(keyBroadcastID, ^uint64(0)),
 	)
 
 	// Client injects into outgoing metadata
@@ -140,11 +149,12 @@ func TestRoundTripPropagation(t *testing.T) {
 
 	// Verify propagated fields are preserved with correct types
 	props := GetPropagated(serverCtx)
-	assert.Len(t, props, 2)
+	assert.Len(t, props, 3)
 	assert.Equal(t, "test_collection", props[keyCollectionName])
 	assert.Equal(t, "99999", props[keyCollectionID])
+	assert.Equal(t, "18446744073709551615", props[keyBroadcastID])
 
-	// Verify int64 type is preserved across the round trip
+	// Verify numeric types are preserved across the round trip.
 	for _, f := range FieldsFromContext(serverCtx) {
 		if f.Key == keyCollectionID {
 			assert.Equal(t, zapcore.Int64Type, f.Type)
@@ -153,6 +163,10 @@ func TestRoundTripPropagation(t *testing.T) {
 		if f.Key == keyCollectionName {
 			assert.Equal(t, zapcore.StringType, f.Type)
 			assert.Equal(t, "test_collection", f.String)
+		}
+		if f.Key == keyBroadcastID {
+			assert.Equal(t, zapcore.Uint64Type, f.Type)
+			assert.Equal(t, int64(-1), f.Integer)
 		}
 	}
 }

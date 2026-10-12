@@ -308,7 +308,7 @@ func BenchmarkDataFrame_FromSearchResultData(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				df, err := FromSearchResultData(resultData, pool, neededFields)
+				df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, neededFields...))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -335,7 +335,7 @@ func BenchmarkDataFrame_ToSearchResultData(b *testing.B) {
 		b.Run(bc.name, func(b *testing.B) {
 			// Generate and convert to DataFrame
 			resultData := generateSearchResultData(bc.nq, bc.topK, bc.numFields)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(bc.numFields))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(bc.numFields)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -358,59 +358,6 @@ func BenchmarkDataFrame_ToSearchResultData(b *testing.B) {
 // Individual Operator Benchmarks
 // =============================================================================
 
-func BenchmarkSelectOp(b *testing.B) {
-	benchCases := []struct {
-		name       string
-		nq         int
-		topK       int
-		numFields  int
-		selectCols int
-	}{
-		{"Small_Select2", 100, 1000, 5, 2},
-		{"Medium_Select3", 100, 1000, 5, 3},
-		{"Large_Select5", 1000, 1000, 5, 5},
-	}
-
-	pool := memory.NewGoAllocator()
-	for _, bc := range benchCases {
-		b.Run(bc.name, func(b *testing.B) {
-			resultData := generateSearchResultData(bc.nq, bc.topK, bc.numFields)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(bc.numFields))
-			if err != nil {
-				b.Fatal(err)
-			}
-			defer df.Release()
-
-			// Build column list to select
-			selectCols := []string{types.IDFieldName, types.ScoreFieldName}
-			if bc.selectCols >= 3 {
-				selectCols = append(selectCols, "int64_field")
-			}
-			if bc.selectCols >= 4 {
-				selectCols = append(selectCols, "float64_field")
-			}
-			if bc.selectCols >= 5 {
-				selectCols = append(selectCols, "varchar_field")
-			}
-
-			chain := NewFuncChainWithAllocator(nil).Select(selectCols...)
-
-			b.ResetTimer()
-			b.ReportAllocs()
-
-			for i := 0; i < b.N; i++ {
-				result, err := chain.Execute(df)
-				if err != nil {
-					b.Fatal(err)
-				}
-				if result != df {
-					result.Release()
-				}
-			}
-		})
-	}
-}
-
 func BenchmarkFilterOp(b *testing.B) {
 	benchCases := []struct {
 		name      string
@@ -427,7 +374,7 @@ func BenchmarkFilterOp(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -469,13 +416,13 @@ func BenchmarkSortOp(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
 			defer df.Release()
 
-			chain := NewFuncChainWithAllocator(nil).Sort("int64_field", bc.desc)
+			chain := NewFuncChainWithAllocator(nil).Sort("int64_field", bc.desc, types.IDFieldName)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -509,7 +456,7 @@ func BenchmarkLimitOp(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -551,7 +498,7 @@ func BenchmarkMapOp(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -594,7 +541,7 @@ func BenchmarkChain_FilterSortLimit(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -603,7 +550,7 @@ func BenchmarkChain_FilterSortLimit(b *testing.B) {
 			chain := NewFuncChainWithAllocator(nil).
 				SetStage(types.StageL2Rerank).
 				Filter(&BenchFilterFunction{threshold: bc.threshold}, []string{types.ScoreFieldName}).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(bc.limit)
 
 			b.ResetTimer()
@@ -620,7 +567,7 @@ func BenchmarkChain_FilterSortLimit(b *testing.B) {
 	}
 }
 
-func BenchmarkChain_MapFilterSelect(b *testing.B) {
+func BenchmarkChain_MapFilter(b *testing.B) {
 	benchCases := []struct {
 		name string
 		nq   int
@@ -635,7 +582,7 @@ func BenchmarkChain_MapFilterSelect(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 5)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(5))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(5)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -644,8 +591,7 @@ func BenchmarkChain_MapFilterSelect(b *testing.B) {
 			chain := NewFuncChainWithAllocator(nil).
 				SetStage(types.StageL2Rerank).
 				Map(&BenchScoreTransformFunction{multiplier: 1.5}, []string{types.ScoreFieldName}, []string{"transformed_score"}).
-				Filter(&BenchFilterFunction{threshold: 0.5}, []string{types.ScoreFieldName}).
-				Select(types.IDFieldName, types.ScoreFieldName, "transformed_score", "int64_field")
+				Filter(&BenchFilterFunction{threshold: 0.5}, []string{types.ScoreFieldName})
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -676,20 +622,19 @@ func BenchmarkChain_FullPipeline(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 5)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(5))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(5)...))
 			if err != nil {
 				b.Fatal(err)
 			}
 			defer df.Release()
 
-			// Full pipeline: Map -> Filter -> Sort -> Limit -> Select
+			// Full pipeline: Map -> Filter -> Sort -> Limit
 			chain := NewFuncChainWithAllocator(nil).
 				SetStage(types.StageL2Rerank).
 				Map(&BenchScoreTransformFunction{multiplier: 2.0}, []string{types.ScoreFieldName}, []string{"transformed_score"}).
 				Filter(&BenchFilterFunction{threshold: 0.3}, []string{types.ScoreFieldName}).
-				Sort("transformed_score", true).
-				Limit(50).
-				Select(types.IDFieldName, "transformed_score", "int64_field", "float64_field")
+				Sort("transformed_score", true, types.IDFieldName).
+				Limit(50)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -717,14 +662,14 @@ func BenchmarkScale_VaryingNQ(b *testing.B) {
 	for _, nq := range nqValues {
 		b.Run(fmt.Sprintf("NQ_%d", nq), func(b *testing.B) {
 			resultData := generateSearchResultData(nq, topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
 			defer df.Release()
 
 			chain := NewFuncChainWithAllocator(nil).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(10)
 
 			b.ResetTimer()
@@ -749,14 +694,14 @@ func BenchmarkScale_VaryingTopK(b *testing.B) {
 	for _, topK := range topKValues {
 		b.Run(fmt.Sprintf("TopK_%d", topK), func(b *testing.B) {
 			resultData := generateSearchResultData(nq, topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
 			defer df.Release()
 
 			chain := NewFuncChainWithAllocator(nil).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(10)
 
 			b.ResetTimer()
@@ -782,7 +727,7 @@ func BenchmarkScale_VaryingColumns(b *testing.B) {
 	for _, numCols := range columnCounts {
 		b.Run(fmt.Sprintf("Cols_%d", numCols), func(b *testing.B) {
 			resultData := generateSearchResultData(nq, topK, numCols)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(numCols))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(numCols)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -791,7 +736,7 @@ func BenchmarkScale_VaryingColumns(b *testing.B) {
 			chain := NewFuncChainWithAllocator(nil).
 				SetStage(types.StageL2Rerank).
 				Filter(&BenchFilterFunction{threshold: 0.5}, []string{types.ScoreFieldName}).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(100)
 
 			b.ResetTimer()
@@ -827,7 +772,7 @@ func BenchmarkWithCheckedAllocator(b *testing.B) {
 			pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
 
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -836,7 +781,7 @@ func BenchmarkWithCheckedAllocator(b *testing.B) {
 			chain := NewFuncChainWithAllocator(pool).
 				SetStage(types.StageL2Rerank).
 				Filter(&BenchFilterFunction{threshold: 0.5}, []string{types.ScoreFieldName}).
-				Sort(types.ScoreFieldName, true).
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
 				Limit(10)
 
 			b.ResetTimer()
@@ -881,16 +826,15 @@ func BenchmarkEndToEnd_Pipeline(b *testing.B) {
 			chain := NewFuncChainWithAllocator(nil).
 				SetStage(types.StageL2Rerank).
 				Filter(&BenchFilterFunction{threshold: 0.5}, []string{types.ScoreFieldName}).
-				Sort(types.ScoreFieldName, true).
-				Limit(50).
-				Select(types.IDFieldName, types.ScoreFieldName, "int64_field")
+				Sort(types.ScoreFieldName, true, types.IDFieldName).
+				Limit(50)
 
 			b.ResetTimer()
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
 				// Import
-				df, err := FromSearchResultData(resultData, pool, neededFields)
+				df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, neededFields...))
 				if err != nil {
 					b.Fatal(err)
 				}

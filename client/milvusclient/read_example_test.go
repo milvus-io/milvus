@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	"github.com/milvus-io/milvus/client/v3/milvusclient"
 )
 
 func ExampleClient_Search_basic() {
@@ -523,19 +523,29 @@ func ExampleClient_Search_textMatch() {
 	q := "artificial intelligence"
 	expr := "text_match(" + titleField + ", \"" + q + "\", minimum_should_match=2) OR text_match(" + textField + ", \"" + q + "\", minimum_should_match=2)"
 
-	boost := entity.NewFunction().
+	titleBoost := entity.NewFunction().
 		WithName("title_boost").
 		WithType(entity.FunctionTypeRerank).
 		WithParam("reranker", "boost").
 		WithParam("filter", "text_match("+titleField+", \""+q+"\", minimum_should_match=2)").
 		WithParam("weight", "2.0")
+	textBoost := entity.NewFunction().
+		WithName("text_boost").
+		WithType(entity.FunctionTypeRerank).
+		WithParam("reranker", "boost").
+		WithParam("weight", "1.5")
+	functionScore := entity.NewFunctionScore().
+		AddFunction(titleBoost).
+		AddFunction(textBoost).
+		WithParam("boost_mode", "sum").
+		WithParam("function_mode", "multiply")
 
 	vectors := []entity.Vector{entity.Text(q)}
 	rs, err := cli.Search(ctx, milvusclient.NewSearchOption(collectionName, 5, vectors).
 		WithANNSField(textSparse).
 		WithFilter(expr).
 		WithOutputFields("id", titleField, textField).
-		WithFunctionReranker(boost))
+		WithFunctionScore(functionScore))
 	if err != nil {
 		log.Fatal("failed to search: ", err.Error())
 	}

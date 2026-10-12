@@ -31,6 +31,7 @@ impl IndexWriterWrapper {
         overall_memory_budget_in_bytes: usize,
         tanviy_index_version: TantivyIndexVersion,
         enable_user_specified_doc_id: bool,
+        enable_background_merge: bool,
     ) -> Result<IndexWriterWrapper> {
         init_log();
         match tanviy_index_version {
@@ -41,6 +42,7 @@ impl IndexWriterWrapper {
                     path,
                     num_threads,
                     overall_memory_budget_in_bytes,
+                    enable_background_merge,
                 )?;
                 Ok(IndexWriterWrapper::V5(writer))
             }
@@ -52,6 +54,7 @@ impl IndexWriterWrapper {
                     num_threads,
                     overall_memory_budget_in_bytes,
                     enable_user_specified_doc_id,
+                    enable_background_merge,
                 )?;
                 Ok(IndexWriterWrapper::V7(writer))
             }
@@ -236,6 +239,7 @@ mod tests {
                 50_000_000,
                 TantivyIndexVersion::V5,
                 false,
+                false,
             )
             .unwrap();
 
@@ -317,6 +321,7 @@ mod tests {
                 "",
                 1,
                 50_000_000,
+                false,
                 false,
                 TantivyIndexVersion::V5,
             )
@@ -408,6 +413,7 @@ mod tests {
                 100_000_000,
                 TantivyIndexVersion::V7,
                 enable,
+                false,
             )
             .unwrap();
 

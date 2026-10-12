@@ -85,7 +85,37 @@ using namespace milvus::bitset::detail::arm;
     FUNC(__VA_ARGS__, Mod, GT);      \
     FUNC(__VA_ARGS__, Mod, LE);      \
     FUNC(__VA_ARGS__, Mod, LT);      \
-    FUNC(__VA_ARGS__, Mod, NE);
+    FUNC(__VA_ARGS__, Mod, NE);      \
+    FUNC(__VA_ARGS__, BitAnd, EQ);   \
+    FUNC(__VA_ARGS__, BitAnd, GE);   \
+    FUNC(__VA_ARGS__, BitAnd, GT);   \
+    FUNC(__VA_ARGS__, BitAnd, LE);   \
+    FUNC(__VA_ARGS__, BitAnd, LT);   \
+    FUNC(__VA_ARGS__, BitAnd, NE);   \
+    FUNC(__VA_ARGS__, BitOr, EQ);    \
+    FUNC(__VA_ARGS__, BitOr, GE);    \
+    FUNC(__VA_ARGS__, BitOr, GT);    \
+    FUNC(__VA_ARGS__, BitOr, LE);    \
+    FUNC(__VA_ARGS__, BitOr, LT);    \
+    FUNC(__VA_ARGS__, BitOr, NE);    \
+    FUNC(__VA_ARGS__, BitXor, EQ);   \
+    FUNC(__VA_ARGS__, BitXor, GE);   \
+    FUNC(__VA_ARGS__, BitXor, GT);   \
+    FUNC(__VA_ARGS__, BitXor, LE);   \
+    FUNC(__VA_ARGS__, BitXor, LT);   \
+    FUNC(__VA_ARGS__, BitXor, NE);   \
+    FUNC(__VA_ARGS__, Shl, EQ);      \
+    FUNC(__VA_ARGS__, Shl, GE);      \
+    FUNC(__VA_ARGS__, Shl, GT);      \
+    FUNC(__VA_ARGS__, Shl, LE);      \
+    FUNC(__VA_ARGS__, Shl, LT);      \
+    FUNC(__VA_ARGS__, Shl, NE);      \
+    FUNC(__VA_ARGS__, Shr, EQ);      \
+    FUNC(__VA_ARGS__, Shr, GE);      \
+    FUNC(__VA_ARGS__, Shr, GT);      \
+    FUNC(__VA_ARGS__, Shr, LE);      \
+    FUNC(__VA_ARGS__, Shr, LT);      \
+    FUNC(__VA_ARGS__, Shr, NE);
 
 // a facility to run through all possible forward ElementT
 #define ALL_FORWARD_OPS(FUNC) \

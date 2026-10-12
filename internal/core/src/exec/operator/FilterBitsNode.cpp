@@ -46,28 +46,32 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
     auto* segment =
         query_context != nullptr ? query_context->get_segment() : nullptr;
     if (segment != nullptr &&
-        segment->get_schema().get_ttl_field_id().has_value()) {
+        segment->get_schema_snapshot()->get_ttl_field_id().has_value()) {
         key += fmt::format("|entity_ttl_physical_time_us:{}",
                            query_context->get_entity_ttl_physical_time_us());
     }
     return key;
 }
 
-void
+}  // namespace
+
+bool
 ConvertPredicateToFilteredBitset(TargetBitmapView data,
                                  TargetBitmapView valid,
                                  const size_t size) {
     // FilterBitsNode outputs a filtered-row bitset: 1 means excluded. A SQL-style
     // predicate passes only when it is definitely TRUE, so UNKNOWN/NULL must be
     // excluded together with FALSE.
-    data.flip();
-    TargetBitmap invalid(valid);
-    invalid.flip();
-    data.inplace_or(invalid, size);
-    valid.set();
-}
+    if (valid.all()) {
+        data.flip();
+        return true;
+    }
 
-}  // namespace
+    data.inplace_and(valid, size);
+    data.flip();
+    valid.set();
+    return false;
+}
 
 PhyFilterBitsNode::PhyFilterBitsNode(
     int32_t operator_id,
@@ -82,13 +86,37 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
-    exprs_ = std::make_unique<ExprSet>(filters, exec_context);
+    // This operator folds UNKNOWN predicate rows into the excluded set
+    // (ConvertPredicateToFilteredBitset), i.e. it is a null-rejecting
+    // consumer: let conjunctions in the predicate tree drop UNKNOWN rows
+    // from their active sets early.
+    exprs_ = std::make_unique<ExprSet>(
+        filters, exec_context, /*null_rejecting=*/true);
     need_process_rows_ = query_context_->get_active_count();
     num_processed_rows_ = 0;
 
     enable_expr_cache_ = query_context_->get_enable_expr_cache();
     if (enable_expr_cache_) {
-        expr_cache_key_ = BuildExprCacheKey(*filter, query_context_);
+        const bool cache_setup_completed = RunExprCacheBestEffort([&]() {
+            // Only cache the predicate result when EVERY expression in it is
+            // cacheable. A bloom_match subtree is non-cacheable (its slim
+            // ToString cache key cannot distinguish distinct filter blobs),
+            // and that propagates up, so a predicate containing bloom_match is
+            // never cached and can never reuse another query's bitmap.
+            for (const auto& e : exprs_->exprs()) {
+                if (e && !e->IsCacheable()) {
+                    enable_expr_cache_ = false;
+                    break;
+                }
+            }
+            if (enable_expr_cache_) {
+                expr_cache_key_ = BuildExprCacheKey(*filter, query_context_);
+            }
+        });
+        if (!cache_setup_completed) {
+            enable_expr_cache_ = false;
+            expr_cache_key_.clear();
+        }
     }
 }
 
@@ -129,20 +157,28 @@ PhyFilterBitsNode::GetOutput() {
                                cache_segment->type() == SegmentType::Sealed &&
                                ExprResCacheManager::IsEnabled();
     if (can_use_cache) {
-        ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                     expr_cache_key_};
-        ExprResCacheManager::Value cached;
-        cached.active_count = need_process_rows_;
-        if (ExprResCacheManager::Instance().Get(key, cached) &&
-            cached.result != nullptr &&
-            cached.result->size() == need_process_rows_) {
-            num_processed_rows_ = need_process_rows_;
+        RowVectorPtr cached_output;
+        RunExprCacheBestEffort([&]() {
+            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
+                                         expr_cache_key_};
+            ExprResCacheManager::Value cached;
+            cached.active_count = need_process_rows_;
+            if (!ExprResCacheManager::Instance().Get(key, cached) ||
+                cached.result == nullptr ||
+                cached.result->size() != need_process_rows_) {
+                return;
+            }
+
             std::vector<VectorPtr> col_res;
             col_res.push_back(std::make_shared<ColumnVector>(
                 cached.result->clone(),
                 cached.valid_result ? cached.valid_result->clone()
                                     : TargetBitmap(need_process_rows_, true)));
-            return std::make_shared<RowVector>(col_res);
+            cached_output = std::make_shared<RowVector>(std::move(col_res));
+            num_processed_rows_ = need_process_rows_;
+        });
+        if (cached_output != nullptr) {
+            return cached_output;
         }
     }
 
@@ -186,13 +222,15 @@ PhyFilterBitsNode::GetOutput() {
                    need_process_rows_);
 
         if (can_use_cache) {
-            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                         expr_cache_key_};
-            ExprResCacheManager::Value v;
-            v.result = std::make_shared<TargetBitmap>(view);
-            v.valid_result = std::make_shared<TargetBitmap>(valid_view);
-            v.active_count = need_process_rows_;
-            ExprResCacheManager::Instance().Put(key, v);
+            RunExprCacheBestEffort([&]() {
+                ExprResCacheManager::Key key{cache_segment->get_segment_id(),
+                                             expr_cache_key_};
+                ExprResCacheManager::Value v;
+                v.result = std::make_shared<TargetBitmap>(view);
+                v.valid_result = std::make_shared<TargetBitmap>(valid_view);
+                v.active_count = need_process_rows_;
+                ExprResCacheManager::Instance().Put(key, v);
+            });
         }
 
         std::vector<VectorPtr> col_res;
@@ -206,7 +244,7 @@ PhyFilterBitsNode::GetOutput() {
         milvus::monitor::internal_core_search_latency_scalar.Observe(
             scalar_cost / 1000);
 
-        return std::make_shared<RowVector>(col_res);
+        return std::make_shared<RowVector>(std::move(col_res));
     }
 
     while (num_processed_rows_ < need_process_rows_) {
@@ -227,11 +265,11 @@ PhyFilterBitsNode::GetOutput() {
                 valid_bitset.append(valid_view);
                 num_processed_rows_ += col_vec_size;
             } else {
-                ThrowInfo(ExprInvalid,
+                ThrowInfo(UnexpectedError,
                           "PhyFilterBitsNode result should be bitmap");
             }
         } else {
-            ThrowInfo(ExprInvalid,
+            ThrowInfo(UnexpectedError,
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }
@@ -250,13 +288,16 @@ PhyFilterBitsNode::GetOutput() {
     // search. Must clone before move since Stage 1 still owns the bitset for
     // the ColumnVector return value below.
     if (can_use_cache) {
-        ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                     expr_cache_key_};
-        ExprResCacheManager::Value v;
-        v.result = std::make_shared<TargetBitmap>(bitset.clone());
-        v.valid_result = std::make_shared<TargetBitmap>(valid_bitset.clone());
-        v.active_count = need_process_rows_;
-        ExprResCacheManager::Instance().Put(key, v);
+        RunExprCacheBestEffort([&]() {
+            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
+                                         expr_cache_key_};
+            ExprResCacheManager::Value v;
+            v.result = std::make_shared<TargetBitmap>(bitset.clone());
+            v.valid_result =
+                std::make_shared<TargetBitmap>(valid_bitset.clone());
+            v.active_count = need_process_rows_;
+            ExprResCacheManager::Instance().Put(key, v);
+        });
     }
 
     // num_processed_rows_ = need_process_rows_;
@@ -271,7 +312,7 @@ PhyFilterBitsNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
                                                                  1000);
 
-    return std::make_shared<RowVector>(col_res);
+    return std::make_shared<RowVector>(std::move(col_res));
 }
 
 }  // namespace exec

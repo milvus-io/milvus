@@ -616,6 +616,81 @@ class TestMilvusClientStructArrayElementQuery(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_match_query_parent_output_with_diskann_index(self):
+        """
+        target: query parent struct array output when element-level vector sub-field uses DISKANN
+        method: build DISKANN on structA[embedding], query id-only, then query id + structA with MATCH_ANY
+        expected: both queries succeed and parent struct array output is returned
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_efq_diskann_output")
+
+        schema = self._create_schema(client)
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        data = []
+        for start in range(0, default_nb, insert_batch_size):
+            batch = self._generate_data(nb=insert_batch_size, start_id=start)
+            res, check = self.insert(client, collection_name, batch)
+            assert check
+            data.extend(batch)
+        self.flush(client, collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="DISKANN",
+            metric_type="COSINE",
+            params={},
+        )
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+        assert self.wait_for_index_ready(client, collection_name, "structA[embedding]", timeout=300)
+
+        self.load_collection(client, collection_name)
+
+        filter_expr = "MATCH_ANY(structA, $[int_val] >= 0)"
+        id_only_results, check = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=["id"],
+            limit=5,
+        )
+        assert check
+        assert len(id_only_results) > 0
+        assert all(set(row) == {"id"} for row in id_only_results)
+
+        parent_results, check = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=["id", "structA"],
+            limit=5,
+        )
+        assert check
+        assert len(parent_results) > 0
+        source_by_id = {row["id"]: row for row in data}
+        for row in parent_results:
+            assert "id" in row
+            assert "structA" in row
+            expected_struct = source_by_id[row["id"]]["structA"]
+            assert len(row["structA"]) == len(expected_struct)
+            for actual_element, expected_element in zip(row["structA"], expected_struct):
+                assert actual_element["int_val"] == expected_element["int_val"]
+                assert actual_element["str_val"] == expected_element["str_val"]
+                assert actual_element["color"] == expected_element["color"]
+                assert "embedding" in actual_element
+                assert len(actual_element["embedding"]) == default_dim
+
     # ---- 2.5 MATCH family in query (via element_filter) ----
 
     @pytest.mark.tags(CaseLabel.L1)

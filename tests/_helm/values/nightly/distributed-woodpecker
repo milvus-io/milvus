@@ -83,6 +83,10 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     common:
       storage:
         enablev2: true
@@ -92,13 +96,14 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
+      targetVecIndexVersion: 11
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 5
       compaction:
         storageVersion:
           enabled: true
         storageFormat:
           enabled: true
-      targetVecIndexVersion: 10
-      compaction:
         bumpSchemaVersion:
           enabled: true
       gc:

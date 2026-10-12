@@ -21,11 +21,12 @@ import (
 	"context"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus/internal/storagev2"
+	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -217,11 +218,28 @@ func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 func getStateFromError(err error) indexpb.JobState {
 	if errors.Is(err, errCancel) {
 		return indexpb.JobState_JobStateRetry
-	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) {
-		// NoSuchKey or unsupported error
+	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) ||
+		errors.Is(err, merr.ErrDataIntegrity) || merr.IsSegcoreDataFormatBroken(err) {
+		// NoSuchKey, unsupported, malformed persisted data, or meta that disagrees
+		// with the data it points at cannot be fixed by retrying. ErrDataIntegrity
+		// stays a system error on purpose: the request is well formed, it is Milvus
+		// state that is inconsistent, so the blame must not move to the caller.
 		return indexpb.JobState_JobStateFailed
 	} else if errors.Is(err, merr.ErrSegcorePretendFinished) {
 		return indexpb.JobState_JobStateFinished
+	} else if merr.IsPermanentSegcoreErr(err) {
+		// A segcore code the table marks permanent (corrupted data, a missing
+		// object, a misconfigured bucket): every construction site of that code is
+		// deterministic, so the task reproduces it on every worker.
+		return indexpb.JobState_JobStateFailed
+	} else if merr.GetErrorType(err) == merr.InputError {
+		// The request or the source data is itself what fails the build, so the task
+		// fails identically on every worker and on every attempt. Fail it once instead
+		// of re-dispatching forever. This covers the segcore codes that
+		// classForCode already tags as caller input (JsonKeyInvalid, ExprInvalid,
+		// DimNotMatch, InvalidParameter, ...) as well as the ParameterInvalid
+		// errors the task itself raises.
+		return indexpb.JobState_JobStateFailed
 	}
 	return indexpb.JobState_JobStateRetry
 }
@@ -242,22 +260,48 @@ func (sched *TaskScheduler) processTask(t Task) {
 	}()
 	sched.TaskQueue.AddActiveTask(t)
 	defer sched.TaskQueue.PopActiveTask(t.Name())
-	mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()))
+	var (
+		indexTask  *indexBuildTask
+		costCPUNum int64
+		execStart  time.Time
+	)
+	if ibt, ok := t.(*indexBuildTask); ok {
+		indexTask = ibt
+		costCPUNum = taskcost.EstimateIndexBuildCPUNum(indexTask.IsVectorIndex())
+		// execStart carries a monotonic clock reading; CostTimeMs derived from
+		// it is immune to wall-clock steps. ExecStartMs/ExecEndMs stay wall-clock
+		// timestamps for external exposure.
+		execStart = time.Now()
+		indexTask.manager.StoreIndexTaskExecutionStart(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), taskcost.NowMs(), costCPUNum)
+		mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()), mlog.Int64("costCPUNum", costCPUNum))
+	} else {
+		mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()))
+	}
+
 	pipelines := []func(context.Context) error{t.PreExecute, t.Execute, t.PostExecute}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
-			mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err))
-			t.SetState(getStateFromError(err), err.Error())
+			if indexTask != nil {
+				costTimeMs := taskcost.ElapsedMs(execStart)
+				// End bookkeeping and final state must land in one critical
+				// section, so a concurrent QueryTask never sees a final cost
+				// paired with an in-progress state.
+				indexTask.SetStateWithCost(getStateFromError(err), err.Error(), taskcost.NowMs(), costTimeMs)
+				mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
+			} else {
+				t.SetState(getStateFromError(err), err.Error())
+				mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err))
+			}
 			return
 		}
 	}
-	t.SetState(indexpb.JobState_JobStateFinished, "")
-
-	// Publish filesystem metrics after index task completion
-	if indexTask, ok := t.(*indexBuildTask); ok {
-		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
-			storagev2.PublishFilesystemMetricsWithConfig(indexTask.req.GetStorageConfig())
-		}
+	if indexTask != nil {
+		costTimeMs := taskcost.ElapsedMs(execStart)
+		indexTask.SetStateWithCost(indexpb.JobState_JobStateFinished, "", taskcost.NowMs(), costTimeMs)
+		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
+	} else {
+		t.SetState(indexpb.JobState_JobStateFinished, "")
+		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()))
 	}
 }
 

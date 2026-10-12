@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -173,6 +174,14 @@ type Factory interface {
 }
 
 func HealthCheck(mqType string) *common.MQClusterStatus {
+	if mqType == mqTypeDefault {
+		// "default" is a placeholder meaning "auto-select by enabled MQs"; resolve
+		// it to the concrete type before probing. The same resolution already
+		// succeeded at factory init, so it cannot panic here on a running node.
+		params := paramtable.Get()
+		mqType = mustSelectMQType(paramtable.GetRole() == typeutil.StandaloneRole, mqType,
+			mqEnable{params.RocksmqEnable(), params.PulsarEnable(), params.KafkaEnable(), params.WoodpeckerEnable()})
+	}
 	clusterStatus := &common.MQClusterStatus{MqType: mqType}
 	switch mqType {
 	case mqTypeRocksmq:

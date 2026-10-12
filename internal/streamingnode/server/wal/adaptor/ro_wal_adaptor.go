@@ -101,8 +101,7 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 		w.roWALImpls,
 		opts,
 		w.scanMetrics.NewScannerMetrics(),
-		func() { w.scanners.Remove(id) },
-		w.forceRecovery)
+		func() { w.scanners.Remove(id) }, scannerConfig{})
 	w.scanners.Insert(id, s)
 	return s, nil
 }
@@ -123,7 +122,6 @@ func (w *roWALAdaptorImpl) checkReadOptWALName(opts wal.ReadOption) error {
 			msgWALName := message.WALName(msgID.WALName)
 			if msgWALName != currentWALName {
 				w.Logger().Info(context.TODO(),
-
 					"WAL name mismatch", mlog.String("msgIDWALName", msgWALName.String()), mlog.String("currentWALName", currentWALName.String()))
 				return status.NewWALNameMismatchError(currentWALName.String(), msgWALName.String())
 			}
@@ -137,24 +135,27 @@ func (w *roWALAdaptorImpl) IsAvailable() bool {
 	return w.availableCtx.Err() == nil
 }
 
-// Available returns a channel that will be closed when the wal is shut down.
-func (w *roWALAdaptorImpl) Available() <-chan struct{} {
+// Unavailable returns a channel that is closed when the WAL becomes unavailable.
+func (w *roWALAdaptorImpl) Unavailable() <-chan struct{} {
 	return w.availableCtx.Done()
+}
+
+// markUnavailable rejects new operations without closing the WAL from the
+// failing background task. The owner remains responsible for closing it.
+func (w *roWALAdaptorImpl) markUnavailable(err error) {
+	w.Logger().Error(context.TODO(), "wal is unavailable because a background task failed", mlog.Err(err))
+	w.availableCancel()
 }
 
 // Close overrides Scanner Close function.
 func (w *roWALAdaptorImpl) Close() {
 	// begin to close the wal.
-	w.Logger().Info(context.TODO(),
-
-		"wal begin to close...")
+	w.Logger().Info(context.TODO(), "wal begin to close...")
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
 
-	w.Logger().Info(context.TODO(),
-
-		"wal begin to close scanners...")
+	w.Logger().Info(context.TODO(), "wal begin to close scanners...")
 
 	// close all wal instances.
 	w.scanners.Range(func(id int64, s wal.Scanner) bool {
@@ -163,18 +164,12 @@ func (w *roWALAdaptorImpl) Close() {
 		return true
 	})
 
-	w.Logger().Info(context.TODO(),
-
-		"scanner close done, close inner wal...")
+	w.Logger().Info(context.TODO(), "scanner close done, close inner wal...")
 	w.roWALImpls.Close()
 
-	w.Logger().Info(context.TODO(),
-
-		"call wal cleanup function...")
+	w.Logger().Info(context.TODO(), "call wal cleanup function...")
 	w.cleanup()
-	w.Logger().Info(context.TODO(),
-
-		"wal closed")
+	w.Logger().Info(context.TODO(), "wal closed")
 
 	// close all metrics.
 	w.scanMetrics.Close()

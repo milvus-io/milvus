@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include <algorithm>
-
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -38,6 +36,15 @@ IsCompareOp(proto::plan::OpType op) {
            op == proto::plan::OpType::GreaterThan ||
            op == proto::plan::OpType::LessEqual ||
            op == proto::plan::OpType::LessThan;
+}
+
+// Ops served by the per-field text index (segment_->GetTextIndex()) instead of
+// the scalar index path; add a new text-index op here and the dispatch follows.
+inline bool
+IsTextIndexOpType(proto::plan::OpType op) {
+    return op == proto::plan::OpType::TextMatch ||
+           op == proto::plan::OpType::PhraseMatch ||
+           op == proto::plan::OpType::TextMatchFuzzy;
 }
 
 [[maybe_unused]] static ColumnVectorPtr
@@ -121,7 +128,7 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                 break;
             }
             default:
-                ThrowInfo(DataTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported data type {}",
                           arr2.array(i).val_case());
         }
@@ -289,26 +296,6 @@ GetValueWithCastNumber(const milvus::proto::plan::GenericValue& value_proto) {
     } else {
         return GetValueFromProto<T>(value_proto);
     }
-}
-
-// Locale-independent ASCII lowercase conversion
-// Converts only ASCII uppercase letters (A-Z) to lowercase (a-z)
-// Non-ASCII characters and non-uppercase characters remain unchanged
-inline unsigned char
-asciiToLower(unsigned char c) {
-    if (c >= 'A' && c <= 'Z') {
-        return static_cast<unsigned char>('a' + (c - 'A'));
-    }
-    return c;
-}
-
-inline std::string
-sanitizeName(const std::string& name) {
-    std::string sanitizedName;
-    sanitizedName.resize(name.size());
-    std::transform(
-        name.begin(), name.end(), sanitizedName.begin(), asciiToLower);
-    return sanitizedName;
 }
 
 }  // namespace exec

@@ -15,10 +15,10 @@ func TestWALMetrics(t *testing.T) {
 		ChannelInfo: PChannelInfo{
 			Name: "ch1",
 		},
-		MVCCTimeTick:     tsoutil.ComposeTSByTime(now, 0),
-		RecoveryTimeTick: tsoutil.ComposeTSByTime(now.Add(-time.Second), 0),
+		MVCCTimeTick:     tsoutil.ComposeTSByTime(now),
+		RecoveryTimeTick: tsoutil.ComposeTSByTime(now.Add(-time.Second)),
 	}
 	assert.Equal(t, time.Second, rw.RecoveryLag())
-	rw.MVCCTimeTick = tsoutil.ComposeTSByTime(now.Add(-2*time.Second), 0)
+	rw.MVCCTimeTick = tsoutil.ComposeTSByTime(now.Add(-2 * time.Second))
 	assert.Zero(t, rw.RecoveryLag())
 }

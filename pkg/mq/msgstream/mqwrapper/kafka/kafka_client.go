@@ -2,8 +2,9 @@ package kafka
 
 import (
 	"context"
-	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,21 +44,23 @@ func getBasicConfig(address string) kafka.ConfigMap {
 	}
 }
 
-func ConfigtoString(config kafka.ConfigMap) string {
-	configString := "["
+// ConfigKeysString returns a deterministic, value-free summary of a Kafka
+// configuration. Values are intentionally omitted because arbitrary
+// librdkafka options can contain credentials or inline private keys.
+func ConfigKeysString(config kafka.ConfigMap) string {
+	keys := make([]string, 0, len(config))
 	for key := range config {
-		if key == "sasl.password" || key == "sasl.username" {
-			configString += key + ":" + "*** "
-		} else {
-			value, _ := config.Get(key, nil)
-			configString += key + ":" + fmt.Sprintf("%v ", value)
-		}
+		keys = append(keys, key)
 	}
-	if len(configString) > 1 {
-		configString = configString[:len(configString)-1]
-	}
-	configString += "]"
-	return configString
+	sort.Strings(keys)
+	return "[" + strings.Join(keys, " ") + "]"
+}
+
+// ConfigtoString is kept for source compatibility with callers outside this
+// module. Deprecated: use ConfigKeysString, which names the value-free contract
+// explicitly.
+func ConfigtoString(config kafka.ConfigMap) string {
+	return ConfigKeysString(config)
 }
 
 func NewKafkaClientInstance(address string) *kafkaClient {
@@ -66,9 +69,15 @@ func NewKafkaClientInstance(address string) *kafkaClient {
 }
 
 func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerConfig kafka.ConfigMap, extraProducerConfig kafka.ConfigMap) *kafkaClient {
-	mlog.Info(context.TODO(), "init kafka Config ", mlog.String("commonConfig", ConfigtoString(config)),
-		mlog.String("extraConsumerConfig", ConfigtoString(extraConsumerConfig)),
-		mlog.String("extraProducerConfig", ConfigtoString(extraProducerConfig)),
+	// Kafka extra configs may contain arbitrary authentication material (for
+	// example ssl.key.pem or sasl.jaas.config), so ConfigKeysString prints the
+	// option names without their values: a key-name allowlist cannot safely
+	// classify every librdkafka option, but knowing which options are set is
+	// what makes a broker misconfiguration diagnosable.
+	mlog.Info(context.TODO(), "init kafka config",
+		mlog.String("commonConfigKeys", ConfigKeysString(config)),
+		mlog.String("extraConsumerConfigKeys", ConfigKeysString(extraConsumerConfig)),
+		mlog.String("extraProducerConfigKeys", ConfigKeysString(extraProducerConfig)),
 	)
 	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }
@@ -183,14 +192,15 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 
 func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	newConf := cloneKafkaConfig(kc.basicConfig)
-	// default max message size 5M
-	newConf.SetKey("message.max.bytes", 10485760)
 	newConf.SetKey("compression.codec", "zstd")
 	// we want to ensure tt send out as soon as possible
 	newConf.SetKey("linger.ms", 2)
 
 	// special producer config
 	kc.specialExtraConfig(newConf, kc.producerConfig)
+	// producerConfig contains the raw kafka.producer.message.max.bytes entry.
+	// Apply the normalized ParamItem last so it remains authoritative.
+	newConf.SetKey("message.max.bytes", paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.GetAsInt())
 
 	return newConf
 }
@@ -259,7 +269,8 @@ func (kc *kafkaClient) StringToMsgID(id string) (common.MessageID, error) {
 func (kc *kafkaClient) specialExtraConfig(current *kafka.ConfigMap, special kafka.ConfigMap) {
 	for k, v := range special {
 		if existingConf, _ := current.Get(k, nil); existingConf != nil {
-			mlog.Warn(context.TODO(), fmt.Sprintf("The existing config :  %v=%v  will be covered by the special kafka config :  %v.", k, v, existingConf))
+			// Both the existing and replacement values may be credentials.
+			mlog.Warn(context.TODO(), "special kafka config overrides existing config", mlog.String("key", k))
 		}
 
 		current.SetKey(k, v)
