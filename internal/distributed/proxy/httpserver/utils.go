@@ -4662,30 +4662,40 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		}
 		return data, nil
 
-	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		// all passed number is float64 type
-		v, ok := value.(float64)
-		if !ok {
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+		bitSize := 64
+		switch dataType {
+		case schemapb.DataType_Int8:
+			bitSize = 8
+		case schemapb.DataType_Int16:
+			bitSize = 16
+		case schemapb.DataType_Int32:
+			bitSize = 32
+		}
+		var literal string
+		switch v := value.(type) {
+		case json.Number:
+			literal = v.String()
+		case float64:
+			// Keep callers that construct FieldSchema directly compatible, but
+			// never truncate fractions or convert an out-of-range float to int.
+			if math.Trunc(v) == v {
+				literal = strconv.FormatFloat(v, 'f', 0, 64)
+			}
+		default:
+			if dataType == schemapb.DataType_Int64 {
+				return nil, merr.WrapErrParameterInvalidMsg(`cannot use "%v"(type: %T) as long default value`, value, value)
+			}
 			return nil, merr.WrapErrParameterInvalidMsg(`cannot use ""%v"(type: %T) as int default value`, value, value)
 		}
-		data := &schemapb.ValueField{
-			Data: &schemapb.ValueField_IntData{
-				IntData: int32(v),
-			},
-		}
-		return data, nil
-
-	case schemapb.DataType_Int64:
-		v, ok := value.(float64)
+		v, ok := parseJSONInteger(literal, bitSize)
 		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg(`cannot use "%v"(type: %T) as long default value`, value, value)
+			return nil, merr.WrapErrParameterInvalidMsg(`default value "%v" must be an exact integer in the %s range`, value, dataType.String())
 		}
-		data := &schemapb.ValueField{
-			Data: &schemapb.ValueField_LongData{
-				LongData: int64(v),
-			},
+		if dataType == schemapb.DataType_Int64 {
+			return &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: v}}, nil
 		}
-		return data, nil
+		return &schemapb.ValueField{Data: &schemapb.ValueField_IntData{IntData: int32(v)}}, nil
 
 	case schemapb.DataType_Float:
 		v, ok := value.(float64)
