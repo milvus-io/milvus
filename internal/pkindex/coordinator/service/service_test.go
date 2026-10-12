@@ -247,7 +247,9 @@ func TestInvalidRequest(t *testing.T) {
 		{"negative collection", -1, "v"},
 		{"empty vchannel", 1, ""},
 		{"slash in vchannel", 1, "a/b"},
-		{"dot dot in vchannel", 1, "a..b"},
+		{"dot vchannel", 1, "."},
+		{"dot dot vchannel", 1, ".."},
+		{"leading slash in vchannel", 1, "/v"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -267,6 +269,77 @@ func TestInvalidRequest(t *testing.T) {
 			get, err := s.GetManifest(ctx, &pkindexpb.GetManifestRequest{CollectionId: c.collectionID, Vchannel: c.vchannel})
 			require.NoError(t, err)
 			assertCode(t, get.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
+		})
+	}
+}
+
+// A vchannel name with ".." inside it, but no "/", is a valid name.
+func TestVChannelWithDotsInside(t *testing.T) {
+	s, _, _ := newService()
+	ctx := context.Background()
+	claim, err := s.ClaimManifest(ctx, claimReq("a..b", 1))
+	require.NoError(t, err)
+	require.NoError(t, statusErr(claim.GetStatus()))
+	flush, err := s.CommitFlush(ctx, flushReq("a..b", 1, 1, 5))
+	require.NoError(t, err)
+	require.NoError(t, statusErr(flush.GetStatus()))
+	get, err := s.GetManifest(ctx, &pkindexpb.GetManifestRequest{CollectionId: 1, Vchannel: "a..b"})
+	require.NoError(t, err)
+	require.NoError(t, statusErr(get.GetStatus()))
+	assert.True(t, get.GetFound())
+}
+
+func TestClaimPKDataType(t *testing.T) {
+	cases := []struct {
+		pkType schemapb.DataType
+		valid  bool
+	}{
+		{schemapb.DataType_Int64, true},
+		{schemapb.DataType_VarChar, true},
+		{schemapb.DataType_None, false},
+		{schemapb.DataType_Int32, false},
+		{schemapb.DataType_String, false},
+		{schemapb.DataType_FloatVector, false},
+	}
+	for _, c := range cases {
+		t.Run(c.pkType.String(), func(t *testing.T) {
+			s, _, _ := newService()
+			claim, err := s.ClaimManifest(context.Background(), &pkindexpb.ClaimManifestRequest{
+				CollectionId: 1, Vchannel: "v", PchannelTerm: 1, PkDataType: c.pkType,
+			})
+			require.NoError(t, err)
+			if c.valid {
+				assert.NoError(t, statusErr(claim.GetStatus()))
+				return
+			}
+			assertCode(t, claim.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
+		})
+	}
+}
+
+func TestCommitFlushCheckpointTimeTick(t *testing.T) {
+	cases := []struct {
+		name  string
+		tick  uint64
+		valid bool
+	}{
+		{"zero", 0, false},
+		{"one", 1, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, _, _ := newService()
+			ctx := context.Background()
+			claim, err := s.ClaimManifest(ctx, claimReq("v", 1))
+			require.NoError(t, err)
+			require.NoError(t, statusErr(claim.GetStatus()))
+			flush, err := s.CommitFlush(ctx, flushReq("v", 1, 1, c.tick))
+			require.NoError(t, err)
+			if c.valid {
+				assert.NoError(t, statusErr(flush.GetStatus()))
+				return
+			}
+			assertCode(t, flush.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
 		})
 	}
 }
