@@ -1754,6 +1754,7 @@ func (node *Proxy) Prewarm(ctx context.Context, request *milvuspb.PrewarmRequest
 	method := "Prewarm"
 	tr := timerecord.NewTimeRecorder(method)
 	pt := &prewarmTask{
+		baseTask:       baseTask{MetaCache: node.GetMetaCache()},
 		ctx:            ctx,
 		Condition:      NewTaskCondition(ctx),
 		PrewarmRequest: request,
@@ -1762,7 +1763,7 @@ func (node *Proxy) Prewarm(ctx context.Context, request *milvuspb.PrewarmRequest
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(pt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(pt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))

@@ -3598,14 +3598,8 @@ func TestPrewarmTask_Execute(t *testing.T) {
 
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Once()
-	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(newSchemaInfo(schema), nil).Once()
+	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(mustNewSchemaInfo(schema), nil).Once()
 	cache.EXPECT().GetPartitionID(mock.Anything, dbName, collectionName, namespace).Return(partitionID, nil).Once()
-
-	originCache := globalMetaCache
-	globalMetaCache = cache
-	t.Cleanup(func() {
-		globalMetaCache = originCache
-	})
 
 	mixCoord := mocks.NewMockMixCoordClient(t)
 	mixCoord.EXPECT().Prewarm(mock.Anything, mock.MatchedBy(func(req *querypb.PrewarmRequest) bool {
@@ -3622,6 +3616,7 @@ func TestPrewarmTask_Execute(t *testing.T) {
 	}, nil).Once()
 
 	task := &prewarmTask{
+		baseTask: baseTask{MetaCache: cache},
 		PrewarmRequest: &milvuspb.PrewarmRequest{
 			Base:                 commonpbutil.NewMsgBase(),
 			DbName:               dbName,

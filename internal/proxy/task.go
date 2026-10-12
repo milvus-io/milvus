@@ -3570,13 +3570,13 @@ func (t *prewarmTask) GetLoadPriority() commonpb.LoadPriority {
 }
 
 func (t *prewarmTask) Execute(ctx context.Context) error {
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
 	t.collectionID = collID
 
-	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
+	collSchema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -3587,7 +3587,7 @@ func (t *prewarmTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.CollectionName, partitionName)
+	partitionID, err := t.GetMetaCache().GetPartitionID(ctx, t.GetDbName(), t.CollectionName, partitionName)
 	if err != nil {
 		return err
 	}
