@@ -994,7 +994,7 @@ dataCoord:
   pkindex:
     gc:
       interval: 3600 # The interval at which data coord runs garbage collection for primary key index files, unit: second.
-      grace: 86400 # Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second.
+      grace: 86400 # Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second. The minimum is 600 (10 minutes); a lower value disables the garbage collection of primary key index files.
       manifestRetainVersions: 8 # The number of the newest primary key index manifest versions that garbage collection keeps for each vchannel.
       manifestRetainDuration: 3600 # Garbage collection keeps every primary key index manifest version written within this time, unit: second.
   snapshot:
