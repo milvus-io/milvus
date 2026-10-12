@@ -20,18 +20,25 @@
 #include <vector>
 
 #include "common/Array.h"
+#include "common/Consts.h"
+#include "common/FieldData.h"
+#include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "index/Families.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/PackedIndexLoad.h"
 #include "index/contracts/Registry.h"
+#include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
+#include "index/scalar/json/JsonProjectedIndexLoad.h"
 #include "indexbuilder/BuildSession.h"
 #include "indexbuilder/IndexBuildCapiAdapter.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/Util.h"
+#include "simdjson/padded_string.h"
 #include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::indexbuilder {
@@ -100,12 +107,15 @@ class ScalarBuildSessionTest : public ::testing::Test {
         if (stats.Files().size() != 1) {
             return nullptr;
         }
-        storage::LoadOptions options;
-        options.params = params;
         auto source = index::InspectPackedIndexFile(
             {stats.Files()[0].file_name}, context);
         const auto resolved_family =
             index::ResolvePackedLoadFamily(family, source->IndexMeta(), params);
+        // Cold-load planning annotates typed JSON completeness, as the sealed
+        // index translator does before opening the reader.
+        storage::LoadOptions options;
+        options.params = index::AnnotateJsonProjectionCompleteness(
+            params, source->Directory(), source->IndexMeta());
         return index::LoaderRegistry::Instance().Lookup(resolved_family).Load(
             {index::OpenedIndexSource{index::PackedIndexSource{
                  std::shared_ptr<storage::AsyncIndexEntryReader>(
@@ -272,6 +282,82 @@ TEST_F(ScalarBuildSessionTest, StructArraySubFieldKeepsNestedBitmapAndHybridRout
         if (value_type == DataType::VARCHAR) check(std::string_view("20"));
         else check(int32_t{20});
       }
+    }
+}
+
+// The proxy encodes an index on the JSON field itself as the empty JSON
+// pointer, so every indexed value sits at the document root.
+TEST_F(ScalarBuildSessionTest, TypedJsonIndexOnFieldRoot) {
+    constexpr int64_t rows = 30;
+    std::vector<Json> documents;
+    documents.reserve(rows);
+    for (int64_t row = 0; row < rows; ++row) {
+        std::string raw;
+        if (row % 3 == 0) {
+            raw = std::to_string(row);
+        } else if (row % 3 == 1) {
+            raw = "\"s" + std::to_string(row % 2) + "\"";
+        } else {
+            raw = "{\"a\":" + std::to_string(row) + "}";
+        }
+        documents.emplace_back(simdjson::padded_string(raw));
+    }
+    struct Case {
+        const char* index_type;
+        const char* cast;
+    };
+    for (const auto& [index_type, cast] :
+         {Case{index::INVERTED_INDEX_TYPE, "DOUBLE"},
+          Case{index::ASCENDING_SORT, "DOUBLE"},
+          Case{index::INVERTED_INDEX_TYPE, "VARCHAR"},
+          Case{index::BITMAP_INDEX_TYPE, "VARCHAR"}}) {
+        SCOPED_TRACE(::testing::Message() << index_type << "/" << cast);
+        auto info = Info(DataType::JSON, index_type);
+        info.set_num_rows(rows);
+        auto* param = info.add_index_params();
+        param->set_key(JSON_CAST_TYPE);
+        param->set_value(cast);
+        param = info.add_index_params();
+        param->set_key(JSON_PATH);
+        param->set_value("");
+        auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+        auto data = std::make_shared<FieldData<Json>>(DataType::JSON, false);
+        data->add_json_data(documents);
+        info.add_insert_files(WriteBinlog(prepared.file_manager_context, data));
+        prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+        auto reader = BuildAndLoad(std::move(prepared));
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->Count(), rows);
+        const auto* json =
+            dynamic_cast<const index::IJsonIndexReader*>(reader.get());
+        ASSERT_NE(json, nullptr);
+        const auto resolved = json->Resolve("", JsonCastType::FromString(cast));
+        ASSERT_TRUE(static_cast<bool>(resolved));
+        if (std::string_view(cast) == "DOUBLE") {
+            const auto* predicate =
+                dynamic_cast<const index::IScalarPredicateReader<double>*>(
+                    resolved.get());
+            ASSERT_NE(predicate, nullptr);
+            const double key = 3.0;
+            const auto hits = predicate->In(1, &key);
+            ASSERT_EQ(hits.size(), rows);
+            EXPECT_EQ(hits.count(), 1);
+            EXPECT_TRUE(hits[3]);
+            EXPECT_EQ(
+                predicate->Range(0.0, index::CompareOp::GreaterEqual).count(),
+                10);
+        } else {
+            const auto* predicate = dynamic_cast<
+                const index::IScalarPredicateReader<std::string_view>*>(
+                resolved.get());
+            ASSERT_NE(predicate, nullptr);
+            const std::string_view key = "s0";
+            const auto hits = predicate->In(1, &key);
+            ASSERT_EQ(hits.size(), rows);
+            // Rows 4, 10, 16, 22 and 28 hold the root string "s0".
+            EXPECT_EQ(hits.count(), 5);
+            EXPECT_TRUE(hits[4]);
+        }
     }
 }
 

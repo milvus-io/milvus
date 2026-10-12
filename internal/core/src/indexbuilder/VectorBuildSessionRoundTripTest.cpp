@@ -67,6 +67,11 @@ TEST_P(VectorBuildSessionRoundTripTest, PublishedBinlogIndexCanSearch) {
                index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         params[knowhere::indexparam::NLIST] = 16;
         search[knowhere::indexparam::NPROBE] = 4;
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS) {
+        // Vanilla FAISS rejects every build key it does not recognize, so
+        // this case fails if Milvus build metadata reaches knowhere.
+        params["faiss_index_name"] = "IVF16,Flat";
+        search[knowhere::indexparam::NPROBE] = 16;
     } else if (sparse) {
         params[knowhere::indexparam::DROP_RATIO_BUILD] = 0.1;
     }
@@ -146,6 +151,7 @@ INSTANTIATE_TEST_SUITE_P(
         Param{knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, knowhere::metric::JACCARD},
         Param{knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, knowhere::metric::JACCARD},
         Param{knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2},
+        Param{knowhere::IndexEnum::INDEX_FAISS, knowhere::metric::L2},
         Param{knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX, knowhere::metric::IP},
         Param{knowhere::IndexEnum::INDEX_SPARSE_WAND, knowhere::metric::IP}),
     [](const ::testing::TestParamInfo<Param>& info) {
