@@ -37,6 +37,8 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
+const rlsSchemaBinaryDim = 64
+
 // The oracle is application-owned row data; it is never populated from a server read.
 type rlsSchemaRow map[string]any
 
@@ -56,12 +58,12 @@ func rlsSchemaVector(t *testing.T, kind string, n int) (entity.Vector, any, colu
 		// Give each fixture a distinct Hamming distance from the query vector.
 		// Equal-distance pagination is outside the default CI matrix.
 		require.GreaterOrEqual(t, n, 1)
-		require.LessOrEqual(t, n, 64)
-		v := make(entity.BinaryVector, 8)
+		require.LessOrEqual(t, n, rlsSchemaBinaryDim)
+		v := make(entity.BinaryVector, rlsSchemaBinaryDim/8)
 		for i := range n {
 			v[i/8] |= 1 << (i % 8)
 		}
-		return v, []byte(v), column.NewColumnBinaryVector("vector", 64, nil), index.NewBinFlatIndex(entity.HAMMING)
+		return v, []byte(v), column.NewColumnBinaryVector("vector", rlsSchemaBinaryDim, nil), index.NewBinFlatIndex(entity.HAMMING)
 	case "float16":
 		v := v.ToFloat16Vector()
 		return v, []byte(v), column.NewColumnFloat16Vector("vector", 8, nil), index.NewFlatIndex(entity.L2)
@@ -184,7 +186,7 @@ func rlsSchemaWriteColumns(t *testing.T, tc rlsSchemaCase, rows ...rlsSchemaRow)
 			case "float32":
 				col, err = column.NewNullableColumnFloatVector("vector", 8, floats, valid)
 			case "binary":
-				col, err = column.NewNullableColumnBinaryVector("vector", 16, bytes, valid)
+				col, err = column.NewNullableColumnBinaryVector("vector", rlsSchemaBinaryDim, bytes, valid)
 			case "float16":
 				col, err = column.NewNullableColumnFloat16Vector("vector", 8, bytes, valid)
 			case "bfloat16":
@@ -263,7 +265,7 @@ func prepareRLSSchema(ctx context.Context, t *testing.T, mc *client.Client, tc r
 		if c.Name() == "vector" && tc.vector != "sparse" {
 			dim := int64(8)
 			if tc.vector == "binary" {
-				dim = 64
+				dim = rlsSchemaBinaryDim
 			}
 			f.WithDim(dim)
 		}
