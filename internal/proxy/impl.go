@@ -7107,55 +7107,29 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 
-	// Inline parameters use the existing handler client's ready-SN picker.
+	request := &streamingpb.StreamingNodeRunAnalyzerRequest{
+		Placeholder: req.GetPlaceholder(), WithDetail: req.GetWithDetail(), WithHash: req.GetWithHash(),
+	}
 	if req.GetCollectionName() == "" {
-		resp, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{
-			Placeholder: req.GetPlaceholder(), WithDetail: req.GetWithDetail(), WithHash: req.GetWithHash(),
-			Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: req.GetAnalyzerParams()}},
-		})
-		if err != nil {
-			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(analyzerservice.PublicError(err))}, nil
+		request.Source = &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{
+			InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: req.GetAnalyzerParams()},
 		}
-		return &milvuspb.RunAnalyzerResponse{Status: resp.GetStatus(), Results: resp.GetResults()}, nil
+	} else {
+		if err := validateRunAnalyzer(req); err != nil {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(merr.WrapErrAsInputError(err))}, nil
+		}
+		field, err := node.buildFieldAnalyzerRequest(ctx, req)
+		if err != nil {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
+		}
+		request.Source = &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: field}
 	}
 
-	// Run the field analyzer owned by the primary streaming node.
-	if err := validateRunAnalyzer(req); err != nil {
-		return &milvuspb.RunAnalyzerResponse{
-			Status: merr.Status(merr.WrapErrAsInputError(err)),
-		}, nil
+	response, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, request)
+	if err != nil {
+		return &milvuspb.RunAnalyzerResponse{Status: merr.Status(analyzerservice.PublicError(err))}, nil
 	}
-
-	method := "RunAnalyzer"
-	task := &RunAnalyzerTask{
-		baseTask:           baseTask{MetaCache: node.GetMetaCache()},
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		RunAnalyzerRequest: req,
-	}
-
-	if err := node.sched.DqQueue.Enqueue(task); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToEnqueue(method),
-			mlog.Err(err),
-		)
-
-		return &milvuspb.RunAnalyzerResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	if err := task.WaitToFinish(); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToWaitToFinish(method),
-			mlog.Err(err),
-		)
-
-		return &milvuspb.RunAnalyzerResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	return task.Result(), nil
+	return &milvuspb.RunAnalyzerResponse{Status: response.GetStatus(), Results: response.GetResults()}, nil
 }
 
 func authorizeRunAnalyzerCollection(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (context.Context, error) {

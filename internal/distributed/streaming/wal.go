@@ -204,6 +204,6 @@ func (s errScanner) Error() error {
 func (s errScanner) Close() {
 }
 
-func (w *walAccesserImpl) AnalyzerClient() handler.AnalyzerClient {
-	return w.handlerClient.AnalyzerClient()
+func (w *walAccesserImpl) AnalyzerClient() AnalyzerClient {
+	return w.handlerClient
 }

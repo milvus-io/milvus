@@ -3,9 +3,12 @@
 ## Entry and routing
 
 Proxy calls `streaming.WAL().AnalyzerClient().RunAnalyzer`. WALAccesser exposes
-its existing HandlerClient's `AnalyzerClient()` domain interface. The analyzer
-client owns no discovery, connection pool or independent shutdown lifecycle.
-QueryCoord, QueryNode and ManagerClient are not involved in this call path.
+an analyzer domain interface implemented directly by the existing HandlerClient's
+`RunAnalyzer` method. No analyzer-specific client wrapper, discovery, connection
+pool or shutdown lifecycle is added.
+Proxy assembles and forwards requests directly, without a scheduler task or TSO
+allocation. QueryCoord, QueryNode and ManagerClient are not involved in this call
+path. Analyzer calls do not use the DQL task queue or its concurrency limit.
 
 The request selects one of two sources:
 
@@ -43,23 +46,24 @@ progress.
 `StreamingNodeHandlerService.RunAnalyzer` separates two error domains:
 
 - Streaming failures (discovery, assignment ownership, WAL shutdown and transport)
-  use native gRPC errors and the existing streaming interceptors. AnalyzerClient
-  allows at most three attempts for retryable failures; field attempts copy the
-  request and report only assignment errors to the balancer. Inline attempts use
-  the ready-connection picker.
+  use native gRPC errors and the existing streaming interceptors. HandlerClient
+  reuses `createHandlerAfterStreamingNodeReady` for assignment discovery, error
+  reporting and backoff until the caller context ends. Field attempts copy the
+  request with the latest assignment. Inline attempts have no PChannel and use
+  the ready-connection picker. Unsupported RPCs return Unimplemented immediately.
 - Analyzer failures (parameters, schema admission, runner availability and
   execution) use Milvus Status in the response. HandlerClient forwards these
   responses without retrying or converting them to streaming errors. Proxy
   preserves the Status, including its original code and retriability.
 
-AnalyzerClient owns the single bounded retry loop for streaming failures. Proxy
-resolves metadata once and forwards the result; it does not refresh metadata or
-retry analyzer responses. The RunAnalyzer gRPC method has no configured retry
-policy, so the connection's service-wide retry policy does not multiply the
-AnalyzerClient budget. Other handler RPCs retain their existing policies.
+Proxy resolves metadata once and forwards the result; it does not refresh
+metadata or retry analyzer responses. RunAnalyzer uses the same gRPC service
+configuration and streaming recovery helper as the other handler operations.
+There is no analyzer-specific retry loop, attempt budget or method configuration.
+HandlerClient does not interpret business Status or retry business failures.
 
 Collection identity is pinned before execution: Proxy resolves field/channel
-metadata by the original collection ID, and all AnalyzerClient attempts retain
+metadata by the original collection ID, and all streaming recovery attempts retain
 that ID. A same-name drop/recreate cannot redirect a request to the new collection.
 There is no historical schema lookup or schema-version admission check.
 
@@ -74,7 +78,7 @@ requests additionally work before load and after release.
 ## Key Packages
 
 - `internal/distributed/streaming/{streaming.go,wal.go}` — public streaming entry.
-- `internal/streamingnode/client/handler/analyzer_client.go` — domain client and routing.
+- `internal/streamingnode/client/handler/analyzer_client.go` — handler RPC and routing.
 - `internal/streamingnode/server/service/analyzer.go` — native RPC dispatch/errors.
 - `internal/streamingnode/server/wal/adaptor/analyzer.go` — WAL field execution.
 - `internal/util/function/manager.go` — schema selection and runner lifetime.

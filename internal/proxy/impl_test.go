@@ -2062,14 +2062,6 @@ func TestRunAnalyzer(t *testing.T) {
 
 	p := &Proxy{}
 
-	tsoAllocatorIns := newMockTsoAllocator()
-	sched, err := scheduler.NewTaskScheduler(ctx, tsoAllocatorIns)
-	require.NoError(t, err)
-	sched.Start()
-	defer sched.Close()
-
-	p.sched = sched
-
 	t.Run("run analyzer err with node not healthy", func(t *testing.T) {
 		p.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
@@ -2113,21 +2105,6 @@ func TestRunAnalyzer(t *testing.T) {
 		require.NoError(t, err)
 		require.Same(t, status, resp.GetStatus())
 		require.Equal(t, 1, call.Times())
-	})
-
-	mockey.PatchConvey("run analyzer from collection field", t, func() {
-		p.metaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1), nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(&schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "test_text"}},
-		}), nil).Build()
-		run := mockey.Mock((*RunAnalyzerTask).runFieldAnalyzer).Return(&milvuspb.RunAnalyzerResponse{Status: merr.Success()}, nil).Build()
-		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
-			Placeholder: [][]byte{[]byte("test doc")}, CollectionName: "test_collection", FieldName: "test_text",
-		})
-		require.NoError(t, err)
-		require.NoError(t, merr.Error(resp.GetStatus()))
-		require.Equal(t, 1, run.Times())
 	})
 }
 

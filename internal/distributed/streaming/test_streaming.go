@@ -26,7 +26,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -286,6 +285,6 @@ func getExpectErr() error {
 	}
 }
 
-func (n *noopWALAccesser) AnalyzerClient() handler.AnalyzerClient {
+func (n *noopWALAccesser) AnalyzerClient() AnalyzerClient {
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 
 	handler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	streamingpb "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -22,53 +23,6 @@ type MockHandlerClient_Expecter struct {
 
 func (_m *MockHandlerClient) EXPECT() *MockHandlerClient_Expecter {
 	return &MockHandlerClient_Expecter{mock: &_m.Mock}
-}
-
-// AnalyzerClient provides a mock function with no fields
-func (_m *MockHandlerClient) AnalyzerClient() handler.AnalyzerClient {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for AnalyzerClient")
-	}
-
-	var r0 handler.AnalyzerClient
-	if rf, ok := ret.Get(0).(func() handler.AnalyzerClient); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(handler.AnalyzerClient)
-		}
-	}
-
-	return r0
-}
-
-// MockHandlerClient_AnalyzerClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AnalyzerClient'
-type MockHandlerClient_AnalyzerClient_Call struct {
-	*mock.Call
-}
-
-// AnalyzerClient is a helper method to define mock.On call
-func (_e *MockHandlerClient_Expecter) AnalyzerClient() *MockHandlerClient_AnalyzerClient_Call {
-	return &MockHandlerClient_AnalyzerClient_Call{Call: _e.mock.On("AnalyzerClient")}
-}
-
-func (_c *MockHandlerClient_AnalyzerClient_Call) Run(run func()) *MockHandlerClient_AnalyzerClient_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockHandlerClient_AnalyzerClient_Call) Return(_a0 handler.AnalyzerClient) *MockHandlerClient_AnalyzerClient_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockHandlerClient_AnalyzerClient_Call) RunAndReturn(run func() handler.AnalyzerClient) *MockHandlerClient_AnalyzerClient_Call {
-	_c.Call.Return(run)
-	return _c
 }
 
 // Close provides a mock function with no fields
@@ -509,6 +463,65 @@ func (_c *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call) Return(_a0 bo
 }
 
 func (_c *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call) RunAndReturn(run func(context.Context, int64, string, []int64) (bool, error)) *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RunAnalyzer provides a mock function with given fields: _a0, _a1
+func (_m *MockHandlerClient) RunAnalyzer(_a0 context.Context, _a1 *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RunAnalyzer")
+	}
+
+	var r0 *streamingpb.StreamingNodeRunAnalyzerResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) *streamingpb.StreamingNodeRunAnalyzerResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.StreamingNodeRunAnalyzerResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_RunAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunAnalyzer'
+type MockHandlerClient_RunAnalyzer_Call struct {
+	*mock.Call
+}
+
+// RunAnalyzer is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *streamingpb.StreamingNodeRunAnalyzerRequest
+func (_e *MockHandlerClient_Expecter) RunAnalyzer(_a0 interface{}, _a1 interface{}) *MockHandlerClient_RunAnalyzer_Call {
+	return &MockHandlerClient_RunAnalyzer_Call{Call: _e.mock.On("RunAnalyzer", _a0, _a1)}
+}
+
+func (_c *MockHandlerClient_RunAnalyzer_Call) Run(run func(_a0 context.Context, _a1 *streamingpb.StreamingNodeRunAnalyzerRequest)) *MockHandlerClient_RunAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*streamingpb.StreamingNodeRunAnalyzerRequest))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_RunAnalyzer_Call) Return(_a0 *streamingpb.StreamingNodeRunAnalyzerResponse, _a1 error) *MockHandlerClient_RunAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_RunAnalyzer_Call) RunAndReturn(run func(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)) *MockHandlerClient_RunAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

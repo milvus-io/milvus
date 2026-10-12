@@ -91,7 +91,6 @@ type (
 	TransferNodeTask          = ddl.TransferNodeTask
 	TransferReplicaTask       = ddl.TransferReplicaTask
 	ListResourceGroupsTask    = ddl.ListResourceGroupsTask
-	RunAnalyzerTask           = ddl.RunAnalyzerTask
 	CreateAliasTask           = ddl.CreateAliasTask
 	DropAliasTask             = ddl.DropAliasTask
 	AlterAliasTask            = ddl.AlterAliasTask
@@ -194,7 +193,6 @@ var (
 	NewTransferNodeTask             = ddl.NewTransferNodeTask
 	NewTransferReplicaTask          = ddl.NewTransferReplicaTask
 	NewListResourceGroupsTask       = ddl.NewListResourceGroupsTask
-	NewRunAnalyzerTask              = ddl.NewRunAnalyzerTask
 	NewCreateAliasTask              = ddl.NewCreateAliasTask
 	NewDropAliasTask                = ddl.NewDropAliasTask
 	NewAlterAliasTask               = ddl.NewAlterAliasTask

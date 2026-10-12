@@ -81,7 +81,6 @@ const (
 	TransferReplicaTaskName         = "TransferReplicaTask"
 	ListResourceGroupsTaskName      = "ListResourceGroupsTask"
 	DescribeResourceGroupTaskName   = "DescribeResourceGroupTask"
-	RunAnalyzerTaskName             = "RunAnalyzer"
 	HighlightTaskName               = "Highlight"
 
 	CreateDatabaseTaskName   = "CreateCollectionTask"
@@ -4120,81 +4119,5 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 }
 
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-type RunAnalyzerTask struct {
-	baseTask
-	Condition
-	*milvuspb.RunAnalyzerRequest
-	ctx          context.Context
-	collectionID typeutil.UniqueID
-	dbName       string
-
-	result *milvuspb.RunAnalyzerResponse
-}
-
-func (t *RunAnalyzerTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-func (t *RunAnalyzerTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-func (t *RunAnalyzerTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-func (t *RunAnalyzerTask) Name() string {
-	return RunAnalyzerTaskName
-}
-
-func (t *RunAnalyzerTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-func (t *RunAnalyzerTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *RunAnalyzerTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *RunAnalyzerTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-func (t *RunAnalyzerTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	t.Base.MsgType = commonpb.MsgType_RunAnalyzer
-	t.Base.SourceID = paramtable.GetNodeID()
-	return nil
-}
-
-func (t *RunAnalyzerTask) PreExecute(ctx context.Context) error {
-	t.dbName = t.GetDbName()
-
-	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.dbName, t.GetCollectionName())
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
-
-	t.collectionID = collID
-
-	t.result = &milvuspb.RunAnalyzerResponse{}
-	return nil
-}
-
-func (t *RunAnalyzerTask) Execute(ctx context.Context) error {
-	var err error
-	t.result, err = t.runFieldAnalyzer(ctx)
-	return err
-}
-
-func (t *RunAnalyzerTask) PostExecute(ctx context.Context) error {
 	return nil
 }

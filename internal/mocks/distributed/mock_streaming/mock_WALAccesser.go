@@ -6,7 +6,6 @@ import (
 	context "context"
 
 	streaming "github.com/milvus-io/milvus/internal/distributed/streaming"
-	handler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	mock "github.com/stretchr/testify/mock"
@@ -26,19 +25,19 @@ func (_m *MockWALAccesser) EXPECT() *MockWALAccesser_Expecter {
 }
 
 // AnalyzerClient provides a mock function with no fields
-func (_m *MockWALAccesser) AnalyzerClient() handler.AnalyzerClient {
+func (_m *MockWALAccesser) AnalyzerClient() streaming.AnalyzerClient {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for AnalyzerClient")
 	}
 
-	var r0 handler.AnalyzerClient
-	if rf, ok := ret.Get(0).(func() handler.AnalyzerClient); ok {
+	var r0 streaming.AnalyzerClient
+	if rf, ok := ret.Get(0).(func() streaming.AnalyzerClient); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(handler.AnalyzerClient)
+			r0 = ret.Get(0).(streaming.AnalyzerClient)
 		}
 	}
 
@@ -62,12 +61,12 @@ func (_c *MockWALAccesser_AnalyzerClient_Call) Run(run func()) *MockWALAccesser_
 	return _c
 }
 
-func (_c *MockWALAccesser_AnalyzerClient_Call) Return(_a0 handler.AnalyzerClient) *MockWALAccesser_AnalyzerClient_Call {
+func (_c *MockWALAccesser_AnalyzerClient_Call) Return(_a0 streaming.AnalyzerClient) *MockWALAccesser_AnalyzerClient_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALAccesser_AnalyzerClient_Call) RunAndReturn(run func() handler.AnalyzerClient) *MockWALAccesser_AnalyzerClient_Call {
+func (_c *MockWALAccesser_AnalyzerClient_Call) RunAndReturn(run func() streaming.AnalyzerClient) *MockWALAccesser_AnalyzerClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

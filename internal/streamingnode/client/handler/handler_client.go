@@ -75,8 +75,8 @@ type ConsumerOptions struct {
 // HandlerClient wraps the PChannel Assignment Service Discovery.
 // Provides the ability to create pchannel-level producer and consumer.
 type HandlerClient interface {
-	// AnalyzerClient returns the analyzer domain client.
-	AnalyzerClient() AnalyzerClient
+	// RunAnalyzer executes an analyzer on a streaming node.
+	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
 
 	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
 	// If the wal is located at remote, it will return 0, error.
@@ -139,7 +139,6 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 		newProducer:      producer.CreateProducer,
 		newConsumer:      consumer.CreateConsumer,
 	}
-	hc.analyzerClient = newAnalyzerClient(hc)
 	return hc
 }
 
@@ -154,13 +153,6 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 			{picker.ServerIDPickerBalancerName: map[string]interface{}{}},
 		},
 		"methodConfig": []map[string]interface{}{
-			{
-				// AnalyzerClient owns the retry budget for this unary RPC.
-				"name": []map[string]string{
-					{"service": "milvus.proto.streaming.StreamingNodeHandlerService", "method": "RunAnalyzer"},
-				},
-				"waitForReady": true,
-			},
 			{
 				"name": []map[string]string{
 					{"service": "milvus.proto.streaming.StreamingNodeHandlerService"},

@@ -26,6 +26,9 @@ import (
 type analyzerWatcher struct{ assignment.Watcher }
 
 func (*analyzerWatcher) Get(context.Context, string) *types.PChannelInfoAssigned { panic("unpatched") }
+func (*analyzerWatcher) Watch(context.Context, string, *types.PChannelInfoAssigned) error {
+	panic("unpatched")
+}
 
 type analyzerService struct {
 	lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
@@ -52,14 +55,24 @@ func (*analyzerTrigger) ReportAssignmentError(context.Context, types.PChannelInf
 }
 
 func TestAnalyzerAssignmentRetry(t *testing.T) {
-	for _, scenario := range []string{"migration", "invalid", "analyzer unavailable", "unavailable"} {
+	for _, scenario := range []string{"migration", "invalid", "analyzer unavailable", "unavailable", "unimplemented"} {
 		mockey.PatchConvey(scenario, t, func() {
 			term := int64(1)
 			mockey.Mock((*analyzerWatcher).Get).To(func(*analyzerWatcher, context.Context, string) *types.PChannelInfoAssigned {
 				return &types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "p", Term: term, AccessMode: types.AccessModeRW}, Node: types.StreamingNodeInfo{ServerID: 10 + term}}
 			}).Build()
 			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
-			reports := mockey.Mock((*analyzerTrigger).ReportAssignmentError).To(func(*analyzerTrigger, context.Context, types.PChannelInfo, error) error { term++; return nil }).Build()
+			reports := mockey.Mock((*analyzerTrigger).ReportAssignmentError).To(func(*analyzerTrigger, context.Context, types.PChannelInfo, error) error { return nil }).Build()
+			mockey.Mock((*analyzerWatcher).Watch).To(func(_ *analyzerWatcher, ctx context.Context, _ string, previous *types.PChannelInfoAssigned) error {
+				if scenario == "migration" {
+					require.Equal(t, int64(1), previous.Channel.Term)
+					// Discovery catches up after the failed attempt has been reported.
+					term++
+					return nil
+				}
+				<-ctx.Done()
+				return ctx.Err()
+			}).Build()
 			calls := 0
 			mockey.Mock((*analyzerRPC).RunAnalyzer).To(func(_ *analyzerRPC, ctx context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
 				calls++
@@ -77,14 +90,17 @@ func TestAnalyzerAssignmentRetry(t *testing.T) {
 				case "analyzer unavailable":
 					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrServiceUnavailable)}, nil
 				case "unavailable":
-					return nil, status.NewInner("not ready")
+					if calls == 1 {
+						return nil, status.NewInner("not ready")
+					}
+				case "unimplemented":
+					return nil, status.ConvertStreamingError("RunAnalyzer", grpcstatus.Error(codes.Unimplemented, "older SN"))
 				}
 				return &streamingpb.StreamingNodeRunAnalyzerResponse{}, nil
 			}).Build()
 			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), watcher: &analyzerWatcher{}, service: &analyzerService{}, rebalanceTrigger: &analyzerTrigger{}}
 			req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{Vchannel: "p_1v0"}}}
-			client.analyzerClient = newAnalyzerClient(client)
-			resp, err := client.AnalyzerClient().RunAnalyzer(context.Background(), req)
+			resp, err := client.RunAnalyzer(context.Background(), req)
 			require.Nil(t, req.GetFieldAnalyzer().GetPchannel(), "retry must not mutate caller request")
 			switch scenario {
 			case "migration":
@@ -96,13 +112,16 @@ func TestAnalyzerAssignmentRetry(t *testing.T) {
 				require.Error(t, merr.Error(resp.GetStatus()))
 				require.Equal(t, 1, calls)
 				require.Zero(t, reports.Times())
+			case "unavailable":
+				require.NoError(t, err)
+				require.Equal(t, 2, calls)
+				require.Zero(t, reports.Times())
 			default:
 				require.Error(t, err)
 				require.Zero(t, reports.Times())
-				if scenario == "unavailable" {
-					require.Equal(t, 3, calls)
-				} else {
-					require.Equal(t, 1, calls)
+				require.Equal(t, 1, calls)
+				if scenario == "unimplemented" {
+					require.Equal(t, codes.Unimplemented, grpcstatus.Code(err))
 				}
 			}
 		})
@@ -124,13 +143,12 @@ func TestAnalyzerInlineUsesExistingPicker(t *testing.T) {
 			return &streamingpb.StreamingNodeRunAnalyzerResponse{}, nil
 		}).Build()
 		owner := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
-		owner.analyzerClient = newAnalyzerClient(owner)
 		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: "{}"}}}
-		_, err := owner.AnalyzerClient().RunAnalyzer(context.Background(), req)
+		_, err := owner.RunAnalyzer(context.Background(), req)
 		require.NoError(t, err)
 		require.Equal(t, 2, calls)
 		owner.lifetime.SetState(typeutil.LifetimeStateStopped)
-		_, err = owner.AnalyzerClient().RunAnalyzer(context.Background(), req)
+		_, err = owner.RunAnalyzer(context.Background(), req)
 		require.True(t, status.AsStreamingError(err).IsOnShutdown())
 		require.Equal(t, 2, calls)
 	})
@@ -146,25 +164,34 @@ func TestAnalyzerDiscoveryAdmission(t *testing.T) {
 				return &analyzerRPC{}, nil
 			}).Build()
 			watcher := mockey.Mock((*analyzerWatcher).Get).Return(nil).Build()
+			mockey.Mock((*analyzerWatcher).Watch).To(func(_ *analyzerWatcher, ctx context.Context, _ string, _ *types.PChannelInfoAssigned) error {
+				<-ctx.Done()
+				return ctx.Err()
+			}).Build()
 			owner := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}, watcher: &analyzerWatcher{}}
 			req := &streamingpb.StreamingNodeRunAnalyzerRequest{}
-			if scenario != "missing source" {
+			if scenario == "service unavailable" {
+				req.Source = &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}
+			} else if scenario != "missing source" {
 				field := &streamingpb.StreamingFieldAnalyzer{}
 				if scenario != "missing channel" {
 					field.Vchannel = "p_1v0"
 				}
 				req.Source = &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: field}
 			}
-			_, err := newAnalyzerClient(owner).RunAnalyzer(context.Background(), req)
+			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+			defer cancel()
+			_, err := owner.RunAnalyzer(ctx, req)
 			require.Error(t, err)
 			if scenario == "missing source" || scenario == "missing channel" {
 				require.True(t, status.AsStreamingError(err).IsInvalidArgument())
 				require.Zero(t, service.Times())
 			} else {
-				require.Equal(t, 3, service.Times(), "discovery failures must exhaust a bounded budget")
+				require.ErrorIs(t, err, context.DeadlineExceeded)
 			}
 			if scenario == "assignment unavailable" {
-				require.Equal(t, 3, watcher.Times())
+				require.Positive(t, watcher.Times())
+				require.Zero(t, service.Times())
 			} else {
 				require.Zero(t, watcher.Times())
 			}
@@ -172,22 +199,31 @@ func TestAnalyzerDiscoveryAdmission(t *testing.T) {
 	}
 }
 
-func TestAnalyzerTransportRetryPolicy(t *testing.T) {
-	for _, tc := range []struct {
-		err   error
-		retry bool
-	}{
-		{status.NewInvalidArgument("bad tokenizer"), false},
-		{status.NewUnrecoverableError("unsupported WAL"), false},
-		{status.NewOnShutdownError("closing"), true},
-		{status.NewInner("not ready"), true},
-		{grpcstatus.Error(codes.Unavailable, "connection lost"), true},
-		{grpcstatus.Error(codes.Unimplemented, "older SN"), false},
-		{context.Canceled, false},
-		{context.DeadlineExceeded, false},
-		{nil, false},
-	} {
-		require.Equal(t, tc.retry, isRetryableAnalyzerTransportError(tc.err), "%v", tc.err)
+func TestAnalyzerInlineUnimplementedAndCancellation(t *testing.T) {
+	for _, scenario := range []string{"unimplemented", "cancel"} {
+		mockey.PatchConvey(scenario, t, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			call := mockey.Mock((*analyzerRPC).RunAnalyzer).To(func(_ *analyzerRPC, _ context.Context, _ *streamingpb.StreamingNodeRunAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+				if scenario == "unimplemented" {
+					return nil, status.ConvertStreamingError("RunAnalyzer", grpcstatus.Error(codes.Unimplemented, "older SN"))
+				}
+				cancel()
+				return nil, status.NewOnShutdownError("closing")
+			}).Build()
+			owner := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
+			req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}}
+			_, err := owner.RunAnalyzer(ctx, req)
+			if scenario == "unimplemented" {
+				require.Equal(t, codes.Unimplemented, grpcstatus.Code(err))
+			} else {
+				require.ErrorIs(t, err, context.Canceled)
+			}
+			require.Equal(t, 1, call.Times())
+			owner.lifetime.SetState(typeutil.LifetimeStateStopped)
+			owner.lifetime.Wait()
+		})
 	}
 }
 
@@ -195,19 +231,19 @@ type analyzerConfigResolver struct{ resolver.Builder }
 
 func (*analyzerConfigResolver) Scheme() string { panic("unpatched") }
 
-func TestAnalyzerDoesNotNestGRPCRetries(t *testing.T) {
-	mockey.PatchConvey("only AnalyzerClient retries RunAnalyzer", t, func() {
+func TestAnalyzerUsesSharedGRPCRetryPolicy(t *testing.T) {
+	mockey.PatchConvey("analyzer uses the handler service retry policy", t, func() {
 		paramtable.Init()
 		mockey.Mock((*analyzerConfigResolver).Scheme).Return("analyzer-config-test").Build()
 		conn, err := grpc.NewClient("passthrough:///", getDialOptions(&analyzerConfigResolver{})...)
 		require.NoError(t, err)
 		defer conn.Close()
 		conn.Connect()
-		// Wait until gRPC applies the default config. Other handler RPCs keep
-		// their retry policy, while the more specific analyzer config has none.
+		// Wait until gRPC applies the shared service config.
 		require.Eventually(t, func() bool {
 			return conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName).RetryPolicy != nil
 		}, time.Second, time.Millisecond)
-		require.Nil(t, conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_RunAnalyzer_FullMethodName).RetryPolicy)
+		require.Equal(t, conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName).RetryPolicy,
+			conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_RunAnalyzer_FullMethodName).RetryPolicy)
 	})
 }
