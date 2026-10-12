@@ -3356,7 +3356,7 @@ func (h *HandlersV2) prewarmNamespace(ctx context.Context, c *gin.Context, anyRe
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
 		Namespace:      &namespaceName,
-		TtlSeconds:     httpReq.TtlSeconds,
+		TtlSeconds:     httpReq.TTLSeconds,
 		Priority:       httpReq.Priority,
 	}
 	c.Set(ContextRequest, req)
