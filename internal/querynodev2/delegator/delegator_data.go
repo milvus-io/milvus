@@ -1289,7 +1289,11 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		if len(stillServing) > 0 {
 			log.Info(ctx, "refusing to release segments the delegator still serves",
 				mlog.Int64s("stillServing", stillServing))
-			return merr.WrapErrServiceUnavailable("segments are still in the delegator's readable set, retry after it advances")
+			// Non-retriable on purpose: a retriable error makes the QueryCoord grpc
+			// client retry in place for ~53s, holding an executor slot and starving
+			// the loads the delegator needs before its readable set can advance.
+			// The segment checker regenerates the release task on its next round.
+			return merr.WrapErrServiceInternalMsg("segments %v are still in the delegator's readable set", stillServing)
 		}
 	} else {
 		signal = sd.distribution.RemoveDistributions(sealed, growing)
