@@ -31,18 +31,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type reduceSchemaExpr struct {
+type udfAggregateSchemaExpr struct {
 	operatorTransformExpr
 	executeWithSchema func(*types.FuncContext, *arrow.Schema, []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error)
 }
 
-func (expr *reduceSchemaExpr) ExecuteWithSchema(ctx *types.FuncContext, schema *arrow.Schema, inputs []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
+func (expr *udfAggregateSchemaExpr) ExecuteWithSchema(ctx *types.FuncContext, schema *arrow.Schema, inputs []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
 	return expr.executeWithSchema(ctx, schema, inputs)
 }
 
-func reduceFirstSchemaExpr(t *testing.T, calls *int) *reduceSchemaExpr {
+func udfAggregateFirstSchemaExpr(t *testing.T, calls *int) *udfAggregateSchemaExpr {
 	t.Helper()
-	return &reduceSchemaExpr{operatorTransformExpr: operatorTransformExpr{name: "schema_reducer", stages: []string{types.StagePostProcess}}, executeWithSchema: func(ctx *types.FuncContext, schema *arrow.Schema, inputs []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
+	return &udfAggregateSchemaExpr{operatorTransformExpr: operatorTransformExpr{name: "schema_aggregator", stages: []string{types.StagePostProcess}}, executeWithSchema: func(ctx *types.FuncContext, schema *arrow.Schema, inputs []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
 		*calls++
 		require.True(t, ctx.Reduction())
 		require.Equal(t, inputs[0].DataType(), schema.Field(0).Type)
@@ -64,7 +64,7 @@ func reduceFirstSchemaExpr(t *testing.T, calls *int) *reduceSchemaExpr {
 	}}
 }
 
-func TestReducePreservesEveryRuntimeTypeAndSchemaMetadata(t *testing.T) {
+func TestUDFAggregatePreservesEveryRuntimeTypeAndSchemaMetadata(t *testing.T) {
 	for _, spec := range aggregateRuntimeSchemaCases(t) {
 		t.Run(spec.name, func(t *testing.T) {
 			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
@@ -74,8 +74,8 @@ func TestReducePreservesEveryRuntimeTypeAndSchemaMetadata(t *testing.T) {
 			input := aggregateSchemaInput(t, pool, spec.field, data)
 			defer input.Release()
 			calls := 0
-			fn := reduceFirstSchemaExpr(t, &calls)
-			op := &ReduceOp{BaseOp: BaseOp{inputs: []string{"v"}, outputs: []string{"generated"}}, function: fn}
+			fn := udfAggregateFirstSchemaExpr(t, &calls)
+			op := &AggregateOp{BaseOp: BaseOp{inputs: []string{"v"}, outputs: []string{"generated"}}, function: fn}
 			output, err := op.Execute(types.NewFuncContextFull(context.Background(), pool, types.StagePostProcess).WithTableResult(true), input)
 			require.NoError(t, err)
 			defer output.Release()
@@ -100,15 +100,15 @@ func TestReducePreservesEveryRuntimeTypeAndSchemaMetadata(t *testing.T) {
 	}
 }
 
-func TestReduceValidatesActualReturnedTypeAndNullability(t *testing.T) {
+func TestUDFAggregateValidatesActualReturnedTypeAndNullability(t *testing.T) {
 	for _, violation := range []string{"declared_type", "schema_type", "nullable"} {
 		t.Run(violation, func(t *testing.T) {
 			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 			defer pool.AssertSize(t, 0)
-			input := reduceTestFrame(t, pool, []int64{1}, nil)
+			input := udfAggregateTestFrame(t, pool, []int64{1}, nil)
 			defer input.Release()
 			calls := 0
-			fn := reduceFirstSchemaExpr(t, &calls)
+			fn := udfAggregateFirstSchemaExpr(t, &calls)
 			if violation == "declared_type" {
 				fn.outputs = []arrow.DataType{arrow.PrimitiveTypes.Float32}
 			} else {
@@ -124,7 +124,7 @@ func TestReduceValidatesActualReturnedTypeAndNullability(t *testing.T) {
 					return arrow.NewSchema([]arrow.Field{field}, nil), outputs, err
 				}
 			}
-			op := &ReduceOp{BaseOp: BaseOp{inputs: []string{"key"}, outputs: []string{"generated"}}, function: fn}
+			op := &AggregateOp{BaseOp: BaseOp{inputs: []string{"key"}, outputs: []string{"generated"}}, function: fn}
 			output, err := op.Execute(types.NewFuncContextFull(context.Background(), pool, types.StagePostProcess).WithTableResult(true), input)
 			require.ErrorIs(t, err, merr.ErrFunctionFailed)
 			require.Nil(t, output)
@@ -133,13 +133,13 @@ func TestReduceValidatesActualReturnedTypeAndNullability(t *testing.T) {
 	}
 }
 
-func TestReduceNestedPathsPreserveGroupedSchemaAndParentNulls(t *testing.T) {
+func TestUDFAggregateNestedPathsPreserveGroupedSchemaAndParentNulls(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
 	input := aggregateNestedSchemaInput(t, pool)
 	defer input.Release()
 	calls := 0
-	fn := reduceFirstSchemaExpr(t, &calls)
+	fn := udfAggregateFirstSchemaExpr(t, &calls)
 	original := fn.executeWithSchema
 	fn.executeWithSchema = func(ctx *types.FuncContext, schema *arrow.Schema, inputs []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
 		require.Equal(t, 1, schema.NumFields(), "key columns must not become expression args")
@@ -147,7 +147,7 @@ func TestReduceNestedPathsPreserveGroupedSchemaAndParentNulls(t *testing.T) {
 		require.True(t, schema.Field(0).Nullable, "null parent masks a nonnullable child")
 		return original(ctx, schema, inputs)
 	}
-	op := &ReduceOp{BaseOp: BaseOp{inputs: []string{"payload.tenant", `payload['metric']`}, outputs: []string{"tenant", "first_metric"}}, keys: []string{"payload.tenant"}, function: fn}
+	op := &AggregateOp{BaseOp: BaseOp{inputs: []string{"payload.tenant", `payload['metric']`}, outputs: []string{"tenant", "first_metric"}}, keys: []string{"payload.tenant"}, function: fn}
 	output, err := op.Execute(types.NewFuncContextFull(context.Background(), pool, types.StagePostProcess).WithTableResult(true), input)
 	require.NoError(t, err)
 	defer output.Release()
@@ -165,7 +165,7 @@ func TestReduceNestedPathsPreserveGroupedSchemaAndParentNulls(t *testing.T) {
 	require.Equal(t, "5", actual)
 }
 
-func TestReducePreservesExplicitRootSchemaMetadata(t *testing.T) {
+func TestUDFAggregatePreservesExplicitRootSchemaMetadata(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
 	values := array.NewInt64Builder(pool)
@@ -178,7 +178,7 @@ func TestReducePreservesExplicitRootSchemaMetadata(t *testing.T) {
 	input := builder.Build()
 	defer input.Release()
 	calls := 0
-	fn := reduceFirstSchemaExpr(t, &calls)
+	fn := udfAggregateFirstSchemaExpr(t, &calls)
 	original := fn.executeWithSchema
 	fn.executeWithSchema = func(ctx *types.FuncContext, schema *arrow.Schema, columns []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
 		value, ok := schema.Metadata().GetValue("model_version")
@@ -188,7 +188,7 @@ func TestReducePreservesExplicitRootSchemaMetadata(t *testing.T) {
 		metadata := arrow.NewMetadata([]string{"model_version"}, []string{"output_v2"})
 		return arrow.NewSchema(returned.Fields(), &metadata), outputs, err
 	}
-	op := &ReduceOp{BaseOp: BaseOp{inputs: []string{"key"}, outputs: []string{"generated"}}, function: fn}
+	op := &AggregateOp{BaseOp: BaseOp{inputs: []string{"key"}, outputs: []string{"generated"}}, function: fn}
 	output, err := op.Execute(types.NewFuncContextFull(context.Background(), pool, types.StagePostProcess).WithTableResult(true), input)
 	require.NoError(t, err)
 	defer output.Release()

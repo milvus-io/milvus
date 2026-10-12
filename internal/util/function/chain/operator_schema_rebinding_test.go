@@ -49,7 +49,7 @@ func TestSchemaAwareMapCanRemoveSamePhysicalLogicalSourceType(t *testing.T) {
 			require.NoError(t, err)
 			input := aggregateSchemaInput(t, pool, field, data)
 			defer input.Release()
-			fn := &reduceSchemaExpr{operatorTransformExpr: operatorTransformExpr{name: "plain_bytes", stages: []string{types.StagePostProcess}}, executeWithSchema: func(ctx *types.FuncContext, schema *arrow.Schema, columns []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
+			fn := &udfAggregateSchemaExpr{operatorTransformExpr: operatorTransformExpr{name: "plain_bytes", stages: []string{types.StagePostProcess}}, executeWithSchema: func(ctx *types.FuncContext, schema *arrow.Schema, columns []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
 				columns[0].Retain()
 				// The complete returned schema deliberately declares plain bytes.
 				return arrow.NewSchema([]arrow.Field{{Name: "plain", Type: columns[0].DataType(), Nullable: true}}, nil), []*arrow.Chunked{columns[0]}, nil
@@ -74,9 +74,9 @@ func TestSchemaAwareMapCanRemoveSamePhysicalLogicalSourceType(t *testing.T) {
 func TestSchemaAwareMapRejectsReturnedSchemaPhysicalTypeMismatch(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
-	input := reduceTestFrame(t, pool, []int64{1}, nil)
+	input := udfAggregateTestFrame(t, pool, []int64{1}, nil)
 	defer input.Release()
-	fn := &reduceSchemaExpr{operatorTransformExpr: operatorTransformExpr{name: "wrong_physical", stages: []string{types.StagePostProcess}}, executeWithSchema: func(ctx *types.FuncContext, schema *arrow.Schema, columns []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
+	fn := &udfAggregateSchemaExpr{operatorTransformExpr: operatorTransformExpr{name: "wrong_physical", stages: []string{types.StagePostProcess}}, executeWithSchema: func(ctx *types.FuncContext, schema *arrow.Schema, columns []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
 		columns[0].Retain()
 		return arrow.NewSchema([]arrow.Field{{Name: "x", Type: arrow.PrimitiveTypes.Float64, Nullable: true}}, nil), []*arrow.Chunked{columns[0]}, nil
 	}}
@@ -126,7 +126,7 @@ func TestSortKeepsTypeHintsFromDuplicateInputOccurrences(t *testing.T) {
 		{schemapb.DataType_Int64, schemapb.DataType_VarChar},
 	} {
 		pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
-		input := reduceTestFrame(t, pool, []int64{1, 2})
+		input := udfAggregateTestFrame(t, pool, []int64{1, 2})
 		plan, err := transform.PostTable("duplicate_hint", &schemapb.FunctionChainOp{Op: "aggregate", Outputs: []string{"n"}, Params: map[string]*schemapb.FunctionParamValue{
 			"keys": arrayParam(), "aggregates": arrayParam(objectParam(map[string]*schemapb.FunctionParamValue{"op": stringParam("count")})),
 		}}, &schemapb.FunctionChainOp{Op: "sort", Inputs: []string{"n", "n"}, Params: map[string]*schemapb.FunctionParamValue{

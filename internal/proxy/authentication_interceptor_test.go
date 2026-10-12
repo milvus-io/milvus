@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/proxy/requestcontext"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
@@ -81,8 +82,10 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	// with valid username/password
 	md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockUser:mockPass"))
 	ctx = metadata.NewIncomingContext(ctx, md)
-	_, err = authInterceptor(ctx)
+	authCtx, err := authInterceptor(ctx)
 	assert.NoError(t, err)
+	assert.Equal(t, "mockUser", requestcontext.AuthenticatedUser(authCtx))
+	assert.Empty(t, requestcontext.AuthenticatedUser(ctx), "authentication does not mutate the input context")
 
 	{
 		// wrong authorization style
@@ -123,6 +126,7 @@ func TestAuthenticationInterceptor(t *testing.T) {
 		ctx = metadata.NewIncomingContext(ctx, md)
 		authCtx, err := authInterceptor(ctx)
 		assert.NoError(t, err)
+		assert.Equal(t, "mockUser", requestcontext.AuthenticatedUser(authCtx), "API keys carry the verified mapped user")
 		md, ok := metadata.FromIncomingContext(authCtx)
 		assert.True(t, ok)
 		authStrArr := md[strings.ToLower(util.HeaderAuthorize)]
@@ -133,6 +137,21 @@ func TestAuthenticationInterceptor(t *testing.T) {
 		assert.Equal(t, "mockUser", user)
 	}
 	hookutil.SetTestHook(hookutil.DefaultHook{})
+}
+
+func TestAuthenticationDisabledDoesNotTrustClaimedOrPreviousPrincipal(t *testing.T) {
+	params := paramtable.Get()
+	previous := params.CommonCfg.AuthorizationEnabled.GetValue()
+	assert.NoError(t, params.Save(params.CommonCfg.AuthorizationEnabled.Key, "false"))
+	defer params.Save(params.CommonCfg.AuthorizationEnabled.Key, previous)
+	cache := NewMockCache(t)
+	interceptor := AuthenticationInterceptorWithMetaCache(func() Cache { return cache })
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("forged:password")))
+	ctx = requestcontext.WithAuthenticatedUser(ctx, "previous_user")
+	authed, err := interceptor(ctx)
+	assert.NoError(t, err)
+	assert.Empty(t, requestcontext.AuthenticatedUser(authed))
+	assert.Equal(t, "previous_user", requestcontext.AuthenticatedUser(ctx))
 }
 
 // streamForAuth is a minimal ServerStream carrying only the context the

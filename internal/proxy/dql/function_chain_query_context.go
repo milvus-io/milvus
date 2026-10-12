@@ -17,6 +17,7 @@
 package dql
 
 import (
+	"context"
 	"strings"
 	"unicode/utf8"
 
@@ -24,9 +25,29 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/requestcontext"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func (t *SearchTask) functionRequestScope(ctx context.Context) chaintypes.RequestContext {
+	database := t.rlsDBName
+	if database == "" {
+		database = t.request.GetDbName()
+	}
+	collection := t.collectionName
+	if t.schema != nil && t.schema.GetName() != "" {
+		collection = t.schema.GetName()
+	}
+	if collection == "" {
+		collection = t.request.GetCollectionName()
+	}
+	return requestcontext.FunctionScope(ctx, database, collection)
+}
+
+func (t *SearchTask) withFunctionRequestScope(ctx context.Context) context.Context {
+	return chaintypes.WithRequestContext(ctx, t.functionRequestScope(ctx))
+}
 
 func chainsNeedQueryContext(plans []*schemapb.FunctionChain) bool {
 	for _, plan := range plans {
@@ -63,6 +84,13 @@ func (t *SearchTask) snapshotQueryInputs() ([]*commonpb.PlaceholderValue, error)
 	}
 	result := make([]*commonpb.PlaceholderValue, len(inputs))
 	for index, raw := range inputs {
+		nq := t.request.GetNq()
+		if t.GetIsAdvanced() {
+			nq = t.request.GetSubReqs()[index].GetNq()
+		}
+		if nq == 0 {
+			nq = t.GetNq()
+		}
 		group := &commonpb.PlaceholderGroup{}
 		if err := proto.Unmarshal(raw, group); err != nil || len(group.GetPlaceholders()) != 1 {
 			return nil, merr.WrapErrParameterInvalidMsg("query context input %d requires one valid query placeholder", index)
@@ -71,8 +99,8 @@ func (t *SearchTask) snapshotQueryInputs() ([]*commonpb.PlaceholderValue, error)
 		if _, known := commonpb.PlaceholderType_name[int32(input.GetType())]; !known || input.GetType() == commonpb.PlaceholderType_None {
 			return nil, merr.WrapErrParameterInvalidMsg("query context input %d has an unsupported placeholder type", index)
 		}
-		if int64(len(input.GetValues())) != t.GetNq() {
-			return nil, merr.WrapErrParameterInvalidMsg("query context input %d does not match NQ %d", index, t.GetNq())
+		if int64(len(input.GetValues())) != nq {
+			return nil, merr.WrapErrParameterInvalidMsg("query context input %d does not match NQ %d", index, nq)
 		}
 		if input.GetType() == commonpb.PlaceholderType_VarChar {
 			for _, value := range input.GetValues() {

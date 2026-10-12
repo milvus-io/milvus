@@ -59,7 +59,7 @@ type listArray interface {
 }
 
 func (o *ExplodeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	if ctx.Stage() != types.StageIngestion && !(ctx.Stage() == types.StagePostProcess && ctx.TableResult()) {
+	if ctx.Stage() != types.StageIngestion && ctx.Stage() != types.StagePreProcess && !(ctx.Stage() == types.StagePostProcess && ctx.TableResult()) {
 		return nil, merr.WrapErrParameterInvalidMsg("explode cannot expand rows in stage %q", ctx.Stage())
 	}
 	column, err := input.ResolveColumn(o.inputs[0], ctx.Pool())
@@ -112,6 +112,7 @@ func (o *ExplodeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 	}
 	collector := NewChunkCollector(colNames, input.NumChunks())
 	defer collector.Release()
+	totalRows := int64(0)
 	for group := range input.NumChunks() {
 		if err := ctx.Context().Err(); err != nil {
 			return nil, err
@@ -135,6 +136,17 @@ func (o *ExplodeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 				position.Release()
 				return nil, merr.WrapErrFunctionFailedMsg("explode list offsets are malformed in chunk %d row %d", group, row)
 			}
+			children := end - start
+			if list.IsNull(row) || start == end {
+				children = 0
+				if o.options.Outer {
+					children = 1
+				}
+			}
+			if limit := ctx.OutputRowLimit(); limit > 0 && children > limit-totalRows-int64(len(parents)) {
+				position.Release()
+				return nil, merr.WrapErrFunctionFailedMsg("explode exceeds output query row limit %d", limit)
+			}
 			if list.IsNull(row) || start == end {
 				if o.options.Outer {
 					parents = append(parents, row)
@@ -151,6 +163,7 @@ func (o *ExplodeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 		}
 		parentIndices[group] = parents
 		newSizes[group] = int64(len(parents))
+		totalRows += newSizes[group]
 		values, err := takeArrayWithNulls(ctx.Pool(), list.ListValues(), elements)
 		if err != nil {
 			position.Release()

@@ -55,6 +55,12 @@ class UDF:
   values = [value.as_py() * params['factor'] for value in columns[0]]
   if context is not None:
    assert context.input_schema.names == ['c0', 'c0']
+   if params.get('expected_scope'):
+    assert context.database=='db' and context.collection=='docs' and context.user=='alice'
+    assert context.resource_name=='pipeline/step/0/Map'
+    assert context.query_count==2 and context.prepared_query_counts==(3,)
+    assert context.query_origins==((0,1,1),)
+    context.logger.info('installed scope verified')
    field=pa.field('multiplied',pa.int64(),nullable=False,metadata={'milvus.data_type':'5'})
    return pa.record_batch([pa.array(values,type=pa.int64())],schema=pa.schema([field]))
   return [pa.array(values, type=pa.int64())]
@@ -123,8 +129,32 @@ def factory(context): return UDF()
                     assert outputs[1].column(0).to_pylist() == [6, 9], outputs
                     assert outputs[0].schema.field(0).nullable is False
                     assert outputs[0].schema.field(0).metadata == {b"milvus.data_type": b"5"}
+                    request.execution_version = 6
+                    request.request_context.CopyFrom(
+                        wire.RequestContext(
+                            database="db",
+                            collection="docs",
+                            user="alice",
+                            resource_name="pipeline/step/0/Map",
+                        )
+                    )
+                    request.query_context.queries[0].values[:] = [b"empty", b"a", b"b"]
+                    request.query_context.queries[0].original_query_indices.extend([0, 1, 1])
+                    request.params.fields["expected_scope"].bool_value = True
+                    sink = pa.BufferOutputStream()
+                    with pa.ipc.new_stream(sink, batches[0].schema) as writer:
+                        for values in ([], [2], [3]):
+                            writer.write_batch(pa.record_batch([pa.array(values, type=pa.int64())], names=["c0"]))
+                    request.inputs = sink.getvalue().to_pybytes()
+                    response = pyudf_pb2_grpc.PyUDFWorkerStub(channel).Execute(request, timeout=5)
+                    assert response.WhichOneof("result") == "outputs" and response.execution_version == 6, response
+                    with pa.ipc.open_stream(response.outputs) as reader:
+                        outputs = list(reader)
+                    assert [batch.column(0).to_pylist() for batch in outputs] == [[], [6], [9]]
                 process.terminate()
                 assert process.wait(timeout=5) == 0
+                lines = log_path.read_text()
+                assert 'resource_name="pipeline/step/0/Map"' in lines and 'user="alice"' in lines
             finally:
                 # Clean up this probe's process group even if startup or an RPC fails.
                 try:

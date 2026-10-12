@@ -97,6 +97,7 @@ type QueryTask struct {
 	aggregationFieldMap  *agg.AggregationFieldMap
 	chMgr                channelmgr.ChannelsMgr
 	postProcess          *searchTransformMeta
+	functionDBName       string
 }
 
 // NewQueryTask constructs a query task. The retrieve request carries the
@@ -795,6 +796,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	if canonicalDBName == "" {
 		canonicalDBName = t.request.GetDbName()
 	}
+	t.functionDBName = canonicalDBName
 
 	var principalName string
 	var enforceRLS bool

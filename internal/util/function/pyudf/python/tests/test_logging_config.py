@@ -16,6 +16,7 @@
 
 """Check stderr formatting without changing the test runner's root logger."""
 
+import logging
 import os
 import subprocess
 import sys
@@ -24,6 +25,20 @@ from pathlib import Path
 
 
 class LoggingTests(unittest.TestCase):
+    def test_request_tags_are_formatted_without_params_or_payload(self):
+        from milvus_pyudf_runtime.logging_config import MilvusFormatter
+
+        record = logging.LogRecord("milvus.pyudf", logging.INFO, "udf.py", 42, "business event", (), None)
+        record.database, record.collection = "数据库", "docs"
+        record.user, record.resource_name = "alice\nnext", "chain/step/0/Map"
+        record.params, record.token, record.payload = "private-params", "private-token", "private-arrow"
+        line = MilvusFormatter().format(record)
+        self.assertIn('[database="数据库"]', line)
+        self.assertIn('[collection="docs"]', line)
+        self.assertIn('[user="alice\\nnext"]', line)
+        self.assertIn('[resource_name="chain/step/0/Map"]', line)
+        self.assertNotIn("private", line)
+
     def test_stderr_format_and_exception(self):
         root = Path(__file__).resolve().parents[1]
         code = """

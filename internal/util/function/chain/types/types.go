@@ -51,12 +51,13 @@ const (
 // FuncContext is the execution context for function chains.
 // The pool is immutable after creation.
 type FuncContext struct {
-	ctx         context.Context // context for cancellation and timeouts
-	pool        memory.Allocator
-	stage       string // execution stage for filtering operators
-	queries     *QueryContext
-	tableResult bool
-	reduction   bool
+	ctx            context.Context // context for cancellation and timeouts
+	pool           memory.Allocator
+	stage          string // execution stage for filtering operators
+	queries        *QueryContext
+	tableResult    bool
+	reduction      bool
+	outputRowLimit int64
 }
 
 // NewFuncContext creates a new FuncContext with the given allocator.
@@ -126,6 +127,16 @@ func (ctx *FuncContext) WithReduction(enabled bool) *FuncContext {
 }
 
 func (ctx *FuncContext) Reduction() bool { return ctx.reduction }
+
+// WithOutputRowLimit bounds expansion before materializing copied parent rows.
+// Zero disables the budget; adapters supply the request's effective NQ limit.
+func (ctx *FuncContext) WithOutputRowLimit(limit int64) *FuncContext {
+	result := *ctx
+	result.outputRowLimit = limit
+	return &result
+}
+
+func (ctx *FuncContext) OutputRowLimit() int64 { return ctx.outputRowLimit }
 
 // =============================================================================
 // Interfaces

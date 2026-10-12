@@ -67,9 +67,15 @@ class PyUDFQueryInput:
 class PyUDFCallContext:
     """Request-owned context; never part of the cached factory instance.
 
-    queries/original_queries contain one entry per ANN input, each with NQ
-    values. Rerank receives query_index. POST receives every candidate group
+    queries/original_queries contain one entry per ANN input. query_count is
+    original NQ; prepared_query_counts may differ per ANN branch. query_origins
+    maps every prepared query to its original query. During PRE, queries remains
+    the stage-entry snapshot, while row_query_origins follows the current rows.
+    Rerank receives the prepared query_index and original_query_index. POST receives every candidate group
     once, with query_index=None; result_offsets also describe a flattened view.
+    database/collection/user are host-provided per-call scope. resource_name
+    names this operator for logs; the cached factory retains the wheel resource.
+    logger binds the four scope fields for this invocation only.
     TABLE groups follow the current operator: they may combine queries or
     partition by keys. Query metadata still describes the original request.
     """
@@ -87,3 +93,13 @@ class PyUDFCallContext:
     # Fields follow the selected positional arguments, including logical Milvus
     # type metadata. Arrow carries the schema; no function registration is needed.
     input_schema: pa.Schema | None = None
+    prepared_query_counts: tuple[int, ...] = ()
+    query_origins: tuple[tuple[int, ...], ...] = ()
+    row_query_origins: tuple[int, ...] = ()
+    original_query_index: int | None = None
+    # Trusted host scope; never sourced from UDF params or cached in the factory.
+    database: str = ""
+    collection: str = ""
+    user: str = ""
+    resource_name: str = ""
+    logger: logging.LoggerAdapter | None = None

@@ -40,15 +40,16 @@ import (
 type AggregateSpec struct{ Op, Input string }
 
 // AggregateOp constructs a new schema, independently within each logical group.
-// Concat explicitly removes the previous query/ANN group boundaries.
+// UnionAll explicitly removes the previous query/ANN group boundaries.
 type AggregateOp struct {
 	BaseOp
-	keys  []string
-	specs []AggregateSpec
+	keys     []string
+	specs    []AggregateSpec
+	function types.FunctionExpr // nil for native aggregate specifications
 }
 
 func init() {
-	MustRegisterOperator(types.OpTypeAggregate, statelessOperatorFactory(NewAggregateOpFromRepr))
+	MustRegisterOperator(types.OpTypeAggregate, NewAggregateOpFromReprWithContext)
 }
 
 func NewAggregateOp(keys, outputs []string, specs []AggregateSpec) (*AggregateOp, error) {
@@ -116,13 +117,26 @@ func validateAggregateNames(keys, outputs []string) error {
 
 func (o *AggregateOp) Name() string { return "Aggregate" }
 func (o *AggregateOp) String() string {
+	if o.function != nil {
+		return fmt.Sprintf("Aggregate(keys=%v, function=%s)", o.keys, o.function.Name())
+	}
 	return fmt.Sprintf("Aggregate(keys=%v, specs=%v)", o.keys, o.specs)
 }
 func (o *AggregateOp) ResetsColumnScope() bool { return true }
 
+// Expression is optional: native aggregates execute their specifications directly.
+func (o *AggregateOp) Expression() types.FunctionExpr { return o.function }
+
 func NewAggregateOpFromRepr(repr *OperatorRepr) (Operator, error) {
-	if repr == nil || repr.Function != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("native aggregate does not accept expression")
+	return NewAggregateOpFromReprWithContext(repr, types.FunctionBuildContext{})
+}
+
+func NewAggregateOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error) {
+	if repr == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("aggregate representation is nil")
+	}
+	if repr.Function != nil {
+		return newUDFAggregateOpFromRepr(repr, buildCtx)
 	}
 	for key := range repr.Params {
 		if key != "keys" && key != "aggregates" {
@@ -178,7 +192,7 @@ func (fc *FuncChain) Aggregate(keys, outputs []string, specs ...AggregateSpec) *
 	return fc.addWithError(op, err)
 }
 
-// postTableRowGroup is shared by native aggregates and PyUDF reduce.
+// postTableRowGroup is shared by native and custom aggregates.
 // FirstRow is -1 only for an empty, unkeyed aggregate group.
 type postTableRowGroup struct {
 	Chunk    int
@@ -388,6 +402,9 @@ func postTableGroupLineage(input *DataFrame, group postTableRowGroup, contexts .
 func (o *AggregateOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
 	if err := requirePostTable(ctx, o.Name()); err != nil {
 		return nil, err
+	}
+	if o.function != nil {
+		return o.executeUDF(ctx, input)
 	}
 	groups, err := groupPostTable(ctx, input, o.keys)
 	if err != nil {

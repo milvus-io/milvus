@@ -115,12 +115,16 @@ type SearchTask struct {
 	rerankMeta rerankMeta
 	rankParams *rankParams
 
-	preProcess          []*searchTransformMeta
-	postProcess         *searchTransformMeta
-	postOutputFields    []string
-	transformsPrepared  bool
-	preProcessed        bool
-	queryContext        *chaintypes.QueryContext
+	preProcess         []*searchTransformMeta
+	postProcess        *searchTransformMeta
+	postOutputFields   []string
+	transformsPrepared bool
+	preProcessed       bool
+	queryContext       *chaintypes.QueryContext
+	// Each ANN input retains prepared-query -> original-query provenance,
+	// even when its chain uses only native expressions and needs no UDF context.
+	preQueryOrigins     [][]int64
+	preOriginalNq       int64
 	tableAllSearchCount int64
 
 	// Order by fields for sorting results
@@ -256,6 +260,9 @@ func (t *SearchTask) AllSearchCount() int64 {
 // NQ for hit responses, preserving the existing search-vector metric contract.
 func (t *SearchTask) ResultQueryCount() int64 {
 	if t.hasPostTable() {
+		if t.preOriginalNq > 0 {
+			return t.preOriginalNq
+		}
 		return t.GetNq()
 	}
 	return t.result.GetResults().GetNumQueries()
@@ -527,6 +534,12 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *SearchTask) checkNq(ctx context.Context) (int64, error) {
+	if t.preProcessed {
+		// Original hybrid inputs were checked together before PRE. Prepared
+		// ANN branches can now have different NQ; revalidating those as client
+		// inputs would reject a retry of this already-prepared task.
+		return t.GetNq(), nil
+	}
 	var nq int64
 	if t.GetIsAdvanced() {
 		// In the context of Advanced Search, it is essential to verify that the number of vectors

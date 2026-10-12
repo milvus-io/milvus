@@ -1401,6 +1401,7 @@ func Test_NewServer_GetVersion(t *testing.T) {
 		assert.Empty(t, resp.GetVersion())
 		assert.Equal(t, common.FunctionChainTransformVersion, resp.GetStatus().GetExtraInfo()[common.FunctionChainTransformVersionKey])
 		assert.Equal(t, common.FunctionChainPostTableVersion, resp.GetStatus().GetExtraInfo()[common.FunctionChainPostTableVersionKey])
+		assert.Equal(t, common.FunctionChainPreQueryExpansionVersion, resp.GetStatus().GetExtraInfo()[common.FunctionChainPreQueryExpansionVersionKey])
 		assert.NoError(t, err)
 	})
 

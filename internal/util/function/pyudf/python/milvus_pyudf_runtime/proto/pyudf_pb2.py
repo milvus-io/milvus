@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bpyudf.proto\x12\x12milvus.proto.pyudf\"\xc4\x02\n\x0e\x45xecuteRequest\x12\x15\n\rresource_name\x18\x02 \x01(\t\x12\x10\n\x08udf_path\x18\x03 \x01(\t\x12\r\n\x05stage\x18\x04 \x01(\t\x12\x37\n\x06params\x18\x05 \x01(\x0b\x32\'.milvus.proto.pyudf.FunctionParamObject\x12\x0e\n\x06inputs\x18\x06 \x01(\x0c\x12\x1c\n\x14input_column_indices\x18\x07 \x03(\r\x12\x37\n\rquery_context\x18\x08 \x01(\x0b\x32 .milvus.proto.pyudf.QueryContext\x12\x19\n\x11\x65xecution_version\x18\t \x01(\r\x12\x14\n\x0ctable_result\x18\n \x01(\x08\x12\x11\n\treduction\x18\x0b \x01(\x08J\x04\x08\x01\x10\x02R\x10protocol_version\"<\n\nQueryInput\x12\x11\n\tdata_type\x18\x01 \x01(\t\x12\x0e\n\x06values\x18\x02 \x03(\x0c\x12\x0b\n\x03tag\x18\x03 \x01(\t\"y\n\x0cQueryContext\x12\x38\n\x10original_queries\x18\x01 \x03(\x0b\x32\x1e.milvus.proto.pyudf.QueryInput\x12/\n\x07queries\x18\x02 \x03(\x0b\x32\x1e.milvus.proto.pyudf.QueryInput\"\x91\x02\n\x12\x46unctionParamValue\x12\x14\n\nbool_value\x18\x01 \x01(\x08H\x00\x12\x15\n\x0bint64_value\x18\x02 \x01(\x03H\x00\x12\x16\n\x0c\x64ouble_value\x18\x03 \x01(\x01H\x00\x12\x16\n\x0cstring_value\x18\x04 \x01(\tH\x00\x12=\n\x0b\x61rray_value\x18\x05 \x01(\x0b\x32&.milvus.proto.pyudf.FunctionParamArrayH\x00\x12?\n\x0cobject_value\x18\x06 \x01(\x0b\x32\'.milvus.proto.pyudf.FunctionParamObjectH\x00\x12\x15\n\x0b\x62ytes_value\x18\x07 \x01(\x0cH\x00\x42\x07\n\x05value\"L\n\x12\x46unctionParamArray\x12\x36\n\x06values\x18\x01 \x03(\x0b\x32&.milvus.proto.pyudf.FunctionParamValue\"\xb1\x01\n\x13\x46unctionParamObject\x12\x43\n\x06\x66ields\x18\x01 \x03(\x0b\x32\x33.milvus.proto.pyudf.FunctionParamObject.FieldsEntry\x1aU\n\x0b\x46ieldsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x35\n\x05value\x18\x02 \x01(\x0b\x32&.milvus.proto.pyudf.FunctionParamValue:\x02\x38\x01\"|\n\x0f\x45xecuteResponse\x12\x19\n\x11\x65xecution_version\x18\x03 \x01(\r\x12\x11\n\x07outputs\x18\x01 \x01(\x0cH\x00\x12\x31\n\x05\x65rror\x18\x02 \x01(\x0b\x32 .milvus.proto.pyudf.ExecuteErrorH\x00\x42\x08\n\x06result\"L\n\x0c\x45xecuteError\x12+\n\x04\x63ode\x18\x01 \x01(\x0e\x32\x1d.milvus.proto.pyudf.ErrorCode\x12\x0f\n\x07message\x18\x02 \x01(\t*\xcf\x01\n\tErrorCode\x12\x1a\n\x16\x45RROR_CODE_UNSPECIFIED\x10\x00\x12\x0e\n\nUDF_FAILED\x10\x01\x12\x16\n\x12RESOURCE_NOT_FOUND\x10\x02\x12\x1e\n\x1aRESOURCE_PERMISSION_DENIED\x10\x03\x12\x16\n\x12RESOURCE_IO_FAILED\x10\x04\x12\x11\n\rOUT_OF_MEMORY\x10\x05\x12\x0f\n\x0bUNSUPPORTED\x10\x06\x12\x0c\n\x08INTERNAL\x10\x07\x12\x14\n\x10INVALID_ARGUMENT\x10\x08\x32\x61\n\x0bPyUDFWorker\x12R\n\x07\x45xecute\x12\".milvus.proto.pyudf.ExecuteRequest\x1a#.milvus.proto.pyudf.ExecuteResponseB2Z0github.com/milvus-io/milvus/pkg/v3/proto/pyudfpbb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bpyudf.proto\x12\x12milvus.proto.pyudf\"\x81\x03\n\x0e\x45xecuteRequest\x12\x15\n\rresource_name\x18\x02 \x01(\t\x12\x10\n\x08udf_path\x18\x03 \x01(\t\x12\r\n\x05stage\x18\x04 \x01(\t\x12\x37\n\x06params\x18\x05 \x01(\x0b\x32\'.milvus.proto.pyudf.FunctionParamObject\x12\x0e\n\x06inputs\x18\x06 \x01(\x0c\x12\x1c\n\x14input_column_indices\x18\x07 \x03(\r\x12\x37\n\rquery_context\x18\x08 \x01(\x0b\x32 .milvus.proto.pyudf.QueryContext\x12\x19\n\x11\x65xecution_version\x18\t \x01(\r\x12\x14\n\x0ctable_result\x18\n \x01(\x08\x12\x11\n\treduction\x18\x0b \x01(\x08\x12;\n\x0frequest_context\x18\x0c \x01(\x0b\x32\".milvus.proto.pyudf.RequestContextJ\x04\x08\x01\x10\x02R\x10protocol_version\"[\n\x0eRequestContext\x12\x10\n\x08\x64\x61tabase\x18\x01 \x01(\t\x12\x12\n\ncollection\x18\x02 \x01(\t\x12\x0c\n\x04user\x18\x03 \x01(\t\x12\x15\n\rresource_name\x18\x04 \x01(\t\"\\\n\nQueryInput\x12\x11\n\tdata_type\x18\x01 \x01(\t\x12\x0e\n\x06values\x18\x02 \x03(\x0c\x12\x0b\n\x03tag\x18\x03 \x01(\t\x12\x1e\n\x16original_query_indices\x18\x04 \x03(\x03\"\x94\x01\n\x0cQueryContext\x12\x38\n\x10original_queries\x18\x01 \x03(\x0b\x32\x1e.milvus.proto.pyudf.QueryInput\x12/\n\x07queries\x18\x02 \x03(\x0b\x32\x1e.milvus.proto.pyudf.QueryInput\x12\x19\n\x11row_query_origins\x18\x03 \x03(\x03\"\x91\x02\n\x12\x46unctionParamValue\x12\x14\n\nbool_value\x18\x01 \x01(\x08H\x00\x12\x15\n\x0bint64_value\x18\x02 \x01(\x03H\x00\x12\x16\n\x0c\x64ouble_value\x18\x03 \x01(\x01H\x00\x12\x16\n\x0cstring_value\x18\x04 \x01(\tH\x00\x12=\n\x0b\x61rray_value\x18\x05 \x01(\x0b\x32&.milvus.proto.pyudf.FunctionParamArrayH\x00\x12?\n\x0cobject_value\x18\x06 \x01(\x0b\x32\'.milvus.proto.pyudf.FunctionParamObjectH\x00\x12\x15\n\x0b\x62ytes_value\x18\x07 \x01(\x0cH\x00\x42\x07\n\x05value\"L\n\x12\x46unctionParamArray\x12\x36\n\x06values\x18\x01 \x03(\x0b\x32&.milvus.proto.pyudf.FunctionParamValue\"\xb1\x01\n\x13\x46unctionParamObject\x12\x43\n\x06\x66ields\x18\x01 \x03(\x0b\x32\x33.milvus.proto.pyudf.FunctionParamObject.FieldsEntry\x1aU\n\x0b\x46ieldsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x35\n\x05value\x18\x02 \x01(\x0b\x32&.milvus.proto.pyudf.FunctionParamValue:\x02\x38\x01\"|\n\x0f\x45xecuteResponse\x12\x19\n\x11\x65xecution_version\x18\x03 \x01(\r\x12\x11\n\x07outputs\x18\x01 \x01(\x0cH\x00\x12\x31\n\x05\x65rror\x18\x02 \x01(\x0b\x32 .milvus.proto.pyudf.ExecuteErrorH\x00\x42\x08\n\x06result\"L\n\x0c\x45xecuteError\x12+\n\x04\x63ode\x18\x01 \x01(\x0e\x32\x1d.milvus.proto.pyudf.ErrorCode\x12\x0f\n\x07message\x18\x02 \x01(\t*\xcf\x01\n\tErrorCode\x12\x1a\n\x16\x45RROR_CODE_UNSPECIFIED\x10\x00\x12\x0e\n\nUDF_FAILED\x10\x01\x12\x16\n\x12RESOURCE_NOT_FOUND\x10\x02\x12\x1e\n\x1aRESOURCE_PERMISSION_DENIED\x10\x03\x12\x16\n\x12RESOURCE_IO_FAILED\x10\x04\x12\x11\n\rOUT_OF_MEMORY\x10\x05\x12\x0f\n\x0bUNSUPPORTED\x10\x06\x12\x0c\n\x08INTERNAL\x10\x07\x12\x14\n\x10INVALID_ARGUMENT\x10\x08\x32\x61\n\x0bPyUDFWorker\x12R\n\x07\x45xecute\x12\".milvus.proto.pyudf.ExecuteRequest\x1a#.milvus.proto.pyudf.ExecuteResponseB2Z0github.com/milvus-io/milvus/pkg/v3/proto/pyudfpbb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,26 +34,28 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._serialized_options = b'Z0github.com/milvus-io/milvus/pkg/v3/proto/pyudfpb'
   _globals['_FUNCTIONPARAMOBJECT_FIELDSENTRY']._loaded_options = None
   _globals['_FUNCTIONPARAMOBJECT_FIELDSENTRY']._serialized_options = b'8\001'
-  _globals['_ERRORCODE']._serialized_start=1286
-  _globals['_ERRORCODE']._serialized_end=1493
+  _globals['_ERRORCODE']._serialized_start=1500
+  _globals['_ERRORCODE']._serialized_end=1707
   _globals['_EXECUTEREQUEST']._serialized_start=36
-  _globals['_EXECUTEREQUEST']._serialized_end=360
-  _globals['_QUERYINPUT']._serialized_start=362
-  _globals['_QUERYINPUT']._serialized_end=422
-  _globals['_QUERYCONTEXT']._serialized_start=424
-  _globals['_QUERYCONTEXT']._serialized_end=545
-  _globals['_FUNCTIONPARAMVALUE']._serialized_start=548
-  _globals['_FUNCTIONPARAMVALUE']._serialized_end=821
-  _globals['_FUNCTIONPARAMARRAY']._serialized_start=823
-  _globals['_FUNCTIONPARAMARRAY']._serialized_end=899
-  _globals['_FUNCTIONPARAMOBJECT']._serialized_start=902
-  _globals['_FUNCTIONPARAMOBJECT']._serialized_end=1079
-  _globals['_FUNCTIONPARAMOBJECT_FIELDSENTRY']._serialized_start=994
-  _globals['_FUNCTIONPARAMOBJECT_FIELDSENTRY']._serialized_end=1079
-  _globals['_EXECUTERESPONSE']._serialized_start=1081
-  _globals['_EXECUTERESPONSE']._serialized_end=1205
-  _globals['_EXECUTEERROR']._serialized_start=1207
-  _globals['_EXECUTEERROR']._serialized_end=1283
-  _globals['_PYUDFWORKER']._serialized_start=1495
-  _globals['_PYUDFWORKER']._serialized_end=1592
+  _globals['_EXECUTEREQUEST']._serialized_end=421
+  _globals['_REQUESTCONTEXT']._serialized_start=423
+  _globals['_REQUESTCONTEXT']._serialized_end=514
+  _globals['_QUERYINPUT']._serialized_start=516
+  _globals['_QUERYINPUT']._serialized_end=608
+  _globals['_QUERYCONTEXT']._serialized_start=611
+  _globals['_QUERYCONTEXT']._serialized_end=759
+  _globals['_FUNCTIONPARAMVALUE']._serialized_start=762
+  _globals['_FUNCTIONPARAMVALUE']._serialized_end=1035
+  _globals['_FUNCTIONPARAMARRAY']._serialized_start=1037
+  _globals['_FUNCTIONPARAMARRAY']._serialized_end=1113
+  _globals['_FUNCTIONPARAMOBJECT']._serialized_start=1116
+  _globals['_FUNCTIONPARAMOBJECT']._serialized_end=1293
+  _globals['_FUNCTIONPARAMOBJECT_FIELDSENTRY']._serialized_start=1208
+  _globals['_FUNCTIONPARAMOBJECT_FIELDSENTRY']._serialized_end=1293
+  _globals['_EXECUTERESPONSE']._serialized_start=1295
+  _globals['_EXECUTERESPONSE']._serialized_end=1419
+  _globals['_EXECUTEERROR']._serialized_start=1421
+  _globals['_EXECUTEERROR']._serialized_end=1497
+  _globals['_PYUDFWORKER']._serialized_start=1709
+  _globals['_PYUDFWORKER']._serialized_end=1806
 # @@protoc_insertion_point(module_scope)

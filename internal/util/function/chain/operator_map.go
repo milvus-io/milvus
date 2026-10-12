@@ -22,7 +22,9 @@ import (
 	"fmt"
 
 	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/compute"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -104,8 +106,82 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 		releaseColumns(outputs)
 		return nil, err
 	}
+	outputSchema, err = o.normalizeScoreOutput(ctx, outputSchema, outputs)
+	if err != nil {
+		releaseColumns(outputs)
+		return nil, err
+	}
 
 	return o.buildOutputDataFrameWithSchema(input, outputs, outputSchema)
+}
+
+// Search scores use Float32 throughout ranking and on the result wire. Cast
+// after validating the function's own output contract, before downstream
+// operators see the column. POST TABLE keeps its independent output schema.
+func (o *MapOp) normalizeScoreOutput(ctx *types.FuncContext, schema *arrow.Schema, outputs []*arrow.Chunked) (*arrow.Schema, error) {
+	if ctx.TableResult() {
+		return schema, nil
+	}
+	var fields []arrow.Field
+	for i, name := range o.outputs {
+		if name != types.ScoreFieldName {
+			continue
+		}
+		output := outputs[i]
+		switch output.DataType().ID() {
+		case arrow.FLOAT32:
+			continue
+		case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
+			arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64, arrow.FLOAT64:
+		default:
+			return nil, merr.WrapErrFunctionFailedMsg("map_op: %s output must be numeric, got %s", name, output.DataType())
+		}
+		if fields == nil {
+			fields = schema.Fields()
+		}
+		options := compute.SafeCastOptions(arrow.PrimitiveTypes.Float32)
+		// Score precision follows the Float32 wire contract, including rounding.
+		options.AllowFloatTruncate = true
+		chunks := make([]arrow.Array, 0, len(output.Chunks()))
+		for group, chunk := range output.Chunks() {
+			if err := ctx.Context().Err(); err != nil {
+				releaseAggregateArrays(chunks)
+				return nil, err
+			}
+			cast, err := compute.CastArray(compute.WithAllocator(ctx.Context(), ctx.Pool()), chunk, options)
+			if err != nil {
+				releaseAggregateArrays(chunks)
+				if merr.IsCanceledOrTimeout(err) {
+					return nil, merr.Wrap(err, "map_op: normalize score")
+				}
+				return nil, merr.WrapErrFunctionFailed(err, "map_op: convert %s group %d to Float32", name, group)
+			}
+			chunks = append(chunks, cast)
+		}
+		outputs[i] = arrow.NewChunked(arrow.PrimitiveTypes.Float32, chunks)
+		releaseAggregateArrays(chunks)
+		output.Release()
+
+		// Replace the logical schema as well as the physical Arrow type. Keeping
+		// a Double annotation on a Float32 score would fail subsequent validation.
+		field, err := types.ArrowFieldFromMilvusSchema(&schemapb.FieldSchema{
+			Name: name, DataType: schemapb.DataType_Float, Nullable: fields[i].Nullable,
+		})
+		if err != nil {
+			return nil, err
+		}
+		metadata := fields[i].Metadata.ToMap()
+		for key, value := range field.Metadata.ToMap() {
+			metadata[key] = value
+		}
+		field.Metadata = arrow.MetadataFrom(metadata)
+		fields[i] = field
+	}
+	if fields == nil {
+		return schema, nil
+	}
+	metadata := schema.Metadata()
+	return arrow.NewSchema(fields, &metadata), nil
 }
 
 func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked) (*DataFrame, error) {

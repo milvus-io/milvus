@@ -22,8 +22,9 @@
 // PreInsert uses the existing Ingestion stage.
 //
 // In the v1 contract, ingestion may remove or expand rows. PreProcess and
-// PostProcess preserve logical groups, row counts and row identity. Aggregate
-// and reduce are reserved future operations and are not accepted in v1 plans.
+// PostProcess in HITS mode preserve logical groups, row counts and row identity.
+// POST TABLE additionally supports union_all and native or custom aggregate
+// with independent output schemas and many-to-one provenance.
 // A stage adapter must additionally bind input/output schemas, validate function
 // availability and types, enforce resource limits, and validate executor output.
 package transform

@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/requestcontext"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -142,12 +143,14 @@ func metricsPortAuthMiddleware() gin.HandlerFunc {
 }
 
 func authenticate(c *gin.Context) {
+	c.Request = c.Request.WithContext(requestcontext.WithAuthenticatedUser(c.Request.Context(), ""))
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
 			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
 			c.Set(httpserver.ContextUsername, username)
 			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
+			c.Request = c.Request.WithContext(requestcontext.WithAuthenticatedUser(c.Request.Context(), username))
 			return
 		}
 	}
@@ -157,6 +160,7 @@ func authenticate(c *gin.Context) {
 		if err == nil {
 			c.Set(httpserver.ContextUsername, user)
 			c.Set(httpserver.ContextToken, rawToken)
+			c.Request = c.Request.WithContext(requestcontext.WithAuthenticatedUser(c.Request.Context(), user))
 			return
 		}
 		mlog.Warn(c.Request.Context(), "fail to verify apikey", mlog.Err(err))
@@ -1233,8 +1237,9 @@ func (s *Server) GetVersion(ctx context.Context, request *milvuspb.GetVersionReq
 	buildTags := os.Getenv(metricsinfo.GitBuildTagsEnvKey)
 	status := merr.Success()
 	status.ExtraInfo = map[string]string{
-		common.FunctionChainTransformVersionKey: common.FunctionChainTransformVersion,
-		common.FunctionChainPostTableVersionKey: common.FunctionChainPostTableVersion,
+		common.FunctionChainTransformVersionKey:         common.FunctionChainTransformVersion,
+		common.FunctionChainPostTableVersionKey:         common.FunctionChainPostTableVersion,
+		common.FunctionChainPreQueryExpansionVersionKey: common.FunctionChainPreQueryExpansionVersion,
 	}
 	return &milvuspb.GetVersionResponse{
 		Status:  status,

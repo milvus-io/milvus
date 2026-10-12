@@ -46,7 +46,8 @@ func PreInsert(name string, ops ...*schemapb.FunctionChainOp) (*schemapb.Functio
 	return newPlan(name, schemapb.FunctionChainStage_FunctionChainStageIngestion, ops)
 }
 
-// PreProcess builds a plan preserving input row identity and order.
+// PreProcess builds a plan preserving single-parent lineage and parent order.
+// flat_map/explode may produce zero or more prepared queries per input query.
 func PreProcess(name string, ops ...*schemapb.FunctionChainOp) (*schemapb.FunctionChain, error) {
 	return newPlan(name, schemapb.FunctionChainStage_FunctionChainStagePreProcess, ops)
 }
@@ -138,8 +139,9 @@ func expansionOp(opType, output string, opts ExplodeOptions) *schemapb.FunctionC
 
 // ValidatePlan validates only the v1 structural contract. It does not
 // imply that the stage, operators or named expressions can execute on a server.
-// Ingestion accepts map/filter/select/explode/flat_map; Pre/PostProcess accept
-// map/select. Schema resolution and function stage/type checks are adapter-owned.
+// Ingestion accepts map/filter/select/explode/flat_map; PreProcess accepts
+// map/select/explode/flat_map; PostProcess HITS accepts map/select. Schema
+// resolution and function stage/type checks are adapter-owned.
 func ValidatePlan(plan *schemapb.FunctionChain) error {
 	if plan == nil {
 		return merr.WrapErrParameterMissingMsg("transform: function chain is required")
@@ -175,7 +177,9 @@ func ValidatePlan(plan *schemapb.FunctionChain) error {
 			return merr.Wrapf(err, "transform op[%d]", i)
 		}
 		if plan.Stage != schemapb.FunctionChainStage_FunctionChainStageIngestion && op.Op != "map" && op.Op != OpSelect {
-			return merr.WrapErrParameterInvalidMsg("transform op[%d]: %s does not preserve rows for stage %s", i, op.Op, plan.Stage)
+			if plan.Stage != schemapb.FunctionChainStage_FunctionChainStagePreProcess || op.Op != OpExplode && op.Op != OpFlatMap {
+				return merr.WrapErrParameterInvalidMsg("transform op[%d]: %s is not supported by stage %s", i, op.Op, plan.Stage)
+			}
 		}
 	}
 	return nil
@@ -190,7 +194,7 @@ func validateTableOp(op *schemapb.FunctionChainOp) error {
 	switch op.Op {
 	case "map", "filter", OpSelect, OpExplode, OpFlatMap:
 		return validateOp(op)
-	case "sort", "limit", "concat", "aggregate", "reduce":
+	case "sort", "limit", "union_all", "aggregate":
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported POST TABLE operation %q", op.Op)
 	}
@@ -200,11 +204,16 @@ func validateTableOp(op *schemapb.FunctionChainOp) error {
 	if err := validateNames(op.Outputs, true); err != nil {
 		return err
 	}
-	if op.Op == "reduce" {
-		return validateExprOp(op)
-	}
 	if op.Expr != nil {
-		return merr.WrapErrParameterInvalidMsg("%s does not accept an expression", op.Op)
+		if op.Op != "aggregate" {
+			return merr.WrapErrParameterInvalidMsg("%s does not accept an expression", op.Op)
+		}
+		if _, exists := op.Params["aggregates"]; exists {
+			return merr.WrapErrParameterInvalidMsg("aggregate accepts either native specifications or an expression")
+		}
+		if err := validateExprOp(op); err != nil {
+			return err
+		}
 	}
 	for key, value := range op.Params {
 		if strings.TrimSpace(key) == "" {
@@ -314,7 +323,7 @@ func validateOp(op *schemapb.FunctionChainOp) error {
 				return merr.Wrap(err, "input data types")
 			}
 		}
-	case "aggregate", "reduce":
+	case "aggregate":
 		return merr.WrapErrParameterInvalidMsg("%s is reserved and not supported by the v1 transform contract", op.Op)
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported transform operation %q", op.Op)

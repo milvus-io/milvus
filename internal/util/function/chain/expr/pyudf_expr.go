@@ -152,6 +152,9 @@ func (e *PyUDFExpr) executeWithSchema(ctx *types.FuncContext, schema *arrow.Sche
 		ResourceName: e.resourceName, UDFPath: path, Stage: ctx.Stage(), Params: e.udfParams, Inputs: inputs, InputSchema: schema,
 		QueryContext: ctx.QueryContext(), TableResult: ctx.TableResult(), Reduction: ctx.Reduction(),
 	}
+	if scope := ctx.RequestContext(); scope != (types.RequestContext{}) {
+		request.RequestContext = &scope
+	}
 	var outputSchema *arrow.Schema
 	var outputs []*arrow.Chunked
 	if adapter, ok := client.(interface {

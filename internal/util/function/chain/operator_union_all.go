@@ -25,19 +25,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ConcatOp appends logical groups in their existing order, without deduplication.
+// UnionAllOp appends logical groups in their existing order, without deduplication.
 // Original source coordinates survive the change to one output group.
-type ConcatOp struct{ BaseOp }
+type UnionAllOp struct{ BaseOp }
 
 func init() {
-	MustRegisterOperator(types.OpTypeConcat, statelessOperatorFactory(NewConcatOpFromRepr))
+	MustRegisterOperator(types.OpTypeUnionAll, statelessOperatorFactory(NewUnionAllOpFromRepr))
 }
 
-func NewConcatOp() *ConcatOp       { return &ConcatOp{} }
-func (o *ConcatOp) Name() string   { return "Concat" }
-func (o *ConcatOp) String() string { return "Concat()" }
+func NewUnionAllOp() *UnionAllOp     { return &UnionAllOp{} }
+func (o *UnionAllOp) Name() string   { return "UnionAll" }
+func (o *UnionAllOp) String() string { return "UnionAll()" }
 
-func (o *ConcatOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
+func (o *UnionAllOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
 	if err := requirePostTable(ctx, o.Name()); err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (o *ConcatOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 			data, err = array.Concatenate(column.Chunks(), ctx.Pool())
 		}
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "concat: Arrow concatenation failed")
+			return nil, merr.WrapErrServiceInternalErr(err, "union_all: Arrow concatenation failed")
 		}
 		if err := builder.AddColumnFromChunks(name, []arrow.Array{data}); err != nil {
 			return nil, err
@@ -77,14 +77,14 @@ func (o *ConcatOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	return builder.Build(), nil
 }
 
-func NewConcatOpFromRepr(repr *OperatorRepr) (Operator, error) {
+func NewUnionAllOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	if repr == nil || repr.Function != nil || len(repr.Inputs) != 0 || len(repr.Outputs) != 0 || len(repr.Params) != 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("concat does not accept inputs, outputs, expression or parameters")
+		return nil, merr.WrapErrParameterInvalidMsg("union_all does not accept inputs, outputs, expression or parameters")
 	}
-	return NewConcatOp(), nil
+	return NewUnionAllOp(), nil
 }
 
-func (fc *FuncChain) Concat() *FuncChain { return fc.Add(NewConcatOp()) }
+func (fc *FuncChain) UnionAll() *FuncChain { return fc.Add(NewUnionAllOp()) }
 
 func requirePostTable(ctx *types.FuncContext, name string) error {
 	if ctx == nil {

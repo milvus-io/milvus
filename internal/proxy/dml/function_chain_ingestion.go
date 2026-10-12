@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
+	"github.com/milvus-io/milvus/internal/proxy/requestcontext"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/chain/transform"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
@@ -124,6 +125,11 @@ func (it *InsertTask) applyIngestion(ctx context.Context, schema *schemaInfo) er
 	}
 	defer input.Release()
 	batch := transform.Batch{Groups: []arrow.Table{input}}
+	collection := schema.GetName()
+	if collection == "" {
+		collection = it.insertMsg.GetCollectionName()
+	}
+	ctx = requestcontext.WithFunctionScope(ctx, it.insertMsg.GetDbName(), collection)
 	executor := chain.NewTransformExecutor(memory.DefaultAllocator, types.FunctionBuildContext{ModelExtraInfo: &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: it.insertMsg.GetDbName()}})
 	output, err := executor.Execute(ctx, schema.GetFunctionChains()[0], batch)
 	if err != nil {

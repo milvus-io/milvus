@@ -45,6 +45,7 @@ func (e *operatorTransformExpr) OutputDataTypes() []arrow.DataType { return e.ou
 func (e *operatorTransformExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 	return e.execute(ctx, inputs)
 }
+
 func (e *operatorTransformExpr) IsRunnable(stage string) bool {
 	for _, allowed := range e.stages {
 		if allowed == stage {
@@ -58,7 +59,8 @@ var registerOperatorTransformExpressions sync.Once
 
 func operatorTransformChunkExpr() *operatorTransformExpr {
 	structure := arrow.StructOf(arrow.Field{Name: "text", Type: arrow.BinaryTypes.String, Nullable: true})
-	return &operatorTransformExpr{name: "test_transform_split", stages: []string{types.StageIngestion}, outputs: []arrow.DataType{arrow.ListOf(structure)},
+	return &operatorTransformExpr{
+		name: "test_transform_split", stages: []string{types.StageIngestion}, outputs: []arrow.DataType{arrow.ListOf(structure)},
 		execute: func(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 			chunks := make([]arrow.Array, len(inputs[0].Chunks()))
 			for group, input := range inputs[0].Chunks() {
@@ -88,7 +90,8 @@ func operatorTransformChunkExpr() *operatorTransformExpr {
 				chunk.Release()
 			}
 			return []*arrow.Chunked{result}, nil
-		}}
+		},
+	}
 }
 
 func installOperatorTransformExpressions() {
@@ -97,7 +100,8 @@ func installOperatorTransformExpressions() {
 			return operatorTransformChunkExpr(), nil
 		})
 		types.MustRegisterFunction("test_transform_keep_long", func(types.FunctionBuildContext, types.FunctionConfig) (types.FunctionExpr, error) {
-			return &operatorTransformExpr{name: "test_transform_keep_long", stages: []string{types.StageIngestion}, outputs: []arrow.DataType{arrow.FixedWidthTypes.Boolean},
+			return &operatorTransformExpr{
+				name: "test_transform_keep_long", stages: []string{types.StageIngestion}, outputs: []arrow.DataType{arrow.FixedWidthTypes.Boolean},
 				execute: func(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 					chunks := make([]arrow.Array, len(inputs[0].Chunks()))
 					for group, input := range inputs[0].Chunks() {
@@ -114,7 +118,8 @@ func installOperatorTransformExpressions() {
 						chunk.Release()
 					}
 					return []*arrow.Chunked{result}, nil
-				}}, nil
+				},
+			}, nil
 		})
 	})
 }
@@ -239,12 +244,13 @@ func TestTransformStagesAndProjectionScope(t *testing.T) {
 		schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
 		schemapb.FunctionChainStage_FunctionChainStageL1Rerank,
 		schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
-		schemapb.FunctionChainStage_FunctionChainStagePreProcess,
 		schemapb.FunctionChainStage_FunctionChainStagePostProcess,
 	} {
 		_, err := ParseFuncChainProto(&schemapb.FunctionChain{Stage: stage, Ops: []*schemapb.FunctionChainOp{explode}}, memory.DefaultAllocator)
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	}
+	_, err = ParseFuncChainProto(&schemapb.FunctionChain{Stage: schemapb.FunctionChainStage_FunctionChainStagePreProcess, Ops: []*schemapb.FunctionChainOp{explode}}, memory.DefaultAllocator)
+	require.NoError(t, err)
 	selectOp, err := transform.Select([]string{"doc_id"}, nil)
 	require.NoError(t, err)
 	_, err = ProtoChainToRepr(&schemapb.FunctionChain{Stage: schemapb.FunctionChainStage_FunctionChainStageIngestion, Ops: []*schemapb.FunctionChainOp{
@@ -281,7 +287,8 @@ func TestSelectPreservesHiddenIdentityAndNullableMap(t *testing.T) {
 	texts.Release()
 	input := builder.Build()
 	defer input.Release()
-	function := &operatorTransformExpr{name: "nullable", stages: []string{types.StagePostProcess}, outputs: []arrow.DataType{arrow.BinaryTypes.String},
+	function := &operatorTransformExpr{
+		name: "nullable", stages: []string{types.StagePostProcess}, outputs: []arrow.DataType{arrow.BinaryTypes.String},
 		execute: func(ctx *types.FuncContext, _ []*arrow.Chunked) ([]*arrow.Chunked, error) {
 			builder := array.NewStringBuilder(ctx.Pool())
 			builder.AppendNull()
@@ -291,7 +298,8 @@ func TestSelectPreservesHiddenIdentityAndNullableMap(t *testing.T) {
 			output := arrow.NewChunked(arrow.BinaryTypes.String, []arrow.Array{values})
 			values.Release()
 			return []*arrow.Chunked{output}, nil
-		}}
+		},
+	}
 	chain := NewFuncChainWithAllocator(pool).SetStage(types.StagePostProcess).
 		Map(function, []string{"text"}, []string{"text"}).SelectAs([]string{"text"}, []string{"highlight"})
 	output, err := chain.Execute(input)

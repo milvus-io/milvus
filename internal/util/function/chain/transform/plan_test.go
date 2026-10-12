@@ -63,8 +63,7 @@ func TestPlanProtobufAndOwnership(t *testing.T) {
 	require.False(t, plan.Ops[0].Params["outer"].GetBoolValue())
 
 	before := proto.Clone(plan).(*schemapb.FunctionChain)
-	expr.Params["udf_params"].GetObjectValue().Fields["limits"].GetArrayValue().Values[0].Value =
-		&schemapb.FunctionParamValue_Int64Value{Int64Value: 999}
+	expr.Params["udf_params"].GetObjectValue().Fields["limits"].GetArrayValue().Values[0].Value = &schemapb.FunctionParamValue_Int64Value{Int64Value: 999}
 	flatMap.Outputs[0] = "changed"
 	selectOp.Inputs[0] = "changed"
 	require.True(t, proto.Equal(before, plan), "builders must not retain caller-owned mutable protobufs")
@@ -111,7 +110,11 @@ func TestBuilderContracts(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, stage, plan.Stage)
 		_, err = constructor("expansion", explode)
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		if stage == schemapb.FunctionChainStage_FunctionChainStagePreProcess {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		}
 	}
 }
 
@@ -171,13 +174,17 @@ func TestStageRestrictionAndExpressionParams(t *testing.T) {
 	filterOp := &schemapb.FunctionChainOp{Op: "filter", Expr: inputExpr()}
 	flatMap, err := FlatMap("chunk", inputExpr(), ExplodeOptions{})
 	require.NoError(t, err)
-	for _, constructor := range []func(string, ...*schemapb.FunctionChainOp) (*schemapb.FunctionChain, error){PreProcess, PostProcess} {
+	for index, constructor := range []func(string, ...*schemapb.FunctionChainOp) (*schemapb.FunctionChain, error){PreProcess, PostProcess} {
 		_, err := constructor("map", mapOp)
 		require.NoError(t, err)
 		_, err = constructor("filter", filterOp)
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		_, err = constructor("flat map", flatMap)
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		if index == 0 {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		}
 	}
 	_, err = PreInsert("filter", filterOp)
 	require.NoError(t, err)

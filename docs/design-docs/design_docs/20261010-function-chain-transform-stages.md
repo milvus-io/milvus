@@ -1,7 +1,7 @@
 # MEP: Function Chain Transformations for INSERT and Search
 
 - **Created:** 2026-10-10
-- **Updated:** 2026-10-11
+- **Updated:** 2026-10-12
 - **Status:** Draft; implemented and verified locally, not a released capability
 - **Component:** Protocol / SDK / Proxy / Function Chain / Streaming
 - **Related issues:** [#46565](https://github.com/milvus-io/milvus/issues/46565), [#52319](https://github.com/milvus-io/milvus/issues/52319)
@@ -11,9 +11,14 @@
 ## Summary
 
 > [POST TABLE](20261011-function-chain-post-tables.md) extends this design with
-> cross-NQ/ANN concatenation, native aggregation, UDF reduction and independent
+> cross-NQ/ANN concatenation, native and custom UDF aggregation, and independent
 > Arrow result schemas, including Query. The row-preserving POST contract below
 > describes the default HITS mode; TABLE is an explicit separate result mode.
+
+The [minimal call-context extension](20261012-function-chain-call-context.md)
+adds request-owned database/collection/authenticated user and operator log labels
+with runtime 0.6.0/private execution version 6. Existing Go context/gRPC retains
+deadline and cancellation authority.
 
 Function Chains now execute at three additional boundaries: collection-bound
 INSERT transformation, request-bound query preparation, and final search
@@ -23,8 +28,12 @@ SDK binding and response parsing. It reuses `Ingestion`, `PreProcess` and
 `PostProcess` wire stages. `PRE_INSERT` is an SDK alias for `INGESTION`.
 
 The new operators are `select`, `explode` and `flat_map`. INSERT can filter or
-expand rows; PRE and POST HITS preserve count and position. Existing L0/L1/L2
-rerank policies remain. General `aggregate` and `reduce` require POST TABLE.
+expand rows. [PRE query expansion](20261012-function-chain-query-expansion.md)
+adds single-parent query fan-out with explicit POST TABLE output; POST HITS
+retains candidate count and position. Existing L0/L1/L2
+rerank policies remain. General `aggregate`, with native or custom UDF logic,
+requires POST TABLE. Together with TABLE's `union_all`, the engine registers 11
+operators; there is no separate public custom-reduction operator.
 
 The [running guide](https://github.com/milvus-io/milvus/blob/master/docs/user-guides/function-chain-transform.md)
 describes the matching SDK, runtime and deterministic wheel. The worker extends
@@ -48,14 +57,15 @@ request instead of accepting a plan that never executes.
 | Stage | Attachment | V1 operators | Cardinality and identity |
 |---|---|---|---|
 | `INGESTION` / `PRE_INSERT` | One named chain in `CollectionSchema.function_chains` | `map`, `filter`, `select`, `explode`, `flat_map` | Single-parent subsets/expansion in original parent order |
-| `PRE_PROCESS` | Ordinary Search or each HybridSearch ANN sub-request | `map`, `select` | One output query per input query, in the same position |
+| `PRE_PROCESS` | Ordinary Search or each HybridSearch ANN sub-request | `map`, `select`, `explode`, `flat_map` | Identity or single-parent expansion; non-identity output requires POST TABLE |
 | `POST_PROCESS` HITS | Ordinary Search or top-level HybridSearch | `map`, `select` | Same candidate count, order, IDs, scores and element identity per query |
 | `POST_PROCESS` TABLE | Search, top-level HybridSearch or Query | See POST TABLE extension | Independent result schema/cardinality with source lineage |
 
-PRE/POST may coexist with legacy FunctionScore and HybridSearch rankers. Only
-actual rerank-stage chains trigger rerank conflicts. Hybrid PRE belongs to each
-sub-request; top-level PRE and sub-request POST are rejected. Hybrid POST runs
-after fusion and the configured reranker.
+Identity PRE and POST HITS/FUSED may coexist with legacy FunctionScore and
+HybridSearch rankers. Hybrid PRE belongs to each sub-request; top-level PRE and
+sub-request POST are rejected. POST HITS/FUSED runs after fusion and the
+configured reranker. Expanded Hybrid inputs require POST TABLE/ANN_INPUTS,
+which reads branch results before fusion and rejects top-level rankers/L2.
 
 Query supports the POST TABLE extension; HITS-mode Query and Search Iterator
 have no transformation adapter. Search by IDs rejects
@@ -187,8 +197,9 @@ timeout, callers can await the same outstanding RPC; this sends no new INSERT.
 PRE's synthetic payload column is `query`. All NQ queries form one logical
 request group, enabling batched translation/embedding. Temporary columns may
 be generated; only the final non-null `query` column binds back to placeholders.
-Count and lineage positions match original queries, and the placeholder tag
-is retained.
+The [query expansion extension](20261012-function-chain-query-expansion.md)
+updates prepared NQ and carries original query provenance for non-identity
+outputs. The placeholder tag is retained.
 
 Text and supported single-vector encodings are accepted. Text output enters
 native query embedding/BM25. Float32/Float64 vectors become FloatVector
@@ -202,11 +213,13 @@ input semantics without promising one external model call across all retries.
 
 ### POST_PROCESS binding
 
-POST executes after reduction/fusion/rerank, required field retrieval and
-configured highlighting. Each original query is one candidate group, including
-zero-hit groups. A PyUDF POST invocation receives all these groups together,
-plus every original/prepared query. Physical Arrow batches do not define query
-boundaries or separate POST invocations.
+POST HITS/FUSED executes after reduction/fusion/rerank, required field retrieval
+and configured highlighting. HITS has one candidate group per original query;
+expanded TABLE has one per prepared query before regrouping, including zero-hit
+groups. ANN_INPUTS reads each branch before top-level fusion. A PyUDF POST
+invocation receives all current groups together, plus every original/prepared
+query. Physical Arrow batches do not define query boundaries or separate POST
+invocations.
 
 Stored fields and typed JSON paths resolve before execution. Scalar arrays,
 scalar StructArray parents/children and supported single-vector fields can be
@@ -262,8 +275,8 @@ one outer list per input row. Two protobuf outputs mean `[element, position]`;
 the UDF still returns one column. Unmapped arbitrary flat rows are rejected.
 FlatMap lowers to native Map + Explode. Every expression checks stage
 compatibility, including the lowered Map. Nested parents use Arrow take rather
-than scalar-only dispatch. Registering the operator does not enable row
-expansion for rerank or PRE/POST stages.
+than scalar-only dispatch. INGESTION, PRE and POST TABLE permit expansion;
+rerank and POST HITS retain their identity/cardinality contracts.
 
 A terminal select defines the complete output payload and enables automatic
 column pruning in the transform executor. Reverse dependency analysis retains
@@ -280,13 +293,14 @@ select alone does not enable this automatic optimization.
 Inputs are borrowed; outputs are owned and released by adapters. Plans and
 results are validated, and partial allocations are released on failure.
 Ingestion has one logical group per INSERT; PRE one query-row group per
-request/sub-request; POST one candidate group per query. Multiple physical
+request/sub-request; POST one candidate group per prepared query before TABLE
+regrouping. Multiple physical
 batches can back a group without changing semantics.
 
 Out-of-band lineage composes back to original `(group, row)` inputs through
-selection, filtering and successive expansions. PRE/POST require singleton
-identity lineage; ingestion allows single-parent subsets/expansion in parent
-order. Multi-source lineage is representable but not executable in v1.
+selection, filtering and successive expansions. PRE and ingestion allow
+single-parent subsets/expansion in parent order; POST HITS requires singleton
+identity lineage. POST TABLE aggregate supports multi-source lineage.
 
 Wheel factories use the `milvus.pyudf` entry point and receive initialization
 context. Runtime 0.2 adds a separate, immutable `PyUDFCallContext` for each
@@ -306,7 +320,9 @@ reject PyUDF and have no Python supervisor integration. Worker-level tests for
 the three rerank stage names verify the common contract, not QueryNode execution.
 
 `context.original_queries` and `context.queries` each contain one input per ANN
-subrequest (one for ordinary Search). `values[i]` belongs to query index `i`.
+subrequest (one for ordinary Search). Original `values[i]` belongs to original
+query index `i`; prepared `values[i]` belongs to prepared index `i` within its
+ANN input. `query_origins` maps the latter back to the former.
 Original values are captured before PRE; prepared values are captured after
 PRE and before native query embedding/conversion. VarChar values become Python
 strings. Vector values retain their original bytes with the PlaceholderType
@@ -315,13 +331,15 @@ the first ANN input as an implicit canonical query.
 PRE itself sees its stage-entry snapshot in context; intermediate query values
 are read from its input columns.
 
-For rerank, each group receives its zero-based `query_index`, even if an earlier
-query has zero hits. For POST, `batches[i]` is the tuple of selected Arrow input
-columns for query `i`, including typed empty arrays. `result_offsets` describes
-the same groups as cumulative row counts. This representation avoids copying
-all candidate arrays into a concatenated buffer. POST returns one sequence of
-output arrays per input group, preserving group/row counts and identity. Merely
-receiving all groups does not enable aggregate/reduce output cardinality.
+For rerank, each group receives its zero-based prepared `query_index`, even if
+an earlier query has zero hits; `original_query_index` identifies its original
+parent when unambiguous. For POST, `batches[i]` is the tuple of selected Arrow
+columns for current group `i`, including typed empty arrays. Expanded TABLE
+groups use explicit source columns rather than indexing original snapshots by
+group number. `result_offsets` describes the same groups as cumulative row
+counts. This representation avoids copying all candidate arrays into a
+concatenated buffer. POST map preserves group/row counts; TABLE aggregate
+returns one row per current group. HITS always preserves identity/cardinality.
 
 Existing two-argument INGESTION/PRE/L2 methods remain callable; a method that
 accepts the `context` keyword receives it. Signature selection precedes the
@@ -329,10 +347,13 @@ user call, so a TypeError in its body never causes a second invocation. POST
 wheels must implement `transform_batch` for the new execution contract.
 Arrays retain one outer value per input row; native FlatMap owns expansion.
 
-The internal worker request uses execution version 2 and includes query
-metadata outside user-controlled params. A successful response must acknowledge
-version 2; an old worker cannot silently return legacy per-query POST output.
-New workers retain the execution-version-0 path for old clients. Query metadata
+The internal worker request includes query metadata outside user-controlled
+params. Legacy batch context uses version 2, TABLE uses version 3, complete
+Arrow schemas use version 4, expanded origin/row context uses version 5, and
+request scope/log labels use version 6.
+A successful response must acknowledge the exact requested version; an old
+worker cannot silently discard a new contract. New workers retain legacy
+execution paths for old clients. Query metadata
 count/type failures are internal contract errors at the worker; malformed
 original client query payloads are rejected as input errors by Proxy first.
 This metadata transports query snapshots only; it does not export arbitrary
@@ -347,10 +368,10 @@ sandbox or a dedicated expansion-ratio limit.
 
 ### Multi-row aggregation
 
-The default HITS contract has no aggregate/reduce. Its merge fuses recall paths
+The default HITS contract has no aggregate. Its merge fuses recall paths
 for candidate identities, and rerank group_by retains member hits. The
 [POST TABLE extension](20261011-function-chain-post-tables.md) adds native
-aggregate and UDF reduce with multi-source lineage and independent output
+and custom UDF aggregate with multi-source lineage and independent output
 schemas. Cross-request aggregation with state, windows and checkpoints remains
 outside these finite-request pipelines.
 

@@ -961,6 +961,7 @@ func serializeAggHitFields(fields map[int64]interface{}, fieldIDToName map[int64
 }
 
 type rerankOperator struct {
+	requestContext   chaintypes.RequestContext
 	queryContext     *chaintypes.QueryContext
 	nq               int64
 	topK             int64
@@ -1022,6 +1023,7 @@ func newRerankOperator(t *SearchTask, params map[string]any) (operator, error) {
 			})
 		}
 		return &rerankOperator{
+			requestContext:   t.functionRequestScope(t.ctx),
 			queryContext:     t.queryContext,
 			nq:               t.GetNq(),
 			topK:             t.rankParams.limit,
@@ -1037,6 +1039,7 @@ func newRerankOperator(t *SearchTask, params map[string]any) (operator, error) {
 		}, nil
 	}
 	return &rerankOperator{
+		requestContext:   t.functionRequestScope(t.ctx),
 		queryContext:     t.queryContext,
 		nq:               t.GetNq(),
 		topK:             t.GetTopk(),
@@ -1079,6 +1082,9 @@ func buildChainFromMeta(
 }
 
 func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	if op.requestContext != (chaintypes.RequestContext{}) {
+		ctx = chaintypes.WithRequestContext(ctx, op.requestContext)
+	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "rerankOperator")
 	defer sp.End()
 

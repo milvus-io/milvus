@@ -233,7 +233,7 @@ func normalizeOperatorInputDataTypes(op *OperatorRepr) error {
 
 func isRuntimeFunctionChainInput(name string) bool {
 	switch name {
-	case types.IDFieldName, types.ScoreFieldName, types.ElementIndicesFieldName, types.QueryIndexFieldName, types.ANNIndexFieldName:
+	case types.IDFieldName, types.ScoreFieldName, types.ElementIndicesFieldName, types.QueryIndexFieldName, types.SubqueryIndexFieldName, types.ANNIndexFieldName:
 		return true
 	default:
 		return strings.HasPrefix(name, types.GroupByFieldName+"_")

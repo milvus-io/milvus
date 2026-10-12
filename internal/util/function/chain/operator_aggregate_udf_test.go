@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func reduceTestFrame(t *testing.T, alloc memory.Allocator, chunks ...[]int64) *DataFrame {
+func udfAggregateTestFrame(t *testing.T, alloc memory.Allocator, chunks ...[]int64) *DataFrame {
 	t.Helper()
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
@@ -48,7 +48,7 @@ func reduceTestFrame(t *testing.T, alloc memory.Allocator, chunks ...[]int64) *D
 	return builder.Build()
 }
 
-func TestReduceTableGroupingAndEmptySchema(t *testing.T) {
+func TestUDFAggregateTableGroupingAndEmptySchema(t *testing.T) {
 	for _, keyed := range []bool{false, true} {
 		for _, empty := range []bool{false, true} {
 			t.Run(map[bool]string{true: "keyed", false: "global"}[keyed]+map[bool]string{true: "empty", false: "rows"}[empty], func(t *testing.T) {
@@ -58,10 +58,10 @@ func TestReduceTableGroupingAndEmptySchema(t *testing.T) {
 				if empty {
 					values = nil
 				}
-				input := reduceTestFrame(t, alloc, values, nil)
+				input := udfAggregateTestFrame(t, alloc, values, nil)
 				defer input.Release()
 				calls := 0
-				fn := &operatorTransformExpr{name: "test_reduce", stages: []string{types.StagePostProcess}, execute: func(ctx *types.FuncContext, columns []*arrow.Chunked) ([]*arrow.Chunked, error) {
+				fn := &operatorTransformExpr{name: "test_udf_aggregate", stages: []string{types.StagePostProcess}, execute: func(ctx *types.FuncContext, columns []*arrow.Chunked) ([]*arrow.Chunked, error) {
 					calls++
 					require.True(t, ctx.Reduction())
 					require.True(t, ctx.TableResult())
@@ -78,7 +78,7 @@ func TestReduceTableGroupingAndEmptySchema(t *testing.T) {
 					}
 					return []*arrow.Chunked{result}, nil
 				}}
-				op := &ReduceOp{BaseOp: BaseOp{inputs: []string{"key"}, outputs: []string{"count"}}, function: fn}
+				op := &AggregateOp{BaseOp: BaseOp{inputs: []string{"key"}, outputs: []string{"count"}}, function: fn}
 				if keyed {
 					op.keys = []string{"key"}
 					op.inputs = []string{"key", "key"}
@@ -111,18 +111,18 @@ func TestReduceTableGroupingAndEmptySchema(t *testing.T) {
 	}
 }
 
-func TestReduceRejectsMalformedOutputAndCancellation(t *testing.T) {
+func TestUDFAggregateRejectsMalformedOutputAndCancellation(t *testing.T) {
 	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer alloc.AssertSize(t, 0)
-	input := reduceTestFrame(t, alloc, []int64{1, 2})
+	input := udfAggregateTestFrame(t, alloc, []int64{1, 2})
 	defer input.Release()
 	calls := 0
-	fn := &operatorTransformExpr{name: "test_reduce", stages: []string{types.StagePostProcess}, execute: func(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
+	fn := &operatorTransformExpr{name: "test_udf_aggregate", stages: []string{types.StagePostProcess}, execute: func(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 		calls++
 		inputs[0].Retain()
 		return []*arrow.Chunked{inputs[0]}, nil
 	}}
-	op := &ReduceOp{BaseOp: BaseOp{inputs: []string{"key"}, outputs: []string{"count"}}, function: fn}
+	op := &AggregateOp{BaseOp: BaseOp{inputs: []string{"key"}, outputs: []string{"count"}}, function: fn}
 	ctx := types.NewFuncContextFull(context.Background(), alloc, types.StagePostProcess).WithTableResult(true)
 	result, err := op.Execute(ctx, input)
 	require.ErrorIs(t, err, merr.ErrFunctionFailed)

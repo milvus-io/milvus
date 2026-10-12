@@ -55,7 +55,7 @@ func source(group int, row int64) RowLineage {
 }
 
 func TestPostTablePermitsCrossQuerySourcesAndEmptyAggregate(t *testing.T) {
-	plan, err := PostTable("summary", &schemapb.FunctionChainOp{Op: "concat"})
+	plan, err := PostTable("summary", &schemapb.FunctionChainOp{Op: "union_all"})
 	require.NoError(t, err)
 	input := Batch{Groups: []arrow.Table{testTable(t, []int64{1, 2}), testTable(t, []int64{3})}}
 	result := Result{Data: Batch{Groups: []arrow.Table{testTable(t, []int64{6})}}, Lineage: [][]RowLineage{{{{Group: 0, Row: 0}, {Group: 0, Row: 1}, {Group: 1, Row: 0}}}}}
@@ -79,8 +79,8 @@ func TestExpansionAndLogicalGroups(t *testing.T) {
 		},
 	}
 	require.NoError(t, ValidateResult(schemapb.FunctionChainStage_FunctionChainStageIngestion, input, result))
+	require.NoError(t, ValidateResult(schemapb.FunctionChainStage_FunctionChainStagePreProcess, input, result))
 	for _, stage := range []schemapb.FunctionChainStage{
-		schemapb.FunctionChainStage_FunctionChainStagePreProcess,
 		schemapb.FunctionChainStage_FunctionChainStagePostProcess,
 	} {
 		err := ValidateResult(stage, input, result)

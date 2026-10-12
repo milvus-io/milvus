@@ -30,6 +30,9 @@ class MilvusFormatter(logging.Formatter):
         level = "WARN" if record.levelno == logging.WARNING else record.levelname
         message = json.dumps(record.getMessage(), ensure_ascii=False)
         line = f"[{date}] [{level}] [PyUDF] [{record.filename}:{record.lineno}] [{message}] [pid={record.process}]"
+        for key in ("database", "collection", "user", "resource_name"):
+            if hasattr(record, key):
+                line += f" [{key}=" + json.dumps(getattr(record, key), ensure_ascii=False) + "]"
         if record.exc_info:
             line += " [stack=" + json.dumps(self.formatException(record.exc_info), ensure_ascii=False) + "]"
         if record.stack_info:

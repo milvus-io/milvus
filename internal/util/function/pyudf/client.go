@@ -32,18 +32,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ExecuteRequest borrows Inputs, Params and QueryContext during Execute. Each
+// ExecuteRequest borrows Inputs, Params, QueryContext and RequestContext during Execute. Each
 // input column has one chunk per query, including queries with zero rows.
 type ExecuteRequest struct {
-	ResourceName string
-	UDFPath      string
-	Stage        string
-	Params       *schemapb.FunctionParamObject
-	Inputs       []*arrow.Chunked
-	InputSchema  *arrow.Schema
-	QueryContext *types.QueryContext
-	TableResult  bool
-	Reduction    bool
+	ResourceName   string
+	UDFPath        string
+	Stage          string
+	Params         *schemapb.FunctionParamObject
+	Inputs         []*arrow.Chunked
+	InputSchema    *arrow.Schema
+	QueryContext   *types.QueryContext
+	RequestContext *types.RequestContext
+	TableResult    bool
+	Reduction      bool
 }
 
 // executionVersion requires query context and one-call POST batch semantics.
@@ -53,6 +54,12 @@ const tableExecutionVersion uint32 = 3
 
 // Schema-aware calls require fields/nullability/logical metadata to survive IPC.
 const schemaExecutionVersion uint32 = 4
+
+// Expanded-query calls retain schema-v4 semantics and require provenance support.
+const queryExpansionExecutionVersion uint32 = 5
+
+// Request scope is host-owned and must never be silently ignored by a worker.
+const requestContextExecutionVersion uint32 = 6
 
 // Client owns the process's fixed worker connections. Concurrent Execute calls
 // share these connections without a queue, admission limit or business retries.

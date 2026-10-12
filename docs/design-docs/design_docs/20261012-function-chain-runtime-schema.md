@@ -46,7 +46,7 @@ ordinary unsigned and temporal/decimal Arrow scalars independently of storage.
 
 ## Operator consistency
 
-Map, filter, select, sort, rerank group_by, aggregate and reduce share column
+Map, filter, select, sort, rerank group_by and aggregate share column
 resolution. Exact names precede dotted/quoted Struct path interpretation.
 Parent null masks propagate to projected child schema and validity. Invalid
 explicit tie-break fields fail rather than being ignored. Legacy parameter-based
@@ -55,9 +55,14 @@ group_by/sort dependencies are included before requery planning and pruning.
 Sort, grouping and MIN/MAX share comparison type checks. Encoded
 JSON/Geometry/Mol/Decimal/vector values are rejected as comparison operands;
 UUID comparison uses bytes. SUM/AVG reject logical Date/Time/Timestamptz
-integers. COUNT/FIRST/LAST/COLLECT_LIST and reduction preserve supported complex
-payloads. Existing floating NaN/score policies are unchanged; the historical
-rerank score-contract question remains separate.
+integers. COUNT/FIRST/LAST/COLLECT_LIST and custom aggregation preserve supported
+complex payloads. After validating a function's declared and runtime output,
+non-TABLE Map normalizes numeric `$score` outputs to Float32 before downstream
+ranking and export. The cast preserves groups, NULL validity and user metadata,
+while rebinding the score's physical and Milvus logical schemas together.
+Ordinary payload columns and independent TABLE outputs keep their original types;
+TABLE cannot rewrite reserved system columns. Intermediate NaN/Inf and final score
+validity policies remain a separate, unresolved rerank contract.
 
 FIRST/LAST/MIN/MAX preserve source types; COLLECT_LIST preserves element
 metadata; EXPLODE transfers it to extracted rows. Generated/aliased fields
@@ -69,11 +74,18 @@ before allocating IDs or appending to WAL.
 
 ## Python transport
 
-Runtime 0.4.0 adds execution version 4. Schema-aware calls require exact worker
+Runtime 0.4.0 adds execution version 4. The
+[query expansion extension](20261012-function-chain-query-expansion.md) adds
+runtime 0.5.0/version 5 for query-origin and PRE-row mappings, preserving the
+same complete schema transport. Schema-aware calls require exact worker
 acknowledgement so an old worker cannot silently drop metadata. Versions 0/2/3
 and existing array signatures remain supported; public protobuf fields are
 unchanged. `context.input_schema` describes selected positional arguments,
 including repeated references.
+
+The [minimal call-context extension](20261012-function-chain-call-context.md)
+uses runtime 0.6.0/version 6 when host request scope is attached, retaining
+complete Arrow schemas and expanded query provenance.
 
 A UDF can return an array sequence or a self-describing `pyarrow.RecordBatch` /
 `Table`. POST still returns one result per current input group. Complete schemas,
@@ -95,7 +107,7 @@ def transform_batch(self, params, batches, *, context):
 Tests cover every protocol enum, complex/vector wire round-trips, NULL parent
 masks, empty groups, invalid metadata/type/dimension bindings, real gRPC schema
 transport and old-worker acknowledgements. Combinations include aggregate →
-collect → explode → sort → select, dynamic map aliases and reduce, with checked
-Arrow allocation cleanup and lineage. The delivery report records final
+collect → explode → sort → select, dynamic map aliases and custom aggregation,
+with checked Arrow allocation cleanup and lineage. The delivery report records final
 package/race and installed-worker results. Historical repository-wide C++
 prerequisite failures are not evidence of a passing repository-wide Go gate.

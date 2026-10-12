@@ -12,8 +12,10 @@
 package common
 
 const (
-	FunctionChainTransformVersionKey = "function_chain_transform_version"
-	FunctionChainTransformVersion    = "1"
-	FunctionChainPostTableVersionKey = "function_chain_post_table_version"
-	FunctionChainPostTableVersion    = "1"
+	FunctionChainTransformVersionKey         = "function_chain_transform_version"
+	FunctionChainTransformVersion            = "1"
+	FunctionChainPostTableVersionKey         = "function_chain_post_table_version"
+	FunctionChainPostTableVersion            = "1"
+	FunctionChainPreQueryExpansionVersionKey = "function_chain_pre_query_expansion_version"
+	FunctionChainPreQueryExpansionVersion    = "1"
 )

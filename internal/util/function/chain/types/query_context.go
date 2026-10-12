@@ -20,14 +20,19 @@ import "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
 // QueryContext is an immutable snapshot of the search inputs. Each entry is an
 // ANN input (one for ordinary Search, one per subrequest for HybridSearch), and
-// Values[i] belongs to query i. OriginalQueries holds the pre-PRE request
+// OriginalQueries holds the pre-PRE request
 // payload. Queries is the stage-entry payload for PRE, and the final PRE output
 // before native embedding for L2/POST.
 // Adapters own the protos. Expressions must neither mutate nor retain them.
-// Candidate group i at L0/L1/L2 and POST refers to the same query index i.
+// QueryOrigins[ann][i] identifies the original query of prepared query i. A nil
+// mapping means identity. ANN branches can have different prepared counts.
+// During PRE, Queries remains the stage-entry snapshot; RowQueryOrigins follows
+// the current operator's rows independently of that snapshot.
 type QueryContext struct {
 	OriginalQueries []*commonpb.PlaceholderValue
 	Queries         []*commonpb.PlaceholderValue
+	QueryOrigins    [][]int64
+	RowQueryOrigins []int64
 }
 
 // WithQueryContext returns a per-execution context without mutating the caller.

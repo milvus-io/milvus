@@ -129,16 +129,16 @@ func TestSearchPostTableCrossNQCountAndEmptyGroups(t *testing.T) {
 	for _, test := range []struct {
 		name        string
 		topks, want []int64
-		concat      bool
+		unionAll    bool
 	}{
 		{name: "per query", topks: []int64{2, 0, 1}, want: []int64{2, 0, 1}},
-		{name: "cross query", topks: []int64{2, 0, 1}, concat: true, want: []int64{3}},
-		{name: "all empty", topks: []int64{0, 0, 0}, concat: true, want: []int64{0}},
+		{name: "cross query", topks: []int64{2, 0, 1}, unionAll: true, want: []int64{3}},
+		{name: "all empty", topks: []int64{0, 0, 0}, unionAll: true, want: []int64{0}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ops := []*schemapb.FunctionChainOp{postTableCountOp()}
-			if test.concat {
-				ops = append([]*schemapb.FunctionChainOp{{Op: "concat"}}, ops...)
+			if test.unionAll {
+				ops = append([]*schemapb.FunctionChainOp{{Op: "union_all"}}, ops...)
 			}
 			plan := postTableTestPlan(t, false, ops...)
 			task := transformTestTask(&milvuspb.SearchRequest{Nq: int64(len(test.topks)), FunctionChains: []*schemapb.FunctionChain{plan}})
@@ -211,7 +211,7 @@ func postTableHybridSource(t *testing.T) []*internalpb.SearchResults {
 }
 
 func TestHybridANNPostTableFetchesEveryCandidateOnceAndKeepsScores(t *testing.T) {
-	plan := postTableTestPlan(t, true, &schemapb.FunctionChainOp{Op: "concat"},
+	plan := postTableTestPlan(t, true, &schemapb.FunctionChainOp{Op: "union_all"},
 		transformTestSelect(t, "tag", types.IDFieldName, types.ScoreFieldName, postQueryIndexColumn, postANNIndexColumn))
 	task := postTableHybridTask(t, plan)
 	task.needRequery = true
@@ -283,7 +283,7 @@ func TestPostTableModeRejectsIncompatibleRequestsBeforeExecution(t *testing.T) {
 }
 
 func TestHybridFusedPostTableKeepsL2LimitBeforeAggregation(t *testing.T) {
-	plan := postTableTestPlan(t, false, &schemapb.FunctionChainOp{Op: "concat"}, postTableCountOp())
+	plan := postTableTestPlan(t, false, &schemapb.FunctionChainOp{Op: "union_all"}, postTableCountOp())
 	task := postTableHybridTask(t, plan)
 	task.request.FunctionChains = append(task.request.FunctionChains, l2FunctionChain(
 		&schemapb.FunctionChainOp{Op: types.OpTypeMerge, Params: map[string]*schemapb.FunctionParamValue{"strategy": chainStringParam("rrf")}},

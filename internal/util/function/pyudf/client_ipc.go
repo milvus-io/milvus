@@ -353,33 +353,111 @@ func encodeExecuteRequest(ctx context.Context, request ExecuteRequest) (*pyudfpb
 	}
 	wire.Inputs = payload
 	if request.QueryContext != nil {
-		nq := len(request.Inputs[0].Chunks())
-		if request.TableResult {
-			nq = 0
-			if len(request.QueryContext.OriginalQueries) != 0 {
-				nq = len(request.QueryContext.OriginalQueries[0].GetValues())
-			}
-		} else if strings.EqualFold(request.Stage, "pre_process") {
-			if nq != 1 {
-				return nil, merr.WrapErrServiceInternal("py_udf: PRE requires one query-row group")
-			}
-			nq = request.Inputs[0].Chunk(0).Len()
-		}
-		original, err := encodeQueryInputs(request.QueryContext.OriginalQueries, nq)
+		queryContext, expanded, err := encodeRequestQueryContext(request)
 		if err != nil {
 			return nil, err
 		}
-		prepared, err := encodeQueryInputs(request.QueryContext.Queries, nq)
-		if err != nil {
-			return nil, err
+		wire.QueryContext = queryContext
+		if expanded {
+			wire.ExecutionVersion = queryExpansionExecutionVersion
 		}
-		if len(original) != len(prepared) || len(original) == 0 && !request.TableResult {
-			return nil, merr.WrapErrServiceInternal("py_udf: query context ANN inputs do not align")
+	}
+	if request.RequestContext != nil {
+		scope := *request.RequestContext
+		wire.RequestContext = &pyudfpb.RequestContext{
+			Database: scope.Database, Collection: scope.Collection,
+			User: scope.User, ResourceName: scope.ResourceName,
 		}
-		wire.QueryContext = &pyudfpb.QueryContext{OriginalQueries: original, Queries: prepared}
+		wire.ExecutionVersion = requestContextExecutionVersion
 	}
 
 	return wire, nil
+}
+
+func encodeRequestQueryContext(request ExecuteRequest) (*pyudfpb.QueryContext, bool, error) {
+	queries := request.QueryContext
+	if len(queries.OriginalQueries) != len(queries.Queries) || len(queries.Queries) == 0 && !request.TableResult {
+		return nil, false, merr.WrapErrServiceInternal("py_udf: query context ANN inputs do not align")
+	}
+	originalCount := 0
+	if len(queries.OriginalQueries) > 0 {
+		originalCount = len(queries.OriginalQueries[0].GetValues())
+	}
+	original, err := encodeQueryInputs(queries.OriginalQueries, originalCount)
+	if err != nil {
+		return nil, false, err
+	}
+	if queries.QueryOrigins != nil && len(queries.QueryOrigins) != len(queries.Queries) {
+		return nil, false, merr.WrapErrServiceInternal("py_udf: prepared query mappings do not align with ANN inputs")
+	}
+	prepared := make([]*pyudfpb.QueryInput, len(queries.Queries))
+	expanded := false
+	for ann, input := range queries.Queries {
+		values, err := encodeQueryInputs([]*commonpb.PlaceholderValue{input}, len(input.GetValues()))
+		if err != nil {
+			return nil, false, err
+		}
+		prepared[ann] = values[0]
+		origins := []int64(nil)
+		if queries.QueryOrigins != nil {
+			origins = queries.QueryOrigins[ann]
+		}
+		if origins == nil {
+			if len(input.GetValues()) != originalCount {
+				return nil, false, merr.WrapErrServiceInternal("py_udf: prepared query count changed without a mapping")
+			}
+			continue
+		}
+		if err := validateQueryOrigins(origins, len(input.GetValues()), originalCount); err != nil {
+			return nil, false, err
+		}
+		identity := len(origins) == originalCount
+		for query, origin := range origins {
+			identity = identity && origin == int64(query)
+		}
+		if !identity {
+			prepared[ann].OriginalQueryIndices = origins
+			expanded = true
+		}
+	}
+	rowOrigins := queries.RowQueryOrigins
+	if strings.EqualFold(request.Stage, types.StagePreProcess) {
+		if len(request.Inputs[0].Chunks()) != 1 {
+			return nil, false, merr.WrapErrServiceInternal("py_udf: PRE requires one query-row group")
+		}
+		rows := request.Inputs[0].Chunk(0).Len()
+		if rowOrigins != nil {
+			if err := validateQueryOrigins(rowOrigins, rows, originalCount); err != nil {
+				return nil, false, err
+			}
+			expanded = true
+		} else if rows != originalCount {
+			return nil, false, merr.WrapErrServiceInternal("py_udf: PRE row count changed without row query origins")
+		}
+	} else if rowOrigins != nil {
+		return nil, false, merr.WrapErrServiceInternal("py_udf: current row query origins require PRE")
+	} else if !request.TableResult {
+		for _, input := range prepared {
+			if len(input.Values) != len(request.Inputs[0].Chunks()) {
+				return nil, false, merr.WrapErrServiceInternal("py_udf: prepared query count differs from candidate groups")
+			}
+		}
+	}
+	return &pyudfpb.QueryContext{OriginalQueries: original, Queries: prepared, RowQueryOrigins: rowOrigins}, expanded, nil
+}
+
+func validateQueryOrigins(origins []int64, rows, originalCount int) error {
+	if len(origins) != rows {
+		return merr.WrapErrServiceInternal("py_udf: query mapping count differs from prepared rows")
+	}
+	previous := int64(-1)
+	for _, origin := range origins {
+		if origin < 0 || origin >= int64(originalCount) || origin < previous {
+			return merr.WrapErrServiceInternal("py_udf: query mapping has invalid bounds or parent order")
+		}
+		previous = origin
+	}
+	return nil
 }
 
 func encodeQueryInputs(inputs []*commonpb.PlaceholderValue, nq int) ([]*pyudfpb.QueryInput, error) {

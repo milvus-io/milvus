@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/requestcontext"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/chain/transform"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
@@ -46,8 +47,9 @@ import (
 )
 
 const (
-	postQueryIndexColumn = "$query_index"
-	postANNIndexColumn   = "$ann_index"
+	postQueryIndexColumn    = "$query_index"
+	postSubqueryIndexColumn = "$subquery_index"
+	postANNIndexColumn      = "$ann_index"
 )
 
 func (t *SearchTask) hasPostTable() bool {
@@ -83,7 +85,7 @@ func validatePostTableSearchOptions(request *milvuspb.SearchRequest) error {
 	return nil
 }
 
-// buildPostTableInput creates one typed group per original NQ, including empty
+// buildPostTableInput creates one typed group per prepared NQ, including empty
 // groups. The source result remains owned by the search pipeline. TABLE has no
 // hit-shaped export and therefore converts only declared inputs and provenance.
 func (t *SearchTask) buildPostTableInput(ctx context.Context, result *milvuspb.SearchResults, annIndex int64, query bool) (transform.Batch, error) {
@@ -95,7 +97,21 @@ func (t *SearchTask) buildPostTableInput(ctx context.Context, result *milvuspb.S
 	}
 	result = proto.Clone(result).(*milvuspb.SearchResults)
 	data := result.GetResults()
-	if int64(len(data.GetTopks())) != t.GetNq() {
+	nq := t.GetNq()
+	branch := 0
+	if annIndex >= 0 {
+		branch = int(annIndex)
+		if branch >= len(t.request.GetSubReqs()) {
+			return transform.Batch{}, merr.WrapErrServiceInternalMsg("POST TABLE ANN input index %d is out of bounds", annIndex)
+		}
+		nq = t.request.GetSubReqs()[branch].GetNq()
+		if nq == 0 {
+			// Existing pipeline tests and legacy clients may leave client-side
+			// branch NQ implicit. The checked task NQ remains authoritative.
+			nq = t.GetNq()
+		}
+	}
+	if int64(len(data.GetTopks())) != nq {
 		return transform.Batch{}, merr.WrapErrServiceInternalMsg("POST TABLE query boundaries do not match source NQ")
 	}
 	rows := int64(0)
@@ -150,19 +166,35 @@ func (t *SearchTask) buildPostTableInput(ctx context.Context, result *milvuspb.S
 		})
 	}
 	queryIndexes := make([]int64, 0, rows)
+	subqueryIndexes := make([]int64, 0, rows)
 	annIndexes := make([]int64, 0, rows)
+	var origins []int64
+	if branch < len(t.preQueryOrigins) {
+		origins = t.preQueryOrigins[branch]
+		if int64(len(origins)) != nq {
+			return transform.Batch{}, merr.WrapErrServiceInternalMsg("POST TABLE query origins do not match prepared NQ")
+		}
+	}
 	for q, count := range data.GetTopks() {
 		queryIndex := int64(q)
+		subqueryIndex := int64(q)
+		if origins != nil {
+			queryIndex = origins[q]
+		}
 		if query {
 			queryIndex = -1
+			subqueryIndex = -1
 		}
 		for row := int64(0); row < count; row++ {
 			queryIndexes, annIndexes = append(queryIndexes, queryIndex), append(annIndexes, annIndex)
+			subqueryIndexes = append(subqueryIndexes, subqueryIndex)
 		}
 	}
-	for index, name := range []string{postQueryIndexColumn, postANNIndexColumn} {
+	for index, name := range []string{postQueryIndexColumn, postSubqueryIndexColumn, postANNIndexColumn} {
 		values := queryIndexes
 		if index == 1 {
+			values = subqueryIndexes
+		} else if index == 2 {
 			values = annIndexes
 		}
 		chainFields = append(chainFields, &schemapb.FieldData{
@@ -437,6 +469,7 @@ func newANNInputTablePipeline(t *SearchTask) (*pipeline, error) {
 		name: "ann_post_table", inputs: []string{"reduced", pipelineStorageCost},
 		outputs: []string{pipelineOutput, pipelineStorageCost}, opName: lambdaOp,
 		params: map[string]any{lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			ctx = t.withFunctionRequestScope(ctx)
 			candidates := inputs[0].([]*milvuspb.SearchResults)
 			t.tableAllSearchCount = aggregatedAllSearchCount(candidates)
 			cost := inputs[1].(segcore.StorageCost)
@@ -574,6 +607,15 @@ func postTableDynamicFields(meta *searchTransformMeta) []string {
 }
 
 func (t *QueryTask) executeQueryPostProcess(ctx context.Context) error {
+	database := t.functionDBName
+	if database == "" {
+		database = t.request.GetDbName()
+	}
+	collection := t.schema.GetName()
+	if collection == "" {
+		collection = t.request.GetCollectionName()
+	}
+	ctx = requestcontext.WithFunctionScope(ctx, database, collection)
 	pk, err := t.schema.GetPkField()
 	if err != nil {
 		return err

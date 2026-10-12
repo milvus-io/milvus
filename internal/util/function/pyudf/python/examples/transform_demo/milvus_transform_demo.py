@@ -7,8 +7,23 @@ def vector(text):
     return [float(len(text)), 1.0]
 
 
+def check_context(params, context):
+    expected = params.get("expected_context")
+    if expected is None:
+        return
+    if context is None or not context.resource_name:
+        raise ValueError("request scope and operator resource_name are required")
+    for name, value in expected.items():
+        if name not in ("database", "collection", "user", "resource_name"):
+            raise ValueError(f"unknown expected context field: {name}")
+        if getattr(context, name) != value:
+            raise ValueError(f"request context field {name} does not match")
+    context.logger.info("validated demo request scope")
+
+
 class Ingestion:
-    def transform(self, params, columns):
+    def transform(self, params, columns, *, context=None):
+        check_context(params, context)
         rows = []
         for value in columns[0]:
             text = value.as_py()
@@ -39,7 +54,15 @@ class Ingestion:
 
 class Query:
     def transform_query(self, params, columns, *, context):
+        check_context(params, context)
         mode = params.get("mode", "embedding")
+        if mode == "expand_queries":
+            return [
+                pa.array(
+                    [[part for part in (value.as_py() or "").split("|") if part] for value in columns[0]],
+                    type=pa.list_(pa.string()),
+                )
+            ]
         if mode == "embedding":
             return [pa.array([vector(value.as_py()) for value in columns[0]], type=pa.list_(pa.float32(), 2))]
         if mode == "translation":
@@ -50,7 +73,10 @@ class Query:
                 )
             ]
         if mode == "rerank":
-            query = context.original_queries[0].values[context.query_index]
+            index = context.original_query_index
+            if index is None:
+                raise ValueError("rerank demo requires an unambiguous original query index")
+            query = context.original_queries[0].values[index]
             preferred = {"hello": "alpha", "world": "gamma"}.get(query)
             return [pa.array([1.0 if value.as_py() == preferred else 0.1 for value in columns[0]], type=pa.float32())]
         raise ValueError(f"unsupported query mode: {mode}")
@@ -58,9 +84,18 @@ class Query:
 
 class PostProcess:
     def transform_batch(self, params, batches, *, context):
+        check_context(params, context)
+        if params.get("mode") == "context":
+            fields = ("database", "collection", "user", "resource_name")
+            output_type = pa.struct([(name, pa.string()) for name in fields])
+            value = {name: getattr(context, name) for name in fields}
+            return [
+                [pa.array([value] * (1 if context.reduction else len(columns[0])), type=output_type)]
+                for columns in batches
+            ]
         if params.get("mode") == "summary":
             if not context.table_result or not context.reduction:
-                raise ValueError("summary requires a POST TABLE reduce operator")
+                raise ValueError("summary requires a POST TABLE aggregate operator")
             output_type = pa.struct(
                 [("texts", pa.list_(pa.string())), ("count", pa.int64()), ("query_count", pa.int64())]
             )
@@ -90,6 +125,8 @@ class PostProcess:
                 for columns in batches
             ]
         total_hits = sum(len(columns[0]) for columns in batches)
+        if context.table_result:
+            raise ValueError("highlight demo requires HITS; TABLE UDFs must use query provenance columns")
         output_type = pa.struct(
             [
                 ("text", pa.string()),

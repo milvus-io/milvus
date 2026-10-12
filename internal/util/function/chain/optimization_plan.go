@@ -102,6 +102,7 @@ type ExecuteOptions struct {
 	EnableColumnPruning bool
 	EnableParallel      bool // reserved for future schedule support
 	QueryContext        *types.QueryContext
+	OutputRowLimit      int64
 
 	Downstream         DownstreamSpec
 	SystemColumnPolicy SystemColumnPolicy

@@ -66,7 +66,7 @@ func TestHybridANNPostTableEntireEmptyBranchHasTypedStoredFields(t *testing.T) {
 		{name: "all empty", emptyFirst: true, emptySecond: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			plan := postTableTestPlan(t, true, &schemapb.FunctionChainOp{Op: "concat"},
+			plan := postTableTestPlan(t, true, &schemapb.FunctionChainOp{Op: "union_all"},
 				transformTestSelect(t, "tag", "tags", "metadata", "sections", postANNIndexColumn))
 			task := postTableHybridTask(t, plan, mustNewSchemaInfo(schema))
 			task.needRequery = true

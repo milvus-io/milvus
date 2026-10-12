@@ -27,50 +27,38 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ReduceOp invokes a UDF once with all key groups. The UDF returns one row
-// per group; native code owns key projection and the many-source lineage.
-type ReduceOp struct {
-	BaseOp
-	keys     []string
-	function types.FunctionExpr
-}
-
-func init() { MustRegisterOperator("reduce", NewReduceOpFromReprWithContext) }
-
-func (o *ReduceOp) Name() string                   { return "Reduce" }
-func (o *ReduceOp) String() string                 { return "Reduce(" + o.function.Name() + ")" }
-func (o *ReduceOp) Expression() types.FunctionExpr { return o.function }
-
-func NewReduceOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error) {
+// Custom aggregation uses the same public operator as native specifications.
+// Its UDF returns one row per key group; native code owns keys and lineage.
+func newUDFAggregateOpFromRepr(repr *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error) {
 	if repr == nil || repr.Function == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("reduce requires an expression")
+		return nil, merr.WrapErrParameterInvalidMsg("custom aggregate requires an expression")
 	}
 	for key := range repr.Params {
 		if key != "keys" {
-			return nil, merr.WrapErrParameterInvalidMsg("reduce: unsupported parameter %q", key)
+			return nil, merr.WrapErrParameterInvalidMsg("custom aggregate: unsupported parameter %q", key)
 		}
 	}
-	keys, err := types.NewParamReader("reduce", repr.Params).StringSlice("keys", false)
+	keys, err := types.NewParamReader("aggregate", repr.Params).StringSlice("keys", false)
 	if err != nil {
 		return nil, err
 	}
 	if len(repr.Inputs) <= len(keys) || len(repr.Outputs) <= len(keys) {
-		return nil, merr.WrapErrParameterInvalidMsg("reduce requires expression inputs and output aliases after group keys")
+		return nil, merr.WrapErrParameterInvalidMsg("custom aggregate requires expression inputs and output aliases after group keys")
 	}
 	seen := make(map[string]bool)
 	for i, key := range keys {
 		if strings.TrimSpace(key) == "" || seen[key] || repr.Inputs[i] != key {
-			return nil, merr.WrapErrParameterInvalidMsg("reduce keys must be unique and align with input columns")
+			return nil, merr.WrapErrParameterInvalidMsg("aggregate keys must be unique and align with input columns")
 		}
 		seen[key] = true
 	}
 	seen = make(map[string]bool)
 	for i, name := range repr.Outputs {
 		if strings.TrimSpace(name) == "" || seen[name] {
-			return nil, merr.WrapErrParameterInvalidMsg("reduce outputs must be non-empty and unique")
+			return nil, merr.WrapErrParameterInvalidMsg("aggregate outputs must be non-empty and unique")
 		}
 		if strings.HasPrefix(name, "$") && (i >= len(keys) || name != keys[i]) {
-			return nil, merr.WrapErrParameterInvalidMsg("reduce cannot write reserved output %q", name)
+			return nil, merr.WrapErrParameterInvalidMsg("aggregate cannot write reserved output %q", name)
 		}
 		seen[name] = true
 	}
@@ -82,13 +70,10 @@ func NewReduceOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionB
 	if !ok || !capability.SupportsReduction() {
 		return nil, merr.WrapErrParameterInvalidMsg("function %q does not support reduction", function.Name())
 	}
-	return &ReduceOp{BaseOp: BaseOp{inputs: repr.Inputs, outputs: repr.Outputs}, keys: keys, function: function}, nil
+	return &AggregateOp{BaseOp: BaseOp{inputs: append([]string(nil), repr.Inputs...), outputs: append([]string(nil), repr.Outputs...)}, keys: keys, function: function}, nil
 }
 
-func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	if err := requirePostTable(ctx, "reduce"); err != nil {
-		return nil, err
-	}
+func (o *AggregateOp) executeUDF(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
 	groups, err := groupPostTable(ctx, input, o.keys)
 	if err != nil {
 		return nil, err
@@ -112,11 +97,11 @@ func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	// There is no retry or extra invocation when real groups exist.
 	if len(flat) == 0 {
 		if input.NumChunks() == 0 {
-			return nil, merr.WrapErrServiceInternal("reduce requires at least one typed input group")
+			return nil, merr.WrapErrServiceInternal("aggregate requires at least one typed input group")
 		}
 		flat = append(flat, postTableRowGroup{Chunk: 0, FirstRow: -1})
 	}
-	columns, err := o.readResolvedColumns("reduce", input, ctx.Pool())
+	columns, err := o.readResolvedColumns("aggregate", input, ctx.Pool())
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +112,7 @@ func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	}
 	for index, column := range columns {
 		if err := types.ValidateRuntimeArrowDataType(column.DataType()); err != nil {
-			return nil, merr.Wrapf(err, "reduce input %q", o.inputs[index])
+			return nil, merr.Wrapf(err, "aggregate input %q", o.inputs[index])
 		}
 	}
 	arguments := make([]*arrow.Chunked, 0, len(columns)-len(o.keys))
@@ -161,7 +146,7 @@ func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	}
 	defer releaseColumns(outputs)
 	if len(outputs) != len(o.outputs)-len(o.keys) {
-		return nil, merr.WrapErrFunctionFailedMsg("reduce returned %d columns, expected %d", len(outputs), len(o.outputs)-len(o.keys))
+		return nil, merr.WrapErrFunctionFailedMsg("aggregate returned %d columns, expected %d", len(outputs), len(o.outputs)-len(o.keys))
 	}
 	expected := make([]int64, len(flat))
 	for i := range expected {
@@ -199,7 +184,7 @@ func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 				for _, value := range chunks {
 					value.Release()
 				}
-				return nil, merr.Wrap(err, "assemble reduce outputs")
+				return nil, merr.Wrap(err, "assemble aggregate outputs")
 			}
 			position += len(group)
 			chunks = append(chunks, values)

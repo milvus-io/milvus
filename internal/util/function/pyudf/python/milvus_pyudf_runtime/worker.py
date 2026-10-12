@@ -42,8 +42,24 @@ from .proto import pyudf_pb2_grpc
 _LOG = logging.getLogger("milvus.pyudf.worker")
 
 
-def _log_error_response(request, error, code):
-    _LOG.error(
+def _request_scope(request):
+    scope = request.request_context
+    return {
+        "database": scope.database,
+        "collection": scope.collection,
+        "user": scope.user,
+        "resource_name": scope.resource_name or request.resource_name,
+    }
+
+
+def _request_logger(request):
+    # Each call owns its adapter and immutable extras. Never mutate the shared
+    # logger, the cached UDF factory context, or another invocation's identity.
+    return logging.LoggerAdapter(_LOG, MappingProxyType(_request_scope(request)))
+
+
+def _log_error_response(request, error, code, logger):
+    logger.error(
         "PyUDF Execute failed resource=%r stage=%r code=%d",
         request.resource_name,
         request.stage,
@@ -72,10 +88,10 @@ def _param(value, depth):
     raise WorkerError("unset function parameter", wire.INVALID_ARGUMENT)
 
 
-def _query_inputs(inputs, nq):
+def _query_inputs(inputs, nq=None):
     result = []
     for item in inputs:
-        if not item.data_type or item.data_type == "None" or len(item.values) != nq:
+        if not item.data_type or item.data_type == "None" or nq is not None and len(item.values) != nq:
             raise WorkerError("query metadata type/count does not match NQ")
         try:
             values = (
@@ -89,12 +105,30 @@ def _query_inputs(inputs, nq):
     return tuple(result)
 
 
+def _query_origins(values, rows, original_count):
+    origins = tuple(values)
+    if len(origins) != rows:
+        raise WorkerError("query mapping count differs from prepared rows")
+    previous = -1
+    for origin in origins:
+        if origin < 0 or origin >= original_count or origin < previous:
+            raise WorkerError("query mapping has invalid bounds or parent order")
+        previous = origin
+    return origins
+
+
 def _argument_schema(request, batch):
     indices = tuple(request.input_column_indices)
-    return pa.schema([batch.schema.field(index) for index in indices]) if indices else batch.schema
+    return (
+        pa.schema([batch.schema.field(index) for index in indices], metadata=batch.schema.metadata)
+        if indices
+        else batch.schema
+    )
 
 
-def _call_context(request, batches):
+def _call_context(request, batches, logger=None):
+    scope = _request_scope(request)
+    logger = logger if logger is not None else _request_logger(request)
     stage = request.stage.lower()
     if stage not in ("ingestion", "pre_process", "l0_rerank", "l1_rerank", "l2_rerank", "post_process"):
         raise WorkerError("unsupported query-context execution stage", wire.UNSUPPORTED)
@@ -103,7 +137,9 @@ def _call_context(request, batches):
     if stage == "ingestion":
         if request.HasField("query_context"):
             raise WorkerError("ingestion must not contain query metadata")
-        return PyUDFCallContext(request.stage, 0, input_schema=_argument_schema(request, batches[0]))
+        return PyUDFCallContext(
+            request.stage, 0, input_schema=_argument_schema(request, batches[0]), logger=logger, **scope
+        )
     if stage == "pre_process":
         if len(batches) != 1:
             raise WorkerError("PRE_PROCESS requires one query-row batch")
@@ -115,22 +151,59 @@ def _call_context(request, batches):
         for batch in batches:
             sizes.append(sizes[-1] + batch.num_rows)
         offsets = tuple(sizes)
-    if request.table_result:
+    expanded = request.execution_version >= 5
+    if not expanded and (
+        request.query_context.row_query_origins
+        or any(item.original_query_indices for item in request.query_context.queries)
+    ):
+        raise WorkerError("expanded query metadata requires execution version 5", wire.UNSUPPORTED)
+    if request.table_result or expanded:
         original_inputs = request.query_context.original_queries
         nq = len(original_inputs[0].values) if original_inputs else 0
     original = _query_inputs(request.query_context.original_queries, nq)
-    queries = _query_inputs(request.query_context.queries, nq)
+    queries = _query_inputs(request.query_context.queries, None if expanded else nq)
     if len(original) != len(queries) or not queries and not request.table_result:
         raise WorkerError("query-context execution requires aligned original and prepared ANN inputs")
+    if any(item.original_query_indices for item in request.query_context.original_queries):
+        raise WorkerError("original query inputs must not contain prepared mappings")
+    origins = []
+    for prepared in request.query_context.queries:
+        rows = len(prepared.values)
+        if prepared.original_query_indices:
+            origins.append(_query_origins(prepared.original_query_indices, rows, nq))
+        elif rows == nq:
+            origins.append(tuple(range(nq)))
+        elif rows == 0 and expanded:
+            origins.append(())
+        else:
+            raise WorkerError("prepared query count changed without a mapping")
+    row_origins = ()
+    if stage == "pre_process":
+        rows = batches[0].num_rows
+        if request.query_context.row_query_origins:
+            row_origins = _query_origins(request.query_context.row_query_origins, rows, nq)
+        elif rows == nq:
+            row_origins = tuple(range(nq))
+        elif rows != 0 or not expanded:
+            raise WorkerError("PRE row count changed without row query origins")
+    elif request.query_context.row_query_origins:
+        raise WorkerError("current row query origins require PRE")
+    elif not request.table_result and any(len(query.values) != len(batches) for query in queries):
+        raise WorkerError("prepared query count differs from candidate groups")
     return PyUDFCallContext(
         stage=request.stage,
         query_count=nq,
         queries=queries,
         original_queries=original,
+        prepared_query_counts=tuple(len(query.values) for query in queries),
+        query_origins=tuple(origins),
+        row_query_origins=row_origins,
         result_offsets=offsets,
         table_result=request.table_result,
         reduction=request.reduction,
         input_schema=_argument_schema(request, batches[0]),
+        logger=logger,
+        **scope,
     )
 
 
@@ -139,18 +212,25 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
         self.loader = PyUDFLoader()
 
     def Execute(self, request, context):
+        logger = _LOG
+
         def check_active():
             if not context.is_active():
                 raise RequestInactive()
 
         try:
+            logger = _request_logger(request)
             check_active()
-            if request.execution_version not in (0, 2, 3, 4):
+            if request.execution_version not in (0, 2, 3, 4, 5, 6):
                 raise WorkerError("unsupported execution version", wire.UNSUPPORTED)
+            if request.HasField("request_context") and request.execution_version != 6:
+                raise WorkerError("request scope requires execution version 6", wire.UNSUPPORTED)
+            if request.execution_version == 6 and not request.HasField("request_context"):
+                raise WorkerError("scope execution requires request context")
             if request.execution_version == 3:
                 if not request.table_result or request.stage.lower() != "post_process":
                     raise WorkerError("execution version 3 requires POST TABLE")
-            elif request.execution_version == 4:
+            elif request.execution_version in (4, 5, 6):
                 if request.table_result and request.stage.lower() != "post_process":
                     raise WorkerError("schema execution TABLE requires POST_PROCESS")
                 if request.reduction and not request.table_result:
@@ -171,7 +251,7 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
             indices = tuple(request.input_column_indices)
             if any(index >= batches[0].num_columns for index in indices):
                 raise WorkerError("input column reference is out of range")
-            call_context = _call_context(request, batches) if request.execution_version >= 2 else None
+            call_context = _call_context(request, batches, logger) if request.execution_version >= 2 else None
             instance = self.loader.load(request.resource_name, request.udf_path, request.stage, check_active)
             output = OutputIPC()
 
@@ -192,7 +272,12 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
                     check_active()
                     group_context = call_context
                     if call_context is not None and request.stage.lower() in ("l0_rerank", "l1_rerank", "l2_rerank"):
-                        group_context = replace(call_context, query_index=query)
+                        parents = {origins[query] for origins in call_context.query_origins}
+                        group_context = replace(
+                            call_context,
+                            query_index=query,
+                            original_query_index=next(iter(parents)) if len(parents) == 1 else None,
+                        )
                     try:
                         selected = arguments(batch)
                         if group_context is None:
@@ -208,18 +293,18 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
             check_active()
             return response
         except RequestInactive:
-            _LOG.warning(
+            logger.warning(
                 "PyUDF Execute cancelled or expired resource=%r stage=%r",
                 request.resource_name,
                 request.stage,
             )
             context.abort(grpc.StatusCode.CANCELLED, "PyUDF RPC is no longer active")
         except MemoryError as exc:
-            return _log_error_response(request, exc, wire.OUT_OF_MEMORY)
+            return _log_error_response(request, exc, wire.OUT_OF_MEMORY, logger)
         except WorkerError as exc:
-            return _log_error_response(request, exc, exc.code)
+            return _log_error_response(request, exc, exc.code, logger)
         except BaseException as exc:
-            return _log_error_response(request, exc, wire.INTERNAL)
+            return _log_error_response(request, exc, wire.INTERNAL, logger)
 
 
 class WorkerServer:

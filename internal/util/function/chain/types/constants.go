@@ -32,9 +32,8 @@ const (
 	OpTypeSelect    = "select"
 	OpTypeExplode   = "explode"
 	OpTypeFlatMap   = "flat_map"
-	OpTypeConcat    = "concat"
+	OpTypeUnionAll  = "union_all"
 	OpTypeAggregate = "aggregate"
-	OpTypeReduce    = "reduce"
 )
 
 // =============================================================================
@@ -85,6 +84,7 @@ const (
 	// ElementIndicesFieldName stores one Int32 element index per result row.
 	ElementIndicesFieldName = "$element_indices"
 	QueryIndexFieldName     = "$query_index"
+	SubqueryIndexFieldName  = "$subquery_index"
 	ANNIndexFieldName       = "$ann_index"
 )
 

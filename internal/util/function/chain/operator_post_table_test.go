@@ -98,14 +98,14 @@ func postTableNativeSpecs() ([]string, []AggregateSpec) {
 	}
 }
 
-func TestPostTableConcatAggregateAcrossQueries(t *testing.T) {
+func TestPostTableUnionAllAggregateAcrossQueries(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
 	input := postTableFixture(t, pool, false)
 	defer input.Release()
 	outputs, specs := postTableNativeSpecs()
 	output, err := NewFuncChainWithAllocator(pool).SetStage(types.StagePostProcess).SetTableResult(true).
-		Concat().Aggregate([]string{"key"}, outputs, specs...).ExecuteWithContext(context.Background(), input)
+		UnionAll().Aggregate([]string{"key"}, outputs, specs...).ExecuteWithContext(context.Background(), input)
 	require.NoError(t, err)
 	defer output.Release()
 	require.Equal(t, []int64{3}, output.chunkSizes)
@@ -239,7 +239,7 @@ func TestPostTableProjectionScopeAndRowLineage(t *testing.T) {
 		return []*arrow.Chunked{out}, nil
 	}}
 	output, err := NewFuncChainWithAllocator(pool).SetStage(types.StagePostProcess).SetTableResult(true).
-		Concat().Filter(predicate, []string{"value"}).Sort("value", true, "").LimitWithOffset(2, 1).Select("value").
+		UnionAll().Filter(predicate, []string{"value"}).Sort("value", true, "").LimitWithOffset(2, 1).Select("value").
 		ExecuteWithOptions(context.Background(), ExecuteOptions{EnableColumnPruning: true, Downstream: DownstreamSpec{RequiredColumns: []string{"value"}}}, input)
 	require.NoError(t, err)
 	defer output.Release()
@@ -257,7 +257,7 @@ func TestPostTableProjectionScopeAndRowLineage(t *testing.T) {
 
 func TestPostTableNativeOperatorsRejectOtherModes(t *testing.T) {
 	for _, stage := range []string{types.StageIngestion, types.StagePreProcess, types.StagePostProcess, types.StageL2Rerank} {
-		fc := NewFuncChainWithAllocator(memory.DefaultAllocator).SetStage(stage).Concat()
+		fc := NewFuncChainWithAllocator(memory.DefaultAllocator).SetStage(stage).UnionAll()
 		require.Error(t, fc.Validate(), stage)
 	}
 	_, err := NewAggregateOp([]string{"key"}, []string{"key", types.ScoreFieldName}, []AggregateSpec{{Op: "count"}})
@@ -409,7 +409,7 @@ func (ctx *postTableCancelContext) Err() error {
 func TestPostTableGroupingAndLineageObserveCancellationDuringTraversal(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
-	input := reduceTestFrame(t, pool, make([]int64, 8192))
+	input := udfAggregateTestFrame(t, pool, make([]int64, 8192))
 	defer input.Release()
 	for _, keyed := range []bool{false, true} {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -461,7 +461,7 @@ func TestPostTableProtoAggregateSortUsesStableOrderWithoutHitIdentity(t *testing
 		if explicitTie {
 			inputs = append(inputs, "text")
 		}
-		plan, err := transform.PostTable("stable_sort", &schemapb.FunctionChainOp{Op: "concat"}, &schemapb.FunctionChainOp{
+		plan, err := transform.PostTable("stable_sort", &schemapb.FunctionChainOp{Op: "union_all"}, &schemapb.FunctionChainOp{
 			Op: "aggregate", Inputs: []string{"text"}, Outputs: []string{"text", "rows"}, Params: map[string]*schemapb.FunctionParamValue{
 				"keys":       arrayParam(stringParam("text")),
 				"aggregates": arrayParam(objectParam(map[string]*schemapb.FunctionParamValue{"op": stringParam("count")})),

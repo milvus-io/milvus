@@ -35,6 +35,8 @@ type Batch struct {
 	Groups []arrow.Table
 	// QueryContext is borrowed, immutable metadata, outside payload projection.
 	QueryContext *types.QueryContext
+	// OutputRowLimit is an adapter-owned expansion budget. Zero is unlimited.
+	OutputRowLimit int64
 }
 
 // SourceRow references an original Executor input row, not an intermediate row.
@@ -66,7 +68,7 @@ type Executor interface {
 }
 
 // ValidateLineage checks result shapes and source bounds, including the
-// multi-source representation reserved for aggregate/reduce. It does not grant
+// multi-source representation used by aggregate. It does not grant
 // an operation or stage permission to use that representation.
 func ValidateLineage(input Batch, result Result) error {
 	return validateLineage(input, result, false)
@@ -109,12 +111,27 @@ func ValidateResultForPlan(plan *schemapb.FunctionChain, input Batch, result Res
 	if IsTablePlan(plan) {
 		return validateLineage(input, result, true)
 	}
-	return ValidateResult(plan.GetStage(), input, result)
+	if err := ValidateResult(plan.GetStage(), input, result); err != nil {
+		return err
+	}
+	if input.OutputRowLimit < 0 {
+		return merr.WrapErrServiceInternal("transform: output row limit is negative")
+	}
+	if input.OutputRowLimit > 0 {
+		remaining := input.OutputRowLimit
+		for _, table := range result.Data.Groups {
+			if table.NumRows() > remaining {
+				return merr.WrapErrFunctionFailedMsg("transform: output exceeds query row limit %d", input.OutputRowLimit)
+			}
+			remaining -= table.NumRows()
+		}
+	}
+	return nil
 }
 
 // ValidateResult adds the v1 stage policy to ValidateLineage. All stages preserve
-// logical group boundaries. Ingestion allows single-parent subset/expansion in
-// parent row order; Pre/PostProcess preserve each original row in its position. Multiple
+// logical group boundaries. Ingestion and PRE allow single-parent subset/expansion
+// in parent row order; PostProcess HITS preserves each row in its position. Multiple
 // contributing source rows are representable but not executable in v1 plans.
 func ValidateResult(stage schemapb.FunctionChainStage, input Batch, result Result) error {
 	if err := validateStage(stage); err != nil {
@@ -126,7 +143,7 @@ func ValidateResult(stage schemapb.FunctionChainStage, input Batch, result Resul
 	if len(input.Groups) != len(result.Data.Groups) {
 		return merr.WrapErrFunctionFailedMsg("transform: logical group count changed")
 	}
-	preserveRows := stage != schemapb.FunctionChainStage_FunctionChainStageIngestion
+	preserveRows := stage == schemapb.FunctionChainStage_FunctionChainStagePostProcess
 	for group, table := range result.Data.Groups {
 		if preserveRows && table.NumRows() != input.Groups[group].NumRows() {
 			return merr.WrapErrFunctionFailedMsg("transform: row count changed in stage %s group %d", stage, group)

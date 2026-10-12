@@ -19,6 +19,7 @@
 package chain
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -41,7 +42,7 @@ type ChainRepr struct {
 type OperatorRepr struct {
 	Type           string
 	Params         map[string]*schemapb.FunctionParamValue
-	Function       *FunctionRepr // for map/filter operators that evaluate an expression
+	Function       *FunctionRepr // operators that evaluate an expression, including custom aggregate
 	Inputs         []string      // input column names, preserving occurrence order
 	InputDataTypes []schemapb.DataType
 	Outputs        []string // output column names
@@ -150,8 +151,8 @@ func ProtoOpToRepr(pb *schemapb.FunctionChainOp) (*OperatorRepr, error) {
 		}
 		repr.Function = expr
 		repr.Inputs = exprInputs
-		if opType == types.OpTypeReduce {
-			keys, err := types.NewParamReader("reduce", repr.Params).StringSlice("keys", false)
+		if opType == types.OpTypeAggregate {
+			keys, err := types.NewParamReader("aggregate", repr.Params).StringSlice("keys", false)
 			if err != nil {
 				return nil, err
 			}
@@ -294,6 +295,33 @@ func (repr *ChainRepr) RefreshInfo() error {
 		hints := op.InputDataTypes
 		if hints != nil && len(hints) != len(inputs) {
 			return merr.WrapErrParameterInvalidMsg("op[%d]: input data types count %d does not match input count %d", i, len(hints), len(inputs))
+		}
+		if opType == types.OpTypeAggregate && op.Function != nil {
+			keys, err := types.NewParamReader("aggregate", op.Params).StringSlice("keys", false)
+			if err != nil {
+				return merr.Wrapf(err, "op[%d]", i)
+			}
+			// Expression references exclude grouping keys. Rebuild dependencies
+			// for direct representations too, without duplicating key prefixes
+			// when RefreshInfo runs more than once.
+			if op.Function.Args != nil {
+				refs, err := ProtoExprArgsToInputs(op.Function.Args)
+				if err != nil {
+					return merr.Wrapf(err, "op[%d]", i)
+				}
+				actual := append(append([]string(nil), keys...), refs...)
+				if !slices.Equal(inputs, actual) {
+					if !slices.Equal(inputs, refs) {
+						return merr.WrapErrParameterInvalidMsg("op[%d]: aggregate inputs must match keys and expression references", i)
+					}
+					if hints != nil {
+						hints = append(make([]schemapb.DataType, len(keys)), hints...)
+					}
+				}
+				inputs = actual
+			} else if len(inputs) <= len(keys) || !slices.Equal(inputs[:len(keys)], keys) {
+				return merr.WrapErrParameterInvalidMsg("op[%d]: aggregate inputs must include keys before expression references", i)
+			}
 		}
 		// Legacy sort/group_by parameters also name real column dependencies.
 		// Normalize them before requery planning, pruning and runtime checks.
@@ -562,5 +590,5 @@ func IsFunctionChainSystemName(name string) bool {
 }
 
 func reprOpResetsColumnScope(name string) bool {
-	return name == types.OpTypeSelect || name == types.OpTypeAggregate || name == types.OpTypeReduce
+	return name == types.OpTypeSelect || name == types.OpTypeAggregate
 }

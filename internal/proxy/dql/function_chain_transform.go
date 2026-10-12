@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/chain/transform"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
@@ -102,7 +103,7 @@ func (meta *searchTransformMeta) planPostInputs(schema *schemaInfo) error {
 	jsonRepr := &chain.ChainRepr{Stage: chaintypes.StagePostProcess}
 	for _, name := range meta.repr.Info.RequiredInputs {
 		switch name {
-		case postQueryIndexColumn, postANNIndexColumn:
+		case postQueryIndexColumn, postSubqueryIndexColumn, postANNIndexColumn:
 			if !transform.IsTablePlan(meta.plan) {
 				return merr.WrapErrParameterInvalidMsg("POST_PROCESS source %q requires TABLE result mode", name)
 			}
@@ -301,10 +302,34 @@ func (t *SearchTask) executeSearchPreProcess(ctx context.Context) error {
 	if t.preProcessed {
 		return nil
 	}
+	ctx = t.withFunctionRequestScope(ctx)
 	if err := t.prepareQueryContext(); err != nil {
 		return err
 	}
-	for index, meta := range t.preProcess {
+	hasPre := false
+	for _, meta := range t.preProcess {
+		hasPre = hasPre || meta != nil
+	}
+	if !hasPre {
+		t.preProcessed = true
+		return nil
+	}
+	// Prepare every branch against the original snapshot, and publish the new
+	// placeholders/NQ only after all branches and result-mode checks succeed.
+	// A failed later branch must not turn a retry into another expansion.
+	prepared := proto.Clone(t.request).(*milvuspb.SearchRequest)
+	branches := 1
+	if t.GetIsAdvanced() {
+		branches = len(t.request.GetSubReqs())
+	}
+	origins := make([][]int64, branches)
+	expanded := false
+	for index := 0; index < branches; index++ {
+		origins[index] = identityQueryOrigins(t.GetNq())
+		var meta *searchTransformMeta
+		if index < len(t.preProcess) {
+			meta = t.preProcess[index]
+		}
 		if meta == nil {
 			continue
 		}
@@ -315,28 +340,104 @@ func (t *SearchTask) executeSearchPreProcess(ctx context.Context) error {
 		if len(raw) == 0 {
 			return merr.WrapErrParameterInvalidMsg("PRE_PROCESS requires query payloads; search by IDs is not supported")
 		}
-		processed, err := meta.processQueryInput(ctx, raw, t.GetNq(), t.queryContext)
+		processed, err := meta.processQueryInputWithOrigins(ctx, raw, t.GetNq(), t.queryContext)
 		if err != nil {
 			return merr.Wrapf(err, "PRE_PROCESS[%d]", index)
 		}
+		origins[index] = processed.origins
+		expanded = expanded || !queryOriginsAreIdentity(processed.origins, t.GetNq())
 		if t.GetIsAdvanced() {
-			t.request.SubReqs[index].PlaceholderGroup = processed
+			prepared.SubReqs[index].PlaceholderGroup = processed.placeholders
+			prepared.SubReqs[index].Nq = int64(len(processed.origins))
 		} else {
-			t.request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: processed}
+			prepared.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: processed.placeholders}
+			prepared.Nq = int64(len(processed.origins))
 		}
 	}
+	if expanded && !t.hasPostTable() {
+		return merr.WrapErrParameterInvalidMsg("PRE_PROCESS query expansion requires POST_PROCESS TABLE to define how subquery results are combined")
+	}
+	if expanded && t.GetIsAdvanced() && !t.hasANNInputTable() {
+		return merr.WrapErrParameterInvalidMsg("HybridSearch PRE_PROCESS query expansion requires POST_PROCESS TABLE with ANN_INPUTS")
+	}
+	var queryContext *chaintypes.QueryContext
 	if t.queryContext != nil {
-		queries, err := t.snapshotQueryInputs()
+		// Snapshot using each prepared branch's NQ rather than the original
+		// shared hybrid NQ. Text is still captured before native embedding.
+		preparedTask := &SearchTask{request: prepared, SearchRequest: t.SearchRequest}
+		queries, err := preparedTask.snapshotQueryInputs()
 		if err != nil {
 			return searchTransformOutputError(err, "query context after PRE_PROCESS")
 		}
-		t.queryContext = &chaintypes.QueryContext{OriginalQueries: t.queryContext.OriginalQueries, Queries: queries}
+		queryContext = &chaintypes.QueryContext{OriginalQueries: t.queryContext.OriginalQueries, Queries: queries}
+		if expanded {
+			queryContext.QueryOrigins = origins
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	preparedQueries := prepared.GetNq()
+	if t.GetIsAdvanced() {
+		preparedQueries = 0
+		for _, sub := range prepared.GetSubReqs() {
+			if sub.GetNq() > math.MaxInt-preparedQueries {
+				return merr.WrapErrServiceInternalMsg("PRE_PROCESS prepared search token count overflowed")
+			}
+			preparedQueries += sub.GetNq()
+		}
+	}
+	if err := taskmodel.CheckPreparedSearchRateLimit(ctx, int(preparedQueries)); err != nil {
+		return merr.Wrap(err, "PRE_PROCESS expanded search quota")
+	}
+	// Cancellation can arrive after encoding or while the shared limiter is
+	// checked. Never publish prepared inputs that could then be dispatched.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	t.preOriginalNq = t.GetNq()
+	t.request, t.preQueryOrigins, t.queryContext = prepared, origins, queryContext
+	if !t.GetIsAdvanced() {
+		t.Nq = prepared.GetNq()
 	}
 	t.preProcessed = true
 	return nil
 }
 
+func identityQueryOrigins(nq int64) []int64 {
+	result := make([]int64, nq)
+	for index := range result {
+		result[index] = int64(index)
+	}
+	return result
+}
+
+func queryOriginsAreIdentity(origins []int64, nq int64) bool {
+	if int64(len(origins)) != nq {
+		return false
+	}
+	for index, origin := range origins {
+		if origin != int64(index) {
+			return false
+		}
+	}
+	return true
+}
+
+type preparedQueryInput struct {
+	placeholders []byte
+	origins      []int64
+}
+
 func (meta *searchTransformMeta) processQueryInput(ctx context.Context, raw []byte, nq int64, queries *chaintypes.QueryContext) ([]byte, error) {
+	result, err := meta.processQueryInputWithOrigins(ctx, raw, nq, queries)
+	if err != nil {
+		return nil, err
+	}
+	return result.placeholders, nil
+}
+
+func (meta *searchTransformMeta) processQueryInputWithOrigins(ctx context.Context, raw []byte, nq int64, queries *chaintypes.QueryContext) (*preparedQueryInput, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -357,9 +458,12 @@ func (meta *searchTransformMeta) processQueryInput(ctx context.Context, raw []by
 	}
 	defer table.Release()
 	// Query inputs are rows of one request group, allowing the function to
-	// batch translation/embedding across NQ. Candidate POST groups remain per
-	// query. Identity lineage still protects every original query row.
-	input := transform.Batch{Groups: []arrow.Table{table}, QueryContext: queries}
+	// batch translation/embedding across NQ. Expansion retains a singleton
+	// parent query in lineage even after several map/explode operations.
+	input := transform.Batch{
+		Groups: []arrow.Table{table}, QueryContext: queries,
+		OutputRowLimit: paramtable.Get().QuotaConfig.NQLimit.GetAsInt64(),
+	}
 	result, err := meta.executor.Execute(ctx, meta.plan, input)
 	if err != nil {
 		return nil, err
@@ -373,6 +477,19 @@ func (meta *searchTransformMeta) processQueryInput(ctx context.Context, raw []by
 		return nil, err
 	}
 	defer combined.Release()
+	origins := make([]int64, 0, combined.NumRows())
+	for _, group := range result.Lineage {
+		for _, sources := range group {
+			// ValidateResult already checked singleton in-group parent lineage.
+			origins = append(origins, sources[0].Row)
+		}
+	}
+	if len(origins) == 0 {
+		return nil, merr.WrapErrFunctionFailedMsg("PRE_PROCESS generated no queries; each ANN input must produce at least one query")
+	}
+	if err := validateNQLimit(int64(len(origins))); err != nil {
+		return nil, searchTransformOutputError(err, "PRE_PROCESS expanded query count exceeds the search NQ budget")
+	}
 	queryIndexes := combined.Schema().FieldIndices(searchQueryColumn)
 	if len(queryIndexes) != 1 {
 		return nil, merr.WrapErrFunctionFailedMsg("PRE_PROCESS output must contain one %q payload column", searchQueryColumn)
@@ -391,7 +508,7 @@ func (meta *searchTransformMeta) processQueryInput(ctx context.Context, raw []by
 		return nil, searchTransformOutputError(err, "PRE_PROCESS bind query outputs")
 	}
 	if len(fields) != 1 || query.Data().NullN() != 0 {
-		return nil, merr.WrapErrFunctionFailedMsg("PRE_PROCESS must return one non-null query value per input")
+		return nil, merr.WrapErrFunctionFailedMsg("PRE_PROCESS must return a non-null query value for every prepared query")
 	}
 	if err := validateGeneratedSearchField(fields[0]); err != nil {
 		return nil, err
@@ -400,8 +517,8 @@ func (meta *searchTransformMeta) processQueryInput(ctx context.Context, raw []by
 	if err != nil {
 		return nil, searchTransformOutputError(err, "PRE_PROCESS encode query outputs")
 	}
-	if int64(count) != nq {
-		return nil, merr.WrapErrFunctionFailedMsg("PRE_PROCESS changed query count from %d to %d", nq, count)
+	if count != len(origins) {
+		return nil, merr.WrapErrFunctionFailedMsg("PRE_PROCESS encoded query count %d does not match lineage count %d", count, len(origins))
 	}
 	output := &commonpb.PlaceholderGroup{}
 	if err := proto.Unmarshal(encoded, output); err != nil || len(output.GetPlaceholders()) != 1 {
@@ -412,7 +529,7 @@ func (meta *searchTransformMeta) processQueryInput(ctx context.Context, raw []by
 	if err != nil {
 		return nil, merr.WrapErrFunctionFailed(err, "PRE_PROCESS serialize query output")
 	}
-	return encoded, nil
+	return &preparedQueryInput{placeholders: encoded, origins: origins}, nil
 }
 
 func queryPlaceholderFieldData(ph *commonpb.PlaceholderValue) (*schemapb.FieldData, error) {
@@ -697,6 +814,7 @@ func (t *SearchTask) executeSearchPostProcess(ctx context.Context, result *milvu
 	if t.postProcess == nil {
 		return nil
 	}
+	ctx = t.withFunctionRequestScope(ctx)
 	if t.hasPostTable() {
 		input, err := t.buildPostTableInput(ctx, result, -1, false)
 		if err != nil {

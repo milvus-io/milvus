@@ -9,7 +9,8 @@ For source builds and coordinated protocol/SDK revisions, see the
 [dependency delivery guide](../dev/function_chain_delivery.md).
 
 The [runtime schema extension](../design-docs/design_docs/20261012-function-chain-runtime-schema.md)
-uses runtime 0.4.0 for complete Arrow schema transport. UDFs can inspect
+uses runtime 0.4.0 or newer for complete Arrow schema transport;
+PRE query expansion requires runtime 0.5.0; the current request-scope extension requires runtime 0.6.0. UDFs can inspect
 `context.input_schema` and return `pyarrow.RecordBatch`/`Table` to preserve logical
 type metadata. Separate function input/output schema declarations are unnecessary.
 
@@ -83,7 +84,7 @@ From the Milvus checkout:
   --wheel-dir ./dist/transform-demo
 ```
 
-Upload `milvus_transform_demo-0.3.0-py3-none-any.whl` to the object storage
+Upload `milvus_transform_demo-0.5.0-py3-none-any.whl` to the object storage
 available to Milvus FileResource, using your storage client. Register its
 storage object path, not a client-local filesystem path:
 
@@ -93,7 +94,7 @@ from pymilvus import MilvusClient
 client = MilvusClient("http://127.0.0.1:19530")
 client.add_file_resource(
     name="transform_demo",
-    path="udf/milvus_transform_demo-0.3.0-py3-none-any.whl",
+    path="udf/milvus_transform_demo-0.5.0-py3-none-any.whl",
 )
 ```
 
@@ -288,18 +289,26 @@ timestamp/decimal/dictionary types are unsupported. Malformed text/JSON and
 non-finite JSON numbers fail as function outputs.
 
 In HybridSearch, attach PRE to each `AnnSearchRequest` and POST to top-level
-`function_chains`. PRE/POST can coexist with RRF or an existing ranker. To change
-scores/order, use an actual rerank chain such as L2; POST does not rerank.
+`function_chains`. Identity PRE and POST HITS/FUSED can coexist with RRF or an
+existing ranker. POST HITS preserves scores/order; use an actual rerank chain
+such as L2 to change them. POST TABLE can sort, limit and aggregate its own rows.
+Expanded Hybrid inputs require TABLE/ANN_INPUTS, which rejects top-level RRF/L2.
 
 ## 5. Choose map, explode and flat_map
 
+The engine registers 11 operators: `map`, `filter`, `sort`, `limit`, `group_by`,
+`merge`, `select`, `explode`, `flat_map`, `union_all` and `aggregate`. POST TABLE
+supports nine: all of these except the existing search/rerank `group_by` and
+`merge`. TABLE's `.group_by(keys).aggregate(...)` configures aggregation keys,
+rather than executing the rerank grouping operator.
+
 | Operator | Meaning | Available transformation stages |
 |---|---|---|
-| `map` | Compute/overwrite one or more columns, one outer value per input row | INGESTION, PRE, POST |
-| `select` | Keep columns and optionally rename them; preserves identity/lineage | INGESTION, PRE, POST |
-| `explode` | Expand an existing List column and repeat parent columns | INGESTION |
-| `flat_map` | Run a List-valued expression, then expand its list | INGESTION |
-| `filter` | Remove ingestion rows with a Boolean expression | INGESTION |
+| `map` | Compute/overwrite one or more columns, one outer value per input row | INGESTION, PRE, POST HITS/TABLE |
+| `select` | Keep columns and optionally rename them; preserves identity/lineage | INGESTION, PRE, POST HITS/TABLE |
+| `explode` | Expand an existing List column and repeat parent columns | INGESTION, PRE, POST TABLE |
+| `flat_map` | Run a List-valued expression, then expand its list | INGESTION, PRE, POST TABLE |
+| `filter` | Remove rows with a Boolean expression | INGESTION, POST TABLE |
 
 A chunking UDF returns one `List<Struct>` per document. FlatMap emits each
 Struct as a `chunk`, and select reads `chunk.text`/`chunk.vector`. Position is
@@ -319,8 +328,9 @@ chain.map("chunks", chunk_expression).explode(
 Default expansion drops null/empty lists. `outer=True` emits one null element
 and null position for them, requiring compatible destination nullability.
 Null elements inside a nonempty list retain their actual index. Successive
-explodes form Cartesian expansion. Multi-row `aggregate`/`reduce` is not
-implemented; existing merge/group_by do not create an arbitrary summary row.
+explodes form Cartesian expansion. INGESTION, PRE and POST HITS do not allow
+multi-row `aggregate`; use POST TABLE as described below. Existing rerank
+merge/group_by do not create an arbitrary summary row.
 
 ## 6. Write a model wheel
 
@@ -332,27 +342,34 @@ returns an instance with exactly one callable:
 - PRE/L2: `transform_query(params, columns, *, context)`.
 - POST: `transform_batch(params, batches, *, context)`.
 
-Use runtime 0.2 or newer for this contract and update POST wheels to the batch
-callable. Existing two-argument INGESTION/PRE/L2 methods are accepted; declare
+Runtime 0.2 introduced this batch contract; use runtime 0.6.0 for the current
+query context below and update POST wheels to the batch callable.
+Existing two-argument INGESTION/PRE/L2 methods are accepted; declare
 the `context` keyword when using request metadata. Keep the factory's
 initialization context separate from this per-invocation context.
 
 For an ordinary search, a reranker reads the corresponding original query as:
 
 ```python
-query = context.original_queries[0].values[context.query_index]
+original_index = context.original_query_index
+query = context.original_queries[0].values[original_index]
 ```
 
 In L2/POST, `context.queries` contains the final PRE payloads, before native embedding.
 They may already be vectors if PRE performs embedding itself. VarChar values
 are strings; vector values are bytes with a `data_type` name. For HybridSearch,
-the outer index identifies the ANN subrequest, and each input has NQ values.
+the outer index identifies the ANN subrequest. Original inputs have original
+NQ values; prepared inputs may have different counts after PRE expansion.
+`context.query_origins` maps prepared indices back to original indices, and
+`context.prepared_query_counts` reports each ANN input count. During an expanding
+PRE chain, `context.row_query_origins` maps its current input rows.
 L0/L1 use the same proposed grouping/index contract but do not yet execute
 PyUDF in QueryNode.
 During PRE, context contains the payloads from entry to the PRE chain; current
 intermediate query values are available in `columns`.
 
-POST receives all query inputs in context and all candidate groups in `batches`:
+POST receives all query inputs in context and all candidate groups in `batches`.
+This HITS example uses identity preprocessing:
 
 ```python
 import pyarrow as pa
@@ -371,11 +388,14 @@ class PostProcess:
         return outputs
 ```
 
-`batches[i]` contains the selected input columns for query `i`; zero-hit queries
-remain present as typed empty arrays. `context.query_index` is `None` for POST,
-and `context.result_offsets` gives cumulative candidate counts. POST returns
-the same number of groups and candidates; N-to-one aggregation remains a
-separate capability.
+`batches[i]` contains the selected input columns for query `i` in HITS mode; zero-hit queries
+remain present as typed empty arrays. Expanded POST TABLE uses prepared-query
+groups and explicit `$query_index`/`$subquery_index` provenance; do not index
+original snapshots using the current group number after expansion or aggregation.
+`context.query_index` is `None` for POST,
+and `context.result_offsets` gives cumulative candidate counts. POST map returns
+the same number of groups and candidates. TABLE aggregate returns one row per
+current group and can combine queries after `union_all`.
 Include `col("$id")` or `col("$score")` in the expression when the UDF needs
 candidate identity or scores as input columns.
 
@@ -402,6 +422,22 @@ in the worker environment, return the declared output shape and use the real
 model dimension. Keep credentials in deployment configuration/environment,
 not persistent chain parameters. A preprocessing function can normalize text;
 replacing Milvus/BM25's tokenizer still uses the analyzer configuration/API.
+
+The [minimal call context](../design-docs/design_docs/20261012-function-chain-call-context.md)
+adds `context.database`, `context.collection`, `context.user`,
+`context.resource_name` and a per-call `context.logger` in runtime 0.6.0.
+Database/collection names are resolved by Proxy; an alias reports its canonical
+collection. User is populated only after password/API-key authentication and
+is empty for anonymous/internal calls. User parameters cannot override it.
+The operator log label is separate from the wheel resource in factory context.
+
+```python
+context.logger.info("embedding request")
+# Existing Go context/gRPC owns deadline and cancellation.
+```
+
+These fields are per invocation and must not be copied to shared instance state.
+No Python deadline API or hosted connector is added by this extension.
 
 ## 7. Handle partial or unknown INSERT outcomes
 
@@ -433,14 +469,14 @@ this does not guarantee exactly-once model execution across new requests.
 ## 8. Return independent POST tables
 
 Use the matching PyMilvus checkout with its `arrow` extra and worker runtime
-0.3 for this mode. Ordinary HITS searches do not require the Arrow extra.
+0.6.0 for the current contracts. Ordinary HITS searches do not require the Arrow extra.
 
 ```python
 from pymilvus.function_chain import agg
 
 post_table = (
     FunctionChain(FunctionChainStage.POST_PROCESS, result_mode="table")
-    .concat()
+    .union_all()
     .group_by("text")
     .aggregate({
         "matches": agg.count(),
@@ -458,7 +494,11 @@ print(table_result.rows)
 arrow_table = table_result.to_arrow()
 ```
 
-`concat()` combines all current groups in order. Without it, aggregates run
+`union_all()` combines all current groups in order, preserving duplicates and
+individual scores, as in SQL `UNION ALL`. SQL `UNION` also removes duplicate
+rows; that distinct operation is not implemented here. Its inputs are the result
+groups already supplied by one request; it does not issue independent queries
+or combine arbitrary cross-collection DAG inputs. Without it, aggregates run
 independently for each current query/ANN group. Group keys follow first
 occurrence, including a null-key group. Aggregates include `count`, `sum`,
 `avg`, `min`, `max`, `first`, `last` and `collect_list`. `count()` counts rows;
@@ -473,13 +513,13 @@ combine repeated documents. This mode replaces top-level fusion, so do not
 also supply a top-level L2 chain or ranker. FUSED mode instead receives normal
 post-rerank candidates and honors the normal search limit.
 
-Custom many-to-one summaries use a reducer:
+Custom many-to-one summaries use the same `aggregate` operator with a UDF:
 
 ```python
 summary = (
     FunctionChain(FunctionChainStage.POST_PROCESS, result_mode="table")
-    .concat()
-    .reduce("summary", fn.py_udf(
+    .union_all()
+    .aggregate("summary", fn.py_udf(
         col("text"), resource_name="transform_demo",
         udf_params={"mode": "summary"},
     ))
@@ -490,15 +530,21 @@ query_table = client.query(
 )
 ```
 
-A TABLE reducer implements `transform_batch` and returns one row per supplied
-group; `context.table_result` and `context.reduction` are true. MAP still
-preserves each group's rows. `context.query_count` and query snapshots describe
-the original search, independently of current grouping; Query has query_count
-zero. Pass source index columns explicitly when the function needs them.
-`.group_by(...).reduce(...)` supplies one input group per distinct key. If all
-keyed groups are empty, the UDF is invoked once with typed empty columns to
-obtain its output schema, and its output row is discarded. Reducers must handle
-empty input without assuming a first row.
+A custom TABLE aggregate implements `transform_batch` and returns one row per
+supplied group; `context.table_result` and `context.reduction` are true. MAP still
+preserves each group's rows. `context.query_count` and `original_queries`
+describe the original search, independently of current grouping; `queries`
+contains stage-entry or final PRE snapshots. Query has query_count zero.
+Pass source index columns explicitly when the function needs them.
+`.group_by(...).aggregate(outputs, expression)` supplies one input group per
+distinct key.
+Use a string for one output alias or a list for multiple output aliases. The
+built-in `.aggregate({alias: agg.count(), ...})` and custom-expression forms both
+emit the wire operator `op="aggregate"`; native specifications and a UDF cannot
+be mixed in one invocation. If all keyed groups are empty, the UDF is invoked
+once with typed empty columns to obtain its output schema, and its output row
+is discarded. Custom aggregates must handle empty input without assuming a
+first row.
 
 TABLE output carries its own Arrow schema, including Struct/List outputs and
 typed empty results. It has no mandatory hit ID or score. A global native
@@ -542,3 +588,8 @@ Docker images were not built, and the full repository Go target did not pass.
 
 See the [design and verification matrix](../design-docs/design_docs/20261010-function-chain-transform-stages.md)
 for exact contracts, test coverage and local evidence.
+
+
+## PRE query expansion
+
+See the [query expansion design](../design-docs/design_docs/20261012-function-chain-query-expansion.md) for PRE `flat_map`/`explode`, original-query provenance and result grouping. Non-identity expansion requires POST TABLE; expanded HybridSearch uses ANN_INPUTS. Keep `$query_index` and `$subquery_index` when their source identity is needed, and use `union_all().group_by("$query_index").aggregate(...)` to summarize each original question. The current matching worker is runtime 0.6.0; SDK PRE expansion requests check `function_chain_pre_query_expansion_version=1`.
