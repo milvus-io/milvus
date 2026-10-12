@@ -380,29 +380,12 @@ func (c *externalCollectionRefreshChecker) nudgeIndexBuilds(job *datapb.External
 			mlog.FieldCollectionID(job.GetCollectionId()))
 		return
 	}
-	notifySegmentIndexBuild(unindexed...)
-}
-
-// notifyExternalCollectionIndexBuild enqueues every flushed, non-L0 segment of
-// the collection that has no index task yet. The index inspector is event
-// driven, so a refresh that lands segments must enqueue them itself - but only
-// once DataCoord's collection meta carries the refreshed source/spec, for the
-// reason nudgeIndexBuilds documents. Callers therefore invoke it when the
-// refresh needs no publish, or when the publish lands in
-// BroadcastAlteredCollection; never right after the segments are applied.
-func notifyExternalCollectionIndexBuild(ctx context.Context, mt *meta, collectionID int64) {
-	if mt == nil || mt.segments == nil || mt.indexMeta == nil {
-		return
+	for _, segmentID := range unindexed {
+		select {
+		case getBuildIndexChSingleton() <- segmentID: // accelerate index building
+		default:
+		}
 	}
-	segments := mt.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(s *SegmentInfo) bool {
-		return isFlush(s) && s.GetLevel() != datapb.SegmentLevel_L0
-	}))
-	if len(segments) == 0 {
-		return
-	}
-	segmentIDs := lo.Map(segments, func(s *SegmentInfo, _ int) int64 { return s.GetID() })
-	unindexed := mt.indexMeta.GetUnIndexedSegmentIDsForIndexTask(collectionID, segmentIDs)
-	notifySegmentIndexBuild(unindexed.Collect()...)
 }
 
 // externalSourceChanged reports whether a schema update makes a new external

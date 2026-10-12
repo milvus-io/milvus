@@ -42,6 +42,16 @@ func getBuildIndexOverflowChSingleton() chan struct{} {
 	return buildIndexOverflowCh
 }
 
+// notifyCollectionIndexBuild asks the index inspector to enqueue every segment
+// of the collection that has no index task yet. It never blocks; a dropped
+// notification is covered by the inspector's periodic reconcile.
+func notifyCollectionIndexBuild(notifyIndexChan chan<- UniqueID, collectionID UniqueID) {
+	select {
+	case notifyIndexChan <- collectionID:
+	default:
+	}
+}
+
 func notifySegmentIndexBuild(segIDs ...UniqueID) {
 	for _, segID := range segIDs {
 		select {

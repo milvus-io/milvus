@@ -168,6 +168,10 @@ type externalCollectionRefreshManager struct {
 	// same physical location the FFI wrote to.
 	chunkManager storage.ChunkManager
 
+	// notifyIndexChan asks the index inspector to enqueue a collection's
+	// unindexed segments once a refresh's source/spec is visible.
+	notifyIndexChan chan<- UniqueID
+
 	// Internal components (private, composed)
 	inspector *externalCollectionRefreshInspector
 	checker   *externalCollectionRefreshChecker
@@ -223,6 +227,7 @@ func NewExternalCollectionRefreshManager(
 	collectionGetter func(ctx context.Context, collectionID int64) (*collectionInfo, error),
 	schemaUpdater func(ctx context.Context, collectionID int64, externalSource, externalSpec string) error,
 	chunkManager storage.ChunkManager,
+	notifyIndexChan chan<- UniqueID,
 ) ExternalCollectionRefreshManager {
 	closeChan := make(chan struct{})
 
@@ -236,6 +241,7 @@ func NewExternalCollectionRefreshManager(
 		collectionGetter: collectionGetter,
 		schemaUpdater:    schemaUpdater,
 		chunkManager:     chunkManager,
+		notifyIndexChan:  notifyIndexChan,
 		closeChan:        closeChan,
 		notifiedJobs:     make(map[int64]struct{}),
 		cleanedJobs:      make(map[int64]struct{}),
@@ -645,12 +651,11 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 
 	if currentSource == newSource && currentSpec == newSpec {
 		// Nothing to deliver - the collection already describes this refresh.
-		// That is a delivered publish, so keep the key. The collection meta
-		// already carries the refreshed source/spec, so the applied segments can
-		// be enqueued for index building now. When a publish is due, the builds
-		// are enqueued once it lands, in BroadcastAlteredCollection.
+		// That is a delivered publish, so keep the key. The source/spec is already
+		// visible, so the applied segments can be indexed now; otherwise
+		// BroadcastAlteredCollection enqueues them when the publish lands.
 		published = true
-		notifyExternalCollectionIndexBuild(ctx, m.mt, job.GetCollectionId())
+		notifyCollectionIndexBuild(m.notifyIndexChan, job.GetCollectionId())
 		return
 	}
 

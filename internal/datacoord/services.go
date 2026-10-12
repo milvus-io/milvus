@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -1898,35 +1899,28 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	// cache miss and update cache
+	var oldSchema *schemapb.CollectionSchema
 	if clonedColl == nil {
-		collInfo := &collectionInfo{
+		// cache miss and update cache
+		clonedColl = &collectionInfo{
 			ID:             req.GetCollectionID(),
-			Schema:         req.GetSchema(),
 			Partitions:     req.GetPartitionIDs(),
 			StartPositions: req.GetStartPositions(),
-			Properties:     properties,
 			DatabaseID:     req.GetDbID(),
 			DatabaseName:   req.GetSchema().GetDbName(),
 			VChannelNames:  req.GetVChannels(),
 		}
-		s.meta.AddCollection(collInfo)
-		if externalSourceChanged(nil, req.GetSchema()) {
-			notifyExternalCollectionIndexBuild(ctx, s.meta, req.GetCollectionID())
-		}
-		return merr.Success(), nil
+	} else {
+		oldSchema = clonedColl.Schema
 	}
-
-	oldSchema := clonedColl.Schema
 	clonedColl.Properties = properties
 	// add field will change the schema
 	clonedColl.Schema = req.GetSchema()
 	s.meta.AddCollection(clonedColl)
 	// A refresh that rebinds an external collection applies its segments before
-	// publishing the new source/spec; their index builds wait until here, where
-	// the published source/spec becomes visible to index dispatch.
+	// publishing the new source/spec, so their index builds are enqueued here.
 	if externalSourceChanged(oldSchema, req.GetSchema()) {
-		notifyExternalCollectionIndexBuild(ctx, s.meta, req.GetCollectionID())
+		notifyCollectionIndexBuild(s.notifyIndexChan, req.GetCollectionID())
 	}
 	return merr.Success(), nil
 }

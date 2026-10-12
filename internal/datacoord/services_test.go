@@ -1365,14 +1365,12 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NotNil(t, coll.Properties)
 	})
 
-	t.Run("published external source enqueues unindexed segments", func(t *testing.T) {
-		drainBuildIndexChForTest()
-		defer drainBuildIndexChForTest()
-		drainBuildIndexOverflowChForTest()
-		defer drainBuildIndexOverflowChForTest()
-
+	t.Run("published external source notifies index build", func(t *testing.T) {
 		spec := `{"format":"parquet"}`
-		s := &Server{meta: newExternalRefreshIndexMeta("s3://bucket/a", spec)}
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{ID: 100, Schema: externalRefreshIndexSchema("s3://bucket/a", spec)})
+		notifyIndexChan := make(chan UniqueID, 1)
+		s := &Server{meta: &meta{collections: collections}, notifyIndexChan: notifyIndexChan}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 
@@ -1381,15 +1379,15 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 			Schema:       externalRefreshIndexSchema("s3://bucket/a", spec),
 		})
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		assertNoBuildIndexEvent(t)
+		assert.Empty(t, notifyIndexChan)
 
 		resp, err = s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
 			CollectionID: 100,
 			Schema:       externalRefreshIndexSchema("s3://bucket/b", spec),
 		})
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		assertBuildIndexEvents(t, 10, 11)
-		assertNoBuildIndexEvent(t)
+		require.Len(t, notifyIndexChan, 1)
+		assert.Equal(t, UniqueID(100), <-notifyIndexChan)
 	})
 }
 

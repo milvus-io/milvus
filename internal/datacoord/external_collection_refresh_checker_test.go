@@ -2119,7 +2119,7 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 			func(_ context.Context, _ int64, source, spec string) error {
 				published = append(published, [2]string{source, spec})
 				return nil
-			}, cm).(*externalCollectionRefreshManager)
+			}, cm, nil).(*externalCollectionRefreshManager)
 
 		// The manager's own callbacks, wired to a stub apply - what is under
 		// test is the callback ordering, not the segment update.
