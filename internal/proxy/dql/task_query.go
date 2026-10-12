@@ -1105,10 +1105,17 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 		Req: t.RetrieveRequest,
 	})
 	if err != nil {
-		return err
+		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
 	}
 	for _, retrieveResult := range result.Results {
 		t.resultBuf.Insert(retrieveResult)
+	}
+	// Plans belong to the final successful shard attempts, including shards
+	// with no rows/workers. Worker results cannot supply a complete read proof.
+	// The two frontiers project one WAL prefix onto growing and transform
+	// execution; their maximum is the last mutation/barrier in that prefix.
+	for _, plan := range result.Plans {
+		t.RecordChannelMvcc(plan.ShardID.VChannel, max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick()))
 	}
 	return nil
 }

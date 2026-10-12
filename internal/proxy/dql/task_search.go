@@ -1518,7 +1518,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		Req: t.SearchRequest,
 	})
 	if err != nil {
-		return err
+		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
 	}
 	if t.resultBuf == nil {
 		t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()

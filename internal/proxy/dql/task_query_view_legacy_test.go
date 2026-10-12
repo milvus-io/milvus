@@ -19,11 +19,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -120,4 +123,25 @@ func TestSearchTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 	})
 	require.ElementsMatch(t, []int64{202}, sourceIDs)
 	require.Zero(t, task.queryChannelsNode.Len())
+}
+
+func TestQueryViewRecordsFinalReadFrontiersIncludingEmptyShards(t *testing.T) {
+	mockey.PatchConvey("final successful plans supply CAS proofs", t, func() {
+		legacy := &fakeLegacyQueryClient{}
+		mockey.Mock((*fakeLegacyQueryClient).Query).Return(&queryclient.LegacyQueryResult{Plans: []queryclient.ShardPlan{
+			{ShardID: qviews.ShardID{VChannel: "insert"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 200, TransformingTimetick: 100}},
+			{ShardID: qviews.ShardID{VChannel: "transform"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 300}},
+		}}, nil).Build()
+		task := &QueryTask{
+			RetrieveRequest: &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()}, request: &milvuspb.QueryRequest{},
+			viewQueryClient: &fakeLegacyViewQueryClient{legacy: legacy}, actualChannelsMvcc: typeutil.NewConcurrentMap[string, uint64](),
+		}
+		require.NoError(t, task.Execute(t.Context()))
+		ts, ok := task.actualChannelsMvcc.Get("insert")
+		require.True(t, ok)
+		require.Equal(t, uint64(200), ts)
+		ts, ok = task.actualChannelsMvcc.Get("transform")
+		require.True(t, ok)
+		require.Equal(t, uint64(300), ts)
+	})
 }
