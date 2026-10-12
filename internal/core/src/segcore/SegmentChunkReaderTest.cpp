@@ -313,19 +313,25 @@ class ReaderStringSegment : public ChunkedSegmentSealedImpl {
         return Column(field);
     }
     int64_t
-    num_chunk_data(FieldId field) const override {
+    num_chunk_data(FieldId field, OpContext* = nullptr) const override {
         return Column(field)->num_chunks();
     }
     int64_t
-    chunk_size(FieldId field, int64_t chunk) const override {
+    chunk_size(FieldId field,
+               int64_t chunk,
+               OpContext* = nullptr) const override {
         return Column(field)->chunk_row_nums(chunk);
     }
     int64_t
-    num_rows_until_chunk(FieldId field, int64_t chunk) const override {
+    num_rows_until_chunk(FieldId field,
+                         int64_t chunk,
+                         OpContext* = nullptr) const override {
         return Column(field)->GetNumRowsUntilChunk(chunk);
     }
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field, int64_t offset) const override {
+    get_chunk_by_offset(FieldId field,
+                        int64_t offset,
+                        OpContext* = nullptr) const override {
         return Column(field)->GetChunkIDByOffset(offset);
     }
     int64_t
@@ -368,19 +374,23 @@ class ReaderStringSnapshot : public SegmentReadSnapshot {
         : column_(std::move(column)), schema_(std::move(schema)) {
     }
     int64_t
-    chunk_size(FieldId, int64_t chunk) const override {
+    chunk_size(FieldId, int64_t chunk, OpContext* = nullptr) const override {
         return column_->chunk_row_nums(chunk);
     }
     int64_t
-    num_rows_until_chunk(FieldId, int64_t chunk) const override {
+    num_rows_until_chunk(FieldId,
+                         int64_t chunk,
+                         OpContext* = nullptr) const override {
         return column_->GetNumRowsUntilChunk(chunk);
     }
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId, int64_t offset) const override {
+    get_chunk_by_offset(FieldId,
+                        int64_t offset,
+                        OpContext* = nullptr) const override {
         return column_->GetChunkIDByOffset(offset);
     }
     int64_t
-    num_chunk_data(FieldId) const override {
+    num_chunk_data(FieldId, OpContext* = nullptr) const override {
         return column_->num_chunks();
     }
     int64_t
