@@ -56,9 +56,9 @@ ValidateCastType(JsonCastType cast_type) {
 
 void
 ValidateJsonPointer(const std::string& path) {
+    // The empty pointer names the JSON field itself (the whole document).
     if (path.empty()) {
-        ThrowInfo(DataTypeInvalid,
-                  "typed JSON projection requires a non-empty json_path");
+        return;
     }
     if (path.find('\0') != std::string::npos) {
         ThrowInfo(DataTypeInvalid,
