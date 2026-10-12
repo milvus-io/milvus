@@ -104,8 +104,8 @@ template <typename Target, typename Source>
 std::optional<Target>
 ConvertJsonNumberExact(Source value) {
     static_assert(
-        (std::is_same_v<Target, int64_t> || std::is_same_v<Target, double>) &&
-        (std::is_same_v<Source, int64_t> || std::is_same_v<Source, double>));
+        (std::is_same_v<Target, int64_t> || std::is_same_v<Target, double>)&&(
+            std::is_same_v<Source, int64_t> || std::is_same_v<Source, double>));
     if constexpr (std::is_same_v<Target, Source>) {
         return value;
     } else if constexpr (std::is_same_v<Target, int64_t>) {
