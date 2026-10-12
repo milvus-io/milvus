@@ -721,6 +721,52 @@ TEST_F(JsonFlatExpressionTest, EmptyJsonInIsDeterministicForEveryRow) {
           true);
 }
 
+TEST(JsonFlatNullExpressionTest, FieldNullUsesRawValidityWithoutPinningIndex) {
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = schema->AddDebugField("json", DataType::JSON, true);
+    const std::vector<std::string> rows = {
+        R"({"a":null})", R"({})", R"(null)", R"({"a":1})", R"({"b":2})"};
+    const uint8_t validity[] = {0x1B};
+    auto field = expr_index::JsonField(rows, true, validity);
+    expr_index::RawFieldFiles files;
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(files.Prepare(field_id, {field}));
+    auto opened =
+        expr_index::BuildIndex(field_id,
+                               DataType::JSON,
+                               index::INVERTED_INDEX_TYPE,
+                               {field},
+                               {{JSON_PATH, ""}, {JSON_CAST_TYPE, "JSON"}});
+    OpContext untouched;
+    OpContext* observed_pin = &untouched;
+    expr_index::InstallIndex(*segment,
+                             field_id,
+                             DataType::JSON,
+                             std::move(opened),
+                             DataType::NONE,
+                             &observed_pin);
+
+    for (const auto op : {proto::plan::NullExpr_NullOp_IsNull,
+                          proto::plan::NullExpr_NullOp_IsNotNull}) {
+        auto column = expr::ColumnInfo(field_id, DataType::JSON);
+        column.nullable_ = true;
+        auto filter = std::make_shared<expr::NullExpr>(column, op);
+        EXPECT_FALSE(
+            CanExprExecuteAllAtOnce(filter, segment.get(), rows.size()));
+        auto evaluation = EvalExprInBatches(filter, segment.get(), rows.size());
+        auto result = evaluation.result;
+        TargetBitmapView bits(result->GetRawData(), result->size());
+        TargetBitmapView valid(result->GetValidRawData(), result->size());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            EXPECT_TRUE(valid[row]);
+            EXPECT_EQ(bits[row],
+                      op == proto::plan::NullExpr_NullOp_IsNull ? row == 2
+                                                                : row != 2);
+        }
+        EXPECT_EQ(observed_pin, &untouched);
+    }
+}
+
 TEST_F(JsonFlatExpressionTest, RootExistsRejectsMissingAndNullValues) {
     auto expr = std::make_shared<expr::ExistsExpr>(
         expr::ColumnInfo(json_fid_, DataType::JSON, {""}));
