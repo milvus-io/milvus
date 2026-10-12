@@ -165,16 +165,29 @@ func TestRLSDefaultDenyAndActionIsolation(t *testing.T) {
 			common.CheckErr(t, runRLSAction(ctx, mc, name, "alice", false, action), false, "no applicable")
 		})
 	}
-	createRLSPolicy(ctx, t, mc, name, "owner", "owner == $current_principal", "", milvuspb.RowPolicyAction_Query)
-	for _, action := range rlsActions {
-		if action == milvuspb.RowPolicyAction_Query {
-			continue
-		}
-		t.Run("query_policy_does_not_grant_"+action.String(), func(t *testing.T) {
-			common.CheckErr(t, runRLSAction(ctx, mc, name, "alice", false, action), false, "no applicable")
+	for _, granted := range rlsActions {
+		t.Run("only_"+granted.String(), func(t *testing.T) {
+			isolated := prepareRLSCollection(ctx, t, mc, "", false)
+			using, check := "owner == $current_principal", ""
+			if granted == milvuspb.RowPolicyAction_Insert || granted == milvuspb.RowPolicyAction_Upsert {
+				check = using
+			}
+			if granted == milvuspb.RowPolicyAction_Insert {
+				using = ""
+			}
+			createRLSPolicy(ctx, t, mc, isolated, "owner", using, check, granted)
+			for _, action := range rlsActions {
+				if action != granted {
+					t.Run("denies_"+action.String(), func(t *testing.T) {
+						common.CheckErr(t, runRLSAction(ctx, mc, isolated, "alice", false, action), false, "no applicable")
+					})
+				}
+			}
+			queryRLS(ctx, t, mc, isolated, "", true, 1, 2, 3, 4)
+			common.CheckErr(t, runRLSAction(ctx, mc, isolated, "alice", false, granted), true)
 		})
 	}
-	common.CheckErr(t, mc.UpdateRowPolicy(ctx, client.NewUpdateRowPolicyOption(name, "owner", milvuspb.RowPolicyType_RowPolicyTypePermissive, rlsActions...).WithUsingExpr("owner == $current_principal").WithCheckExpr("owner == $current_principal")), true)
+	createRLSPolicy(ctx, t, mc, name, "owner", "owner == $current_principal", "owner == $current_principal", rlsActions...)
 	for _, action := range rlsActions {
 		for _, principal := range []string{"", " \t"} {
 			t.Run("missing_principal_"+action.String()+fmt.Sprintf("_%q", principal), func(t *testing.T) {
@@ -281,9 +294,11 @@ func TestRLSReadPathsAndPrincipalBinding(t *testing.T) {
 		qi, err := mc.QueryIterator(ctx, client.NewQueryIteratorOption(name).WithBatchSize(1).WithOutputFields("id").WithRLSPrincipal("alice"))
 		common.CheckErr(t, err, true)
 		var got []int64
+		ended := false
 		for range 10 {
 			r, err := qi.Next(ctx)
 			if errors.Is(err, io.EOF) {
+				ended = true
 				break
 			}
 			common.CheckErr(t, err, true)
@@ -293,13 +308,16 @@ func TestRLSReadPathsAndPrincipalBinding(t *testing.T) {
 				got = append(got, id)
 			}
 		}
+		require.True(t, ended, "query iterator did not reach EOF")
 		require.ElementsMatch(t, []int64{1, 3}, got)
 		si, err := mc.SearchIterator(ctx, client.NewSearchIteratorOption(name, entity.FloatVector{0, 1, 2, 3}).WithBatchSize(1).WithRLSPrincipal("alice"))
 		common.CheckErr(t, err, true)
 		got = nil
+		ended = false
 		for range 10 {
 			r, err := si.Next(ctx)
 			if errors.Is(err, io.EOF) {
+				ended = true
 				break
 			}
 			common.CheckErr(t, err, true)
@@ -309,6 +327,7 @@ func TestRLSReadPathsAndPrincipalBinding(t *testing.T) {
 				got = append(got, id)
 			}
 		}
+		require.True(t, ended, "search iterator did not reach EOF")
 		require.ElementsMatch(t, []int64{1, 3}, got)
 	})
 }
