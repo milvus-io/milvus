@@ -17,6 +17,7 @@
 package testcases
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"fmt"
@@ -421,9 +422,14 @@ func checkRLSSchemaRows(t *testing.T, result client.ResultSet, want map[any]rlsS
 				}
 				require.Equal(t, expected[f], n)
 			} else if f == "vector" && c.Type() == entity.FieldTypeSparseVector {
-				require.Equal(t, expected[f].(entity.SparseEmbedding).Serialize(), actual.(entity.SparseEmbedding).Serialize())
+				wantBytes, gotBytes := expected[f].(entity.SparseEmbedding).Serialize(), actual.(entity.SparseEmbedding).Serialize()
+				if !bytes.Equal(wantBytes, gotBytes) {
+					require.Equal(t, wantBytes, gotBytes)
+				}
 			} else if f == "doc" {
-				require.JSONEq(t, string(expected[f].([]byte)), string(actual.([]byte)), "id=%v", id)
+				if !bytes.Equal(expected[f].([]byte), actual.([]byte)) {
+					require.JSONEq(t, string(expected[f].([]byte)), string(actual.([]byte)), "id=%v", id)
+				}
 			} else if f == "instant" {
 				wantTime, err := time.Parse(time.RFC3339Nano, expected[f].(string))
 				if err != nil {
@@ -445,6 +451,20 @@ func checkRLSSchemaRows(t *testing.T, result client.ResultSet, want map[any]rlsS
 		}
 	}
 	return seen
+}
+
+// Count keys in linear time instead of pairwise matching thousands of rows.
+func checkRLSSchemaIDs(t *testing.T, want, got []any) {
+	t.Helper()
+	require.Len(t, got, len(want))
+	wantCounts, gotCounts := map[any]int{}, map[any]int{}
+	for _, id := range want {
+		wantCounts[id]++
+	}
+	for _, id := range got {
+		gotCounts[id]++
+	}
+	require.Equal(t, wantCounts, gotCounts)
 }
 
 // Every read checks exact IDs and complete values; iterator pages additionally check duplicates across pages.
@@ -473,10 +493,10 @@ func checkRLSSchemaState(ctx context.Context, t *testing.T, mc *client.Client, n
 			maps.DeleteFunc(searchWant, func(_ any, r rlsSchemaRow) bool { return r["vector"] == nil })
 			searchKeys := slices.Collect(maps.Keys(searchWant))
 			checkSearch := func(t *testing.T, r client.ResultSet) {
-				require.ElementsMatch(t, searchKeys, checkRLSSchemaRows(t, r, searchWant, fields))
+				checkRLSSchemaIDs(t, searchKeys, checkRLSSchemaRows(t, r, searchWant, fields))
 			}
 			check := func(t *testing.T, r client.ResultSet, fs []string) {
-				require.ElementsMatch(t, keys, checkRLSSchemaRows(t, r, want, fs))
+				checkRLSSchemaIDs(t, keys, checkRLSSchemaRows(t, r, want, fs))
 			}
 			t.Run("query", func(t *testing.T) {
 				r, e := mc.Query(ctx, client.NewQueryOption(name).WithFilter("owner != ''").WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
@@ -502,7 +522,7 @@ func checkRLSSchemaState(ctx context.Context, t *testing.T, mc *client.Client, n
 						break
 					}
 				}
-				require.ElementsMatch(t, keys, got)
+				checkRLSSchemaIDs(t, keys, got)
 			})
 			t.Run("get", func(t *testing.T) {
 				pk := rlsSchemaColumns(t, tc)[0]
@@ -535,7 +555,7 @@ func checkRLSSchemaState(ctx context.Context, t *testing.T, mc *client.Client, n
 					got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
 				}
 				require.True(t, ended)
-				require.ElementsMatch(t, keys, got)
+				checkRLSSchemaIDs(t, keys, got)
 			})
 			t.Run("search", func(t *testing.T) {
 				queries := []entity.Vector{qv, rlsSchemaVector(t, tc.vector, 64)}
@@ -577,7 +597,7 @@ func checkRLSSchemaState(ctx context.Context, t *testing.T, mc *client.Client, n
 					got = append(got, checkRLSSchemaRows(t, r, searchWant, fields)...)
 				}
 				require.True(t, ended)
-				require.ElementsMatch(t, searchKeys, got)
+				checkRLSSchemaIDs(t, searchKeys, got)
 			})
 			if len(searchKeys) > 0 {
 				t.Run("search_by_ids", func(t *testing.T) {
@@ -640,9 +660,13 @@ func rlsVectorDistance(query entity.Vector, value any) float32 {
 
 func rlsRankedIDs(query entity.Vector, rows map[any]rlsSchemaRow) []any {
 	ids := slices.Collect(maps.Keys(rows))
+	scores := make(map[any]float32, len(rows))
+	for id, row := range rows {
+		scores[id] = rlsVectorDistance(query, row["vector"])
+	}
 	_, sparse := query.(entity.SparseEmbedding)
 	slices.SortFunc(ids, func(a, b any) int {
-		order := cmp.Compare(rlsVectorDistance(query, rows[a]["vector"]), rlsVectorDistance(query, rows[b]["vector"]))
+		order := cmp.Compare(scores[a], scores[b])
 		if sparse {
 			return -order
 		}
@@ -1153,7 +1177,7 @@ func TestRLSSchemaSearchVariants(t *testing.T) {
 											r, err := mc.Query(ctx, o)
 											require.NoError(t, err)
 											ids := checkRLSSchemaRows(t, r, want, fields)
-											require.ElementsMatch(t, slices.Collect(maps.Keys(want)), ids)
+											checkRLSSchemaIDs(t, slices.Collect(maps.Keys(want)), ids)
 											if mode == "ordered_query" {
 												for i := 1; i < len(ids); i++ {
 													require.Greater(t, want[ids[i-1]]["f64"].(float64), want[ids[i]]["f64"].(float64))
@@ -1198,7 +1222,7 @@ func TestRLSSchemaSearchVariants(t *testing.T) {
 										r := rs[0]
 										require.NoError(t, r.Err)
 										if mode == "range" {
-											require.ElementsMatch(t, slices.Collect(maps.Keys(rangeWant)), checkRLSSchemaRows(t, r, rangeWant, fields))
+											checkRLSSchemaIDs(t, slices.Collect(maps.Keys(rangeWant)), checkRLSSchemaRows(t, r, rangeWant, fields))
 											return
 										}
 										owners := map[string][]any{}
@@ -1246,10 +1270,10 @@ func TestRLSSchemaSearchVariants(t *testing.T) {
 												require.Equal(t, want[h.PK]["f64"], h.Fields["f64"])
 												ids = append(ids, h.PK)
 											}
-											require.ElementsMatch(t, owners[owner], ids)
+											checkRLSSchemaIDs(t, owners[owner], ids)
 											returned = append(returned, ids...)
 										}
-										require.ElementsMatch(t, slices.Collect(maps.Keys(want)), returned)
+										checkRLSSchemaIDs(t, slices.Collect(maps.Keys(want)), returned)
 									})
 								}
 							})
@@ -1539,14 +1563,14 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 			t.Run("query_get_count", func(t *testing.T) {
 				r, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("owner != ''").WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 				require.NoError(t, err)
-				require.ElementsMatch(t, keys, checkRLSSchemaRows(t, r, want, fields))
+				checkRLSSchemaIDs(t, keys, checkRLSSchemaRows(t, r, want, fields))
 				pk := rlsSchemaColumns(t, tc)[0]
 				for id := range all {
 					require.NoError(t, pk.AppendValue(id))
 				}
 				r, err = mc.Get(ctx, client.NewQueryOption(name).WithIDs(pk).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 				require.NoError(t, err)
-				require.ElementsMatch(t, keys, checkRLSSchemaRows(t, r, want, fields))
+				checkRLSSchemaIDs(t, keys, checkRLSSchemaRows(t, r, want, fields))
 				r, err = mc.Query(ctx, client.NewQueryOption(name).WithFilter("owner != ''").WithOutputFields("count(*)").WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 				require.NoError(t, err)
 				n, err := r.GetColumn("count(*)").GetAsInt64(0)
@@ -1568,7 +1592,7 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 					got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
 				}
 				require.True(t, ended)
-				require.ElementsMatch(t, keys, got)
+				checkRLSSchemaIDs(t, keys, got)
 			})
 			// Query each original PK range so a missing execution path cannot hide behind total count.
 			for _, group := range []struct {
@@ -1703,7 +1727,7 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 								got = append(got, checkRLSSchemaRows(t, r, groupWant, fields)...)
 							}
 							require.True(t, ended)
-							require.ElementsMatch(t, expected, got)
+							checkRLSSchemaIDs(t, expected, got)
 						})
 					}
 				})
@@ -1989,7 +2013,7 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 					t.Run("query_get_count", func(t *testing.T) {
 						r, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter(filter).WithTemplateParam("key", value).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 						require.NoError(t, err)
-						require.ElementsMatch(t, ids, checkRLSSchemaRows(t, r, want, fields))
+						checkRLSSchemaIDs(t, ids, checkRLSSchemaRows(t, r, want, fields))
 						var requested []int64
 						for id, row := range all {
 							if row[field] == value && (clusterValue == nil || row[tc.clusteringKey] == clusterValue) {
@@ -1998,7 +2022,7 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 						}
 						r, err = mc.Get(ctx, client.NewQueryOption(name).WithIDs(column.NewColumnInt64("id", requested)).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 						require.NoError(t, err)
-						require.ElementsMatch(t, ids, checkRLSSchemaRows(t, r, want, fields))
+						checkRLSSchemaIDs(t, ids, checkRLSSchemaRows(t, r, want, fields))
 						r, err = mc.Query(ctx, client.NewQueryOption(name).WithFilter(filter).WithTemplateParam("key", value).WithOutputFields("count(*)").WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 						require.NoError(t, err)
 						n, err := r.GetColumn("count(*)").GetAsInt64(0)
@@ -2020,7 +2044,7 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 							got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
 						}
 						require.True(t, ended)
-						require.ElementsMatch(t, ids, got)
+						checkRLSSchemaIDs(t, ids, got)
 					})
 					checkTopK := func(t *testing.T, result client.ResultSet, query entity.Vector, rrf bool) {
 						t.Helper()
@@ -2097,7 +2121,7 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 								got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
 							}
 							require.True(t, ended)
-							require.ElementsMatch(t, expected, got)
+							checkRLSSchemaIDs(t, expected, got)
 						})
 					}
 				})
@@ -2152,7 +2176,7 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 					}
 					r, err := mc.Query(ctx, opt)
 					require.NoError(t, err)
-					require.ElementsMatch(t, slices.Collect(maps.Keys(want)), checkRLSSchemaRows(t, r, want, fields))
+					checkRLSSchemaIDs(t, slices.Collect(maps.Keys(want)), checkRLSSchemaRows(t, r, want, fields))
 				})
 			}
 		}
