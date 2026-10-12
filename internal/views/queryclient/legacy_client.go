@@ -272,8 +272,7 @@ func SupportsQueryStream(req *internalpb.RetrieveRequest) bool {
 		req.GetLimit() > 0 &&
 		!req.GetIsCount() &&
 		len(req.GetGroupByFieldIds()) == 0 &&
-		len(req.GetAggregates()) == 0 &&
-		len(req.GetOrderByFields()) == 0
+		len(req.GetAggregates()) == 0
 }
 
 func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error) {

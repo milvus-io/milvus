@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -59,6 +60,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type searchTaskReduceStream struct {
+	chunks []*internalpb.SearchResults
+}
+
+func (s *searchTaskReduceStream) Recv() (*internalpb.SearchResults, error) {
+	if len(s.chunks) == 0 {
+		return nil, io.EOF
+	}
+	chunk := s.chunks[0]
+	s.chunks = s.chunks[1:]
+	return chunk, nil
+}
+
+func (*searchTaskReduceStream) Close() error {
+	return nil
+}
+
+func (*searchTaskReduceStream) Interrupt() (*internalpb.SearchResults, error) {
+	return nil, errors.New("not implemented")
+}
+
 func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
 	output := &schemapb.SearchResultData{
 		NumQueries: 2,
@@ -96,6 +118,48 @@ func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
 	require.Equal(t, []int64{11, 12, 21, 22}, output.GetIds().GetIntId().GetData())
 	require.Equal(t, []float32{0.2, 0.3, 1.1, 1.2}, output.GetScores())
 	require.Equal(t, []int64{2, 2}, output.GetTopks())
+}
+
+func TestConsumeResultStreamPreservesOrderByCandidateWindow(t *testing.T) {
+	task := &SearchTask{
+		SearchRequest: &internalpb.SearchRequest{Nq: 1, Topk: 3, Offset: 1},
+		orderByFields: []OrderByField{{FieldName: "price"}},
+	}
+	stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{
+		{
+			Status:     merr.Success(),
+			MetricType: metric.L2,
+			ResultData: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       2,
+				Topks:      []int64{2},
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 11}},
+				}},
+				Scores: []float32{-0.1, -0.2},
+			},
+		},
+		{
+			Status:     merr.Success(),
+			MetricType: metric.L2,
+			ResultData: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       1,
+				Topks:      []int64{1},
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{12}},
+				}},
+				Scores: []float32{-0.3},
+			},
+		},
+	}}
+
+	result, metricType, err := task.consumeResultStream(stream, metric.L2, func(*internalpb.SearchResults) {})
+	require.NoError(t, err)
+	require.Equal(t, metric.L2, metricType)
+	require.Equal(t, []int64{10, 11, 12}, result.GetResults().GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{0.1, 0.2, 0.3}, result.GetResults().GetScores())
+	require.Equal(t, []int64{3}, result.GetResults().GetTopks())
 }
 
 func TestSearchTaskFillResultSkipsTopksInsufficientForSearchAggregation(t *testing.T) {
