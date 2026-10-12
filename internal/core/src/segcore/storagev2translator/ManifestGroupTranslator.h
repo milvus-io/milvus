@@ -253,6 +253,8 @@ class ManifestGroupTranslator
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
     bool enable_async_load_{false};
+    // Estimation and every reload use the same async window size.
+    const int64_t async_read_window_bytes_;
 };
 
 }  // namespace milvus::segcore::storagev2translator

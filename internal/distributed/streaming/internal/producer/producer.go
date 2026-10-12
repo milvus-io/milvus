@@ -29,6 +29,10 @@ type ProducerOptions struct {
 	PChannel string
 }
 
+type ProduceOption struct {
+	IdempotencyKey string
+}
+
 // NewResumableProducer creates a new producer.
 // Provide an auto resuming producer.
 func NewResumableProducer(f factory, opts *ProducerOptions) *ResumableProducer {
@@ -83,6 +87,10 @@ type ResumableProducer struct {
 
 // BeginProduce begins a new produce task.
 func (p *ResumableProducer) BeginProduce(ctx context.Context, msgs ...message.MutableMessage) (*ProduceGuard, error) {
+	return p.BeginProduceWithOptions(ctx, msgs)
+}
+
+func (p *ResumableProducer) BeginProduceWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...ProduceOption) (*ProduceGuard, error) {
 	if len(msgs) == 0 {
 		panic("begin produce with no messages")
 	}
@@ -100,6 +108,7 @@ func (p *ResumableProducer) BeginProduce(ctx context.Context, msgs ...message.Mu
 		return &ProduceGuard{
 			producer: p,
 			msgs:     msgs,
+			opts:     opts,
 			r:        nil,
 		}, nil
 	}
@@ -111,6 +120,7 @@ func (p *ResumableProducer) BeginProduce(ctx context.Context, msgs ...message.Mu
 	return &ProduceGuard{
 		producer: p,
 		msgs:     msgs,
+		opts:     opts,
 		r:        r,
 	}, nil
 }

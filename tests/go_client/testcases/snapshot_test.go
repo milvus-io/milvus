@@ -338,6 +338,55 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	common.CheckErr(t, err, true)
 }
 
+// CreateSnapshot must persist growing inserts and deletes without a preceding Flush.
+func TestSnapshotRestoreWithoutExplicitFlush(t *testing.T) {
+	ctx := hp.CreateContext(t, 3*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	collName := common.GenRandomString(snapshotPrefix, 8)
+	restoredName := "restored_" + collName
+	snapshotName := "unflushed_" + collName
+	require.NoError(t, mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim).
+		WithAutoID(false).WithShardNum(2)))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, collName))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(restoredName))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.NoError(t, err)
+	hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), hp.TNewDataOption().TWithNb(100))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(collName).WithInt64IDs("id", []int64{0, 1, 2}))
+	require.NoError(t, err)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName)))
+
+	// Later inserts and deletes must not become part of the snapshot.
+	hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), hp.TNewDataOption().TWithNb(10).TWithStart(100))
+	_, err = mc.Delete(ctx, client.NewDeleteOption(collName).WithInt64IDs("id", []int64{3, 4, 5}))
+	require.NoError(t, err)
+	jobID, err := mc.RestoreSnapshot(ctx, client.NewRestoreSnapshotOption(snapshotName, collName, restoredName))
+	require.NoError(t, err)
+	_, err = waitForRestoreComplete(ctx, mc, jobID, time.Minute)
+	require.NoError(t, err)
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredName))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	result, err := mc.Query(ctx, client.NewQueryOption(restoredName).
+		WithFilter("id >= 0").WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Equal(t, 97, result.ResultCount)
+	ids := make([]int64, 0, result.ResultCount)
+	for i := 0; i < result.ResultCount; i++ {
+		id, err := result.Fields[0].GetAsInt64(i)
+		require.NoError(t, err)
+		ids = append(ids, id)
+	}
+	expected := make([]int64, 97)
+	for i := range expected {
+		expected[i] = int64(i + 3)
+	}
+	require.ElementsMatch(t, expected, ids)
+}
+
 // TestSnapshotRestoreExternalReferenced restores directly from CreateSnapshot metadata.
 // This covers the referenced layout, where metadata still points at the original
 // Milvus storage files instead of an exported self-contained bundle.

@@ -19,18 +19,98 @@ package tasks
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"math/rand"
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
+
+func TestTakeForOutputRequestDecision(t *testing.T) {
+	t.Run("request limit", func(t *testing.T) {
+		assert.True(t, takeForOutputAllowed(10000, 10000))
+		assert.False(t, takeForOutputAllowed(10001, 10000))
+		assert.False(t, takeForOutputAllowed(unknownTakeForOutputResultCount, 10000))
+		assert.True(t, takeForOutputAllowed(unknownTakeForOutputResultCount, 0))
+	})
+
+	t.Run("search count", func(t *testing.T) {
+		assert.Equal(t, int64(600), searchTakeForOutputResultCount(10, 20, 3))
+		assert.Equal(t, int64(200), searchTakeForOutputResultCount(10, 20, 0))
+		assert.Equal(t, int64(0), searchTakeForOutputResultCount(0, 20, 1))
+		assert.Equal(t, unknownTakeForOutputResultCount, searchTakeForOutputResultCount(-1, 20, 1))
+		assert.Equal(t, int64(math.MaxInt64), searchTakeForOutputResultCount(math.MaxInt64, 2, 1))
+	})
+
+	t.Run("retrieve primary key term", func(t *testing.T) {
+		plan := &planpb.PlanNode{
+			Node: &planpb.PlanNode_Query{
+				Query: &planpb.QueryPlanNode{
+					Predicates: &planpb.Expr{
+						Expr: &planpb.Expr_TermExpr{
+							TermExpr: &planpb.TermExpr{
+								ColumnInfo: &planpb.ColumnInfo{IsPrimaryKey: true},
+								Values: []*planpb.GenericValue{
+									{}, {}, {},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		req := &internalpb.RetrieveRequest{Limit: -1}
+		assert.Equal(t, int64(3), retrieveTakeForOutputResultCount(req, plan))
+		req.Limit = 0
+		assert.Equal(t, int64(3), retrieveTakeForOutputResultCount(req, plan))
+		req.Limit = 2
+		assert.Equal(t, int64(2), retrieveTakeForOutputResultCount(req, plan))
+	})
+
+	t.Run("retrieve limit and unknown", func(t *testing.T) {
+		assert.Equal(t, int64(128), retrieveTakeForOutputResultCount(
+			&internalpb.RetrieveRequest{Limit: 128},
+			&planpb.PlanNode{},
+		))
+		nonPrimaryKeyPlan := &planpb.PlanNode{
+			Node: &planpb.PlanNode_Query{
+				Query: &planpb.QueryPlanNode{
+					Predicates: &planpb.Expr{
+						Expr: &planpb.Expr_TermExpr{
+							TermExpr: &planpb.TermExpr{
+								ColumnInfo: &planpb.ColumnInfo{},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, int64(128), retrieveTakeForOutputResultCount(
+			&internalpb.RetrieveRequest{Limit: 128},
+			nonPrimaryKeyPlan,
+		))
+		assert.Equal(t, unknownTakeForOutputResultCount, retrieveTakeForOutputResultCount(
+			&internalpb.RetrieveRequest{Limit: -1},
+			&planpb.PlanNode{},
+		))
+		assert.Equal(t, unknownTakeForOutputResultCount, retrieveTakeForOutputResultCount(
+			&internalpb.RetrieveRequest{Limit: 0},
+			&planpb.PlanNode{},
+		))
+		assert.Equal(t, unknownTakeForOutputResultCount, retrieveTakeForOutputResultCount(nil, nil))
+	})
+}
 
 type SearchTaskSuite struct {
 	suite.Suite
@@ -145,6 +225,8 @@ func (s *SearchTaskSuite) TestCombinePlaceHolderGroups() {
 }
 
 func (s *SearchTaskSuite) TestMergeFilterOnly() {
+	serializedPlan, err := proto.Marshal(&planpb.PlanNode{})
+	s.Require().NoError(err)
 	s.Run("same_filter_only_can_merge", func() {
 		task1 := &SearchTask{
 			nq:   10,
@@ -156,7 +238,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -174,7 +256,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -199,7 +281,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -217,7 +299,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -242,7 +324,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -261,7 +343,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -285,7 +367,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -303,7 +385,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -316,6 +398,69 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 		s.True(merged, "tasks with same FilterOnly=false should merge")
 		s.Equal(int64(15), task1.nq)
 	})
+}
+
+func TestSearchTaskMergeFunctionChains(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		chains    []*schemapb.FunctionChain
+		malformed bool
+		wantMerge bool
+	}{
+		{name: "no chain", wantMerge: true},
+		{name: "L0", chains: []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageL0Rerank}}},
+		{name: "L1", chains: []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageL1Rerank}}},
+		{name: "malformed plan", malformed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			serializedPlan, err := proto.Marshal(&planpb.PlanNode{QuerynodeFunctionChains: tc.chains})
+			require.NoError(t, err)
+			if tc.malformed {
+				serializedPlan = []byte{0xff}
+			}
+			newTask := func() *SearchTask {
+				return &SearchTask{
+					nq: 1, topk: 10, groupSize: 1,
+					originNqs: []int64{1}, originTopks: []int64{10},
+					notifier: make(chan error, 1),
+					req: &querypb.SearchRequest{
+						Req: &internalpb.SearchRequest{
+							CollectionID: 1000, SerializedExprPlan: serializedPlan,
+						},
+						DmlChannels: []string{"channel1"},
+					},
+				}
+			}
+			first, second := newTask(), newTask()
+			require.Equal(t, tc.wantMerge, first.MergeWith(second))
+			if tc.wantMerge {
+				require.Equal(t, int64(2), first.nq)
+				require.Equal(t, []*SearchTask{second}, first.others)
+				require.True(t, second.merged)
+				return
+			}
+
+			for _, task := range []*SearchTask{first, second} {
+				require.Equal(t, int64(1), task.nq)
+				require.Equal(t, int64(10), task.topk)
+				require.Equal(t, int64(1), task.groupSize)
+				require.Equal(t, []int64{1}, task.originNqs)
+				require.Equal(t, []int64{10}, task.originTopks)
+				require.Empty(t, task.others)
+				require.False(t, task.merged)
+			}
+			// An execution failure must not notify the unrelated request.
+			first.Done(assert.AnError)
+			require.ErrorIs(t, first.Wait(), assert.AnError)
+			select {
+			case err := <-second.notifier:
+				t.Fatalf("unrelated request received completion: %v", err)
+			default:
+			}
+			second.Done(nil)
+			require.NoError(t, second.Wait())
+		})
+	}
 }
 
 func (s *SearchTaskSuite) TestSearchTaskMinNQ() {

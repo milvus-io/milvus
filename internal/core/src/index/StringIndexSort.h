@@ -155,6 +155,14 @@ class StringIndexSort : public StringIndex {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
+
  protected:
     int64_t
     CalculateTotalSize() const;
@@ -358,9 +366,11 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     ByteSize() const override;
 
  private:
-    // Helper method for binary search
-    size_t
-    FindValueIndex(const std::string& value) const;
+    void
+    ApplyMembership(size_t n,
+                    const std::string* values,
+                    TargetBitmap& bitset,
+                    bool in) const;
 
     // Helper to find the range of unique values that start with a prefix
     std::pair<size_t, size_t>
@@ -514,9 +524,12 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     ByteSize() const override;
 
  private:
-    // Binary search for a value
-    size_t
-    FindValueIndex(const std::string& value) const;
+    friend class StringIndexSort;
+    void
+    ApplyMembership(size_t n,
+                    const std::string* values,
+                    TargetBitmap& bitset,
+                    bool in) const;
 
     // Check if value matches pattern based on op type
     bool
@@ -543,7 +556,6 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
         return MmapEntry(str_ptr, post_list_ptr);
     }
 
- private:
     void
     MmapAndParse(size_t data_size,
                  size_t total_num_rows,

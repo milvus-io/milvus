@@ -20,7 +20,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
@@ -60,31 +60,33 @@ SearchOnSealedIndex(const Schema& schema,
                     SearchResult& search_result) {
     const auto* schema_ptr = &schema;
     const auto* entry_ptr = &entry;
-    auto register_vector_iterator_recreator = [&] {
-        if (!search_result.allow_vector_iterator_recreation_ ||
-            !CanUseStrictGroupFilteredIterator(search_info, num_queries) ||
+    auto register_vector_search_provider = [&] {
+        if (!search_result.allow_filtered_vector_search_ ||
+            !CanUseStrictGroupSearch(search_info, num_queries) ||
             !search_result.vector_iterators_.has_value()) {
             return;
         }
-        search_result.SetVectorIteratorRecreator(
+        search_result.SetVectorSearchProvider(
             bitset,
             [schema_ptr,
              entry_ptr,
-             recreate_search_info = search_info,
+             phase1_search_info = search_info,
              query_data,
              query_offsets,
              num_queries,
              op_context](const BitsetView& combined_filter,
-                         SearchResult& recreated_result) {
-                SearchOnSealedIndex(*schema_ptr,
-                                    *entry_ptr,
-                                    recreate_search_info,
-                                    query_data,
-                                    query_offsets,
-                                    num_queries,
-                                    combined_filter,
-                                    op_context,
-                                    recreated_result);
+                         int64_t remaining_topk,
+                         SearchResult& filtered_result) {
+                SearchOnSealedIndex(
+                    *schema_ptr,
+                    *entry_ptr,
+                    StrictGroupSearchInfo(phase1_search_info, remaining_topk),
+                    query_data,
+                    query_offsets,
+                    num_queries,
+                    combined_filter,
+                    op_context,
+                    filtered_result);
             });
     };
 
@@ -92,6 +94,12 @@ SearchOnSealedIndex(const Schema& schema,
 
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
+    if (field.get_data_type() == DataType::VECTOR_ARRAY &&
+        field.is_element_nullable()) {
+        ThrowInfo(NotImplemented,
+                  "search on element-nullable VECTOR_ARRAY fields is not "
+                  "supported");
+    }
     auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32;
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
     auto dim = is_sparse ? 0 : field.get_dim();
@@ -121,7 +129,8 @@ SearchOnSealedIndex(const Schema& schema,
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
-    const bool is_element_level_search = search_info.array_offsets_ != nullptr;
+    const bool is_element_level_search =
+        search_info.struct_element_offsets_ != nullptr;
     search_result.element_level_ = is_element_level_search;
     BitsetView search_bitset = bitset;
 
@@ -130,7 +139,7 @@ SearchOnSealedIndex(const Schema& schema,
             *vec_index, dataset, search_info, search_bitset, op_context);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
-                                    search_info.array_offsets_.get());
+                                    search_info.struct_element_offsets_.get());
         return;
     }
 
@@ -148,13 +157,13 @@ SearchOnSealedIndex(const Schema& schema,
     }
     FinalizeVectorSearchOffsets(
         search_result,
-        use_iterator ? nullptr : search_info.array_offsets_.get());
+        use_iterator ? nullptr : search_info.struct_element_offsets_.get());
     if (use_iterator) {
         search_result.resource_pins_.emplace_back(std::move(accessor));
     }
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topK;
-    register_vector_iterator_recreator();
+    register_vector_search_provider();
 }
 
 void
@@ -170,40 +179,48 @@ SearchOnSealedColumn(const Schema& schema,
                      milvus::OpContext* op_context,
                      SearchResult& result) {
     const auto* schema_ptr = &schema;
-    auto register_vector_iterator_recreator = [&] {
-        if (!result.allow_vector_iterator_recreation_ ||
-            !CanUseStrictGroupFilteredIterator(search_info, num_queries) ||
+    auto register_vector_search_provider = [&] {
+        if (!result.allow_filtered_vector_search_ ||
+            !CanUseStrictGroupSearch(search_info, num_queries) ||
             !result.vector_iterators_.has_value()) {
             return;
         }
-        result.SetVectorIteratorRecreator(
+        result.SetVectorSearchProvider(
             bitview,
             [schema_ptr,
              column,
-             recreate_search_info = search_info,
-             recreate_index_info = index_info,
+             phase1_search_info = search_info,
+             phase1_index_info = index_info,
              query_data,
              query_offsets,
              num_queries,
              row_count,
              op_context](const BitsetView& combined_filter,
-                         SearchResult& recreated_result) {
-                SearchOnSealedColumn(*schema_ptr,
-                                     column,
-                                     recreate_search_info,
-                                     recreate_index_info,
-                                     query_data,
-                                     query_offsets,
-                                     num_queries,
-                                     row_count,
-                                     combined_filter,
-                                     op_context,
-                                     recreated_result);
+                         int64_t remaining_topk,
+                         SearchResult& filtered_result) {
+                SearchOnSealedColumn(
+                    *schema_ptr,
+                    column,
+                    StrictGroupSearchInfo(phase1_search_info, remaining_topk),
+                    phase1_index_info,
+                    query_data,
+                    query_offsets,
+                    num_queries,
+                    row_count,
+                    combined_filter,
+                    op_context,
+                    filtered_result);
             });
     };
 
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
+    if (field.get_data_type() == DataType::VECTOR_ARRAY &&
+        field.is_element_nullable()) {
+        ThrowInfo(NotImplemented,
+                  "search on element-nullable VECTOR_ARRAY fields is not "
+                  "supported");
+    }
 
     auto data_type = field.get_data_type();
     auto element_type = field.get_element_type();
@@ -221,8 +238,9 @@ SearchOnSealedColumn(const Schema& schema,
 
     CheckBruteForceSearchParam(field, search_info);
 
-    const bool is_element_level_search = data_type == DataType::VECTOR_ARRAY &&
-                                         search_info.array_offsets_ != nullptr;
+    const bool is_element_level_search =
+        data_type == DataType::VECTOR_ARRAY &&
+        search_info.struct_element_offsets_ != nullptr;
     // Nullable vector chunks scan compacted physical rows. Row-level searches
     // need p2l ids; element-level VECTOR_ARRAY searches map element ids later.
     const bool needs_offset_mapping =
@@ -268,13 +286,13 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_bitview,
                                          data_type);
         cached_iter.NextBatch(search_info, result);
-        FinalizeVectorSearchOffsets(result, search_info.array_offsets_.get());
+        FinalizeVectorSearchOffsets(result,
+                                    search_info.struct_element_offsets_.get());
         return;
     }
 
     const bool use_vector_iterator =
         milvus::exec::UseVectorIterator(search_info);
-    auto num_chunk = column->num_chunks();
 
     SubSearchResult final_qr(num_queries,
                              search_info.topk_,
@@ -283,6 +301,7 @@ SearchOnSealedColumn(const Schema& schema,
 
     int64_t offset = 0;
     auto vector_chunks = column->GetAllChunks(op_context);
+    auto num_chunk = column->num_chunks();
     for (int i = 0; i < num_chunk; ++i) {
         const auto& pw = vector_chunks[i];
         auto vec_data = pw.get()->Data();
@@ -361,10 +380,10 @@ SearchOnSealedColumn(const Schema& schema,
     } else {
         // See FinalizeVectorSearchOffsets for the rationale: element-level
         // and row-level remapping are mutually exclusive.
-        if (search_info.array_offsets_ != nullptr) {
+        if (search_info.struct_element_offsets_ != nullptr) {
             auto [seg_offsets, elem_indicies] =
                 final_qr.convert_to_element_offsets(
-                    search_info.array_offsets_.get());
+                    search_info.struct_element_offsets_.get());
             result.seg_offsets_ = std::move(seg_offsets);
             result.element_indices_ = std::move(elem_indicies);
             result.element_level_ = true;
@@ -375,7 +394,7 @@ SearchOnSealedColumn(const Schema& schema,
     }
     result.unity_topK_ = query_dataset.topk;
     result.total_nq_ = query_dataset.num_queries;
-    register_vector_iterator_recreator();
+    register_vector_search_provider();
 }
 
 }  // namespace milvus::query

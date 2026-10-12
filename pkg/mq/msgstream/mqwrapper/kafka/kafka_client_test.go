@@ -47,6 +47,20 @@ func getKafkaBrokerList() string {
 	return brokerList
 }
 
+func TestConfigKeysStringOmitsValues(t *testing.T) {
+	config := kafka.ConfigMap{
+		"ssl.key.pem":      "inline-private-key",
+		"sasl.jaas.config": "username=user password=broker-secret",
+	}
+
+	got := ConfigKeysString(config)
+	assert.Contains(t, got, "ssl.key.pem")
+	assert.Contains(t, got, "sasl.jaas.config")
+	assert.NotContains(t, got, "inline-private-key")
+	assert.NotContains(t, got, "broker-secret")
+	assert.Equal(t, got, ConfigtoString(config), "deprecated wrapper must preserve compatibility")
+}
+
 func IntToBytes(n int) []byte {
 	tmp := int32(n)
 	bytesBuffer := bytes.NewBuffer([]byte{})

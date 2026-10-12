@@ -114,6 +114,10 @@ func (s *TestArrayStructSuite) run() {
 				Key:   common.DimKey,
 				Value: fmt.Sprintf("%d", dim),
 			},
+			{
+				Key:   common.MaxCapacityKey,
+				Value: "100",
+			},
 		},
 		IndexParams: nil,
 	}
@@ -168,9 +172,9 @@ func (s *TestArrayStructSuite) run() {
 		CollectionNames: []string{collection},
 	})
 	s.Require().NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collection]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collection]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collection]
 	s.Require().True(has)

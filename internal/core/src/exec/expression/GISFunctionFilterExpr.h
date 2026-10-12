@@ -124,7 +124,7 @@ PromoteShortGISCoarseBitmap(TargetBitmap& coarse, int64_t active_count) {
 class PhyGISFunctionFilterExpr : public SegmentExpr {
  public:
     PhyGISFunctionFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::GISFunctionFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,

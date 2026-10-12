@@ -17,6 +17,11 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 
 #include <atomic>
+#include <mutex>
+#include "storage/LoadAdmissionController.h"
+#include "storage/LoadOverheadController.h"
+#include "storage/ThreadPools.h"
+#include "common/EasyAssert.h"
 
 namespace milvus::segcore::storagev2translator {
 namespace {
@@ -34,6 +39,21 @@ StorageV2AsyncLoadEnabled() {
 
 void
 SetStorageV2AsyncLoadEnabled(const bool enabled) {
+    static std::mutex mode_update_mutex;
+    std::lock_guard lock(mode_update_mutex);
+    if (enabled == StorageV2AsyncLoadEnabled()) {
+        return;
+    }
+    // Mode changes require quiescent loading; live mixed-mode rollout is unsupported.
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    const auto limit =
+        enabled ? admission.CapacitySlots()
+                : static_cast<size_t>(ThreadPools::GetLoadExecutorWorkers());
+    if (!storage::ConfigureLoadOverheadControllers(
+            limit, enabled ? admission.CapacityBytes() : 0)) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to configure loading overhead for load mode");
+    }
     g_async_load_enabled.store(enabled, std::memory_order_release);
 }
 

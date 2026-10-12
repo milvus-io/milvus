@@ -59,8 +59,10 @@ struct RegexMatcher {
         // codepoints — consistent with Tantivy's Unicode regex engine.
         options.set_encoding(RE2::Options::EncodingUTF8);
         re2_ = std::make_unique<RE2>(pattern, options);
-        AssertInfo(re2_->ok(),
-                   "Failed to compile regex pattern: " + re2_->error());
+        if (!(re2_->ok())) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "Failed to compile regex pattern: " + re2_->error());
+        }
     }
 
  private:
@@ -97,8 +99,10 @@ struct PartialRegexMatcher {
         // codepoints — consistent with Tantivy's Unicode regex engine.
         options.set_encoding(RE2::Options::EncodingUTF8);
         re2_ = std::make_unique<RE2>(pattern, options);
-        AssertInfo(re2_->ok(),
-                   "Failed to compile regex pattern: " + re2_->error());
+        if (!(re2_->ok())) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "Failed to compile regex pattern: " + re2_->error());
+        }
     }
 
  private:

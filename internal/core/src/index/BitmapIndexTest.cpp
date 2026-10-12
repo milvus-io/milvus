@@ -11,15 +11,27 @@
 
 #include <boost/container/vector.hpp>
 #include <boost/filesystem/operations.hpp>
+#include <arrow/buffer.h>
+#include <arrow/io/interfaces.h>
+#include <arrow/result.h>
+#include <arrow/status.h>
+#include <arrow/util/future.h>
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
+#include <folly/coro/BlockingWait.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <stdlib.h>
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
+#include <cstring>
+#include <filesystem>
 #include <functional>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <unordered_set>
 #include <variant>
@@ -45,16 +57,81 @@
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/IndexEntryDirectStreamWriter.h"
+#include "storage/RemoteOutputStream.h"
 #include "storage/PayloadReader.h"
+#include "storage/RemoteInputStream.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/Constants.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
+
+namespace {
+
+using milvus::test::AsyncTrackingRandomAccessFile;
+
+class ExposedBitmapIndex : public BitmapIndex<int32_t> {
+ public:
+    using BitmapIndex<int32_t>::BitmapIndex;
+
+    void
+    LoadPlannedForTest(milvus::storage::AsyncIndexEntryReader& reader,
+                       const milvus::Config& config) {
+        auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
+        folly::coro::blockingWait(reader.ReadEntriesAsync(
+            plan.entries, proto::common::LoadPriority::HIGH));
+        folly::coro::blockingWait(FinishLoadAsync(plan, config));
+        plan.Commit();
+    }
+};
+
+struct BitmapAsyncLoadFixture {
+    explicit BitmapAsyncLoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        boost::filesystem::remove_all(root_path);
+        storage::StorageConfig storage_config;
+        storage_config.storage_type = "local";
+        storage_config.root_path = root_path;
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+
+        field_schema.set_data_type(proto::schema::DataType::Int32);
+        field_schema.set_nullable(true);
+        field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+        index_meta = storage::IndexMeta{3, 101, 9100, 9100};
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~BitmapAsyncLoadFixture() {
+        boost::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    proto::schema::FieldSchema field_schema;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
+
+std::unique_ptr<bool[]>
+MakeBoolArray(const std::vector<bool>& values) {
+    auto result = std::make_unique<bool[]>(values.size());
+    for (size_t i = 0; i < values.size(); ++i) {
+        result[i] = values[i];
+    }
+    return result;
+}
+
+}  // namespace
 
 template <typename T>
 static std::vector<T>
@@ -74,6 +151,299 @@ GenerateData<std::string>(const size_t size, const size_t cardinality) {
         result.push_back(std::to_string(rand() % cardinality));
     }
     return result;
+}
+
+TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesBufferedPlannedLoad) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    BitmapAsyncLoadFixture fixture("bitmap_async_memory");
+
+    std::vector<int32_t> data{1, 2, 1, 3, 2, 4, 1};
+    std::vector<bool> valid_flags{true, false, true, true, true, false, true};
+    auto valid_data = MakeBoolArray(valid_flags);
+
+    ExposedBitmapIndex build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data(), valid_data.get());
+    auto stats = build_index.UploadUnified({});
+
+    AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedBitmapIndex load_index(fixture.ctx);
+    Config config;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    config[milvus::index::ENABLE_OFFSET_CACHE] = true;
+    load_index.LoadPlannedForTest(*reader, config);
+
+    EXPECT_GT(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    ASSERT_EQ(load_index.Count(), data.size());
+    EXPECT_EQ(load_index.Reverse_Lookup(1), std::nullopt);
+    auto value = int32_t{1};
+    auto hits = load_index.In(1, &value);
+    EXPECT_TRUE(hits[0]);
+    EXPECT_FALSE(hits[1]);
+    EXPECT_TRUE(hits[2]);
+    EXPECT_FALSE(hits[3]);
+    EXPECT_FALSE(hits[4]);
+    EXPECT_FALSE(hits[5]);
+    EXPECT_TRUE(hits[6]);
+}
+
+TEST(BitmapIndexLoadResourceTest, BitsetFallbackReservesDecodedState) {
+    BitmapAsyncLoadFixture fixture("bitmap_bitset_resources");
+    fixture.field_meta.field_schema.set_nullable(false);
+    fixture.ctx = storage::FileManagerContext(fixture.field_meta,
+                                              fixture.index_meta,
+                                              fixture.chunk_manager,
+                                              fixture.fs);
+    constexpr size_t rows = 100003;
+    constexpr size_t cardinality = DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
+    std::vector<int32_t> data(rows);
+    for (size_t i = 0; i < rows; ++i) {
+        data[i] = i % cardinality;
+    }
+    ExposedBitmapIndex built(fixture.ctx);
+    built.Build(rows, data.data());
+    const auto stats = built.UploadUnified({});
+    AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    ASSERT_FALSE(reader->Directory().HasEntry(BITMAP_INDEX_VALID_BITSET));
+    const auto dense_bytes =
+        (cardinality + 1) * TargetBitmap(rows).size_in_bytes();
+    ASSERT_GT(dense_bytes, 16 * stats->GetSerializedSize());
+    const auto raw_bytes =
+        reader->Directory().At(BITMAP_INDEX_DATA).plaintext_size;
+    const std::map<std::string, std::string> params{
+        {INDEX_TYPE, BITMAP_INDEX_TYPE}, {SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    for (const bool async : {false, true}) {
+        fixture.ctx.use_async_load = async;
+        for (const bool mmap : {false, true}) {
+            SCOPED_TRACE(fmt::format("async={}, mmap={}", async, mmap));
+            const auto resources =
+                index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                    DataType::INT32,
+                    stats->GetSerializedSize(),
+                    params,
+                    mmap,
+                    rows,
+                    stats->GetIndexFiles(),
+                    fixture.ctx);
+            EXPECT_GE(resources.request.final_memory_cost, dense_bytes);
+            EXPECT_GE(resources.request.max_memory_cost,
+                      resources.request.final_memory_cost + raw_bytes);
+            EXPECT_EQ(resources.request.final_disk_cost, 0);
+            EXPECT_FALSE(resources.overhead.has_value());
+        }
+    }
+
+    ExposedBitmapIndex loaded(fixture.ctx);
+    Config config;
+    config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
+    loaded.LoadPlannedForTest(*reader, config);
+    EXPECT_FALSE(loaded.is_mmap_);
+    const int32_t key = 17;
+    const auto hits = loaded.In(1, &key);
+    ASSERT_EQ(hits.size(), rows);
+    for (size_t i = 0; i < rows; ++i) {
+        ASSERT_EQ(hits[i], data[i] == key) << i;
+    }
+}
+
+TEST(BitmapIndexLoadResourceTest, FrozenScratchDoesNotScaleWithObjectSize) {
+    // Keep the read-buffer reservation constant so the comparison isolates
+    // conversion scratch, without allocating either large serialized object.
+    milvus::test::ScopedLoadTransientBudget budget_guard(1);
+    const std::map<std::string, std::string> params{
+        {INDEX_TYPE, BITMAP_INDEX_TYPE}, {SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    const auto estimate = [&](uint64_t bytes) {
+        return index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+            DataType::INT32, 0, bytes, params, true, 1000000);
+    };
+    constexpr uint64_t MiB = 1024 * 1024;
+    const auto small = estimate(64 * MiB);
+    const auto large = estimate(256 * MiB);
+    EXPECT_EQ(small.max_memory_cost, large.max_memory_cost);
+    EXPECT_LT(large.max_memory_cost, 64 * MiB);
+    EXPECT_EQ(large.final_disk_cost, 256 * MiB);
+}
+
+TEST(BitmapIndexLoadResourceTest, FrozenScratchCoversUnoptimizedRuns) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(1);
+    constexpr uint32_t rows = 1 << 16;
+    roaring::Roaring posting;
+    posting.addRange(0, rows);
+    posting.runOptimize();
+    // Removing alternating values preserves the run representation. This valid
+    // input needs far more space than rows / 8 until optimized again.
+    for (uint32_t i = 0; i < rows; i += 2) {
+        posting.remove(i);
+    }
+    const auto frozen_bytes = posting.getFrozenSizeInBytes();
+    ASSERT_GT(frozen_bytes, rows / 8);
+    constexpr uint64_t index_bytes = 64 * 1024 * 1024;
+    const std::map<std::string, std::string> params{
+        {INDEX_TYPE, BITMAP_INDEX_TYPE}, {SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    const auto request =
+        index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+            DataType::INT32, 0, index_bytes, params, true, rows);
+    const auto read_bytes = storage::EntryStreamMaxTransientBytes(
+        index_bytes, storage::MaxEntryStreamTaskBytes());
+    EXPECT_GE(request.max_memory_cost - request.final_memory_cost - read_bytes,
+              2 * BITMAP_FROZEN_BATCH_BYTES + 3 * frozen_bytes);
+}
+
+TEST(BitmapIndexV3AsyncLoadTest, MmapPathUsesBufferedPlannedLoad) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    BitmapAsyncLoadFixture fixture("bitmap_async_mmap");
+    fixture.field_schema.set_nullable(false);
+    fixture.field_meta.field_schema = fixture.field_schema;
+    fixture.ctx = storage::FileManagerContext(fixture.field_meta,
+                                              fixture.index_meta,
+                                              fixture.chunk_manager,
+                                              fixture.fs);
+
+    std::vector<int32_t> data(DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 32);
+    std::iota(data.begin(), data.end(), 0);
+
+    ExposedBitmapIndex build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedBitmapIndex load_index(fixture.ctx);
+    Config config;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    config[milvus::index::MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
+    load_index.LoadPlannedForTest(*reader, config);
+
+    EXPECT_GT(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_TRUE(load_index.is_mmap_);
+    ASSERT_EQ(load_index.Count(), data.size());
+    auto value = int32_t{17};
+    auto hits = load_index.In(1, &value);
+    EXPECT_TRUE(hits[17]);
+}
+
+TEST(BitmapIndexV3AsyncLoadTest, FrozenMmapFailureKeepsCodeAndCleansFiles) {
+    BitmapAsyncLoadFixture fixture("bitmap_async_frozen_mmap_failure");
+    std::vector<int32_t> data(DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 1);
+    std::iota(data.begin(), data.end(), 0);
+    ExposedBitmapIndex build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+    AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+
+    const auto path = fixture.root_path + "/mmap/index";
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    // /dev/null accepts buffered writes but cannot be mapped. Only the test's
+    // symlink is owned and removed by the load's failure cleanup.
+    std::filesystem::create_symlink("/dev/null", path);
+    ExposedBitmapIndex loaded(fixture.ctx);
+    try {
+        loaded.LoadPlannedForTest(
+            *reader,
+            {{MMAP_FILE_PATH, path},
+             {LOAD_PRIORITY, proto::common::LoadPriority::HIGH}});
+        FAIL() << "expected final frozen mmap failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::MmapError);
+        EXPECT_NE(std::string(error.what()).find("frozen Bitmap index"),
+                  std::string::npos);
+        auto status = FailureCStatus(&error);
+        EXPECT_EQ(status.error_code, static_cast<int>(ErrorCode::MmapError));
+        free(const_cast<char*>(status.error_msg));
+    }
+    EXPECT_FALSE(std::filesystem::is_symlink(path));
+    EXPECT_FALSE(std::filesystem::exists(path + ".raw.tmp_load"));
+    EXPECT_FALSE(loaded.is_mmap_);
+}
+
+TEST(BitmapIndexV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    BitmapAsyncLoadFixture fixture("bitmap_async_validity");
+    for (size_t rows :
+         {size_t{8},
+          size_t{9},
+          size_t{63},
+          size_t{64},
+          size_t{65},
+          size_t{2 * DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 65}}) {
+        std::vector<int32_t> data(rows);
+        std::iota(data.begin(), data.end(), 0);
+        auto valid = std::make_unique<bool[]>(rows);
+        for (size_t i = 0; i < rows; ++i) {
+            valid[i] = i % 3 != 0;
+        }
+        BitmapIndex<int32_t> build_index(fixture.ctx);
+        build_index.Build(rows, data.data(), valid.get());
+        auto stats = build_index.UploadUnified({});
+        auto packed = milvus::test::ReadPackedIndexBytes(
+            fixture.ctx, stats->GetIndexFiles());
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE(testing::Message()
+                         << "rows=" << rows << ", mmap=" << mmap);
+            Config config;
+            if (mmap) {
+                config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
+            }
+            BitmapIndex<int32_t> load_index(fixture.ctx);
+            {
+                AsyncTrackingRandomAccessFile* remote_file = nullptr;
+                auto reader = milvus::test::OpenAsyncIndexEntryReader(
+                    packed, &remote_file);
+                auto plan = load_index.PlanLoad(
+                    reader->Directory(), reader->IndexMeta(), config);
+                auto entry = std::find_if(plan.entries.begin(),
+                                          plan.entries.end(),
+                                          [](const auto& entry) {
+                                              return entry.name ==
+                                                     BITMAP_INDEX_VALID_BITSET;
+                                          });
+                ASSERT_NE(entry, plan.entries.end());
+                const auto target =
+                    std::get<storage::MemoryEntryTarget>(entry->target);
+                ASSERT_EQ(target.bytes, (rows + 7) / 8);
+                folly::coro::blockingWait(reader->ReadEntriesAsync(
+                    plan.entries, proto::common::LoadPriority::HIGH));
+                // The synchronous unpacker ignores unused persisted bits.
+                if (rows % 8 != 0) {
+                    target.data[target.bytes - 1] |= 0x80;
+                }
+                folly::coro::blockingWait(
+                    load_index.FinishLoadAsync(plan, config));
+                EXPECT_EQ(
+                    reinterpret_cast<uint8_t*>(load_index.valid_bitset_.data()),
+                    target.data);
+                plan.Commit();
+            }
+            const auto* bytes = reinterpret_cast<const uint8_t*>(
+                load_index.valid_bitset_.data());
+            for (size_t i = 0; i < load_index.valid_bitset_.size_in_bytes() * 8;
+                 ++i) {
+                EXPECT_EQ((bytes[i / 8] >> (i % 8)) & 1u, i < rows && valid[i]);
+            }
+            EXPECT_EQ(load_index.is_mmap_,
+                      mmap && build_index.Cardinality() >
+                                  DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND);
+            EXPECT_EQ(load_index.IsNotNull().count(),
+                      build_index.IsNotNull().count());
+        }
+    }
 }
 
 template <typename T>
@@ -961,3 +1331,73 @@ REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTestV6,
 INSTANTIATE_TYPED_TEST_SUITE_P(BitmapIndexE2ECheck_Mmap,
                                BitmapIndexTestV6,
                                BitmapType);
+
+TEST(BitmapIndexV3AsyncLoadTest, RejectsMalformedPostingsWithValidEntryCrc) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    BitmapAsyncLoadFixture fixture("bitmap_async_corrupt");
+    ASSERT_TRUE(fixture.fs->CreateDir(fixture.root_path, true).ok());
+    roaring::Roaring bitmap;
+    bitmap.add(0);
+    const int32_t key = 7;
+    std::vector<uint8_t> good(sizeof(key) + bitmap.getSizeInBytes());
+    std::memcpy(good.data(), &key, sizeof(key));
+    bitmap.write(reinterpret_cast<char*>(good.data() + sizeof(key)));
+    std::vector<std::vector<uint8_t>> invalid;
+    invalid.emplace_back(good.begin(), good.begin() + sizeof(key) - 1);
+    invalid.emplace_back(good.begin(), good.end() - 1);
+    invalid.push_back(good);
+    invalid.back().push_back(
+        0);  // Bytes left over after the declared postings.
+    bitmap = roaring::Roaring();
+    bitmap.add(100);  // Valid roaring encoding, invalid document offset.
+    invalid.emplace_back(sizeof(key) + bitmap.getSizeInBytes());
+    std::memcpy(invalid.back().data(), &key, sizeof(key));
+    bitmap.write(reinterpret_cast<char*>(invalid.back().data() + sizeof(key)));
+    const uint32_t malformed_header[] = {
+        static_cast<uint32_t>(key),
+        roaring::internal::SERIAL_COOKIE_NO_RUNCONTAINER,
+        UINT32_MAX};
+    const auto* header_bytes =
+        reinterpret_cast<const uint8_t*>(malformed_header);
+    invalid.emplace_back(header_bytes, header_bytes + sizeof(malformed_header));
+    for (bool mmap : {false, true}) {
+        for (size_t i = 0; i < invalid.size(); ++i) {
+            SCOPED_TRACE(::testing::Message()
+                         << "mmap=" << mmap << " case=" << i);
+            auto path = fixture.root_path + "/bad.v3";
+            {
+                auto output = fixture.fs->OpenOutputStream(path);
+                ASSERT_TRUE(output.ok()) << output.status().ToString();
+                auto stream = std::make_shared<storage::RemoteOutputStream>(
+                    std::move(output.ValueOrDie()));
+                storage::IndexEntryDirectStreamWriter writer(stream);
+                writer.WriteEntry(
+                    BITMAP_INDEX_DATA, invalid[i].data(), invalid[i].size());
+                // Large cardinality selects the mmap decoder. Both decoders must
+                // reject the malformed first posting without reading past it.
+                writer.PutMeta(
+                    BITMAP_INDEX_LENGTH,
+                    mmap ? DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 1 : 1);
+                writer.PutMeta(BITMAP_INDEX_NUM_ROWS, 1);
+                writer.Finish();
+            }
+            auto file = fixture.fs->OpenInputFile(path);
+            ASSERT_TRUE(file.ok());
+            auto input = std::make_shared<storage::RemoteInputStream>(
+                std::move(file.ValueOrDie()));
+            auto reader =
+                folly::coro::blockingWait(storage::AsyncIndexEntryReader::Open(
+                    input, 0, proto::common::LoadPriority::HIGH));
+            ExposedBitmapIndex index(fixture.ctx);
+            Config config;
+            if (mmap)
+                config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
+            try {
+                index.LoadPlannedForTest(*reader, config);
+                FAIL() << "expected corrupt bitmap error";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+            }
+        }
+    }
+}

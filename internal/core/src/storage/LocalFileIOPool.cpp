@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include "storage/LocalFileIOPool.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "folly/coro/WithCancellation.h"
 
 #include <algorithm>
 #include <exception>
@@ -25,6 +27,21 @@
 #include "log/Log.h"
 
 namespace milvus::storage {
+
+folly::coro::Task<void>
+RunLocalFileIOAsync(std::function<void()> operation,
+                    proto::common::LoadPriority priority) {
+    auto run = [&]() -> folly::coro::Task<void> {
+        operation();
+        co_return;
+    };
+    co_await folly::coro::co_withCancellation(
+        folly::CancellationToken{},
+        folly::coro::co_withExecutor(
+            ResolveAsyncLoadExecutor(
+                LocalFileIOPool::GetInstance().GetExecutor(), priority),
+            run()));
+}
 namespace {
 
 // Clamps configured workers to the executor's supported local range.

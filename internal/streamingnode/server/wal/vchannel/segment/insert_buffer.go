@@ -9,6 +9,8 @@ import (
 )
 
 type writeOnlyInsertBuffer struct {
+	// Successful object output is reused while DataCoord publication retries.
+	persisted    *flushResult
 	entries      []message.RetainedImmutableMessage
 	fromTimeTick uint64
 	toTimeTick   uint64

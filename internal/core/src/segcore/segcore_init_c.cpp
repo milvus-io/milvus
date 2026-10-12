@@ -17,7 +17,10 @@
 #include <string>
 
 #include "cachinglayer/Manager.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
+#include "log/Log.h"
+#include "monitor/Monitor.h"
 #include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
 #include "glog/logging.h"
@@ -33,7 +36,23 @@ std::once_flag close_glog_once;
 
 extern "C" void
 SegcoreInit(const char* conf_file) {
-    milvus::config::KnowhereInitImpl(conf_file);
+    // Mirrors IndexBuilderInit: a config exception here (bad conf file) must
+    // not cross the C ABI and terminate the process; log and keep defaults.
+    try {
+        milvus::config::KnowhereInitImpl(conf_file);
+    }
+    CGO_CATCH_AND_LOG("SegcoreInit")
+    // Ring-3 observability: count every exception that reaches the cgo
+    // boundary without a typed error code (it collapses to
+    // UnexpectedError/2001). A shrinking rate means explicit classification
+    // coverage is improving; a spike points at an unclassified throw site.
+    milvus::RegisterUntypedCgoExceptionObserver([](const char* what) {
+        milvus::monitor::internal_cgo_untyped_exception_total.Increment();
+        LOG_WARN(
+            "untyped exception crossed the cgo boundary (error code "
+            "collapsed to UnexpectedError): {}",
+            what);
+    });
 }
 
 // TODO merge small index config into one config map, including enable/disable small_index
@@ -127,17 +146,16 @@ SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
 }
 
 extern "C" void
-SegcoreSetTakeForOutputResultCountLimit(const int64_t value) {
+SegcoreSetLazyColumnGroupEnabled(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
-    config.set_take_for_output_result_count_limit(value);
+    config.set_lazy_column_group_enabled(value);
 }
 
-extern "C" int64_t
-SegcoreGetTakeForOutputResultCountLimit() {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
-    return config.get_take_for_output_result_count_limit();
+extern "C" bool
+SegcoreGetLazyColumnGroupEnabled() {
+    return milvus::segcore::SegcoreConfig::default_config()
+        .get_lazy_column_group_enabled();
 }
 
 extern "C" void
@@ -171,9 +189,8 @@ SegcoreSetDenseVectorInterminIndexType(const char* value) {
         status.error_code = Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 extern "C" CStatus
@@ -186,9 +203,8 @@ SegcoreSetDenseVectorInterminIndexRefineQuantType(const char* value) {
         status.error_code = Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 extern "C" void
@@ -233,6 +249,10 @@ SegcoreSetIndexBuildRatio(const float value) {
     config.set_build_ratio(value);
 }
 
+// The KnowhereInit*ThreadPool calls below ThrowInfo(ConfigInvalid) on a bad
+// value; the Go callers (querynode init and paramtable callbacks) have no
+// error channel, so an escaping exception would cross the C ABI and
+// terminate the process. Swallow and log, keeping the previous pool size.
 extern "C" void
 SegcoreSetGrowingIndexBuildThreadRate(const float value) {
     milvus::segcore::SegcoreConfig& config =
@@ -242,17 +262,26 @@ SegcoreSetGrowingIndexBuildThreadRate(const float value) {
 
 extern "C" void
 SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads) {
-    milvus::config::KnowhereInitBuildThreadPool(num_threads);
+    try {
+        milvus::config::KnowhereInitBuildThreadPool(num_threads);
+    }
+    CGO_CATCH_AND_LOG("SegcoreSetKnowhereBuildThreadPoolNum")
 }
 
 extern "C" void
 SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads) {
-    milvus::config::KnowhereInitSearchThreadPool(num_threads);
+    try {
+        milvus::config::KnowhereInitSearchThreadPool(num_threads);
+    }
+    CGO_CATCH_AND_LOG("SegcoreSetKnowhereSearchThreadPoolNum")
 }
 
 extern "C" void
 SegcoreSetKnowhereFetchThreadPoolNum(const uint32_t num_threads) {
-    milvus::config::KnowhereInitFetchThreadPool(num_threads);
+    try {
+        milvus::config::KnowhereInitFetchThreadPool(num_threads);
+    }
+    CGO_CATCH_AND_LOG("SegcoreSetKnowhereFetchThreadPoolNum")
 }
 
 extern "C" void
@@ -263,19 +292,33 @@ SegcoreSetPrefetchThreadPoolNum(const uint32_t num_threads) {
 extern "C" void
 SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
                                     const uint32_t max_size) {
-    milvus::config::KnowhereInitGPUMemoryPool(init_size, max_size);
+    try {
+        milvus::config::KnowhereInitGPUMemoryPool(init_size, max_size);
+    }
+    CGO_CATCH_AND_LOG("SegcoreSetKnowhereGpuMemoryPoolSize")
 }
 
 // return value must be freed by the caller
 extern "C" char*
 SegcoreSetSimdType(const char* value) {
-    LOG_DEBUG("set config simd_type: {}", value);
-    auto real_type = milvus::config::KnowhereSetSimdType(value);
-    char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
-    AssertInfo(ret != nullptr, "memmory allocation for ret failed!");
-    milvus::fastmem::FastMemcpy(ret, real_type.c_str(), real_type.length());
-    ret[real_type.length()] = 0;
-    return ret;
+    // Returns NULL on failure, mirroring IndexBuilderSetSimdType: an invalid
+    // common.simdType makes KnowhereSetSimdType ThrowInfo(ConfigInvalid), and
+    // the Go caller has no error channel, so an escaping exception would
+    // cross the C ABI and terminate the QueryNode. Keep the default SIMD
+    // type instead and log loudly.
+    try {
+        LOG_DEBUG("set config simd_type: {}", value);
+        auto real_type = milvus::config::KnowhereSetSimdType(value);
+        char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
+        if (ret == nullptr) {
+            return nullptr;
+        }
+        milvus::fastmem::FastMemcpy(ret, real_type.c_str(), real_type.length());
+        ret[real_type.length()] = 0;
+        return ret;
+    }
+    CGO_CATCH_AND_LOG("SegcoreSetSimdType")
+    return nullptr;
 }
 
 extern "C" void

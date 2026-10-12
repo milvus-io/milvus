@@ -21,7 +21,6 @@ import (
 	"fmt"
 	sio "io"
 	"math"
-	"path"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -174,9 +172,10 @@ func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.Rw
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
-		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
-		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
-			common.SegmentInsertLogPath, metautil.JoinIDPath(t.collectionID, t.partitionID))
+		// LOB base path at partition level, sharing the manifest root rule so
+		// the reader (which reconstructs lobs/ from the manifest base) resolves
+		// the same files (see #53051).
+		lobBasePath := storage.SegmentPartitionBasePath(t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
 		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
 			lobBasePath,
 			t.compactionParams.TextInlineThreshold,
@@ -289,7 +288,11 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, seg.GetCommitTimestamp())
 
-	reader, existingFields, err := newCompactionSegmentRecordReader(ctx, seg, t.plan.GetSchema(), t.compactionParams.StorageConfig,
+	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(seg.GetManifest())
+	if err != nil {
+		return 0, 0, err
+	}
+	reader, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, seg, t.plan.GetSchema(), t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithCollectionID(t.collectionID),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithVersion(seg.GetStorageVersion()),
@@ -776,6 +779,19 @@ func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error 
 	t.lobContext.SetCompactionType(datapb.CompactionType_MixCompaction, sourceSegmentCount, targetSegmentCount)
 
 	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+	outputPartitionBase := storage.SegmentPartitionBasePath(
+		t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
+	partitionBaseMismatch, err := compaction.LOBSourcePartitionBaseMismatch(sourceManifests, outputPartitionBase)
+	if err != nil {
+		return err
+	}
+	if partitionBaseMismatch {
+		t.lobContext.ForceRewriteAllAcrossPartitionBases(textFieldIDs)
+		mlog.Info(ctx, "forcing TEXT LOB rewrite across partition namespaces",
+			mlog.Int64("planID", t.GetPlanID()),
+			mlog.String("outputPartitionBase", outputPartitionBase),
+			mlog.Int64s("textFieldIDs", textFieldIDs))
+	}
 
 	// log strategy decisions
 	for fieldID, decision := range t.lobContext.Decisions {

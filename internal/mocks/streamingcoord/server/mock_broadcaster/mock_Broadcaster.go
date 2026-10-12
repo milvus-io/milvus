@@ -328,6 +328,79 @@ func (_c *MockBroadcaster_WithSecondaryClusterResourceKey_Call) RunAndReturn(run
 	return _c
 }
 
+// WithUnreplicableResourceKeys provides a mock function with given fields: ctx, resourceKeys
+func (_m *MockBroadcaster) WithUnreplicableResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	_va := make([]interface{}, len(resourceKeys))
+	for _i := range resourceKeys {
+		_va[_i] = resourceKeys[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WithUnreplicableResourceKeys")
+	}
+
+	var r0 broadcaster.BroadcastAPI
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ResourceKey) (broadcaster.BroadcastAPI, error)); ok {
+		return rf(ctx, resourceKeys...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ResourceKey) broadcaster.BroadcastAPI); ok {
+		r0 = rf(ctx, resourceKeys...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(broadcaster.BroadcastAPI)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, ...message.ResourceKey) error); ok {
+		r1 = rf(ctx, resourceKeys...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroadcaster_WithUnreplicableResourceKeys_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithUnreplicableResourceKeys'
+type MockBroadcaster_WithUnreplicableResourceKeys_Call struct {
+	*mock.Call
+}
+
+// WithUnreplicableResourceKeys is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resourceKeys ...message.ResourceKey
+func (_e *MockBroadcaster_Expecter) WithUnreplicableResourceKeys(ctx interface{}, resourceKeys ...interface{}) *MockBroadcaster_WithUnreplicableResourceKeys_Call {
+	return &MockBroadcaster_WithUnreplicableResourceKeys_Call{Call: _e.mock.On("WithUnreplicableResourceKeys",
+		append([]interface{}{ctx}, resourceKeys...)...)}
+}
+
+func (_c *MockBroadcaster_WithUnreplicableResourceKeys_Call) Run(run func(ctx context.Context, resourceKeys ...message.ResourceKey)) *MockBroadcaster_WithUnreplicableResourceKeys_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]message.ResourceKey, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(message.ResourceKey)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_WithUnreplicableResourceKeys_Call) Return(_a0 broadcaster.BroadcastAPI, _a1 error) *MockBroadcaster_WithUnreplicableResourceKeys_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroadcaster_WithUnreplicableResourceKeys_Call) RunAndReturn(run func(context.Context, ...message.ResourceKey) (broadcaster.BroadcastAPI, error)) *MockBroadcaster_WithUnreplicableResourceKeys_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockBroadcaster creates a new instance of MockBroadcaster. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockBroadcaster(t interface {

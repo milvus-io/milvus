@@ -48,6 +48,83 @@ func NewColumnStructArray(name string, fields []Column) Column {
 	}
 }
 
+// NewColumnStructArrayFromSchema creates an empty StructArray column whose
+// child columns match schema. Values can then be appended as map[string]any.
+func NewColumnStructArrayFromSchema(name string, schema *entity.StructSchema) (Column, error) {
+	if schema == nil {
+		return nil, errors.New("struct schema is required")
+	}
+	fields := make([]Column, 0, len(schema.Fields))
+	for _, field := range schema.Fields {
+		if field == nil {
+			return nil, errors.New("struct schema contains a nil child")
+		}
+		child, err := newStructArrayChildColumn(field)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, child)
+	}
+	return NewColumnStructArray(name, fields), nil
+}
+
+func newStructArrayChildColumn(field *entity.Field) (Column, error) {
+	if field == nil {
+		return nil, errors.New("struct child field is required")
+	}
+
+	switch field.DataType {
+	case entity.FieldTypeBool:
+		return NewColumnBoolArray(field.Name, nil), nil
+	case entity.FieldTypeInt8:
+		return NewColumnInt8Array(field.Name, nil), nil
+	case entity.FieldTypeInt16:
+		return NewColumnInt16Array(field.Name, nil), nil
+	case entity.FieldTypeInt32:
+		return NewColumnInt32Array(field.Name, nil), nil
+	case entity.FieldTypeInt64:
+		return NewColumnInt64Array(field.Name, nil), nil
+	case entity.FieldTypeFloat:
+		return NewColumnFloatArray(field.Name, nil), nil
+	case entity.FieldTypeDouble:
+		return NewColumnDoubleArray(field.Name, nil), nil
+	case entity.FieldTypeVarChar, entity.FieldTypeString:
+		return NewColumnVarCharArray(field.Name, nil), nil
+	case entity.FieldTypeFloatVector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnFloatVectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeFloat16Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnFloat16VectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeBFloat16Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnBFloat16VectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeBinaryVector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnBinaryVectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeInt8Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return NewColumnInt8VectorArray(field.Name, int(dim), nil), nil
+	default:
+		return nil, errors.Newf("unsupported struct sub-field type %v for field %q", field.DataType, field.Name)
+	}
+}
+
 func (c *columnStructArray) Name() string {
 	return c.name
 }

@@ -121,9 +121,9 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 		CollectionNames: []string{s.collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[s.collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[s.collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[s.collectionName]
 	s.True(has)
@@ -290,7 +290,7 @@ func (s *ExpressionSuite) searchWithShiftNotExpression() {
 	}
 }
 
-func (s *ExpressionSuite) TestDivisionByZeroError() {
+func (s *ExpressionSuite) testDivisionByZeroError() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -360,7 +360,7 @@ func (s *ExpressionSuite) TestExpression() {
 	s.searchWithExpression()
 	s.searchWithBitwiseExpression()
 	s.searchWithShiftNotExpression()
-	s.TestDivisionByZeroError()
+	s.testDivisionByZeroError()
 }
 
 func TestExpression(t *testing.T) {

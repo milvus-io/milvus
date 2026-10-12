@@ -138,8 +138,9 @@ class LoadAdmissionController {
     [[nodiscard]] size_t
     CapacitySlots() const;
 
-    // Re-evaluates waiters after updating slots. Shrinking does not revoke
-    // admitted work; new requests wait until they fit the new capacity.
+    // Updates slot-based overhead policies before expanding admission and after
+    // restricting it. A rejected expansion leaves capacity unchanged. Shrinking
+    // retains accounting for already admitted slots until they drain.
     void
     SetCapacitySlots(size_t slots);
 
@@ -185,6 +186,10 @@ class LoadAdmissionController {
     };
 
     LoadAdmissionController() = default;
+
+    // Finishes a deferred policy reduction once inflight slots fit the limit.
+    void
+    RefreshSlotPolicy();
 
     // Methods suffixed with Locked require mu_ to be held by the caller.
     [[nodiscard]] size_t
@@ -236,6 +241,7 @@ class LoadAdmissionController {
     size_t inflight_slots_{0};
     size_t capacity_bytes_{0};
     size_t capacity_slots_{0};
+    bool slot_policy_update_pending_{false};
     PendingQueue high_pending_;
     PendingQueue low_pending_;
 };

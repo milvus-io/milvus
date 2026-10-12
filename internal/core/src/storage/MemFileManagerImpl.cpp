@@ -51,7 +51,8 @@ namespace milvus::storage {
 MemFileManagerImpl::MemFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta) {
+                      fileManagerContext.indexMeta,
+                      fileManagerContext.use_async_load) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
@@ -163,8 +164,10 @@ MemFileManagerImpl::LoadIndexToMemory(
         LoadBatchIndexFiles();
     }
 
-    AssertInfo(file_to_index_data.size() == remote_files.size(),
-               "inconsistent file num and index data num!");
+    if (!(file_to_index_data.size() == remote_files.size())) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "inconsistent file num and index data num!");
+    }
     return file_to_index_data;
 }
 
@@ -185,7 +188,7 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
         config, INSERT_FILES_KEY);
     AssertInfo(insert_files.has_value(),
                "insert file paths is empty when build index");
-    auto remote_files = insert_files.value();
+    auto& remote_files = insert_files.value();
     SortByPath(remote_files);
 
     auto parallel_degree =
@@ -212,8 +215,10 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
         FetchRawData();
     }
 
-    AssertInfo(field_datas.size() == remote_files.size(),
-               "inconsistent file num and raw data num!");
+    if (!(field_datas.size() == remote_files.size())) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "inconsistent file num and raw data num!");
+    }
     return field_datas;
 }
 
@@ -241,23 +246,26 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     //     ignore offset, so `offset > 0 && max_rows == 0` would silently drop
     //     the requested offset and read everything. Reject it rather than
     //     honoring a request the readers cannot express.
-    // These are caller-supplied request parameters, so a bad value is an
-    // Input error (InvalidParameter), not an internal/System failure. Using
-    // AssertInfo here would be wrong: it classifies as UnexpectedError
-    // (System), which is non-retriable-System semantics for what is really a
-    // malformed request.
+    // num_rows / offset are not API-caller input: they are produced by the
+    // index-build code that assembles this config (a Milvus-internal caller,
+    // not the end user), so a bad value is a Milvus bug and is reported as
+    // UnexpectedError (System), the same class as the sibling
+    // data-type / element-type checks above. InvalidParameter would cross
+    // the cgo boundary as an InputError and pin the failure on the user's
+    // request, which is the classification this file must not make for a
+    // value the user never supplied.
     if (max_rows < 0) {
-        ThrowInfo(ErrorCode::InvalidParameter,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "[StorageV2] num_rows must be non-negative, got: {}",
                   max_rows);
     }
     if (offset < 0) {
-        ThrowInfo(ErrorCode::InvalidParameter,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "[StorageV2] offset must be non-negative, got: {}",
                   offset);
     }
     if (offset > 0 && max_rows == 0) {
-        ThrowInfo(ErrorCode::InvalidParameter,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "[StorageV2] offset ({}) requires a positive num_rows; "
                   "num_rows == 0 selects a full-column read and ignores "
                   "offset",
@@ -302,7 +310,7 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          storage_column_mapping);
     }
 
-    auto remote_files = segment_insert_files.value();
+    auto& remote_files = segment_insert_files.value();
     for (auto& files : remote_files) {
         SortByPath(files);
     }
@@ -398,7 +406,7 @@ MemFileManagerImpl::cache_opt_field_memory(const Config& config) {
     if (!opt_fields.has_value()) {
         return res;
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};
@@ -431,7 +439,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
     if (!opt_fields.has_value()) {
         return {};
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};
@@ -446,7 +454,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
             config, SEGMENT_INSERT_FILES_KEY);
     AssertInfo(segment_insert_files.has_value(),
                "insert file paths for storage v2 is empty when build index");
-    auto remote_files = segment_insert_files.value();
+    auto& remote_files = segment_insert_files.value();
     for (auto& files : remote_files) {
         SortByPath(files);
     }
@@ -471,7 +479,7 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
     if (!opt_fields.has_value()) {
         return {};
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};

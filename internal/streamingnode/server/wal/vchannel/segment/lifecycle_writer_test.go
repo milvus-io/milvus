@@ -57,7 +57,9 @@ func TestCommitL1SegmentIgnoresSegmentNotFound(t *testing.T) {
 			return merr.Status(merr.WrapErrSegmentNotFound(1)), nil
 		}},
 	}
-	require.NoError(t, w.CommitL1Segment(context.Background(), newCommitL1SegmentTestMeta()))
+	version, err := w.CommitL1Segment(context.Background(), newCommitL1SegmentTestMeta())
+	require.NoError(t, err)
+	require.Nil(t, version)
 }
 
 // TestCommitL1SegmentFailsOnInputError covers the Unrecoverable
@@ -72,7 +74,7 @@ func TestCommitL1SegmentFailsOnInputError(t *testing.T) {
 			return merr.Status(merr.WrapErrParameterInvalid("v2", "v3")), nil
 		}},
 	}
-	err := w.CommitL1Segment(context.Background(), newCommitL1SegmentTestMeta())
+	_, err := w.CommitL1Segment(context.Background(), newCommitL1SegmentTestMeta())
 	require.Error(t, err)
 	require.False(t, retry.IsRecoverable(err))
 }

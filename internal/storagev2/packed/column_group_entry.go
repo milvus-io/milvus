@@ -100,24 +100,15 @@ func columnGroupEntriesFromC(cColumnGroups *C.LoonColumnGroups) ([]ColumnGroupEn
 				if file.path == nil {
 					return nil, merr.WrapErrServiceInternalMsg("nil file path in column group %d file %d", i, j)
 				}
+				properties, err := columnGroupFileProperties(file)
+				if err != nil {
+					return nil, merr.Wrapf(err, "column group %d file %d", i, j)
+				}
 				fileEntry := ColumnGroupFileEntry{
 					Path:       C.GoString(file.path),
 					StartIndex: int64(file.start_index),
 					EndIndex:   int64(file.end_index),
-				}
-				if file.num_properties > 0 {
-					if file.property_keys == nil || file.property_values == nil {
-						return nil, merr.WrapErrServiceInternalMsg("column group %d file %d has %d properties but nil keys/values", i, j, file.num_properties)
-					}
-					keys := unsafe.Slice(file.property_keys, int(file.num_properties))
-					values := unsafe.Slice(file.property_values, int(file.num_properties))
-					fileEntry.Properties = make(map[string]string, int(file.num_properties))
-					for k := range keys {
-						if keys[k] == nil || values[k] == nil {
-							continue
-						}
-						fileEntry.Properties[C.GoString(keys[k])] = C.GoString(values[k])
-					}
+					Properties: properties,
 				}
 				entry.Files = append(entry.Files, fileEntry)
 			}
@@ -125,6 +116,26 @@ func columnGroupEntriesFromC(cColumnGroups *C.LoonColumnGroups) ([]ColumnGroupEn
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+// columnGroupFileProperties copies properties before the native manifest is freed.
+func columnGroupFileProperties(file *C.LoonColumnGroupFile) (map[string]string, error) {
+	if file.num_properties == 0 {
+		return nil, nil
+	}
+	if file.property_keys == nil || file.property_values == nil {
+		return nil, merr.WrapErrServiceInternalMsg("file has %d properties but nil keys/values", file.num_properties)
+	}
+	keys := unsafe.Slice(file.property_keys, int(file.num_properties))
+	values := unsafe.Slice(file.property_values, int(file.num_properties))
+	properties := make(map[string]string, len(keys))
+	for i := range keys {
+		if keys[i] == nil || values[i] == nil {
+			continue
+		}
+		properties[C.GoString(keys[i])] = C.GoString(values[i])
+	}
+	return properties, nil
 }
 
 // addColumnGroupEntries stages each serialized column group onto a loon

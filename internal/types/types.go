@@ -309,7 +309,7 @@ type MixCoord interface {
 	GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*QueryCoordTopology, error)
 
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
-	NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error
+	NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error
 
 	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
 

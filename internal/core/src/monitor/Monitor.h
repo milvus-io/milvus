@@ -98,25 +98,21 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_core_expr_filter_ratio);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_gis_coarse_ratio);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_gis_refine_ratio);
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_count);
-DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_ratio);
 DECLARE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_phase1_candidates);
 DECLARE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_phase2_candidates);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_batch_count);
 DECLARE_PROMETHEUS_HISTOGRAM(
-    internal_core_strict_group_phase2_probe_candidates);
-DECLARE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_probe_accepted);
-DECLARE_PROMETHEUS_HISTOGRAM(
-    internal_core_strict_group_phase2_probe_group_hits);
-DECLARE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_original_remaining_candidates);
 DECLARE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_membership_build_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_bitmap_build_latency);
-DECLARE_PROMETHEUS_HISTOGRAM(
-    internal_core_strict_group_phase2_acceptance_ratio);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_search_latency);
+
+// expression result cache metrics
+DECLARE_PROMETHEUS_COUNTER(internal_expr_cache_hit_total);
 
 // async cgo metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds);
@@ -140,6 +136,8 @@ DECLARE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_load);
 DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_executing_task_total);
 DECLARE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_search);
 DECLARE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_load);
+DECLARE_PROMETHEUS_COUNTER_FAMILY(internal_cgo_untyped_exception);
+DECLARE_PROMETHEUS_COUNTER(internal_cgo_untyped_exception_total);
 
 // storage thread pool metrics
 DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_capacity);

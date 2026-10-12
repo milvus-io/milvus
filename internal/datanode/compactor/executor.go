@@ -140,9 +140,15 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 	e.mu.Lock()
 
 	if task, exists := e.tasks[planID]; exists {
-		// Update state based on result
+		// Update state based on result. A result may now carry a terminal
+		// failed state with a typed FailStatus; take the state from the result
+		// so the failure survives to the DataCoord query instead of collapsing
+		// to a synthetic bare failure.
 		if result != nil {
-			task.state = datapb.CompactionTaskState_completed
+			if result.GetState() == datapb.CompactionTaskState_unknown {
+				result.State = datapb.CompactionTaskState_completed
+			}
+			task.state = result.GetState()
 			task.result = result
 		} else {
 			task.state = datapb.CompactionTaskState_failed
@@ -205,7 +211,16 @@ func (e *executor) executeTask(task Compactor) {
 	result, err := task.Compact()
 	if err != nil {
 		log.Warn(context.TODO(), "compaction task failed", mlog.Err(err))
-		e.completeTask(task.GetPlanID(), nil)
+		// Carry the typed error back to DataCoord instead of reducing it to a
+		// bare failed state: the code/reason let DataCoord persist a diagnosable
+		// fail_reason and decide retryability (e.g. requeue an OOM).
+		e.completeTask(task.GetPlanID(), &datapb.CompactionPlanResult{
+			PlanID:     task.GetPlanID(),
+			State:      datapb.CompactionTaskState_failed,
+			Channel:    task.GetChannelName(),
+			Type:       task.GetCompactionType(),
+			FailStatus: merr.Status(err),
+		})
 		return
 	}
 

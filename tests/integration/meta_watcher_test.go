@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/tests/integration/cluster"
 )
@@ -134,10 +135,10 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	s.Require().NoError(merr.CheckRPCCall(flushResp, err))
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
@@ -244,7 +245,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	s.NoError(err)
+	s.Require().NoError(merr.CheckRPCCall(flushResp, err))
 
 	assert.Eventually(s.T(), func() bool {
 		segments, err := c.ShowSegments(collectionName)
@@ -257,9 +258,9 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 		}
 		return false
 	}, 5*time.Second, 100*time.Millisecond)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)

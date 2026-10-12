@@ -19,6 +19,7 @@
 #include <fmt/core.h>
 #include <folly/Unit.h>
 
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -477,19 +478,20 @@ struct UnaryElementFunc {
     }
 };
 
-#define UnaryArrayCompare(cmp)                                               \
-    do {                                                                     \
-        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {         \
-            res[i] = false;                                                  \
-        } else {                                                             \
-            if (index >= src[offset].length()) {                             \
-                res[i] = false;                                              \
-                valid_res[i] = false;                                        \
-                continue;                                                    \
-            }                                                                \
-            auto array_data = src[offset].template get_data<GetType>(index); \
-            res[i] = (cmp);                                                  \
-        }                                                                    \
+#define UnaryArrayCompare(cmp)                                           \
+    do {                                                                 \
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {     \
+            res[i] = false;                                              \
+        } else {                                                         \
+            if (index >= src[offset].length()) {                         \
+                res[i] = false;                                          \
+                valid_res[i] = false;                                    \
+                continue;                                                \
+            }                                                            \
+            auto array_data =                                            \
+                src[offset].template get_data_unchecked<GetType>(index); \
+            res[i] = (cmp);                                              \
+        }                                                                \
     } while (false)
 
 template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
@@ -549,7 +551,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = array_data == val;
                 }
             } else if constexpr (op == proto::plan::OpType::NotEqual) {
@@ -562,7 +564,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = array_data != val;
                 }
             } else if constexpr (op == proto::plan::OpType::GreaterThan) {
@@ -591,7 +593,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = (*matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,
@@ -611,7 +613,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = (*regex_matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,
@@ -633,7 +635,9 @@ struct UnaryIndexFuncForMatch {
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, IndexInnerType val, proto::plan::OpType op) {
+    operator()(Index* index,
+               const IndexInnerType& val,
+               proto::plan::OpType op) {
         AssertInfo(op == proto::plan::OpType::Match ||
                        op == proto::plan::OpType::PostfixMatch ||
                        op == proto::plan::OpType::InnerMatch ||
@@ -691,7 +695,7 @@ struct UnaryIndexFunc {
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, IndexInnerType val) {
+    operator()(Index* index, const IndexInnerType& val) {
         if constexpr (op == proto::plan::OpType::Equal) {
             return index->In(1, &val);
         } else if constexpr (op == proto::plan::OpType::NotEqual) {
@@ -747,6 +751,8 @@ struct UnaryIndexFunc {
     }
 };
 
+// LIKE and regex are handled by ShreddingExecutor, which retains their
+// compiled matchers across batches.
 template <typename T, typename U>
 void
 BatchUnaryCompare(const T* src,
@@ -836,26 +842,6 @@ BatchUnaryCompare(const T* src,
             }
             break;
         }
-        case proto::plan::Match: {
-            if constexpr (std::is_same_v<U, std::string> ||
-                          std::is_same_v<U, std::string_view>) {
-                LikePatternMatcher matcher(val);
-                for (int i = 0; i < size; ++i) {
-                    res[i] = matcher(src[i]);
-                }
-                break;
-            }
-        }
-        case proto::plan::RegexMatch: {
-            if constexpr (std::is_same_v<U, std::string> ||
-                          std::is_same_v<U, std::string_view>) {
-                PartialRegexMatcher matcher(val);
-                for (int i = 0; i < size; ++i) {
-                    res[i] = matcher(src[i]);
-                }
-                break;
-            }
-        }
         default: {
             ThrowInfo(
                 UnexpectedError,
@@ -898,12 +884,38 @@ class ShreddingExecutor {
  private:
     void
     ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
+        if constexpr (std::is_same_v<InnerType, std::string>) {
+            // Compile on the first evaluated batch, then reuse for this
+            // executor's remaining windows. Empty/skipped scans do not
+            // construct a matcher, just as in the chunk-based path.
+            if (op_type_ == proto::plan::Match) {
+                if (!like_matcher_) {
+                    like_matcher_ = std::make_unique<LikePatternMatcher>(val_);
+                }
+                for (size_t i = 0; i < size; ++i) {
+                    res[i] = (*like_matcher_)(src[i]);
+                }
+                return;
+            }
+            if (op_type_ == proto::plan::RegexMatch) {
+                if (!regex_matcher_) {
+                    regex_matcher_ =
+                        std::make_unique<PartialRegexMatcher>(val_);
+                }
+                for (size_t i = 0; i < size; ++i) {
+                    res[i] = (*regex_matcher_)(src[i]);
+                }
+                return;
+            }
+        }
         BatchUnaryCompare<GetType, InnerType>(src, size, val_, op_type_, res);
     }
 
     proto::plan::OpType op_type_;
     InnerType val_;
     std::string pointer_;
+    std::unique_ptr<LikePatternMatcher> like_matcher_;
+    std::unique_ptr<PartialRegexMatcher> regex_matcher_;
 };
 
 // Executor for shredding ARRAY type stored as BSON binary in variable-length
@@ -960,7 +972,7 @@ class ShreddingArrayBsonExecutor {
 class PhyUnaryRangeFilterExpr : public SegmentExpr {
  public:
     PhyUnaryRangeFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -998,7 +1010,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
             // try to pin ngram index for json
             auto field_id = expr_->column_.field_id_;
             auto schema = segment->get_schema_snapshot();
-            auto field_meta = (*schema)[field_id];
+            const auto& field_meta = (*schema)[field_id];
 
             if (field_meta.is_json()) {
                 auto pointer =
@@ -1017,6 +1029,12 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     void
     DetermineExecPath() override;
+
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_ &&
+               !IsTextIndexOpType(expr_->op_type_) && !CanUseNgramIndex();
+    }
 
     bool
     SupportOffsetInput() override {
@@ -1049,11 +1067,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>
     GetLogicalExpr() {
         return expr_;
-    }
-
-    int64_t
-    GetActiveCount() const {
-        return active_count_;
     }
 
     // The concrete string literal to hand to a scalar index's ShouldUseOp cost

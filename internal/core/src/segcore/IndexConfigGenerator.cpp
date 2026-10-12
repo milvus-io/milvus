@@ -140,6 +140,11 @@ VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) const {
         }
     }
 
+    if (searchInfo.search_params_.contains("skip_refine")) {
+        searchParam.search_params_["skip_refine"] =
+            searchInfo.search_params_["skip_refine"];
+    }
+
     if (metric_type_ == knowhere::metric::BM25) {
         searchParam.search_params_[knowhere::meta::BM25_AVGDL] =
             searchInfo.search_params_[knowhere::meta::BM25_AVGDL];

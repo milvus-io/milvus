@@ -22,10 +22,10 @@
 #include "knowhere/comp/index_param.h"
 
 const int64_t INVALID_FIELD_ID = -1;
-inline constexpr char kStrictGroupAcceptanceThreshold[] =
-    "strict_group_acceptance_threshold";
-inline constexpr char kStrictGroupProbeCandidates[] =
-    "strict_group_probe_candidates";
+inline constexpr char kStrictGroupStrategy[] = "strict_group_strategy";
+inline constexpr char kStrictGroupPhase1CandidateWeight[] =
+    "strict_group_phase1_candidate_weight";
+inline constexpr char kStrictGroupSkipRefine[] = "strict_group_skip_refine";
 const int64_t INVALID_SEG_OFFSET = -1;
 const int64_t INVALID_ARRAY_INDEX = -1;
 const milvus::PkType INVALID_PK;  // of std::monostate if not set.
@@ -119,7 +119,7 @@ const bool DEFAULT_ENABLE_DRIVER_PREFETCH = true;
 const bool DEFAULT_JSON_KEY_STATS_ENABLED = true;
 const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
 const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
-const bool DEFAULT_ENABLE_PARQUET_STATS_SKIP_INDEX = false;
+const bool DEFAULT_ENABLE_PARQUET_STATS_SKIP_INDEX = true;
 
 // skipindex stats related
 const double DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE = 0.01;

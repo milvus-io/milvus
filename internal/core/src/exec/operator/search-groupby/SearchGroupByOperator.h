@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonUtils.h"
@@ -41,6 +42,7 @@
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
 #include "knowhere/comp/index_param.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -184,27 +186,54 @@ class SealedDataGetter : public DataGetter<OutputType> {
  private:
     milvus::OpContext* op_ctx_;
     const segcore::SegmentSealed& segment_;
+    const segcore::SegmentReadSnapshot* snapshot_{nullptr};
     const FieldId field_id_;
     bool from_data_;
 
-    // Thread-safety contract: str_pw_map / json_pw_map are `mutable` and
-    // accessed without locks inside Get(). This is safe ONLY because each
-    // SealedDataGetter instance is scoped to a single SearchGroupBy invocation
-    // on a single segment, executed on one Driver thread (Velox-style single-
-    // threaded operator pipeline). If groupby is ever parallelized per-nq or
-    // shared across queries, this cache must be guarded — data race otherwise.
-    mutable std::unordered_map<
-        int64_t,
-        PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>>
-        str_pw_map;
+    // Thread-safety contract: string_chunk_pins_ is mutable and accessed
+    // without locks inside Get(). Each getter belongs to one SearchGroupBy
+    // invocation on one segment and is used on a single Driver thread.
+    // Sharing a getter across threads would require synchronizing this cache.
+    mutable std::unordered_map<int64_t, PinWrapper<Chunk*>> string_chunk_pins_;
 
     PinWrapper<const index::IndexBase*> index_ptr_;
-    // Getting str_view from segment is cpu-costly, this map is to cache this view for performance.
-    // Shares the same single-thread contract as str_pw_map above.
-    mutable std::unordered_map<
-        int64_t,
-        PinWrapper<std::pair<std::vector<milvus::Json>, ValidityView>>>
-        json_pw_map;
+
+    // VARCHAR and raw JSON share StringChunk storage. Keep visited chunks
+    // pinned for the getter's lifetime and construct only the requested view.
+    // The returned view borrows from this cache and must not outlive the getter.
+    std::optional<std::string_view>
+    GetStringRow(int64_t chunk_id, int64_t inner_offset) const {
+        auto it = string_chunk_pins_.find(chunk_id);
+        if (it == string_chunk_pins_.end()) {
+            PinWrapper<Chunk*> pin;
+            if (snapshot_) {
+                // Snapshot-backed path borrows the column from the frozen
+                // published state; the snapshot owns it for the request.
+                auto* column = snapshot_->GetColumn(field_id_);
+                AssertInfo(column != nullptr,
+                           "group-by field {} has no raw string column",
+                           field_id_.get());
+                pin = column->GetChunk(op_ctx_, chunk_id);
+            } else {
+                // Non-pinned fallback must keep the column's shared_ptr alive
+                // until GetChunk() pins the chunk: GetChunkedColumn() returns
+                // a temporary owner that is destroyed at the semicolon, so a
+                // concurrent publication could retire the column before
+                // pinning.
+                auto column = segment_.GetChunkedColumn(field_id_);
+                AssertInfo(column != nullptr,
+                           "group-by field {} has no raw string column",
+                           field_id_.get());
+                pin = column->GetChunk(op_ctx_, chunk_id);
+            }
+            it = string_chunk_pins_.emplace(chunk_id, std::move(pin)).first;
+        }
+        const auto* chunk = static_cast<const StringChunk*>(it->second.get());
+        if (!chunk->isValid(inner_offset)) {
+            return std::nullopt;
+        }
+        return (*chunk)[inner_offset];
+    }
 
  public:
     SealedDataGetter(milvus::OpContext* op_ctx,
@@ -212,8 +241,12 @@ class SealedDataGetter : public DataGetter<OutputType> {
                      FieldId field_id,
                      std::optional<std::string> json_path,
                      std::optional<DataType> json_type,
-                     bool strict_cast)
-        : op_ctx_(op_ctx), segment_(segment), field_id_(field_id) {
+                     bool strict_cast,
+                     const segcore::SegmentReadSnapshot* snapshot = nullptr)
+        : op_ctx_(op_ctx),
+          segment_(segment),
+          snapshot_(snapshot),
+          field_id_(field_id) {
         from_data_ = segment_.HasFieldData(field_id_);
         if (!from_data_) {
             auto index = segment_.PinIndex(op_ctx_, field_id_);
@@ -235,35 +268,25 @@ class SealedDataGetter : public DataGetter<OutputType> {
     std::optional<OutputType>
     Get(int64_t idx) const {
         if (from_data_) {
-            auto id_offset_pair = segment_.get_chunk_by_offset(field_id_, idx);
+            auto id_offset_pair =
+                snapshot_ ? snapshot_->get_chunk_by_offset(field_id_, idx)
+                          : segment_.get_chunk_by_offset(field_id_, idx);
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
             if constexpr (std::is_same_v<InnerRawType, std::string>) {
-                if (str_pw_map.find(chunk_id) == str_pw_map.end()) {
-                    // for now, search_group_by does not handle null values
-                    auto pw = segment_.chunk_view<std::string_view>(
-                        op_ctx_, field_id_, chunk_id);
-                    str_pw_map[chunk_id] = std::move(pw);
-                }
-                auto& pw = str_pw_map[chunk_id];
-                auto& [str_chunk_view, valid_data] = pw.get();
-                if (valid_data && !valid_data[inner_offset]) {
+                auto row = GetStringRow(chunk_id, inner_offset);
+                if (!row.has_value()) {
                     return std::nullopt;
                 }
-                std::string_view str_val_view = str_chunk_view[inner_offset];
-                return std::string(str_val_view.data(), str_val_view.length());
+                return std::string(*row);
             } else if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
-                if (json_pw_map.find(chunk_id) == json_pw_map.end()) {
-                    auto pw = segment_.chunk_view<milvus::Json>(
-                        op_ctx_, field_id_, chunk_id);
-                    json_pw_map[chunk_id] = std::move(pw);
-                }
-                auto& pw = json_pw_map[chunk_id];
-                auto& [json_chunk_view, valid_data] = pw.get();
-                if (valid_data && !valid_data[inner_offset]) {
+                auto row = GetStringRow(chunk_id, inner_offset);
+                if (!row.has_value()) {
                     return std::nullopt;
                 }
-                auto& json_val = json_chunk_view[inner_offset];
+                // JSONChunkWriter provides SIMDJSON_PADDING after the final
+                // row. The cached pin keeps both the bytes and padding alive.
+                milvus::Json json_val(*row);
                 JSON_TYPE_CASES(OutputType)
                 JSON_STRING_CASE(OutputType)
                 return std::nullopt;
@@ -272,8 +295,22 @@ class SealedDataGetter : public DataGetter<OutputType> {
                     std::is_same_v<OutputType, InnerRawType>,
                     "OutputType and InnerRawType must be the same for "
                     "non-json/string field group by");
-                auto pw = segment_.chunk_data<InnerRawType>(
-                    op_ctx_, field_id_, chunk_id);
+                auto pw = [&]() -> PinWrapper<Span<InnerRawType>> {
+                    if (snapshot_) {
+                        auto* column = snapshot_->GetColumn(field_id_);
+                        AssertInfo(column != nullptr,
+                                   "group-by field {} has no raw data column",
+                                   field_id_.get());
+                        return column->Span(op_ctx_, chunk_id)
+                            .template transform<Span<InnerRawType>>(
+                                [](SpanBase&& span_base) {
+                                    return static_cast<Span<InnerRawType>>(
+                                        span_base);
+                                });
+                    }
+                    return segment_.chunk_data<InnerRawType>(
+                        op_ctx_, field_id_, chunk_id);
+                }();
                 auto& span = pw.get();
                 if (!span.is_valid(inner_offset)) {
                     return std::nullopt;
@@ -312,7 +349,8 @@ GetDataGetter(milvus::OpContext* op_ctx,
               FieldId fieldId,
               std::optional<std::string> json_path = std::nullopt,
               std::optional<DataType> json_type = std::nullopt,
-              bool strict_cast = false) {
+              bool strict_cast = false,
+              const segcore::SegmentReadSnapshot* snapshot = nullptr) {
     if (json_path.has_value()) {
         auto json_path_tokens = milvus::parse_json_pointer(json_path.value());
         json_path = milvus::Json::pointer(json_path_tokens);
@@ -334,7 +372,8 @@ GetDataGetter(milvus::OpContext* op_ctx,
             fieldId,
             json_path,
             json_type,
-            strict_cast);
+            strict_cast,
+            snapshot);
     } else {
         ThrowInfo(UnexpectedError,
                   "The segment used to init data getter is neither growing or "
@@ -405,7 +444,8 @@ class MultiFieldDataGetter {
         const std::vector<FieldId>& field_ids,
         const std::optional<std::string>& json_path = std::nullopt,
         const std::optional<DataType>& json_type = std::nullopt,
-        bool strict_cast = false);
+        bool strict_cast = false,
+        const segcore::SegmentReadSnapshot* snapshot = nullptr);
 
     void
     GetInto(int64_t idx, CompositeGroupKey& out) const;
@@ -426,7 +466,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<float>& distances,
               std::vector<size_t>& topk_per_nq_prefix_sum,
               std::vector<int32_t>* element_indices = nullptr,
-              SearchResult* search_result = nullptr);
+              SearchResult* search_result = nullptr,
+              const segcore::SegmentReadSnapshot* snapshot = nullptr);
 
 bool
 TryStrictGroupFilteredSearch(
@@ -438,7 +479,8 @@ TryStrictGroupFilteredSearch(
     std::vector<CompositeGroupKey>& groups,
     std::vector<int64_t>& offsets,
     std::vector<float>& distances,
-    std::vector<size_t>& prefix);
+    std::vector<size_t>& prefix,
+    const segcore::SegmentReadSnapshot* snapshot = nullptr);
 
 }  // namespace exec
 }  // namespace milvus

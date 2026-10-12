@@ -1,6 +1,7 @@
 package qviews
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -122,4 +123,26 @@ func TestQueryViewIdentifiersString(t *testing.T) {
 		QueryViewVersion: qv,
 	}
 	assert.Equal(t, "10-by-dev-rootcoord-dml_0_1v0-2/3/4", key.String())
+}
+
+// stubDataViewRef satisfies qviews.DataViewRef so the interface shape
+// (DataView/Version/Stats/Deref) is enforced at compile time.
+type stubDataViewRef struct{}
+
+func (s *stubDataViewRef) DataView() *viewpb.DataViewOfCollection { return nil }
+func (s *stubDataViewRef) Version() *viewpb.DataVersion           { return nil }
+func (s *stubDataViewRef) Stats(segmentID int64) (SegmentStats, bool) {
+	return SegmentStats{}, false
+}
+func (s *stubDataViewRef) Deref() {}
+
+type stubDataViewRefProvider struct{}
+
+func (s *stubDataViewRefProvider) Get(ctx context.Context, collectionID int64, version *viewpb.DataVersion) (DataViewRef, error) {
+	return nil, nil
+}
+
+func TestDataViewRefInterfaceShape(t *testing.T) {
+	var _ DataViewRef = (*stubDataViewRef)(nil)
+	var _ DataViewRefProvider = (*stubDataViewRefProvider)(nil)
 }

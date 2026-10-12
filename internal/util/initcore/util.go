@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -109,8 +110,10 @@ func UpdateExprResCacheConfig() {
 	defer C.free(unsafe.Pointer(cDiskPath))
 
 	C.SetExprResCacheConfig(cMode, cDiskPath,
+		C.int64_t(params.QueryNodeCfg.ExprResCacheMaterializationMaxBytes.GetAsInt64()),
 		C.int64_t(params.QueryNodeCfg.ExprResCacheMemMaxBytes.GetAsInt64()),
 		C.bool(params.QueryNodeCfg.ExprResCacheMemCompressionEnabled.GetAsBool()),
+		C.bool(params.QueryNodeCfg.ExprResCacheMemEnableGrowing.GetAsBool()),
 		C.int32_t(params.QueryNodeCfg.ExprResCacheAdmissionThreshold.GetAsInt32()),
 		C.int64_t(params.QueryNodeCfg.ExprResCacheMinEvalDurationUs.GetAsInt64()),
 		C.int64_t(params.QueryNodeCfg.ExprResCacheDiskMaxBytes.GetAsInt64()),
@@ -122,15 +125,22 @@ func UpdateArrowIOThreadPoolCapacity(threads int) {
 	C.SetArrowIOThreadPoolCapacity(C.int(threads))
 }
 
+// defaultArrowIOThreadPoolCapacity is the pool size used when
+// common.arrow.ioThreadPoolCoefficient is 0.
+const defaultArrowIOThreadPoolCapacity = 8
+
 // ResolveArrowIOThreadPoolCapacity returns the effective arrow IO thread pool
-// size: coefficient × CPU cores, clamped by MaxCapacity when > 0. Returns 0
-// when the coefficient is unset, which signals the C++ side to keep arrow's
-// built-in default (8).
-func ResolveArrowIOThreadPoolCapacity() int {
+// size: coefficient × CPU cores, clamped by MaxCapacity when > 0. A zero
+// coefficient returns defaultArrowIOThreadPoolCapacity. A negative coefficient
+// returns an error.
+func ResolveArrowIOThreadPoolCapacity() (int, error) {
 	cfg := &paramtable.Get().CommonCfg
 	coef := cfg.ArrowIOThreadPoolCoefficient.GetAsFloat()
-	if coef <= 0 {
-		return 0
+	if coef < 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("invalid %s %v: must be >= 0", cfg.ArrowIOThreadPoolCoefficient.Key, coef)
+	}
+	if coef == 0 {
+		return defaultArrowIOThreadPoolCapacity, nil
 	}
 	threads := int(coef * float64(hardware.GetCPUNum()))
 	if threads < 1 {
@@ -139,26 +149,37 @@ func ResolveArrowIOThreadPoolCapacity() int {
 	if maxCap := cfg.ArrowIOThreadPoolMaxCapacity.GetAsInt(); maxCap > 0 && threads > maxCap {
 		threads = maxCap
 	}
-	return threads
+	return threads, nil
+}
+
+// ApplyArrowIOThreadPoolCapacity resolves the configured capacity and applies
+// it to arrow's IO thread pool. Invalid config is logged and the pool is left
+// unchanged. `source` and `trigger` are included in the log entry.
+func ApplyArrowIOThreadPoolCapacity(source, trigger string) {
+	threads, err := ResolveArrowIOThreadPoolCapacity()
+	if err != nil {
+		mlog.Warn(context.TODO(), "ignore invalid arrow io thread pool config",
+			mlog.String("source", source),
+			mlog.String("trigger", trigger),
+			mlog.String("error", err.Error()))
+		return
+	}
+	UpdateArrowIOThreadPoolCapacity(threads)
+	mlog.Info(context.TODO(), "arrow io thread pool capacity updated",
+		mlog.String("source", source),
+		mlog.String("trigger", trigger),
+		mlog.Int("threads", threads))
 }
 
 // RegisterArrowIOThreadPoolWatchers wires hot-reload of arrow IO pool capacity
-// to paramtable updates on the two coefficient/maxCapacity keys. `source` is
-// included in the log entry so log lines from different components (e.g.
-// "querynode" vs "datanode" in standalone, where both register the same keys)
-// remain distinguishable.
+// to paramtable updates on the two coefficient/maxCapacity keys.
 func RegisterArrowIOThreadPoolWatchers(pt *paramtable.ComponentParam, source string) {
 	handler := func(key string) func(*config.Event) {
 		return func(evt *config.Event) {
 			if !evt.HasUpdated {
 				return
 			}
-			newThreads := ResolveArrowIOThreadPoolCapacity()
-			UpdateArrowIOThreadPoolCapacity(newThreads)
-			mlog.Info(context.TODO(), "arrow io thread pool capacity updated",
-				mlog.String("source", source),
-				mlog.String("trigger", key),
-				mlog.Int("threads", newThreads))
+			ApplyArrowIOThreadPoolCapacity(source, key)
 		}
 	}
 	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
@@ -259,8 +280,9 @@ func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
 }
 
 // updateStorageV2AsyncLoadEnabled publishes the rollout value to C++.
-func updateStorageV2AsyncLoadEnabled(enabled bool) {
-	C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
+func updateStorageV2AsyncLoadEnabled(enabled bool) error {
+	status := C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
+	return HandleCStatus(&status, "configure async load mode failed")
 }
 
 // updateStorageV2AsyncLoadThreadPoolSize publishes the positive worker limit.
@@ -316,48 +338,58 @@ func registerConfigWatcherWithCatchUp(register func(syncConfig func()), syncConf
 	serializedSync()
 }
 
-func applyQueryNodeLoadConfig(enabled bool, budgetBytes, slots int64) {
+func applyQueryNodeLoadConfig(enabled bool, budgetBytes, slots int64) error {
 	// Stop new translators from selecting async before relaxing its defaults;
 	// install the limits before allowing new translators to select async.
 	if !enabled {
-		updateStorageV2AsyncLoadEnabled(false)
+		if err := updateStorageV2AsyncLoadEnabled(false); err != nil {
+			return err
+		}
 	}
 	UpdateLoadTransientBudgetBytes(budgetBytes)
 	UpdateLoadAdmissionSlots(slots)
 	if enabled {
-		updateStorageV2AsyncLoadEnabled(true)
+		return updateStorageV2AsyncLoadEnabled(true)
 	}
+	return nil
 }
 
 // registerQueryNodeLoadConfig applies the initial rollout switch and admission
 // limits, then keeps all three keys synchronized. Only QueryNode owns this
 // process-wide configuration, including when colocated with DataNode.
-func registerQueryNodeLoadConfig(ctx context.Context, pt *paramtable.ComponentParam, apply func(bool, int64, int64)) {
+func registerQueryNodeLoadConfig(ctx context.Context, pt *paramtable.ComponentParam, apply func(bool, int64, int64) error) error {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
-	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
-		for _, key := range []string{
-			pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key,
-			pt.CommonCfg.LoadTransientBudgetBytes.Key,
-			pt.CommonCfg.LoadAdmissionSlots.Key,
-		} {
-			pt.Watch(key, config.NewHandler(key+".querynode", func(evt *config.Event) {
-				if !evt.HasUpdated {
-					return
-				}
-				syncConfig()
-			}))
-		}
-	}, func() {
+	var mu sync.Mutex
+	syncConfig := func() error {
+		mu.Lock()
+		defer mu.Unlock()
 		enabled := pt.QueryNodeCfg.StorageV2EnableAsyncLoad.GetAsBool()
 		budgetBytes, slots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
-		apply(enabled, budgetBytes, slots)
+		if err := apply(enabled, budgetBytes, slots); err != nil {
+			return err
+		}
 		mlog.Info(ctx, "QueryNode load configuration updated",
 			mlog.Bool("async_enabled", enabled),
 			mlog.Int64("transient_budget_bytes", budgetBytes),
 			mlog.Int64("admission_slots", slots))
-	})
+		return nil
+	}
+	for _, key := range []string{
+		pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key,
+		pt.CommonCfg.LoadTransientBudgetBytes.Key,
+		pt.CommonCfg.LoadAdmissionSlots.Key,
+	} {
+		pt.Watch(key, config.NewHandler(key+".querynode", func(evt *config.Event) {
+			if evt.HasUpdated {
+				if err := syncConfig(); err != nil {
+					mlog.Warn(ctx, "Failed to update QueryNode load configuration", mlog.Err(err))
+				}
+			}
+		}))
+	}
+	return syncConfig()
 }
 
 // registerStorageV2AsyncLoadReadWindowConfig keeps the native read-window
@@ -392,10 +424,6 @@ func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
 
 func UpdateDefaultConfigParamTypeCheck(enable bool) {
 	C.SetDefaultConfigParamTypeCheck(C.bool(enable))
-}
-
-func UpdateDefaultEnableParquetStatsSkipIndex(enable bool) {
-	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enable))
 }
 
 func UpdateEnableLatestDeleteSnapshotOptimization(enable bool) {

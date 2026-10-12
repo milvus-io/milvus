@@ -53,8 +53,10 @@ func (c *WALCallback) alterWALV2AckCallback(
 ) error {
 	logger := mlog.With(
 		mlog.Stringer("targetWALName", result.Message.Header().TargetWalName),
-		mlog.Any("config", result.Message.Header().Config),
-		mlog.Uint64("broadcastID", result.Message.BroadcastHeader().BroadcastID),
+		// Both keys and values come from the request payload; only their count is
+		// safe to attach to every callback log line.
+		mlog.Int("configCount", len(result.Message.Header().Config)),
+		mlog.FieldBroadcastID(result.Message.BroadcastHeader().BroadcastID),
 	)
 
 	logger.Info(ctx, "AlterWAL broadcast message acknowledged by all vchannels",

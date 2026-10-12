@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,7 @@ type fixtureSpec struct {
 	commitTs         uint64
 	fillTextAnalyzer bool  // decorate the base text field with multi_analyzer_params (by_field=lang)
 	textLOBFieldID   int64 // >0: write this source TEXT field through the LOB-aware writer
+	legacyNamespace  bool  // write the source under localStorage.path/files instead of the canonical root
 }
 
 type fixtureOpt func(*fixtureSpec)
@@ -165,6 +167,10 @@ func withCommitTs(ts uint64) fixtureOpt { return func(s *fixtureSpec) { s.commit
 
 func withTextLOBSource(fieldID int64) fixtureOpt {
 	return func(s *fixtureSpec) { s.textLOBFieldID = fieldID }
+}
+
+func withLegacySourceNamespace() fixtureOpt {
+	return func(s *fixtureSpec) { s.legacyNamespace = true }
 }
 
 type bumpFixture struct {
@@ -270,14 +276,20 @@ func buildBumpFixture(t *testing.T, opts ...fixtureOpt) *bumpFixture {
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
 	params := compaction.GenParams()
 	params.StorageVersion = storage.StorageV3
+	sourceStorageConfig := params.StorageConfig
+	if spec.legacyNamespace {
+		sourceStorageConfig = proto.Clone(params.StorageConfig).(*indexpb.StorageConfig)
+		sourceStorageConfig.RootPath = path.Join(params.StorageConfig.GetRootPath(), "files")
+	}
 
 	fixtureWriterOpts := []storage.RwOption{
-		storage.WithStorageConfig(params.StorageConfig),
+		storage.WithStorageConfig(sourceStorageConfig),
 		storage.WithVersion(storage.StorageV3),
 	}
 	if spec.textLOBFieldID > 0 {
-		lobBasePath := path.Join(params.StorageConfig.GetRootPath(),
-			common.SegmentInsertLogPath, metautil.JoinIDPath(CollectionID, PartitionID))
+		lobBasePath := path.Join(
+			storage.SegmentPartitionBasePath(sourceStorageConfig.GetRootPath(), CollectionID, PartitionID),
+			"lobs", strconv.FormatInt(spec.textLOBFieldID, 10))
 		fixtureWriterOpts = append(fixtureWriterOpts, storage.WithTextColumnConfigs([]packed.TextColumnConfig{{
 			FieldID:             spec.textLOBFieldID,
 			LobBasePath:         lobBasePath,
@@ -346,6 +358,7 @@ func buildBumpFixture(t *testing.T, opts ...fixtureOpt) *bumpFixture {
 	jsonParams, err := compaction.GenerateJSONParams(targetSchema)
 	require.NoError(t, err)
 	plan := &datapb.CompactionPlan{
+		EnableManifestDelta:    true,
 		PlanID:                 999,
 		Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
 		SegmentBinlogs:         []*datapb.CompactionSegmentBinlogs{segment},
@@ -879,6 +892,54 @@ func TestBumpUTBumpOnlyEchoesSource(t *testing.T) {
 	// Source data still fully readable and golden.
 	verifySegmentData(t, fix.cfg, seg.GetManifest(),
 		&schemapb.CollectionSchema{Fields: physicalReadFields(fix.sourceSchema)}, fix.rows)
+}
+
+func TestBumpUTLegacyCoordinatorGetsCompleteManifest(t *testing.T) {
+	setupBumpUTEnv(t)
+	fix := buildBumpFixture(t, withBM25Target())
+	fix.task.plan.EnableManifestDelta = false // omitted by a pre-52621 coordinator
+
+	seg := runCompact(t, fix)
+	require.Nil(t, seg.GetManifestDelta())
+	require.NotEmpty(t, seg.GetManifest())
+	require.Equal(t, fix.sourceManifest, seg.GetBaseManifest())
+	require.Equal(t, fix.segment.GetSegmentID(), seg.GetSegmentID())
+	require.Equal(t, storage.StorageV3, seg.GetStorageVersion())
+	base, version, err := packed.UnmarshalManifestPath(seg.GetManifest())
+	require.NoError(t, err)
+	sourceBase, sourceVersion, err := packed.UnmarshalManifestPath(fix.sourceManifest)
+	require.NoError(t, err)
+	require.Equal(t, sourceBase, base)
+	require.Greater(t, version, sourceVersion)
+
+	// Read the real worker-committed revision, without a coordinator-side commit.
+	verifySegmentData(t, fix.cfg, seg.GetManifest(),
+		&schemapb.CollectionSchema{Fields: physicalReadFields(fix.sourceSchema)}, fix.rows)
+	verifyManifestFields(t, fix.cfg, seg.GetManifest(), []int64{102}, nil)
+	texts := make([]string, len(fix.rows))
+	for i := range texts {
+		texts[i] = bumpFxVarchar(bumpFxTextField, i)
+	}
+	expected := expectedBM25SparseRows(t, fix.targetSchema, fix.targetSchema.GetFunctions()[0], texts)
+	requireSparseRows(t, fix, seg.GetManifest(), 102, len(fix.rows), expected)
+	stats, err := packed.NewStatsResolver(seg.GetManifest(), fix.cfg).BM25StatsPaths()
+	require.NoError(t, err)
+	require.NotEmpty(t, stats[102])
+	require.NotNil(t, seg.GetStats())
+	require.Positive(t, seg.GetStats().GetStatsBinlogSize())
+}
+
+func TestBumpUTLegacyManifestCommitFailure(t *testing.T) {
+	setupBumpUTEnv(t)
+	fix := additiveFixture(t)
+	fix.task.plan.EnableManifestDelta = false
+	patch := mockey.Mock(packed.CommitManifestUpdates).Return("", errBumpUTInjected).Build()
+	defer patch.UnPatch()
+
+	result, err := fix.task.Compact()
+	require.ErrorIs(t, err, errBumpUTInjected)
+	require.Nil(t, result)
+	verifySourceIntact(t, fix)
 }
 
 // [A1][S0] additive: +nullable int64 — every historical row gets NULL, the new
@@ -2111,6 +2172,44 @@ func readTextRefs(t *testing.T, fix *bumpFixture, manifest string, textID int64)
 	return refs
 }
 
+func readLOBPayloads(t *testing.T, fix *bumpFixture, manifest string, textID int64) []string {
+	lobFiles, err := packed.GetManifestLobFiles(manifest, fix.cfg)
+	require.NoError(t, err)
+	var fragments []packed.Fragment
+	for _, lobFile := range lobFiles {
+		if lobFile.FieldID != textID {
+			continue
+		}
+		fragments = append(fragments, packed.Fragment{
+			FilePath: lobFile.Path,
+			StartRow: 0,
+			EndRow:   lobFile.TotalRows,
+			RowCount: lobFile.TotalRows,
+		})
+	}
+	require.NotEmpty(t, fragments)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "text_data", Type: arrow.BinaryTypes.String}}, nil)
+	reader, err := packed.NewFFIPackedReaderWithFragments(
+		[]string{"text_data"}, "vortex", fragments, schema, []string{"text_data"},
+		1<<20, fix.cfg, nil, packed.ExternalReaderContext{})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, reader.Close()) }()
+
+	var values []string
+	for {
+		record, readErr := reader.ReadNext()
+		if readErr == sio.EOF {
+			break
+		}
+		require.NoError(t, readErr)
+		column := record.Column(0).(*array.String)
+		for i := 0; i < column.Len(); i++ {
+			values = append(values, strings.Clone(column.Value(i)))
+		}
+	}
+	return values
+}
+
 // [LOB1][S0] additive keeps TEXT LOB data dereferenceable: every row's LOB
 // reference bytes survive the bump unchanged AND the referenced .vx blob file
 // stays byte-identical — together this proves content round-trip without
@@ -2176,6 +2275,63 @@ func TestBumpUTFullRewriteTextLOBKeptRowsSurvive(t *testing.T) {
 		require.Equal(t, srcRefs[pk], postRefs[pk], "kept row %d must keep a live LOB reference", pk)
 	}
 	require.Equal(t, preLob, listLobFiles(t, fix), "LOB blob files must stay byte-identical")
+}
+
+// [LOB3][S0] a pre-3.0.2 local source can remain under the legacy `files`
+// namespace after upgrade. A full schema rewrite creates a canonical output
+// segment, so byte-reusing its TEXT references would make the output reader look
+// for the legacy UUID under the wrong partition. The compactor must decode the
+// source payload and write a new canonical LOB file instead.
+func TestBumpUTFullRewriteTextLOBRewritesAcrossPartitionNamespaces(t *testing.T) {
+	setupBumpUTEnv(t)
+	const textID = int64(105)
+	const droppedID = int64(107)
+	const rows = 6
+	fix := buildBumpFixture(t, withRows(rows),
+		withSourceFields(
+			&schemapb.FieldSchema{FieldID: textID, Name: "big_text", DataType: schemapb.DataType_Text},
+			&schemapb.FieldSchema{FieldID: droppedID, Name: "dropped", DataType: schemapb.DataType_Int64},
+		),
+		withFillValue(func(i int, ts uint64, v map[int64]any) {
+			v[textID] = bumpFxLobText(i)
+			v[droppedID] = int64(i)
+		}),
+		withTextLOBSource(textID),
+		withLegacySourceNamespace(),
+		withTargetDroppedField(droppedID),
+	)
+
+	sourceBase, _, err := packed.UnmarshalManifestPath(fix.sourceManifest)
+	require.NoError(t, err)
+	require.Contains(t, sourceBase, "/files/insert_log/")
+	sourceRefs := readTextRefs(t, fix, fix.sourceManifest, textID)
+
+	segment := runCompact(t, fix)
+	outputBase, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
+	require.NoError(t, err)
+	require.Equal(t,
+		storage.SegmentManifestBasePath(fix.cfg.GetRootPath(), CollectionID, PartitionID, segment.GetSegmentID()),
+		outputBase)
+	outputRefs := readTextRefs(t, fix, segment.GetManifest(), textID)
+	require.NotEqual(t, sourceRefs, outputRefs, "cross-namespace rewrite must allocate new LOB references")
+
+	gotPayloads := readLOBPayloads(t, fix, segment.GetManifest(), textID)
+	require.Len(t, gotPayloads, rows)
+	for i := 0; i < rows; i++ {
+		require.Equal(t, bumpFxLobText(i), gotPayloads[i])
+	}
+	for _, lobFile := range mustManifestLobFiles(t, fix, segment.GetManifest()) {
+		if lobFile.FieldID == textID {
+			require.NotContains(t, lobFile.Path, "/files/insert_log/")
+			require.Contains(t, lobFile.Path, "/insert_log/")
+		}
+	}
+}
+
+func mustManifestLobFiles(t *testing.T, fix *bumpFixture, manifest string) []packed.LobFileInfo {
+	lobFiles, err := packed.GetManifestLobFiles(manifest, fix.cfg)
+	require.NoError(t, err)
+	return lobFiles
 }
 
 // [ST2][S1] full rewrite with deletes + BM25 materialization: the committed

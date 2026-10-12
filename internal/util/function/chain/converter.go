@@ -234,12 +234,16 @@ func exportIntFieldData(col *arrow.Chunked, name string) ([]int32, error) {
 // Import: Milvus -> DataFrame
 // =============================================================================
 
-// FromSearchResultData creates a DataFrame from SearchResultData.
-// Each query's results become a separate chunk.
-// alloc must not be nil.
-// neededFields specifies which field columns to import from FieldsData;
-// other field columns will be skipped. If nil or empty, no field columns are imported.
-func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Allocator, neededFields []string) (*DataFrame, error) {
+// FromSearchResultData creates a DataFrame from SearchResultData using
+// schema-resolved chain inputs. Each query's results become a separate chunk.
+// Ordinary fields are imported directly, while JSON paths are materialized as
+// Arrow columns named by their logical inputs. A nil or empty
+// plan imports only system and group-by columns.
+func FromSearchResultData(
+	resultData *schemapb.SearchResultData,
+	alloc memory.Allocator,
+	plan *DataFrameInputPlan,
+) (*DataFrame, error) {
 	if alloc == nil {
 		return nil, merr.WrapErrServiceInternal("alloc is nil")
 	}
@@ -324,34 +328,15 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 		}
 	}
 
-	// Import other fields (skip when empty results, as stubs may have nil scalars)
-	// neededFields == nil or []: skip all field columns (none needed)
-	// neededFields == ["a","b"]: import only "a" and "b"
-	var fieldFilter map[string]bool
-	if len(neededFields) > 0 {
-		fieldFilter = make(map[string]bool, len(neededFields))
-		for _, name := range neededFields {
-			fieldFilter[name] = true
-		}
-	}
+	// Import planned fields only for non-empty results. Empty-result stubs may
+	// carry no FieldData even when the plan has inputs.
 	if totalRows > 0 {
 		seenFieldIDs := make(map[int64]bool)
 		seenFieldNames := make(map[string]bool)
-		for _, fieldData := range resultData.GetFieldsData() {
-			fieldID := fieldData.GetFieldId()
-			fieldName := fieldData.GetFieldName()
-			if fieldFilter == nil || !fieldFilter[fieldName] {
-				continue
-			}
-			if seenFieldIDs[fieldID] {
-				return nil, merr.WrapErrServiceInternalMsg("duplicate field id %d (fieldName=%q)", fieldID, fieldName)
-			}
-			if seenFieldNames[fieldName] {
-				return nil, merr.WrapErrServiceInternalMsg("duplicate field name %q (fieldId=%d conflicts with existing field)", fieldName, fieldID)
-			}
-			seenFieldIDs[fieldID] = true
-			seenFieldNames[fieldName] = true
-			if err := importFieldData(builder, fieldData, offsets, alloc); err != nil {
+		if plan != nil && len(plan.Inputs) > 0 {
+			if err := importPlannedFieldData(
+				builder, resultData.GetFieldsData(), plan, offsets, alloc, seenFieldIDs, seenFieldNames,
+			); err != nil {
 				return nil, err
 			}
 		}
@@ -374,9 +359,22 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 				return nil, err
 			}
 		}
+	} else if plan != nil && len(plan.Inputs) > 0 {
+		if err := materializeEmptyPlannedColumns(builder, plan, len(topks), alloc); err != nil {
+			return nil, err
+		}
 	}
 
-	return builder.Build(), nil
+	df := builder.Build()
+	if plan != nil {
+		for _, input := range plan.Inputs {
+			if err := ValidateMaterializedInput(df, input); err != nil {
+				df.Release()
+				return nil, err
+			}
+		}
+	}
+	return df, nil
 }
 
 // importEmptyIDs creates empty $id columns (Int64 type) for empty results.
@@ -724,6 +722,9 @@ func ToSearchResultData(df *DataFrame) (*schemapb.SearchResultData, error) {
 }
 
 // ToSearchResultDataWithOptions exports the DataFrame to SearchResultData with options.
+// Exported strings share the Arrow value buffers. Callers must provide immutable,
+// Go-managed string buffers that are not recycled on Release. QueryNode reduce
+// and Proxy rerank build these buffers with memory.DefaultAllocator.
 func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemapb.SearchResultData, error) {
 	result := &schemapb.SearchResultData{
 		NumQueries: int64(df.NumChunks()),
@@ -855,11 +856,36 @@ func exportScores(df *DataFrame) ([]float32, error) {
 		return nil, merr.WrapErrServiceInternalMsg("exportScores: column %s not found", types.ScoreFieldName)
 	}
 
-	data, err := exportChunkedValues[float32, *array.Float32](col, types.ScoreFieldName)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("exportScores: %v", err)
+	if col.DataType().ID() != arrow.FLOAT32 {
+		return nil, merr.WrapErrFunctionFailedMsg("exportScores: $score type mismatch: expected Float32, got %s", col.DataType())
+	}
+	data := make([]float32, 0, col.Len())
+	for chunkIdx, chunk := range col.Chunks() {
+		if err := ValidateScoreChunk(chunk, chunkIdx); err != nil {
+			return nil, merr.Wrap(err, "exportScores")
+		}
+		data = append(data, chunk.(*array.Float32).Float32Values()...)
 	}
 	return data, nil
+}
+
+// ValidateScoreChunk requires Float32, non-null, finite scores at a stage
+// boundary. chunkIdx identifies the original query chunk for error reporting.
+// Intermediate function-chain columns may still contain invalid scores.
+func ValidateScoreChunk(chunk arrow.Array, chunkIdx int) error {
+	scores, ok := chunk.(*array.Float32)
+	if !ok {
+		return merr.WrapErrFunctionFailedMsg("$score type mismatch: expected Float32, got %s", chunk.DataType())
+	}
+	for rowIdx, score := range scores.Float32Values() {
+		if scores.IsNull(rowIdx) {
+			return merr.WrapErrFunctionFailedMsg("$score contains null in chunk %d at row %d", chunkIdx, rowIdx)
+		}
+		if math.IsNaN(float64(score)) || math.IsInf(float64(score), 0) {
+			return merr.WrapErrFunctionFailedMsg("$score contains non-finite value %v in chunk %d at row %d", score, chunkIdx, rowIdx)
+		}
+	}
+	return nil
 }
 
 func exportElementIndices(df *DataFrame) (*schemapb.LongArray, error) {

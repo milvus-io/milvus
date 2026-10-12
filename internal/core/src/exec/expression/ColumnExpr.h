@@ -44,7 +44,7 @@ namespace exec {
 
 class PhyColumnExpr : public Expr {
  public:
-    PhyColumnExpr(const std::vector<std::shared_ptr<Expr>>& input,
+    PhyColumnExpr(std::vector<std::shared_ptr<Expr>> input,
                   const std::shared_ptr<const milvus::expr::ColumnExpr>& expr,
                   const std::string& name,
                   milvus::OpContext* op_ctx,
@@ -183,6 +183,7 @@ class PhyColumnExpr : public Expr {
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
 
+    segcore::StringScanState string_scan_state_;
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::ColumnExpr> expr_;

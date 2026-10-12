@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -35,6 +36,7 @@ import (
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -75,7 +77,10 @@ func TestApplyL1RerankSortLimitRealignsSources(t *testing.T) {
 	mockL1FieldReader(t, pool, []int32{0, 1, 0, 1}, []int64{10, 20, 30, 40}, []int64{1, 50, 100, 2})
 
 	task := &SearchTask{ctx: t.Context()}
-	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}, {}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{chain: repr, inputFieldIDs: []int64{101}})
+	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}, {}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{
+		chain:     repr,
+		inputPlan: inputPlanForScalarFieldForTest(101, "ts", schemapb.DataType_Int64),
+	})
 	require.NoError(t, err)
 	defer reranked.DF.Release()
 
@@ -198,8 +203,8 @@ func TestApplyL1RerankSortLimitWithOffsetRealignsSources(t *testing.T) {
 
 	task := &SearchTask{ctx: t.Context()}
 	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}, {}, {}, {}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{
-		chain:         repr,
-		inputFieldIDs: []int64{101},
+		chain:     repr,
+		inputPlan: inputPlanForScalarFieldForTest(101, "ts", schemapb.DataType_Int64),
 	})
 	require.NoError(t, err)
 	defer reranked.DF.Release()
@@ -220,6 +225,130 @@ func TestApplyL1RerankSortLimitWithOffsetRealignsSources(t *testing.T) {
 	for _, name := range []string{"ts", "temporary_score", l1SourceIndexColumn} {
 		assert.False(t, reranked.DF.HasColumn(name), "column %q must be pruned", name)
 	}
+}
+
+// A public Search may fan out to several workers. L1 pagination applies to
+// each worker's merged candidates, not to the final distributed result.
+func TestApplyL1RerankLimitIsWorkerLocal(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		workers     [][]int
+		wantIDs     [][]int64
+		wantScores  [][]float32
+		wantSources [][]segmentSource
+	}{
+		{
+			name:       "two segments on one worker",
+			workers:    [][]int{{0, 1}},
+			wantIDs:    [][]int64{{3}},
+			wantScores: [][]float32{{0.7}},
+			wantSources: [][]segmentSource{
+				{{InputIdx: 0, SegOffset: 30, OriginalIdx: 1}},
+			},
+		},
+		{
+			name:       "one segment per worker",
+			workers:    [][]int{{0}, {1}},
+			wantIDs:    [][]int64{{1}, {2}},
+			wantScores: [][]float32{{0.9}, {0.8}},
+			wantSources: [][]segmentSource{
+				{{InputIdx: 0, SegOffset: 10, OriginalIdx: 0}},
+				{{InputIdx: 0, SegOffset: 20, OriginalIdx: 0}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withBoostScoreCheckedAllocator(t)
+			segDFs := []*chain.DataFrame{
+				makeL1SegmentDF(t, defaultAllocator, []int64{1, 3}, []float32{0.9, 0.7}, []int64{10, 30}),
+				makeL1SegmentDF(t, defaultAllocator, []int64{2, 4}, []float32{0.8, 0.6}, []int64{20, 40}),
+			}
+			defer segDFs[0].Release()
+			defer segDFs[1].Release()
+			repr, err := chain.ProtoChainToRepr(l1FunctionChainForTest(
+				&schemapb.FunctionChainOp{
+					Op:     chaintypes.OpTypeSort,
+					Inputs: []string{chaintypes.IDFieldName},
+					Params: map[string]*schemapb.FunctionParamValue{
+						"desc": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}},
+					},
+				},
+				&schemapb.FunctionChainOp{
+					Op: chaintypes.OpTypeLimit,
+					Params: map[string]*schemapb.FunctionParamValue{
+						"limit":  {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: 1}},
+						"offset": {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: 1}},
+					},
+				},
+			))
+			require.NoError(t, err)
+			for worker, segmentIndices := range tc.workers {
+				inputs := make([]*chain.DataFrame, 0, len(segmentIndices))
+				for _, idx := range segmentIndices {
+					inputs = append(inputs, segDFs[idx])
+				}
+				task := &SearchTask{ctx: t.Context()}
+				reduced, err := task.executeGoReduce(inputs, 4, nil, 0, 1)
+				require.NoError(t, err)
+				defer reduced.DF.Release()
+				reranked, err := task.applyL1Rerank(reduced, nil, nil, &preparedL1FunctionChain{chain: repr})
+				require.NoError(t, err)
+				defer reranked.DF.Release()
+				assertL1ChunkInt64Values(t, reranked.DF, chaintypes.IDFieldName, [][]int64{tc.wantIDs[worker]})
+				assertL1ChunkFloat32Values(t, reranked.DF, chaintypes.ScoreFieldName, [][]float32{tc.wantScores[worker]})
+				assert.Equal(t, tc.wantSources[worker], reranked.Sources[0])
+			}
+		})
+	}
+}
+
+func TestApplyL1RerankAfterGroupByCandidateSelection(t *testing.T) {
+	withBoostScoreCheckedAllocator(t)
+	// Segment-local GroupBy has already selected these representatives. Group
+	// 20 spans both segments; group 40 falls outside this worker's top three.
+	seg0 := buildTestDFWithGroupBy(defaultAllocator,
+		[][]int64{{1, 3}}, [][]float32{{0, -4}}, [][]int64{{10, 20}}, groupByCol)
+	seg1 := buildTestDFWithGroupBy(defaultAllocator,
+		[][]int64{{4, 5, 6}}, [][]float32{{-9, -16, -25}}, [][]int64{{20, 30, 40}}, groupByCol)
+	defer seg0.Release()
+	defer seg1.Release()
+
+	task := &SearchTask{ctx: t.Context()}
+	reduced, err := task.executeGoReduce([]*chain.DataFrame{seg0, seg1}, 3, &groupByOptions{
+		GroupSize: 1,
+		Columns:   []string{groupByCol},
+	}, 0, 1)
+	require.NoError(t, err)
+	defer reduced.DF.Release()
+	assertL1ChunkInt64Values(t, reduced.DF, chaintypes.IDFieldName, [][]int64{{1, 3, 5}})
+
+	// Only surviving representatives are materialized for L1. It must not
+	// reselect ID 4 from group 20 or bring back the discarded fourth group.
+	mockL1FieldReader(t, defaultAllocator, []int32{0, 0, 1}, []int64{0, 1, 1}, []int64{0, 20, 10})
+	repr, err := chain.ProtoChainToRepr(l1FunctionChainForTest(mapOpWithParamsForTest(
+		chaintypes.ScoreFieldName,
+		chainexpr.NumCombineFuncName,
+		map[string]*schemapb.FunctionParamValue{
+			chaintypes.NumCombineParamMode: stringParamForTest(chaintypes.NumCombineModeSum),
+		},
+		columnArgForTest("ts"),
+		columnArgForTest(chaintypes.IDFieldName),
+	)))
+	require.NoError(t, err)
+	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}, {}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{
+		chain:     repr,
+		inputPlan: inputPlanForScalarFieldForTest(101, "ts", schemapb.DataType_Int64),
+	})
+	require.NoError(t, err)
+	defer reranked.DF.Release()
+	assertL1ChunkInt64Values(t, reranked.DF, chaintypes.IDFieldName, [][]int64{{3, 5, 1}})
+	assertL1ChunkFloat32Values(t, reranked.DF, chaintypes.ScoreFieldName, [][]float32{{23, 15, 1}})
+	assertL1ChunkInt64Values(t, reranked.DF, groupByCol, [][]int64{{20, 30, 10}})
+	assert.Equal(t, []segmentSource{
+		{InputIdx: 0, SegOffset: 1, OriginalIdx: 1},
+		{InputIdx: 1, SegOffset: 1, OriginalIdx: 1},
+		{InputIdx: 0, SegOffset: 0, OriginalIdx: 0},
+	}, reranked.Sources[0])
 }
 
 func TestApplyL1RerankReadsFieldsFromReducedSources(t *testing.T) {
@@ -264,7 +393,10 @@ func TestApplyL1RerankReadsFieldsFromReducedSources(t *testing.T) {
 	mockL1FieldReader(t, pool, []int32{0}, []int64{20}, []int64{5})
 
 	task := &SearchTask{ctx: t.Context()}
-	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{chain: repr, inputFieldIDs: []int64{101}})
+	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{
+		chain:     repr,
+		inputPlan: inputPlanForScalarFieldForTest(101, "ts", schemapb.DataType_Int64),
+	})
 	require.NoError(t, err)
 	defer reranked.DF.Release()
 	scores := reranked.DF.Column(chaintypes.ScoreFieldName).Chunk(0).(*array.Float32)
@@ -297,7 +429,10 @@ func TestApplyL1RerankMapNormalizesScoreAndPreservesSource(t *testing.T) {
 
 	mockL1FieldReader(t, pool, []int32{0, 0}, []int64{10, 20}, []int64{1, 5})
 	task := &SearchTask{ctx: t.Context()}
-	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{chain: repr, inputFieldIDs: []int64{101}})
+	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{
+		chain:     repr,
+		inputPlan: inputPlanForScalarFieldForTest(101, "ts", schemapb.DataType_Int64),
+	})
 	require.NoError(t, err)
 	defer reranked.DF.Release()
 
@@ -566,48 +701,58 @@ func TestL1InternalContracts(t *testing.T) {
 		defer func() { fillL1FieldsOrdered = oldReader }()
 
 		tests := []struct {
-			name          string
-			field         arrow.Field
-			inputFieldIDs []int64
-			message       string
+			name      string
+			field     arrow.Field
+			inputPlan *chain.DataFrameInputPlan
+			message   string
 		}{
 			{
-				name:          "missing field ID metadata",
-				field:         arrow.Field{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
-				inputFieldIDs: []int64{101},
-				message:       "missing field id metadata",
+				name: "missing field ID metadata",
+				field: arrow.Field{
+					Name:     "ts",
+					Type:     arrow.PrimitiveTypes.Int64,
+					Metadata: arrow.NewMetadata([]string{arrowMetadataDataTypeKey}, []string{"5"}),
+				},
+				inputPlan: inputPlanForScalarFieldForTest(101, "ts", schemapb.DataType_Int64),
+				message:   "invalid field id metadata",
 			},
 			{
 				name: "conflicting materialized field",
 				field: arrow.Field{
-					Name:     chaintypes.IDFieldName,
-					Type:     arrow.PrimitiveTypes.Int64,
-					Metadata: arrow.NewMetadata([]string{arrowMetadataFieldIDKey}, []string{"101"}),
+					Name: chaintypes.IDFieldName,
+					Type: arrow.PrimitiveTypes.Int64,
+					Metadata: arrow.NewMetadata(
+						[]string{arrowMetadataFieldIDKey, arrowMetadataDataTypeKey},
+						[]string{"101", "5"},
+					),
 				},
-				inputFieldIDs: []int64{101},
-				message:       "conflicts with reduced dataframe column",
+				inputPlan: inputPlanForScalarFieldForTest(101, chaintypes.IDFieldName, schemapb.DataType_Int64),
+				message:   "conflicts with reduced dataframe column",
 			},
 			{
-				name: "missing requested ID",
+				name: "wrong field ID",
 				field: arrow.Field{
-					Name:     "ts",
-					Type:     arrow.PrimitiveTypes.Int64,
-					Metadata: arrow.NewMetadata([]string{arrowMetadataFieldIDKey}, []string{"102"}),
+					Name: "ts",
+					Type: arrow.PrimitiveTypes.Int64,
+					Metadata: arrow.NewMetadata(
+						[]string{arrowMetadataFieldIDKey, arrowMetadataDataTypeKey},
+						[]string{"102", "5"},
+					),
 				},
-				inputFieldIDs: []int64{101},
-				message:       "missing field id 101",
+				inputPlan: inputPlanForScalarFieldForTest(101, "ts", schemapb.DataType_Int64),
+				message:   "invalid field id metadata",
 			},
 		}
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				fillL1FieldsOrdered = func(context.Context, []*segcore.SearchResult, *segcore.SearchPlan, []int64, []int32, []int64) (arrow.Record, error) {
+				fillL1FieldsOrdered = func(context.Context, []*segcore.SearchResult, *segcore.SearchPlan, []byte, []int32, []int64) (arrow.Record, error) {
 					return makeRecord(test.field), nil
 				}
 				reduced := newReduced([]int64{1}, []string{chaintypes.IDFieldName, chaintypes.ScoreFieldName, chaintypes.SegOffsetFieldName})
 				reduced.Sources = [][]segmentSource{{{InputIdx: 0, SegOffset: 10}}}
 				defer reduced.DF.Release()
 
-				input, err := buildL1InputDataFrame(t.Context(), pool, reduced, nil, nil, test.inputFieldIDs)
+				input, err := buildL1InputDataFrame(t.Context(), pool, reduced, nil, nil, test.inputPlan)
 				require.Nil(t, input)
 				assertSystemInternal(t, err, test.message)
 			})
@@ -732,14 +877,17 @@ func mockL1FieldReader(t *testing.T, pool memory.Allocator, expectedSegIndices [
 		ctx context.Context,
 		results []*segcore.SearchResult,
 		plan *segcore.SearchPlan,
-		fieldIDs []int64,
+		inputPlanBlob []byte,
 		segIndices []int32,
 		segOffsets []int64,
 	) (arrow.Record, error) {
 		require.NoError(t, ctx.Err())
 		require.NotEmpty(t, results)
 		require.NotNil(t, plan)
-		require.Equal(t, []int64{101}, fieldIDs)
+		var inputPlan cgopb.FunctionChainInputPlan
+		require.NoError(t, proto.Unmarshal(inputPlanBlob, &inputPlan))
+		require.Len(t, inputPlan.Inputs, 1)
+		require.Equal(t, int64(101), inputPlan.Inputs[0].GetSourceFieldId())
 		require.Equal(t, expectedSegIndices, segIndices)
 		require.Equal(t, expectedSegOffsets, segOffsets)
 		require.Len(t, segIndices, len(values))

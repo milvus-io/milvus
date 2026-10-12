@@ -32,12 +32,18 @@
 namespace milvus {
 namespace exec {
 GroupingSet::~GroupingSet() {
-    if (isGlobal_ && lookup_) {
-        AssertInfo(lookup_->hits_.size() == 1,
-                   "GlobalAggregation should have exactly one output line");
-        // globalAggregationBuffer_ is automatically cleaned up by unique_ptr
-        // No need to manually delete[] or set to nullptr
-        lookup_->hits_[0] = nullptr;
+    if (isGlobal_) {
+        if (globalAggregationBuffer_) {
+            for (auto& aggregate : aggregates_) {
+                aggregate.function_->destroy(globalAggregationBuffer_.get());
+            }
+        }
+    } else if (hash_table_) {
+        for (auto* row : hash_table_->rows()->allRows()) {
+            for (auto& aggregate : aggregates_) {
+                aggregate.function_->destroy(row);
+            }
+        }
     }
 }
 

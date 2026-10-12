@@ -339,6 +339,7 @@ func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
 			err := storage.ValidateStorageV1InsertWritableSchema(test.schema)
 			if test.wantError {
 				require.Error(t, err)
+				require.ErrorIs(t, err, merr.ErrStorage)
 				assert.Contains(t, err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
 				return
 			}
@@ -351,6 +352,7 @@ func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{nestedArrayField()},
 		})
 		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrStorage)
 		assert.Contains(t, err.Error(), "nested Array is not supported in V1 storage format, fieldName=nested_array")
 	})
 
@@ -364,6 +366,7 @@ func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
 			},
 		})
 		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrStorage)
 		assert.Contains(t, err.Error(), "nested Array is not supported in V1 storage format, structName=struct_array, fieldName=nested_array")
 	})
 }

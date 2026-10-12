@@ -41,6 +41,38 @@ func SetRBACRolesToContext(ctx context.Context, roles []string) context.Context 
 	return context.WithValue(ctx, RBACRoleContextKey, rolesCopy)
 }
 
+type rbacSubject struct {
+	username  string
+	password  string
+	roleNames []string
+	bypass    bool
+}
+
+func authorizationDisabled() bool {
+	return !Params.CommonCfg.AuthorizationEnabled.GetAsBool()
+}
+
+func getCurrentUserRBACSubject(ctx context.Context) (rbacSubject, error) {
+	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
+	if err != nil {
+		mlog.Warn(ctx, "GetCurUserFromContext fail", mlog.Err(err))
+		return rbacSubject{}, err
+	}
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+		return rbacSubject{username: username, password: password, bypass: true}, nil
+	}
+	roleNames, err := GetRole(username)
+	if err != nil {
+		mlog.Warn(ctx, "GetRole fail", mlog.String("username", username), mlog.Err(err))
+		return rbacSubject{}, err
+	}
+	return rbacSubject{
+		username:  username,
+		password:  password,
+		roleNames: append(roleNames, util.RolePublic),
+	}, nil
+}
+
 // UnaryServerInterceptor returns a new unary server interceptors that performs per-request privilege access.
 func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterceptor {
 	privilege.InitPrivilegeGroups()
@@ -62,33 +94,34 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 
 func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc {
 	return func(ctx context.Context, req interface{}) (context.Context, error) {
-		if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		if authorizationDisabled() {
 			return ctx, nil
 		}
 		mlog.RatedDebug(ctx, rate.Limit(60), "PrivilegeInterceptor", mlog.String("type", reflect.TypeOf(req).String()))
-		privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
+		privilegeReq := collectionMetadataPrivilegeRequest(req)
+		privilegeExt, err := funcutil.GetPrivilegeExtObj(privilegeReq)
 		if err != nil {
 			mlog.RatedInfo(ctx, rate.Limit(60), "GetPrivilegeExtObj err", mlog.Err(err))
 			return ctx, nil
 		}
-		username, password, err := contextutil.GetAuthInfoFromContext(ctx)
+		subject, err := getCurrentUserRBACSubject(ctx)
 		if err != nil {
-			mlog.Warn(ctx, "GetCurUserFromContext fail", mlog.Err(err))
 			return ctx, err
 		}
-		if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+		if subject.bypass {
 			return ctx, nil
 		}
-		roleNames, err := GetRole(username)
-		if err != nil {
-			mlog.Warn(ctx, "GetRole fail", mlog.String("username", username), mlog.Err(err))
-			return ctx, err
-		}
-		roleNames = append(roleNames, util.RolePublic)
+		username, password, roleNames := subject.username, subject.password, subject.roleNames
 		ctx = SetRBACRolesToContext(ctx, roleNames)
+		if replicas, ok := req.(*milvuspb.GetReplicasRequest); ok && replicas.GetCollectionName() == "" {
+			privilegeReq, err = replicaPrivilegeRequestByID(ctx, GetMetaCache(), replicas)
+			if err != nil {
+				return ctx, err
+			}
+		}
 		objectType := privilegeExt.ObjectType.String()
 		objectNameIndex := privilegeExt.ObjectNameIndex
-		objectName := funcutil.GetObjectName(req, objectNameIndex)
+		objectName := funcutil.GetObjectName(privilegeReq, objectNameIndex)
 		objectPrivilege := privilegeExt.ObjectPrivilege.String()
 		// Resolve resources against the database the request actually reads from,
 		// while keeping the database used by the policy check separate. Alias
@@ -102,7 +135,7 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 		//   - Database-/Collection-level privileges are scoped to the db the request
 		//     targets: the request-body DbName takes precedence, falling back to the
 		//     connection-context db.
-		dbName := GetCurDBNameFromRequestOrContext(ctx, req)
+		dbName := GetCurDBNameFromRequestOrContext(ctx, privilegeReq)
 		policyDBName := dbName
 		if util.GetPrivilegeLevel(util.MetaStore2API(objectPrivilege)) == milvuspb.PrivilegeLevel_Cluster.String() {
 			policyDBName = util.AnyWord
@@ -127,15 +160,8 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 		}
 
 		// Resolve alias to actual collection name for RBAC checks
-		if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
-			if objectName != util.AnyWord && objectName != "" {
-				if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, GetMetaCache(), dbName, objectName); resolveErr != nil {
-					mlog.RatedWarn(ctx, rate.Limit(60), "failed to resolve collection alias for RBAC, using original name",
-						mlog.String("objectName", objectName), mlog.FieldDbName(dbName), mlog.Err(resolveErr))
-				} else {
-					objectName = actualCollectionName
-				}
-			}
+		if objectNameIndex != 0 {
+			objectName = resolveRBACObjectName(ctx, GetMetaCache(), dbName, objectType, objectName)
 		}
 
 		if isCurUserObject(objectType, username, objectName) {
@@ -147,23 +173,13 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 		}
 
 		objectNameIndexs := privilegeExt.ObjectNameIndexs
-		objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
+		objectNames := funcutil.GetObjectNames(privilegeReq, objectNameIndexs)
 
 		// Resolve aliases for operations that refer to multiple resources
 		if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndexs != 0 && len(objectNames) > 0 {
 			resolvedNames := make([]string, 0, len(objectNames))
 			for _, name := range objectNames {
-				if name == util.AnyWord || name == "" {
-					resolvedNames = append(resolvedNames, name)
-					continue
-				}
-				if actualName, resolveErr := resolveCollectionAlias(ctx, GetMetaCache(), dbName, name); resolveErr != nil {
-					mlog.RatedWarn(ctx, rate.Limit(60), "failed to resolve collection alias for RBAC, using original name",
-						mlog.String("objectName", name), mlog.FieldDbName(dbName), mlog.Err(resolveErr))
-					resolvedNames = append(resolvedNames, name)
-				} else {
-					resolvedNames = append(resolvedNames, actualName)
-				}
+				resolvedNames = append(resolvedNames, resolveRBACObjectName(ctx, GetMetaCache(), dbName, objectType, name))
 			}
 			objectNames = resolvedNames
 		}
@@ -174,20 +190,9 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 			mlog.Int32("object_index", objectNameIndex), mlog.String("object_name", objectName),
 			mlog.Int32("object_indexs", objectNameIndexs), mlog.Strings("object_names", objectNames))
 
-		e := privilege.GetEnforcer()
 		for _, roleName := range roleNames {
 			permitFunc := func(objectName string) (bool, error) {
-				object := funcutil.PolicyForResource(policyDBName, objectType, objectName)
-				isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
-				if cached {
-					return isPermit, nil
-				}
-				isPermit, err := e.Enforce(roleName, object, objectPrivilege)
-				if err != nil {
-					return false, err
-				}
-				privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
-				return isPermit, nil
+				return isRolePermitted(roleName, policyDBName, objectType, objectName, objectPrivilege)
 			}
 
 			if objectNameIndex != 0 {
@@ -224,6 +229,10 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 
 		log.Info(ctx, "permission deny", mlog.Strings("roles", roleNames))
 
+		if replicas, ok := req.(*milvuspb.GetReplicasRequest); ok && replicas.GetCollectionName() == "" {
+			return ctx, replicaPrivilegeDenied()
+		}
+
 		if password == util.PasswordHolder {
 			username = "apikey user"
 		}
@@ -251,6 +260,102 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 	filterGrantEntity := selectGrantReq.GetEntity()
 	roleName := filterGrantEntity.GetRole().GetName()
 	return funcutil.SliceContain(roleNames, roleName)
+}
+
+func checkSkipRLSPrivilege(ctx context.Context, metaCache Cache, dbName, collectionName, operation string) error {
+	permitted, err := isCurrentUserPermitted(ctx, metaCache, dbName, commonpb.ObjectType_Collection.String(), collectionName, commonpb.ObjectPrivilege_PrivilegeSkipRLS.String())
+	if err != nil {
+		return err
+	}
+	if permitted {
+		return nil
+	}
+	return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS: skip_rls requires SkipRLS privilege on collection %s", operation, collectionName)
+}
+
+func checkManageRLSPrivilege(ctx context.Context, metaCache Cache, req *milvuspb.AlterCollectionRequest, dbName, collectionName string) error {
+	privilegeName := commonpb.ObjectPrivilege_PrivilegeManageRLS.String()
+	permitted, err := isCurrentUserPermitted(ctx, metaCache, dbName, commonpb.ObjectType_Collection.String(), collectionName, privilegeName)
+	if err != nil || permitted {
+		return err
+	}
+	err = merr.WrapErrPrivilegeNotPermitted("%s is required", privilegeName)
+	hookutil.GetExtension().ReportAction(ctx, req, &milvuspb.BoolResponse{
+		Status: merr.Status(err),
+	}, err, milvuspb.MilvusService_AlterCollection_FullMethodName, hookutil.ActionAuthorize)
+	return err
+}
+
+// resolveRLSEnforcement returns whether RLS remains enabled after processing a
+// request-scoped bypass. rls.force takes precedence over both authorization
+// configuration and SkipRLS privileges.
+func resolveRLSEnforcement(ctx context.Context, metaCache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
+	if !rlsEnabled || !skipRLS {
+		return rlsEnabled, nil
+	}
+	if rlsForce {
+		return false, merr.WrapErrPrivilegeNotPermitted(
+			"%s operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
+			operation, collectionName)
+	}
+	if err := checkSkipRLSPrivilege(ctx, metaCache, dbName, collectionName, operation); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func resolveRBACObjectName(ctx context.Context, metaCache Cache, dbName, objectType, objectName string) string {
+	if !Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() || objectType != commonpb.ObjectType_Collection.String() || objectName == util.AnyWord || objectName == "" {
+		return objectName
+	}
+	actualName, err := resolveCollectionAlias(ctx, metaCache, dbName, objectName)
+	if err != nil {
+		mlog.RatedWarn(ctx, rate.Limit(60), "failed to resolve collection alias for RBAC, using original name",
+			mlog.String("objectName", objectName), mlog.FieldDbName(dbName), mlog.Err(err))
+		return objectName
+	}
+	return actualName
+}
+
+func isRolePermitted(roleName, dbName, objectType, objectName, objectPrivilege string) (bool, error) {
+	object := funcutil.PolicyForResource(dbName, objectType, objectName)
+	isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+	if cached {
+		return isPermit, nil
+	}
+	isPermit, err := privilege.GetEnforcer().Enforce(roleName, object, objectPrivilege)
+	if err != nil {
+		return false, err
+	}
+	privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
+	return isPermit, nil
+}
+
+func isCurrentUserPermitted(ctx context.Context, metaCache Cache, dbName, objectType, objectName, objectPrivilege string) (bool, error) {
+	if authorizationDisabled() {
+		return true, nil
+	}
+	subject, err := getCurrentUserRBACSubject(ctx)
+	if err != nil {
+		return false, err
+	}
+	if subject.bypass {
+		return true, nil
+	}
+	if dbName == "" {
+		dbName = GetCurDBNameFromContextOrDefault(ctx)
+	}
+	objectName = resolveRBACObjectName(ctx, metaCache, dbName, objectType, objectName)
+	for _, roleName := range subject.roleNames {
+		isPermit, err := isRolePermitted(roleName, dbName, objectType, objectName, objectPrivilege)
+		if err != nil {
+			return false, err
+		}
+		if isPermit {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // resolveCollectionAlias resolves an alias to its actual collection name
@@ -419,4 +524,76 @@ func StreamPrivilegeInterceptor(ctx context.Context, fullMethod string) (context
 // (Global scope), mirroring the unary interceptor's cluster-level handling.
 func authorizeCreateReplicateStream(ctx context.Context) (context.Context, error) {
 	return enforceClusterPrivilege(ctx, commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String())
+}
+
+// CheckClusterPrivilege reports whether the caller identified by ctx holds the
+// given cluster-level object privilege.
+//
+// PrivilegeInterceptor covers privileges that a whole RPC requires, declared on
+// the request message via the privilege_ext_obj annotation. That annotation
+// holds exactly one privilege per message, so it cannot express a privilege
+// that depends on request *content* -- for example an import that only reads
+// Milvus's internal storage when the backup option is set. Call this from the
+// task when that is the case.
+//
+// It must keep the same preconditions as PrivilegeInterceptor: dropping any one
+// of them silently changes who is allowed in.
+//
+// req and fullMethod are carried only so a denial can be reported on the same
+// hookutil ActionAuthorize channel as every other privilege denial; pass the
+// same fullMethod the RPC reports under elsewhere.
+func CheckClusterPrivilege(ctx context.Context, req interface{}, fullMethod string, objectPrivilege string) error {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+
+	username, _, err := contextutil.GetAuthInfoFromContext(ctx)
+	if err != nil {
+		return merr.WrapErrPrivilegeNotAuthenticated("fail to get authentication info: %v", err)
+	}
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+		return nil
+	}
+
+	roleNames, err := GetRole(username)
+	if err != nil {
+		return err
+	}
+	roleNames = append(roleNames, util.RolePublic)
+
+	// Cluster-level privileges are not scoped to a database, so they are
+	// authorized globally -- both the db and the object name are AnyWord.
+	// This mirrors PrivilegeInterceptor, where GetPrivilegeLevel forces
+	// dbName=AnyWord and GetObjectName returns AnyWord for object_name_index<=0.
+	object := funcutil.PolicyForResource(util.AnyWord, commonpb.ObjectType_Global.String(), util.AnyWord)
+	enforcer := privilege.GetEnforcer()
+	for _, roleName := range roleNames {
+		isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+		if !cached {
+			isPermit, err = enforcer.Enforce(roleName, object, objectPrivilege)
+			if err != nil {
+				return err
+			}
+			privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
+		}
+		if isPermit {
+			return nil
+		}
+	}
+
+	mlog.Info(ctx, "cluster privilege denied",
+		mlog.String("username", username),
+		mlog.Strings("roles", roleNames),
+		mlog.String("privilege", objectPrivilege))
+	err = merr.WrapErrPrivilegeNotPermitted("%s is required", objectPrivilege)
+	// Same report UnaryServerInterceptor emits when PrivilegeInterceptor
+	// refuses, so a content-driven denial lands in the same audit stream as an
+	// annotation-driven one. The branches above are not reported: an internal
+	// enforcer failure is not an authorization decision, and a request with no
+	// auth info never reaches a task -- GrpcAuthInterceptor already refused it
+	// and reported that refusal itself.
+	hookutil.GetExtension().ReportAction(ctx, req, &milvuspb.BoolResponse{
+		Status: merr.Status(err),
+	}, err, fullMethod, hookutil.ActionAuthorize)
+	return err
 }

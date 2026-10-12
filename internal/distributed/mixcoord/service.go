@@ -18,6 +18,7 @@ package grpcmixcoord
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
@@ -57,12 +58,22 @@ import (
 
 // Server grpc wrapper
 type Server struct {
-	mixCoord    types.MixCoordComponent
-	grpcServer  *grpc.Server
-	listener    *netutil.NetListener
-	grpcErrChan chan error
+	mixCoord       types.MixCoordComponent
+	recoveryWaiter recoveryWaiter
+	grpcServer     *grpc.Server
+	listener       *netutil.NetListener
+	grpcErrChan    chan error
 
-	grpcWG sync.WaitGroup
+	grpcWG    sync.WaitGroup
+	grpcReady atomic.Bool
+
+	// grpcServing is closed once this server answers gRPC. Work that has to be
+	// able to call the coordinator back - the extension seam's engine - waits
+	// on this rather than on activation, because activation runs ahead of the
+	// recovery barrier that gates Serve, and work that blocked the activation
+	// callbacks would keep Serve from ever starting.
+	grpcServing     chan struct{}
+	grpcServingOnce sync.Once
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -75,16 +86,22 @@ type Server struct {
 	mixCoordClient types.MixCoordClient
 }
 
+type recoveryWaiter interface {
+	WaitForRecovery(ctx context.Context) error
+}
+
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx) //nolint:gosec
 	s := &Server{
 		ctx:         ctx1,
 		cancel:      cancel,
-		grpcErrChan: make(chan error),
+		grpcErrChan: make(chan error, 1),
+		grpcServing: make(chan struct{}),
 	}
 
-	var err error
-	s.mixCoord, err = mixcoord.NewMixCoordServer(ctx, factory)
+	mixCoordServer, err := mixcoord.NewMixCoordServer(ctx, factory)
+	s.mixCoord = mixCoordServer
+	s.recoveryWaiter = mixCoordServer
 	mixCoordClient, _ := mix.NewClient(ctx1)
 	s.mixCoordClient = mixCoordClient
 	if err != nil {
@@ -94,6 +111,12 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func (s *Server) Prepare() error {
+	// The listener is bound here (so the address can be advertised before
+	// recovery) but Serve is deferred until after the coordinator recovery
+	// barrier (startGrpcAfterRecovery). During recovery or while standby, the
+	// port accepts TCP connections but never answers HTTP/2: clients observe
+	// the dial timeout, not an immediate connection refused, and a TCP-socket
+	// liveness probe reports the never-accepting standby as up.
 	listener, err := netutil.NewListener(
 		netutil.OptIP(paramtable.Get().RootCoordGrpcServerCfg.IP),
 		netutil.OptPort(paramtable.Get().RootCoordGrpcServerCfg.Port.GetAsInt()),
@@ -167,24 +190,12 @@ func (s *Server) init() error {
 	}
 	mlog.Info(s.ctx, "MixCoord init done ...")
 
-	err = s.startGrpc()
-	if err != nil {
-		return err
-	}
-	mlog.Info(s.ctx, "grpc init done ...")
+	s.initGrpcServer()
+	mlog.Info(s.ctx, "grpc server initialized ...")
 	return nil
 }
 
-func (s *Server) startGrpc() error {
-	s.grpcWG.Add(1)
-	go s.startGrpcLoop()
-	// wait for grpc server loop start
-	err := <-s.grpcErrChan
-	return err
-}
-
-func (s *Server) startGrpcLoop() {
-	defer s.grpcWG.Done()
+func (s *Server) initGrpcServer() {
 	Params := &paramtable.Get().RootCoordGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -195,11 +206,6 @@ func (s *Server) startGrpcLoop() {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
-
-	mlog.Info(s.ctx, "start grpc ", mlog.Int("port", s.listener.Port()))
-
-	ctx, cancel := context.WithCancel(s.ctx)
-	defer cancel()
 
 	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
@@ -237,10 +243,105 @@ func (s *Server) startGrpcLoop() {
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	s.mixCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
+}
+
+func (s *Server) startGrpc() error {
+	s.grpcWG.Add(1)
+	go s.startGrpcLoop()
+	// wait for grpc server loop start
+	select {
+	case err := <-s.grpcErrChan:
+		if err == nil {
+			s.grpcReady.Store(true)
+			s.markGrpcServing()
+		}
+		return err
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
+}
+
+func (s *Server) startGrpcLoop() {
+	defer s.grpcWG.Done()
+	mlog.Info(s.ctx, "start grpc", mlog.Int("port", s.listener.Port()))
+
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
-		s.grpcErrChan <- err
+		select {
+		case s.grpcErrChan <- err:
+		case <-s.ctx.Done():
+		}
 	}
+}
+
+// markGrpcServing releases everything waiting for this server to answer gRPC.
+func (s *Server) markGrpcServing() {
+	s.grpcServingOnce.Do(func() {
+		if s.grpcServing != nil {
+			close(s.grpcServing)
+		}
+	})
+}
+
+// waitGrpcServing blocks until this server answers gRPC, or ctx ends. A Server
+// built without the channel (a test that never serves) is not gated.
+func (s *Server) waitGrpcServing(ctx context.Context) error {
+	if s.grpcServing == nil {
+		return nil
+	}
+	select {
+	case <-s.grpcServing:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// engineStartFailed ends the process the way a gRPC startup failure after Run()
+// does: this happens on a detached goroutine, so it cannot be returned to the
+// startup path, and a coordinator serving without its engine would accept work
+// nothing accounts for.
+func (s *Server) engineStartFailed(err error) {
+	mlog.Error(s.ctx, "coordinator engine failed to start on activation", mlog.Err(err))
+	go func() {
+		if stopErr := s.Stop(); stopErr != nil {
+			mlog.Warn(s.ctx, "failed to cleanly stop MixCoord after engine startup failure", mlog.Err(stopErr))
+		}
+		mlog.Cleanup()
+		os.Exit(1)
+	}()
+}
+
+func (s *Server) startGrpcAfterRecovery(waiter recoveryWaiter) {
+	if err := waitForRecoveryAndStart(s.ctx, waiter, s.startGrpc); err != nil {
+		if s.ctx.Err() == nil {
+			mlog.Error(s.ctx, "failed to start MixCoord grpc server after recovery", mlog.Err(err))
+			// The failure happens after Run() has already returned, so it
+			// cannot propagate through the normal startup path. Stop the
+			// component from a separate goroutine (Stop waits on grpcWG, which
+			// includes this one) and terminate the process with a fatal exit
+			// instead of panicking from this detached goroutine.
+			go func() {
+				if err := s.Stop(); err != nil {
+					mlog.Warn(s.ctx, "failed to cleanly stop MixCoord after grpc startup failure", mlog.Err(err))
+				}
+				mlog.Cleanup()
+				os.Exit(1)
+			}()
+		}
+	}
+}
+
+func waitForRecoveryAndStart(ctx context.Context, waiter recoveryWaiter, start func() error) error {
+	if err := waiter.WaitForRecovery(ctx); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return start()
 }
 
 func (s *Server) start() error {
@@ -255,6 +356,21 @@ func (s *Server) start() error {
 		return err
 	}
 
+	// The extension seam registers here; the engine itself starts on its own
+	// goroutine, once this replica is ACTIVE and gRPC is answering. An engine's
+	// first act is usually to read coordinator state, and the activation
+	// callbacks run ahead of the recovery barrier that gates Serve, so an
+	// engine started on that chain would deadlock its own first call.
+	if err := startCoordinatorEngine(s.ctx, s.mixCoord, s.mixCoordClient, s.waitGrpcServing, s.engineStartFailed); err != nil {
+		mlog.Error(s.ctx, "coordinator engine registration failed", mlog.Err(err))
+		return err
+	}
+
+	s.grpcWG.Add(1)
+	go func() {
+		defer s.grpcWG.Done()
+		s.startGrpcAfterRecovery(s.recoveryWaiter)
+	}()
 	return nil
 }
 
@@ -275,14 +391,29 @@ func (s *Server) Stop() (err error) {
 		defer s.tikvCli.Close()
 	}
 
+	// The extension seam sits before the coordinator is torn down, so an
+	// engine still sees a working coordinator while it stops.
+	stopCoordinatorEngine(s.ctx)
+
 	if s.mixCoord != nil {
 		mlog.Info(s.ctx, "graceful stop rootCoord")
 		s.mixCoord.GracefulStop()
 		mlog.Info(s.ctx, "graceful stop rootCoord done")
 	}
 
+	// Unblock the startup goroutine when the server is stopped before recovery
+	// finishes, for example while it is still in standby. Cancel before stopping
+	// gRPC so a concurrent delayed Serve is treated as shutdown, not startup
+	// failure.
+	s.cancel()
 	if s.grpcServer != nil {
-		utils.GracefulStopGRPCServer(s.grpcServer)
+		if s.grpcReady.Load() {
+			utils.GracefulStopGRPCServer(s.grpcServer)
+		} else {
+			// No external RPC has been admitted yet, so a direct stop avoids
+			// racing GracefulStop with the delayed Serve call.
+			s.grpcServer.Stop()
+		}
 	}
 	s.grpcWG.Wait()
 
@@ -293,7 +424,6 @@ func (s *Server) Stop() (err error) {
 		}
 	}
 
-	s.cancel()
 	if s.listener != nil {
 		s.listener.Close()
 	}
@@ -534,6 +664,38 @@ func (s *Server) SelectGrant(ctx context.Context, request *milvuspb.SelectGrantR
 
 func (s *Server) ListPolicy(ctx context.Context, request *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 	return s.mixCoord.ListPolicy(ctx, request)
+}
+
+func (s *Server) CreateRowPolicy(ctx context.Context, request *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CreateRowPolicy(ctx, request)
+}
+
+func (s *Server) UpdateRowPolicy(ctx context.Context, request *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.UpdateRowPolicy(ctx, request)
+}
+
+func (s *Server) DropRowPolicy(ctx context.Context, request *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DropRowPolicy(ctx, request)
+}
+
+func (s *Server) ListRowPolicies(ctx context.Context, request *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return s.mixCoord.ListRowPolicies(ctx, request)
+}
+
+func (s *Server) SetRLSPrincipalTags(ctx context.Context, request *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.mixCoord.SetRLSPrincipalTags(ctx, request)
+}
+
+func (s *Server) GetRLSPrincipalTags(ctx context.Context, request *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return s.mixCoord.GetRLSPrincipalTags(ctx, request)
+}
+
+func (s *Server) ListRLSPrincipals(ctx context.Context, request *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return s.mixCoord.ListRLSPrincipals(ctx, request)
+}
+
+func (s *Server) DeleteRLSPrincipalTags(ctx context.Context, request *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DeleteRLSPrincipalTags(ctx, request)
 }
 
 func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
@@ -1003,6 +1165,10 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 // ListFileResources list file resources
 func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.mixCoord.ListFileResources(ctx, req)
+}
+
+func (s *Server) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return s.mixCoord.GetRLSMetadata(ctx, req)
 }
 
 // TruncateCollection truncate a collection

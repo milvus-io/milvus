@@ -538,6 +538,58 @@ func TestApplySnapshotExternalSpecRejectsURIProviderConflict(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not match snapshot URI provider")
 }
 
+func TestApplySnapshotExternalSpecAzureNoSpecDefaultPort(t *testing.T) {
+	// The no-spec same-account check compares the configured endpoint against
+	// the URI host; the default https port may appear on either side — Milvus
+	// normalizes minio.address to host:port, while URI writing usually drops
+	// it — and must not turn the comparison into a mismatch.
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+	newCfg := func(address string) *objectstorage.Config {
+		return &objectstorage.Config{
+			Address:                     address,
+			BucketName:                  "snapshot-container",
+			AccessKeyID:                 "snapshot-account",
+			SecretAccessKeyID:           "key",
+			CloudProvider:               objectstorage.CloudProviderAzure,
+			UseSSL:                      true,
+			IgnoreAzureConnectionString: true,
+		}
+	}
+
+	t.Run("port on the configured side", func(t *testing.T) {
+		hasSpec, _, err := applySnapshotExternalSpecToConfig(
+			newCfg("core.windows.net:443"),
+			"azure",
+			"snapshot-account.blob.core.windows.net",
+			"",
+		)
+		require.NoError(t, err)
+		assert.False(t, hasSpec)
+	})
+
+	t.Run("port on the URI side", func(t *testing.T) {
+		hasSpec, _, err := applySnapshotExternalSpecToConfig(
+			newCfg("core.windows.net"),
+			"azure",
+			"snapshot-account.blob.core.windows.net:443",
+			"",
+		)
+		require.NoError(t, err)
+		assert.False(t, hasSpec)
+	})
+
+	t.Run("different account still rejected", func(t *testing.T) {
+		_, _, err := applySnapshotExternalSpecToConfig(
+			newCfg("core.windows.net:443"),
+			"azure",
+			"other-account.blob.core.windows.net",
+			"",
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match the instance storage credential")
+	})
+}
+
 func TestBuildStorageConfigSnapshotURIQualifiesObjectKey(t *testing.T) {
 	cfg := storageConfigFromObjectConfig(&objectstorage.Config{
 		BucketName:    "snapshot-bucket",

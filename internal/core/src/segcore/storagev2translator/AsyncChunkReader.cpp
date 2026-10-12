@@ -28,7 +28,7 @@
 #include "folly/coro/WithCancellation.h"
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/storagev2translator/AsyncLoadException.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 
 namespace milvus::segcore::storagev2translator {
 namespace {
@@ -145,8 +145,8 @@ OpenChunkReadersAsync(const milvus::OpContext* ctx,
                       std::vector<ChunkReaderOpenSpec> specs,
                       AsyncChunkReaderOpenOptions options) {
     try {
-        auto executor = ResolveAsyncLoadExecutor(std::move(options.executor),
-                                                 options.load_priority);
+        auto executor = storage::ResolveAsyncLoadExecutor(
+            std::move(options.executor), options.load_priority);
         const auto context_cancellation_token =
             ctx ? ctx->cancellation_token : folly::CancellationToken{};
         return detail::ClassifyAsyncLoadExceptions(OpenChunkReadersOnExecutor(

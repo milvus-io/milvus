@@ -98,6 +98,25 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
+                auto accessor =
+                    segment_chunk_reader_.GetStringDataAccessorByOffsets(
+                        expr_->GetColumn().field_id_,
+                        OffsetView::From(input->data(), real_batch_size),
+                        PinnedIndexForRawLookup());
+                for (int64_t i = 0; i < real_batch_size; ++i) {
+                    auto value = accessor(i);
+                    if (value.has_value()) {
+                        res_value[i] = segcore::get_from_variant<T>(value);
+                    } else {
+                        valid_res[i] = false;
+                    }
+                }
+                return res_vec;
+            }
+        }
+
         int64_t processed_rows = 0;
         // Keep the chunk's data accessor (which pins the chunk) across
         // iterations and rebuild only when the chunk id changes, avoiding a
@@ -163,7 +182,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             expr_->GetColumn().field_id_,
             current_chunk_id_,
             current_chunk_pos_,
-            PinnedIndexForRawLookup());
+            PinnedIndexForRawLookup(),
+            real_batch_size,
+            &string_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
             auto data = cda();
             if (!data.has_value()) {

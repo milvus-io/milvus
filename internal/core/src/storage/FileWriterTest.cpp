@@ -123,7 +123,12 @@ TEST_F(FileWriterTest, InvalidDiskConfigDoesNotPublishState) {
         LocalFileIOPool::GetInstance().Configure(0);
         const CDiskWriteConfig config{"direct", 8, 1, rate_config};
         auto status = InitDiskFileWriterConfig(config);
-        EXPECT_EQ(status.error_code, ErrorCode::InvalidParameter);
+        // ConfigInvalid, not InvalidParameter: the rate-limiter fields reach
+        // this entry point from milvus.yaml via initcore, never from a
+        // request, so the same code the write-mode check a few lines up
+        // already returns applies. InvalidParameter carries InputError to Go,
+        // which would make a deployment error look like the caller's fault.
+        EXPECT_EQ(status.error_code, ErrorCode::ConfigInvalid);
         free(const_cast<char*>(status.error_msg));
         EXPECT_EQ(FileWriter::GetMode(), FileWriter::WriteMode::BUFFERED);
         EXPECT_EQ(FileWriter::GetBufferSize(), 4096);
@@ -1172,6 +1177,52 @@ TEST_F(FileWriterTest, FileWriterWaitsForConfiguredWritePermit) {
               std::future_status::ready);
     EXPECT_NO_THROW(write.get());
     EXPECT_EQ(ReadFile(filename), data);
+}
+
+TEST_F(FileWriterTest, PositionedWriterSharesConfiguredWritePermit) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    for (const auto mode :
+         {FileWriter::WriteMode::BUFFERED, FileWriter::WriteMode::DIRECT}) {
+        FileWriter::SetMode(mode);
+        pool.Configure(1);
+        const auto filename = (test_dir_ / "positioned_permit.txt").string();
+        const std::string data(kBufferSize * 2, 'x');
+        PositionedFileWriter writer(filename, data.size());
+        auto permit = pool.AcquireWritePermit();
+        // Empty writes must not wait for a permit.
+        writer.WriteAt(0, nullptr, 0);
+
+        std::promise<void> started;
+        auto ready = started.get_future();
+        auto write = std::async(std::launch::async, [&] {
+            started.set_value();
+            writer.WriteAt(0, data.data(), data.size());
+        });
+        // Unblock the worker even when an assertion below fails.
+        auto unblock = folly::makeGuard([&] { pool.Configure(0); });
+        ASSERT_EQ(ready.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_EQ(write.wait_for(std::chrono::milliseconds(100)),
+                  std::future_status::timeout);
+        permit = {};
+        ASSERT_EQ(write.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_NO_THROW(write.get());
+
+        if (mode == FileWriter::WriteMode::DIRECT) {
+            // This fails inside the write path, after acquiring the permit.
+            EXPECT_THROW(writer.WriteAt(kBufferSize, data.data(), 17),
+                         std::runtime_error);
+        }
+        auto next = std::async(std::launch::async,
+                               [&] { return pool.AcquireWritePermit(); });
+        auto unblock_next = folly::makeGuard([&] { pool.Configure(0); });
+        ASSERT_EQ(next.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        auto next_permit = next.get();
+        writer.Finish();
+        EXPECT_EQ(ReadFile(filename), data);
+    }
 }
 
 TEST_F(FileWriterTest, DisablingWriteLimitUnblocksWaitingWriters) {

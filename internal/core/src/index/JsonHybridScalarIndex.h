@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "index/JsonIndexLoadPlan.h"
 #include <algorithm>
 #include "common/FastMem.h"
 #include <cstring>
@@ -169,7 +170,10 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
                 const Config& config) override {
         HybridScalarIndex<T>::LoadEntries(reader, config);
 
-        bool has_non_exist = reader.GetMeta<bool>("has_non_exist", false);
+        bool has_non_exist = (reader.IndexMeta().contains("has_non_exist")
+                                  ? ReadRequiredIndexMeta<bool>(
+                                        reader.IndexMeta(), "has_non_exist")
+                                  : false);
         if (has_non_exist) {
             auto e = reader.ReadEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME);
             non_exist_offsets_.resize(e.data.size() / sizeof(size_t));
@@ -179,6 +183,29 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         LOG_INFO("LoadEntries JsonHybridScalarIndex done, has_non_exist: {}",
                  has_non_exist);
         BuildExistsBitset(this->Count());
+    }
+
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) override {
+        auto plan = HybridScalarIndex<T>::PlanLoad(directory, metadata, config);
+        AppendJsonNonExistOffsetsPlan(plan, directory, metadata);
+        return plan;
+    }
+
+    folly::coro::Task<void>
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override {
+        auto new_non_exist_offsets = TakeJsonNonExistOffsets(plan);
+
+        co_await HybridScalarIndex<T>::FinishLoadAsync(plan, config);
+        non_exist_offsets_ = std::move(new_non_exist_offsets);
+        BuildExistsBitset(this->Count());
+        LOG_INFO(
+            "FinishLoadAsync JsonHybridScalarIndex done, "
+            "has_non_exist: "
+            "{}",
+            !non_exist_offsets_.empty());
     }
 
     JsonCastType

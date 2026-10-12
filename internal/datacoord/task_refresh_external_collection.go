@@ -495,6 +495,10 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))
 		return err
 	}
+	// The SegmentMeta mutation is committed; schedule an asynchronous DataView
+	// snapshot reconciliation (best-effort, non-blocking) - the recompute reads
+	// the updated/removed segments from SegmentMeta.
+	mt.recomputeDataView(ctx, collectionID)
 
 	mlog.Info(ctx, "external collection segments updated successfully",
 		mlog.Int("updatedSegments", len(updatedSegments)),

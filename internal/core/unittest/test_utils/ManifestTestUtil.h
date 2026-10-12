@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "storage/loon_ffi/util.h"
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -36,6 +37,7 @@
 #include "milvus-storage/reader.h"
 #include "milvus-storage/transaction/transaction.h"
 #include "milvus-storage/writer.h"
+#include "storage/Util.h"
 #include "DataGen.h"
 
 namespace milvus::test {
@@ -52,7 +54,9 @@ GenerateColumnGroupPattern(const SchemaPtr& schema) {
 
     for (const auto& field_id : schema->get_field_ids()) {
         const auto& meta = (*schema)[field_id];
-        auto id_str = std::to_string(field_id.get());
+        auto id_str = schema->is_external_collection()
+                          ? schema->get_storage_column_name(field_id)
+                          : std::to_string(field_id.get());
         if (IsVectorDataType(meta.get_data_type())) {
             vector_groups.push_back(id_str);
         } else {
@@ -87,14 +91,27 @@ class V3SegmentTestData {
                       int64_t per_batch,
                       int64_t dim,
                       const std::string& root_path,
-                      const std::string& base_path)
-        : schema_(schema), base_path_(base_path), root_path_(root_path) {
-        std::filesystem::create_directories(std::filesystem::path(root_path) /
-                                            std::filesystem::path(base_path));
+                      const std::string& base_path,
+                      const std::string& column_group_pattern = "")
+        : schema_(schema),
+          // Keys are complete paths: the loon local filesystem is rooted at
+          // "/" and base_path lives under root_path (see LoonFSRootPath).
+          base_path_((std::filesystem::path(root_path) / base_path).string()),
+          root_path_(root_path) {
+        std::filesystem::create_directories(base_path_);
 
         // Convert schema to Arrow schemas
         auto arrow_schema = schema_->ConvertToArrowSchema();
         loon_schema_ = schema_->ConvertToLoonArrowSchema();
+        if (schema_->is_external_collection()) {
+            arrow::FieldVector fields;
+            for (size_t i = 0; i < schema_->get_field_ids().size(); ++i) {
+                const auto field_id = schema_->get_field_ids()[i];
+                fields.push_back(loon_schema_->field(i)->WithName(
+                    schema_->get_storage_column_name(field_id)));
+            }
+            loon_schema_ = arrow::schema(fields);
+        }
 
         // Generate data batches and remap to Loon schema
         std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
@@ -103,22 +120,38 @@ class V3SegmentTestData {
             auto dataset = milvus::segcore::DataGen(schema_, per_batch, 42 + i);
             auto batch = milvus::segcore::ConvertToArrowRecordBatch(
                 dataset, dim, arrow_schema);
-            // Remap to Loon schema (field IDs as column names).
-            // Both schemas iterate field_ids_ in the same order, so
-            // columns align directly.
+            // Remap to storage names (field IDs internally, mappings externally).
+            // Both schemas iterate field_ids_ in the same order. Nullable
+            // dense vectors use variable-length binary in Loon storage, so
+            // normalize their generated fixed-size-binary arrays first.
+            auto columns = batch->columns();
+            for (int column_index = 0; column_index < columns.size();
+                 ++column_index) {
+                if (columns[column_index]->type_id() ==
+                        arrow::Type::FIXED_SIZE_BINARY &&
+                    loon_schema_->field(column_index)->type()->id() ==
+                        arrow::Type::BINARY) {
+                    columns[column_index] =
+                        milvus::storage::ConvertFixedSizeBinaryToBinary(
+                            {columns[column_index]})
+                            .front();
+                }
+            }
             auto loon_batch = arrow::RecordBatch::Make(
-                loon_schema_, batch->num_rows(), batch->columns());
+                loon_schema_, batch->num_rows(), std::move(columns));
             batches.push_back(std::move(loon_batch));
         }
         total_rows_ = n_batch * per_batch;
 
         // Set up Writer properties with schema_based column group policy
-        auto pattern = GenerateColumnGroupPattern(schema_);
+        auto pattern = column_group_pattern.empty()
+                           ? GenerateColumnGroupPattern(schema_)
+                           : column_group_pattern;
         milvus_storage::api::Properties props;
         milvus_storage::api::SetValue(
             props, PROPERTY_FS_STORAGE_TYPE, LOON_FS_TYPE_LOCAL);
         milvus_storage::api::SetValue(
-            props, PROPERTY_FS_ROOT_PATH, root_path.c_str());
+            props, PROPERTY_FS_ROOT_PATH, kLoonLocalFSRootPath);
         milvus_storage::api::SetValue(props,
                                       PROPERTY_WRITER_POLICY,
                                       LOON_COLUMN_GROUP_POLICY_SCHEMA_BASED);
@@ -201,7 +234,7 @@ class V3SegmentTestData {
         milvus_storage::api::SetValue(
             reader_props, PROPERTY_FS_STORAGE_TYPE, LOON_FS_TYPE_LOCAL);
         milvus_storage::api::SetValue(
-            reader_props, PROPERTY_FS_ROOT_PATH, root_path_.c_str());
+            reader_props, PROPERTY_FS_ROOT_PATH, kLoonLocalFSRootPath);
         auto reader = milvus_storage::api::Reader::create(
             column_groups_, loon_schema_, needed_columns, reader_props);
         auto result = reader->get_chunk_reader(cg_index);
@@ -217,7 +250,7 @@ class V3SegmentTestData {
         std::unordered_map<FieldId, FieldMeta> result;
         const auto& cg = column_groups_->at(cg_index);
         for (const auto& col_name : cg->columns) {
-            auto fid = FieldId(std::stoll(col_name));
+            auto fid = schema_->ResolveColumnFieldId(col_name);
             result.emplace(fid, (*schema_)[fid]);
         }
         return result;
