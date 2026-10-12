@@ -34,6 +34,24 @@ func (b *TxnBuffer) GetUncommittedMessageBuilder() map[message.TxnID]*message.Im
 	return b.builders
 }
 
+// Snapshot copies the unfinished transaction builders at an observation boundary.
+// The caller must own the buffer exclusively while taking the snapshot. Messages
+// are immutable, but builders and their body slices must not be shared: Build
+// consumes the builder and replaces the body entries when a transaction commits.
+func (b *TxnBuffer) Snapshot() *TxnBuffer {
+	snapshot := NewTxnBuffer(b.logger, b.metrics)
+	snapshot.bytes = b.bytes
+	for id, builder := range b.builders {
+		begin, body := builder.Messages()
+		copy := message.NewImmutableTxnMessageBuilder(begin)
+		for _, msg := range body {
+			copy.Add(msg)
+		}
+		snapshot.builders[id] = copy
+	}
+	return snapshot
+}
+
 // HandleImmutableMessages handles immutable messages.
 // The timetick of msgs should be in ascending order, and the timetick of all messages is less than or equal to ts.
 // Hold the uncommitted txn messages until the commit or rollback message comes and pop the committed txn messages.

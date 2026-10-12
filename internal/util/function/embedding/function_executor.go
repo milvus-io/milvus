@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -55,6 +54,9 @@ type Runner interface {
 
 type FunctionExecutor struct {
 	runners map[int64]Runner
+	// dbName labels the function latency metric so a dropped collection can be
+	// cleaned per (db, collection); collection names are only unique per db.
+	dbName string
 }
 
 func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (Runner, error) {
@@ -81,15 +83,10 @@ func validateFunction(schema *schemapb.CollectionSchema, fSchema *schemapb.Funct
 		return err
 	}
 
-	// BM25 or minhash function returns nil from createFunction
+	// BM25 and MinHash return nil from createFunction: neither needs a model
+	// runtime check. MinHash parameter validation is pure schema checking and
+	// runs unconditionally in validator.ValidateFunction instead.
 	if f == nil {
-		if fSchema.GetType() == schemapb.FunctionType_MinHash {
-			err := function.ValidateMinHashFunction(schema, fSchema)
-			if err != nil {
-				return err
-			}
-		}
-		// bm25 or minhash validate pass
 		return nil
 	}
 
@@ -123,6 +120,9 @@ func ValidateFunctions(schema *schemapb.CollectionSchema, needValidateFunctionNa
 func NewFunctionExecutor(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (*FunctionExecutor, error) {
 	executor := &FunctionExecutor{
 		runners: make(map[int64]Runner),
+	}
+	if extraInfo != nil {
+		executor.dbName = extraInfo.DBName
 	}
 	if functions == nil {
 		functions = schema.Functions
@@ -158,7 +158,7 @@ func (executor *FunctionExecutor) processSingleFunction(ctx context.Context, run
 		return nil, err
 	}
 
-	metrics.ProxyFunctionlatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), runner.GetCollectionName(), runner.GetFunctionTypeName(), runner.GetFunctionProvider(), runner.GetFunctionName()).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyFunctionlatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), executor.dbName, runner.GetCollectionName(), runner.GetFunctionTypeName(), runner.GetFunctionProvider(), runner.GetFunctionName()).Observe(float64(tr.RecordSpan().Milliseconds()))
 	tr.CtxElapse(ctx, "function ProcessInsert done")
 	return outputs, nil
 }
@@ -220,7 +220,7 @@ func (executor *FunctionExecutor) processSingleSearch(ctx context.Context, runne
 	if err != nil {
 		return nil, err
 	}
-	metrics.ProxyFunctionlatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), runner.GetCollectionName(), runner.GetFunctionTypeName(), runner.GetFunctionProvider(), runner.GetFunctionName()).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyFunctionlatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), executor.dbName, runner.GetCollectionName(), runner.GetFunctionTypeName(), runner.GetFunctionProvider(), runner.GetFunctionName()).Observe(float64(tr.RecordSpan().Milliseconds()))
 	tr.CtxElapse(ctx, "function ProcessSearch done")
 	return proto.Marshal(res)
 }

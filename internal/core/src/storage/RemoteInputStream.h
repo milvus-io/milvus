@@ -16,7 +16,9 @@
 #include <memory>
 
 #include "arrow/io/interfaces.h"
+#include "arrow/filesystem/filesystem.h"
 #include "filemanager/InputStream.h"
+#include "folly/coro/Task.h"
 
 namespace milvus::storage {
 
@@ -27,6 +29,10 @@ class RemoteInputStream : public milvus::InputStream {
 
     ~RemoteInputStream() override = default;
 
+    // Open the backing file and cache its size without blocking the caller on IO.
+    static folly::coro::Task<std::shared_ptr<InputStream>>
+    OpenAsync(std::shared_ptr<arrow::fs::FileSystem> fs, std::string path);
+
     size_t
     Size() const override;
 
@@ -35,6 +41,9 @@ class RemoteInputStream : public milvus::InputStream {
 
     size_t
     ReadAt(void* data, size_t offset, size_t size) override;
+
+    folly::SemiFuture<size_t>
+    ReadAtAsync(void* data, size_t offset, size_t size) override;
 
     size_t
     Read(int fd, size_t size) override;
@@ -49,6 +58,16 @@ class RemoteInputStream : public milvus::InputStream {
     Seek(int64_t offset) override;
 
  private:
+    RemoteInputStream(std::shared_ptr<arrow::io::RandomAccessFile> remote_file,
+                      size_t file_size)
+        : file_size_(file_size), remote_file_(std::move(remote_file)) {
+    }
+
+    // Retries belong to this stream operation. Its future completes only after
+    // the backing file has stopped accessing the caller-owned destination.
+    folly::coro::Task<size_t>
+    ReadAtAsyncImpl(void* data, size_t offset, size_t size);
+
     size_t file_size_;
     std::shared_ptr<arrow::io::RandomAccessFile> remote_file_;
 };

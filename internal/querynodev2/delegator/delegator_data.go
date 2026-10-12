@@ -424,7 +424,15 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 						return false, nil
 					} else if err != nil {
 						log.Warn(ctx, "worker failed to delete on segment", mlog.Err(err))
-						return true, err
+						// Stop only on a typed error explicitly classified
+						// non-retriable. merr.IsRetryableErr alone would be
+						// wrong: it is an allowlist over milvusError, so a raw
+						// gRPC Unavailable/DeadlineExceeded from a worker
+						// blipping during a rolling restart would abort on the
+						// first attempt and offline the segment -- worse than
+						// master's ten attempts. Same guard as UpdateSchema and
+						// applyDeleteBatch.
+						return !merr.IsMilvusError(err) || merr.IsRetryableErr(err), err
 					}
 					return false, nil
 				}, retry.Attempts(10))
@@ -674,11 +682,16 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 		segmentID := req.GetInfos()[0].GetSegmentID()
 		nodeID := req.GetDstNodeID()
-		_, err, _ := sd.sf.Do(fmt.Sprintf("%d-%d", nodeID, segmentID), func() (struct{}, error) {
-			err := worker.LoadSegments(ctx, req)
-			return struct{}{}, err
-		})
-		return err
+		// Join any identical in-flight load, but stop waiting when this
+		// caller's ctx ends; the shared load keeps running for its initiator.
+		select {
+		case res := <-sd.sf.DoChan(fmt.Sprintf("%d-%d", nodeID, segmentID), func() (struct{}, error) {
+			return struct{}{}, worker.LoadSegments(ctx, req)
+		}):
+			return res.Err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	// separate infos into different load task

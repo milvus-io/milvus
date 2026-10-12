@@ -3,6 +3,8 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,11 +19,13 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
@@ -43,6 +47,12 @@ type Catalog struct {
 
 	pool *conc.Pool[any]
 }
+
+type prefixWalker interface {
+	WalkWithPrefix(context.Context, string, int, func([]byte, []byte) error) error
+}
+
+const rlsPrincipalScanBatchSize = 128
 
 func NewCatalog(metaKV kv.TxnKV) metastore.RootCoordCatalog {
 	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
@@ -695,19 +705,16 @@ func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeut
 }
 
 func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
-	// Delegate to the composite Update, which owns the atomic-or-ordered
-	// commit. When the child metadata keys plus the collection key fit one
-	// etcd txn, they are removed atomically; otherwise Update flushes the
-	// child removals first and the collection key (the CommitRemove
-	// visibility marker) last. If RootCoord crashes mid-flush, the collection
-	// stays in Dropping state and the tombstone sweeper retries on next
-	// startup.
+	// Delegate to the composite Update, which removes child metadata before
+	// the collection key (the visibility marker). If RootCoord crashes
+	// mid-flush, the collection stays in Dropping state and the tombstone
+	// sweeper retries on next startup.
 	return kc.Update(ctx, ts, metastore.DropCollection(collectionInfo))
 }
 
 // buildDropCollectionKeys computes the collection key and the child
 // metadata keys (aliases, partitions, fields, struct array fields,
-// functions) removed when dropping a collection. Factored out so both
+// functions and RLS policies) removed when dropping a collection. Factored out so both
 // Catalog.DropCollection (which now delegates to the composite Update) and
 // Catalog.Update's CollectionEntry/ActionDelete type-switch case
 // (accumulated into a single txn.Builder) apply the exact same key set.
@@ -736,6 +743,12 @@ func buildDropCollectionKeys(collectionInfo *model.Collection) (string, []string
 	}
 	for _, function := range collectionInfo.Functions {
 		delMetakeysSnap = append(delMetakeysSnap, BuildFunctionKey(collectionInfo.CollectionID, function.ID))
+	}
+	for _, policy := range collectionInfo.RLSPolicies {
+		if policy == nil {
+			continue
+		}
+		delMetakeysSnap = append(delMetakeysSnap, BuildRLSPolicyKey(collectionInfo.CollectionID, policy.PolicyID))
 	}
 	// delMetakeysSnap = append(delMetakeysSnap, buildPartitionPrefix(collectionInfo.CollectionID))
 	// delMetakeysSnap = append(delMetakeysSnap, buildFieldPrefix(collectionInfo.CollectionID))
@@ -1514,7 +1527,71 @@ func (kc *Catalog) loadGranteeIDPrefix(ctx context.Context, tenant string, grant
 	return kc.loadGranteeIDPrefixWithLoadedGrantees(ctx, tenant, granteeKey, idStr, nil, nil)
 }
 
+func validateLoadedGrantees(granteeKeys []string, granteeValues []string) error {
+	if (granteeKeys == nil) != (granteeValues == nil) {
+		return merr.WrapErrServiceInternalMsg("loaded grantee keys and values must both be nil or both be non-nil, got keys=%d values=%d", len(granteeKeys), len(granteeValues))
+	}
+	if granteeKeys != nil && len(granteeKeys) != len(granteeValues) {
+		return merr.WrapErrServiceInternalMsg("loaded grantee keys and values must have equal length, got keys=%d values=%d", len(granteeKeys), len(granteeValues))
+	}
+	return nil
+}
+
+type loadedGranteesProvider func(ctx context.Context) ([]string, []string, error)
+
+func newLoadedGranteesProvider(granteeKeys []string, granteeValues []string) (loadedGranteesProvider, error) {
+	if err := validateLoadedGrantees(granteeKeys, granteeValues); err != nil {
+		return nil, err
+	}
+	if granteeKeys == nil {
+		return nil, nil
+	}
+	return func(context.Context) ([]string, []string, error) {
+		return granteeKeys, granteeValues, nil
+	}, nil
+}
+
+func (kc *Catalog) newLazyLoadedGranteesProvider(tenant string) loadedGranteesProvider {
+	var (
+		loaded        bool
+		granteeKeys   []string
+		granteeValues []string
+		loadErr       error
+	)
+	return func(ctx context.Context) ([]string, []string, error) {
+		if loaded {
+			return granteeKeys, granteeValues, loadErr
+		}
+		loaded = true
+
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		granteeKeys, granteeValues, loadErr = kc.Txn.LoadWithPrefix(ctx, granteeKey)
+		if loadErr != nil {
+			mlog.Error(ctx, "fail to load all grant privilege entities", mlog.String("key", granteeKey), mlog.Err(loadErr))
+			return nil, nil, loadErr
+		}
+		if loadErr = validateLoadedGrantees(granteeKeys, granteeValues); loadErr != nil {
+			return nil, nil, loadErr
+		}
+		if granteeKeys == nil {
+			granteeKeys = []string{}
+		}
+		if granteeValues == nil {
+			granteeValues = []string{}
+		}
+		return granteeKeys, granteeValues, nil
+	}
+}
+
 func (kc *Catalog) loadGranteeIDPrefixWithLoadedGrantees(ctx context.Context, tenant string, granteeKey string, idStr string, granteeKeys []string, granteeValues []string) ([]string, []string, string, error) {
+	loadedGrantees, err := newLoadedGranteesProvider(granteeKeys, granteeValues)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return kc.loadGranteeIDPrefixWithLoadedGranteeProvider(ctx, tenant, granteeKey, idStr, loadedGrantees)
+}
+
+func (kc *Catalog) loadGranteeIDPrefixWithLoadedGranteeProvider(ctx context.Context, tenant string, granteeKey string, idStr string, loadedGrantees loadedGranteesProvider) ([]string, []string, string, error) {
 	var firstPrefix string
 	newID := crypto.GranteeID(granteeKey)
 	if isLegacyGranteeID(idStr) && idStr != newID {
@@ -1523,7 +1600,18 @@ func (kc *Catalog) loadGranteeIDPrefixWithLoadedGrantees(ctx context.Context, te
 			otherGranteeKey string
 			err             error
 		)
-		if granteeKeys != nil {
+		if loadedGrantees != nil {
+			var (
+				granteeKeys   []string
+				granteeValues []string
+			)
+			granteeKeys, granteeValues, err = loadedGrantees(ctx)
+			if err != nil {
+				return nil, nil, granteeIDKey, err
+			}
+			if err := validateLoadedGrantees(granteeKeys, granteeValues); err != nil {
+				return nil, nil, granteeIDKey, err
+			}
 			granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 			otherGranteeKey, err = findOtherGranteeWithIDFromKeys(ctx, granteePrefix, granteeKey, idStr, granteeKeys, granteeValues)
 		} else {
@@ -1687,6 +1775,18 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 }
 
 func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	return kc.listGrantWithLoadedGrantees(ctx, tenant, entity, nil, nil)
+}
+
+func (kc *Catalog) listGrantWithLoadedGrantees(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, granteeKeys []string, granteeValues []string) ([]*milvuspb.GrantEntity, error) {
+	loadedGrantees, err := newLoadedGranteesProvider(granteeKeys, granteeValues)
+	if err != nil {
+		return nil, err
+	}
+	return kc.listGrantWithLoadedGranteeProvider(ctx, tenant, entity, loadedGrantees)
+}
+
+func (kc *Catalog) listGrantWithLoadedGranteeProvider(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, loadedGrantees loadedGranteesProvider) ([]*milvuspb.GrantEntity, error) {
 	var entities []*milvuspb.GrantEntity
 
 	var granteeKey string
@@ -1696,7 +1796,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		if dbName != entity.DbName && dbName != util.AnyWord && entity.DbName != util.AnyWord {
 			return nil
 		}
-		keys, values, granteeIDKey, err := kc.loadGranteeIDPrefix(ctx, tenant, granteeKey, v)
+		keys, values, granteeIDKey, err := kc.loadGranteeIDPrefixWithLoadedGranteeProvider(ctx, tenant, granteeKey, v, loadedGrantees)
 		if err != nil {
 			mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", granteeIDKey), mlog.Err(err))
 			return err
@@ -2110,12 +2210,17 @@ func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBA
 		return entity.GetRole(), true
 	})
 
+	var loadedGrantees loadedGranteesProvider
+	if len(roleEntity) > 0 {
+		loadedGrantees = kc.newLazyLoadedGranteesProvider(tenant)
+	}
+
 	grantsEntity := make([]*milvuspb.GrantEntity, 0)
 	for _, role := range roleEntity {
-		grants, err := kc.ListGrant(ctx, tenant, &milvuspb.GrantEntity{
+		grants, err := kc.listGrantWithLoadedGranteeProvider(ctx, tenant, &milvuspb.GrantEntity{
 			Role:   role,
 			DbName: util.AnyWord,
-		})
+		}, loadedGrantees)
 		if err != nil {
 			return nil, err
 		}
@@ -2247,6 +2352,131 @@ func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privile
 		privGroups = append(privGroups, privGroupInfo)
 	}
 	return privGroups, nil
+}
+
+func (kc *Catalog) SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
+	if policy == nil {
+		return merr.WrapErrServiceInternalMsg("RLS policy is nil")
+	}
+	if policy.PolicyID == 0 {
+		return merr.WrapErrServiceInternalMsg("RLS policy ID is empty")
+	}
+	key := BuildRLSPolicyKey(policy.CollectionID, policy.PolicyID)
+	value, err := proto.Marshal(model.MarshalRLSPolicyModel(policy))
+	if err != nil {
+		return merr.WrapErrSerializationFailed(err, "marshal RLS policy info")
+	}
+	return kc.Txn.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error {
+	return kc.Txn.Remove(ctx, BuildRLSPolicyKey(collectionID, policyID))
+}
+
+func (kc *Catalog) ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error) {
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, BuildRLSPolicyPrefix(collectionID))
+	if err != nil {
+		return nil, err
+	}
+	policies := make([]*model.RLSPolicy, 0, len(values))
+	for _, value := range values {
+		info := &rootcoordpb.RLSPolicyInfo{}
+		if err := proto.Unmarshal([]byte(value), info); err != nil {
+			return nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS policy info")
+		}
+		policies = append(policies, model.UnmarshalRLSPolicyModel(info))
+	}
+	sort.Slice(policies, func(i, j int) bool {
+		if policies[i].PolicyName == policies[j].PolicyName {
+			return policies[i].PolicyID < policies[j].PolicyID
+		}
+		return policies[i].PolicyName < policies[j].PolicyName
+	})
+	return policies, nil
+}
+
+func buildRLSPrincipalKey(collectionID int64, principalName string) string {
+	return BuildRLSPrincipalPrefix(collectionID) + url.PathEscape(principalName)
+}
+
+func (kc *Catalog) SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error {
+	if principal == nil {
+		return merr.WrapErrServiceInternalMsg("RLS principal is nil")
+	}
+	key := buildRLSPrincipalKey(principal.CollectionID, principal.PrincipalName)
+	info, err := model.MarshalRLSPrincipalModel(principal)
+	if err != nil {
+		return err
+	}
+	value, err := proto.Marshal(info)
+	if err != nil {
+		return merr.WrapErrSerializationFailed(err, "marshal RLS principal info")
+	}
+	return kc.Txn.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error) {
+	key := buildRLSPrincipalKey(collectionID, principalName)
+	value, err := kc.Txn.Load(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	info := &rootcoordpb.RLSPrincipalInfo{}
+	if err := proto.Unmarshal([]byte(value), info); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
+	}
+	principal, err := model.UnmarshalRLSPrincipalModel(info)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
+	}
+	return principal, nil
+}
+
+func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error {
+	return kc.Txn.Remove(ctx, buildRLSPrincipalKey(collectionID, principalName))
+}
+
+func (kc *Catalog) ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error) {
+	walker, ok := kc.Txn.(prefixWalker)
+	if !ok {
+		return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "metadata store does not support bounded RLS principal scans")
+	}
+	maxEntries := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheEntries.GetAsInt()
+	maxBytes := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.GetAsInt64()
+	principals := make([]*model.RLSPrincipal, 0, min(maxEntries, rlsPrincipalScanBatchSize))
+	var totalBytes int64
+	// TODO: Add cursor pagination so callers can enumerate collections that
+	// exceed the non-paginated list limits.
+	err := walker.WalkWithPrefix(ctx, BuildRLSPrincipalPrefix(collectionID), rlsPrincipalScanBatchSize, func(_, value []byte) error {
+		if len(principals) >= maxEntries {
+			return merr.WrapErrServiceQuotaExceededMsg("RLS principal list exceeds the %d-entry limit", maxEntries)
+		}
+		info := &rootcoordpb.RLSPrincipalInfo{}
+		if err := proto.Unmarshal(value, info); err != nil {
+			return merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
+		}
+		principal, err := model.UnmarshalRLSPrincipalModel(info)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
+		}
+		entryBytes, err := rlsutil.PrincipalTagsSize(principal.PrincipalName, principal.Tags)
+		if err != nil {
+			return err
+		}
+		if entryBytes > maxBytes-totalBytes {
+			return merr.WrapErrServiceQuotaExceededMsg("RLS principal list exceeds the %d-byte limit", maxBytes)
+		}
+		totalBytes += entryBytes
+		principals = append(principals, principal)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(principals, func(i, j int) bool {
+		return principals[i].PrincipalName < principals[j].PrincipalName
+	})
+	return principals, nil
 }
 
 func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {

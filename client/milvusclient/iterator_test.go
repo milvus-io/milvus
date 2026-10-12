@@ -59,6 +59,17 @@ func (s *SearchIteratorSuite) TestSearchIteratorOptionWithNamespace() {
 	s.Equal(namespace, req.GetNamespace())
 }
 
+func (s *SearchIteratorSuite) TestSearchIteratorOptionWithRLSContext() {
+	opt := NewSearchIteratorOption("coll", entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+		return rand.Float32()
+	}))).WithRLSPrincipal("alice").WithSkipRLS(true).WithBatchSize(10)
+	req, err := opt.SearchOption().Request()
+
+	s.Require().NoError(err)
+	s.Equal("alice", req.GetRlsPrincipal())
+	s.True(req.GetSkipRls())
+}
+
 func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 	ctx := context.Background()
 	s.Run("success", func() {
@@ -450,6 +461,18 @@ func (s *QueryIteratorSuite) TestQueryIteratorOptionWithNamespace() {
 
 	s.Require().NoError(err)
 	s.Equal(namespace, req.GetNamespace())
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorOptionWithRLSContext() {
+	req, err := NewQueryIteratorOption("coll").
+		WithRLSPrincipal("alice").
+		WithSkipRLS(true).
+		WithBatchSize(10).
+		Request()
+
+	s.Require().NoError(err)
+	s.Equal("alice", req.GetRlsPrincipal())
+	s.True(req.GetSkipRls())
 }
 
 func (s *QueryIteratorSuite) TestQueryIteratorInit() {

@@ -97,8 +97,11 @@ class CachedSearchIterator {
     using DisIdPair = std::pair<float, int64_t>;
     using IterIdx = size_t;
     using IterIdDisIdPair = std::pair<IterIdx, DisIdPair>;
-    using GetChunkDataFunc =
-        std::function<std::pair<const void*, int64_t>(int64_t)>;
+    struct ChunkSearchData {
+        dataset::RawDataset raw_data;
+        BitsetView bitset;
+    };
+    using GetChunkDataFunc = std::function<ChunkSearchData(int64_t, int64_t)>;
 
     // used only for sealed segment with chunked data
     std::vector<milvus::cachinglayer::PinWrapper<const void*>> pin_wrappers_;
@@ -190,6 +193,14 @@ class CachedSearchIterator {
 
     void
     Init(const SearchInfo& search_info);
+
+    void
+    AppendChunkIterators(const dataset::SearchDataset& dataset,
+                         const SearchInfo& search_info,
+                         const std::map<std::string, std::string>& index_info,
+                         const dataset::RawDataset& raw_data,
+                         const BitsetView& bitset,
+                         const milvus::DataType& data_type);
 
     // must call get_chunk_data from chunk 0 to chunk num_chunks_ - 1 in order.
     void

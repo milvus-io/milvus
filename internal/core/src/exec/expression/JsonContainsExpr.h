@@ -445,7 +445,7 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
 class PhyJsonContainsFilterExpr : public SegmentExpr {
  public:
     PhyJsonContainsFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::JsonContainsExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -476,6 +476,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
+
     std::string
     ToString() const override {
         return fmt::format("{}", expr_->ToString());
@@ -489,6 +494,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return expr_->column_;
+    }
+
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
     }
 
     void
@@ -509,7 +519,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             return;
         }
         if (expr_->column_.data_type_ == DataType::ARRAY &&
-            expr_->vals_.empty()) {
+            (expr_->column_.element_level_ || expr_->vals_.empty())) {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
@@ -546,6 +556,10 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     VectorPtr
     ExecArrayContains(EvalCtx& context);
 
+    template <typename ArrayType, typename ExprValueType, bool ElementLevel>
+    VectorPtr
+    ExecArrayContainsImpl(EvalCtx& context);
+
     template <typename ExprValueType>
     VectorPtr
     ExecJsonContainsAll(EvalCtx& context);
@@ -557,6 +571,10 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     template <typename ExprValueType>
     VectorPtr
     ExecArrayContainsAll(EvalCtx& context);
+
+    template <typename ArrayType, typename ExprValueType, bool ElementLevel>
+    VectorPtr
+    ExecArrayContainsAllImpl(EvalCtx& context);
 
     VectorPtr
     ExecJsonContainsArray(EvalCtx& context);

@@ -37,12 +37,19 @@ import (
 
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
 func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
+	return RateLimitInterceptorWithMetaCache(func() Cache { return nil }, limiter)
+}
+
+// RateLimitInterceptorWithMetaCache returns a new unary server interceptor that performs
+// request rate limiting. GetMetaCache is resolved per request so the interceptor observes
+// the meta cache initialized by the proxy after startup instead of a construction-time snapshot.
+func RateLimitInterceptorWithMetaCache(GetMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		request, ok := req.(proto.Message)
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 		}
-		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, request)
+		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, GetMetaCache(), request)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to get request info", mlog.Err(err))
 			return handler(ctx, req)
@@ -107,19 +114,19 @@ func getRequestNamespace(req any) *string {
 	}
 }
 
-func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map[int64][]int64, error) {
-	db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
+func getCollectionAndPartitionID(ctx context.Context, metaCache Cache, r reqPartName) (int64, map[int64][]int64, error) {
+	db, err := metaCache.GetDatabaseInfo(ctx, r.GetDbName())
 	if err != nil {
 		return 0, nil, err
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
+	collectionID, err := metaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
 	if err != nil {
 		return 0, nil, err
 	}
 
 	var collectionSchema *schemaInfo
 	if namespace := getRequestNamespace(r); namespace != nil {
-		collectionSchema, err = globalMetaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
+		collectionSchema, err = metaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
 		if err != nil {
 			return 0, nil, err
 		}
@@ -128,7 +135,7 @@ func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map
 			return 0, nil, err
 		}
 		if namespaceAsPartition {
-			part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), partitionName)
+			part, err := metaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), partitionName)
 			if err != nil {
 				return 0, nil, err
 			}
@@ -138,7 +145,7 @@ func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map
 
 	if r.GetPartitionName() == "" {
 		if collectionSchema == nil {
-			collectionSchema, err = globalMetaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
+			collectionSchema, err = metaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
 			if err != nil {
 				return 0, nil, err
 			}
@@ -147,25 +154,25 @@ func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map
 			return db.DBID, map[int64][]int64{collectionID: {}}, nil
 		}
 	}
-	part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), r.GetPartitionName())
+	part, err := metaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), r.GetPartitionName())
 	if err != nil {
 		return 0, nil, err
 	}
 	return db.DBID, map[int64][]int64{collectionID: {part.PartitionID}}, nil
 }
 
-func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, map[int64][]int64, error) {
-	db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
+func getCollectionAndPartitionIDs(ctx context.Context, metaCache Cache, r reqPartNames) (int64, map[int64][]int64, error) {
+	db, err := metaCache.GetDatabaseInfo(ctx, r.GetDbName())
 	if err != nil {
 		return 0, nil, err
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
+	collectionID, err := metaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
 	if err != nil {
 		return 0, nil, err
 	}
 	partitionNames := r.GetPartitionNames()
 	if namespace := getRequestNamespace(r); namespace != nil {
-		collectionSchema, err := globalMetaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
+		collectionSchema, err := metaCache.GetCollectionSchema(ctx, r.GetDbName(), r.GetCollectionName())
 		if err != nil {
 			return 0, nil, err
 		}
@@ -177,7 +184,7 @@ func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, m
 
 	parts := make([]int64, len(partitionNames))
 	for i, s := range partitionNames {
-		part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), s)
+		part, err := metaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), s)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -187,17 +194,17 @@ func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, m
 	return db.DBID, map[int64][]int64{collectionID: parts}, nil
 }
 
-func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
-	db, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), r.GetDbName())
+func getCollectionID(metaCache Cache, r reqCollName) (int64, map[int64][]int64) {
+	db, _ := metaCache.GetDatabaseInfo(context.TODO(), r.GetDbName())
 	if db == nil {
 		return util.InvalidDBID, map[int64][]int64{}
 	}
-	collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+	collectionID, _ := metaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 	return db.DBID, map[int64][]int64{collectionID: {}}
 }
 
-func getDatabaseID(dbName string) int64 {
-	db, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), dbName)
+func getDatabaseID(metaCache Cache, dbName string) int64 {
+	db, _ := metaCache.GetDatabaseInfo(context.TODO(), dbName)
 	if db == nil {
 		return util.InvalidDBID
 	}

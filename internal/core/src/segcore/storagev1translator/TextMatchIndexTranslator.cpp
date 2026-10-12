@@ -17,6 +17,7 @@
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string_view>
@@ -27,11 +28,27 @@
 #include "fmt/core.h"
 #include "glog/logging.h"
 #include "index/TextMatchIndex.h"
+#include "index/IndexFactory.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "log/Log.h"
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
+
+namespace {
+
+int64_t
+EstimateValidityBitmapBytes(int64_t num_rows) {
+    constexpr int64_t kWordBytes = sizeof(uint64_t);
+    constexpr int64_t kBitsPerWord = kWordBytes * 8;
+    if (num_rows <= 0) {
+        return 0;
+    }
+    return ((num_rows - 1) / kBitsPerWord + 1) * kWordBytes;
+}
+
+}  // namespace
 
 TextMatchIndexTranslator::TextMatchIndexTranslator(
     TextMatchIndexLoadInfo load_info,
@@ -53,6 +70,26 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
             /* support_eviction */ true,
             std::nullopt,
             milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
+    const auto files = index::GetValueFromConfig<std::vector<std::string>>(
+        config_, index::INDEX_FILES);
+    if (files && files->size() == 1 && files->front().ends_with(".v3")) {
+        file_manager_context_.use_async_load =
+            file_manager_context_.use_async_load.value_or(
+                storagev2translator::StorageV2AsyncLoadEnabled());
+        auto resources =
+            index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                DataType::VARCHAR,
+                load_info_.index_size,
+                {{index::INDEX_TYPE, index::INVERTED_INDEX_TYPE},
+                 {index::SCALAR_INDEX_ENGINE_VERSION, "3"}},
+                load_info_.enable_mmap,
+                load_info_.num_rows,
+                *files,
+                file_manager_context_,
+                /*is_index_file=*/false);
+        packed_load_resource_request_ = resources.request;
+        meta_.loading_overhead_config = std::move(resources.overhead);
+    }
 }
 
 size_t
@@ -69,14 +106,23 @@ std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
 TextMatchIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
+    if (packed_load_resource_request_) {
+        const auto& request = *packed_load_resource_request_;
+        return {{request.final_memory_cost, request.final_disk_cost},
+                {request.max_memory_cost - request.final_memory_cost,
+                 request.max_disk_cost - request.final_disk_cost}};
+    }
     // ignore the cid checking, because there is only one cell
+    auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
     if (load_info_.enable_mmap) {
-        return {{0, load_info_.index_size}, {load_info_.index_size, 0}};
+        return {{bitmap_bytes, load_info_.index_size},
+                {load_info_.index_size, 0}};
     } else {
         // The reason the maximum disk usage is not zero is that the text match index
         // is first written to the disk, then loaded into memory. Only after that are
         // the disk files deleted.
-        return {{load_info_.index_size, 0}, {0, load_info_.index_size}};
+        return {{load_info_.index_size + bitmap_bytes, 0},
+                {0, load_info_.index_size}};
     }
 }
 
@@ -112,17 +158,21 @@ TextMatchIndexTranslator::get_cells(
                 // no specific metric defined for text match index load yet
             },
             milvus::ScopedTimer::LogLevel::Info);
-        index->Load(config_);
+        index->Load(config_, ctx);
         index->RegisterAnalyzer("milvus_tokenizer",
                                 load_info_.analyzer_params.c_str());
     }
+
+    CheckCancellation(
+        ctx, load_info_.segment_id, "TextMatchIndexTranslator::get_cells()");
 
     LOG_INFO("load text match index success for field:{} of segment:{}",
              load_info_.field_id,
              load_info_.segment_id);
 
     if (load_info_.enable_mmap) {
-        index->SetCellSize({0, index->ByteSize()});
+        auto bitmap_bytes = index->ValidityBitmapByteSize();
+        index->SetCellSize({bitmap_bytes, index->ByteSize() - bitmap_bytes});
     } else {
         index->SetCellSize({index->ByteSize(), 0});
     }

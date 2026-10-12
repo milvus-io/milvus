@@ -18,6 +18,7 @@ package tombstone
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -30,10 +31,8 @@ import (
 // Once the tombstone is safe to be removed, it will be removed by the background goroutine.
 func NewTombstoneSweeper() TombstoneSweeper {
 	ts := &tombstoneSweeperImpl{
-		notifier:   syncutil.NewAsyncTaskNotifier[struct{}](),
-		incoming:   make(chan Tombstone),
-		tombstones: make(map[string]Tombstone),
-		interval:   5 * time.Minute,
+		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+		interval: 5 * time.Minute,
 	}
 	ts.SetLogger(mlog.With(mlog.FieldModule(typeutil.RootCoordRole), mlog.FieldComponent("tombstone_sweeper")))
 	go ts.background()
@@ -44,18 +43,31 @@ func NewTombstoneSweeper() TombstoneSweeper {
 type tombstoneSweeperImpl struct {
 	mlog.Binder
 
-	notifier   *syncutil.AsyncTaskNotifier[struct{}]
-	incoming   chan Tombstone
-	tombstones map[string]Tombstone
+	notifier *syncutil.AsyncTaskNotifier[struct{}]
+
+	// tombstones is written by DropCollection/DropPartition callbacks and
+	// iterated by the background GC concurrently. The entry wrapper gives
+	// CompareAndDelete a comparable generation token, so a concurrent
+	// re-registration with the same ID cannot be deleted by an older sweep.
+	tombstones sync.Map // map[string]*tombstoneEntry
 	interval   time.Duration
 	// TODO: add metrics for the tombstone sweeper.
 }
 
-// AddTombstone adds a tombstone to the sweeper.
+type tombstoneEntry struct {
+	tombstone Tombstone
+}
+
+// AddTombstone adds a tombstone to the sweeper without waiting for the
+// background GC, which may be performing slow external calls.
 func (s *tombstoneSweeperImpl) AddTombstone(tombstone Tombstone) {
-	select {
-	case <-s.notifier.Context().Done():
-	case s.incoming <- tombstone:
+	if s.notifier.Context().Err() != nil {
+		return
+	}
+
+	_, loaded := s.tombstones.Swap(tombstone.ID(), &tombstoneEntry{tombstone: tombstone})
+	if !loaded {
+		s.Logger().Info(context.TODO(), "tombstone added", mlog.String("tombstone", tombstone.ID()))
 	}
 }
 
@@ -71,11 +83,6 @@ func (s *tombstoneSweeperImpl) background() {
 
 	for {
 		select {
-		case tombstone := <-s.incoming:
-			if _, ok := s.tombstones[tombstone.ID()]; !ok {
-				s.tombstones[tombstone.ID()] = tombstone
-				s.Logger().Info(context.TODO(), "tombstone added", mlog.String("tombstone", tombstone.ID()))
-			}
 		case <-ticker.C:
 			s.triggerGCTombstone(s.notifier.Context())
 		case <-s.notifier.Context().Done():
@@ -86,30 +93,32 @@ func (s *tombstoneSweeperImpl) background() {
 
 // triggerGCTombstone triggers the garbage collection of the tombstones.
 func (s *tombstoneSweeperImpl) triggerGCTombstone(ctx context.Context) {
-	if len(s.tombstones) == 0 {
-		return
-	}
-	for _, tombstone := range s.tombstones {
+	s.tombstones.Range(func(key, value any) bool {
 		if ctx.Err() != nil {
 			// The tombstone sweeper is closing, stop it.
-			return
+			return false
 		}
-		tombstoneID := tombstone.ID()
+
+		tombstoneID := key.(string)
+		entry := value.(*tombstoneEntry)
+		tombstone := entry.tombstone
 		confirmed, err := tombstone.ConfirmCanBeRemoved(ctx)
 		if err != nil {
 			s.Logger().Warn(ctx, "fail to confirm if tombstone can be removed", mlog.String("tombstone", tombstoneID), mlog.Err(err))
-			continue
+			return true
 		}
 		if !confirmed {
-			continue
+			return true
 		}
 		if err := tombstone.Remove(ctx); err != nil {
 			s.Logger().Warn(ctx, "fail to remove tombstone", mlog.String("tombstone", tombstoneID), mlog.Err(err))
-			continue
+			return true
 		}
-		delete(s.tombstones, tombstoneID)
-		s.Logger().Info(ctx, "tombstone removed", mlog.String("tombstone", tombstoneID))
-	}
+		if s.tombstones.CompareAndDelete(tombstoneID, entry) {
+			s.Logger().Info(ctx, "tombstone removed", mlog.String("tombstone", tombstoneID))
+		}
+		return true
+	})
 }
 
 // Close closes the tombstone sweeper.

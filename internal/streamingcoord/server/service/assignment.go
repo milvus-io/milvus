@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
@@ -84,6 +83,14 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 		return s.handleForcePromote(ctx, config)
 	}
 
+	// Connection tokens are redacted whenever the configuration is read, so a
+	// caller that read it back cannot resend them. Take the stored ones before
+	// anything compares or validates this configuration.
+	config, err := s.fillRedactedConnectionTokens(ctx, config)
+	if err != nil {
+		return nil, err
+	}
+
 	// check if the configuration is same.
 	// so even if current cluster is not primary, we can still make a idempotent success result.
 	if _, err := s.validateReplicateConfiguration(ctx, config); err != nil {
@@ -122,6 +129,22 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 		return nil, err
 	}
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
+}
+
+// fillRedactedConnectionTokens replaces the redacted connection tokens of an
+// incoming configuration with the ones already stored for the same clusters.
+// Without it a configuration that was read back can never be written again: the
+// read redacts the tokens and the validator rejects the change.
+func (s *assignmentServiceImpl) fillRedactedConnectionTokens(ctx context.Context, config *commonpb.ReplicateConfiguration) (*commonpb.ReplicateConfiguration, error) {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	latestAssignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil {
+		return nil, err
+	}
+	return replicateutil.FillRedactedConnectionTokens(config, latestAssignment.ReplicateConfiguration), nil
 }
 
 // waitUntilPrimaryChangeOrConfigurationSame waits until the primary changes or the configuration is same.
@@ -262,21 +285,17 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	}
 
 	// Create the AlterReplicateConfigMessage with force promote flag
-	controlChannel := streaming.WAL().ControlChannel()
-	broadcastPChannels := lo.Map(pchannels, func(pchannel string, _ int) string {
-		if funcutil.IsOnPhysicalChannel(controlChannel, pchannel) {
-			return controlChannel
-		}
-		return pchannel
-	})
-
+	cc := message.ClusterChannels{
+		Channels:       pchannels,
+		ControlChannel: streaming.WAL().ControlChannel(),
+	}
 	msg := message.NewAlterReplicateConfigMessageBuilderV2().
 		WithHeader(&message.AlterReplicateConfigMessageHeader{
 			ReplicateConfiguration: forcePromoteConfig,
 			ForcePromote:           true, // marks as force promote
 		}).
 		WithBody(&message.AlterReplicateConfigMessageBody{}).
-		WithBroadcast(broadcastPChannels, message.OptBuildBroadcastAckSyncUp()). // Disable fast DDL ack
+		WithClusterLevelBroadcast(cc, message.OptBuildBroadcastAckSyncUp()). // Disable fast DDL ack
 		MustBuildBroadcast()
 
 	// Use Broadcast() to broadcast the message

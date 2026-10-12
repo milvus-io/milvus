@@ -22,11 +22,31 @@
 #include "common/resource_c.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
+#include "index/BitmapIndex.h"
 #include "index/Meta.h"
 #include "knowhere/version.h"
 #include "segcore/Types.h"
 #include "segcore/load_index_c.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/FileWriter.h"
+
+// EstimateLoadIndexResource now reports failure through a CStatus instead of
+// returning a zero estimate; unwrap it for the happy-path tests below.
+static LoadResourceRequest
+EstimateLoadIndexResourceChecked(CLoadIndexInfo c_load_index_info) {
+    LoadResourceRequest request{};
+    auto status = EstimateLoadIndexResource(c_load_index_info, &request);
+    EXPECT_EQ(status.error_code, milvus::ErrorCode::Success)
+        << (status.error_msg ? status.error_msg : "");
+    // FailureCStatus strdups error_msg (success carries a literal ""); free
+    // it so a failing estimation does not double as an LSan kill of the
+    // whole test binary.
+    if (status.error_code != milvus::ErrorCode::Success &&
+        status.error_msg != nullptr) {
+        free(const_cast<char*>(status.error_msg));
+    }
+    return request;
+}
 
 using Param =
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>;
@@ -224,8 +244,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          {"field_type", "string"}},
         {1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
-         0UL,
          1UL * 1024 * 1024 * 1024,
+         0UL,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "INVERTED"},
@@ -240,8 +260,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {{"index_type", "NGRAM"}, {"mmap", "false"}, {"field_type", "string"}},
         {1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
-         0UL,
          1UL * 1024 * 1024 * 1024,
+         0UL,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "NGRAM"}, {"mmap", "true"}, {"field_type", "string"}},
@@ -255,7 +275,13 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "BITMAP"}, {"mmap", "true"}, {"field_type", "array"}},
-        {2UL * 1024 * 1024 * 1024,
+        // Input, decoded Roaring, and two overlapping frozen output buffers.
+        // Unknown row count reserves all 2^16 containers (64 bytes each),
+        // plus the Roaring object rounded up to the 32-byte frozen alignment.
+        {4UL * 1024 * 1024 * 1024 +
+             2 * milvus::index::BITMAP_FROZEN_BATCH_BYTES +
+             3 * ((1UL << 16) * 64 +
+                  ((sizeof(roaring::Roaring) + 31) / 32) * 32),
          2UL * 1024 * 1024 * 1024,
          0UL,
          1UL * 1024 * 1024 * 1024,
@@ -330,12 +356,31 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.index_size = 1024 * 1024 * 1024;  // 1G index size
     loadIndexInfo.num_rows = 0;
 
-    LoadResourceRequest request = EstimateLoadIndexResource(&loadIndexInfo);
+    LoadResourceRequest request =
+        EstimateLoadIndexResourceChecked(&loadIndexInfo);
     ASSERT_EQ(request.has_raw_data, expected.has_raw_data);
     ASSERT_EQ(request.final_memory_cost, expected.final_memory_cost);
     ASSERT_EQ(request.final_disk_cost, expected.final_disk_cost);
     ASSERT_EQ(request.max_memory_cost, expected.max_memory_cost);
     ASSERT_EQ(request.max_disk_cost, expected.max_disk_cost);
+}
+
+TEST(IndexLoadTest, SparseIndexResourceEstimateHasRawData) {
+    milvus::segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_type = milvus::DataType::VECTOR_SPARSE_U32_F32;
+    load_index_info.element_type = milvus::DataType::NONE;
+    load_index_info.index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC},
+        {"metric_type", knowhere::metric::IP},
+    };
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_size = 1024 * 1024;
+    load_index_info.num_rows = 1024;
+
+    auto request = EstimateLoadIndexResourceChecked(&load_index_info);
+
+    EXPECT_TRUE(request.has_raw_data);
 }
 
 TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
@@ -358,10 +403,10 @@ TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
 }
 
 #ifdef BUILD_DISK_ANN
-TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
+TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     constexpr int64_t kNumRows = 1025;
-    constexpr uint64_t kOffsetMappingMmapBytes =
+    constexpr uint64_t kIdMapMmapBytes =
         static_cast<uint64_t>(kNumRows) * sizeof(int32_t);
 
     auto make_load_info = [] {
@@ -393,36 +438,30 @@ TEST(IndexLoadTest, DiskAnnOffsetMappingMmapEstimateChargesDiskCost) {
     };
 
     auto baseline_info = make_load_info();
-    auto baseline = EstimateLoadIndexResource(&baseline_info);
+    auto baseline = EstimateLoadIndexResourceChecked(&baseline_info);
 
     auto i2o_info = make_load_info();
     i2o_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
-    auto i2o = EstimateLoadIndexResource(&i2o_info);
-    ASSERT_EQ(i2o.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(i2o.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    auto i2o = EstimateLoadIndexResourceChecked(&i2o_info);
+    ASSERT_EQ(i2o.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(i2o.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(i2o.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(i2o.max_memory_cost, baseline.max_memory_cost);
 
     auto o2i_info = make_load_info();
     o2i_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
-    auto o2i = EstimateLoadIndexResource(&o2i_info);
-    ASSERT_EQ(o2i.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(o2i.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    auto o2i = EstimateLoadIndexResourceChecked(&o2i_info);
+    ASSERT_EQ(o2i.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(o2i.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(o2i.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(o2i.max_memory_cost, baseline.max_memory_cost);
 
     auto both_info = make_load_info();
     both_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
     both_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
-    auto both = EstimateLoadIndexResource(&both_info);
-    ASSERT_EQ(both.final_disk_cost,
-              baseline.final_disk_cost + kOffsetMappingMmapBytes);
-    ASSERT_EQ(both.max_disk_cost,
-              baseline.max_disk_cost + kOffsetMappingMmapBytes);
+    auto both = EstimateLoadIndexResourceChecked(&both_info);
+    ASSERT_EQ(both.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
+    ASSERT_EQ(both.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(both.final_memory_cost, baseline.final_memory_cost);
     ASSERT_EQ(both.max_memory_cost, baseline.max_memory_cost);
 }
@@ -454,7 +493,7 @@ TEST(IndexLoadTest, SegmentAdmissionEstimateDoesNotOpenScalarV3File) {
     loadIndexInfo.schema.set_fieldid(loadIndexInfo.field_id);
     loadIndexInfo.schema.set_data_type(milvus::proto::schema::DataType::Int64);
 
-    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto request = EstimateLoadIndexResourceChecked(&loadIndexInfo);
 
     EXPECT_EQ(request.final_memory_cost, kIndexSize);
     EXPECT_EQ(request.final_disk_cost, 0);
@@ -492,7 +531,7 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     loadIndexInfo.index_size = kIndexSize;
     loadIndexInfo.num_rows = kNumRows;
 
-    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto request = EstimateLoadIndexResourceChecked(&loadIndexInfo);
     auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
         kIndexSize,
         milvus::storage::EntryStreamTransientBytes(
@@ -537,7 +576,7 @@ TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
     loadIndexInfo.index_size = kIndexSize;
     loadIndexInfo.num_rows = kNumRows;
 
-    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto request = EstimateLoadIndexResourceChecked(&loadIndexInfo);
     auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
         kIndexSize,
         milvus::storage::EntryStreamTransientBytes(
@@ -583,7 +622,7 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
     loadIndexInfo.index_size = kIndexSize;
     loadIndexInfo.num_rows = kNumRows;
 
-    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto request = EstimateLoadIndexResourceChecked(&loadIndexInfo);
     auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
         kIndexSize,
         milvus::storage::EntryStreamTransientBytes(

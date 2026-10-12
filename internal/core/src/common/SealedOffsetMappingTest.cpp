@@ -58,7 +58,7 @@ TEST(SealedOffsetMapping, BuildBasicVecMode) {
     EXPECT_EQ(mapping.GetLogicalOffset(2), 3);
 }
 
-TEST(SealedOffsetMapping, BuildMapModeOnSparse) {
+TEST(SealedOffsetMapping, BuildSparseUsesContiguousStorage) {
     SealedOffsetMapping mapping;
     std::vector<uint8_t> valid(100, 0);
     valid[5] = 1;
@@ -184,9 +184,8 @@ TEST(SealedOffsetMapping, ValidCountBelowConvertsLogicalBound) {
     EXPECT_EQ(mapping.ValidCountBelow(100), 4);
 }
 
-// Sparse input takes the map-mode binary search instead of lower_bound over a
-// contiguous array; both branches must agree.
-TEST(SealedOffsetMapping, ValidCountBelowInMapMode) {
+// Sparse input still uses the same contiguous physical->logical storage.
+TEST(SealedOffsetMapping, ValidCountBelowOnSparseMapping) {
     SealedOffsetMapping mapping;
     std::vector<uint8_t> valid(100, 0);
     valid[5] = 1;

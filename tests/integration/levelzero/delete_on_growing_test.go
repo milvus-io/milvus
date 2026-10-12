@@ -21,13 +21,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -35,12 +36,6 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster
-
-	// make sure L0 segment are flushed per msgpack
-	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
-		paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.Key: "1",
-	})
-	defer revertGuard()
 
 	const (
 		indexType  = integration.IndexFaissIvfFlat
@@ -95,43 +90,30 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	})
 	err = merr.CheckRPCCall(deleteResult, err)
 	s.NoError(err)
+	s.EqualValues(5, deleteResult.GetDeleteCnt())
 
 	checkRowCount(0)
 
-	l0Exist := func() ([]*datapb.SegmentInfo, bool) {
+	// The materializer may split a Delete batch across multiple L0 files.
+	// Wait for all delete entries to be persisted, not just the first L0.
+	s.Require().EventuallyWithT(func(t *assert.CollectT) {
 		segments, err := s.Cluster.ShowSegments(collectionName)
-		s.Require().NoError(err)
-		s.Require().Greater(len(segments), 0)
-		for _, segment := range segments {
-			if segment.GetLevel() == datapb.SegmentLevel_L0 {
-				return segments, true
-			}
+		if !assert.NoError(t, err) {
+			return
 		}
-		return nil, false
-	}
-
-	checkL0Exist := func() {
-		failT := time.NewTimer(10 * time.Second)
-		checkT := time.NewTicker(100 * time.Millisecond)
-		for {
-			select {
-			case <-failT.C:
-				s.FailNow("L0 segment timeout")
-			case <-checkT.C:
-				if segments, exist := l0Exist(); exist {
-					failT.Stop()
-					for _, segment := range segments {
-						if segment.GetLevel() == datapb.SegmentLevel_L0 {
-							s.EqualValues(5, segment.Deltalogs[0].GetBinlogs()[0].GetEntriesNum())
-						}
-					}
-					return
+		var entries int64
+		for _, segment := range segments {
+			if segment.GetLevel() != datapb.SegmentLevel_L0 {
+				continue
+			}
+			for _, field := range segment.GetDeltalogs() {
+				for _, binlog := range field.GetBinlogs() {
+					entries += binlog.GetEntriesNum()
 				}
 			}
 		}
-	}
-
-	checkL0Exist()
+		assert.Equal(t, int64(5), entries, "all deletes must be persisted across L0 files")
+	}, 10*time.Second, 100*time.Millisecond)
 
 	// release collection
 	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: collectionName})

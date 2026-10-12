@@ -12,10 +12,46 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include "common/Utils.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+
+TEST(Util_Common, SparseRowsRejectMisalignedSizes) {
+    for (bool validate : {true, false}) {
+        for (size_t size : {9, 1, 7, 17, 25}) {
+            SCOPED_TRACE(size);
+            SCOPED_TRACE(validate);
+            std::string bytes(size, '\0');
+            try {
+                (void)milvus::CopyAndWrapSparseRow(
+                    bytes.data(), bytes.size(), validate);
+                FAIL() << "expected invalid sparse row length";
+            } catch (const milvus::SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(),
+                          milvus::ErrorCode::DataFormatBroken);
+            }
+        }
+    }
+}
+
+TEST(Util_Common, SparseRowsPreserveAlignedData) {
+    const std::string bytes("\x01\0\0\0\0\0\x80\x3f", 8);
+    for (bool validate : {true, false}) {
+        std::vector<std::string> rows{"", bytes, bytes};
+        auto result = milvus::SparseBytesToRows(rows, validate);
+        EXPECT_EQ(result[0].size(), 0);
+        for (size_t i = 1; i < rows.size(); ++i) {
+            ASSERT_EQ(result[i].size(), 1);
+            EXPECT_EQ(result[i][0].id, 1);
+            EXPECT_FLOAT_EQ(result[i][0].val, 1.0f);
+            EXPECT_EQ(std::string(static_cast<const char*>(result[i].data()),
+                                  result[i].data_byte_size()),
+                      bytes);
+        }
+    }
+}
 
 TEST(Util_Common, GetCommonPrefix) {
     std::string str1 = "";
@@ -87,6 +123,25 @@ TEST(Util_Common, MutableFieldDataRowValidData) {
     EXPECT_TRUE(vector_field.valid_data().empty());
     ASSERT_EQ(vector_field.vectors().valid_data_size(), 1);
     EXPECT_TRUE(vector_field.vectors().valid_data(0));
+}
+
+TEST(Util_Common, SaturatingAddReturnsExactSum) {
+    EXPECT_EQ(milvus::SaturatingAdd(uint32_t{40}, uint32_t{2}), uint32_t{42});
+}
+
+TEST(Util_Common, SaturatingAddClampsOnOverflow) {
+    constexpr auto max = std::numeric_limits<uint64_t>::max();
+    EXPECT_EQ(milvus::SaturatingAdd(max - 1, uint64_t{2}), max);
+}
+
+TEST(Util_Common, SaturatingMultiplyReturnsExactProduct) {
+    EXPECT_EQ(milvus::SaturatingMultiply(uint32_t{6}, uint32_t{7}),
+              uint32_t{42});
+}
+
+TEST(Util_Common, SaturatingMultiplyClampsOnOverflow) {
+    constexpr auto max = std::numeric_limits<uint64_t>::max();
+    EXPECT_EQ(milvus::SaturatingMultiply(max / 2 + 1, uint64_t{2}), max);
 }
 
 TEST(SimilarityCorelation, Naive) {

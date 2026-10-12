@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
+	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
 
@@ -30,11 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-)
-
-const (
-	ExprAuthModeRootOnly = "rootOnly"
-	ExprAuthModeRBAC     = "rbac"
 )
 
 // getUserRoleFunc is a callback function to get user roles.
@@ -74,52 +69,68 @@ func (e *ErrServiceUnavailable) Error() string {
 	return e.msg
 }
 
+// maxLoggedFieldLen bounds a caller-supplied value in the log. The gated
+// endpoints answer unauthenticated callers, and both the username and the
+// endpoint are caller-controlled (/debug/pprof/ and /webui/ are subtree
+// patterns), so an unbounded field would let one cheap request write as many
+// log bytes as the caller cares to send.
+const maxLoggedFieldLen = 64
+
+func truncateForLog(s string) string {
+	if len(s) <= maxLoggedFieldLen {
+		return s
+	}
+	// Trim back to a rune boundary so the result is still valid UTF-8.
+	cut := maxLoggedFieldLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "...(truncated)"
+}
+
 // parseHTTPAuth extracts username and password from HTTP request.
 // Supports HTTP Basic Auth format only.
 func parseHTTPAuth(req *http.Request) (username, password string, ok bool) {
 	return req.BasicAuth()
 }
 
-// CheckExprAuth authenticates and authorizes access to the /expr endpoint.
-func CheckExprAuth(ctx context.Context, req *http.Request) error {
-	mode := paramtable.Get().CommonCfg.ExprAuthMode.GetValue()
-	switch strings.ToLower(mode) {
-	case "", strings.ToLower(ExprAuthModeRootOnly):
-		return checkExprRootAuth(ctx, req)
-	case ExprAuthModeRBAC:
-		if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {
-			return &ErrPermissionDenied{msg: "authorization must be enabled when common.security.exprAuthMode is rbac"}
-		}
-		return CheckPrivilege(
-			ctx,
-			req,
-			commonpb.ObjectType_Global,
-			util.PrivilegeExpr,
-			util.AnyWord,
-			util.DefaultDBName,
-		)
-	default:
-		return &ErrPermissionDenied{msg: fmt.Sprintf("invalid expr auth mode %q", mode)}
-	}
+// CheckRootAuth authenticates a management-plane request as the milvus root
+// user via HTTP Basic Auth. endpoint names the protected resource for the log
+// only, never for the response body.
+//
+// Render the result with HTTPStatusFromPrivilegeError:
+//
+//   - missing/blank credentials or wrong root password -> 401
+//   - any non-root username (password is not checked)  -> 403
+//   - the credential could not be checked at all       -> 503
+//
+// The 503 case matters: a node that cannot reach its credential store must not
+// report a correct password as invalid.
+func CheckRootAuth(ctx context.Context, req *http.Request, endpoint string) error {
+	return checkRootAuth(ctx, req, endpoint, verifyManagementPassword)
 }
 
-func checkExprRootAuth(ctx context.Context, req *http.Request) error {
+func checkRootAuth(ctx context.Context, req *http.Request, endpoint string,
+	verify func(ctx context.Context, username, password, endpoint string) error,
+) error {
 	username, password, ok := parseHTTPAuth(req)
 	if !ok || username == "" || password == "" {
 		return &ErrAuthentication{msg: "authentication required. Use HTTP Basic Auth with root credentials"}
 	}
 	if username != util.UserRoot {
-		mlog.Warn(ctx, "non-root user attempted to access /expr", mlog.String("username", username))
-		return &ErrPermissionDenied{msg: "only root user can access /expr endpoint"}
+		mlog.RatedWarn(ctx, 1.0, "non-root user attempted to access protected endpoint",
+			mlog.String("username", truncateForLog(username)),
+			mlog.String("endpoint", truncateForLog(endpoint)))
+		return &ErrPermissionDenied{msg: "only root user can access this endpoint"}
 	}
-	if passwordVerifyFunc == nil {
-		return &ErrServiceUnavailable{msg: "password verification not available"}
+	if err := verify(ctx, username, password, endpoint); err != nil {
+		if IsAuthenticationError(err) {
+			mlog.RatedWarn(ctx, 1.0, "invalid root password",
+				mlog.String("endpoint", truncateForLog(endpoint)))
+		}
+		return err
 	}
-	if !passwordVerifyFunc(ctx, username, password) {
-		mlog.Warn(ctx, "invalid root password for /expr access")
-		return &ErrAuthentication{msg: "invalid root password"}
-	}
-	mlog.Info(ctx, "root user authenticated for /expr access")
+	mlog.RatedDebug(ctx, 1.0, "root user authenticated", mlog.String("endpoint", truncateForLog(endpoint)))
 	return nil
 }
 
@@ -138,13 +149,14 @@ func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.
 		return &ErrAuthentication{msg: "authentication required"}
 	}
 
-	// Verify password
-	if passwordVerifyFunc == nil {
-		return &ErrServiceUnavailable{msg: "password verification not available"}
-	}
-	if !passwordVerifyFunc(ctx, username, password) {
-		mlog.Warn(ctx, "invalid credentials for HTTP RBAC check", mlog.String("username", username))
-		return &ErrAuthentication{msg: "invalid credentials"}
+	// Verify password with the proxy-owned RBAC verifier. The management-plane
+	// verifier is deliberately not consulted: it is root-only, and MixCoord may
+	// have registered one in this same process.
+	if err := verifyRBACPassword(ctx, username, password); err != nil {
+		if IsAuthenticationError(err) {
+			mlog.Warn(ctx, "invalid credentials for HTTP RBAC check", mlog.String("username", username))
+		}
+		return err
 	}
 
 	// Root bypass (unless RootShouldBindRole is enabled)

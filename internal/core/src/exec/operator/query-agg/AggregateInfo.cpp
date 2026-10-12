@@ -46,13 +46,13 @@ toAggregateInfo(const plan::AggregationNode& aggregationNode,
                     inputExpr.get())) {
                 const auto& fieldName = fieldExpr->name();
                 if (fieldName.empty()) {
-                    ThrowInfo(ExprInvalid,
+                    ThrowInfo(UnexpectedError,
                               "Field name cannot be empty in aggregate input");
                 }
                 inputColumnIdxes.emplace_back(
                     inputType->GetChildIndex(fieldName));
             } else if (inputExpr != nullptr) {
-                ThrowInfo(ExprInvalid,
+                ThrowInfo(UnexpectedError,
                           "Only support aggregation towards column for now");
             }
         }

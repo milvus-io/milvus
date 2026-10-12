@@ -18,6 +18,21 @@ type tsMsgImpl struct {
 	msgType commonpb.MsgType
 }
 
+// newTimeTickMessageBody adapts a V2 confirmation barrier to the legacy
+// msgstream TimeTick contract. The barrier remains unchanged in the WAL and
+// streaming scanner; only old msgstream consumers observe it as a TimeTick.
+func newTimeTickMessageBody(msg message.ImmutableMessage) msgstream.TsMsg {
+	return &tsMsgImpl{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: msg.TimeTick(),
+			EndTimestamp:   msg.TimeTick(),
+		},
+		ts:      msg.TimeTick(),
+		sz:      msg.EstimateSize(),
+		msgType: commonpb.MsgType_TimeTick,
+	}
+}
+
 func (t *tsMsgImpl) ID() msgstream.UniqueID {
 	panic("should never use")
 }

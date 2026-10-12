@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -24,6 +25,7 @@
 #include "arrow/record_batch.h"
 #include "arrow/result.h"
 #include "common/Array.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -34,6 +36,7 @@
 #include "simdjson/base.h"
 #include "simdjson/padded_string.h"
 #include "storage/FileWriter.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus {
 namespace {
@@ -603,6 +606,10 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<GeometryChunkWriter>(nullable);
         }
         case milvus::DataType::ARRAY:
+            if (field_meta.is_nested_array()) {
+                return std::make_shared<ColumnarArrayChunkWriter>(
+                    field_meta.get_array_type_schema());
+            }
             return std::make_shared<ArrayChunkWriter>(
                 field_meta.get_element_type(), nullable);
         case milvus::DataType::VECTOR_SPARSE_U32_F32:
@@ -744,6 +751,15 @@ make_chunk(const FieldMeta& field_meta,
                 row_nums, data, size, nullable, chunk_mmap_guard);
         }
         case milvus::DataType::ARRAY:
+            if (field_meta.is_nested_array()) {
+                return std::make_unique<ColumnarArrayChunk>(
+                    row_nums,
+                    data,
+                    size,
+                    std::make_shared<const proto::schema::TypeSchema>(
+                        field_meta.get_array_type_schema()),
+                    chunk_mmap_guard);
+            }
             return std::make_unique<ArrayChunk>(row_nums,
                                                 data,
                                                 size,
@@ -772,18 +788,24 @@ create_chunk_buffer(const FieldMeta& field_meta,
                     const arrow::ArrayVector& array_vec,
                     bool mmap_populate,
                     const std::string& file_path,
-                    proto::common::LoadPriority load_priority) {
+                    proto::common::LoadPriority load_priority,
+                    MmapChunkWritebackMode writeback_mode) {
     auto cw = create_chunk_writer(field_meta);
     auto [size, row_nums] = cw->calculate_size(array_vec);
     size_t aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
                           ~(ChunkTarget::ALIGNED_SIZE - 1);
     std::shared_ptr<ChunkTarget> target;
+    std::shared_ptr<MemChunkTarget> mem_target;
+    std::shared_ptr<MmapChunkTarget> mmap_target;
     if (file_path.empty()) {
-        target = std::make_shared<MemChunkTarget>(aligned_size, mmap_populate);
+        mem_target =
+            std::make_shared<MemChunkTarget>(aligned_size, mmap_populate);
+        target = mem_target;
     } else {
         auto io_prio = storage::io::GetPriorityFromLoadPriority(load_priority);
-        target = std::make_shared<MmapChunkTarget>(
-            file_path, mmap_populate, aligned_size, io_prio);
+        mmap_target = std::make_shared<MmapChunkTarget>(
+            file_path, mmap_populate, aligned_size, io_prio, writeback_mode);
+        target = mmap_target;
     }
     cw->write_to_target(array_vec, target);
     // The writer is one-shot. Release its scratch buffers before a
@@ -794,8 +816,10 @@ create_chunk_buffer(const FieldMeta& field_meta,
     if (!file_path.empty()) {
         chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(data, size, file_path);
+        mmap_target->TransferOwnership();
     } else {
         chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(data, size, "");
+        mem_target->TransferOwnership();
     }
     ChunkBuffer buffer;
     buffer.data = data;
@@ -820,9 +844,14 @@ create_chunk(const FieldMeta& field_meta,
              const arrow::ArrayVector& array_vec,
              bool mmap_populate,
              const std::string& file_path,
-             proto::common::LoadPriority load_priority) {
-    auto buffer = create_chunk_buffer(
-        field_meta, array_vec, mmap_populate, file_path, load_priority);
+             proto::common::LoadPriority load_priority,
+             MmapChunkWritebackMode writeback_mode) {
+    auto buffer = create_chunk_buffer(field_meta,
+                                      array_vec,
+                                      mmap_populate,
+                                      file_path,
+                                      load_priority,
+                                      writeback_mode);
     return make_chunk_from_buffer(field_meta, buffer, 0);
 }
 
@@ -832,7 +861,8 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                    const std::vector<arrow::ArrayVector>& array_vec,
                    bool mmap_populate,
                    const std::string& file_path,
-                   proto::common::LoadPriority load_priority) {
+                   proto::common::LoadPriority load_priority,
+                   MmapChunkWritebackMode writeback_mode) {
     std::vector<std::shared_ptr<ChunkWriterBase>> cws;
     cws.reserve(field_ids.size());
     size_t total_aligned_size = 0, final_row_nums = 0;
@@ -865,15 +895,20 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
         }
     }
     std::shared_ptr<ChunkTarget> target;
+    std::shared_ptr<MemChunkTarget> mem_target;
+    std::shared_ptr<MmapChunkTarget> mmap_target;
     if (file_path.empty()) {
-        target =
+        mem_target =
             std::make_shared<MemChunkTarget>(total_aligned_size, mmap_populate);
+        target = mem_target;
     } else {
-        target = std::make_shared<MmapChunkTarget>(
+        mmap_target = std::make_shared<MmapChunkTarget>(
             file_path,
             mmap_populate,
             total_aligned_size,
-            storage::io::GetPriorityFromLoadPriority(load_priority));
+            storage::io::GetPriorityFromLoadPriority(load_priority),
+            writeback_mode);
+        target = mmap_target;
     }
     for (size_t i = 0; i < field_ids.size(); i++) {
         auto start_off = target->tell();
@@ -910,9 +945,11 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
     if (!file_path.empty()) {
         chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(
             data, total_aligned_size, file_path);
+        mmap_target->TransferOwnership();
     } else {
         chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(data, total_aligned_size, "");
+        mem_target->TransferOwnership();
     }
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
@@ -922,7 +959,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                                           data + chunk_offsets[i],
                                           chunk_sizes[i],
                                           chunk_mmap_guard);
-        LOG_INFO(
+        LOG_DEBUG(
             "created chunk for field {} with chunk offset: {}, chunk "
             "size: {}, file path: {}",
             field_ids[i].get(),
@@ -930,6 +967,13 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
             chunk_sizes[i],
             file_path);
     }
+    LOG_INFO(
+        "created group chunk with {} fields, row count: {}, total aligned "
+        "size: {}, file path: {}",
+        field_ids.size(),
+        final_row_nums,
+        total_aligned_size,
+        file_path);
 
     return chunks;
 }
@@ -938,8 +982,15 @@ arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader) {
     arrow::ArrayVector array_vec;
     for (const auto& batch : *reader) {
-        auto batch_data = batch.ValueOrDie();
-        array_vec.push_back(batch_data->column(0));
+        // A failed read (corrupt file, IO error) surfaces here as an error
+        // Result; ValueOrDie would abort the process instead of throwing a
+        // classified error.
+        if (!batch.ok()) {
+            ThrowInfo(storage::ArrowStatusToErrorCode(batch.status()),
+                      "failed to read record batch: {}",
+                      batch.status().ToString());
+        }
+        array_vec.push_back(batch.ValueUnsafe()->column(0));
     }
     return array_vec;
 }

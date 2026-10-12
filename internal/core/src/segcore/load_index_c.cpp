@@ -29,8 +29,8 @@
 #include <vector>
 
 #include "cachinglayer/Manager.h"
-#include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Tracer.h"
@@ -44,7 +44,6 @@
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "knowhere/binaryset.h"
 #include "knowhere/utils.h"
 #include "log/Log.h"
 #include "monitor/scope_metric.h"
@@ -54,19 +53,102 @@
 #include "pb/schema.pb.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
-#include "segcore/storagev1translator/V1SealedIndexTranslator.h"
-#include "storage/FileManager.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 
+namespace {
+
+void
+FillLoadIndexInfoFromProto(const milvus::proto::cgo::LoadIndexInfo& info_proto,
+                           milvus::segcore::LoadIndexInfo* load_index_info) {
+    load_index_info->collection_id = info_proto.collectionid();
+    load_index_info->partition_id = info_proto.partitionid();
+    load_index_info->segment_id = info_proto.segmentid();
+    load_index_info->field_id = info_proto.field().fieldid();
+    load_index_info->field_type =
+        static_cast<milvus::DataType>(info_proto.field().data_type());
+    load_index_info->element_type =
+        static_cast<milvus::DataType>(info_proto.field().element_type());
+    load_index_info->enable_mmap = info_proto.enable_mmap();
+    load_index_info->index_id = info_proto.indexid();
+    load_index_info->index_build_id = info_proto.index_buildid();
+    load_index_info->index_version = info_proto.index_version();
+    load_index_info->index_store_path_version =
+        info_proto.index_store_path_version();
+    for (const auto& [k, v] : info_proto.index_params()) {
+        load_index_info->index_params[k] = v;
+    }
+    load_index_info->index_files.assign(info_proto.index_files().begin(),
+                                        info_proto.index_files().end());
+    load_index_info->uri = info_proto.uri();
+    load_index_info->index_engine_version = info_proto.index_engine_version();
+    auto scalar_version = info_proto.current_scalar_index_version();
+    if (scalar_version > 0) {
+        load_index_info
+            ->index_params[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+            std::to_string(scalar_version);
+    }
+    load_index_info->schema = info_proto.field();
+    load_index_info->index_size = info_proto.index_file_size();
+    load_index_info->num_rows = info_proto.num_rows();
+    auto field_schema = milvus::FieldMeta::ParseFrom(load_index_info->schema);
+    size_t dim =
+        IsVectorDataType(field_schema.get_data_type()) &&
+                !IsSparseFloatVectorDataType(field_schema.get_data_type())
+            ? field_schema.get_dim()
+            : 1;
+    load_index_info->dim = dim;
+    auto warmup_it = load_index_info->index_params.find("warmup");
+    if (warmup_it != load_index_info->index_params.end()) {
+        load_index_info->warmup_policy = warmup_it->second;
+        LOG_DEBUG("Index warmup_policy extracted from index_params: {}",
+                  load_index_info->warmup_policy);
+    } else {
+        load_index_info->warmup_policy = "";
+        LOG_DEBUG("No warmup key in index_params, warmup_policy will be empty");
+    }
+}
+
+LoadResourceRequest
+EstimateLoadIndexResourceFromLoadInfo(
+    const milvus::segcore::LoadIndexInfo* load_index_info) {
+    auto field_type = load_index_info->field_type;
+    auto element_type = load_index_info->element_type;
+    auto& index_params = load_index_info->index_params;
+    bool find_index_type = index_params.count("index_type") > 0 ? true : false;
+    if (!(find_index_type == true)) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Can't find index type in index_params");
+    }
+
+    // Keep admission estimation metadata-only: exact scalar V3 directory
+    // inspection belongs to SealedIndexTranslator, where the result is used
+    // for the actual MCL loading reservation.
+    return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+        field_type,
+        element_type,
+        load_index_info->index_engine_version,
+        load_index_info->index_size,
+        index_params,
+        load_index_info->enable_mmap,
+        load_index_info->num_rows,
+        load_index_info->dim);
+}
+
+}  // namespace
+
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
     SCOPE_CGO_CALL_METRIC();
 
-    return knowhere::UseDiskLoad(index_type, index_engine_version) ||
-           strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
+    try {
+        return knowhere::UseDiskLoad(index_type, index_engine_version) ||
+               strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
+    }
+    CGO_CATCH_AND_LOG("IsLoadWithDisk")
+    return false;
 }
 
 CStatus
@@ -82,12 +164,8 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -99,153 +177,92 @@ DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info) {
 }
 
 CStatus
-appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
+EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info,
+                          LoadResourceRequest* c_load_resource_request) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        auto field_type = load_index_info->field_type;
-        auto binary_set = (knowhere::BinarySet*)c_binary_set;
-        auto& index_params = load_index_info->index_params;
-        bool find_index_type =
-            index_params.count("index_type") > 0 ? true : false;
-        AssertInfo(find_index_type == true,
-                   "Can't find index type in index_params");
-
-        milvus::index::CreateIndexInfo index_info;
-        index_info.field_type = milvus::DataType(field_type);
-        index_info.index_type = index_params["index_type"];
-
-        auto config = milvus::index::ParseConfigFromIndexParams(
-            load_index_info->index_params);
-
-        // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.
-        // Use value_or(1) for unit test without setting this value
-        index_info.scalar_index_engine_version =
-            milvus::index::GetValueFromConfig<int32_t>(
-                config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-                .value_or(1);
-
-        index_info.tantivy_index_version =
-            index_info.scalar_index_engine_version <= 1
-                ? milvus::index::TANTIVY_INDEX_MINIMUM_VERSION
-                : milvus::index::TANTIVY_INDEX_LATEST_VERSION;
-
-        load_index_info->index =
-            milvus::index::IndexFactory::GetInstance().CreateIndex(
-                index_info, milvus::storage::FileManagerContext());
-        load_index_info->index->Load(*binary_set);
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
+        *c_load_resource_request =
+            EstimateLoadIndexResourceFromLoadInfo(load_index_info);
+        return milvus::SuccessCStatus();
     }
+    // Estimation failure must reach the Go caller as an error: a swallowed
+    // exception here would read as a zero-resource estimate and let the
+    // segment pass load admission without any memory/disk reservation.
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
-LoadResourceRequest
-EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
+CStatus
+EstimateLoadIndexResourceFromSerializedInfo(
+    const uint8_t* serialized_load_index_info,
+    const uint64_t len,
+    LoadResourceRequest* load_resource_request) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        auto field_type = load_index_info->field_type;
-        auto element_type = load_index_info->element_type;
-        auto& index_params = load_index_info->index_params;
-        bool find_index_type =
-            index_params.count("index_type") > 0 ? true : false;
-        AssertInfo(find_index_type == true,
-                   "Can't find index type in index_params");
+        AssertInfo(load_resource_request != nullptr,
+                   "load resource request is null");
+        auto info_proto = milvus::proto::cgo::LoadIndexInfo();
+        auto parsed =
+            info_proto.ParseFromArray(serialized_load_index_info, len);
+        AssertInfo(parsed, "failed to parse load index info");
 
-        // Segment Loader calls this API while deciding whether a segment may
-        // start loading. Keep that admission path metadata-only: exact scalar
-        // V3 directory inspection belongs to SealedIndexTranslator, where the
-        // result is used for the actual MCL loading reservation.
-        return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-            field_type,
-            element_type,
-            load_index_info->index_engine_version,
-            load_index_info->index_size,
-            index_params,
-            load_index_info->enable_mmap,
-            load_index_info->num_rows,
-            load_index_info->dim);
-    } catch (std::exception& e) {
-        ThrowInfo(milvus::UnexpectedError,
-                  fmt::format("failed to estimate index load resource, "
-                              "encounter exception : {}",
-                              e.what()));
-        return LoadResourceRequest{0, 0, 0, 0, false};
+        auto load_index_info = milvus::segcore::LoadIndexInfo();
+        FillLoadIndexInfoFromProto(info_proto, &load_index_info);
+        *load_resource_request =
+            EstimateLoadIndexResourceFromLoadInfo(&load_index_info);
+        return milvus::SuccessCStatus();
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 bool
 TryReserveLoadingResourceWithTimeout(CResourceUsage size,
                                      int64_t millisecond_timeout) {
-    return milvus::cachinglayer::Manager::GetInstance()
-        .ReserveLoadingResourceWithTimeout(
-            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
-                                                size.disk_bytes),
-            std::chrono::milliseconds(millisecond_timeout));
+    // Failure direction is safe: false means "reservation failed" and the Go
+    // caller backs off, whereas an escaping exception would cross the C ABI
+    // and terminate the process.
+    try {
+        return milvus::cachinglayer::Manager::GetInstance()
+            .ReserveLoadingResourceWithTimeout(
+                milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                    size.disk_bytes),
+                std::chrono::milliseconds(millisecond_timeout));
+    }
+    CGO_CATCH_AND_LOG("TryReserveLoadingResourceWithTimeout")
+    return false;
 }
 
 void
 ReleaseLoadingResource(CResourceUsage size) {
-    milvus::cachinglayer::Manager::GetInstance().ReleaseLoadingResource(
-        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
-                                            size.disk_bytes));
+    try {
+        milvus::cachinglayer::Manager::GetInstance().ReleaseLoadingResource(
+            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                size.disk_bytes));
+    }
+    CGO_CATCH_AND_LOG("ReleaseLoadingResource")
 }
 
 void
 ChargeLoadedResource(CResourceUsage size) {
-    milvus::cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
-                                            size.disk_bytes));
+    try {
+        milvus::cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                size.disk_bytes));
+    }
+    CGO_CATCH_AND_LOG("ChargeLoadedResource")
 }
 
 void
 RefundLoadedResource(CResourceUsage size) {
-    milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
-        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
-                                            size.disk_bytes));
-}
-
-CStatus
-AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
-    SCOPE_CGO_CALL_METRIC();
-
     try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-
-        // json index is not handled, fallback to the old interface
-        if (load_index_info->field_type == milvus::DataType::JSON) {
-            return appendScalarIndex(c_load_index_info, c_binary_set);
-        }
-        std::unique_ptr<
-            milvus::cachinglayer::Translator<milvus::index::IndexBase>>
-            translator = std::make_unique<
-                milvus::segcore::storagev1translator::V1SealedIndexTranslator>(
-                load_index_info, (knowhere::BinarySet*)c_binary_set);
-        load_index_info->cache_index =
-            milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-                std::move(translator));
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
+        milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
+            milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                                size.disk_bytes));
     }
+    CGO_CATCH_AND_LOG("RefundLoadedResource")
 }
 
 CStatus
@@ -280,13 +297,8 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
-    } catch (milvus::SegcoreError& e) {
-        return milvus::FailureCStatus(&e);
-    } catch (std::bad_alloc& e) {
-        return milvus::FailureCStatus(milvus::MemAllocateFailed, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -302,12 +314,8 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -323,59 +331,7 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
         // TODO: keep this since LoadIndexInfo is used by SegmentSealed.
         {
-            load_index_info->collection_id = info_proto->collectionid();
-            load_index_info->partition_id = info_proto->partitionid();
-            load_index_info->segment_id = info_proto->segmentid();
-            load_index_info->field_id = info_proto->field().fieldid();
-            load_index_info->field_type =
-                static_cast<milvus::DataType>(info_proto->field().data_type());
-            load_index_info->element_type = static_cast<milvus::DataType>(
-                info_proto->field().element_type());
-            load_index_info->enable_mmap = info_proto->enable_mmap();
-            load_index_info->index_id = info_proto->indexid();
-            load_index_info->index_build_id = info_proto->index_buildid();
-            load_index_info->index_version = info_proto->index_version();
-            load_index_info->index_store_path_version =
-                info_proto->index_store_path_version();
-            for (const auto& [k, v] : info_proto->index_params()) {
-                load_index_info->index_params[k] = v;
-            }
-            load_index_info->index_files.assign(
-                info_proto->index_files().begin(),
-                info_proto->index_files().end());
-            load_index_info->uri = info_proto->uri();
-            load_index_info->index_engine_version =
-                info_proto->index_engine_version();
-            // Inject scalar index version into index_params for scalar indexes
-            auto scalar_version = info_proto->current_scalar_index_version();
-            if (scalar_version > 0) {
-                load_index_info
-                    ->index_params[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
-                    std::to_string(scalar_version);
-            }
-            load_index_info->schema = info_proto->field();
-            load_index_info->index_size = info_proto->index_file_size();
-            load_index_info->num_rows = info_proto->num_rows();
-            auto field_schema =
-                milvus::FieldMeta::ParseFrom(load_index_info->schema);
-            size_t dim = IsVectorDataType(field_schema.get_data_type()) &&
-                                 !IsSparseFloatVectorDataType(
-                                     field_schema.get_data_type())
-                             ? field_schema.get_dim()
-                             : 1;
-            load_index_info->dim = dim;
-            // Extract warmup_policy from index_params (keep it for Knowhere)
-            auto warmup_it = load_index_info->index_params.find("warmup");
-            if (warmup_it != load_index_info->index_params.end()) {
-                load_index_info->warmup_policy = warmup_it->second;
-                LOG_INFO("Index warmup_policy extracted from index_params: {}",
-                         load_index_info->warmup_policy);
-            } else {
-                LOG_INFO(
-                    "No warmup key in index_params, warmup_policy will be "
-                    "empty");
-            }
-
+            FillLoadIndexInfoFromProto(*info_proto, load_index_info);
             auto remote_chunk_manager =
                 milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                     .GetRemoteChunkManager();
@@ -388,12 +344,8 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void

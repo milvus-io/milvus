@@ -18,6 +18,7 @@ package milvusclient
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -78,6 +79,64 @@ func (s *ResultSetSuite) TestResultsetUnmarshal() {
 
 	var otherReceiver []*OtherData
 	err = rs.Unmarshal(&otherReceiver)
+	s.Error(err)
+}
+
+func (s *ResultSetSuite) TestResultsetUnmarshalTimestamptz() {
+	type TsData struct {
+		Ts time.Time `milvus:"name:ts"`
+	}
+	type NullableTsData struct {
+		Ts *time.Time `milvus:"name:ts"`
+	}
+	type StringTsData struct {
+		Ts string `milvus:"name:ts"`
+	}
+
+	// the server returns timestamptz as ISO strings in the collection timezone
+	isoData := []string{
+		"2024-01-01T00:00:00+08:00",
+		"2024-06-15T12:30:45.123456Z",
+	}
+	ds := DataSet([]column.Column{
+		column.NewColumnTimestamptzIsoString("ts", isoData),
+	})
+
+	// time.Time target
+	var timeReceiver []*TsData
+	err := ds.Unmarshal(&timeReceiver)
+	s.NoError(err)
+	s.Require().Len(timeReceiver, 2)
+	for i, row := range timeReceiver {
+		parsed, err := time.Parse(time.RFC3339Nano, isoData[i])
+		s.NoError(err)
+		s.True(parsed.Equal(row.Ts), "row %d ts = %v, want %v", i, row.Ts, parsed)
+	}
+
+	// string target unchanged
+	var strReceiver []*StringTsData
+	err = ds.Unmarshal(&strReceiver)
+	s.NoError(err)
+	s.Require().Len(strReceiver, 2)
+	for i, row := range strReceiver {
+		s.Equal(isoData[i], row.Ts)
+	}
+
+	// nullable *time.Time target, including a null row (compact mode)
+	nullableCol, err := column.NewNullableColumnTimestamptzIsoString("ts", []string{"2024-01-01T00:00:00Z"}, []bool{true, false})
+	s.NoError(err)
+	dsN := DataSet([]column.Column{nullableCol})
+	var nullReceiver []*NullableTsData
+	err = dsN.Unmarshal(&nullReceiver)
+	s.NoError(err)
+	s.Require().Len(nullReceiver, 2)
+	s.Require().NotNil(nullReceiver[0].Ts)
+	s.True(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).Equal(*nullReceiver[0].Ts))
+	s.Nil(nullReceiver[1].Ts)
+
+	// unparseable string into time.Time target returns error
+	badCol := column.NewColumnTimestamptzIsoString("ts", []string{"not-a-timestamp"})
+	err = DataSet([]column.Column{badCol}).Unmarshal(&[]*TsData{})
 	s.Error(err)
 }
 

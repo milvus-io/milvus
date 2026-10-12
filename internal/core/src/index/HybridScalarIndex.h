@@ -37,6 +37,12 @@
 namespace milvus {
 namespace index {
 
+// Shares the persisted-type and legacy standalone-file compatibility rules
+// between async resource admission and actual hybrid loading.
+ScalarIndexType
+ResolvePackedHybridIndexType(const nlohmann::json& metadata,
+                             const Config& config);
+
 /*
 * @brief Implementation of hybrid index  
 * @details This index only for scalar type.
@@ -108,6 +114,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     IsNull() override {
         return internal_index_->IsNull();
     }
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
 
     TargetBitmap
     IsNotNull() override {
@@ -192,6 +203,14 @@ class HybridScalarIndex : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
+
  protected:
     ScalarIndexType
     SelectIndexBuildType(const std::vector<FieldDataPtr>& field_datas);
@@ -230,6 +249,10 @@ class HybridScalarIndex : public ScalarIndex<T> {
     int32_t bitmap_index_cardinality_limit_;
     ScalarIndexType low_cardinality_index_type_;
     ScalarIndexType high_cardinality_index_type_;
+    // Resolved scalar index engine version from the last Build() call;
+    // gates whether nested (struct sub-field) high-cardinality data may
+    // select STL_SORT (see kNestedHybridStlSortMinVersion).
+    int32_t scalar_index_version_{0};
     proto::schema::DataType field_type_;
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};

@@ -12,7 +12,7 @@ type TokenStream interface {
 
 //go:generate mockery --name=Analyzer --with-expecter --inpackage --filename=mock_analyzer.go --structname=MockAnalyzer
 type Analyzer interface {
-	NewTokenStream(text string) TokenStream
+	NewTokenStream(text string) (TokenStream, error)
 	Clone() (Analyzer, error)
 	Destroy()
 }

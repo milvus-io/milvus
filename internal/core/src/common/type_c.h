@@ -94,6 +94,12 @@ typedef struct CStorageConfig {
     uint32_t max_connections;
     const char* tls_min_version;
     bool use_crc32c_checksum;
+    uint32_t talon_mode;
+    uint32_t talon_small_read_threshold;
+    const char* talon_coordinator;
+    uint32_t talon_block_size;
+    uint32_t talon_max_idle_per_addr;
+    bool talon_enable_for_external_table;
 } CStorageConfig;
 
 typedef struct CDiskWriteRateLimiterConfig {
@@ -128,6 +134,7 @@ typedef struct CMmapConfig {
     bool vector_index_enable_mmap;
     bool vector_field_enable_mmap;
     bool mmap_populate;
+    bool mmap_writeback;
     bool json_stats_enable_mmap;
     const char* json_stats_mmap_path;
 } CMmapConfig;

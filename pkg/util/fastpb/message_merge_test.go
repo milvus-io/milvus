@@ -169,6 +169,11 @@ func TestRepeatedMessageOneofMerge(t *testing.T) {
 				&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
 				&schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{2}}}}},
 			},
+			{
+				&schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{1, 2, 3}}}}},
+				&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{4}}}},
+				&schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{5, 6, 7}}}}},
+			},
 		} {
 			wire := concat(t, msgs...)
 			want := &schemapb.IDs{}

@@ -228,7 +228,7 @@ struct BinaryRangeElementFuncForArray {
                 valid_res[i] = false;
                 continue;
             }
-            auto value = src[offset].get_data<GetType>(index);
+            auto value = src[offset].get_data_unchecked<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
@@ -266,7 +266,7 @@ struct BinaryRangeIndexFunc {
 class PhyBinaryRangeFilterExpr : public SegmentExpr {
  public:
     PhyBinaryRangeFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -298,6 +298,11 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     void
     DetermineExecPath() override;
 
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
+
     std::string
     ToString() const override {
         return fmt::format("{}", expr_->ToString());
@@ -311,6 +316,11 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return expr_->column_;
+    }
+
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
     }
 
  private:
@@ -328,6 +338,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                      HighPrecisionType& val2,
                      bool& lower_inclusive,
                      bool& upper_inclusive,
+                     int64_t batch_size,
                      OffsetVector* input = nullptr);
 
     template <typename T>

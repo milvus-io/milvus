@@ -147,6 +147,10 @@ func (v *BasePlanVisitor) VisitTemplateVariable(ctx *TemplateVariableContext) in
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitMembershipMatchWithOption(ctx *MembershipMatchWithOptionContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitTimestamptzCompareReverse(ctx *TimestamptzCompareReverseContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -212,6 +216,14 @@ func (v *BasePlanVisitor) VisitStructSubField(ctx *StructSubFieldContext) interf
 }
 
 func (v *BasePlanVisitor) VisitPower(ctx *PowerContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitFieldName(ctx *FieldNameContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitFieldReference(ctx *FieldReferenceContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

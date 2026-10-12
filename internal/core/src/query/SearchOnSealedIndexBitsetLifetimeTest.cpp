@@ -28,7 +28,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <numeric>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "common/BitsetView.h"
@@ -44,14 +47,19 @@
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "mmap/ChunkedColumn.h"
+#include "mmap/ChunkedColumnGroup.h"
 #include "query/SearchOnGrowing.h"
 #include "query/SearchOnSealed.h"
+#include "query/Utils.h"
+#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SealedIndexingRecord.h"
+#include "segcore/Utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 namespace milvus::query {
 namespace {
@@ -66,6 +74,62 @@ MakeLogicalBitsetBytes(int64_t total_count) {
         logical_bitset_bytes[i >> 3] |= 1U << (i & 0x07);
     }
     return logical_bitset_bytes;
+}
+
+TargetBitmap
+MakeAdditionalFilter(int64_t total_count) {
+    TargetBitmap additional_filter(total_count, false);
+    for (int64_t i = 3; i < total_count; i += 5) {
+        additional_filter[i] = true;
+    }
+    return additional_filter;
+}
+
+bool
+IsFiltered(const std::vector<uint8_t>& bitset_bytes, int64_t offset) {
+    return (bitset_bytes[offset >> 3] & (1U << (offset & 0x07))) != 0;
+}
+
+template <typename IsValid>
+void
+AssertSearchUsesCombinedLogicalFilter(SearchResult& search_result,
+                                      const std::vector<uint8_t>& base_filter,
+                                      const TargetBitmap& additional_filter,
+                                      IsValid&& is_valid) {
+    // Exercise ordinary Search through each real provider (sealed index,
+    // nullable raw chunks, growing). Quotas differ from the phase-one topK.
+    ASSERT_TRUE(search_result.CanSearchFilteredVectors());
+    auto shared_filter =
+        std::make_shared<TargetBitmap>(additional_filter.clone());
+    for (int64_t remaining : {1, 2, 4}) {
+        auto searched =
+            search_result.SearchFilteredVectors(shared_filter, remaining);
+        ASSERT_TRUE(searched);
+        const auto& batch = **searched;
+        EXPECT_FALSE(batch.vector_iterators_.has_value());
+        EXPECT_FALSE(batch.CanSearchFilteredVectors());
+        EXPECT_EQ(batch.total_nq_, 1);
+        EXPECT_EQ(batch.unity_topK_, remaining);
+        ASSERT_EQ(batch.seg_offsets_.size(), remaining);
+        ASSERT_EQ(batch.distances_.size(), remaining);
+        std::unordered_set<int64_t> seen;
+        for (auto offset : batch.seg_offsets_) {
+            ASSERT_GE(offset, 0);
+            ASSERT_LT(offset, additional_filter.size());
+            EXPECT_TRUE(seen.insert(offset).second);
+            EXPECT_FALSE(IsFiltered(base_filter, offset));
+            EXPECT_FALSE(additional_filter[offset]);
+            EXPECT_TRUE(is_valid(offset));
+        }
+    }
+    for (size_t i = 0; i < shared_filter->size(); ++i) {
+        (*shared_filter)[i] = true;
+    }
+    auto empty = search_result.SearchFilteredVectors(shared_filter, 2);
+    ASSERT_TRUE(empty);
+    EXPECT_FALSE((**empty).vector_iterators_.has_value());
+    EXPECT_EQ((**empty).seg_offsets_,
+              (std::vector<int64_t>{INVALID_SEG_OFFSET, INVALID_SEG_OFFSET}));
 }
 
 std::unique_ptr<bool[]>
@@ -103,13 +167,16 @@ MakeGroupBySearchInfo(FieldId vector_field,
         {knowhere::indexparam::NPROBE, "32"},
     };
     search_info.group_by_field_ids_.push_back(group_by_field);
+    search_info.group_size_ = 3;
+    search_info.strict_group_size_ = true;
     return search_info;
 }
 
 void
 AssertVectorIteratorUsableAfterSearchReturns(SearchResult& search_result,
-                                             int64_t max_results) {
-    ASSERT_EQ(search_result.pinned_bitsets_.size(), 1);
+                                             int64_t max_results,
+                                             size_t expected_pinned_bitsets) {
+    ASSERT_EQ(search_result.pinned_bitsets_.size(), expected_pinned_bitsets);
     ASSERT_TRUE(search_result.vector_iterators_.has_value());
     ASSERT_FALSE(search_result.vector_iterators_->empty());
 
@@ -159,35 +226,66 @@ BuildNullableFloatVectorColumn(const FieldMeta& field_meta,
                                int64_t dim,
                                const bool* valid_data,
                                const std::vector<float>& vectors,
-                               std::vector<std::vector<char>>& chunk_buffers) {
+                               std::vector<std::vector<char>>& chunk_buffers,
+                               std::vector<int64_t> rows_per_chunk = {}) {
     std::vector<std::unique_ptr<Chunk>> chunks;
-    std::vector<int64_t> num_rows_per_chunk;
-    num_rows_per_chunk.push_back(total_count);
-
-    auto null_bitmap_bytes = (total_count + 7) / 8;
-    auto vector_data_bytes = vectors.size() * sizeof(float);
-    auto buffer_size = null_bitmap_bytes + vector_data_bytes;
-    chunk_buffers.emplace_back(buffer_size, 0);
-    char* buffer = chunk_buffers.back().data();
-
-    for (int64_t i = 0; i < total_count; ++i) {
-        if (valid_data[i]) {
-            buffer[i >> 3] |= 1U << (i & 0x07);
-        }
+    if (rows_per_chunk.empty()) {
+        rows_per_chunk.push_back(total_count);
     }
-    std::memcpy(buffer + null_bitmap_bytes, vectors.data(), vector_data_bytes);
 
-    auto chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-    chunks.emplace_back(std::make_unique<FixedWidthChunk>(total_count,
-                                                          dim,
-                                                          buffer,
-                                                          buffer_size,
-                                                          sizeof(float),
-                                                          true,
-                                                          chunk_mmap_guard));
+    int64_t logical_begin = 0;
+    int64_t physical_begin = 0;
+    for (auto chunk_rows : rows_per_chunk) {
+        int64_t chunk_valid_count = 0;
+        for (int64_t i = 0; i < chunk_rows; ++i) {
+            if (valid_data[logical_begin + i]) {
+                ++chunk_valid_count;
+            }
+        }
+
+        auto null_bitmap_bytes = (chunk_rows + 7) / 8;
+        auto vector_data_bytes =
+            static_cast<size_t>(chunk_valid_count * dim) * sizeof(float);
+        auto buffer_size = null_bitmap_bytes + vector_data_bytes;
+        chunk_buffers.emplace_back(buffer_size, 0);
+        char* buffer = chunk_buffers.back().data();
+
+        int64_t chunk_physical = 0;
+        for (int64_t i = 0; i < chunk_rows; ++i) {
+            if (!valid_data[logical_begin + i]) {
+                continue;
+            }
+            buffer[i >> 3] |= 1U << (i & 0x07);
+            const auto* src =
+                vectors.data() +
+                static_cast<size_t>((physical_begin + chunk_physical) * dim);
+            auto* dst =
+                buffer + null_bitmap_bytes +
+                static_cast<size_t>(chunk_physical * dim) * sizeof(float);
+            std::memcpy(dst, src, static_cast<size_t>(dim) * sizeof(float));
+            ++chunk_physical;
+        }
+
+        auto chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+        chunks.emplace_back(
+            std::make_unique<FixedWidthChunk>(chunk_rows,
+                                              dim,
+                                              buffer,
+                                              buffer_size,
+                                              sizeof(float),
+                                              true,
+                                              chunk_mmap_guard));
+        logical_begin += chunk_rows;
+        physical_begin += chunk_valid_count;
+    }
+    AssertInfo(logical_begin == total_count,
+               "nullable test chunk rows do not match total rows");
+    AssertInfo(physical_begin * dim == static_cast<int64_t>(vectors.size()),
+               "nullable test compact vectors do not match valid rows");
 
     auto translator = std::make_unique<TestChunkTranslator>(
-        num_rows_per_chunk, "", std::move(chunks));
+        rows_per_chunk, "", std::move(chunks));
     auto slot =
         cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
             std::move(translator), nullptr);
@@ -197,14 +295,16 @@ BuildNullableFloatVectorColumn(const FieldMeta& field_meta,
 }
 
 std::unique_ptr<index::IndexBase>
-BuildNullableVectorIndex(int64_t total_count,
-                         int64_t dim,
-                         const bool* valid_data,
-                         const std::vector<float>& vectors) {
+BuildNullableVectorIndex(
+    int64_t total_count,
+    int64_t dim,
+    const bool* valid_data,
+    const std::vector<float>& vectors,
+    const std::string& index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
     index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::COSINE;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    create_index_info.index_type = index_type;
     create_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
 
@@ -218,17 +318,361 @@ BuildNullableVectorIndex(int64_t total_count,
 
     auto build_dataset =
         knowhere::GenDataSet(vectors.size() / dim, dim, vectors.data());
+    build_dataset->SetIdMapData(
+        knowhere::IdMapData::FromValidData(valid_data, total_count));
     auto build_conf = knowhere::Json{
         {knowhere::meta::METRIC_TYPE, knowhere::metric::COSINE},
         {knowhere::meta::DIM, std::to_string(dim)},
         {knowhere::indexparam::NLIST, "128"},
+        {"M", "16"},
+        {"efConstruction", "100"},
     };
     index_base->BuildWithDataset(build_dataset, build_conf);
-    vector_index->BuildValidData(valid_data, total_count);
     return index_base;
 }
 
+struct NullableRawVectorFixture {
+    SchemaPtr schema;
+    FieldId vector_field;
+    FieldId pk_field;
+    int64_t total_count = 0;
+    int64_t valid_count = 0;
+    int64_t filtered_logical = 0;
+    int64_t target_logical = 0;
+    std::unique_ptr<bool[]> valid_data;
+    std::vector<float> compact_vectors;
+    std::vector<float> query;
+};
+
+NullableRawVectorFixture
+MakeNullableRawVectorFixture(int64_t total_count = 1400,
+                             int64_t filtered_logical = 1100,
+                             int64_t target_logical = 1200) {
+    NullableRawVectorFixture fixture;
+    fixture.schema = std::make_shared<Schema>();
+    fixture.vector_field = fixture.schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::L2, true);
+    fixture.pk_field = fixture.schema->AddDebugField("pk", DataType::INT64);
+    fixture.schema->set_primary_field_id(fixture.pk_field);
+    fixture.total_count = total_count;
+    fixture.filtered_logical = filtered_logical;
+    fixture.target_logical = target_logical;
+    fixture.valid_data = std::make_unique<bool[]>(total_count);
+    fixture.query.assign(kDim, 0.0F);
+
+    for (int64_t logical = 0; logical < total_count; ++logical) {
+        const bool valid =
+            (logical == filtered_logical || logical == target_logical)
+                ? true
+                : logical % 17 != 5;
+        fixture.valid_data[logical] = valid;
+        if (!valid) {
+            continue;
+        }
+        ++fixture.valid_count;
+        for (int64_t dim = 0; dim < kDim; ++dim) {
+            float value = 1000.0F + static_cast<float>(logical + dim);
+            if (logical == filtered_logical || logical == target_logical) {
+                value = 0.0F;
+            }
+            fixture.compact_vectors.push_back(value);
+        }
+    }
+    return fixture;
+}
+
+std::unique_ptr<InsertRecordProto>
+MakeNullableRawVectorInsertData(const NullableRawVectorFixture& fixture) {
+    std::vector<int64_t> pks(fixture.total_count);
+    std::iota(pks.begin(), pks.end(), 0);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto pk_array =
+        segcore::CreateDataArrayFrom(pks.data(),
+                                     nullptr,
+                                     fixture.total_count,
+                                     (*fixture.schema)[fixture.pk_field]);
+    auto vector_array = segcore::CreateVectorDataArrayFrom(
+        fixture.compact_vectors.data(),
+        fixture.valid_data.get(),
+        fixture.total_count,
+        fixture.valid_count,
+        (*fixture.schema)[fixture.vector_field]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    insert_data->mutable_fields_data()->AddAllocated(vector_array.release());
+    insert_data->set_num_rows(fixture.total_count);
+    return insert_data;
+}
+
+std::unique_ptr<segcore::SegmentGrowing>
+MakeGrowingNullableRawVectorSegment(const NullableRawVectorFixture& fixture) {
+    auto& config = segcore::SegcoreConfig::default_config();
+    segcore::ScopedSegcoreConfigRestore config_restore(config);
+    config.set_chunk_rows(2048);
+    config.set_enable_interim_segment_index(false);
+
+    auto segment = segcore::CreateGrowingSegment(
+        fixture.schema, empty_index_meta, 0, config);
+    auto insert_data = MakeNullableRawVectorInsertData(fixture);
+    std::vector<idx_t> row_ids(fixture.total_count);
+    std::vector<Timestamp> timestamps(fixture.total_count, 100);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+    auto offset = segment->PreInsert(fixture.total_count);
+    segment->Insert(offset,
+                    fixture.total_count,
+                    row_ids.data(),
+                    timestamps.data(),
+                    insert_data.get());
+    return segment;
+}
+
+SearchInfo
+MakeNullableRawVectorSearchInfo(FieldId vector_field,
+                                int64_t topk,
+                                std::optional<float> radius = std::nullopt,
+                                bool iterator_v2 = false) {
+    SearchInfo search_info;
+    search_info.field_id_ = vector_field;
+    search_info.topk_ = topk;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::indexparam::NPROBE, "1"},
+    };
+    if (radius.has_value()) {
+        search_info.search_params_[knowhere::meta::RADIUS] = radius.value();
+    }
+    if (iterator_v2) {
+        SearchIteratorV2Info iterator_info;
+        iterator_info.batch_size = topk;
+        search_info.iterator_v2_info_ = iterator_info;
+    }
+    return search_info;
+}
+
+BitsetView
+MakeSingleFilteredBitset(TargetBitmap& bitmap, int64_t filtered_logical) {
+    bitmap.set(filtered_logical);
+    return BitsetView(bitmap);
+}
+
+void
+ExpectTargetReturnedAndFilteredSkipped(const SearchResult& result,
+                                       int64_t target_logical,
+                                       int64_t filtered_logical) {
+    ASSERT_FALSE(result.seg_offsets_.empty());
+    EXPECT_EQ(result.seg_offsets_[0], target_logical);
+    EXPECT_EQ(std::find(result.seg_offsets_.begin(),
+                        result.seg_offsets_.end(),
+                        filtered_logical),
+              result.seg_offsets_.end())
+        << "filtered logical id must not be returned";
+}
+
+SearchResult
+SearchGrowingNullableRawBruteForce(const NullableRawVectorFixture& fixture,
+                                   SearchInfo search_info) {
+    auto segment = MakeGrowingNullableRawVectorSegment(fixture);
+    auto* growing_segment =
+        dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
+    AssertInfo(growing_segment != nullptr, "failed to create growing segment");
+
+    search_info.active_count_ = fixture.total_count;
+    TargetBitmap filter(fixture.total_count, false);
+    auto bitset = MakeSingleFilteredBitset(filter, fixture.filtered_logical);
+
+    SearchResult result;
+    SearchOnGrowing(*growing_segment,
+                    search_info,
+                    fixture.query.data(),
+                    nullptr,
+                    1,
+                    MAX_TIMESTAMP,
+                    bitset,
+                    nullptr,
+                    result);
+    return result;
+}
+
+SearchResult
+SearchSealedNullableRawBruteForce(const NullableRawVectorFixture& fixture,
+                                  const SearchInfo& search_info,
+                                  std::vector<int64_t> rows_per_chunk = {}) {
+    std::vector<std::vector<char>> chunk_buffers;
+    auto column =
+        BuildNullableFloatVectorColumn((*fixture.schema)[fixture.vector_field],
+                                       fixture.total_count,
+                                       kDim,
+                                       fixture.valid_data.get(),
+                                       fixture.compact_vectors,
+                                       chunk_buffers,
+                                       std::move(rows_per_chunk));
+    AssertInfo(column->GetOffsetMapping().IsEnabled(),
+               "sealed nullable column must build an offset mapping");
+
+    TargetBitmap filter(fixture.total_count, false);
+    auto bitset = MakeSingleFilteredBitset(filter, fixture.filtered_logical);
+
+    SearchResult result;
+    SearchOnSealedColumn(*fixture.schema,
+                         column.get(),
+                         search_info,
+                         std::map<std::string, std::string>{},
+                         fixture.query.data(),
+                         nullptr,
+                         1,
+                         fixture.total_count,
+                         bitset,
+                         nullptr,
+                         result);
+    return result;
+}
+
 }  // namespace
+
+TEST(StrictGroupHnswSearch, PreservesParametersForIndependentPhaseTwo) {
+    constexpr int64_t n = 1000;
+    auto schema = std::make_shared<Schema>();
+    auto vector_field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE);
+    auto group_field = schema->AddDebugField("group", DataType::INT64);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto data = segcore::DataGen(schema, n);
+    for (auto& column : *data.raw_->mutable_fields_data()) {
+        if (column.field_id() == group_field.get()) {
+            for (int64_t i = 0; i < n; ++i) {
+                column.mutable_scalars()->mutable_long_data()->set_data(i,
+                                                                        i % 2);
+            }
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto vectors = MakeCompactVectors(n, kDim);
+    auto valid = std::make_unique<bool[]>(n);
+    std::fill_n(valid.get(), n, true);
+    auto index =
+        BuildNullableVectorIndex(n, kDim, valid.get(), vectors, "HNSW");
+    auto entry = MakeSealedIndexingEntry(
+        knowhere::metric::COSINE,
+        CreateTestCacheIndex("strict-hnsw-ef-regression", std::move(index)));
+    for (const auto& [ef, as_string] : std::vector<std::pair<int, bool>>{
+             {0, false}, {32, false}, {64, false}, {32, true}, {64, true}}) {
+        SCOPED_TRACE(ef);
+        auto info = MakeGroupBySearchInfo(
+            vector_field, group_field, knowhere::metric::COSINE);
+        info.topk_ = 2;
+        info.group_size_ = 5;
+        info.search_params_ = knowhere::Json::object();
+        if (ef != 0)
+            info.search_params_["ef"] = as_string
+                                            ? knowhere::Json(std::to_string(ef))
+                                            : knowhere::Json(ef);
+        const auto original_params = info.search_params_;
+        SearchResult result;
+        SearchOnSealedIndex(*schema,
+                            entry,
+                            info,
+                            vectors.data(),
+                            nullptr,
+                            1,
+                            {},
+                            nullptr,
+                            result);
+        // VectorSearchNode normally supplies the segment row count.
+        result.total_data_cnt_ = n;
+        ASSERT_TRUE(result.CanSearchFilteredVectors());
+        auto filter = std::make_shared<TargetBitmap>(n, false);
+        // Inherited explicit parameters are valid for both quotas. When ef is
+        // absent, leave default selection to the backend.
+        for (int64_t remaining : {4, 32}) {
+            auto completed = result.SearchFilteredVectors(filter, remaining);
+            ASSERT_TRUE(completed);
+            ASSERT_EQ((**completed).seg_offsets_.size(), remaining);
+            for (auto id : (**completed).seg_offsets_) EXPECT_GE(id, 0);
+            const auto phase2 = StrictGroupSearchInfo(info, remaining);
+            auto expected_params = original_params;
+            expected_params[knowhere::meta::TOPK] = remaining;
+            expected_params["skip_refine"] = false;
+            EXPECT_EQ(phase2.search_params_, expected_params);
+        }
+        std::vector<CompositeGroupKey> groups;
+        std::vector<int64_t> offsets;
+        std::vector<float> distances;
+        std::vector<size_t> prefix;
+        exec::SearchGroupBy(nullptr,
+                            *result.vector_iterators_,
+                            info,
+                            groups,
+                            *segment,
+                            offsets,
+                            distances,
+                            prefix,
+                            nullptr,
+                            &result);
+        EXPECT_EQ(offsets.size(), 10);
+        EXPECT_EQ(info.search_params_, original_params);
+        EXPECT_EQ(info.topk_, 2);
+        EXPECT_EQ(info.group_size_, 5);
+    }
+    // Invalid first-phase tuning must still fail in the backend. Independent
+    // completion parameters are not a way to bypass initial validation.
+    for (const auto& ef : {knowhere::Json(-1), knowhere::Json("invalid")}) {
+        auto info = MakeGroupBySearchInfo(
+            vector_field, group_field, knowhere::metric::COSINE);
+        info.search_params_ = {{"ef", ef}};
+        SearchResult result;
+        result.total_data_cnt_ = n;
+        EXPECT_THROW(SearchOnSealedIndex(*schema,
+                                         entry,
+                                         info,
+                                         vectors.data(),
+                                         nullptr,
+                                         1,
+                                         {},
+                                         nullptr,
+                                         result),
+                     SegcoreError);
+    }
+}
+
+TEST(StrictGroupIvfSearch, IndependentPhaseTwoPreservesSearchParameters) {
+    constexpr int64_t n = 2000;
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE);
+    auto group = schema->AddDebugField("group", DataType::INT64);
+    auto vectors = MakeCompactVectors(n, kDim);
+    auto valid = std::make_unique<bool[]>(n);
+    std::fill_n(valid.get(), n, true);
+    auto index = BuildNullableVectorIndex(n, kDim, valid.get(), vectors);
+    auto entry = MakeSealedIndexingEntry(
+        knowhere::metric::COSINE,
+        CreateTestCacheIndex("strict-ivf-independent-search",
+                             std::move(index)));
+    auto info = MakeGroupBySearchInfo(field, group, knowhere::metric::COSINE);
+    info.topk_ = 2;
+    info.group_size_ = 5;
+    info.search_params_ = {{"nprobe", 1}, {"ef", 2}};
+    const auto params = info.search_params_;
+    SearchResult result;
+    result.total_data_cnt_ = n;
+    SearchOnSealedIndex(
+        *schema, entry, info, vectors.data(), nullptr, 1, {}, nullptr, result);
+    ASSERT_TRUE(result.CanSearchFilteredVectors());
+    auto filter = std::make_shared<TargetBitmap>(n, false);
+    (*filter)[0] = true;
+    auto completed = result.SearchFilteredVectors(filter, 4);
+    ASSERT_TRUE(completed);
+    ASSERT_EQ((**completed).seg_offsets_.size(), 4);
+    for (auto id : (**completed).seg_offsets_) EXPECT_GT(id, 0);
+    const auto phase2 = StrictGroupSearchInfo(info, 4);
+    auto expected_params = params;
+    expected_params[knowhere::meta::TOPK] = 4;
+    expected_params["skip_refine"] = false;
+    EXPECT_EQ(phase2.search_params_, expected_params);
+    EXPECT_EQ(info.search_params_, params);
+}
 
 TEST(SearchOnSealedIndexBitsetLifetime,
      GroupByIteratorMustNotKeepDanglingTransformedBitset) {
@@ -248,7 +692,9 @@ TEST(SearchOnSealedIndexBitsetLifetime,
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
-    ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
+    ASSERT_TRUE(vector_index->HasValidData());
+    ASSERT_EQ(vector_index->GetIdMap().OutCount(), total_count);
+    ASSERT_EQ(vector_index->GetValidCount(), valid_count);
 
     auto indexing_entry = MakeSealedIndexingEntry(
         knowhere::metric::COSINE,
@@ -273,7 +719,57 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         nullptr,
                         search_result);
 
-    AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
+    // Indexed nullable search now passes the caller's logical bitset directly
+    // to Knowhere; there is no Milvus-side transformed bitset to pin.
+    AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count, 0);
+    auto additional_filter = MakeAdditionalFilter(total_count);
+    AssertSearchUsesCombinedLogicalFilter(
+        search_result,
+        logical_bitset_bytes,
+        additional_filter,
+        [&](int64_t offset) { return valid_data[offset]; });
+
+    auto non_strict_search_info = search_info;
+    non_strict_search_info.strict_group_size_ = false;
+    SearchResult non_strict_result;
+    SearchOnSealedIndex(*schema,
+                        indexing_entry,
+                        non_strict_search_info,
+                        query.data(),
+                        nullptr,
+                        1,
+                        logical_bitset,
+                        nullptr,
+                        non_strict_result);
+    EXPECT_FALSE(non_strict_result.CanSearchFilteredVectors());
+
+    auto single_group_result_search_info = search_info;
+    single_group_result_search_info.group_size_ = 1;
+    SearchResult single_group_result;
+    SearchOnSealedIndex(*schema,
+                        indexing_entry,
+                        single_group_result_search_info,
+                        query.data(),
+                        nullptr,
+                        1,
+                        logical_bitset,
+                        nullptr,
+                        single_group_result);
+    EXPECT_FALSE(single_group_result.CanSearchFilteredVectors());
+
+    std::vector<float> two_queries = query;
+    two_queries.insert(two_queries.end(), query.begin(), query.end());
+    SearchResult multiple_query_result;
+    SearchOnSealedIndex(*schema,
+                        indexing_entry,
+                        search_info,
+                        two_queries.data(),
+                        nullptr,
+                        2,
+                        logical_bitset,
+                        nullptr,
+                        multiple_query_result);
+    EXPECT_FALSE(multiple_query_result.CanSearchFilteredVectors());
 }
 
 TEST(SearchOnSealedIndexCachePinLifetime,
@@ -294,7 +790,9 @@ TEST(SearchOnSealedIndexCachePinLifetime,
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
-    ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
+    ASSERT_TRUE(vector_index->HasValidData());
+    ASSERT_EQ(vector_index->GetIdMap().OutCount(), total_count);
+    ASSERT_EQ(vector_index->GetValidCount(), valid_count);
 
     auto cache_index = CreateTestCacheIndex(
         "nullable-vector-index-pin-lifetime", std::move(index_base));
@@ -396,8 +894,9 @@ TEST(SearchOnSealedIndexNullableNoFilter,
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
-    ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
-    ASSERT_EQ(vector_index->GetOffsetMapping().GetValidCount(), valid_count);
+    ASSERT_TRUE(vector_index->HasValidData());
+    ASSERT_EQ(vector_index->GetIdMap().OutCount(), total_count);
+    ASSERT_EQ(vector_index->GetValidCount(), valid_count);
 
     auto indexing_entry = MakeSealedIndexingEntry(
         knowhere::metric::COSINE,
@@ -508,6 +1007,9 @@ TEST(SearchOnGrowingBitsetLifetime,
     const auto& vector_data = FindFieldData(dataset, vector_field);
     auto valid_count = CountValidRows(vector_data, total_count);
     ASSERT_GT(valid_count, 0);
+    ASSERT_LT(valid_count, total_count);
+    const auto& row_validity = GetFieldDataRowValidData(vector_data);
+    ASSERT_EQ(row_validity.size(), total_count);
 
     auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
     auto reserved_offset = segment->PreInsert(total_count);
@@ -540,7 +1042,14 @@ TEST(SearchOnGrowingBitsetLifetime,
                     search_result);
 
     ASSERT_EQ(search_result.resource_pins_.size(), 1);
-    AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
+    AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count, 0);
+    auto additional_filter = MakeAdditionalFilter(total_count);
+    AssertSearchUsesCombinedLogicalFilter(
+        search_result,
+        logical_bitset_bytes,
+        additional_filter,
+        [&](int64_t offset) { return row_validity.Get(offset); });
+
     search_result.vector_iterators_.reset();
 
     // The storage reference outlives SearchOnGrowing and is released wherever
@@ -625,6 +1134,142 @@ TEST(SearchOnGrowingBitsetLifetime, NullableGrowingEmptyBitsetMeansNoFilter) {
         [](int64_t offset) { return offset != INVALID_SEG_OFFSET; });
     EXPECT_GT(matched, 0)
         << "an empty bitset must not be read as zero visible rows";
+}
+
+TEST(SearchOnGrowingNullableRawBruteForce,
+     KnnUsesLogicalBitsetAndResultIdsAcrossIdMapChunks) {
+    auto fixture = MakeNullableRawVectorFixture();
+    auto search_info = MakeNullableRawVectorSearchInfo(fixture.vector_field, 1);
+    auto result = SearchGrowingNullableRawBruteForce(fixture, search_info);
+
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    ExpectTargetReturnedAndFilteredSkipped(
+        result, fixture.target_logical, fixture.filtered_logical);
+}
+
+TEST(SearchOnGrowingNullableRawBruteForce,
+     RangeSearchUsesLogicalBitsetAndResultIdsAcrossIdMapChunks) {
+    auto fixture = MakeNullableRawVectorFixture();
+    auto search_info =
+        MakeNullableRawVectorSearchInfo(fixture.vector_field, 2, 0.01F);
+    auto result = SearchGrowingNullableRawBruteForce(fixture, search_info);
+
+    ASSERT_EQ(result.seg_offsets_.size(), 2);
+    ExpectTargetReturnedAndFilteredSkipped(
+        result, fixture.target_logical, fixture.filtered_logical);
+}
+
+TEST(SearchOnGrowingNullableRawBruteForce,
+     IteratorUsesLogicalBitsetAndResultIdsAcrossIdMapChunks) {
+    auto fixture = MakeNullableRawVectorFixture();
+    auto search_info = MakeNullableRawVectorSearchInfo(
+        fixture.vector_field, 1, std::nullopt, true);
+    auto result = SearchGrowingNullableRawBruteForce(fixture, search_info);
+
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    ExpectTargetReturnedAndFilteredSkipped(
+        result, fixture.target_logical, fixture.filtered_logical);
+}
+
+TEST(SearchOnGrowingNullableRawBruteForce,
+     VectorArrayRowSearchReturnsLogicalIds) {
+    constexpr int64_t dim = 2;
+    constexpr int64_t row_count = 4;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_field = schema->AddDebugField("pk", DataType::INT64);
+    auto vector_field =
+        schema->AddDebugVectorArrayField("emb",
+                                         DataType::VECTOR_FLOAT,
+                                         dim,
+                                         knowhere::metric::MAX_SIM_COSINE,
+                                         true);
+    schema->set_primary_field_id(pk_field);
+
+    auto& config = segcore::SegcoreConfig::default_config();
+    segcore::ScopedSegcoreConfigRestore config_restore(config);
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(false);
+
+    auto segment =
+        segcore::CreateGrowingSegment(schema, empty_index_meta, 0, config);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(row_count);
+
+    auto pk_data = insert_data->add_fields_data();
+    pk_data->set_field_id(pk_field.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+    for (int64_t pk = 0; pk < row_count; ++pk) {
+        pk_data->mutable_scalars()->mutable_long_data()->add_data(pk);
+    }
+
+    auto array_data = insert_data->add_fields_data();
+    array_data->set_field_id(vector_field.get());
+    array_data->set_type(proto::schema::DataType::ArrayOfVector);
+    array_data->add_valid_data(false);
+    array_data->add_valid_data(true);
+    array_data->add_valid_data(true);
+    array_data->add_valid_data(true);
+    array_data->mutable_vectors()->set_dim(dim);
+    auto vector_array = array_data->mutable_vectors()->mutable_vector_array();
+    vector_array->set_dim(dim);
+    vector_array->set_element_type(proto::schema::DataType::FloatVector);
+
+    auto empty_row = vector_array->add_data();
+    empty_row->set_dim(dim);
+    empty_row->mutable_float_vector();
+
+    auto target_row = vector_array->add_data();
+    target_row->set_dim(dim);
+    target_row->mutable_float_vector()->add_data(1.0F);
+    target_row->mutable_float_vector()->add_data(0.0F);
+
+    auto control_row = vector_array->add_data();
+    control_row->set_dim(dim);
+    control_row->mutable_float_vector()->add_data(0.0F);
+    control_row->mutable_float_vector()->add_data(1.0F);
+
+    std::vector<idx_t> row_ids(row_count);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+    std::vector<Timestamp> timestamps(row_count, 100);
+    auto reserved_offset = segment->PreInsert(row_count);
+    segment->Insert(reserved_offset,
+                    row_count,
+                    row_ids.data(),
+                    timestamps.data(),
+                    insert_data.get());
+
+    auto* growing_segment =
+        dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    SearchInfo search_info;
+    search_info.field_id_ = vector_field;
+    search_info.topk_ = 2;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::MAX_SIM_COSINE;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::MAX_SIM_COSINE}};
+    search_info.active_count_ = row_count;
+
+    std::vector<float> query{1.0F, 0.0F};
+    std::vector<size_t> query_offsets{0, 1};
+
+    SearchResult result;
+    SearchOnGrowing(*growing_segment,
+                    search_info,
+                    query.data(),
+                    query_offsets.data(),
+                    1,
+                    MAX_TIMESTAMP,
+                    BitsetView{},
+                    nullptr,
+                    result);
+
+    ASSERT_EQ(result.seg_offsets_.size(), 2);
+    EXPECT_EQ(result.seg_offsets_[0], 2);
+    EXPECT_EQ(result.seg_offsets_[1], 3);
 }
 
 void
@@ -918,6 +1563,183 @@ TEST(SearchOnGrowingBitsetLifetime,
     AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(false);
 }
 
+TEST(SearchOnSealedColumnCancellation,
+     LazyMaterializationUsesCallerContextAndAllowsRetry) {
+    for (const bool nullable : {false, true}) {
+        SCOPED_TRACE(nullable);
+        constexpr int64_t num_rows = 3;
+        constexpr int64_t dim = 2;
+        Schema schema;
+        const auto field_id = schema.AddDebugField("vector",
+                                                   DataType::VECTOR_FLOAT,
+                                                   dim,
+                                                   knowhere::metric::L2,
+                                                   nullable);
+        const std::vector<float> vectors =
+            nullable ? std::vector<float>{0, 0, 2, 0}
+                     : std::vector<float>{0, 0, 1, 0, 2, 0};
+        const size_t bitmap_bytes = nullable ? 1 : 0;
+        std::vector<char> buffer(bitmap_bytes + vectors.size() * sizeof(float));
+        if (nullable) {
+            buffer[0] = 0b00000101;
+        }
+        std::memcpy(buffer.data() + bitmap_bytes,
+                    vectors.data(),
+                    vectors.size() * sizeof(float));
+        auto chunk = std::make_shared<FixedWidthChunk>(
+            num_rows,
+            dim,
+            buffer.data(),
+            buffer.size(),
+            sizeof(float),
+            nullable,
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, ""));
+        int factory_calls = 0;
+        OpContext* observed_ctx = nullptr;
+        auto group = std::make_shared<ChunkedColumnGroup>(
+            num_rows, 1, [&](OpContext* op_ctx) {
+                observed_ctx = op_ctx;
+                ++factory_calls;
+                segcore::CheckCancellation(op_ctx, 1, "lazy vector search");
+                std::unordered_map<FieldId, std::shared_ptr<Chunk>> fields;
+                fields.emplace(field_id, chunk);
+                std::vector<std::unique_ptr<GroupChunk>> chunks;
+                chunks.push_back(std::make_unique<GroupChunk>(fields));
+                return std::make_unique<TestGroupChunkTranslator>(
+                    1,
+                    std::vector<int64_t>{num_rows},
+                    nullable ? "lazy-nullable-search-ctx" : "lazy-search-ctx",
+                    std::move(chunks));
+            });
+        std::shared_ptr<ChunkedColumnInterface> column =
+            std::make_shared<ProxyChunkColumn>(
+                group, field_id, schema[field_id]);
+        auto search_info = MakeNullableRawVectorSearchInfo(field_id, 2);
+        const std::vector<float> query_vector{2, 0};
+        auto search = [&](OpContext* op_ctx) {
+            SearchResult result;
+            SearchOnSealedColumn(schema,
+                                 column.get(),
+                                 search_info,
+                                 {},
+                                 query_vector.data(),
+                                 nullptr,
+                                 1,
+                                 num_rows,
+                                 BitsetView{},
+                                 op_ctx,
+                                 result);
+            return result;
+        };
+
+        folly::CancellationSource cancelled;
+        cancelled.requestCancellation();
+        OpContext cancelled_ctx(cancelled.getToken());
+        try {
+            search(&cancelled_ctx);
+            FAIL() << "expected cancelled lazy vector initialization";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+        EXPECT_EQ(observed_ctx, &cancelled_ctx);
+        EXPECT_FALSE(group->IsMaterialized());
+        EXPECT_FALSE(column->GetOffsetMapping().IsEnabled());
+        EXPECT_EQ(factory_calls, 1);
+
+        OpContext fresh_ctx;
+        auto result = search(&fresh_ctx);
+        EXPECT_EQ(observed_ctx, &fresh_ctx);
+        EXPECT_TRUE(group->IsMaterialized());
+        EXPECT_EQ(factory_calls, 2);
+        ASSERT_EQ(result.seg_offsets_.size(), 2);
+        EXPECT_EQ(result.seg_offsets_[0], 2);
+        EXPECT_EQ(result.seg_offsets_[1], nullable ? 0 : 1);
+        ASSERT_EQ(result.distances_.size(), 2);
+        EXPECT_FLOAT_EQ(result.distances_[0], 0);
+        EXPECT_FLOAT_EQ(result.distances_[1], nullable ? 4 : 1);
+        if (nullable) {
+            const auto& mapping = column->GetOffsetMapping();
+            EXPECT_TRUE(mapping.IsEnabled());
+            EXPECT_EQ(mapping.GetValidCount(), 2);
+            EXPECT_EQ(mapping.GetPhysicalOffset(1), -1);
+            EXPECT_EQ(mapping.GetPhysicalOffset(2), 1);
+        }
+    }
+}
+
+TEST(SearchOnSealedColumnNullableRawBruteForce,
+     KnnUsesLogicalBitsetAndResultIds) {
+    auto fixture = MakeNullableRawVectorFixture();
+    auto search_info = MakeNullableRawVectorSearchInfo(fixture.vector_field, 1);
+    auto result = SearchSealedNullableRawBruteForce(fixture, search_info);
+
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    ExpectTargetReturnedAndFilteredSkipped(
+        result, fixture.target_logical, fixture.filtered_logical);
+}
+
+TEST(SearchOnSealedColumnNullableRawBruteForce,
+     KnnUsesLogicalBitsetAndResultIdsAcrossPhysicalChunks) {
+    auto fixture = MakeNullableRawVectorFixture();
+    auto search_info = MakeNullableRawVectorSearchInfo(fixture.vector_field, 1);
+    auto result =
+        SearchSealedNullableRawBruteForce(fixture, search_info, {700, 700});
+
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    ExpectTargetReturnedAndFilteredSkipped(
+        result, fixture.target_logical, fixture.filtered_logical);
+}
+
+TEST(SearchOnSealedColumnNullableRawBruteForce,
+     RangeSearchUsesLogicalBitsetAndResultIds) {
+    auto fixture = MakeNullableRawVectorFixture();
+    auto search_info =
+        MakeNullableRawVectorSearchInfo(fixture.vector_field, 2, 0.01F);
+    auto result = SearchSealedNullableRawBruteForce(fixture, search_info);
+
+    ASSERT_EQ(result.seg_offsets_.size(), 2);
+    ExpectTargetReturnedAndFilteredSkipped(
+        result, fixture.target_logical, fixture.filtered_logical);
+}
+
+TEST(SearchOnSealedColumnNullableRawBruteForce,
+     RangeSearchUsesLogicalBitsetAndResultIdsAcrossPhysicalChunks) {
+    auto fixture = MakeNullableRawVectorFixture();
+    auto search_info =
+        MakeNullableRawVectorSearchInfo(fixture.vector_field, 2, 0.01F);
+    auto result =
+        SearchSealedNullableRawBruteForce(fixture, search_info, {700, 700});
+
+    ASSERT_EQ(result.seg_offsets_.size(), 2);
+    ExpectTargetReturnedAndFilteredSkipped(
+        result, fixture.target_logical, fixture.filtered_logical);
+}
+
+TEST(SearchOnSealedColumnNullableRawBruteForce,
+     IteratorUsesLogicalBitsetAndResultIds) {
+    auto fixture = MakeNullableRawVectorFixture();
+    auto search_info = MakeNullableRawVectorSearchInfo(
+        fixture.vector_field, 1, std::nullopt, true);
+    auto result = SearchSealedNullableRawBruteForce(fixture, search_info);
+
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    ExpectTargetReturnedAndFilteredSkipped(
+        result, fixture.target_logical, fixture.filtered_logical);
+}
+
+TEST(SearchOnSealedColumnNullableRawBruteForce,
+     IteratorUsesLogicalBitsetAndResultIdsAcrossPhysicalChunks) {
+    auto fixture = MakeNullableRawVectorFixture();
+    auto search_info = MakeNullableRawVectorSearchInfo(
+        fixture.vector_field, 1, std::nullopt, true);
+    auto result =
+        SearchSealedNullableRawBruteForce(fixture, search_info, {700, 700});
+
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    ExpectTargetReturnedAndFilteredSkipped(
+        result, fixture.target_logical, fixture.filtered_logical);
+}
+
 TEST(SearchOnSealedColumnBitsetLifetime,
      GroupByIteratorMustNotKeepDanglingTransformedBitset) {
     constexpr int64_t total_count = 512;
@@ -961,7 +1783,72 @@ TEST(SearchOnSealedColumnBitsetLifetime,
                          nullptr,
                          search_result);
 
-    AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
+    AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count, 0);
+    auto additional_filter = MakeAdditionalFilter(total_count);
+    AssertSearchUsesCombinedLogicalFilter(
+        search_result,
+        logical_bitset_bytes,
+        additional_filter,
+        [&](int64_t offset) { return valid_data[offset]; });
+}
+
+TEST(ElementNullableVectorArraySearch, RejectsUnsupportedRepresentation) {
+    auto schema = std::make_shared<Schema>();
+    auto primary_key = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(primary_key);
+    auto vector_array =
+        schema->AddDebugVectorArrayField("vectors",
+                                         DataType::VECTOR_FLOAT,
+                                         kDim,
+                                         knowhere::metric::L2,
+                                         /*nullable=*/false,
+                                         /*element_nullable=*/true);
+
+    SearchInfo search_info;
+    search_info.field_id_ = vector_array;
+    search_info.topk_ = 1;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::L2;
+    std::vector<float> query(kDim, 0.0F);
+
+    segcore::SealedIndexingEntry entry;
+    SearchResult sealed_index_result;
+    EXPECT_ANY_THROW(SearchOnSealedIndex(*schema,
+                                         entry,
+                                         search_info,
+                                         query.data(),
+                                         nullptr,
+                                         1,
+                                         BitsetView{},
+                                         nullptr,
+                                         sealed_index_result));
+
+    SearchResult sealed_column_result;
+    EXPECT_ANY_THROW(SearchOnSealedColumn(*schema,
+                                          nullptr,
+                                          search_info,
+                                          {},
+                                          query.data(),
+                                          nullptr,
+                                          1,
+                                          0,
+                                          BitsetView{},
+                                          nullptr,
+                                          sealed_column_result));
+
+    auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing = dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    SearchResult growing_result;
+    EXPECT_ANY_THROW(SearchOnGrowing(*growing,
+                                     search_info,
+                                     query.data(),
+                                     nullptr,
+                                     1,
+                                     MAX_TIMESTAMP,
+                                     BitsetView{},
+                                     nullptr,
+                                     growing_result));
 }
 
 }  // namespace milvus::query

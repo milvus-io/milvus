@@ -710,7 +710,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
  public:
     PhyBinaryArithOpEvalRangeExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr>&
             expr,
         const std::string& name,
@@ -787,6 +787,27 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         }
     }
 
+    bool
+    SupportsRawExprCache() const override {
+        if (expr_->column_.element_level_) {
+            return false;
+        }
+        switch (expr_->column_.data_type_) {
+            case DataType::BOOL:
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
+            case DataType::INT64:
+            case DataType::FLOAT:
+            case DataType::DOUBLE:
+            case DataType::JSON:
+            case DataType::ARRAY:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     std::string
     ToString() const override {
         return fmt::format("{}", expr_->ToString());
@@ -802,12 +823,10 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         return expr_->column_;
     }
 
-    void
-    PrefetchRawData() override;
-
-    template <typename T>
-    void
-    PrefetchRawData();
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
 
  private:
     template <typename T>
@@ -830,9 +849,9 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);
 
-    template <typename ValueType>
+    template <typename ArrayType, typename ValueType, bool ElementLevel>
     VectorPtr
-    ExecRangeVisitorImplForVectorArray(OffsetVector* input = nullptr);
+    ExecArrayLength(OffsetVector* input = nullptr);
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;

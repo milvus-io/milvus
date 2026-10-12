@@ -127,7 +127,9 @@ func (f *Formatter) Format(i info.AccessInfo) string {
 func parseConfigKey(k string) (string, string, error) {
 	fields := strings.Split(k, ".")
 	if len(fields) != 2 || (fields[1] != fomaterkey && fields[1] != methodKey) {
-		return "", "", merr.WrapErrParameterInvalid("<FormatterName>.(format|methods)", k, "parse accsslog formatter config key failed")
+		// Dynamic names are request payload. This error is also logged by the
+		// refresh callback, so describe the required shape without echoing k.
+		return "", "", merr.WrapErrParameterInvalidMsg("access log formatter key must match <FormatterName>.(format|methods)")
 	}
 	return fields[0], fields[1], nil
 }

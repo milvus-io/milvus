@@ -42,6 +42,7 @@ set(MILVUS_TEST_FILES
         test_loading.cpp
         test_exec.cpp
         test_timestamptz_arith_compare.cpp
+        test_timestamptz_compare.cpp
         test_offsets_eval_correctness.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
@@ -54,6 +55,10 @@ set(MILVUS_TEST_FILES
         test_scorer.cpp
         test_sealed.cpp
         test_storage.cpp
+        test_s3_endpoint_auth.cpp
+        test_minio_endpoint_auth.cpp
+        test_plugin_loader.cpp
+        test_gcp_chunk_manager.cpp
         test_string_expr.cpp
         test_rust_result.cpp
         test_storage_v2_index_raw_data.cpp
@@ -61,7 +66,6 @@ set(MILVUS_TEST_FILES
         test_element_filter.cpp
         test_query_group_by.cpp
         test_minhash.cpp
-        test_async_warmup.cpp
         test_boost_score_c.cpp
         test_sort_buffer.cpp
         test_row_container.cpp
@@ -77,6 +81,10 @@ set(MILVUS_TEST_FILES
         test_growing_concurrent_reopen.cpp
         test_segment_read_lease.cpp
         CipherPluginContextTest.cpp
+        test_knowhere_status_mapping.cpp
+        test_storage_error_code.cpp
+        test_loon_ffi_error_passthrough.cpp
+        test_cabi_exception_containment.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
@@ -110,6 +118,12 @@ endif()
 # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
 # once done, move this line to the else branch of `if (DEFINED AZURE_BUILD_DIR)`
 list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "RemoteChunkManagerTest\\.cpp$")
+
+# ArrowFileSystemChunkManagerRemoteTest needs a live object store (MinIO); the
+# cpp-ut environment has none (MINIO_ADDRESS points at the docker-compose
+# `minio` service, unresolvable there), so keep it out of all_tests like the
+# real-object-storage tests above.
+list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ArrowFileSystemChunkManagerRemoteTest\\.cpp$")
 
 if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)

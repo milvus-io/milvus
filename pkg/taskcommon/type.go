@@ -28,6 +28,9 @@ const (
 	Analyze                   Type = "Analyze"
 	RefreshExternalCollection Type = "RefreshExternalCollection"
 	CopySegment               Type = "CopySegment"
+	// ExternalCopySegment is a fail-closed capability discriminator. Workers
+	// predating foreign-source copy support reject it before decoding the task.
+	ExternalCopySegment Type = "ExternalCopySegment"
 )
 
 var TypeList = []Type{
@@ -39,4 +42,5 @@ var TypeList = []Type{
 	Analyze,
 	RefreshExternalCollection,
 	CopySegment,
+	ExternalCopySegment,
 }

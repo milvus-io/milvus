@@ -2,10 +2,12 @@ package segcore_test
 
 import (
 	"context"
+	"path"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -160,7 +162,8 @@ func TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp(t *testing.T) {
 		PartitionID:     2,
 		CommitTimestamp: 9999,
 	}
-	result := segcore.ConvertToSegcoreSegmentLoadInfo(info)
+	result, err := segcore.ConvertToSegcoreSegmentLoadInfo(info)
+	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, int64(42), result.GetSegmentID(),
 		"SegmentID must be preserved through conversion")
@@ -176,7 +179,8 @@ func TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp(t *testing.T) {
 		PartitionID:  2,
 		// CommitTimestamp = 0
 	}
-	result2 := segcore.ConvertToSegcoreSegmentLoadInfo(info2)
+	result2, err := segcore.ConvertToSegcoreSegmentLoadInfo(info2)
+	assert.NoError(t, err)
 	assert.NotNil(t, result2)
 	assert.Equal(t, int64(43), result2.GetSegmentID(),
 		"SegmentID must be preserved through conversion when CommitTimestamp is zero")
@@ -184,13 +188,15 @@ func TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp(t *testing.T) {
 
 func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 	t.Run("nil input", func(t *testing.T) {
-		result := segcore.ConvertToSegcoreSegmentLoadInfo(nil)
+		result, err := segcore.ConvertToSegcoreSegmentLoadInfo(nil)
+		assert.NoError(t, err)
 		assert.Nil(t, result)
 	})
 
 	t.Run("empty input", func(t *testing.T) {
 		src := &querypb.SegmentLoadInfo{}
-		result := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		assert.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.Equal(t, int64(0), result.SegmentID)
 		assert.Equal(t, int64(0), result.PartitionID)
@@ -319,7 +325,8 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 		}
 
 		// Convert to segcorepb.SegmentLoadInfo
-		result := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		assert.NoError(t, err)
 
 		// Validate basic fields
 		assert.NotNil(t, result)
@@ -425,7 +432,8 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 			},
 		}
 
-		result := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+		assert.NoError(t, err)
 
 		assert.NotNil(t, result)
 		assert.Equal(t, 1, len(result.BinlogPaths))
@@ -458,8 +466,79 @@ func TestConvertToSegcoreSegmentLoadInfo_IndexStorePathVersion(t *testing.T) {
 		},
 	}
 
-	result := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+	result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Len(t, result.GetIndexInfos(), 1)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, result.GetIndexInfos()[0].GetIndexStorePathVersion())
+}
+
+func TestConvertToSegcoreSegmentLoadInfo_LegacyStatsRoot(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	for _, item := range []*paramtable.ParamItem{&params.CommonCfg.StorageType, &params.LocalStorageCfg.Path, &params.MinioCfg.RootPath} {
+		key, value := item.Key, item.GetValue()
+		t.Cleanup(func() { require.NoError(t, params.Save(key, value)) })
+	}
+	const localRoot = "/var/lib/milvus/data"
+	require.NoError(t, params.Save(params.LocalStorageCfg.Path.Key, localRoot))
+	require.NoError(t, params.Save(params.MinioCfg.RootPath.Key, "files"))
+	for _, backend := range []struct{ name, root string }{{"local", localRoot}, {"remote", "files"}} {
+		t.Run(backend.name, func(t *testing.T) {
+			require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, backend.name))
+			for _, version := range []int64{storage.StorageV1, storage.StorageV2} {
+				for _, fullPaths := range []bool{false, true} {
+					textBase := backend.root + "/text_log/10/1/2/3/4/106"
+					jsonBase := backend.root + "/json_stats/3/11/1/2/3/4/107"
+					textFiles := []string{"index.v3"}
+					jsonFiles := []string{"meta.json", "shared_key_index/0", "shredding_data/0/0"}
+					inputText := append([]string(nil), textFiles...)
+					inputJSON := append([]string(nil), jsonFiles...)
+					if fullPaths {
+						for i := range inputText {
+							inputText[i] = path.Join(textBase, inputText[i])
+						}
+						for i := range inputJSON {
+							inputJSON[i] = path.Join(jsonBase, inputJSON[i])
+						}
+					}
+					src := &querypb.SegmentLoadInfo{
+						StorageVersion: version, CollectionID: 2, PartitionID: 3, SegmentID: 4,
+						TextStatsLogs: map[int64]*datapb.TextIndexStats{
+							106: {FieldID: 106, BuildID: 10, Version: 1, Files: inputText},
+						},
+						JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+							107: {FieldID: 107, BuildID: 11, Version: 1, JsonKeyStatsDataFormat: 3, Files: inputJSON},
+						},
+					}
+					original := proto.Clone(src)
+					result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+					require.NoError(t, err, "version=%d fullPaths=%t", version, fullPaths)
+					assert.Equal(t, textBase, result.TextStatsLogs[106].BasePath)
+					assert.Equal(t, jsonBase, result.JsonKeyStatsLogs[107].BasePath)
+					assert.Equal(t, textFiles, result.TextStatsLogs[106].Files)
+					assert.Equal(t, jsonFiles, result.JsonKeyStatsLogs[107].Files)
+					assert.True(t, proto.Equal(original, src), "conversion must not rewrite source metadata")
+				}
+			}
+		})
+	}
+}
+
+func TestConvertToSegcoreSegmentLoadInfo_V3ManifestErrorReturnsError(t *testing.T) {
+	src := &querypb.SegmentLoadInfo{
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "not-a-valid-manifest-path",
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {FieldID: 100, BuildID: 200, Version: 1, Files: []string{"text.index"}},
+		},
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {FieldID: 101, BuildID: 201, Version: 1, Files: []string{"json.stats"}},
+		},
+	}
+
+	result, err := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
 }

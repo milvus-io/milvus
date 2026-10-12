@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	oteltrace "go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -48,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -55,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -138,6 +142,12 @@ func setTraceIDHeaderTo(header http.Header, traceID string) {
 }
 
 func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
+	return ParseUsernamePasswordWithChallenge(c, true)
+}
+
+// ParseUsernamePasswordWithChallenge lets a caller suppress the legacy Basic
+// challenge before a response is written, without changing credential parsing.
+func ParseUsernamePasswordWithChallenge(c *gin.Context, challenge bool) (string, string, bool) {
 	username, password, ok := c.Request.BasicAuth()
 	if !ok {
 		token := GetAuthorization(c)
@@ -146,7 +156,7 @@ func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
 			username = token[:i]
 			password = token[i+1:]
 		}
-	} else {
+	} else if challenge {
 		c.Header("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
 	}
 	return username, password, username != "" && password != ""
@@ -520,7 +530,7 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 // index and JSON_CONTAINS build a DOM, so a deeper document is readable by some
 // queries and not others. The request binder allows 9997 levels, so the gap is
 // reachable.
-const maxJSONDepth = 1024
+const maxJSONDepth = fieldvalidator.MaxJSONDepth
 
 // checkEngineCompatible reports the first reason the storage engine would not be
 // able to read a document back, in one pass over it.
@@ -886,9 +896,15 @@ func nullElementIn(value gjson.Result) (int, bool) {
 	return idx, found
 }
 
-func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
+func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool, fieldOps ...*schemapb.FieldPartialUpdateOp) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
+	jsonPathFields := make(map[string]bool)
+	for _, op := range fieldOps {
+		if op.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+			jsonPathFields[op.GetFieldName()] = true
+		}
+	}
 	// Escape hatch for clients that relied on the previous value handling.
 	// Read once per request rather than per field.
 	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
@@ -953,6 +969,23 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				fieldType := field.DataType
 				fieldName := field.Name
 				fieldValue := data.Get(fieldName)
+
+				// Replacement operands are JSON values, not SQL NULL or an encoded
+				// document string. Preserve their type regardless of compatibility mode.
+				if fieldType == schemapb.DataType_JSON && jsonPathFields[fieldName] {
+					if !fieldValue.Exists() {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg("JSON PATH_REPLACE field %s is required in every row", fieldName)
+					}
+					stored, err := jsonDocumentForStorage(fieldName, fieldValue.Raw)
+					if err != nil {
+						return reallyDataArray, validDataMap, err
+					}
+					reallyData[fieldName] = stored
+					if field.Nullable || field.DefaultValue != nil {
+						validDataMap[fieldName] = append(validDataMap[fieldName], true)
+					}
+					continue
+				}
 
 				// For partial update, missing fields mean "do not update this field".
 				// Explicit JSON null is handled below as an update to null for nullable fields.
@@ -1444,6 +1477,109 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 		}
 	}
 	return reallyDataArray, validDataMap, nil
+}
+
+// schemaForPathReplaceOperands validates information that would be lost during
+// REST row conversion and returns a request-local schema view. A PATH_REPLACE
+// StructArray operand must contain all children for an element path or exactly
+// the selected child for a child path. The collection schema remains complete.
+func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSchema, fieldOps []*schemapb.FieldPartialUpdateOp) (*schemapb.CollectionSchema, error) {
+	targets := make(map[string]string)
+	for _, fieldOp := range fieldOps {
+		if fieldOp.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+			targets[fieldOp.GetFieldName()] = fieldOp.GetPath()
+		}
+	}
+	if len(targets) == 0 {
+		return collSchema, nil
+	}
+
+	rows := gjson.GetBytes(body, HTTPRequestData).Array()
+	if len(rows) == 0 {
+		return collSchema, nil
+	}
+	for _, field := range collSchema.GetFields() {
+		if field.GetDataType() != schemapb.DataType_Array {
+			continue
+		}
+		if _, targeted := targets[field.GetName()]; !targeted {
+			continue
+		}
+		for rowIndex, row := range rows {
+			rawValue := gjson.Get(row.Raw, field.GetName())
+			if !rawValue.Exists() || rawValue.Type == gjson.Null {
+				continue
+			}
+			// A scalar Array has no element-level validity. Inspect the raw
+			// operand before compatibility-mode decoding can turn a null bool
+			// or float into its zero value. String() also unwraps the legacy
+			// quoted-array spelling accepted by REST row conversion.
+			if index, found := nullElementIn(gjson.Parse(rawValue.String())); found {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"row %d PATH_REPLACE array field %q has a null operand element at index %d",
+					rowIndex, field.GetName(), index)
+			}
+		}
+	}
+	requestSchema := proto.Clone(collSchema).(*schemapb.CollectionSchema)
+	for _, structSchema := range requestSchema.GetStructArrayFields() {
+		if _, targeted := targets[structSchema.GetName()]; !targeted {
+			continue
+		}
+		var expectedMask []string
+		for rowIndex, row := range rows {
+			rawValue := gjson.Get(row.Raw, structSchema.GetName())
+			if !rawValue.Exists() || rawValue.Type == gjson.Null {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must not be missing or null", rowIndex, structSchema.GetName())
+			}
+			elements := rawValue.Array()
+			if !rawValue.IsArray() || len(elements) != 1 || !elements[0].IsObject() {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must contain exactly one object", rowIndex, structSchema.GetName())
+			}
+			mask := make([]string, 0)
+			elements[0].ForEach(func(key, _ gjson.Result) bool {
+				mask = append(mask, key.String())
+				return true
+			})
+			sort.Strings(mask)
+			if len(mask) == 0 {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q child mask must not be empty", rowIndex, structSchema.GetName())
+			}
+			if rowIndex == 0 {
+				expectedMask = mask
+			} else if !slices.Equal(expectedMask, mask) {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q child mask %v does not match request mask %v", rowIndex, structSchema.GetName(), mask, expectedMask)
+			}
+		}
+
+		path := targets[structSchema.GetName()]
+		if strings.Count(path, "[") == 1 {
+			if len(expectedMask) != len(structSchema.GetFields()) {
+				return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q whole element requires all struct children", structSchema.GetName())
+			}
+		} else if len(expectedMask) != 1 || !strings.HasSuffix(path, "["+expectedMask[0]+"]") {
+			return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q path requires exactly the selected child", structSchema.GetName())
+		}
+		selected := make(map[string]struct{}, len(expectedMask))
+		for _, name := range expectedMask {
+			selected[name] = struct{}{}
+		}
+		children := make([]*schemapb.FieldSchema, 0, len(selected))
+		for _, child := range structSchema.GetFields() {
+			name := subShortName(child)
+			if _, ok := selected[name]; ok {
+				children = append(children, child)
+				delete(selected, name)
+			}
+		}
+		if len(selected) > 0 {
+			for name := range selected {
+				return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE struct field %q has no child %q", structSchema.GetName(), name)
+			}
+		}
+		structSchema.Fields = children
+	}
+	return requestSchema, nil
 }
 
 func containsString(arr []string, s string) bool {
@@ -2928,6 +3064,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 
 	dynamicCol := make([][]byte, 0, rowsLen)
 	fieldLen := make(map[string]int)
+	// Escape hatch for clients that relied on the previous value handling.
+	// Read once per request rather than per row, like checkAndSetData does.
+	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 
 	for _, row := range rows {
 		// collection schema name need not be same, since receiver could have other names
@@ -3046,7 +3185,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			// distinct keys into one. Check the bytes that actually land.
 			// Gated like the per-value checks above: compatibilityMode restores
 			// the previous handling, which stored the wrapper unexamined.
-			if !paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool() {
+			if !compatibilityMode {
 				if err := checkEngineCompatible(common.MetaFieldName, string(bs)); err != nil {
 					return nil, err
 				}
@@ -4478,7 +4617,8 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 		return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 	}
 
-	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, request)
+	metaCache := getProxyMetaCache(pxy)
+	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
 		return nil, err
 	}
@@ -4747,7 +4887,7 @@ func RequestHandlerFunc(c *gin.Context) {
 	}
 	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 	c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, "+HTTPHeaderIdempotencyKey)
 	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH")
 	c.Writer.Header().Set("X-Content-Type-Options", "nosniff") // Prevents MIME sniffing
 
@@ -5349,7 +5489,10 @@ func genFunctionSchema(ctx context.Context, function *FunctionSchema) (*schemapb
 	description := function.Description
 	params := []*commonpb.KeyValuePair{}
 	for key, value := range function.Params {
-		if reflect.TypeOf(value).Kind() == reflect.Slice || reflect.TypeOf(value).Kind() == reflect.Map {
+		valueType := reflect.TypeOf(value)
+		if valueType == nil {
+			params = append(params, &commonpb.KeyValuePair{Key: key, Value: "null"})
+		} else if valueType.Kind() == reflect.Slice || valueType.Kind() == reflect.Map {
 			bs, err := json.Marshal(value)
 			if err != nil {
 				return nil, merr.WrapErrParameterInvalidMsg("Marshal function params fail, please check it!")
@@ -5580,4 +5723,36 @@ func trimStringList(values []string) []string {
 		trimmed[i] = strings.TrimSpace(value)
 	}
 	return trimmed
+}
+
+// IdempotencyKeyHandlerFunc copies the REST Idempotency-Key header into the gRPC
+// incoming metadata, so the proxy reads the key from exactly one place regardless of
+// whether the request arrived over REST or gRPC. Existing metadata is preserved.
+//
+// Registered as middleware rather than inside a handler wrapper: which operations are
+// idempotent is decided downstream, so every route — v1 and v2 alike — must carry the
+// key rather than drop it and force the next adopter to rediscover this hop.
+func IdempotencyKeyHandlerFunc(c *gin.Context) {
+	key := c.Request.Header.Get(HTTPHeaderIdempotencyKey)
+	if key == "" {
+		c.Next()
+		return
+	}
+	// Validate before the key reaches outgoing metadata. Go accepts header bytes
+	// gRPC does not, and this middleware is mounted on the whole engine, so an
+	// unchecked key would ride along on every coordinator RPC of any v1 or v2
+	// route -- see ValidateIdempotencyKey for what that costs.
+	if err := interceptor.ValidateIdempotencyKey(key); err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return
+	}
+	ctx := c.Request.Context()
+	md, _ := metadata.FromIncomingContext(ctx)
+	md = md.Copy()
+	md.Set(util.HeaderIdempotencyKey, key)
+	c.Request = c.Request.WithContext(metadata.NewIncomingContext(ctx, md))
+	c.Next()
 }

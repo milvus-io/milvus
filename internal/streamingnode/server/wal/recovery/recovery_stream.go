@@ -2,18 +2,21 @@ package recovery
 
 import (
 	"context"
-
-	"github.com/cockroachdb/errors"
-	"google.golang.org/protobuf/proto"
+	"math"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// recoverFromStream recovers the recovery storage from the recovery stream.
-func (r *recoveryStorageImpl) recoverFromStream(
+// runBoundedRecovery replays the persisted checkpoint through the recovery
+// barrier with complete message semantics and returns the recovered write path.
+// Only this startup observation is bounded; the same stream remains open for live replay.
+func (r *recoveryStorageImpl) runBoundedRecovery(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	lastTimeTickMessage message.ImmutableMessage,
@@ -29,106 +32,123 @@ func (r *recoveryStorageImpl) recoverFromStream(
 		mlog.String("state", recoveryStorageStateStreamRecovering),
 	))
 
-	r.Logger().Info(ctx, "recover from wal stream...")
+	r.Logger().Info(context.TODO(), "recover from wal stream...")
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.MessageID,
-		EndTimeTick:     lastTimeTickMessage.TimeTick(),
+		RecoveryBarrier: lastTimeTickMessage,
 	})
+	r.recoveryStream = rs
 	defer func() {
-		rs.Close()
 		if err != nil {
-			r.Logger().Warn(ctx, "recovery from wal stream failed", mlog.Err(err))
-			return
+			r.Logger().Warn(context.TODO(), "recovery from wal stream failed", mlog.Err(err))
 		}
 	}()
 L:
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(ctx.Err(), "failed to recover from wal")
+			return nil, merr.Wrap(ctx.Err(), "failed to recover from wal")
 		case msg, ok := <-rs.Chan():
 			if !ok {
-				// The recovery stream is reach the end, we can stop the recovery.
+				if err := rs.Error(); err != nil {
+					return nil, merr.Wrap(err, "failed to read the recovery stream")
+				}
+				return nil, merr.WrapErrServiceUnavailableMsg("recovery stream ended before the startup barrier")
+			}
+			r.observeMessage(ctx, msg)
+			if msg.MessageType() == message.MessageTypeRecoveryBarrier &&
+				msg.TimeTick() == lastTimeTickMessage.TimeTick() && msg.MessageID().EQ(lastTimeTickMessage.MessageID()) {
 				break L
 			}
-			r.ObserveMessage(ctx, msg)
 		}
 	}
-	if rs.Error() != nil {
-		return nil, errors.Wrap(rs.Error(), "failed to read the recovery info from wal")
-	}
-	snapshot = r.getSnapshot()
+	snapshot = r.buildInitialRecoverySnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
+	snapshot.SummarySnapshots, err = r.buildIdempotencySnapshots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	vchannelCount := len(snapshot.WritePathRecovery.VChannels)
+	segmentCount := len(snapshot.WritePathRecovery.GrowingSegments)
 	logFields := []mlog.Field{
 		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
-		mlog.Int("vchannels", len(snapshot.VChannels)),
-		mlog.Int("segments", len(snapshot.SegmentAssignments)),
+		mlog.Int("vchannels", vchannelCount),
+		mlog.Int("segments", segmentCount),
 		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
 		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
 	}
-	if snapshot.AlterWALInfo != nil {
+	if state := snapshot.PChannelControl.GetAlterWalState(); state.GetStage() != streamingpb.AlterWALStage_NONE {
 		logFields = append(logFields,
-			mlog.Bool("foundAlterWALMsg", snapshot.AlterWALInfo.FoundAlterWALMsg),
-			mlog.Stringer("targetWALName", snapshot.AlterWALInfo.TargetWALName),
+			mlog.Stringer("targetWALName", state.GetTargetWalName()),
 		)
 	}
-	r.Logger().Info(ctx, "recovery from wal stream done", logFields...)
+	r.Logger().Info(context.TODO(), "recovery from wal stream done", logFields...)
 	return snapshot, nil
 }
 
-// getSnapshot returns the snapshot of the recovery storage.
-// Use this function to get the snapshot after recovery is finished,
-// and use the snapshot to recover all write ahead components.
-func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
-	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
-	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
-	// Collect active vchannels and build a set of active partition IDs (globally unique).
-	activePartitions := make(map[int64]struct{})
-	for channelName, vchannel := range r.vchannels {
-		if vchannel.IsActive() {
-			vchannels[channelName] = proto.Clone(vchannel.meta).(*streamingpb.VChannelMeta)
-			for _, p := range vchannel.meta.CollectionInfo.Partitions {
-				activePartitions[p.PartitionId] = struct{}{}
-			}
-		}
-	}
-	for segmentID, segment := range r.segments {
-		if !segment.IsGrowing() {
-			continue
-		}
-		// Defensive filtering: skip recoverable segment assignments whose parent vchannel
-		// does not exist or is not active, or whose partition has been dropped. This can happen due to
-		// non-atomic etcd persistence or Kafka offset compaction replaying CreateSegment
-		// for dropped collections/partitions.
-		if _, ok := vchannels[segment.meta.Vchannel]; !ok {
-			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with non-active vchannel",
-				mlog.Int64("segmentID", segmentID),
-				mlog.String("vchannel", segment.meta.Vchannel),
-				mlog.Int64("collectionID", segment.meta.CollectionId),
-				mlog.String("state", segment.meta.State.String()),
-			)
-			continue
-		}
-		if _, ok := activePartitions[segment.meta.PartitionId]; !ok {
-			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with dropped partition",
-				mlog.Int64("segmentID", segmentID),
-				mlog.String("vchannel", segment.meta.Vchannel),
-				mlog.Int64("collectionID", segment.meta.CollectionId),
-				mlog.Int64("partitionID", segment.meta.PartitionId),
-				mlog.String("state", segment.meta.State.String()),
-			)
-			continue
-		}
-		segments[segmentID] = proto.Clone(segment.meta).(*streamingpb.SegmentAssignmentMeta)
-	}
+func (r *recoveryStorageImpl) buildInitialRecoverySnapshot() *RecoverySnapshot {
 	snapshot := &RecoverySnapshot{
-		VChannels:          vchannels,
-		SegmentAssignments: segments,
-		Checkpoint:         r.checkpoint.Clone(),
+		WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+			VChannels:       make(map[string]moduleapi.VChannelWritePathRecoveryState),
+			GrowingSegments: make(map[int64]moduleapi.SegmentWritePathRecoveryState),
+		},
+		Checkpoint:      r.getCompletedCheckpoint(),
+		PChannelControl: clonePChannelControl(r.pchannelControl),
 	}
-	if r.alterWALInfo != nil {
-		alterWALInfoCopy := *r.alterWALInfo
-		snapshot.AlterWALInfo = &alterWALInfoCopy
+	if r.vchannelManager != nil {
+		snapshot.WritePathRecovery = r.vchannelManager.RecoverySnapshot()
 	}
 	return snapshot
+}
+
+// buildIdempotencySnapshots combines retained chunks with the records staged during
+// startup replay, including sealed chunks whose uploads are still pending. It
+// runs at the recovery barrier before the interceptor accepts writes.
+//
+// The whole retained range is read. What bounds it is retention itself -- the
+// summary applies its retention policy to the chunk set -- and the window
+// applies its own byte cap when it loads them.
+//
+// A read failure fails the WAL open rather than yielding a partial window. A
+// window missing entries answers a retry of a write that DID land by appending
+// it again, which is a way to duplicate writes on a channel whose clients were
+// told they had idempotency.
+func (r *recoveryStorageImpl) buildIdempotencySnapshots(
+	ctx context.Context,
+) (map[string]*idempotencyview.Snapshot, error) {
+	if r.summaryManager == nil {
+		return nil, nil
+	}
+	// The vchannels come from the summary rather than the recovered write path:
+	// the write path's vchannels are collections and segments, a different
+	// question from which channels have a dedup history, and a pchannel holds
+	// records for vchannels the write path does not know about yet.
+	vchannels := r.summaryManager.IdempotencyVChannels()
+	if len(vchannels) == 0 {
+		return nil, nil
+	}
+	// One pass over the chunks for ALL vchannels: a chunk is a pchannel-wide
+	// object, so reading them one vchannel at a time would download each chunk
+	// once per vchannel and block the WAL open for as long as that takes.
+	allSections, err := r.summaryManager.ReadIdempotencyEntriesOfVChannels(ctx, vchannels, 0, math.MaxUint64)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to read the idempotency summary")
+	}
+	snapshots := make(map[string]*idempotencyview.Snapshot, len(vchannels))
+	for _, vchannel := range vchannels {
+		sections, ok := allSections[vchannel]
+		if !ok || len(sections.Inserts) == 0 {
+			continue
+		}
+		records, err := idempotencyview.RecordsFromSections(sections.Idempotency, sections.Inserts)
+		if err != nil {
+			return nil, merr.Wrapf(err, "failed to rebuild the idempotency window of vchannel %s", vchannel)
+		}
+		snapshots[vchannel] = &idempotencyview.Snapshot{
+			PChannel: r.channel.Name,
+			VChannel: vchannel,
+			Records:  records,
+		}
+	}
+	return snapshots, nil
 }

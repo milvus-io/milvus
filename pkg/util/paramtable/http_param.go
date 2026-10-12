@@ -18,6 +18,7 @@ package paramtable
 
 type httpConfig struct {
 	Enabled               ParamItem `refreshable:"false"`
+	EnableV1              ParamItem `refreshable:"false"`
 	DebugMode             ParamItem `refreshable:"false"`
 	Port                  ParamItem `refreshable:"false"`
 	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
@@ -27,6 +28,7 @@ type httpConfig struct {
 	LegacyArrayResponse   ParamItem `refreshable:"true"`
 	EnablePprof           ParamItem `refreshable:"false"`
 	RequestTimeoutMs      ParamItem `refreshable:"true"`
+	DQLAdmissionEnabled   ParamItem `refreshable:"true"`
 	ReadHeaderTimeout     ParamItem `refreshable:"false"`
 	ReadTimeout           ParamItem `refreshable:"false"`
 	WriteTimeout          ParamItem `refreshable:"false"`
@@ -47,6 +49,18 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.Enabled.Init(base.mgr)
+
+	p.EnableV1 = ParamItem{
+		Key:          "proxy.http.enableV1",
+		DefaultValue: "true",
+		Version:      "3.0.1",
+		Doc: `Whether to register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
+Disabling requires a restart and leaves the HTTP listeners, /v2/vectordb/*, probes, and metrics available.
+The non-underscore /api/v1/* REST API has been removed regardless of this setting.
+WebUI data and telemetry commands require these console APIs; disable proxy.http.enableWebUI too to hide the pages.`,
+		Export: true,
+	}
+	p.EnableV1.Init(base.mgr)
 
 	p.DebugMode = ParamItem{
 		Key:          "proxy.http.debug_mode",
@@ -150,6 +164,18 @@ string wherever one appears, including inside either kind of array.`,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
 
+	p.DQLAdmissionEnabled = ParamItem{
+		Key:          "proxy.http.dqlAdmissionEnabled",
+		DefaultValue: "true",
+		Version:      "3.0.1",
+		Doc: `high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
+queue is full, before the request body is decoded. The scheduler rejects such a request with the same
+TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
+cost. Disabling restores the old always-decode behavior.`,
+		Export: true,
+	}
+	p.DQLAdmissionEnabled.Init(base.mgr)
+
 	p.ReadHeaderTimeout = ParamItem{
 		Key:          "proxy.http.readHeaderTimeout",
 		DefaultValue: "5s",
@@ -201,6 +227,7 @@ string wherever one appears, including inside either kind of array.`,
 		Version:      "2.6.0",
 		Doc:          "Strict-Transport-Security max-age in seconds",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.HSTSMaxAge.Init(base.mgr)
 
@@ -210,6 +237,7 @@ string wherever one appears, including inside either kind of array.`,
 		Version:      "2.6.0",
 		Doc:          "Include subdomains in Strict-Transport-Security",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.HSTSIncludeSubDomains.Init(base.mgr)
 
@@ -219,6 +247,7 @@ string wherever one appears, including inside either kind of array.`,
 		Version:      "2.6.0",
 		Doc:          "Whether to enable setting the Strict-Transport-Security header",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.EnableHSTS.Init(base.mgr)
 

@@ -112,8 +112,6 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.SetIndexSliceSize(cIndexSliceSize)
-	cLoadTransientBudgetBytes := C.int64_t(paramtable.Get().CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
-	C.SetLoadTransientBudgetBytes(cLoadTransientBudgetBytes)
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
@@ -173,15 +171,26 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		UpdateExprResCacheConfig()
 	}
 
-	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
+	ApplyArrowIOThreadPoolCapacity("querynode", "init")
 
 	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
 	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)
+	if err := registerQueryNodeAsyncLoadThreadPoolConfig(ctx, paramtable.Get(), updateStorageV2AsyncLoadThreadPoolSize); err != nil {
+		return err
+	}
+	if err := registerQueryNodeLoadConfig(ctx, paramtable.Get(), applyQueryNodeLoadConfig); err != nil {
+		return err
+	}
+	cStorageV2AsyncLoadReadWindowSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.GetAsInt64())
+	C.SetStorageV2AsyncLoadReadWindowSizeBytes(cStorageV2AsyncLoadReadWindowSizeBytes)
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
 	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))
 
 	err := InitArrowReaderConfig(paramtable.Get())
 	if err != nil {
+		return err
+	}
+	if err := InitExternalVectorNullPolicy(paramtable.Get()); err != nil {
 		return err
 	}
 
@@ -191,12 +200,19 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	SetArrowFSChunkManagerEnabled(paramtable.Get())
 	err = InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
 		return err
 	}
 
 	err = InitDiskFileWriterConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
+	// Publish the External Table IOPS policy once for native Segcore readers.
+	err = InitExternalIopsConfig(paramtable.Get())
 	if err != nil {
 		return err
 	}
@@ -227,6 +243,11 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	}
 
 	err = InitGISSplitFusion(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
+	err = InitScanPinPolicy(paramtable.Get())
 	if err != nil {
 		return err
 	}

@@ -55,23 +55,27 @@ default:
     return p[TypeKey], merr.WrapErrParameterInvalidMsg("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
 ```
 
-✅ As merged (`pkg/taskcommon/properties.go`, `GetTaskType`):
+✅ Use a typed capability error (`pkg/taskcommon/properties.go`, `GetTaskType`):
 
 ```go
 default:
-    // Task types are assigned by the coordinator; an unrecognized one means a
-    // protocol mismatch (e.g. a newer coordinator scheduling onto an older
-    // node), which is system blame, not user input.
-    return p[TypeKey], merr.WrapErrServiceInternalMsg("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
+    // Task types are assigned by the coordinator. An unrecognized type means
+    // this worker does not implement the coordinator's task protocol, which is
+    // a system capability mismatch rather than invalid user input.
+    return p[TypeKey], merr.Wrapf(merr.ErrServiceUnimplemented,
+        "unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
 ```
 
-Same fix applied to: datanode `CreateTask`/`QueryTask`/`DropTask` dispatch,
-compaction `preCompact` plan-shape checks (mix/sort/L0/bump), and the
-`reduceStatisticResponse` unknown-key branch.
+DataNode `CreateTask`/`QueryTask`/`DropTask` use the same capability code. This
+lets a coordinator distinguish an unsupported task protocol with `errors.Is`
+without relying on an error string or the wire `Retriable` flag. By contrast,
+malformed plans for task types that the worker does recognize remain
+`ErrServiceInternal`.
 
-**Rule of thumb:** if the only way to reach the branch is a Milvus bug or a
-mixed-version rolling upgrade → `WrapErrServiceInternalMsg`, even though the
-code shape screams "validation".
+**Rule of thumb:** if the worker lacks the requested coordinator-owned
+capability → `ErrServiceUnimplemented`; if both sides claim the capability but
+their internal contract is malformed → `ErrServiceInternal`. Neither is user
+input.
 
 ## Pattern 2 — Internal component output is not user input
 
@@ -258,19 +262,32 @@ This is the *reverse* of Pattern 1: here the C++ side really is validating
 user input, so collapsing it into the system table would have been the
 misclassification.
 
-**segcore pass-through codes collapse on the wire.** Most C++ codes are
-deliberately projected to 2000 (`ErrSegcore`) on the wire, with the original
-code preserved in `Reason` as `segcoreCode=`. This includes C++ codes 2001 and
-2002; they do **not** map to the similarly numbered Go sentinels. The dedicated
-`segcoreCodeTable` mappings are: 2003 → `ErrSegcoreUnsupported` (wire 2001),
-2033 → `ErrSegcorePretendFinished` (wire 2002, control-flow signal), 2037 →
-`ErrSegcoreFollyOtherException`, 2038 → `ErrSegcoreFollyCancel`, 2039 →
-`ErrSegcoreOutOfRange`, 2040 → `ErrSegcoreGCPNativeError`, 2046 →
-`ErrCollectionSchemaVersionNotReady` (wire 110), and 2099 → `KnowhereError`.
-Codes 2037, 2040, and 2046 are retriable. Don't "improve" a call site by
-hand-picking a 20xx number — go through `merr.SegcoreError(code, msg)` and let
-the table decide retriability and projection. Guard tests:
-`pkg/util/merr/segcore_test.go` (`wire_code_projection`,
+**segcore codes pass through to the wire.** An in-band C++ code (2000-2099)
+now reaches the client as its ORIGINAL value: 2028 stays 2028, 2024 stays
+2024, and an in-band code added by a future C++ version passes through
+unchanged under the `ErrSegcore` family umbrella. Guardrails: an out-of-band
+(garbage) code still collapses to 2000; cross-family mappings keep their
+sentinel's wire code (2046 → `ErrCollectionSchemaVersionNotReady`, wire 110).
+Family identity for `errors.Is` is preserved via inner/Unwrap.
+
+Compatibility (changed in the pass-through PR): previously most codes were
+projected to wire 2000 with the real code buried in `Reason`; additionally the
+sentinels were renumbered to the C++ values they represent —
+`ErrSegcoreUnsupported` 2001 → **2003**, `ErrSegcorePretendFinished` 2002 →
+**2033** — because their old numbers squatted on C++ UnexpectedError /
+NotImplemented and would false-match under code-based `errors.Is`. An
+application matching wire codes 2000/2001/2002 must be updated: wire 2001 now
+means C++ `UnexpectedError` itself (an unclassified internal failure), wire
+2002 means C++ `NotImplemented`, and the Unsupported / pretend-finished
+signals arrive as 2003 / 2033.
+
+Retriability is unchanged by the wire projection: transient codes (2012-2015,
+2018, 2027, 2034, 2036-2037, 2040, 2043, 2045-2046, ...) are marked retriable
+by `classForCode`; input codes (2025/2026/2028/2031/2032/2042) are
+`InputError`. Don't "improve" a call site by hand-picking a 20xx number — go
+through `merr.SegcoreError(code, msg)` and let the table decide retriability
+and projection. Guard tests: `pkg/util/merr/segcore_test.go`
+(`wire_code_projection`, `named_sentinel_wire_transitions`,
 `TestSegcoreCodeTableCoverage`).
 
 ---
@@ -287,6 +304,7 @@ via `WrapErrAsInputError(When)` at the proxy chokepoint only.
 | request value is malformed / out of range | `ErrParameterInvalid` 1100 (Input) | `ErrServiceInternal` | user can fix it by changing the request |
 | request lacks a required field | `ErrParameterMissing` 1101 (Input) | `ErrParameterInvalid` | both Input; Missing is the precise statement |
 | an internal invariant / contract was violated | `ErrServiceInternal` 5 | `ErrParameterInvalid` | Patterns 1–2: nobody's request caused it |
+| a worker does not implement a coordinator task type | `ErrServiceUnimplemented` 10 | `ErrParameterInvalid` / `ErrServiceInternal` | a typed capability mismatch lets the coordinator fail fast or fall back deliberately |
 | transient "not ready, try again shortly" | `ErrServiceUnavailable` 2 / `ErrServiceNotReady` 1 (retriable) | any not-found code | Pattern 5: must survive `retry.Do` |
 | name lookup failed, name typed by user | `ErrCollectionNotFound` 100 etc. **+ boundary stamp** | marking the sentinel Input globally | dual identity, Pattern 5 |
 | name lookup failed from internal state (id-based, cache refresh) | `ErrCollectionNotFound` 100 etc., unmarked | `ErrServiceInternal` | keeps refresh/retry paths alive; stays system-blame |

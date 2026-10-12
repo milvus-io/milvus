@@ -47,7 +47,33 @@ import (
 // may come from different replica group. We only need these shards to form a replica that serves query
 // requests.
 func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
-	for _, replica := range s.meta.GetByCollection(s.ctx, collectionID) {
+	return s.anyReplicaAvailable(s.meta.GetByCollection(s.ctx, collectionID))
+}
+
+// checkAnyReplicaAvailableInResourceGroup is the answer a ShowLoadCollections
+// scoped to a resource group gives: whether THAT group can serve the
+// collection, which is the group's shard-leader readiness - every shard of
+// the collection has a serviceable leader in the group's replicas, on a node
+// the coordinator knows (utils.ShardLeaderReadinessByResourceGroup, the same
+// verdict the scoped load waits for). It is not the collection-wide rule
+// restricted to one group: that rule reads a replica with no read-only node
+// as available, so a replica just spawned into the group, holding nothing,
+// would read true beside a progress of 0.
+func (s *Server) checkAnyReplicaAvailableInResourceGroup(ctx context.Context, collectionID int64, rgName string) bool {
+	readiness, err := utils.ShardLeaderReadinessByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr, collectionID, rgName)
+	if err != nil {
+		mlog.Warn(ctx, "the resource group's shard-leader readiness cannot be answered, reporting it as not serving",
+			mlog.Int64("collectionID", collectionID), mlog.String("resourceGroup", rgName), mlog.Err(err))
+		return false
+	}
+	return readiness.Ready
+}
+
+// anyReplicaAvailable is the collection-wide rule: a replica is available when
+// every one of its read-only nodes is still known to the node manager, and
+// the answer is yes as soon as one replica is.
+func (s *Server) anyReplicaAvailable(replicas []*meta.Replica) bool {
+	for _, replica := range replicas {
 		isAvailable := true
 		for _, node := range replica.GetRONodes() {
 			if s.nodeMgr.Get(node) == nil {
@@ -158,7 +184,19 @@ func (s *Server) balanceSegments(ctx context.Context,
 	}
 
 	if sync {
-		err := task.Wait(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
+		// This bound exists for a different reason than the task's own
+		// deadline: a task only gets its real deadline once it's actually
+		// admitted by the executor (see Task.ActivateDeadline). If the target
+		// node's executor stays saturated, the task can sit rejected in the
+		// queue indefinitely without ever being admitted, and callers commonly
+		// pass no deadline of their own (e.g. pymilvus defaults to
+		// timeout=None) -- so without a bound here, this handler could hang
+		// forever. SegmentTaskTimeout is a reasonable ceiling for "how long
+		// this synchronous call is willing to wait" independent of whether it
+		// matches the task's own execution budget.
+		waitCtx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+		defer cancel()
+		err := task.Wait(waitCtx, tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))
@@ -236,7 +274,10 @@ func (s *Server) balanceChannels(ctx context.Context,
 	}
 
 	if sync {
-		err := task.Wait(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
+		// See the matching comment in balanceSegments.
+		waitCtx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond))
+		defer cancel()
+		err := task.Wait(waitCtx, tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))

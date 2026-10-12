@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -84,7 +83,8 @@ type DataCoordCatalog interface {
 	// TODO: From MarkChannelAdded to DropChannel, it's totally a redundant design by now, remove it in future.
 	MarkChannelAdded(ctx context.Context, channel string) error
 	ShouldDropChannel(ctx context.Context, channel string) bool
-	ChannelExists(ctx context.Context, channel string) bool
+	// ChannelExists returns lookup errors separately from an absent channel.
+	ChannelExists(ctx context.Context, channel string) (bool, error)
 	DropChannel(ctx context.Context, channel string) error
 
 	ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error)
@@ -149,10 +149,6 @@ type DataCoordCatalog interface {
 	ListExternalCollectionRefreshTasks(ctx context.Context) ([]*datapb.ExternalCollectionRefreshTask, error)
 	SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error
 
-	// Analyzer Resource
-	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
-	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
-	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
 	// snapshot related
 	SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error
 	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error
@@ -160,4 +156,11 @@ type DataCoordCatalog interface {
 	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
 	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
 	DropExportSnapshotJob(ctx context.Context, jobID int64) error
+
+	// SegmentChangeGroup persistence. Per-record writes go through the
+	// composite Update (metastore.SaveSegmentChangeGroup / DeleteSegmentChangeGroup)
+	// so they can be composed atomically with segment and DataView actions;
+	// List/Drop provide recovery scanning and collection-drop cleanup.
+	ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error)
+	DropSegmentChangeGroups(ctx context.Context, collectionID int64) error
 }

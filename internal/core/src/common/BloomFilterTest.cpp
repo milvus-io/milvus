@@ -41,43 +41,6 @@ TEST(BloomFilterTest, BlockedBF_BasicOperations) {
     EXPECT_TRUE(bf->Test("milvus"));
 }
 
-TEST(BloomFilterTest, BlockedBF_Locations) {
-    auto bf = NewBloomFilterWithType(1000, 0.01, BFType::Blocked);
-
-    bf->Add("test_key");
-
-    auto locs = Locations("test_key", bf->K(), bf->Type());
-
-    ASSERT_EQ(locs.size(), 1);
-    EXPECT_TRUE(bf->TestLocations(locs));
-
-    auto locs2 = Locations("non_existent", bf->K(), bf->Type());
-    EXPECT_FALSE(bf->TestLocations(locs2));
-}
-
-TEST(BloomFilterTest, BlockedBF_BatchTestLocations) {
-    auto bf = NewBloomFilterWithType(1000, 0.01, BFType::Blocked);
-
-    std::vector<std::string> keys = {"key1", "key2", "key3", "key4"};
-    std::vector<std::vector<uint64_t>> locs;
-
-    for (size_t i = 0; i < 2; ++i) {
-        bf->Add(keys[i]);
-    }
-
-    for (const auto& key : keys) {
-        locs.push_back(Locations(key, bf->K(), bf->Type()));
-    }
-
-    std::vector<bool> hits(keys.size(), false);
-    auto results = bf->BatchTestLocations(locs, hits);
-
-    EXPECT_TRUE(results[0]);
-    EXPECT_TRUE(results[1]);
-    EXPECT_FALSE(results[2]);
-    EXPECT_FALSE(results[3]);
-}
-
 TEST(BloomFilterTest, BlockedBF_Serialization) {
     auto bf = NewBloomFilterWithType(1000, 0.01, BFType::Blocked);
 
@@ -106,16 +69,6 @@ TEST(BloomFilterTest, AlwaysTrueBF_BasicOperations) {
     EXPECT_TRUE(bf->Test("anything"));
     EXPECT_TRUE(bf->Test("something"));
     EXPECT_TRUE(bf->Test(""));
-}
-
-TEST(BloomFilterTest, AlwaysTrueBF_Locations) {
-    auto bf = NewBloomFilterWithType(0, 0.0, BFType::AlwaysTrue);
-
-    auto locs = Locations("test", bf->K(), bf->Type());
-    EXPECT_TRUE(locs.empty());
-
-    EXPECT_TRUE(bf->TestLocations({}));
-    EXPECT_TRUE(bf->TestLocations({1, 2, 3}));
 }
 
 TEST(BloomFilterTest, AlwaysTrueBF_Serialization) {
@@ -288,21 +241,4 @@ TEST(BloomFilterTest, BlockedBF_InvalidJsonDeserialization) {
     nlohmann::json invalid_json3;
     invalid_json3["type"] = "UnknownType";
     EXPECT_THROW(BloomFilterFromJson(invalid_json3), std::runtime_error);
-}
-
-TEST(BloomFilterTest, LocationsConsistency) {
-    std::string data1 = "consistent_test";
-    std::string data2 = "consistent_test";
-
-    auto locs1 = Locations(data1, 7, BFType::Blocked);
-    auto locs2 = Locations(data2, 7, BFType::Blocked);
-
-    ASSERT_EQ(locs1.size(), locs2.size());
-    for (size_t i = 0; i < locs1.size(); ++i) {
-        EXPECT_EQ(locs1[i], locs2[i]);
-    }
-
-    std::string data3 = "different_test";
-    auto locs3 = Locations(data3, 7, BFType::Blocked);
-    EXPECT_NE(locs1, locs3);
 }

@@ -1,0 +1,575 @@
+# DataCoord Segment-Scoped Manifest Commit Framework
+
+- **Created:** 2026-08-17
+- **Status:** Draft
+- **Component:** DataCoord / StorageV3
+- **Related work:** StorageV3 manifest index metadata migration
+
+## Summary
+
+StorageV3 uses an immutable, versioned manifest as the source of truth for a
+segment's files.  `SegmentInfo.manifest_path` is the durable pointer that makes
+one manifest revision visible to the rest of Milvus.
+
+This design introduces one DataCoord-owned commit framework for this pair of
+operations.  For a given segment, it serializes the full sequence:
+
+1. read the currently published `SegmentInfo` and manifest;
+2. construct and commit the next manifest revision;
+3. atomically persist the new `manifest_path` together with the associated
+   `SegmentInfo` and/or `SegmentIndex` change; and
+4. update the in-memory metadata only after the catalog write succeeds.
+
+The serialization key is `segmentID`.  Different segments remain concurrent.
+No caller outside the framework may create a manifest revision that is intended
+to update an existing segment, or directly replace that segment's manifest
+pointer in etcd.
+
+The framework must be completed on a clean branch based on `master`.  The
+ongoing manifest-index migration is intentionally **not** its implementation
+branch: after this framework is complete, that work will be rebased/adapted to
+use the framework rather than retain its local publication logic.
+
+## Problem
+
+Today the lifecycle is split across several owners:
+
+- an index worker can append its index entry to a manifest and later report the
+  resulting path to DataCoord;
+- DataCoord GC removes index entries from a manifest, then separately publishes
+  a new path and removes files/`SegmentIndex` metadata;
+- copy/restore has the worker write the target's index entries into the
+  manifest it produces, then publishes that pointer with `UpdateManifest`;
+- stats, flush/import, and compaction paths publish manifests through several
+  forms of `UpdateManifest`.
+
+`meta.segMu` protects the in-process execution of `UpdateSegmentsInfo`, but it
+does not cover the object-storage transaction that created the manifest
+revision.  Therefore it is not a segment commit lock.  Two paths can observe
+one pointer, create revisions independently, and later publish their results
+out of order.  A later etcd write can then point backward to an older revision
+or publish a revision that omits a completed change.
+
+The existing `indexMeta.keyLock(BuildID)` has a different responsibility: it
+serializes lifecycle changes for one `SegmentIndex` job.  It cannot serialize a
+manifest shared by all indexes and stats of a segment.  Conversely, a global
+`segMu` held across object storage would serialize unrelated segments and make
+network I/O block all metadata updates.
+
+## Goals
+
+1. A single segment has exactly one in-process manifest commit at a time.
+2. The segment lock covers manifest revision creation **and** catalog
+   publication, not only the etcd write.
+3. DataNode writes physical data, index, and stats files, but DataCoord owns the
+   commit-time manifest transaction and the etcd publication of the result.
+4. A successful visible commit updates all metadata that describes that visible
+   manifest in one catalog transaction.
+5. Failure is retryable and never publishes a manifest pointer before its
+   manifest exists.
+6. The framework serializes manifest writes only where *concurrent* writers can
+   target the same segment: the post-flush async jobs — stats sort, index build,
+   GC, compaction, batch DDL — that operate on an already-flushed segment.
+   Single-writer manifest writes are published inline via `UpdateManifest`
+   without the keyed lock: the flush of a growing or L0 segment
+   (`SaveBinlogPaths`, serialized by the segment's single WAL owner) and the
+   finalization of a fresh copy or import target. `UpdateManifest` therefore
+   carries no StorageV3 guard; the concurrent paths route through
+   `CommitSegmentManifest` by construction because they build a new revision
+   rather than record a pre-built pointer.
+
+## Non-goals
+
+- A distributed transaction between object storage and etcd.  It is not
+  available and must not be simulated with protobuf-value CAS.
+- A distributed per-segment lock across multiple active DataCoord leaders.
+  Milvus leadership already permits only the active DataCoord to mutate catalog
+  metadata.  Manifest transaction conflict handling remains the protection for
+  leader handoff, retries, and unexpected external writers.
+- Serializing all segment metadata updates.  Non-manifest updates can continue
+  to use `UpdateSegmentsInfo`; only the manifest commit protocol is serialized
+  by this new keyed lock.
+- Changing the manifest format or the storage transaction ABI beyond the
+  structured mutations needed by this framework.
+
+## Ownership Model
+
+```text
+DataNode / compactor
+  writes immutable artifact files
+  returns a structured manifest delta and its expected input manifest
+                      |
+                      v
+DataCoord meta.CommitSegmentManifest(segmentID, request)
+  segment-scoped lock
+    -> read current SegmentInfo
+    -> validate expected base / segment state
+    -> execute packed manifest transaction
+    -> catalog transaction: SegmentInfo + SegmentIndex/task state
+    -> install in-memory result
+                      |
+                      v
+Visible SegmentInfo.manifest_path
+```
+
+Where DataCoord builds the revision, the worker must not return a pre-published
+manifest revision.  For example, an index task returns its index files and index
+metadata, not the result of `AddIndexInfoToManifest`; DataCoord converts it to a
+`ManifestIndexInfo` while holding the segment commit lock and invokes the packed
+transaction itself.  This holds for every concurrent post-flush path — stats
+sort, index build, GC index removal, compaction, batch DDL — because each
+targets an already-flushed segment that the others may be advancing at the same
+time and so must serialize.  These paths reach the manifest only through
+`CommitSegmentManifest`; they never call `UpdateManifest`.
+
+Single-writer manifest writes do not serialize and are published inline via
+`UpdateManifest`:
+
+- The flush of a growing or L0 segment (`SaveBinlogPaths`).  A growing segment is
+  created *already holding* a `ManifestEarliest` revision (`segment_manager.go`)
+  and its manifest is advanced by every sync, but those syncs come from the one
+  WAL owner of the segment's VChannel and are applied sequentially — there is no
+  concurrent writer.  Stale retries and cross-node handoff are fenced by the
+  channel-owner check in `SaveBinlogPaths`, and a re-sent identical pointer is a
+  no-op, so no base-match CAS is required.  The flusher returns a complete
+  manifest pointer, which DataCoord records directly.
+- The finalization of a fresh copy or import target. It is initially registered
+  with an empty manifest path (`snapshot_manager.go`, `import_util.go`). Before
+  dispatch, `copySegmentTask.prepareCopyCleanup` gives an Importing V3 copy
+  target a version-zero manifest pointer identifying its cleanup base; this
+  placeholder does not imply that a manifest file exists. During copying, the
+  target is `Importing`, excluding stats/index/compaction work that gates on
+  `Flushed`/`Flushing`. Successful finalization installs the worker's complete
+  manifest pointer and sets the target to `Flushed`. Copy finalization reads back non-empty
+  index metadata to verify target identity and artifact paths; it creates no new
+  revision. These state filters exclude regular stats/index/compaction work;
+  they do not serialize copy finalization with task failure. A separate per-task
+  lock excludes the new rejected-result cleanup from result installation. Cleanup
+  rechecks failed state and waits for ordinary GC to remove all target metadata,
+  so its snapshot, loaded-reader and pause protections also precede prefix
+  deletion. Failed tasks with cleanup plans reject late completed results, including after cleanup or restart, only
+  after persisting cleanup intent. Admission failures retain scheduler polling;
+  restart resumes failed tasks that still have cleanup plans and an assigned
+  worker. Pending/InProgress worker responses keep that polling active until a
+  terminal response or confirmed worker loss. Their durable state remains Failed.
+  Worker loss after Completed-result admission fails the task and preserves its
+  cleanup intent instead of redispatching potentially partly published targets.
+  Worker loss before admission remains retryable. This does not serialize task
+  failure with a result installation that is already in progress.
+
+These paths use `UpdateManifest` to adopt a worker-produced pointer; that
+operator has no StorageV3 guard. Participating post-flush writers instead hand
+DataCoord structured entries and create the revision under the segment lock.
+The backfill and external-refresh adoption bypasses are described below.
+
+## API Shape
+
+### Worker protocol compatibility
+
+Moving manifest transactions from DataNode to DataCoord changes the response
+contract even when the protobuf change only adds fields. A pre-framework
+DataCoord requires a complete manifest for schema-bump materialization and
+expects standalone text/JSON stats to have already been added to the returned
+manifest. Unconditionally returning a delta, or returning the unchanged stats
+manifest, breaks those consumers.
+
+The requesting DataCoord opts in through `enable_manifest_delta` on
+`CompactionPlan` and `CreateStatsRequest`. The default is false, including when
+an older sender omits the field. The response is selected per request, not from
+the worker's binary version or a process-wide setting.
+
+| Request / worker | Schema-bump materialization | Standalone text / JSON stats |
+|---|---|---|
+| Legacy request, patched worker | Worker commits new files and BM25 stats against the plan's base; returns `Manifest` and `BaseManifest`, with no `ManifestDelta` | Worker adds stats and returns the resulting manifest plus the existing stats metadata |
+| Opted-in request, patched worker | Returns only `ManifestDelta`; DataCoord commits against the current manifest | Worker returns stats descriptors; DataCoord commits them against the current manifest |
+| New DataCoord, pre-framework worker | Unknown request flag is ignored; DataCoord retains complete-manifest adoption with base/version validation | DataCoord reconstructs stats entries from the legacy result and commits them against the current manifest |
+
+Schema-version-only bumps and full rewrites keep returning complete manifests.
+Sort stats always bake into the target manifest, regardless of the flag.
+StorageV2 stats retain their metadata result path. L0 still returns deltalogs;
+its transaction ownership change is internal to DataCoord. Flush, import and
+copy retain their complete-manifest wire contract. Batch manifest DDL has no
+changed worker response in this migration.
+
+The compatibility path preserves the old coordinator's concurrency checks; it
+does not give an old coordinator the new segment-lock/rebase implementation.
+The worker must not return the unchanged base as if it contained newly written
+files, nor write both a complete manifest and a delta for opted-in requests.
+
+Request negotiation supports rolling upgrades and requests already dispatched
+by an old coordinator. It does not make a pre-framework coordinator able to
+consume delta results already dispatched by a newer coordinator. Before such
+a downgrade, drain schema-bump and standalone stats tasks while the newer
+coordinator is active. Already cached delta-only results from an unpatched
+worker also require task redispatch to a patched worker (or completion by a
+delta-aware coordinator); retrying their publication on the old coordinator
+cannot change the response format.
+
+Regression coverage exercises legacy and opted-in requests, reads real
+worker-created manifests to verify added columns/BM25/text/JSON stats, and
+checks manifest-commit failures. Existing DataCoord coverage must continue to
+exercise legacy manifest adoption, stale-base rejection, replay, structured
+delta commits, and stats rebasing. These tests do not substitute for a mixed
+binary cluster upgrade/downgrade run.
+
+`meta` owns a keyed lock, initialized with the rest of metadata state:
+
+```go
+segmentManifestLocks *lock.KeyLock[int64]
+```
+
+The exported surface should use typed requests rather than an arbitrary callback
+that can do hidden I/O or re-enter `meta`:
+
+```go
+type SegmentManifestCommit struct {
+    SegmentID        int64
+    ExpectedManifest string // empty only for initial-manifest creation
+    Mutation         ManifestMutation
+    CatalogMutation  SegmentManifestCatalogMutation
+}
+
+func (m *meta) CommitSegmentManifest(
+    ctx context.Context,
+    commit SegmentManifestCommit,
+) error
+```
+
+`ManifestMutation` is a closed/typed set, initially including:
+
+- `CommitUpdates` — construct the next revision from the segment's currently
+  published pointer and a structured `packed.ManifestUpdates` payload: new data
+  files, delta logs, stats, and index add/drop entries;
+- `Noop` — publish a prepared manifest path unchanged, only as a temporary
+  compatibility adapter.  It must validate the base and is removed once every
+  producer returns structured entries.
+
+`CatalogMutation` describes the metadata that must become visible with the
+manifest pointer.  Examples are completing one `SegmentIndex`, creating copied
+target `SegmentIndex` records, updating segment statistics, or changing a
+segment state.  It must produce catalog actions, not perform an independent
+catalog write.
+
+## Commit Protocol and Lock Order
+
+For one segment, the protocol is:
+
+1. Lock `segmentManifestLocks[segmentID]`. If the commit mutates SegmentIndex
+   records, acquire their `indexMeta.keyLock` locks in BuildID order and retain
+   them through manifest I/O and catalog publication.
+2. Briefly take `segMu`, clone the current `SegmentInfo`, and release `segMu`.
+   Validate segment existence, StorageV3, health/state, and
+   `ExpectedManifest` where the operation depends on a specific input.
+3. Execute the `packed` transaction using that snapshot's manifest pointer.
+   In the pinned milvus-storage revision (`3ae6ac4`), `OVERWRITE` applies the
+   updates to the specified read manifest. The highest stored revision only
+   determines the next revision number; its contents are not merged. The
+   segment lock serializes participating local writers. The resolver alone
+   does not prevent lost updates from external writers or an overlapping
+   leader handoff.
+4. Reacquire `segMu`, reload the latest `SegmentInfo`, and revalidate segment
+   health and `ExpectedManifest`. Apply the new pointer and catalog mutation to
+   that latest clone, preserving unrelated ordinary metadata updates that ran
+   during manifest I/O.
+5. While still holding `segMu`, execute one `catalog.Update` / catalog
+   transaction containing the changed `SegmentInfo` and all associated
+   `SegmentIndex` records. This matches the existing full-record
+   `UpdateSegmentsInfo` consistency model: final catalog publications are
+   serialized, while the slower manifest I/O for different segments remains
+   concurrent. If the catalog write fails, do not change memory.
+6. Install the cloned metadata in memory, then release `segMu`. Release any
+   BuildID locks and the segment lock when the commit returns.
+
+The lock ordering is always:
+
+```text
+segmentManifestLock(segmentID) -> indexMeta.keyLock(buildID) -> segMu
+```
+
+`segMu` is never held during object-storage I/O. For commits with SegmentIndex
+mutations, the BuildID locks are acquired before the initial `segMu` snapshot
+and held across manifest I/O and final publication. They keep the authoritative
+task projection stable while the manifest entry is generated and published.
+Other `SegmentIndex` writers take `keyLock` before reading segment state under
+`segMu`; the commit preserves this order in both its snapshot and publication
+sections. Commits without SegmentIndex mutations acquire no BuildID lock.
+No code may take a BuildID lock first and
+then attempt a segment manifest commit.  Multi-segment operations sort segment
+IDs before locking.  Where possible, compaction creates independent target
+segments rather than committing two segments under one lock.
+
+One known bypass predates this design and is not closed by it: backfill
+adoption and batch DDL advance `manifest_path` through `UpdateManifestVersion`,
+outside `segmentManifestLocks`, guarded only by version monotonicity. A
+revision built from base N and adopted after a commit published N+1 wins on
+version alone, and the storage layer's overwrite resolver does not merge, so
+the newer revision's content is silently dropped - index entries included, now
+that manifests carry them. Until adoption carries the base version the revision
+was built from and rejects a stale one (follow-up), no index build or GC
+retraction may overlap a backfill window on the same segment.
+
+## Failure and Recovery Semantics
+
+Object storage and etcd cannot commit atomically.  The ordering is deliberately
+one-way:
+
+```text
+artifact files -> manifest revision -> etcd/catalog pointer -> memory
+```
+
+- If artifact generation fails, no manifest or etcd change is made.
+- If manifest creation succeeds but catalog publication fails, the revision is
+  orphaned and invisible.  Retrying starts from the still-published pointer;
+  orphan cleanup is safe because no `SegmentInfo` references it.
+- A retry must be idempotent at the logical mutation level.  Adding an index
+  must not create duplicate logical index entries; dropping a deleted logical
+  index may remove every matching historical entry.
+- A stale expected base or changed segment state is a retry/discard result, not
+  an attempt to overwrite the current pointer. Exact `ExpectedManifest`
+  conflicts retain a typed retriable error plus an in-process stale marker, so
+  task-specific consumers such as Stats can discard obsolete worker output
+  without classifying unrelated service-unavailable failures as stale.
+
+Drop keeps the same ordering - bytes first, then the metadata naming them:
+
+```text
+resolve delete list (meta + manifest)
+  -> delete index objects
+  -> commit manifest without index + remove SegmentIndex (one catalog transaction)
+```
+
+The usual argument for retiring metadata first - "bytes gone but metadata still
+claims them is a read failure" - does not apply here. `recycleUnusedSegIndexes`
+reaches this path only when the index definition no longer exists or the segment
+itself is gone, and only for a task in a terminal state. Nothing consumes the
+artifact, so a window where metadata still names deleted files harms no reader,
+and the next GC cycle simply repeats the whole step; deleting already-deleted
+files is a no-op.
+
+Retiring the metadata first is what would be unsafe. Once the `SegmentIndex`
+record is removed, a failed deletion leaks bytes that nothing can re-drive:
+`recycleUnusedIndexFilesV1` is meta-driven through `GetDeletedIndexesWithV1Path`,
+so a COLLECTION_ROOTED artifact leaks permanently. Only the BUILD_ROOTED layout
+would be reclaimed, by `recycleUnusedIndexFilesV0`'s orphan-buildID sweep - and
+that is the older layout, so the leak would grow rather than shrink over time.
+
+What the framework still contributes is atomicity between the two metadata
+stores: the manifest revision and the `SegmentIndex` removal retire in one
+catalog transaction, so they can never disagree about whether the index exists.
+Only their ordering relative to the bytes is what changed. Object deletion
+remains non-atomic with either, which is why it runs first, where a failure
+costs a retry rather than an unreclaimable leak.
+
+## Retiring the etcd SegmentIndex Record
+
+The manifest becomes the only durable record of a completed StorageV3 index
+artifact, but `SegmentIndex` remains the durable build-task record until that
+point. `dataCoord.index.writeSegmentIndexToManifest` (default off) controls
+only the terminal artifact placement:
+
+- Off: every state, including Finished, persists to etcd and no manifest index
+  entry is created.
+- On: Unissued, InProgress, Failed, deleted, and fake-Finished records still
+  persist to etcd. A Finished StorageV3 build with actual files is added to the
+  manifest; the same catalog transaction advances `manifest_path` and deletes
+  its etcd task row. StorageV1/V2 always stay on the etcd path.
+
+This makes publication the sole retirement point instead of spreading an etcd
+write gate through `CreateSegmentIndex`, `AlterSegmentIndexes`, and every state
+transition. It also handles an in-flight build across false-to-true activation:
+the row created before activation is deleted atomically when its artifact is
+published, so restart cannot resurrect an old InProgress state over a Finished
+manifest entry.
+
+Reload follows durable placement rather than the switch's current value. It
+first loads etcd task records, then reads each retained healthy or Dropped,
+non-L0 StorageV3 segment whose `manifest_has_index` marker says a manifest entry has been
+published. Entries whose build IDs are absent from etcd are projected into
+in-memory `SegmentIndex` records; etcd wins conflicts, preserving task states
+and record-resident results. A marked manifest that cannot be read fails
+startup: silently omitting its entries could make GC classify live index files
+as orphaned. Dropped compaction parents still need their indexes for query
+fallback and orphan-GC protection. GC removes files before removing catalog
+metadata, so a failed read may instead be followed by a successful existence
+check proving that a Dropped segment's manifest is absent. Only in that case
+does startup continue without its indexes; the marker remains unchanged until
+pending GC removes the catalog row. Existence-check failures and unreadable
+manifests that still exist fail startup. Startup logs scanned, read, and recovered counts. The
+object-storage fan-out is bounded by
+`dataCoord.index.segmentIndexManifestLoadConcurrency`.
+
+The switch may be changed in either direction. Turning it off sends new
+completions to etcd but does not move or hide records already resident in
+manifests; their marker keeps reload and GC on those manifests. Turning
+it on again resumes manifest publication. No inverse feature switch and no
+eager manifest-to-etcd backfill are required, so mixed historical placement is
+supported without dual-writing an individual result.
+
+GC also follows durable placement rather than the current mode. It reads a
+StorageV3 manifest only when `manifest_has_index` is set, including after the
+write switch is turned off; unmarked segments remain on the etcd-only path with
+no manifest read.
+
+The candidate set is deliberately NOT narrowed by which index definitions are
+still live. Skipping a segment whose definitions all have records would strand
+precisely the entry the system still needs: a manifest entry whose definition is
+already dropped has no `SegmentIndex` record by construction, and GC is entirely
+record-driven (`GetAllSegIndexes`, `GetDeletedIndexesWithV1Path`), so an entry
+with no record is never visited again and its bytes leak for the
+COLLECTION_ROOTED layout. The reload filter is therefore: healthy or Dropped, non-L0,
+StorageV3, non-empty manifest path, and `manifest_has_index`.
+
+Every entry read is validated with the same predicate the other manifest
+consumers use (`manifestIndexFilePathInfo`) before it becomes a record, because
+the reload is the one path that promotes a manifest entry into a record whose
+file keys later reach `removeObjectFiles`. A malformed entry fails startup for
+the same reason an unreadable manifest does.
+
+The cost is one object read per marked healthy or Dropped non-L0 StorageV3 segment at
+startup. An all-etcd cluster has no marked segments and performs no manifest
+GETs. Reads use `dataCoord.index.segmentIndexManifestLoadConcurrency` (default
+64, clamped to 1–256), further bounded by `minio.maxConnections`. Each active
+read blocks a native thread. Fixed-size batches retain futures only for the
+active batch, and successful records are installed before the next batch.
+Transient reads retry locally up to three times. Invalid entries are rejected
+without a validation retry; exhausted reads and invalid metadata both terminate
+startup without replaying the scan through `initMeta`'s metastore retry loop.
+The partially recovered metadata is never exposed by `newMeta`.
+
+**Lock order.** The global order is
+`segmentManifestLocks -> indexMeta.keyLock -> segMu`.
+`CommitSegmentManifest` therefore acquires the build's key lock before its
+first `segMu` acquisition and holds it through publication; acquiring it during
+staging, after `segMu`, inverts the order and deadlocks against a concurrent
+transition of the same build. `TestCommitSegmentManifestTakesKeyLockBeforeSegMu`
+pins this: parked on the key lock, the commit must hold no `segMu`.
+
+Two limits are inherent rather than incidental, and are why the switch is
+off-by-default rather than removed:
+
+- Only StorageV3 segments record indexes in a manifest, which is why the switch
+  cannot apply to StorageV1/V2 segments at all - the etcd record stays their
+  sole copy, and retiring it needs a different mechanism.
+- A `SegmentIndex` is also the build task record. Because task-only states have
+  no manifest representation, they continue to persist in etcd. A recovered
+  manifest record is `Finished` by construction.
+- Mode changes affect new terminal results only. Historical etcd and manifest
+  records may coexist; the per-segment marker makes both recoverable.
+
+A version-skew guard protects the one cross-binary interaction: with the
+switch on, a copy executed by a DataNode that predates manifest index
+republication returns a manifest whose index section was never rewritten.
+`syncVectorScalarIndexes` hard-fails the copy task with an upgrade hint instead
+of installing an artifact-bearing record that cannot be recovered on restart.
+
+One invariant carries the whole scheme: **a visible StorageV3 segment always
+has a non-empty `ManifestPath`.** It holds by construction - `AllocSegment`
+mints the pointer in the same `SegmentInfo` literal that sets `StorageVersion`,
+and flush, compaction, import and copy all publish `ManifestPath` atomically
+with the segment record; there is no in-place V1/V2 to V3 conversion. Nothing
+validated it, however, and a violation is silent: the segment would answer "not
+manifest-backed" and keep writing to etcd. Publication therefore declines to
+the safe etcd path, while recovery returns a data-integrity error and aborts
+startup if a segment marked `manifest_has_index` has no pointer.
+
+The consumers that decide *whether a segment is indexed* -
+`indexMeta.GetSegmentIndexes` / `GetIndexedSegments`, read by the index
+inspector, the compaction trigger and segment load - answer from in-memory
+records alone, which is the reason the reload exists at all. No DataCoord read
+path falls back to the manifest: the reload makes the in-memory records
+complete before the server serves, and every publication installs its record in
+memory in the same commit, so an absent record means an absent artifact rather
+than a record kept elsewhere. Manifest index entries are read only by the
+reload, by GC when it retracts one, and by the copy worker.
+
+## Required Caller Migration
+
+| Current owner/path | Framework migration |
+|---|---|
+| `task_index.go` / DataNode index task | Return index artifact metadata. `meta.CommitSegmentManifest(AddIndexes)` creates the revision and, via a `SegmentIndexUpsert` catalog mutation, atomically installs the Finished record in memory and deletes its etcd task row. |
+| `garbage_collector.go` | Delete the objects first, then use `DropIndexes` with a `SegmentIndexRemove` catalog mutation so the retracting revision's pointer and the `SegmentIndex` removal land in one catalog transaction - the same bytes-first ordering as the legacy path (see Failure and Recovery Semantics). A StorageV2 segment, a dropped segment, or a manifest that never carried the entry follows the same file deletion with a bare `RemoveSegmentIndex` instead of a manifest commit. |
+| `copy_segment_task.go`, `import_task_import.go` / restore | A copy or import target is a fresh, exclusively owned segment whose worker returns a complete manifest pointer, so DataCoord publishes that first pointer inline via `UpdateManifest`. No `CommitSegmentManifest` serialization is needed for a segment no other writer touches. Index entries are part of "complete": the copied manifest inherits the source's entries, whose stored paths point outside the segment base and therefore encode the source IDs, so the copy worker enumerates and retracts them from the copied manifest itself and records the target's own entries in the same transaction. DataCoord supplies the reallocated target index definitions keyed by name. |
+| `task_stats.go` | Text, JSON, and sort stats all use `AddStats`; remove the bare sort `UpdateManifest` path. |
+| flush / `SaveBinlogPaths` | No migration. Publishes inline via `UpdateManifest`. A growing or L0 segment is flushed by its single WAL owner and advanced sequentially, so its manifest write has no concurrent writer and needs no `CommitSegmentManifest` serialization even though the manifest advances from `ManifestEarliest`. |
+| compaction | Generate output files in DataNode, return output manifest entries, then publish each output segment through the framework. |
+| external collection refresh | Deferred from the segment-scoped migration. Keep its existing job-level `UpdateSegmentsInfo` publication until a collection-level generation boundary can atomically switch the complete refresh result and `external_source` / `external_spec`. |
+| snapshot/restore and recovery | Read the published pointer normally; concurrent post-flush destination-manifest writes use the framework. |
+
+`UpdateManifest` is the inline publication mechanism for the single-writer
+manifest paths: all StorageV1/V2 writes, and the StorageV3 flush
+(`SaveBinlogPaths`) and copy/import finalizations, none of which has a concurrent
+writer. It carries no StorageV3 guard. The concurrent post-flush paths (stats,
+index, GC, compaction, batch DDL) never call `UpdateManifest` — they build a
+revision and advance the pointer through `CommitSegmentManifest`. A review-time
+grep of every `UpdateManifest(` and every packed manifest mutation is a required
+migration gate: any new `UpdateManifest` caller must be a single-writer path.
+
+The current staged implementation intentionally does not migrate external
+collection refresh by publishing each returned segment independently. Doing so
+would turn one job-level refresh into a partially visible sequence and could
+leave a failed job with only some new manifests published. External collection
+refresh remains an explicit follow-up and the end-state acceptance criteria
+below are not satisfied until that collection-level protocol is implemented.
+
+## Implementation Plan in the Clean Worktree
+
+1. Add the keyed lock and `CommitSegmentManifest` skeleton in `meta.go`, with
+   lock-order documentation and focused concurrency tests.
+2. Add typed packed mutation adapters and tests for add/drop/stats/create.  The
+   storage transaction uses `OVERWRITE`; do not add a protobuf-serialized
+   `SegmentInfo` value-equality CAS.
+3. Migrate index completion end-to-end: no worker-side index manifest
+   publication and no change to the DataNode result contract - DataCoord builds
+   the `ManifestIndexInfo` from the collection schema, the index definition, and
+   the index task record, then atomically publishes `SegmentInfo` plus
+   `SegmentIndex`.  Implemented; see
+   [StorageV3 Manifest Index Publication](20260811-storagev3-manifest-index-publication.md).
+4. Migrate GC with the durable cleanup state and crash/retry tests.
+5. Migrate stats, including the sort path.
+6. Migrate compaction output publication to the framework. Leave flush
+   (`SaveBinlogPaths`) and copy/import on inline `UpdateManifest` — they are
+   single-writer — and keep `UpdateManifest` free of any StorageV3 guard.
+7. Add observability: lock wait/hold duration, commit outcomes, stale-base
+   rejections, orphan-manifest count, and cleanup retries.
+8. Run the full affected DataCoord/DataNode test matrix in the Milvus builder
+   container, with race/fault-injection tests covering etcd failure, stale
+   inputs, concurrent index completion, index-vs-GC, stats-vs-index, and
+   restart after each drop stage.
+
+## Integration with the Existing Manifest-Index Work
+
+The existing branch should not be incrementally expanded with this framework.
+After the clean branch is complete:
+
+1. rebase the manifest-index migration onto the framework branch;
+2. replace its local `packed.AddIndexInfosToManifest`,
+   `RemoveIndexInfosFromManifest`, and manifest-pointer publication logic with
+   `CommitSegmentManifest` actions;
+3. keep `SegmentIndex.IndexFileKeys` as the read path's only file-list source -
+   no manifest fallback is needed, since a record without keys is a
+   fake-finished build, which publishes no manifest entry either; and
+4. re-run the full lifecycle audit: build, load, query, copy/restore, snapshot,
+   compaction, dropped-segment GC, and recovery.
+
+This ordering avoids stabilizing two competing publication protocols in the
+same release.
+
+## Acceptance Criteria
+
+1. There is no StorageV3 manifest mutation or pointer publication outside the
+   DataCoord segment commit framework.
+2. Two concurrent operations on the same segment cannot publish pointer
+   revisions out of order.
+3. Operations on different segments do not block one another on manifest I/O.
+4. A catalog write failure never updates in-memory metadata and never exposes
+   the orphan manifest revision.
+5. GC after a crash converges without deleting files referenced by the current
+   manifest.
+6. Tests demonstrate each required race and failure case rather than only
+   successful sequential execution.
+
+## Recovery and restore resource bounds
+
+See [the index-publication design](20260811-storagev3-manifest-index-publication.md#recovery-and-restore-resource-bounds)
+for the shared manifest-read budget, empty-marker normalization, copy request
+compatibility, durable cleanup plans, and activation/rollback boundaries.

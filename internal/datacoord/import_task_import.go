@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -135,6 +137,25 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
+		if errors.Is(err, importid.ErrIDRangeTooSmall) {
+			// The one assemble failure a retry cannot fix: the per-file range reserved
+			// fewer ids than the file's row count, so the datanode cursor cannot cover
+			// it. Neither number changes by rescheduling, so fail the job now with the
+			// precise reason -- otherwise the job stays Importing (checkImportingJob only
+			// advances once every task is Completed) until tryTimeoutJob replaces the
+			// reason with a generic timeout message.
+			//
+			// Only the job is updated, as in preimport: the checker's tryFailingTasks
+			// marks this task Failed on the next tick.
+			if updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(),
+				UpdateJobState(internalpb.ImportJobState_Failed),
+				UpdateJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
+					WrapTaskLog(t, mlog.Err(updateErr))...)
+			}
+			return
+		}
+		t.retryTimes++
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())

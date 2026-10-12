@@ -228,17 +228,17 @@ You can also run unit tests in package level.
 
 ```shell
 # run unit tests in datanode package
-$ go test ./internal/datanode -cover
+$ go test ./internal/datanode -tags dynamic,test -gcflags="all=-N -l" -cover
 ok  	github.com/milvus-io/milvus/internal/datanode 3.874s	coverage: 88.2% of statements
 ```
 
 You can run a sub unit test.
 
-In this case, we are only concerned about the tests with name "SegmentReplica" and
-sub tests with name "segmentFlushed". When running sub tests, the coverage is not concerned.
+In this case, we are only concerned about the tests with name "TestDataNode" and
+sub tests with name "Test_getSystemInfoMetrics". When running sub tests, the coverage is not concerned.
 
 ```shell
-$ go test ./internal/datanode -run SegmentReplica/segmentFlushed
+$ go test ./internal/datanode -tags dynamic,test -gcflags="all=-N -l" -run TestDataNode/Test_getSystemInfoMetrics
 ok  	github.com/milvus-io/milvus/internal/datanode 0.019s
 ```
 

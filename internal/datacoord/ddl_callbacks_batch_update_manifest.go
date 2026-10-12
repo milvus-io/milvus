@@ -46,6 +46,26 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 			segmentIDs = append(segmentIDs, segID)
 			v2Count++
 		case hasV3:
+			// TODO(segment-manifest-commit): a batch broadcast carries up to 512
+			// items and this V3 payload is a pure manifest-version bump (no
+			// object-storage I/O). We deliberately keep it as an UpdateManifestVersion
+			// operator so the whole batch — V2 column groups and V3 version bumps —
+			// commits in a single atomic UpdateSegmentsInfo (one AlterSegments).
+			//
+			// Routing each item through meta.CommitSegmentManifest instead would take
+			// the per-segment manifest lock plus segMu twice per item and issue one
+			// catalog.Update per item, and a mid-loop failure would return before the
+			// accumulated V2 operators are applied — i.e. the batch would no longer be
+			// applied as a unit. The tension is that CommitSegmentManifest's per-segment
+			// serialization is what protects against concurrent writers
+			// (stats/index/GC/compaction) racing the manifest pointer; skipping it here
+			// trades that protection for batch atomicity. meta.CommitSegmentManifests now
+			// resolves that trade-off — it takes every segment's manifest lock as one
+			// atomic operation yet still commits in a single UpdateSegmentsInfo (L0
+			// compaction already uses it) — and because this V3 payload is an I/O-free
+			// pointer adoption it maps to a ManifestMutationNoop commit. Routing this
+			// callback (and the external collection refresh path) through it is the
+			// remaining follow-up.
 			operators = append(operators, UpdateManifestVersion(segID, item.GetManifestVersion()))
 			segmentIDs = append(segmentIDs, segID)
 			v3Count++
@@ -58,6 +78,13 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 		if err := c.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 			mlog.Warn(ctx, "batch update manifest failed", mlog.Err(err))
 			return err
+		}
+		// The SegmentMeta mutation is committed (manifest versions advanced
+		// for V3 items); reconcile the DataView snapshot asynchronously so
+		// consumers observe the new manifest versions. V2 column-group
+		// updates do not touch the manifest, so only V3 items trigger.
+		if v3Count > 0 {
+			c.meta.recomputeDataView(ctx, result.Message.Header().GetCollectionId())
 		}
 		notifySegmentIndexBuild(segmentIDs...)
 	}

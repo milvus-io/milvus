@@ -51,7 +51,6 @@
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "segcore/Collection.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/collection_c.h"

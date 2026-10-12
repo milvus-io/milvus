@@ -26,10 +26,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,11 +40,14 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -165,7 +170,7 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 }
 
 func InitMockGlobalMetaCache() {
-	proxy.InitEmptyGlobalCache()
+	proxy.InitEmptyMetaCacheForTest()
 }
 
 func Print(code int32, message string) string {
@@ -226,6 +231,129 @@ func TestVectorAuthenticate(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "{\"code\":200,\"data\":[\""+DefaultCollectionName+"\"]}", w.Body.String())
 	})
+}
+
+// newRESTV1ServerForRBACTest builds a v1 REST server whose auth middleware sets
+// the parsed username directly, without re-initializing the proxy privilege
+// cache (genAuthMiddleWare resets it, which would wipe test grants).
+func newRESTV1ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) *gin.Engine {
+	t.Helper()
+	h := NewHandlersV1(pxy)
+	ginHandler := gin.Default()
+	app := ginHandler.Group(URIPrefixV1, func(c *gin.Context) {
+		username, _, ok := ParseUsernamePassword(c)
+		if !ok || username == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+			return
+		}
+		c.Set(ContextUsername, username)
+	})
+	h.RegisterRoutesToV1(app)
+	return ginHandler
+}
+
+// TestRESTV1AliasRBAC guards the alias-resolution wiring of the REST v1
+// authorization path (see TestRESTV2AliasRBAC for the shared rationale).
+func TestRESTV1AliasRBAC(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
+	paramtable.Get().Save(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	const (
+		username = "alice"
+		role     = "role_reader"
+		alias    = "orders_current"
+		realCol  = "orders"
+	)
+
+	cache := proxy.InitEmptyMetaCacheForTest()
+	require.NotNil(t, cache)
+	patch := mockey.Mock((*proxy.MetaCache).ResolveCollectionAlias).Return(realCol, nil).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
+	privCache := privilege.GetPrivilegeCache()
+	require.NotNil(t, privCache)
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheGrantPrivilege,
+		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), realCol, commonpb.ObjectPrivilege_PrivilegeQuery.String(), util.DefaultDBName),
+	}))
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheAddUserToRole,
+		OpKey:  funcutil.EncodeUserRoleCache(username, role),
+	}))
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{Status: &StatusSuccess}, nil).Twice()
+	testEngine := newRESTV1ServerForRBACTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache})
+
+	queryPath := versional(VectorQueryPath)
+	for _, tc := range []struct {
+		name string
+		coll string
+	}{
+		{"real collection name", realCol},
+		{"alias resolves to the granted collection", alias},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := bytes.NewReader([]byte(`{"collectionName": "` + tc.coll + `", "filter": "pk > 0"}`))
+			req := httptest.NewRequest(http.MethodPost, queryPath, body)
+			req.SetBasicAuth(username, "pwd")
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		})
+	}
+}
+
+// TestRESTV1AliasRBAC_GrantOnAliasStringDenied verifies the inverse: a grant
+// scoped to the alias string must NOT authorize access through the alias.
+func TestRESTV1AliasRBAC_GrantOnAliasStringDenied(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
+	paramtable.Get().Save(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	const (
+		username = "alice"
+		role     = "role_reader"
+		alias    = "orders_current"
+		realCol  = "orders"
+	)
+
+	cache := proxy.InitEmptyMetaCacheForTest()
+	require.NotNil(t, cache)
+	patch := mockey.Mock((*proxy.MetaCache).ResolveCollectionAlias).Return(realCol, nil).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
+	privCache := privilege.GetPrivilegeCache()
+	require.NotNil(t, privCache)
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheGrantPrivilege,
+		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), alias, commonpb.ObjectPrivilege_PrivilegeQuery.String(), util.DefaultDBName),
+	}))
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheAddUserToRole,
+		OpKey:  funcutil.EncodeUserRoleCache(username, role),
+	}))
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := newRESTV1ServerForRBACTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache})
+
+	body := bytes.NewReader([]byte(`{"collectionName": "` + alias + `", "filter": "pk > 0"}`))
+	req := httptest.NewRequest(http.MethodPost, versional(VectorQueryPath), body)
+	req.SetBasicAuth(username, "pwd")
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	mp.AssertNotCalled(t, "Query", mock.Anything, mock.Anything)
 }
 
 func TestVectorListCollection(t *testing.T) {
@@ -585,6 +713,69 @@ func genGetRequest() *http.Request {
 	bodyReader := bytes.NewReader(jsonBody)
 	req := httptest.NewRequest(http.MethodPost, versional(VectorGetPath), bodyReader)
 	return req
+}
+
+func TestRESTV1ForwardsRLSFields(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
+	})
+
+	matchesRLS := func(req interface {
+		GetRlsPrincipal() string
+		GetSkipRls() bool
+	},
+	) bool {
+		return req.GetRlsPrincipal() == "alice" && req.GetSkipRls()
+	}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&DefaultDescCollectionResp, nil).Times(4)
+	mp.EXPECT().Query(mock.Anything, mock.MatchedBy(func(req *milvuspb.QueryRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.QueryResults{Status: &StatusSuccess}, nil).Twice()
+	mp.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(req *milvuspb.DeleteRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{Status: &StatusSuccess}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{
+		Status: &StatusSuccess, IDs: genIDs(schemapb.DataType_Int64), InsertCnt: 1,
+	}, nil).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpsertRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{
+		Status: &StatusSuccess, IDs: genIDs(schemapb.DataType_Int64), UpsertCnt: 1,
+	}, nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.SearchResults{
+		Status: &StatusSuccess, Results: &schemapb.SearchResultData{},
+	}, nil).Once()
+
+	engine := initHTTPServer(mp, false)
+	send := func(path, body string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versional(path), strings.NewReader(body)))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+	row := generateSearchResult(schemapb.DataType_Int64)[0]
+	data, err := json.Marshal(map[string]interface{}{
+		HTTPCollectionName: DefaultCollectionName,
+		HTTPReturnData:     row,
+		"rlsPrincipal":     "alice",
+		"skipRls":          true,
+	})
+	require.NoError(t, err)
+
+	send(VectorQueryPath, `{"collectionName":"book","filter":"book_id > 0","rlsPrincipal":"alice","skipRls":true}`)
+	send(VectorGetPath, `{"collectionName":"book","id":[1],"rlsPrincipal":"alice","skipRls":true}`)
+	send(VectorDeletePath, `{"collectionName":"book","filter":"book_id in [1]","rlsPrincipal":"alice","skipRls":true}`)
+	// Object-form data exercises the single-row Insert/Upsert fallback copies.
+	send(VectorInsertPath, string(data))
+	send(VectorUpsertPath, string(data))
+	send(VectorSearchPath, `{"collectionName":"book","vector":[0.1,0.2],"rlsPrincipal":"alice","skipRls":true}`)
 }
 
 func TestDelete(t *testing.T) {

@@ -622,15 +622,6 @@ TEST(GetElementValuesTest, FromFixedHashStr) {
     EXPECT_EQ(result, (std::vector<std::string>{"x", "y"}));
 }
 
-TEST(GetElementValuesTest, FromSortVectorElement) {
-    auto elem = std::make_shared<SortVectorElement<int64_t>>(
-        std::vector<int64_t>{30, 10, 20});
-    auto result =
-        GetElementValues<int64_t>(std::static_pointer_cast<MultiElement>(elem));
-    // SortVectorElement sorts on construction
-    EXPECT_EQ(result, (std::vector<int64_t>{10, 20, 30}));
-}
-
 TEST(GetElementValuesTest, UnknownTypeReturnsEmpty) {
     // FlatVectorElement is not handled by GetElementValues — should return {}
     auto elem = std::make_shared<FlatVectorElement<int32_t>>(
@@ -811,31 +802,6 @@ TEST(FilterChunkVsInTest, Double) {
     std::vector<double> data(128);
     for (int i = 0; i < 128; ++i) data[i] = i * 0.1;
     FilterChunkVsIn<double>({0.0, 1.0, 5.0, 12.7}, data, "Double");
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// SortVectorElement tests
-// Production usage: JsonContainsExpr creates SortVectorElement for
-// JSON_CONTAINS / JSON_CONTAINS_ALL / JSON_CONTAINS_ANY queries.
-// Always constructed with full vector (constructor sorts automatically).
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST(SortVectorElementTest, Basic) {
-    SortVectorElement<int32_t> sv(std::vector<int32_t>{5, 3, 1, 4, 2});
-    EXPECT_EQ(sv.Size(), 5);
-    for (int v : {1, 2, 3, 4, 5}) {
-        EXPECT_TRUE(sv.In(MakeVT(int32_t(v))));
-    }
-    EXPECT_FALSE(sv.In(MakeVT(int32_t(0))));
-    EXPECT_FALSE(sv.In(MakeVT(int32_t(6))));
-}
-
-TEST(SortVectorElementTest, StringWithStringView) {
-    SortVectorElement<std::string> sv(
-        std::vector<std::string>{"cherry", "apple", "banana"});
-    EXPECT_TRUE(sv.In(MakeVT(std::string("apple"))));
-    EXPECT_TRUE(sv.In(MakeVT(std::string_view("banana"))));
-    EXPECT_FALSE(sv.In(MakeVT(std::string("grape"))));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1235,13 +1201,6 @@ TEST(SetElementTest, WrongTypeVariant) {
     EXPECT_FALSE(se.In(MakeVT(std::monostate{})));
 }
 
-TEST(SortVectorElementTest, WrongTypeVariant) {
-    SortVectorElement<int32_t> sv(std::vector<int32_t>{10});
-    EXPECT_TRUE(sv.In(MakeVT(int32_t(10))));
-    EXPECT_FALSE(sv.In(MakeVT(int64_t(10))));
-    EXPECT_FALSE(sv.In(MakeVT(std::monostate{})));
-}
-
 TEST(FlatVectorElementTest, WrongTypeVariant) {
     FlatVectorElement<int64_t> fv(std::vector<int64_t>{5});
     EXPECT_TRUE(fv.In(MakeVT(int64_t(5))));
@@ -1322,34 +1281,6 @@ TEST(SetElementBoolTest, GenericDeduplicates) {
     EXPECT_EQ(se.Size(), 1);
     EXPECT_TRUE(se.In(MakeVT(true)));
     EXPECT_FALSE(se.In(MakeVT(false)));
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// SortVectorElement — via constructor (production path)
-// Production: JsonContainsExpr always constructs with full vector
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST(SortVectorElementTest, EmptyAndSize) {
-    SortVectorElement<int32_t> sv(std::vector<int32_t>{});
-    EXPECT_TRUE(sv.Empty());
-    EXPECT_EQ(sv.Size(), 0);
-}
-
-TEST(SortVectorElementTest, LargeList) {
-    std::vector<int32_t> vals(1000);
-    for (int i = 0; i < 1000; ++i) vals[i] = 1000 - i;  // reverse order
-    SortVectorElement<int32_t> sv(vals);
-    for (int v : {1, 500, 1000}) {
-        EXPECT_TRUE(sv.In(MakeVT(int32_t(v))));
-    }
-    EXPECT_FALSE(sv.In(MakeVT(int32_t(0))));
-    EXPECT_FALSE(sv.In(MakeVT(int32_t(1001))));
-}
-
-TEST(SortVectorElementTest, GetElements) {
-    SortVectorElement<int32_t> sv(std::vector<int32_t>{30, 10, 20});
-    auto elems = sv.GetElements();
-    EXPECT_EQ(elems, (std::vector<int32_t>{10, 20, 30}));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

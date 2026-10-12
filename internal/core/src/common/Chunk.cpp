@@ -62,7 +62,7 @@ StringChunk::ViewsByOffsets(const FixedVector<int32_t>& offsets) {
         ret.emplace_back(data_ + start, offsets_[idx + 1] - start);
         valid_res.emplace_back(isValid(idx));
     }
-    return {ret, valid_res};
+    return {std::move(ret), std::move(valid_res)};
 }
 
 }  // namespace milvus

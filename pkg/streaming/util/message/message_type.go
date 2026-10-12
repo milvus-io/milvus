@@ -55,7 +55,8 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeDropPartition: {
 		ExclusiveRequired: true,
 	},
-	MessageTypeImport: {},
+	MessageTypeImport:       {},
+	MessageTypeUpdateImport: {},
 	MessageTypeCommitImport: {
 		ExclusiveRequired: true,
 	},
@@ -70,6 +71,9 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		SelfControlled: true,
 	},
 	MessageTypeManualFlush: {
+		ExclusiveRequired: true,
+	},
+	MessageTypeCreateSnapshot: {
 		ExclusiveRequired: true,
 	},
 	MessageTypeAlterReplicateConfig: {
@@ -120,11 +124,18 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeCreateIndex:         {},
 	MessageTypeAlterIndex:          {},
 	MessageTypeDropIndex:           {},
+	MessageTypeAlterRLSMetadata:    {},
+	MessageTypeDropRLSMetadata:     {},
 	MessageTypeFlushAll: {
 		ExclusiveRequired: true,
 	},
 	MessageTypeAlterWAL: {
 		ExclusiveRequired: true,
+	},
+	MessageTypeRecoveryBarrier: {
+		LogLevel:       mlog.InfoLevel,
+		IsSystem:       true,
+		SelfControlled: true,
 	},
 }
 

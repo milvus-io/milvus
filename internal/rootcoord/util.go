@@ -215,13 +215,21 @@ func getQueryCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metric
 	return mixCoord.GetQueryCoordTopology(ctx, req)
 }
 
-func getDataCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metricsinfo.DataCoordTopology, error) {
+func getDataCoordTopology(ctx context.Context, mixCoord types.MixCoord) (*metricsinfo.DataCoordTopology, error) {
 	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	if err != nil {
 		return nil, err
 	}
 	// Use direct topology method to avoid JSON marshal/unmarshal overhead in MixCoord mode
 	return mixCoord.GetDataCoordTopology(ctx, req)
+}
+
+func getConnectedDataNodeMetrics(ctx context.Context, mixCoord types.MixCoord) ([]metricsinfo.DataNodeInfos, error) {
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	if err != nil {
+		return nil, err
+	}
+	return mixCoord.GetConnectedDataNodeMetrics(ctx, req)
 }
 
 func getProxyMetrics(ctx context.Context, proxies proxyutil.ProxyClientManagerInterface) ([]*metricsinfo.ProxyInfos, error) {
@@ -276,12 +284,12 @@ func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxD
 
 	// get Data cluster metrics
 	group.Go(func() error {
-		dataCoordTopology, err := getDataCoordMetrics(ctx, mixcoord)
+		dataNodeMetrics, err := getConnectedDataNodeMetrics(ctx, mixcoord)
 		if err != nil {
 			return err
 		}
 
-		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
+		for _, dataNodeMetric := range dataNodeMetrics {
 			dm := dataNodeMetric.QuotaMetrics
 			if dm != nil {
 				if dm.Fgm.NumFlowGraph > 0 && dm.Fgm.MinFlowGraphChannel != "" {
@@ -337,8 +345,50 @@ func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxD
 	return nil
 }
 
+func checkNestedArrayTypeSchemaCapacity(fieldSchema *schemapb.FieldSchema) error {
+	if !typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+		return nil
+	}
+	maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
+	var rootCapacity int64
+	for typeSchema := fieldSchema.GetTypeSchema(); typeSchema.GetArrayElement() != nil; typeSchema = typeSchema.GetArrayElement() {
+		maxCapacity, err := parameterutil.GetMaxCapacityFromTypeSchema(typeSchema)
+		if err != nil {
+			return err
+		}
+		if maxCapacity <= 0 || maxCapacity > maxArrayCapacity {
+			return merr.WrapErrParameterInvalidMsg(
+				"the maximum capacity specified for a Array should be in (0, %d]",
+				maxArrayCapacity)
+		}
+		if rootCapacity == 0 {
+			rootCapacity = maxCapacity
+		}
+	}
+
+	mirrorCapacity, err, hasMirror := common.GetInt64Value(
+		fieldSchema.GetTypeParams(), common.MaxCapacityKey)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg(
+			"the value for %s of field %s must be an integer",
+			common.MaxCapacityKey, fieldSchema.GetName())
+	}
+	if hasMirror && mirrorCapacity != rootCapacity {
+		return merr.WrapErrParameterInvalidMsg(
+			"type param %s of nested array field %s must match type_schema root capacity %d",
+			common.MaxCapacityKey, fieldSchema.GetName(), rootCapacity)
+	}
+	return nil
+}
+
 func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 	for _, fieldSchema := range fieldSchemas {
+		if err := typeutil.ValidateFieldTypeSchema(fieldSchema); err != nil {
+			return err
+		}
+		if err := checkNestedArrayTypeSchemaCapacity(fieldSchema); err != nil {
+			return err
+		}
 		if fieldSchema.GetDataType() == schemapb.DataType_ArrayOfStruct {
 			msg := fmt.Sprintf("Invalid field type, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
@@ -443,13 +493,13 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				panic("default value unsupport data type")
 			}
 		}
-		if err := checkDupKvPairs(fieldSchema.GetTypeParams(), "type"); err != nil {
+		if err := typeutil.CheckDupKvPairs(fieldSchema.GetTypeParams(), "type"); err != nil {
 			return err
 		}
 		if err := validateLocalFormat(fieldSchema); err != nil {
 			return err
 		}
-		if err := checkDupKvPairs(fieldSchema.GetIndexParams(), "index"); err != nil {
+		if err := typeutil.CheckDupKvPairs(fieldSchema.GetIndexParams(), "index"); err != nil {
 			return err
 		}
 	}
@@ -464,9 +514,21 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 		}
 
 		for _, field := range schema.GetFields() {
+			if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
+				return err
+			}
+			if err := checkNestedArrayTypeSchemaCapacity(field); err != nil {
+				return err
+			}
 			if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
 				msg := fmt.Sprintf("fields in StructArrayField can only be array or array of vector, but field %s is %s", field.Name, field.DataType.String())
 				return merr.WrapErrParameterInvalidMsg(msg)
+			}
+			switch field.GetElementType() {
+			case schemapb.DataType_ArrayOfVector:
+				return merr.WrapErrParameterInvalidMsg("nested ArrayOfVector is not supported for field %s", field.GetName())
+			case schemapb.DataType_ArrayOfStruct:
+				return merr.WrapErrParameterInvalidMsg("nested ArrayOfStruct is not supported for field %s", field.GetName())
 			}
 
 			if field.IsPartitionKey || field.IsPrimaryKey {
@@ -479,13 +541,13 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 					field.DataType.String(), field.ElementType.String(), field.Name)
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
-			if err := checkDupKvPairs(field.GetTypeParams(), "type"); err != nil {
+			if err := typeutil.CheckDupKvPairs(field.GetTypeParams(), "type"); err != nil {
 				return err
 			}
 			if err := validateLocalFormat(field); err != nil {
 				return err
 			}
-			if err := checkDupKvPairs(field.GetIndexParams(), "index"); err != nil {
+			if err := typeutil.CheckDupKvPairs(field.GetIndexParams(), "index"); err != nil {
 				return err
 			}
 
@@ -503,7 +565,13 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 }
 
 func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema) (int64, error) {
-	for _, param := range field.GetTypeParams() {
+	typeParams := field.GetTypeParams()
+	maxArrayCapacity := int64(defaultMaxArrayCapacity)
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		typeParams = field.GetTypeSchema().GetTypeParams()
+		maxArrayCapacity = Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
+	}
+	for _, param := range typeParams {
 		if param.GetKey() != common.MaxCapacityKey {
 			continue
 		}
@@ -512,8 +580,8 @@ func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema
 			return 0, merr.WrapErrParameterInvalidMsg("the value for %s of field %s in struct array field %s must be an integer",
 				common.MaxCapacityKey, field.GetName(), structName)
 		}
-		if maxCapacity > defaultMaxArrayCapacity || maxCapacity <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
+		if maxCapacity > maxArrayCapacity || maxCapacity <= 0 {
+			return 0, merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
 		}
 		return maxCapacity, nil
 	}
@@ -538,17 +606,6 @@ func checkStructArrayFieldMaxCapacity(schema *schemapb.StructArrayFieldSchema) e
 			return merr.WrapErrParameterInvalidMsg("all sub-fields in struct array field must have the same max_capacity: structName=%s, subFieldName=%s, max_capacity=%d, expected=%d",
 				schema.GetName(), field.GetName(), maxCapacity, expectedMaxCapacity)
 		}
-	}
-	return nil
-}
-
-func checkDupKvPairs(params []*commonpb.KeyValuePair, paramType string) error {
-	set := typeutil.NewSet[string]()
-	for _, kv := range params {
-		if set.Contain(kv.GetKey()) {
-			return merr.WrapErrParameterInvalidMsg("duplicated %s param key \"%s\"", paramType, kv.GetKey())
-		}
-		set.Insert(kv.GetKey())
 	}
 	return nil
 }
@@ -598,10 +655,6 @@ func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldS
 		for _, subField := range field.GetFields() {
 			if subField.GetDataType() != schemapb.DataType_Array && subField.GetDataType() != schemapb.DataType_ArrayOfVector {
 				return merr.WrapErrParameterInvalidMsg("fields in StructArrayField can only be array or array of vector, but field %s is %s", subField.Name, subField.DataType.String())
-			}
-			if subField.GetElementType() == schemapb.DataType_ArrayOfStruct || subField.GetElementType() == schemapb.DataType_ArrayOfVector ||
-				subField.GetElementType() == schemapb.DataType_Array {
-				return merr.WrapErrParameterInvalidMsg("nested array is not supported for field %s", subField.Name)
 			}
 			if _, ok := schemapb.DataType_name[int32(subField.GetElementType())]; !ok || subField.GetElementType() == schemapb.DataType_None {
 				return merr.WrapErrParameterInvalid("Invalid field", fmt.Sprintf("field data type: %s is not supported", subField.GetElementType()))

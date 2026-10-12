@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -31,10 +33,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -672,6 +676,76 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 
 func TestRetrieve(t *testing.T) {
 	suite.Run(t, new(RetrieveSuite))
+}
+
+func TestRetrieveOnSegmentsCountWithEmptyResult(t *testing.T) {
+	paramtable.Init()
+
+	collectionID := int64(100)
+	schema := mock_segcore.GenTestCollectionSchema("test-retrieve-count", schemapb.DataType_Int64, true)
+	indexMeta := mock_segcore.GenTestIndexMeta(collectionID, schema)
+	coll, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID: collectionID,
+		Schema:       schema,
+		IndexMeta:    indexMeta,
+	})
+	require.NoError(t, err)
+	defer coll.Release()
+
+	plan, err := mock_segcore.GenSimpleRetrievePlan(coll)
+	require.NoError(t, err)
+
+	prevLevel := mlog.GetLevel()
+	mlog.SetLevel(mlog.DebugLevel)
+	defer mlog.SetLevel(prevLevel)
+
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: collectionID,
+			IsCount:      true,
+		},
+	}
+	mgr := NewManager()
+
+	// A segment may legitimately return an empty count(*) result — no field
+	// data at all, or a 0-row scalar array. The debug-only logging block must
+	// not index into it (see issue #53422).
+	runCase := func(t *testing.T, result *segcorepb.RetrieveResults) {
+		seg := NewMockSegment(t)
+		seg.EXPECT().DatabaseName().Return("default").Maybe()
+		seg.EXPECT().ResourceGroup().Return("rg").Maybe()
+		seg.EXPECT().Retrieve(mock.Anything, mock.Anything).Return(result, nil)
+
+		res, err := retrieveOnSegments(context.TODO(), mgr, []Segment{seg}, SegmentTypeSealed, plan, req)
+		require.NoError(t, err)
+		require.Len(t, res, 1)
+	}
+
+	t.Run("empty fields data", func(t *testing.T) {
+		runCase(t, &segcorepb.RetrieveResults{})
+	})
+
+	t.Run("zero-row scalar array", func(t *testing.T) {
+		runCase(t, &segcorepb.RetrieveResults{
+			FieldsData: []*schemapb.FieldData{makeInt64Field(100, "cnt", []int64{})},
+		})
+	})
+
+	t.Run("readable count value", func(t *testing.T) {
+		seg := NewMockSegment(t)
+		seg.EXPECT().DatabaseName().Return("default").Maybe()
+		seg.EXPECT().ResourceGroup().Return("rg").Maybe()
+		seg.EXPECT().ID().Return(int64(0)).Maybe()
+		seg.EXPECT().LoadInfo().Return(&querypb.SegmentLoadInfo{}).Maybe()
+		seg.EXPECT().Retrieve(mock.Anything, mock.Anything).
+			Return(&segcorepb.RetrieveResults{
+				FieldsData: []*schemapb.FieldData{makeInt64Field(100, "cnt", []int64{100})},
+			}, nil)
+
+		res, err := retrieveOnSegments(context.TODO(), mgr, []Segment{seg}, SegmentTypeSealed, plan, req)
+		require.NoError(t, err)
+		require.Len(t, res, 1)
+	})
 }
 
 func TestShouldEnableIgnoreNonPkWithGroupBy(t *testing.T) {

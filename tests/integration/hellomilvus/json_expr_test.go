@@ -611,7 +611,8 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	mlog.Info(context.TODO(), "like expression run successfully")
 
-	expr = `str1 like 'abc\\"def-%'`
+	// Escape the literal backslash through both string-literal and LIKE parsing.
+	expr = `str1 like 'abc\\\\"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
 		s.Equal(1, len(result.Results.FieldsData))
 		s.Equal(fieldName, result.Results.FieldsData[0].GetFieldName())
@@ -630,7 +631,7 @@ func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int
 	s.doSearch(collectionName, []string{fieldName}, expr, dim, checkFunc)
 	mlog.Info(context.TODO(), "like expression run successfully")
 
-	expr = `str2 like 'abc\\"def-%'`
+	expr = `str2 like 'abc\\\\"def-%'`
 	checkFunc = func(result *milvuspb.SearchResults) {
 		for _, topk := range result.GetResults().GetTopks() {
 			s.Zero(topk)
@@ -732,9 +733,9 @@ func (s *HelloMilvusSuite) insertFlushIndexLoad(ctx context.Context, dbName, col
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
@@ -981,8 +982,8 @@ func (s *HelloMilvusSuite) TestJsonWithEscapeString() {
 	s.insertFlushIndexLoad(ctx, dbName, collectionName, rowNum, dim, []*schemapb.FieldData{fVecColumn, dynamicData})
 
 	expr := ""
-	// search
-	expr = `str1 like "abc\\\"%"`
+	// Escape the backslash for LIKE and the quote for the string literal.
+	expr = `str1 like "abc\\\\\"%"`
 	checkFunc := func(result *milvuspb.SearchResults) {
 		s.Equal(1, len(result.Results.FieldsData))
 		s.Equal(common.MetaFieldName, result.Results.FieldsData[0].GetFieldName())

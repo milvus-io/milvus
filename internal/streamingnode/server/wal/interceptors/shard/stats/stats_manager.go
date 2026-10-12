@@ -17,17 +17,13 @@ import (
 )
 
 type (
-	SegmentStats         = utils.SegmentStats
-	ModifiedMetrics      = utils.ModifiedMetrics
-	SegmentBelongs       = utils.SegmentBelongs
-	SyncOperationMetrics = utils.SyncOperationMetrics
-	SealOperator         = utils.SealOperator
+	SegmentStats    = utils.SegmentStats
+	ModifiedMetrics = utils.ModifiedMetrics
+	SegmentBelongs  = utils.SegmentBelongs
+	SealOperator    = utils.SealOperator
 )
 
-var (
-	ErrNotEnoughSpace = errors.New("not enough space")
-	ErrTooLargeInsert = errors.New("insert too large")
-)
+var ErrNotEnoughSpace = errors.New("not enough space")
 
 // StatsManager is the manager of stats.
 // It manages the insert stats of all segments, used to check if a segment has enough space to insert or should be sealed.
@@ -98,6 +94,10 @@ func NewStatsManager() *StatsManager {
 // It will perform an atomic operation to register the seal operator and segments into the manager.
 func (m *StatsManager) RegisterSealOperator(sealOperator SealOperator, belongs []SegmentBelongs, stats []*SegmentStats) {
 	m.registerSealOperator(sealOperator, belongs, stats)
+	// ReachLimit is runtime-only. Seal recovered segments that have already
+	// crossed their persisted soft assignment target without waiting for
+	// another allocation or a periodic policy check.
+	m.worker.notifyToSealSegmentWithCapacityPolicy()
 	m.notifyIfTotalGrowingBytesOverHWM()
 }
 
@@ -202,7 +202,9 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 }
 
 // AllocRows alloc number of rows on current segment.
-// AllocRows will check if the segment has enough space to insert.
+// AllocRows treats the segment limits as soft sealing targets: every segment
+// may accept one allocation that crosses a target and is sealed afterwards;
+// later allocations are rejected so the caller can move to another segment.
 // Must be called after RegisterGrowingSegment and before UnregisterGrowingSegment.
 func (m *StatsManager) AllocRows(segmentID int64, insert ModifiedMetrics, runtimeFlushSize ...uint64) error {
 	if insert.Rows == 0 || insert.BinarySize == 0 {
@@ -260,9 +262,6 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics, runtim
 
 		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, m.pchannelStats[info.PChannel])
 		return stat.ShouldBeSealed(), nil
-	}
-	if stat.IsEmpty() {
-		return false, ErrTooLargeInsert
 	}
 	return stat.ShouldBeSealed(), ErrNotEnoughSpace
 }
@@ -360,26 +359,6 @@ func (m *StatsManager) getSealOperator(segmentID int64) (SegmentBelongs, *Segmen
 	return belongs, stats.Copy(), sealOperator, true
 }
 
-// UpdateOnSync updates the stats of segment on sync.
-// It's an async update operation, so it's not necessary to do success.
-func (m *StatsManager) UpdateOnSync(segmentID int64, syncMetric SyncOperationMetrics) {
-	m.mu.Lock()
-	if _, ok := m.segmentIndex[segmentID]; !ok {
-		// UpdateOnSync is called asynchronously, so we need to check if the segment is still exist.
-		m.mu.Unlock()
-		return
-	}
-	m.segmentStats[segmentID].UpdateOnSync(syncMetric)
-	limit := uint64(m.cfg.maxBinlogFileNum)
-	notify := m.segmentStats[segmentID].BinLogCounter > limit
-	m.mu.Unlock()
-
-	// Trigger seal if the binlog file number reach the limit.
-	if notify {
-		m.worker.NotifySealSegment(segmentID, policy.PolicyBinlogNumber(limit))
-	}
-}
-
 // UnregisterSealedSegment unregisters the sealed segment.
 func (m *StatsManager) UnregisterSealedSegment(segmentID int64) *SegmentStats {
 	m.mu.Lock()
@@ -461,6 +440,23 @@ func (m *StatsManager) selectSegmentsWithTimePolicy() map[int64]policy.SealPolic
 		}
 	}
 	return sealSegmentIDs
+}
+
+// selectSegmentsWithCapacityPolicy selects growing segments that have crossed
+// their soft assignment target. The comparison is recoverable from persisted
+// stats, so this is also the fallback when the best-effort capacity notifier is
+// dropped.
+func (m *StatsManager) selectSegmentsWithCapacityPolicy() []int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	segmentIDs := make([]int64, 0)
+	for segmentID, stat := range m.segmentStats {
+		if stat.ShouldBeSealed() {
+			segmentIDs = append(segmentIDs, segmentID)
+		}
+	}
+	return segmentIDs
 }
 
 // selectSegmentsWithBlockingL0Policy selects the earliest L1 growing segment per vchannel

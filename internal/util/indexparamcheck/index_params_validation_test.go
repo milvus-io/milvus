@@ -223,6 +223,31 @@ func TestValidateFieldIndexParams(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("recursive array rejected", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			FieldID:     103,
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+							},
+						},
+					},
+				},
+			},
+		}
+		params := map[string]string{common.IndexTypeKey: IndexINVERTED}
+
+		err := ValidateFieldIndexParams(field, params)
+
+		assert.ErrorContains(t, err, "indexing recursive ARRAY field nested_array is not supported")
+	})
+
 	t.Run("unknown index type rejected", func(t *testing.T) {
 		params := map[string]string{common.IndexTypeKey: "NOT_A_REAL_INDEX"}
 		err := ValidateFieldIndexParams(sparseField, params)

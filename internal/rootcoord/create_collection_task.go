@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -549,6 +550,13 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	if err := assignFunctionIDsFromFieldNames(schema); err != nil {
 		return merr.Wrap(err, "align milvus-table function field IDs")
 	}
+	// Newly aligned milvus-table schemas set preserveFieldID below and would
+	// bypass the direct-path ValidateFunction in prepareSchema, so run the
+	// non-runtime function validation here; DDL replay never reaches this
+	// point (it returns early above) and keeps its historical schema unjudged.
+	if err := validator.ValidateFunction(schema, "", true); err != nil {
+		return err
+	}
 	t.preserveFieldID = true
 	t.Req.Properties = upsertCreateCollectionProperty(t.Req.GetProperties(), util.PreserveFieldIdsKey, "true")
 
@@ -568,28 +576,40 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 			StorageType: params.CommonCfg.StorageType.GetValue(),
 			// External collections may reference an s3:// source even when the
 			// primary storage is local, so the connection cap still applies.
-			MaxConnections: uint32(params.MinioCfg.MaxConnections.GetAsInt()),
+			MaxConnections:              uint32(params.MinioCfg.MaxConnections.GetAsInt()),
+			TalonMode:                   params.CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
+			TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
+			TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
+			TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 		}
 	}
 	return &indexpb.StorageConfig{
-		Address:           params.MinioCfg.Address.GetValue(),
-		AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
-		SecretAccessKey:   params.MinioCfg.SecretAccessKey.GetValue(),
-		UseSSL:            params.MinioCfg.UseSSL.GetAsBool(),
-		SslCACert:         params.MinioCfg.SslCACert.GetValue(),
-		BucketName:        params.MinioCfg.BucketName.GetValue(),
-		RootPath:          params.MinioCfg.RootPath.GetValue(),
-		UseIAM:            params.MinioCfg.UseIAM.GetAsBool(),
-		IAMEndpoint:       params.MinioCfg.IAMEndpoint.GetValue(),
-		StorageType:       params.CommonCfg.StorageType.GetValue(),
-		Region:            params.MinioCfg.Region.GetValue(),
-		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
-		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
-		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
-		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
-		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
-		UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
+		Address:                     params.MinioCfg.Address.GetValue(),
+		AccessKeyID:                 params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey:             params.MinioCfg.SecretAccessKey.GetValue(),
+		UseSSL:                      params.MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:                   params.MinioCfg.SslCACert.GetValue(),
+		BucketName:                  params.MinioCfg.BucketName.GetValue(),
+		RootPath:                    params.MinioCfg.RootPath.GetValue(),
+		UseIAM:                      params.MinioCfg.UseIAM.GetAsBool(),
+		IAMEndpoint:                 params.MinioCfg.IAMEndpoint.GetValue(),
+		StorageType:                 params.CommonCfg.StorageType.GetValue(),
+		Region:                      params.MinioCfg.Region.GetValue(),
+		UseVirtualHost:              params.MinioCfg.UseVirtualHost.GetAsBool(),
+		CloudProvider:               params.MinioCfg.CloudProvider.GetValue(),
+		RequestTimeoutMs:            params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		MaxConnections:              uint32(params.MinioCfg.MaxConnections.GetAsInt()),
+		GcpCredentialJSON:           params.MinioCfg.GcpCredentialJSON.GetValue(),
+		SslTlsMinVersion:            params.MinioCfg.SslTLSMinVersion.GetValue(),
+		UseCrc32CChecksum:           params.MinioCfg.UseCRC32C.GetAsBool(),
+		TalonMode:                   params.CommonCfg.StorageTalonMode.GetAsUint32(),
+		TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
+		TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+		TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
+		TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
+		TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 	}
 }
 
@@ -674,6 +694,12 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	if err := t.appendNamespaceShardingEnabled(); err != nil {
 		return err
 	}
+	if err := common.ValidateRLSProperties(t.Req.GetProperties()...); err != nil {
+		return err
+	}
+	if err := common.ValidateRLSForceRequiresEnabled(t.Req.GetProperties()...); err != nil {
+		return err
+	}
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
 	if err := common.ValidateNamespaceMode(t.Req.GetProperties()...); err != nil {
 		return err
@@ -696,6 +722,18 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		}
 	} else {
 		if err := t.assignFieldAndFunctionID(t.body.CollectionSchema); err != nil {
+			return err
+		}
+		// Function schema validation for requests entering RootCoord directly —
+		// the proxy validates before forwarding, but nothing else on this path
+		// does. Runs only for newly created schemas: preserveFieldID restores an
+		// existing collection (snapshot/replication), whose historical schema
+		// must not be re-judged by current-version rules. External collections
+		// are validated too — the one resolution-sensitive rule (nullable
+		// input) exempts externally-mapped fields at the rule level, so the
+		// structural checks (e.g. the MinHash dim/num_hashes relation) stay
+		// authoritative on this path for the RESOLVED schema as well.
+		if err := validator.ValidateFunction(t.body.CollectionSchema, "", true); err != nil {
 			return err
 		}
 	}

@@ -24,8 +24,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Cache is the interface for system metadata cache.
@@ -62,26 +65,42 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 	return metacache.ParsePartitionsInfo(infos, hasPartitionKey)
 }
 
-// globalMetaCache is singleton instance of Cache.
-var globalMetaCache Cache
-
-// InitMetaCache initializes globalMetaCache.
-func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
+func initMetaCache(ctx context.Context, mixCoord types.MixCoordClient) (Cache, error) {
 	metaCache, err := metacache.NewMetaCache(mixCoord)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	globalMetaCache = metaCache
-	expr.Register("cache", globalMetaCache)
 
 	err = privilege.InitPrivilegeCache(ctx, mixCoord)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to init privilege cache", mlog.Err(err))
-		return err
+		return nil, err
 	}
 
 	internalhttp.RegisterPasswordVerifyFunc(PasswordVerify)
 	internalhttp.RegisterGetUserRoleFunc(GetRole)
 
-	return nil
+	return metaCache, nil
+}
+
+// newManagementRootVerifier builds the proxy's management-plane credential
+// verifier. It is a plain constructor: Proxy.Init holds the result and
+// registers it, so nothing here outlives a Proxy.
+//
+// It deliberately does not reuse the proxy's privilege cache: that cache only
+// stores a credential after a password has already matched, so a failed
+// attempt is never cached and every wrong password would issue a GetCredential
+// RPC that the coordinator serves with an unconditional metastore read. The
+// gated endpoints answer unauthenticated callers, which would make that an
+// anonymous etcd amplifier.
+func newManagementRootVerifier(mixCoord types.MixCoordClient) *adminauth.CachedRootVerifier {
+	return adminauth.NewCachedRootVerifier(func(ctx context.Context) (string, error) {
+		resp, err := mixCoord.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
+			Username: util.UserRoot,
+		})
+		if err != nil {
+			return "", merr.Wrap(err, "GetCredential failed")
+		}
+		return adminauth.RootHashFromResponse(resp)
+	})
 }

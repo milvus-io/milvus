@@ -102,7 +102,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionName != t.FunctionSchema.Name {
 		return merr.WrapErrParameterInvalidMsg("invalid function config, name not match")
 	}
-	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
+	coll, err := getCollectionInfo(ctx, t.GetMetaCache(), t.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		mlog.Error(t.ctx, "AddCollectionTask, get collection info failed",
 			mlog.String("dbName", t.GetDbName()),
@@ -154,12 +154,12 @@ func (t *alterCollectionFunctionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func getCollectionInfo(ctx context.Context, dbName string, collectionName string) (*collectionInfo, error) {
-	collID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+func getCollectionInfo(ctx context.Context, metaCache Cache, dbName string, collectionName string) (*collectionInfo, error) {
+	collID, err := metaCache.GetCollectionID(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}
-	coll, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collectionName, collID)
+	coll, err := metaCache.GetCollectionInfo(ctx, dbName, collectionName, collID)
 	if err != nil {
 		return nil, err
 	}

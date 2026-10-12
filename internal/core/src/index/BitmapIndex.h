@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #pragma once
+#include <span>
 
 #include <map>
 #include <memory>
@@ -30,10 +31,8 @@
 namespace milvus {
 namespace index {
 
-struct BitmapInfo {
-    size_t offset_;
-    size_t size_;
-};
+// Frozen conversion keeps one batch plus at most one large bitmap.
+inline constexpr size_t BITMAP_FROZEN_BATCH_BYTES = 16 * 1024 * 1024;
 
 enum class BitmapIndexBuildMode {
     ROARING,
@@ -106,6 +105,11 @@ class BitmapIndex : public ScalarIndex<T> {
 
     const TargetBitmap
     IsNull() override;
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
 
     TargetBitmap
     IsNotNull() override;
@@ -214,6 +218,14 @@ class BitmapIndex : public ScalarIndex<T> {
     void
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
+
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
     bool
     SupportPatternMatch() const override {
@@ -358,7 +370,7 @@ class BitmapIndex : public ScalarIndex<T> {
     DeserializeValidBitsetData(const uint8_t* data_ptr, size_t data_size);
 
     T
-    ParseKey(const uint8_t** ptr);
+    ParseKey(std::span<const uint8_t>& input);
 
     // Deserialize posting data.
     //
@@ -373,6 +385,7 @@ class BitmapIndex : public ScalarIndex<T> {
     // null arrays during reconstruction.
     void
     DeserializeIndexData(const uint8_t* data_ptr,
+                         size_t data_size,
                          size_t index_length,
                          bool rebuild_validity_from_postings);
 
@@ -429,6 +442,34 @@ class BitmapIndex : public ScalarIndex<T> {
     // Rebuilding validity from postings is lossy for ARRAY fields: empty
     // arrays have no element postings, so they cannot be distinguished from
     // null arrays during reconstruction.
+    using FrozenOffsets = std::map<T, std::pair<size_t, size_t>>;
+
+    struct FrozenIndexData {
+        std::span<const uint8_t> input;
+        size_t remaining;
+        size_t file_size{0};
+        FrozenOffsets offsets;
+        std::vector<uint8_t> buffer;
+    };
+
+    // Decode and freeze a bounded batch on the caller; no file operations.
+    void
+    BuildFrozenBatch(FrozenIndexData& data,
+                     bool rebuild_validity_from_postings);
+    // Open the prepared frozen file and restore query views, without deleting it.
+    void
+    MapFrozenIndex(const std::string& path,
+                   size_t file_size,
+                   const FrozenOffsets& offsets);
+    // Await writes only, then map on the calling async worker. The returned
+    // file guard must be retained on success or destroyed on LocalFileIOPool.
+    folly::coro::Task<std::unique_ptr<MmapFileRAII>>
+    MMapIndexDataAsync(const std::string& path,
+                       const uint8_t* data,
+                       size_t data_size,
+                       size_t index_length,
+                       proto::common::LoadPriority priority,
+                       bool rebuild_validity_from_postings);
     void
     MMapIndexData(const std::string& filepath,
                   const uint8_t* data,
