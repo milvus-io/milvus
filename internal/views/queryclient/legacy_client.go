@@ -62,6 +62,8 @@ type LegacyQueryRequest struct {
 	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
 	// Mutually exclusive with MVCC. Zero preserves ordinary consistency sampling.
 	BarrierMVCC uint64
+	// AllowStreaming enables streaming reduction for supported Query requests.
+	AllowStreaming bool
 	// Plans binds an internal requery to the original Search attempt. Non-nil
 	// (including empty) never resolves a new schema, view or MVCC.
 	Plans []ShardPlan
@@ -224,7 +226,7 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 	if req.Plans != nil {
 		return c.queryRetainedPlans(ctx, req)
 	}
-	if c.enableReduceStream && SupportsQueryStream(req.Req) {
+	if c.enableReduceStream && req.AllowStreaming {
 		return c.queryStream(ctx, req)
 	}
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
