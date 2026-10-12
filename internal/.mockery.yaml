@@ -17,6 +17,9 @@ packages:
   github.com/milvus-io/milvus/internal/rootcoord/tombstone:
     interfaces:
       TombstoneSweeper:
+  github.com/milvus-io/milvus/internal/pkindex/coordinator/client:
+    interfaces:
+      Client:
   github.com/milvus-io/milvus/internal/streamingcoord/server/balancer:
     interfaces:
       Balancer:
