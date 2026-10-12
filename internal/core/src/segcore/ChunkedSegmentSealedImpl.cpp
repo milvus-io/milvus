@@ -10665,12 +10665,13 @@ ChunkedSegmentSealedImpl::Prewarm(
         }
     }
 
-    // The captured runtime state is immutable and keeps every index slot
-    // alive while its cells are pinned.
-    auto runtime = CaptureRuntimeResourceState();
     for (auto field_id : field_ids) {
         prefetch_chunks(op_ctx, field_id);
 
+        // Capture the runtime state per field and release it before pinning,
+        // so an index replaced or dropped meanwhile is neither kept alive nor
+        // loaded for nothing; the copied slots stay alive while pinned.
+        auto runtime = CaptureRuntimeResourceState();
         std::vector<index::CacheIndexBasePtr> index_slots;
         if (auto vector_entry = GetVectorIndexing(runtime, field_id);
             vector_entry != nullptr) {
@@ -10691,6 +10692,7 @@ ChunkedSegmentSealedImpl::Prewarm(
                 index_slots.push_back(index.index);
             }
         }
+        runtime.reset();
 
         for (const auto& slot : index_slots) {
             if (slot == nullptr) {
