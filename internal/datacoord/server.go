@@ -46,6 +46,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	pkindexgc "github.com/milvus-io/milvus/internal/pkindex/coordinator/gc"
+	pkindexservice "github.com/milvus-io/milvus/internal/pkindex/coordinator/service"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -123,6 +125,8 @@ type Server struct {
 	mixCoord         types.MixCoord
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
+	pkindexService   *pkindexservice.Service
+	pkindexGC        *pkindexgc.GC
 	handler          Handler
 	importMeta       ImportMeta
 	importInspector  ImportInspector
@@ -244,6 +248,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		pkindexService:      pkindexservice.New(),
 	}
 
 	for _, opt := range opts {
@@ -376,6 +381,11 @@ func (s *Server) initDataCoord() (initErr error) {
 	mlog.Info(s.ctx, "init segment manager done")
 
 	s.initGarbageCollection(storageCli)
+
+	if err = s.initPKIndex(storageCli); err != nil {
+		return err
+	}
+	mlog.Info(s.ctx, "init primary key index manifest service done")
 
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
 		commitImport:        s.broadcastCommitImportMessage,
@@ -856,6 +866,7 @@ func (s *Server) startServerLoop() {
 	// construction (bounded by s.ctx); nothing to do here.
 
 	s.garbageCollector.start()
+	s.pkindexGC.Start(s.serverLoopCtx)
 
 	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
@@ -1178,6 +1189,10 @@ func (s *Server) Stop() error {
 	mlog.Info(s.ctx, "datacoord server shutdown")
 	s.garbageCollector.close()
 	mlog.Info(s.ctx, "datacoord garbage collector stopped")
+	if s.pkindexGC != nil {
+		s.pkindexGC.Close()
+		mlog.Info(s.ctx, "datacoord primary key index gc stopped")
+	}
 	if s.snapshotExportManager != nil {
 		s.snapshotExportManager.Close()
 		mlog.Info(s.ctx, "datacoord snapshot export manager stopped")

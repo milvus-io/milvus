@@ -42,7 +42,8 @@ type PointerStore interface {
 	// Swap writes the value only when the stored value equals expected. An
 	// error does not tell whether the write took effect.
 	Swap(ctx context.Context, key, expected, value string) error
-	// List returns all keys with prefix and their values.
+	// List returns all keys with prefix and their values. Keys are relative to
+	// the store root, in the same form as the keys passed to Load.
 	List(ctx context.Context, prefix string) (keys, values []string, err error)
 }
 
