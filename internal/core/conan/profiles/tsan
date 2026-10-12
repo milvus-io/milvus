@@ -1,0 +1,22 @@
+# Overlay for native host dependencies. Keep build tools on the normal profile.
+include(default)
+
+[settings]
+compiler=clang
+compiler.version=20
+compiler.libcxx=libstdc++11
+compiler.cppstd=20
+
+[conf]
+tools.build:compiler_executables={"c":"/usr/lib/llvm-20/bin/clang", "cpp":"/usr/lib/llvm-20/bin/clang++"}
+user.milvus:sanitizer=thread
+user.milvus:tsan_dependency_policy=3
+tools.build:cflags=["-fsanitize=thread", "-g", "-fno-omit-frame-pointer"]
+tools.build:cxxflags=["-fsanitize=thread", "-g", "-fno-omit-frame-pointer"]
+tools.build:exelinkflags=["-fsanitize=thread", "-shared-libsan"]
+tools.build:sharedlinkflags=["-fsanitize=thread", "-shared-libsan"]
+# Flags alone do not change a Conan package ID. Never reuse ordinary binaries.
+tools.info.package_id:confs=["user.milvus:sanitizer", "user.milvus:tsan_dependency_policy", "tools.build:cflags", "tools.build:cxxflags", "tools.build:exelinkflags", "tools.build:sharedlinkflags"]
+
+[options]
+openblas/*:use_openmp=False

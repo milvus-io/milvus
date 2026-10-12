@@ -83,6 +83,8 @@ endif ()
 
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( Utils )
+include( DefineOptions )
+include( Sanitizers )
 
 # **************************** Build time, type and code version ****************************
 get_current_time( BUILD_TIME )
@@ -187,12 +189,11 @@ find_package(Azure REQUIRED)
 
 include( CTest )
 include( BuildUtils )
-include( DefineOptions )
 
 # ---- Split DWARF (Linux only) ----
 # Keep this opt-in: .dwo files stay in the build tree and are not included in
 # installed artifacts or the published debug image by default.
-if (LINUX AND MILVUS_USE_SPLIT_DWARF AND NOT USE_ASAN STREQUAL "ON")
+if (LINUX AND MILVUS_USE_SPLIT_DWARF AND NOT USE_ASAN AND NOT USE_TSAN)
     check_cxx_compiler_flag("-gsplit-dwarf" HAS_SPLIT_DWARF)
     if (HAS_SPLIT_DWARF)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gsplit-dwarf")
@@ -203,6 +204,20 @@ endif ()
 
 include( ExternalProject )
 include( GNUInstallDirs )
+foreach(_libdir lib lib64)
+    set(_sanitizer_marker "${CMAKE_INSTALL_PREFIX}/${_libdir}/milvus-sanitizer")
+    if(EXISTS "${_sanitizer_marker}")
+        file(READ "${_sanitizer_marker}" _installed_sanitizer)
+        string(STRIP "${_installed_sanitizer}" _installed_sanitizer)
+        if(NOT _installed_sanitizer STREQUAL MILVUS_SANITIZER AND
+           (_installed_sanitizer STREQUAL "thread" OR USE_TSAN))
+            message(FATAL_ERROR "Changing TSan mode requires a fresh install directory")
+        endif()
+    endif()
+endforeach()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/milvus-sanitizer" "${MILVUS_SANITIZER}\n")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/milvus-sanitizer"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 include( FetchContent )
 
 include_directories( thirdparty )
@@ -227,11 +242,6 @@ if (LINUX OR MSYS)
                   "-Wno-error"
                   "-Wno-all"
                   )
-    if (USE_ASAN STREQUAL "ON")
-        message( STATUS "Building Milvus Core Using AddressSanitizer")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-    endif()
     if (CMAKE_BUILD_TYPE STREQUAL "Release")
         append_flags( CMAKE_CXX_FLAGS
                 "-O3"

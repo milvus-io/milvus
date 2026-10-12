@@ -13,6 +13,9 @@ FROM ubuntu:jammy-20240530
 
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
+ARG MILVUS_ARCHER_LIB
+ARG MILVUS_TSAN_OPTIONS=halt_on_error=1:exitcode=66
+ARG MILVUS_JEMALLOC_LIB=/milvus/lib/libjemalloc.so
 ARG MILVUS_RUNTIME_USER=milvus:milvus
 
 # Install ca-certificates first, then switch to HTTPS and install other packages
@@ -42,7 +45,9 @@ COPY --chown=milvus:milvus --chmod=774 ./lib/ /milvus/lib/
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
-ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
+ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:${MILVUS_JEMALLOC_LIB}
+ENV TSAN_OPTIONS=${MILVUS_TSAN_OPTIONS}
+ENV OMP_TOOL_LIBRARIES=${MILVUS_ARCHER_LIB}
 ENV MALLOC_CONF=background_thread:true
 ENV OPENSSL_MODULES=/milvus/lib/ossl-modules
 

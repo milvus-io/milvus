@@ -108,9 +108,11 @@ TextMatchIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
     if (packed_load_resource_request_) {
         const auto& request = *packed_load_resource_request_;
-        return {{request.final_memory_cost, request.final_disk_cost},
-                {request.max_memory_cost - request.final_memory_cost,
-                 request.max_disk_cost - request.final_disk_cost}};
+        return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
+                                                    request.final_disk_cost),
+                milvus::cachinglayer::ResourceUsage(
+                    request.max_memory_cost - request.final_memory_cost,
+                    request.max_disk_cost - request.final_disk_cost)};
     }
     // ignore the cid checking, because there is only one cell
     auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);

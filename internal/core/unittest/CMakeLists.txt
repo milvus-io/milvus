@@ -12,6 +12,9 @@
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+if(USE_TSAN)
+    add_subdirectory(tsan)
+endif()
 include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
@@ -129,16 +132,6 @@ if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)
 else()
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "GcpNativeChunkManagerTest\\.cpp$")
-endif()
-
-if (LINUX)
-    message( STATUS "Building Milvus Unit Test on Linux")
-    option(USE_ASAN "Whether to use AddressSanitizer" OFF)
-    if ( USE_ASAN )
-        message( STATUS "Building Milvus using AddressSanitizer")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-    endif()
 endif()
 
 add_compile_definitions(
