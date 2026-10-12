@@ -42,8 +42,9 @@ type Collection struct {
 	Fields            []*Field
 	StructArrayFields []*StructArrayField
 	Functions         []*Function
-	// RLS policies are cached by RootCoord and persisted in their own KV namespace.
-	RLSPolicies          map[string]*RLSPolicy
+	// RLS policies are owned by RootCoord and persisted in their own KV namespace.
+	RLSPolicies map[string]*RLSPolicy
+
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
 	ShardsNum            int32
