@@ -1405,6 +1405,11 @@ func (s *mixCoordImpl) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	s.streamingCoord.RegisterGRPCService(server)
 }
 
+// RegisterPKIndexCoordGRPCService registers the grpc service of the primary key index manifests.
+func (s *mixCoordImpl) RegisterPKIndexCoordGRPCService(server *grpc.Server) {
+	s.datacoordServer.RegisterPKIndexCoordGRPCService(server)
+}
+
 func (s *mixCoordImpl) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return s.rootcoordServer.GetQuotaMetrics(ctx, req)
 }
