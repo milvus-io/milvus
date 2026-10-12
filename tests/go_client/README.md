@@ -224,7 +224,8 @@ go test -tags=dynamic,test -gcflags='all=-N -l' -count=1 \
 
 This suite does not cover RBAC privilege grants/revocations, runtime server
 configuration changes, bulk import, CDC, restart orchestration, fault injection,
-or performance/soak testing. TEXT fields requiring a StorageV3 deployment and
+or performance/soak testing. BM25 SearchIterator coverage is deferred pending
+resolution of an incomplete-pagination result. TEXT fields requiring a StorageV3 deployment and
 unsupported Geometry row serialization are outside this default matrix.
 
 ## Contributing
