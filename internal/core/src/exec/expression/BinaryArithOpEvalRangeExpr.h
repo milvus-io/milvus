@@ -752,40 +752,6 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
         req.value_type = data_type;
         SelectAndPinIndex(req);
-        if (exec_path_ != ExprExecPath::ScalarIndex) {
-            return;
-        }
-
-        // for basic types, need index raw data for arith evaluation
-        bool has_raw = false;
-        switch (data_type) {
-            case DataType::BOOL:
-                has_raw = IndexHasRawData<bool>();
-                break;
-            case DataType::INT8:
-                has_raw = IndexHasRawData<int8_t>();
-                break;
-            case DataType::INT16:
-                has_raw = IndexHasRawData<int16_t>();
-                break;
-            case DataType::INT32:
-                has_raw = IndexHasRawData<int32_t>();
-                break;
-            case DataType::INT64:
-                has_raw = IndexHasRawData<int64_t>();
-                break;
-            case DataType::FLOAT:
-                has_raw = IndexHasRawData<float>();
-                break;
-            case DataType::DOUBLE:
-                has_raw = IndexHasRawData<double>();
-                break;
-            default:
-                has_raw = false;
-        }
-        if (!has_raw) {
-            exec_path_ = ExprExecPath::RawData;
-        }
     }
 
     bool
