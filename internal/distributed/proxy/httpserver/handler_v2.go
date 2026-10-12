@@ -3360,7 +3360,7 @@ func (h *HandlersV2) prewarmNamespace(ctx context.Context, c *gin.Context, anyRe
 		Priority:       httpReq.Priority,
 	}
 	c.Set(ContextRequest, req)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Prewarm", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Prewarm", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Prewarm(reqCtx, req.(*milvuspb.PrewarmRequest))
 	})
 	if err == nil {
@@ -3386,7 +3386,7 @@ func (h *HandlersV2) describePrewarmTask(ctx context.Context, c *gin.Context, an
 		TaskID: httpReq.TaskID,
 	}
 	c.Set(ContextRequest, req)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribePrewarmTask", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribePrewarmTask", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DescribePrewarmTask(reqCtx, req.(*milvuspb.DescribePrewarmTaskRequest))
 	})
 	if err == nil {
