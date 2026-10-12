@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifestmanager"
 	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
@@ -60,6 +61,10 @@ func (s *Service) ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifes
 	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
 		return &pkindexpb.ClaimManifestResponse{Status: merr.Status(err)}, nil
 	}
+	if t := req.GetPkDataType(); t != schemapb.DataType_Int64 && t != schemapb.DataType_VarChar {
+		return &pkindexpb.ClaimManifestResponse{Status: merr.Status(
+			merr.WrapErrParameterInvalidMsg("pk_data_type must be Int64 or VarChar, got %s", t))}, nil
+	}
 	m, err := s.manager()
 	if err != nil {
 		return &pkindexpb.ClaimManifestResponse{Status: merr.Status(err)}, nil
@@ -81,6 +86,10 @@ func (s *Service) ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifes
 func (s *Service) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.CommitFlushResponse, error) {
 	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
 		return &pkindexpb.CommitFlushResponse{Status: merr.Status(err)}, nil
+	}
+	if req.GetCheckpointTimeTick() == 0 {
+		return &pkindexpb.CommitFlushResponse{Status: merr.Status(
+			merr.WrapErrParameterInvalidMsg("checkpoint_time_tick must not be 0"))}, nil
 	}
 	m, err := s.manager()
 	if err != nil {
@@ -115,13 +124,13 @@ func (s *Service) GetManifest(ctx context.Context, req *pkindexpb.GetManifestReq
 }
 
 // validateTarget checks that a request names a collection and a vchannel that
-// can form a manifest key: a positive collection ID and a non-empty vchannel
-// name that contains neither "/" nor "..".
+// can form a manifest key: a positive collection ID and a vchannel name that
+// is not empty, ".", or "..", and does not contain "/".
 func validateTarget(collectionID int64, vchannel string) error {
 	if collectionID <= 0 {
 		return merr.WrapErrParameterInvalidMsg("collection_id must be positive, got %d", collectionID)
 	}
-	if vchannel == "" || strings.Contains(vchannel, "/") || strings.Contains(vchannel, "..") {
+	if vchannel == "" || vchannel == "." || vchannel == ".." || strings.Contains(vchannel, "/") {
 		return merr.WrapErrParameterInvalidMsg("invalid vchannel %q", vchannel)
 	}
 	return nil
