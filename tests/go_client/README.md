@@ -244,6 +244,9 @@ joint key conditions, and Query IN/range filters. Existing-row Upsert with an RL
 USING predicate is rejected for partition-key collections; the tests verify
 unchanged data and separately check new-PK Upsert. Clustering-key updates and
 manual clustering compaction are followed by complete data and read-path checks.
+The fixture waits for asynchronous sorting after Flush. If MajorCompaction
+returns an existing Sort trigger, it waits for that task and retries within a
+bounded deadline; only actual Clustering plans count as clustering coverage.
 
 ```bash
 cd tests/go_client

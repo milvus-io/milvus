@@ -1959,28 +1959,62 @@ func TestRLSSchemaKeys(t *testing.T) {
 				if tc.clusteringKey != "" {
 					t.Run("clustering_compaction", func(t *testing.T) {
 						rlsFlush(ctx, t, mc, name)
-						// The typed SDK does not expose MajorCompaction; use the public RPC.
-						resp, err := mc.GetService().ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{CollectionName: name, MajorCompaction: true})
-						require.NoError(t, err)
-						require.NoError(t, merr.Error(resp.GetStatus()))
-						require.Positive(t, resp.GetCompactionID())
-						require.Positive(t, resp.GetCompactionPlanCount(), "must execute physical clustering work")
-						var targets []int64
+						// Flush can leave asynchronous sorting work even with automatic compaction disabled.
 						require.EventuallyWithT(t, func(c *assert.CollectT) {
-							state, err := mc.GetService().GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{CompactionID: resp.GetCompactionID()})
+							state, err := mc.GetService().GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{CollectionName: name})
 							if !assert.NoError(c, err) || !assert.NoError(c, merr.Error(state.GetStatus())) {
 								return
 							}
 							assert.Equal(c, commonpb.CompactionState_Completed, state.GetState())
-							assert.Len(c, state.GetMergeInfos(), int(resp.GetCompactionPlanCount()))
-							targets = nil
 							for _, plan := range state.GetMergeInfos() {
-								assert.Equal(c, commonpb.CompactionType_CompactionTypeClustering, plan.GetType())
-								// Successful plans quickly transition to Cleaned and leave CompletedPlanNo.
-								assert.Contains(c, []commonpb.CompactionTaskState{commonpb.CompactionTaskState_CompactionTaskStateCompleted, commonpb.CompactionTaskState_CompactionTaskStateCleaned}, plan.GetState())
 								assert.Empty(c, plan.GetFailureReason())
-								assert.NotEmpty(c, plan.GetTargets())
+							}
+						}, 3*time.Minute, time.Second)
+						var resp *milvuspb.ManualCompactionResponse
+						var targets []int64
+						require.EventuallyWithT(t, func(c *assert.CollectT) {
+							if resp == nil {
+								// The typed SDK does not expose MajorCompaction; use the public RPC.
+								var err error
+								resp, err = mc.GetService().ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{CollectionName: name, MajorCompaction: true})
+								if !assert.NoError(c, err) || !assert.NoError(c, merr.Error(resp.GetStatus())) {
+									resp = nil
+									return
+								}
+							}
+							if !assert.Positive(c, resp.GetCompactionID()) || !assert.Positive(c, resp.GetCompactionPlanCount(), "must execute physical clustering work") {
+								return
+							}
+							state, err := mc.GetService().GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{CompactionID: resp.GetCompactionID()})
+							if !assert.NoError(c, err) || !assert.NoError(c, merr.Error(state.GetStatus())) {
+								return
+							}
+							if !assert.Equal(c, commonpb.CompactionState_Completed, state.GetState()) {
+								return
+							}
+							valid := assert.Len(c, state.GetMergeInfos(), int(resp.GetCompactionPlanCount()))
+							targets = nil
+							existingSort := false
+							for _, plan := range state.GetMergeInfos() {
+								// Successful plans quickly transition to Cleaned and leave CompletedPlanNo.
+								valid = assert.Contains(c, []commonpb.CompactionTaskState{commonpb.CompactionTaskState_CompactionTaskStateCompleted, commonpb.CompactionTaskState_CompactionTaskStateCleaned}, plan.GetState()) && valid
+								valid = assert.Empty(c, plan.GetFailureReason()) && valid
+								valid = assert.NotEmpty(c, plan.GetTargets()) && valid
+								if plan.GetType() == commonpb.CompactionType_CompactionTypeSort {
+									// The server may reuse an in-flight Sort trigger for MajorCompaction.
+									existingSort = true
+									continue
+								}
+								valid = assert.Equal(c, commonpb.CompactionType_CompactionTypeClustering, plan.GetType()) && valid
 								targets = append(targets, plan.GetTargets()...)
+							}
+							if !valid {
+								return
+							}
+							if existingSort {
+								t.Logf("MajorCompaction returned Sort trigger %d; retrying after its completion", resp.GetCompactionID())
+								resp = nil
+								assert.Fail(c, "must observe an actual clustering plan after sorting")
 							}
 						}, 3*time.Minute, time.Second)
 						require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)))
