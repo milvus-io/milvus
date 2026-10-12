@@ -409,6 +409,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"interval":        {Interval: 0, Grace: time.Hour},
 		"zero grace":      {Interval: time.Minute, Grace: 0},
 		"negative grace":  {Interval: time.Minute, Grace: -1},
+		"grace below min": {Interval: time.Minute, Grace: MinGrace - time.Second},
 		"retain versions": {Interval: time.Minute, Grace: time.Hour, RetainVersions: -1},
 		"retain duration": {Interval: time.Minute, Grace: time.Hour, RetainDuration: -1},
 	} {
@@ -417,6 +418,12 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 			assert.True(t, errors.Is(err, ErrInvalidConfig))
 		})
 	}
+}
+
+func TestNewAcceptsMinGrace(t *testing.T) {
+	_, err := New(fakes.NewPointers(), fakes.NewStore(), testLayout,
+		Config{Interval: time.Minute, Grace: MinGrace}, nil)
+	assert.NoError(t, err)
 }
 
 func TestStartRunsRounds(t *testing.T) {

@@ -37,22 +37,27 @@ import (
 // ErrInvalidConfig is returned by New for a Config that it cannot run with.
 var ErrInvalidConfig = errors.New("invalid primary key index gc config")
 
-// Config is the schedule and the retention of the GC.
+// MinGrace is the lowest Config.Grace that New accepts.
+const MinGrace = 10 * time.Minute
+
+// Config is the schedule and the retention of the GC. Datacoord reads each
+// duration from a dataCoord.pkindex.gc.* parameter whose unit is second.
 type Config struct {
 	// Interval is the time between two rounds. It must be positive.
 	Interval time.Duration
 	// Grace is the minimum age of an SST that no retained body references, and
 	// of a body whose version is above the current version, before it is
-	// deleted. It must be longer than the longest time from an object write to
-	// its commit: from a manifest body write to its pointer swap, from an SST
-	// upload to its flush commit, and from a compaction output upload to its
-	// compact commit.
+	// deleted. It must be at least MinGrace. It must be longer than the longest
+	// time from an object write to its commit: from a manifest body write to
+	// its pointer swap, from an SST upload to its flush commit, and from a
+	// compaction output upload to its compact commit.
 	Grace time.Duration
 	// RetainVersions is the number of versions, up to and including the
 	// current version, whose bodies are kept.
 	RetainVersions int
-	// RetainDuration is the age below which a body at or below the current
-	// version is kept.
+	// RetainDuration is the minimum age of a body at or below the current
+	// version and outside the RetainVersions newest versions before it is
+	// deleted.
 	RetainDuration time.Duration
 }
 
@@ -78,11 +83,12 @@ type GC struct {
 }
 
 // New returns a GC over the pointers in pointers and the objects in store, at
-// the keys of layout.
+// the keys of layout. It returns ErrInvalidConfig when cfg.Interval is not
+// positive, cfg.Grace is below MinGrace, or a retention value is negative.
 func New(pointers manifestmanager.PointerStore, store manifest.ObjectStore, layout manifest.Layout,
 	cfg Config, inFlight InFlightOutputs,
 ) (*GC, error) {
-	if cfg.Interval <= 0 || cfg.Grace <= 0 || cfg.RetainVersions < 0 || cfg.RetainDuration < 0 {
+	if cfg.Interval <= 0 || cfg.Grace < MinGrace || cfg.RetainVersions < 0 || cfg.RetainDuration < 0 {
 		return nil, errors.Wrapf(ErrInvalidConfig, "%+v", cfg)
 	}
 	return &GC{pointers: pointers, store: store, layout: layout, cfg: cfg, inFlight: inFlight, now: time.Now}, nil
