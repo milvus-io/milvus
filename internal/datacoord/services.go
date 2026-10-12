@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/function/ingestion"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -2149,15 +2150,16 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
+	ingestionErr := ingestion.RejectUnsupportedWrite(in.GetSchema(), "import")
 	var rlsPredicate *planpb.Expr
 	var rlsErr error
-	if !l0ImportDisabled {
+	if !l0ImportDisabled && ingestionErr == nil {
 		rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, in)
 	}
 
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
-	if isBackup && !l0ImportDisabled && rlsErr == nil {
+	if isBackup && !l0ImportDisabled && ingestionErr == nil && rlsErr == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2187,6 +2189,9 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	if importCollectionInfo == nil {
 		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(in.GetCollectionID()))
 		return resp, nil
+	}
+	if err := ingestion.RejectUnsupportedWrite(importCollectionInfo.Schema, "import"); err != nil {
+		ingestionErr = err
 	}
 
 	jobID := in.GetJobID()
@@ -2223,6 +2228,12 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
 			"into data segment deltalogs before restore, or set the config to true on this cluster " +
 			"to re-enable the legacy L0 import")(job)
+	} else if ingestionErr != nil {
+		// Old-Proxy or replicated WAL messages can reach this callback directly.
+		// A terminal job keeps the failure observable and releases the broadcast
+		// resource guard instead of retrying an unsupported operation forever.
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason(ingestionErr.Error())(job)
 	} else if rlsErr != nil {
 		mlog.Warn(ctx, "RLS import check could not be prepared, creating the job in Failed state",
 			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()), mlog.Err(rlsErr))

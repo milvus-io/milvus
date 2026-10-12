@@ -22,12 +22,14 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -411,6 +413,9 @@ func (op *MergeOp) validateInputs(ctx *types.FuncContext, inputs []*DataFrame) (
 	if ctx == nil {
 		return nil, merr.WrapErrServiceInternal("merge_op: function context is nil")
 	}
+	if err := ctx.Context().Err(); err != nil {
+		return nil, err
+	}
 	if len(inputs) == 0 {
 		return nil, merr.WrapErrServiceInternal("merge_op: no inputs provided")
 	}
@@ -573,10 +578,67 @@ func (op *MergeOp) validateInputs(ctx *types.FuncContext, inputs []*DataFrame) (
 		}
 	}
 
+	if err := validateMergePayloadColumns(inputs, numChunks); err != nil {
+		return nil, err
+	}
 	if idType == nil {
-		idType = arrow.PrimitiveTypes.Int64
+		// Empty typed inputs still carry the primary-key schema. Nonempty
+		// inputs above remain authoritative over legacy untyped empty stubs.
+		idType = inputs[0].Column(types.IDFieldName).DataType()
 	}
 	return &mergeInputLayout{numChunks: numChunks, idType: idType, hasElement: hasElement}, nil
+}
+
+// Payload schema compatibility is independent of which candidate wins. Check
+// complete Arrow types (including vector dimensions and nested members), even
+// for empty branches and fields that no selected location happens to use.
+func validateMergePayloadColumns(inputs []*DataFrame, numChunks int) error {
+	dataTypes := make(map[string]arrow.DataType)
+	logicalTypes := make(map[string]schemapb.DataType)
+	for inputIndex, input := range inputs {
+		if input.schema == nil || input.schema.NumFields() != input.NumColumns() {
+			return merr.WrapErrFunctionFailedMsg("merge_op: input[%d] payload schema is inconsistent", inputIndex)
+		}
+		for _, name := range collectOrderedFieldNames([]*DataFrame{input}) {
+			column := input.Column(name)
+			if column == nil {
+				return merr.WrapErrFunctionFailedMsg("merge_op: input[%d] column %q is nil", inputIndex, name)
+			}
+			if err := types.ValidateRuntimeArrowDataType(column.DataType()); err != nil {
+				return merr.Wrapf(err, "merge_op input[%d] column %q", inputIndex, name)
+			}
+			if expected := dataTypes[name]; expected != nil && !arrow.TypeEqual(expected, column.DataType(), arrow.CheckMetadata()) {
+				return merr.WrapErrFunctionFailedMsg("merge_op: input[%d] column %q type %s does not match %s", inputIndex, name, column.DataType(), expected)
+			}
+			dataTypes[name] = column.DataType()
+			logicalType, hasLogicalType := input.FieldType(name)
+			if raw, present := input.schema.Field(input.nameIndex[name]).Metadata.GetValue(types.MetadataKeyMilvusDataType); present {
+				value, err := strconv.ParseInt(raw, 10, 32)
+				if err != nil {
+					return merr.WrapErrFunctionFailed(err, "merge_op: column %q has invalid logical type metadata", name)
+				}
+				if hasLogicalType && logicalType != schemapb.DataType(value) {
+					return merr.WrapErrFunctionFailedMsg("merge_op: input[%d] column %q has conflicting logical type metadata", inputIndex, name)
+				}
+				logicalType, hasLogicalType = schemapb.DataType(value), true
+			}
+			if hasLogicalType {
+				if expected, present := logicalTypes[name]; present && logicalType != expected {
+					return merr.WrapErrFunctionFailedMsg("merge_op: input[%d] column %q logical type %s does not match %s", inputIndex, name, logicalType, expected)
+				}
+				logicalTypes[name] = logicalType
+			}
+			if len(column.Chunks()) != numChunks {
+				return merr.WrapErrFunctionFailedMsg("merge_op: input[%d] column %q has inconsistent chunk count", inputIndex, name)
+			}
+			for chunkIndex, chunk := range column.Chunks() {
+				if chunk == nil || int64(chunk.Len()) != input.chunkSizes[chunkIndex] || !arrow.TypeEqual(chunk.DataType(), column.DataType()) {
+					return merr.WrapErrFunctionFailedMsg("merge_op: input[%d] column %q chunk %d has inconsistent runtime schema", inputIndex, name, chunkIndex)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // =============================================================================
@@ -660,12 +722,20 @@ func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*Dat
 		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {
 			return nil, err
 		}
+		nullable := false
+		copiedMetadata := false
 		for _, input := range inputs {
-			if input.HasColumn(colName) {
-				builder.CopyFieldMetadata(input, colName)
-				break
+			if !input.HasColumn(colName) {
+				nullable = true
+				continue
 			}
+			if !copiedMetadata {
+				builder.CopyFieldMetadata(input, colName)
+				copiedMetadata = true
+			}
+			nullable = nullable || input.fieldNullables[colName] || input.Column(colName).NullN() > 0
 		}
+		builder.SetFieldNullable(colName, nullable)
 	}
 
 	success = true
@@ -1184,12 +1254,19 @@ func (op *MergeOp) collectFieldData(ctx *types.FuncContext, collectors map[strin
 
 // buildFieldArray builds a field array from merged locations.
 func (op *MergeOp) buildFieldArray(ctx *types.FuncContext, colName string, locs []idLocation, inputs []*DataFrame, chunkIdx int) (arrow.Array, error) {
-	// Find the data type from first input that has this column
+	// Resolve paths through the same column resolver used by other operators.
+	columns, err := resolveMergePayloadColumns(ctx.Pool(), colName, inputs, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseColumns(columns)
 	var dataType arrow.DataType
-	for _, df := range inputs {
-		if col := df.Column(colName); col != nil {
-			dataType = col.DataType()
-			break
+	for _, column := range columns {
+		if column != nil {
+			if dataType != nil && !arrow.TypeEqual(dataType, column.DataType(), arrow.CheckMetadata()) {
+				return nil, merr.WrapErrFunctionFailedMsg("merge_op: column %q has incompatible input types %s and %s", colName, dataType, column.DataType())
+			}
+			dataType = column.DataType()
 		}
 	}
 
@@ -1209,66 +1286,122 @@ func (op *MergeOp) buildFieldArrayOfType(ctx *types.FuncContext, colName string,
 
 // buildEmptyArray creates an empty array of the given type.
 func buildEmptyArray(pool memory.Allocator, dt arrow.DataType) (arrow.Array, error) {
-	switch dt.ID() {
-	case arrow.BOOL:
-		b := array.NewBooleanBuilder(pool)
-		defer b.Release()
-		return b.NewArray(), nil
-	case arrow.INT8:
-		b := array.NewInt8Builder(pool)
-		defer b.Release()
-		return b.NewArray(), nil
-	case arrow.INT16:
-		b := array.NewInt16Builder(pool)
-		defer b.Release()
-		return b.NewArray(), nil
-	case arrow.INT32:
-		b := array.NewInt32Builder(pool)
-		defer b.Release()
-		return b.NewArray(), nil
-	case arrow.INT64:
-		b := array.NewInt64Builder(pool)
-		defer b.Release()
-		return b.NewArray(), nil
-	case arrow.FLOAT32:
-		b := array.NewFloat32Builder(pool)
-		defer b.Release()
-		return b.NewArray(), nil
-	case arrow.FLOAT64:
-		b := array.NewFloat64Builder(pool)
-		defer b.Release()
-		return b.NewArray(), nil
-	case arrow.STRING:
-		b := array.NewStringBuilder(pool)
-		defer b.Release()
-		return b.NewArray(), nil
-	default:
-		return nil, merr.WrapErrServiceInternalMsg("unsupported type: %s", dt.Name())
+	if dt == nil {
+		return nil, merr.WrapErrServiceInternal("merge_op: empty array type is missing")
 	}
+	if err := types.ValidateRuntimeArrowDataType(dt); err != nil {
+		return nil, merr.Wrap(err, "merge_op empty array type")
+	}
+	return array.MakeArrayOfNull(pool, dt, 0), nil
 }
 
 // buildArrayFromLocations builds an array from locations.
 func buildArrayFromLocations(pool memory.Allocator, colName string, locs []idLocation, inputs []*DataFrame, dt arrow.DataType, chunkIdx int) (arrow.Array, error) {
 	switch dt.ID() {
 	case arrow.BOOL:
-		return buildTypedArrayFromLocations[bool](colName, locs, inputs, array.NewBooleanBuilder(pool), chunkIdx, dt.ID())
+		return buildTypedArrayFromLocations[bool](colName, locs, inputs, array.NewBooleanBuilder(pool), chunkIdx, dt.ID(), pool)
 	case arrow.INT8:
-		return buildTypedArrayFromLocations[int8](colName, locs, inputs, array.NewInt8Builder(pool), chunkIdx, dt.ID())
+		return buildTypedArrayFromLocations[int8](colName, locs, inputs, array.NewInt8Builder(pool), chunkIdx, dt.ID(), pool)
 	case arrow.INT16:
-		return buildTypedArrayFromLocations[int16](colName, locs, inputs, array.NewInt16Builder(pool), chunkIdx, dt.ID())
+		return buildTypedArrayFromLocations[int16](colName, locs, inputs, array.NewInt16Builder(pool), chunkIdx, dt.ID(), pool)
 	case arrow.INT32:
-		return buildTypedArrayFromLocations[int32](colName, locs, inputs, array.NewInt32Builder(pool), chunkIdx, dt.ID())
+		return buildTypedArrayFromLocations[int32](colName, locs, inputs, array.NewInt32Builder(pool), chunkIdx, dt.ID(), pool)
 	case arrow.INT64:
-		return buildTypedArrayFromLocations[int64](colName, locs, inputs, array.NewInt64Builder(pool), chunkIdx, dt.ID())
+		return buildTypedArrayFromLocations[int64](colName, locs, inputs, array.NewInt64Builder(pool), chunkIdx, dt.ID(), pool)
 	case arrow.FLOAT32:
-		return buildTypedArrayFromLocations[float32](colName, locs, inputs, array.NewFloat32Builder(pool), chunkIdx, dt.ID())
+		return buildTypedArrayFromLocations[float32](colName, locs, inputs, array.NewFloat32Builder(pool), chunkIdx, dt.ID(), pool)
 	case arrow.FLOAT64:
-		return buildTypedArrayFromLocations[float64](colName, locs, inputs, array.NewFloat64Builder(pool), chunkIdx, dt.ID())
+		return buildTypedArrayFromLocations[float64](colName, locs, inputs, array.NewFloat64Builder(pool), chunkIdx, dt.ID(), pool)
 	case arrow.STRING:
-		return buildTypedArrayFromLocations[string](colName, locs, inputs, array.NewStringBuilder(pool), chunkIdx, dt.ID())
+		return buildTypedArrayFromLocations[string](colName, locs, inputs, array.NewStringBuilder(pool), chunkIdx, dt.ID(), pool)
 	default:
-		return nil, merr.WrapErrServiceInternalMsg("unsupported type: %s", dt.Name())
+		return buildNestedArrayFromLocations(pool, colName, locs, inputs, dt, chunkIdx)
 	}
+}
+
+// resolveMergePayloadColumns resolves paths once per input. A payload absent
+// from an input contributes typed nulls; a malformed path on a present root is
+// an error, not another missing payload.
+func resolveMergePayloadColumns(pool memory.Allocator, colName string, inputs []*DataFrame, dt arrow.DataType) ([]*arrow.Chunked, error) {
+	columns := make([]*arrow.Chunked, len(inputs))
+	for index, input := range inputs {
+		if input == nil {
+			releaseColumns(columns)
+			return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] is nil", index)
+		}
+		if !input.HasColumn(colName) && !input.HasColumn(ColumnReferenceRoot(colName)) {
+			continue
+		}
+		column, err := input.ResolveColumn(colName, pool)
+		if err != nil {
+			releaseColumns(columns)
+			return nil, merr.Wrapf(err, "merge_op input[%d] column %q", index, colName)
+		}
+		columns[index] = column
+		if dt != nil && !arrow.TypeEqual(dt, column.DataType(), arrow.CheckMetadata()) {
+			actual := column.DataType()
+			releaseColumns(columns)
+			return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] column %q type %s does not match %s", index, colName, actual, dt)
+		}
+	}
+	return columns, nil
+}
+
+// Build non-scalar payloads with Arrow Take/Concat rather than scalar dispatch,
+// retaining nested nulls, child schema and vector widths. Contiguous source runs
+// keep location order without creating one temporary array for every result row.
+func buildNestedArrayFromLocations(pool memory.Allocator, colName string, locs []idLocation, inputs []*DataFrame, dt arrow.DataType, chunkIdx int) (arrow.Array, error) {
+	columns, err := resolveMergePayloadColumns(pool, colName, inputs, dt)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseColumns(columns)
+	if len(locs) == 0 {
+		return buildEmptyArray(pool, dt)
+	}
+	parts := make([]arrow.Array, 0)
+	defer func() {
+		for _, part := range parts {
+			part.Release()
+		}
+	}()
+	for begin := 0; begin < len(locs); {
+		inputIndex := locs[begin].inputIdx
+		if inputIndex < 0 || inputIndex >= len(columns) {
+			return nil, merr.WrapErrFunctionFailedMsg("merge_op: payload input index %d is out of bounds", inputIndex)
+		}
+		end := begin + 1
+		for end < len(locs) && locs[end].inputIdx == inputIndex {
+			end++
+		}
+		column := columns[inputIndex]
+		var part arrow.Array
+		if column == nil {
+			part = array.MakeArrayOfNull(pool, dt, end-begin)
+		} else {
+			if chunkIdx < 0 || chunkIdx >= len(column.Chunks()) {
+				return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] column %q missing chunk %d", inputIndex, colName, chunkIdx)
+			}
+			indices := make([]int, end-begin)
+			for index := range indices {
+				indices[index] = locs[begin+index].rowIdx
+				if indices[index] < 0 || indices[index] >= column.Chunk(chunkIdx).Len() {
+					return nil, merr.WrapErrFunctionFailedMsg("merge_op: input[%d] column %q has no row %d", inputIndex, colName, indices[index])
+				}
+			}
+			part, err = takeArrayWithNulls(pool, column.Chunk(chunkIdx), indices)
+			if err != nil {
+				return nil, merr.Wrap(err, "merge_op payload Take")
+			}
+		}
+		parts = append(parts, part)
+		begin = end
+	}
+	result, err := array.Concatenate(parts, pool)
+	if err != nil {
+		return nil, merr.WrapErrFunctionFailed(err, "merge_op payload concatenation")
+	}
+	return result, nil
 }
 
 // typedArrayBuilder is a generic builder interface for MergeOp.
@@ -1280,12 +1413,23 @@ type typedArrayBuilder[T any] interface {
 }
 
 // buildTypedArrayFromLocations builds a typed array from locations.
-func buildTypedArrayFromLocations[T any, B typedArrayBuilder[T]](colName string, locs []idLocation, inputs []*DataFrame, builder B, chunkIdx int, expectedType arrow.Type) (arrow.Array, error) {
+func buildTypedArrayFromLocations[T any, B typedArrayBuilder[T]](colName string, locs []idLocation, inputs []*DataFrame, builder B, chunkIdx int, expectedType arrow.Type, allocators ...memory.Allocator) (arrow.Array, error) {
 	defer builder.Release()
+	pool := memory.DefaultAllocator
+	if len(allocators) > 0 {
+		pool = allocators[0]
+	}
+	columns, err := resolveMergePayloadColumns(pool, colName, inputs, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseColumns(columns)
 
 	for _, loc := range locs {
-		df := inputs[loc.inputIdx]
-		col := df.Column(colName)
+		if loc.inputIdx < 0 || loc.inputIdx >= len(columns) {
+			return nil, merr.WrapErrFunctionFailedMsg("merge_op: payload input index %d is out of bounds", loc.inputIdx)
+		}
+		col := columns[loc.inputIdx]
 		if col == nil {
 			builder.AppendNull()
 			continue
@@ -1295,13 +1439,13 @@ func buildTypedArrayFromLocations[T any, B typedArrayBuilder[T]](colName string,
 				"merge_op: input[%d] column %s type %s does not match output type",
 				loc.inputIdx, colName, col.DataType())
 		}
-		if chunkIdx >= len(col.Chunks()) {
+		if chunkIdx < 0 || chunkIdx >= len(col.Chunks()) {
 			return nil, merr.WrapErrFunctionFailedMsg(
 				"merge_op: input[%d] column %s missing chunk %d", loc.inputIdx, colName, chunkIdx)
 		}
 
 		chunk := col.Chunk(chunkIdx)
-		if loc.rowIdx >= chunk.Len() {
+		if loc.rowIdx < 0 || loc.rowIdx >= chunk.Len() {
 			return nil, merr.WrapErrFunctionFailedMsg(
 				"merge_op: input[%d] chunk[%d] column %s has no row %d",
 				loc.inputIdx, chunkIdx, colName, loc.rowIdx)

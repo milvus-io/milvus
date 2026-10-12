@@ -59,10 +59,10 @@ func (s *OperatorRegistryTestSuite) TestGetOperatorFactoryRegistered() {
 	}
 }
 
-func (s *OperatorRegistryTestSuite) TestFilterOperatorNotRegistered() {
+func (s *OperatorRegistryTestSuite) TestFilterOperatorRegistered() {
 	factory, ok := GetOperatorFactory(types.OpTypeFilter)
-	s.False(ok)
-	s.Nil(factory)
+	s.True(ok)
+	s.NotNil(factory)
 }
 
 func (s *OperatorRegistryTestSuite) TestGetOperatorFactoryNotRegistered() {

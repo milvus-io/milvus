@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function/ingestion"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
@@ -383,6 +384,9 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
+	if err := ingestion.ValidateCollection(t.schema); err != nil {
+		return err
+	}
 
 	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
 	if err != nil {
@@ -580,6 +584,22 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *createCollectionTask) Execute(ctx context.Context) error {
+	if len(t.schema.GetFunctionChains()) > 0 {
+		states, err := t.mixCoord.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		if err := merr.CheckRPCCall(states, err); err != nil {
+			return merr.Wrap(err, "check coordinator function chain capability")
+		}
+		supported := false
+		for _, info := range states.GetState().GetExtraInfo() {
+			if info.GetKey() == common.FunctionChainTransformVersionKey && info.GetValue() == common.FunctionChainTransformVersion {
+				supported = true
+				break
+			}
+		}
+		if !supported {
+			return merr.WrapErrAsInputError(merr.WrapErrOperationNotSupportedMsg("coordinator does not support collection ingestion function chains"))
+		}
+	}
 	var err error
 	t.result, err = t.mixCoord.CreateCollection(ctx, t.CreateCollectionRequest)
 	return merr.CheckRPCCall(t.result, err)

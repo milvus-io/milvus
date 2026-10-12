@@ -909,7 +909,7 @@ func (c *Core) GetComponentStates(ctx context.Context, req *milvuspb.GetComponen
 			NodeID:    nodeID,
 			Role:      typeutil.RootCoordRole,
 			StateCode: code,
-			ExtraInfo: nil,
+			ExtraInfo: []*commonpb.KeyValuePair{{Key: common.FunctionChainTransformVersionKey, Value: common.FunctionChainTransformVersion}},
 		},
 		Status: merr.Success(),
 		SubcomponentStates: []*milvuspb.ComponentInfo{

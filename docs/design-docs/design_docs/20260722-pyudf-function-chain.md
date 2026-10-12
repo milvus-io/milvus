@@ -1,16 +1,27 @@
 # MEP: PyUDF FunctionChain Worker Pool
 
 - **Created:** 2026-07-22
-- **Updated:** 2026-09-20
+- **Updated:** 2026-10-11
 - **Status:** Worker pool and Proxy integration implemented
 - **Component:** FunctionChain / PyUDF
 
-This is the single design and operational reference for PyUDF, including the
-worker pool, protocol, configuration, deployment, verification, and benchmarks.
-Current behavior is described in sections 1–13; section 14 separates acceptance
-requirements from recorded results and historical implementation milestones.
-The implementation links are the references for configuration, protocol
-generation, and tests.
+> **Transformation extension:** The local implementation now also runs PyUDF
+> in collection-bound INGESTION and request-bound PRE_PROCESS/POST_PROCESS,
+> with nested Arrow outputs, native select/explode/flat_map and endpoint binding.
+> Runtime 0.2 adds per-request query context and one-call POST batching; its
+> execution-version-2 contract supersedes the original per-group POST callable.
+> Runtime 0.3 also supports [POST TABLE](20261011-function-chain-post-tables.md):
+> execution version 3 separates original NQ from current groups and permits
+> explicitly declared one-row-per-group reducers.
+> See [the transformation design](20261010-function-chain-transform-stages.md)
+> and [running guide](../../user-guides/function-chain-transform.md) for the
+> current stage/type/cardinality contract. The L2/scalar scope below records
+> the original worker integration and is not the scope limit of that extension.
+
+This document records the worker pool, protocol, configuration, deployment and
+historical verification. Sections 1–13 describe the original worker contract;
+the linked extension describes the new stages and endpoint adapters. Section
+14 separates acceptance requirements from recorded results and milestones.
 
 ## Contents
 
@@ -609,7 +620,7 @@ For source-to-consumer audits, follow these boundaries:
 | Python source to response | [loader.py](../../../internal/util/function/pyudf/python/milvus_pyudf_runtime/loader.py), [instance.py](../../../internal/util/function/pyudf/python/milvus_pyudf_runtime/instance.py), and [worker.py](../../../internal/util/function/pyudf/python/milvus_pyudf_runtime/worker.py): distinguish resource I/O, user exceptions, parameter errors, and runtime failures at their origin |
 | Response to expression | [client_errors.go](../../../internal/util/function/pyudf/client_errors.go), [client_ipc.go](../../../internal/util/function/pyudf/client_ipc.go), and [pyudf_expr.go](../../../internal/util/function/chain/expr/pyudf_expr.go): preserve typed errors and cancellation; malformed successful responses are internal failures |
 | Expression to FunctionChain | [operator_map.go](../../../internal/util/function/chain/operator_map.go) and [chain.go](../../../internal/util/function/chain/chain.go): preserve execution errors and distinguish later business output validation |
-| FunctionChain to Search | [search_pipeline.go](../../../internal/proxy/search_pipeline.go), [task_search.go](../../../internal/proxy/task_search.go), [task_scheduler.go](../../../internal/proxy/scheduler/task_scheduler.go), and [impl.go](../../../internal/proxy/impl.go): trace task completion through `merr.Status` without publishing partial results |
+| FunctionChain to Search | [search_pipeline.go](../../../internal/proxy/dql/search_pipeline.go), [task_search.go](../../../internal/proxy/dql/task_search.go), [task_scheduler.go](../../../internal/proxy/scheduler/task_scheduler.go), and [impl.go](../../../internal/proxy/impl.go): trace task completion through `merr.Status` without publishing partial results |
 | Status to SDK | [merr/utils.go](../../../pkg/util/merr/utils.go) and the supported SDK's status decoder: assert Code, Retriable, ExtraInfo, and compatible/input-error fields where exposed, not only message text |
 
 Audit every construction and wrapping site for a category before claiming that
@@ -816,8 +827,8 @@ after installing a wheel. The supervisor suite also crashes a worker from
 inside a UDF and verifies that the replacement reloads that UDF, returns correct
 results, and caches one instance per worker generation.
 
-Full Search coverage is in
-[test_milvus_client_pyudf.py](../../../tests/python_client/milvus_client/test_milvus_client_pyudf.py).
+Historical L2 Search tests from the original worker change are in
+[test_milvus_client_pyudf.py at the pinned PR revision](https://github.com/milvus-io/milvus/blob/1d12e9190afab61d62769afd16a1be2635cecb1e/tests/python_client/milvus_client/test_milvus_client_pyudf.py).
 These tests require a running Milvus with PyUDF enabled, a synchronized
 FileResource manager, the installed runtime, and the configured object store.
 The repeated-input case checks shared Python array identity, argument order,

@@ -29,12 +29,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// FilterOp is temporarily unavailable in user-submitted function chains:
-// Execute currently masks function error codes, including PyUDF errors.
-// Keep registration disabled until error propagation is fixed and verified.
-// func init() {
-// 	MustRegisterOperator(types.OpTypeFilter, NewFilterOpFromReprWithContext)
-// }
+func init() {
+	MustRegisterOperator(types.OpTypeFilter, NewFilterOpFromReprWithContext)
+}
 
 // FilterOp filters the DataFrame based on the boolean result of a FunctionExpr.
 // The FunctionExpr must return exactly one boolean column.
@@ -77,15 +74,20 @@ func (o *FilterOp) Name() string { return "Filter" }
 
 func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
 	// Read input columns from DataFrame
-	inputs, err := o.ReadInputColumns("filter_op", input)
+	inputs, err := o.readResolvedColumns("filter_op", input, ctx.Pool())
+	if err != nil {
+		return nil, err
+	}
+	defer releaseColumns(inputs)
+	inputSchema, err := functionInputSchema(input, o.inputs)
 	if err != nil {
 		return nil, err
 	}
 
 	// Execute FunctionExpr to get boolean result
-	outputs, err := o.function.Execute(ctx, inputs)
+	_, outputs, err := executeFunction(ctx, o.function, inputSchema, inputs)
 	if err != nil {
-		return nil, merr.WrapErrFunctionFailed(err, "filter_op: function execution failed")
+		return nil, merr.Wrap(err, "filter_op: function execution failed")
 	}
 
 	// Validate output at runtime (especially important for dynamic output types)
@@ -98,6 +100,10 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 		return nil, merr.WrapErrFunctionFailedMsg("filter_op: function must return exactly 1 output, got %d", len(outputs))
 	}
 
+	if err := validateFunctionOutputShape(outputs, input.chunkSizes); err != nil {
+		releaseColumns(outputs)
+		return nil, err
+	}
 	filterCol := outputs[0]
 	defer filterCol.Release() // Release the temporary boolean column
 
@@ -113,6 +119,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	// Process each chunk - extract boolean chunks with type safety
 	newChunkSizes := make([]int64, 0, input.NumChunks())
 	filterChunks := make([]*array.Boolean, input.NumChunks())
+	pickedRows := make([][]int, input.NumChunks())
 	for chunkIdx := range input.NumChunks() {
 		boolChunk, ok := filterCol.Chunk(chunkIdx).(*array.Boolean)
 		if !ok {
@@ -125,12 +132,19 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 		for i := range boolChunk.Len() {
 			if boolChunk.IsValid(i) && boolChunk.Value(i) {
 				trueCount++
+				pickedRows[chunkIdx] = append(pickedRows[chunkIdx], i)
 			}
 		}
 		newChunkSizes = append(newChunkSizes, trueCount)
 	}
 
 	builder.SetChunkSizes(newChunkSizes)
+	builder.CopyAllMetadata(input)
+	lineage, err := pickLineage(input, pickedRows)
+	if err != nil {
+		return nil, err
+	}
+	builder.SetLineage(lineage)
 
 	// Use ChunkCollector for filtered chunks
 	colNames := input.ColumnNames()
@@ -146,7 +160,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 			filtered, err := filterArray(ctx.Pool(), dataChunk, filterChunks[chunkIdx])
 			if err != nil {
-				return nil, merr.WrapErrFunctionFailed(err, "filter_op: column %s", colName)
+				return nil, merr.Wrapf(err, "filter_op: column %s", colName)
 			}
 			collector.Set(colName, chunkIdx, filtered)
 		}
@@ -159,6 +173,8 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 	return builder.Build(), nil
 }
+
+func (o *FilterOp) Expression() types.FunctionExpr { return o.function }
 
 func (o *FilterOp) String() string {
 	return fmt.Sprintf("Filter(%s)", o.function.Name())
@@ -186,7 +202,7 @@ func NewFilterOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionB
 	}
 	fn, err := FunctionFromReprWithContext(repr.Function, buildCtx)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("filter function: %v", err)
+		return nil, merr.Wrap(err, "filter function")
 	}
 	if len(repr.Inputs) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("filter_op: inputs is required")

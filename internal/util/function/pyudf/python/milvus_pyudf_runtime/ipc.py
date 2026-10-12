@@ -43,6 +43,15 @@ def decode_inputs(payload: bytes, check_active: Callable[[], None]) -> list[pa.R
         raise WorkerError("invalid input Arrow IPC") from exc
 
 
+class ArrowOutputs(tuple):
+    """Validated positional columns with an optional self-describing schema."""
+
+    def __new__(cls, columns, schema=None):
+        result = super().__new__(cls, columns)
+        result.schema = schema
+        return result
+
+
 class OutputIPC:
     """Collect query batches with consistent schemas and encode the IPC result."""
 
@@ -50,11 +59,26 @@ class OutputIPC:
         self.schema = None
         self.batches = []
 
-    def append(self, outputs: tuple[pa.Array, ...]) -> None:
-        schema = pa.schema([(f"c{i}", output.type) for i, output in enumerate(outputs)])
+    def append(self, outputs: tuple[pa.Array, ...], *, inputs=(), input_schema=None) -> None:
+        schema = getattr(outputs, "schema", None)
+        if schema is None:
+            fields = []
+            for i, output in enumerate(outputs):
+                field = pa.field(f"c{i}", output.type)
+                # Identity outputs can retain logical types without guessing
+                # from bytes or from equal values of unrelated columns.
+                if input_schema is not None:
+                    for index, source in enumerate(inputs):
+                        if output is source:
+                            field = input_schema.field(index).with_name(f"c{i}")
+                            break
+                fields.append(field)
+            schema = pa.schema(fields)
+        if len(schema) != len(outputs) or any(field.type != output.type for field, output in zip(schema, outputs)):
+            raise WorkerError("UDF output schema differs from its columns", wire.UDF_FAILED)
         if self.schema is None:
             self.schema = schema
-        elif not self.schema.equals(schema):
+        elif not self.schema.equals(schema, check_metadata=True):
             raise WorkerError("UDF output column count/type differs between query batches", wire.UDF_FAILED)
         if outputs:
             batch = pa.record_batch(list(outputs), schema=schema)

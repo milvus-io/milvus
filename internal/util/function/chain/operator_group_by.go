@@ -170,14 +170,26 @@ func (o *GroupByOp) String() string {
 }
 
 func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	// Validate columns exist
-	groupCol := input.Column(o.groupByField)
-	if groupCol == nil {
-		return nil, merr.WrapErrServiceInternalMsg("group_by_op: column %q not found", o.groupByField)
+	if err := ctx.Context().Err(); err != nil {
+		return nil, err
 	}
-	scoreCol := input.Column(types.ScoreFieldName)
-	if scoreCol == nil {
-		return nil, merr.WrapErrServiceInternalMsg("group_by_op: column %q not found", types.ScoreFieldName)
+	if err := validateFrameShape(input); err != nil {
+		return nil, merr.Wrap(err, "group_by_op input")
+	}
+	columns, err := o.readResolvedColumns("group_by_op", input, ctx.Pool())
+	if err != nil {
+		return nil, err
+	}
+	defer releaseColumns(columns)
+	groupCol, scoreCol, idCol := columns[0], columns[1], columns[2]
+	if err := validateComparableColumn(input, o.groupByField, "group_by_op"); err != nil {
+		return nil, err
+	}
+	if scoreCol.DataType().ID() != arrow.FLOAT32 {
+		return nil, merr.WrapErrServiceInternalMsg("group_by_op: score column is not Float32")
+	}
+	if idCol.DataType().ID() != arrow.INT64 && idCol.DataType().ID() != arrow.STRING {
+		return nil, merr.WrapErrFunctionFailedMsg("group_by_op: ID column must be Int64 or String, got %s", idCol.DataType())
 	}
 
 	numChunks := input.NumChunks()
@@ -190,6 +202,7 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 	// Prepare group score builder
 	groupScoreChunks := make([]arrow.Array, numChunks)
 	newChunkSizes := make([]int64, numChunks)
+	pickedRows := make([][]int, numChunks)
 
 	// Release groupScoreChunks on error
 	success := false
@@ -205,12 +218,13 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 
 	// Process each chunk independently
 	for chunkIdx := 0; chunkIdx < numChunks; chunkIdx++ {
-		result, err := o.processChunk(ctx, input, chunkIdx)
+		result, err := o.processChunk(ctx, groupCol, scoreCol, idCol, chunkIdx)
 		if err != nil {
 			return nil, err
 		}
 
 		newChunkSizes[chunkIdx] = int64(len(result.indices))
+		pickedRows[chunkIdx] = result.indices
 		groupScoreChunks[chunkIdx] = result.groupScores
 
 		// Reorder existing columns by indices
@@ -219,7 +233,7 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 			dataChunk := col.Chunk(chunkIdx)
 			reordered, err := dispatchPickByIndices(ctx.Pool(), dataChunk, result.indices)
 			if err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("group_by_op: reorder column %s: %v", colName, err)
+				return nil, merr.Wrapf(err, "group_by_op: reorder column %s", colName)
 			}
 			collector.Set(colName, chunkIdx, reordered)
 		}
@@ -230,6 +244,12 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 	defer builder.Release()
 
 	builder.SetChunkSizes(newChunkSizes)
+	builder.CopyAllMetadata(input)
+	lineage, err := pickLineage(input, pickedRows)
+	if err != nil {
+		return nil, err
+	}
+	builder.SetLineage(lineage)
 
 	// Add existing columns
 	for _, colName := range colNames {
@@ -255,12 +275,9 @@ type chunkResult struct {
 }
 
 // processChunk processes a single chunk and returns the result.
-func (o *GroupByOp) processChunk(ctx *types.FuncContext, input *DataFrame, chunkIdx int) (*chunkResult, error) {
-	groupCol := input.Column(o.groupByField)
-	scoreCol := input.Column(types.ScoreFieldName)
-	idCol := input.Column(types.IDFieldName)
-	if idCol == nil {
-		return nil, merr.WrapErrServiceInternalMsg("group_by_op: column %q not found", types.IDFieldName)
+func (o *GroupByOp) processChunk(ctx *types.FuncContext, groupCol, scoreCol, idCol *arrow.Chunked, chunkIdx int) (*chunkResult, error) {
+	if err := ctx.Context().Err(); err != nil {
+		return nil, err
 	}
 
 	groupChunk := groupCol.Chunk(chunkIdx)
@@ -350,10 +367,10 @@ type group struct {
 // buildGroups builds groups from the chunk.
 func (o *GroupByOp) buildGroups(groupChunk arrow.Array, scoreChunk *array.Float32, idChunk arrow.Array, chunkLen int) []*group {
 	groupMap := make(map[any]*group)
-	groupOrder := make([]any, 0) // Maintain appearance order
+	groupOrder := make([]*group, 0) // Maintain appearance order without looking up non-reflexive keys again.
 
 	for i := 0; i < chunkLen; i++ {
-		key := getArrayValue(groupChunk, i)
+		key := groupByScalarKey(groupChunk, i)
 		score := scoreChunk.Value(i)
 		id := getArrayValue(idChunk, i)
 
@@ -369,16 +386,44 @@ func (o *GroupByOp) buildGroups(groupChunk arrow.Array, scoreChunk *array.Float3
 				ids:        []any{id},
 			}
 			groupMap[key] = g
-			groupOrder = append(groupOrder, key)
+			groupOrder = append(groupOrder, g)
 		}
 	}
 
-	// Return groups in appearance order
-	result := make([]*group, 0, len(groupOrder))
-	for _, key := range groupOrder {
-		result = append(result, groupMap[key])
+	return groupOrder
+}
+
+// groupByScalarKey uses the same supported scalar domain as ordering. Binary
+// values become immutable Go strings so they are valid hash keys; temporal and
+// LargeString values retain their scalar values rather than becoming null keys.
+func groupByScalarKey(values arrow.Array, row int) any {
+	if values.IsNull(row) {
+		return nil
 	}
-	return result
+	switch values := values.(type) {
+	case *array.LargeString:
+		return values.Value(row)
+	case *array.Binary:
+		return string(values.Value(row))
+	case *array.LargeBinary:
+		return string(values.Value(row))
+	case *array.FixedSizeBinary:
+		return string(values.Value(row))
+	case *array.Timestamp:
+		return values.Value(row)
+	case *array.Date32:
+		return values.Value(row)
+	case *array.Date64:
+		return values.Value(row)
+	case *array.Time32:
+		return values.Value(row)
+	case *array.Time64:
+		return values.Value(row)
+	case *array.Duration:
+		return values.Value(row)
+	default:
+		return getArrayValue(values, row)
+	}
 }
 
 // sortAndLimitGroup sorts rows within a group by score in the configured

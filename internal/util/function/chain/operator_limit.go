@@ -59,6 +59,7 @@ func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame,
 	defer collector.Release()
 
 	newChunkSizes := make([]int64, input.NumChunks())
+	pickedRows := make([][]int, input.NumChunks())
 
 	// Process each chunk
 	for chunkIdx := range input.NumChunks() {
@@ -69,6 +70,12 @@ func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame,
 		end := min(start+o.limit, chunkSize)
 
 		newChunkSizes[chunkIdx] = end - start
+		if input.lineage != nil {
+			pickedRows[chunkIdx] = make([]int, end-start)
+			for i := range pickedRows[chunkIdx] {
+				pickedRows[chunkIdx][i] = int(start) + i
+			}
+		}
 
 		// Slice each column
 		for _, colName := range colNames {
@@ -76,7 +83,7 @@ func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame,
 			dataChunk := col.Chunk(chunkIdx)
 			sliced, err := sliceArray(dataChunk, int(start), int(end))
 			if err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("limit_op: column %s: %v", colName, err)
+				return nil, merr.Wrapf(err, "limit_op: column %s", colName)
 			}
 			collector.Set(colName, chunkIdx, sliced)
 		}
@@ -87,10 +94,16 @@ func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame,
 	defer builder.Release()
 
 	builder.SetChunkSizes(newChunkSizes)
+	builder.CopyAllMetadata(input)
+	lineage, err := pickLineage(input, pickedRows)
+	if err != nil {
+		return nil, err
+	}
+	builder.SetLineage(lineage)
 
 	for _, colName := range colNames {
 		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {
-			return nil, merr.WrapErrServiceInternalMsg("limit_op: %v", err)
+			return nil, merr.Wrap(err, "limit_op")
 		}
 		builder.CopyFieldMetadata(input, colName)
 	}

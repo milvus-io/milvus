@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -1398,6 +1399,9 @@ func Test_NewServer_GetVersion(t *testing.T) {
 		server := getServer(t)
 		resp, err := server.GetVersion(context.TODO(), req)
 		assert.Empty(t, resp.GetVersion())
+		assert.Equal(t, common.FunctionChainTransformVersion, resp.GetStatus().GetExtraInfo()[common.FunctionChainTransformVersionKey])
+		assert.Equal(t, common.FunctionChainPostTableVersion, resp.GetStatus().GetExtraInfo()[common.FunctionChainPostTableVersionKey])
+		assert.Equal(t, common.FunctionChainPreQueryExpansionVersion, resp.GetStatus().GetExtraInfo()[common.FunctionChainPreQueryExpansionVersionKey])
 		assert.NoError(t, err)
 	})
 

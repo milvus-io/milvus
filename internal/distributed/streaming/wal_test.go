@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -304,6 +305,15 @@ func newInsertMessage(vChannel string) message.MutableMessage {
 		panic(err)
 	}
 	return msg
+}
+
+func TestClosedWALReportsAppendWasNotAttempted(t *testing.T) {
+	w, _, _, _ := createMockWAL(t)
+	w.Close()
+	responses := w.AppendMessages(context.Background(), newInsertMessage(vChannel1))
+	require.Len(t, responses.Responses, 1)
+	require.ErrorIs(t, responses.Responses[0].Error, ErrWALAccesserClosed)
+	require.True(t, responses.Responses[0].AppendNotAttempted)
 }
 
 func TestAppendMessagesWithOptionsGroupsSameVChannelIdempotentBodiesIntoTxn(t *testing.T) {

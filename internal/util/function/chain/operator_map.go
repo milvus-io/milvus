@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/compute"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -72,13 +73,18 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 	}
 
 	// 1. Read input columns from DataFrame using inputs
-	inputs, err := o.ReadInputColumns("map_op", input)
+	inputs, err := o.readResolvedColumns("map_op", input, ctx.Pool())
+	if err != nil {
+		return nil, err
+	}
+	defer releaseColumns(inputs)
+	inputSchema, err := functionInputSchema(input, o.inputs)
 	if err != nil {
 		return nil, err
 	}
 
 	// 2. Call FunctionExpr to process columns
-	outputs, err := o.function.Execute(ctx, inputs)
+	outputSchema, outputs, err := executeFunction(ctx, o.function, inputSchema, inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -87,87 +93,121 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 	// This is especially important for dynamic output types where validation
 	// was skipped at creation time
 	if len(outputs) != len(o.outputs) {
-		releaseMapOutputs(outputs)
+		// Release outputs before returning error
+		for _, out := range outputs {
+			if out != nil {
+				out.Release()
+			}
+		}
 		return nil, merr.WrapErrFunctionFailedMsg("map_op: function returned %d outputs, expected %d",
 			len(outputs), len(o.outputs))
 	}
-	if err := normalizeMapScoreOutput(ctx, o.outputs, outputs); err != nil {
-		releaseMapOutputs(outputs)
+	if err := validateFunctionOutputShape(outputs, input.chunkSizes); err != nil {
+		releaseColumns(outputs)
+		return nil, err
+	}
+	outputSchema, err = o.normalizeScoreOutput(ctx, outputSchema, outputs)
+	if err != nil {
+		releaseColumns(outputs)
 		return nil, err
 	}
 
-	return o.buildOutputDataFrame(input, outputs)
+	return o.buildOutputDataFrameWithSchema(input, outputs, outputSchema)
 }
 
-func normalizeMapScoreOutput(ctx *types.FuncContext, outputNames []string, outputs []*arrow.Chunked) error {
-	for i, name := range outputNames {
+// Search scores use Float32 throughout ranking and on the result wire. Cast
+// after validating the function's own output contract, before downstream
+// operators see the column. POST TABLE keeps its independent output schema.
+func (o *MapOp) normalizeScoreOutput(ctx *types.FuncContext, schema *arrow.Schema, outputs []*arrow.Chunked) (*arrow.Schema, error) {
+	if ctx.TableResult() {
+		return schema, nil
+	}
+	var fields []arrow.Field
+	for i, name := range o.outputs {
 		if name != types.ScoreFieldName {
 			continue
 		}
-		if outputs[i] == nil {
-			return merr.WrapErrFunctionFailedMsg("map_op: output %d mapped to %q is nil", i, name)
+		output := outputs[i]
+		if output.DataType().ID() == arrow.FLOAT32 {
+			continue
 		}
-		if outputs[i].DataType().ID() != arrow.FLOAT32 {
-			if !isMapScoreConvertibleType(outputs[i].DataType().ID()) {
-				return merr.WrapErrFunctionFailedMsg("map_op: output %d mapped to %q must be numeric, got %s",
-					i, name, outputs[i].DataType())
+		if !isMapScoreConvertibleType(output.DataType().ID()) {
+			return nil, merr.WrapErrFunctionFailedMsg("map_op: output %d mapped to %q must be numeric, got %s", i, name, output.DataType())
+		}
+		if fields == nil {
+			fields = schema.Fields()
+		}
+		options := compute.SafeCastOptions(arrow.PrimitiveTypes.Float32)
+		// Score precision follows the Float32 wire contract, including rounding.
+		options.AllowFloatTruncate = true
+		chunks := make([]arrow.Array, 0, len(output.Chunks()))
+		for group, chunk := range output.Chunks() {
+			if err := ctx.Context().Err(); err != nil {
+				releaseAggregateArrays(chunks)
+				return nil, err
 			}
-
-			converted, err := castMapScoreToFloat32(ctx, outputs[i])
+			cast, err := compute.CastArray(compute.WithAllocator(ctx.Context(), ctx.Pool()), chunk, options)
 			if err != nil {
-				return merr.WrapErrFunctionFailed(err, "map_op: convert output %d mapped to %q from %s to Float32",
-					i, name, outputs[i].DataType())
+				releaseAggregateArrays(chunks)
+				if merr.IsCanceledOrTimeout(err) {
+					return nil, merr.Wrap(err, "map_op: normalize score")
+				}
+				return nil, merr.WrapErrFunctionFailed(err, "map_op: convert %s group %d to Float32", name, group)
 			}
-			outputs[i].Release()
-			outputs[i] = converted
+			chunks = append(chunks, cast)
 		}
+		outputs[i] = arrow.NewChunked(arrow.PrimitiveTypes.Float32, chunks)
+		releaseAggregateArrays(chunks)
+		output.Release()
+
+		// Replace the logical schema as well as the physical Arrow type. Keeping
+		// a Double annotation on a Float32 score would fail subsequent validation.
+		field, err := types.ArrowFieldFromMilvusSchema(&schemapb.FieldSchema{
+			Name: name, DataType: schemapb.DataType_Float, Nullable: fields[i].Nullable,
+		})
+		if err != nil {
+			return nil, err
+		}
+		metadata := fields[i].Metadata.ToMap()
+		for key, value := range field.Metadata.ToMap() {
+			metadata[key] = value
+		}
+		field.Metadata = arrow.MetadataFrom(metadata)
+		fields[i] = field
 	}
-	return nil
+	if fields == nil {
+		return schema, nil
+	}
+	metadata := schema.Metadata()
+	return arrow.NewSchema(fields, &metadata), nil
 }
 
 func isMapScoreConvertibleType(dataType arrow.Type) bool {
 	switch dataType {
-	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64, arrow.FLOAT64:
+	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
+		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64, arrow.FLOAT64:
 		return true
 	default:
 		return false
 	}
 }
 
-func castMapScoreToFloat32(ctx *types.FuncContext, output *arrow.Chunked) (*arrow.Chunked, error) {
-	computeCtx := compute.WithAllocator(ctx.Context(), ctx.Pool())
-	options := compute.SafeCastOptions(arrow.PrimitiveTypes.Float32)
-	options.AllowFloatTruncate = true
-	chunks := make([]arrow.Array, 0, len(output.Chunks()))
-	defer func() {
-		for _, chunk := range chunks {
-			chunk.Release()
-		}
-	}()
-	for _, chunk := range output.Chunks() {
-		converted, err := compute.CastArray(computeCtx, chunk, options)
-		if err != nil {
-			return nil, err
-		}
-		chunks = append(chunks, converted)
-	}
-	return arrow.NewChunked(arrow.PrimitiveTypes.Float32, chunks), nil
-}
-
-func releaseMapOutputs(outputs []*arrow.Chunked) {
-	for _, output := range outputs {
-		if output != nil {
-			output.Release()
-		}
-	}
-}
-
 func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked) (*DataFrame, error) {
+	return o.buildOutputDataFrameWithSchema(input, outputs, nil)
+}
+
+func (o *MapOp) buildOutputDataFrameWithSchema(input *DataFrame, outputs []*arrow.Chunked, schema *arrow.Schema) (*DataFrame, error) {
 	// 4. Create builder
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
 
 	builder.SetChunkSizes(input.chunkSizes)
+	builder.CopyAllMetadata(input)
+	if schema != nil {
+		if _, aware := o.function.(types.SchemaAwareFunctionExpr); aware {
+			builder.SetArrowSchemaMetadata(schema.Metadata())
+		}
+	}
 
 	// Build set of output column names (these will replace any existing columns with the same name)
 	outputColSet := make(map[string]struct{})
@@ -193,7 +233,38 @@ func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked)
 
 	// 6. Add all output columns at once
 	if err := builder.AddColumns(o.outputs, outputs); err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("map_op: %v", err)
+		return nil, merr.Wrap(err, "map_op")
+	}
+	for i, name := range o.outputs {
+		if dataType, err := ToMilvusType(outputs[i].DataType()); err == nil {
+			builder.SetFieldType(name, dataType)
+		}
+		builder.SetFieldNullable(name, outputs[i].NullN() > 0)
+		_, schemaAware := o.function.(types.SchemaAwareFunctionExpr)
+		if original := input.Column(name); !schemaAware && original != nil && arrow.TypeEqual(original.DataType(), outputs[i].DataType()) {
+			builder.CopyFieldMetadata(input, name)
+			builder.SetFieldNullable(name, input.fieldNullables[name] || outputs[i].NullN() > 0)
+		}
+		if schema != nil {
+			field := schema.Field(i)
+			// Schema-aware adapters may return a new logical type even when its
+			// physical Arrow representation is unchanged.
+			if schemaAware || field.Metadata.Len() > 0 || input.Column(name) == nil || !arrow.TypeEqual(input.Column(name).DataType(), field.Type) {
+				if err := setFunctionOutputField(builder, name, field); err != nil {
+					return nil, err
+				}
+			} else {
+				preserved, err := functionInputSchema(input, []string{name})
+				if err != nil {
+					return nil, err
+				}
+				field = preserved.Field(0)
+				field.Nullable = field.Nullable || outputs[i].NullN() > 0
+				if err := setFunctionOutputField(builder, name, field); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
 	return builder.Build(), nil
@@ -217,7 +288,7 @@ func NewMapOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuil
 	}
 	fn, err := FunctionFromReprWithContext(repr.Function, buildCtx)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("map function: %v", err)
+		return nil, merr.Wrap(err, "map function")
 	}
 	if len(repr.Inputs) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("map operator requires inputs")
@@ -226,4 +297,23 @@ func NewMapOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuil
 		return nil, merr.WrapErrParameterInvalidMsg("map operator requires outputs")
 	}
 	return NewMapOp(fn, repr.Inputs, repr.Outputs)
+}
+
+func (o *MapOp) Expression() types.FunctionExpr { return o.function }
+
+func validateFunctionOutputShape(outputs []*arrow.Chunked, sizes []int64) error {
+	for index, output := range outputs {
+		if output == nil {
+			return merr.WrapErrFunctionFailedMsg("function output %d is nil", index)
+		}
+		if len(output.Chunks()) != len(sizes) {
+			return merr.WrapErrFunctionFailedMsg("function output %d has inconsistent chunk count", index)
+		}
+		for group, chunk := range output.Chunks() {
+			if chunk == nil || !arrow.TypeEqual(chunk.DataType(), output.DataType()) || int64(chunk.Len()) != sizes[group] {
+				return merr.WrapErrFunctionFailedMsg("function output %d group %d must preserve %d rows", index, group, sizes[group])
+			}
+		}
+	}
+	return nil
 }

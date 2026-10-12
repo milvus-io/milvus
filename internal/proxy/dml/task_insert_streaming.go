@@ -3,6 +3,7 @@ package dml
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"go.opentelemetry.io/otel"
 
@@ -35,6 +36,9 @@ import (
 func (it *InsertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-Execute")
 	defer sp.End()
+	if it.result.GetIngestionResult() != nil && it.insertMsg.NRows() == 0 {
+		return nil
+	}
 
 	collID := it.collectionID
 	it.insertMsg.CollectionID = collID
@@ -76,15 +80,52 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		it.result.Status = merr.Status(err)
 		return err
 	}
+	if info := it.result.GetIngestionResult(); info != nil {
+		if !atomic.CompareAndSwapUint32(&it.ingestionWritePhase, ingestionBeforeAppend, ingestionAppendStarted) {
+			err := merr.Wrap(context.Canceled, "ingestion insertion canceled before WAL append")
+			it.result.Status = merr.Status(err)
+			return err
+		}
+		info.OutcomeUnknown = true
+		defer it.settleIngestionAppend()
+	}
 	resp := streaming.WAL().AppendMessagesWithOptions(ctx, msgs, streaming.AppendOption{
 		IdempotencyKey: it.idempotencyKey,
 	})
+	if err := it.confirmIngestion(msgs, channelNames, resp); err != nil {
+		// A malformed internal outcome cannot confirm any optimistic IDs.
+		if info := it.result.GetIngestionResult(); info != nil {
+			it.result.IDs, _ = emptyIngestionIDs(it.schema)
+			it.result.InsertCnt = 0
+			info.OutputRows = 0
+			info.OutcomeUnknown = true
+			info.OutputSources = &milvuspb.FunctionChainRowMapping{SourceOffsets: []uint64{0}}
+			it.result.SuccIndex = nil
+			it.result.ErrIndex = make([]uint32, info.GetInputRows())
+			for row := range it.result.ErrIndex {
+				it.result.ErrIndex[row] = uint32(row)
+			}
+		}
+		it.result.Status = merr.Status(err)
+		it.result.Status.Retriable = false
+		return nil
+	}
+	if info := it.result.GetIngestionResult(); info != nil && info.GetOutputRows() > 0 {
+		// Partial outcomes still expose confirmed child IDs; their timestamp must
+		// reach the committed write units for a subsequent consistency barrier.
+		it.result.Timestamp = resp.MaxTimeTick()
+	}
 	if err := resp.UnwrapFirstError(); err != nil {
 		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
 			it.result.Status = merr.Status(merr.ErrCollectionSchemaMismatch)
 		} else {
 			it.result.Status = merr.Status(err)
+		}
+		if it.result.GetIngestionResult() != nil {
+			// Keep the system error code, but replaying a write whose other units
+			// may already have committed is unsafe without transformed-output reuse.
+			it.result.Status.Retriable = false
 		}
 		return nil
 	}

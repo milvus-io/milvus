@@ -36,6 +36,48 @@ message ExecuteRequest {
   // UDF argument position -> zero-based IPC column index. Repeated indices
   // reuse the same decoded array. Empty means IPC columns in their stored order.
   repeated uint32 input_column_indices = 7;
+  // Per-request query metadata, separate from user-controlled UDF parameters.
+  QueryContext query_context = 8;
+  // 0 is legacy; 2 adds query context/batch POST; 3 adds relational POST;
+  // 4 preserves runtime Arrow schemas; 5 adds expanded-query provenance;
+  // 6 adds trusted per-call request scope and the operator's log label.
+  // The client requires an exact version acknowledgment on success.
+  uint32 execution_version = 9;
+  // v3-only: logical groups no longer correspond one-to-one to request NQ.
+  bool table_result = 10;
+  // v3-only: return exactly one row per input group instead of preserving rows.
+  bool reduction = 11;
+  // v6: supplied by the host, independently of user-controlled params.
+  RequestContext request_context = 12;
+}
+
+message RequestContext {
+  string database = 1;
+  string collection = 2;
+  string user = 3;
+  // Operator log label, separate from ExecuteRequest.resource_name (the wheel).
+  string resource_name = 4;
+}
+
+// Keep raw vector encodings and text values without importing public SDK
+// descriptors into the worker. data_type is the PlaceholderType enum name.
+message QueryInput {
+  string data_type = 1;
+  repeated bytes values = 2;
+  string tag = 3;
+  // v5: prepared query index -> original query index. Empty means identity
+  // when the prepared count equals original NQ, or an empty prepared input.
+  repeated int64 original_query_indices = 4;
+}
+
+message QueryContext {
+  // Entries align with ANN subrequests. Original inputs retain the request NQ;
+  // prepared inputs may have different counts after PRE expansion.
+  repeated QueryInput original_queries = 1;
+  repeated QueryInput queries = 2;
+  // v5 PRE only: current operator row -> original query. Query snapshots still
+  // describe PRE stage entry and need not have the current operator row count.
+  repeated int64 row_query_origins = 3;
 }
 
 // Runtime-owned parameter types. Keep these independent of Milvus API protos:
@@ -61,6 +103,7 @@ message FunctionParamObject {
 }
 
 message ExecuteResponse {
+  uint32 execution_version = 3;
   oneof result {
     // One complete Arrow IPC stream; output layout is independent of inputs.
     bytes outputs = 1;

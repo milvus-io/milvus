@@ -859,7 +859,7 @@ func (s *mixCoordImpl) GetComponentStates(ctx context.Context, req *milvuspb.Get
 			NodeID:    nodeID,
 			Role:      typeutil.MixCoordRole,
 			StateCode: code,
-			ExtraInfo: nil,
+			ExtraInfo: []*commonpb.KeyValuePair{{Key: common.FunctionChainTransformVersionKey, Value: common.FunctionChainTransformVersion}},
 		},
 		Status: merr.Success(),
 		SubcomponentStates: []*milvuspb.ComponentInfo{

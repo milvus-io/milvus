@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/util/function/chain/transform"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -53,6 +54,11 @@ type InsertTask struct {
 
 	idempotencyEnabled bool
 	idempotencyKey     string
+	ingestionLineage   []transform.RowLineage
+	// Atomic state coordinates an interrupted RPC waiter with the scheduler's
+	// write attempt. FieldsData/result remain scheduler-owned until settlement.
+	ingestionWritePhase uint32
+	ingestionInputRows  uint64
 }
 
 // NewInsertTask constructs an insert task. It takes the host node and the
@@ -275,7 +281,19 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	if err := it.prepareIdempotencyKey(colInfo.Properties); err != nil {
 		return err
 	}
+	if err := it.applyIngestion(ctx, schema); err != nil {
+		return err
+	}
+	if it.result.GetIngestionResult() != nil && it.insertMsg.NRows() == 0 {
+		it.result.IDs, err = emptyIngestionIDs(it.schema)
+		if err != nil {
+			return err
+		}
+		return it.finalizeIngestion(nil)
+	}
 
+	// Collection ingestion transforms run first. Native schema Functions consume
+	// their final text columns and generate embeddings for the expanded rows.
 	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
 		return err
 	}

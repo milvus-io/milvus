@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/chain/transform"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
@@ -44,6 +45,31 @@ func functionChainInputPlanTestSchema(dynamic bool) *schemapb.CollectionSchema {
 		EnableDynamicField: dynamic,
 		Fields:             fields,
 	}
+}
+
+func TestSelectJSONPathInputHintsAndScope(t *testing.T) {
+	op, err := transform.Select([]string{`metadata["price"]`, `metadata["price"]`}, []string{"price_a", "price_b"})
+	require.NoError(t, err)
+	op.Params = map[string]*schemapb.FunctionParamValue{
+		types.InputDataTypesParam: {Value: &schemapb.FunctionParamValue_ArrayValue{ArrayValue: &schemapb.FunctionParamArray{
+			Values: []*schemapb.FunctionParamValue{
+				{Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: int64(schemapb.DataType_Double)}},
+				{Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: int64(schemapb.DataType_Double)}},
+			},
+		}}},
+	}
+	plan, err := transform.PostProcess("json select", op)
+	require.NoError(t, err)
+	repr, err := ProtoChainToRepr(plan)
+	require.NoError(t, err)
+	inputs, err := CompileDataFrameInputPlan(repr, functionChainInputPlanTestSchema(false))
+	require.NoError(t, err)
+	require.Len(t, inputs.Inputs, 1)
+	require.Equal(t, schemapb.DataType_Double, inputs.Inputs[0].DataTypeHint)
+	require.Equal(t, []int64{103}, inputs.PhysicalFieldIDs())
+
+	op.Params[types.InputDataTypesParam].GetArrayValue().Values = op.Params[types.InputDataTypesParam].GetArrayValue().Values[:1]
+	require.Error(t, transform.ValidatePlan(&schemapb.FunctionChain{Stage: plan.Stage, Ops: []*schemapb.FunctionChainOp{op}}))
 }
 
 func TestCompileDataFrameInputPlan(t *testing.T) {

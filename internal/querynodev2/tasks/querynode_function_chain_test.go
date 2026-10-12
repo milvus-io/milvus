@@ -381,7 +381,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 		assert.Contains(t, err.Error(), "limit does not accept expression, inputs, or outputs")
 	})
 
-	t.Run("l1 rejects unsupported op", func(t *testing.T) {
+	t.Run("l1 rejects unsupported filter", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
 			l1FunctionChainForTest(&schemapb.FunctionChainOp{Op: types.OpTypeFilter}),
 		}}
@@ -389,7 +389,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 		_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
 		require.Error(t, err)
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "unknown operator type: filter")
+		assert.Contains(t, err.Error(), `type "filter" is not supported by L1 rerank function chain`)
 	})
 
 	t.Run("l1 rejects invalid limit as input error", func(t *testing.T) {

@@ -22,12 +22,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	// Register built-in function expressions
 	_ "github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -55,11 +57,12 @@ type Operator interface {
 
 // FuncChain is a function chain that contains a list of operators.
 type FuncChain struct {
-	name       string
-	stage      string // execution stage for validating function compatibility
-	operators  []Operator
-	alloc      memory.Allocator
-	buildError error // stores error from fluent API calls
+	name        string
+	stage       string // execution stage for validating function compatibility
+	operators   []Operator
+	alloc       memory.Allocator
+	buildError  error // stores error from fluent API calls
+	tableResult bool
 }
 
 // NewFuncChainWithAllocator creates a new FuncChain with the given allocator.
@@ -90,6 +93,10 @@ func (fc *FuncChain) SetStage(stage string) *FuncChain {
 func (fc *FuncChain) Stage() string {
 	return fc.stage
 }
+
+// SetTableResult selects the explicit POST table contract. Other stages reject it.
+func (fc *FuncChain) SetTableResult(enabled bool) *FuncChain { fc.tableResult = enabled; return fc }
+func (fc *FuncChain) TableResult() bool                      { return fc.tableResult }
 
 // Add adds an operator to the chain.
 func (fc *FuncChain) Add(op Operator) *FuncChain {
@@ -132,37 +139,125 @@ func (fc *FuncChain) Validate() error {
 // validateOperators is an internal helper that validates all operators in a single pass.
 // It checks that operators are not nil, have valid functions, and support the given stage.
 func (fc *FuncChain) validateOperators(stage string) error {
+	if fc.tableResult && stage != types.StagePostProcess {
+		return merr.WrapErrParameterInvalidMsg("TABLE result mode is only supported by POST")
+	}
+	produced := make(map[string]struct{})
+	scopeLocked := false
 	for i, op := range fc.operators {
 		if op == nil {
 			return merr.WrapErrServiceInternalMsg("operator[%d] is nil", i)
 		}
 
-		// Validate MapOp
-		if mapOp, ok := op.(*MapOp); ok {
-			if mapOp.function == nil {
-				return merr.WrapErrServiceInternalMsg("operator[%d] MapOp has nil function", i)
-			}
-			if !mapOp.function.IsRunnable(stage) {
-				return merr.WrapErrParameterInvalidMsg("operator[%d] function %q does not support stage %q",
-					i, mapOp.function.Name(), stage)
+		if expression, ok := op.(interface{ Expression() types.FunctionExpr }); ok {
+			function := expression.Expression()
+			if function == nil {
+				if aggregation, native := op.(*AggregateOp); !native || len(aggregation.specs) == 0 {
+					return merr.WrapErrServiceInternalMsg("operator[%d] %s has nil function", i, op.Name())
+				}
+			} else if !function.IsRunnable(stage) {
+				return merr.WrapErrParameterInvalidMsg("operator[%d] function %q does not support stage %q", i, function.Name(), stage)
 			}
 		}
-
-		// Validate FilterOp
-		if filterOp, ok := op.(*FilterOp); ok {
-			if filterOp.function == nil {
-				return merr.WrapErrServiceInternalMsg("operator[%d] FilterOp has nil function", i)
+		if err := validateOperatorStageWithMode(op, stage, fc.tableResult); err != nil {
+			return merr.Wrapf(err, "operator[%d]", i)
+		}
+		for _, name := range op.Inputs() {
+			if scopeLocked && (fc.tableResult || !IsFunctionChainSystemName(name)) && !producedColumn(produced, name) {
+				return merr.WrapErrParameterInvalidMsg("operator[%d] input %q is unavailable after select", i, name)
 			}
-			if !filterOp.function.IsRunnable(stage) {
-				return merr.WrapErrParameterInvalidMsg("operator[%d] filter function %q does not support stage %q",
-					i, filterOp.function.Name(), stage)
-			}
+		}
+		if operatorResetsColumnScope(op) {
+			produced = make(map[string]struct{}, len(op.Outputs()))
+			scopeLocked = true
+		}
+		for _, name := range op.Outputs() {
+			produced[name] = struct{}{}
 		}
 
 		// Validate MergeOp placement: MergeOp can only be at index 0
 		if _, ok := op.(*MergeOp); ok && i > 0 {
 			return merr.WrapErrParameterInvalidMsg("operator[%d] MergeOp can only be the first operator in the chain", i)
 		}
+	}
+	return nil
+}
+
+func isTransformStage(stage string) bool {
+	return stage == types.StageIngestion || stage == types.StagePreProcess || stage == types.StagePostProcess
+}
+
+func validateOperatorStage(op Operator, stage string) error {
+	return validateOperatorStageWithMode(op, stage, false)
+}
+
+func operatorResetsColumnScope(op Operator) bool {
+	switch op.(type) {
+	case *SelectOp, *AggregateOp:
+		return true
+	}
+	return false
+}
+
+func validateOperatorStageWithMode(op Operator, stage string, tableResult bool) error {
+	if tableResult {
+		if stage != types.StagePostProcess {
+			return merr.WrapErrParameterInvalidMsg("TABLE operators require POST stage")
+		}
+		switch op.(type) {
+		case *MapOp, *FilterOp, *SelectOp, *ExplodeOp, *FlatMapOp, *SortOp, *LimitOp, *UnionAllOp, *AggregateOp:
+		default:
+			return merr.WrapErrParameterInvalidMsg("%s is not supported by POST TABLE", op.Name())
+		}
+		for index, output := range op.Outputs() {
+			if !strings.HasPrefix(output, "$") {
+				continue
+			}
+			if selection, ok := op.(*SelectOp); ok && output == selection.inputs[index] {
+				continue
+			}
+			if aggregation, ok := op.(*AggregateOp); ok && index < len(aggregation.keys) && output == aggregation.keys[index] {
+				continue
+			}
+			return merr.WrapErrParameterInvalidMsg("TABLE cannot rewrite system output %q", output)
+		}
+		return nil
+	}
+	switch op.(type) {
+	case *UnionAllOp, *AggregateOp:
+		return merr.WrapErrParameterInvalidMsg("%s requires POST TABLE mode", op.Name())
+	case *ExplodeOp, *FlatMapOp:
+		if stage != types.StageIngestion && stage != types.StagePreProcess {
+			return merr.WrapErrParameterInvalidMsg("%s cannot expand rows in stage %q", op.Name(), stage)
+		}
+	case *SelectOp:
+		if !isTransformStage(stage) {
+			return merr.WrapErrParameterInvalidMsg("select is only supported by transform stages")
+		}
+	}
+	if !isTransformStage(stage) {
+		return nil // Existing rerank endpoint/operator allowlists remain authoritative.
+	}
+	allowed := false
+	switch op.(type) {
+	case *MapOp, *SelectOp:
+		allowed = true
+	case *ExplodeOp, *FlatMapOp:
+		allowed = stage == types.StageIngestion || stage == types.StagePreProcess
+	case *FilterOp:
+		allowed = stage == types.StageIngestion
+	}
+	if !allowed {
+		return merr.WrapErrParameterInvalidMsg("%s is not supported by transform stage %q", op.Name(), stage)
+	}
+	for i, output := range op.Outputs() {
+		if !strings.HasPrefix(strings.TrimSpace(output), "$") {
+			continue
+		}
+		if selectOp, ok := op.(*SelectOp); ok && output == selectOp.inputs[i] {
+			continue
+		}
+		return merr.WrapErrParameterInvalidMsg("transform cannot rewrite system output %q", output)
 	}
 	return nil
 }
@@ -181,6 +276,9 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFram
 // ExecuteWithOptions executes the chain with optional optimization metadata.
 // FuncChain remains the only executor; OptimizationPlan only guides execution.
 func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions, inputs ...*DataFrame) (*DataFrame, error) {
+	if ctx == nil {
+		return nil, merr.WrapErrServiceInternal("chain execution context is nil")
+	}
 	if len(inputs) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("at least one input is required")
 	}
@@ -189,13 +287,22 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 	if err := fc.Validate(); err != nil {
 		return nil, err
 	}
+	for i, input := range inputs {
+		if err := validateFrameShape(input); err != nil {
+			return nil, merr.Wrapf(err, "chain input[%d]", i)
+		}
+	}
 
 	plan, err := fc.buildOptimizationPlan(opts)
 	if err != nil {
 		return nil, err
 	}
 
-	funcCtx := types.NewFuncContextFull(ctx, fc.alloc, fc.stage)
+	if opts.OutputRowLimit < 0 {
+		return nil, merr.WrapErrServiceInternal("chain output row limit is negative")
+	}
+	funcCtx := types.NewFuncContextFull(ctx, fc.alloc, fc.stage).WithQueryContext(opts.QueryContext).WithTableResult(fc.tableResult).WithOutputRowLimit(opts.OutputRowLimit)
+	currentContext := funcCtx
 
 	var result *DataFrame
 	startIdx := 0
@@ -204,18 +311,32 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 	if len(fc.operators) > 0 {
 		if mergeOp, ok := fc.operators[0].(*MergeOp); ok {
 			var err error
-			result, err = mergeOp.ExecuteMulti(funcCtx, inputs)
+			currentContext = fc.operatorContext(funcCtx, 0, mergeOp)
+			if err := ctx.Err(); err != nil {
+				mlog.Debug(currentContext.Context(), "function chain execution cancelled", mlog.Err(err))
+				return nil, err
+			}
+			mlog.Debug(currentContext.Context(), "function chain operator started")
+			result, err = mergeOp.ExecuteMulti(currentContext, inputs)
 			if err != nil {
+				mlog.Error(currentContext.Context(), "function chain operator failed", mlog.Err(err))
 				return nil, merr.Wrapf(err, "%s failed", mergeOp.Name())
 			}
 			startIdx = 1
+			if err := validateFrameShape(result); err != nil {
+				mlog.Error(currentContext.Context(), "function chain operator output schema failed", mlog.Err(err))
+				fc.releaseIfOwned(result, inputs)
+				return nil, merr.Wrap(err, "Merge output")
+			}
 			if plan != nil {
 				result, err = fc.pruneIfNeeded(result, plan.PruneAfter[0], plan.SystemColumnPolicy, inputs)
 				if err != nil {
+					mlog.Error(currentContext.Context(), "function chain operator projection failed", mlog.Err(err))
 					fc.releaseIfOwned(result, inputs)
 					return nil, err
 				}
 			}
+			mlog.Debug(currentContext.Context(), "function chain operator completed")
 		} else {
 			if len(inputs) > 1 {
 				return nil, merr.WrapErrParameterInvalidMsg("chain expects 1 input but got %d (first operator is not MergeOp)", len(inputs))
@@ -232,10 +353,12 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 	// Process remaining operators
 	for i := startIdx; i < len(fc.operators); i++ {
 		op := fc.operators[i]
+		currentContext = fc.operatorContext(funcCtx, i, op)
 
 		// Check for context cancellation before each operator
 		select {
 		case <-ctx.Done():
+			mlog.Debug(currentContext.Context(), "function chain execution cancelled", mlog.Err(ctx.Err()))
 			fc.releaseIfOwned(result, inputs)
 			return nil, ctx.Err()
 		default:
@@ -245,15 +368,44 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 			var err error
 			result, err = fc.pruneIfNeeded(result, plan.PruneBefore[i], plan.SystemColumnPolicy, inputs)
 			if err != nil {
+				mlog.Error(currentContext.Context(), "function chain operator projection failed", mlog.Err(err))
 				fc.releaseIfOwned(result, inputs)
 				return nil, err
 			}
 		}
 
-		newResult, err := op.Execute(funcCtx, result)
+		var newResult *DataFrame
+		var err error
+		if err := validateOperatorInputSchema(op, result); err != nil {
+			mlog.Error(currentContext.Context(), "function chain operator input schema failed", mlog.Err(err))
+			fc.releaseIfOwned(result, inputs)
+			return nil, merr.Wrapf(err, "operator[%d] %s input schema", i, op.Name())
+		}
+		operatorContext, err := preProcessContextForFrame(currentContext, result)
 		if err != nil {
+			mlog.Error(currentContext.Context(), "function chain operator query lineage failed", mlog.Err(err))
+			fc.releaseIfOwned(result, inputs)
+			return nil, merr.Wrapf(err, "operator[%d] %s query lineage", i, op.Name())
+		}
+		currentContext = operatorContext
+		mlog.Debug(currentContext.Context(), "function chain operator started")
+		if flatMap, ok := op.(*FlatMapOp); ok && plan != nil {
+			newResult, err = flatMap.executeWithProjection(operatorContext, result, plan.PruneAfter[i], plan.SystemColumnPolicy)
+		} else {
+			newResult, err = op.Execute(operatorContext, result)
+		}
+		if err != nil {
+			mlog.Error(currentContext.Context(), "function chain operator failed", mlog.Err(err))
 			fc.releaseIfOwned(result, inputs)
 			return nil, merr.Wrapf(err, "%s failed", op.Name())
+		}
+		if err := validateFrameShape(newResult); err != nil {
+			mlog.Error(currentContext.Context(), "function chain operator output schema failed", mlog.Err(err))
+			if newResult != result {
+				fc.releaseIfOwned(newResult, inputs)
+			}
+			fc.releaseIfOwned(result, inputs)
+			return nil, merr.Wrapf(err, "operator[%d] %s output schema", i, op.Name())
 		}
 
 		// Release intermediate results (but not the original inputs)
@@ -265,10 +417,17 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 		if plan != nil {
 			result, err = fc.pruneIfNeeded(result, plan.PruneAfter[i], plan.SystemColumnPolicy, inputs)
 			if err != nil {
+				mlog.Error(currentContext.Context(), "function chain operator projection failed", mlog.Err(err))
 				fc.releaseIfOwned(result, inputs)
 				return nil, err
 			}
 		}
+		mlog.Debug(currentContext.Context(), "function chain operator completed")
+	}
+	if err := ctx.Err(); err != nil {
+		mlog.Debug(currentContext.Context(), "function chain execution cancelled", mlog.Err(err))
+		fc.releaseIfOwned(result, inputs)
+		return nil, err
 	}
 
 	return result, nil

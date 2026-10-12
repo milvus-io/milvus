@@ -623,10 +623,11 @@ func (s *MapOpTestSuite) TestMapOpExecuteAllowsFloat64ForRegularOutput() {
 }
 
 func (s *MapOpTestSuite) TestMapScoreConvertibleTypes() {
-	for _, dataType := range []arrow.Type{arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64, arrow.FLOAT64} {
+	for _, dataType := range []arrow.Type{arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
+		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64, arrow.FLOAT64} {
 		s.True(isMapScoreConvertibleType(dataType), dataType.String())
 	}
-	for _, dataType := range []arrow.Type{arrow.BOOL, arrow.STRING, arrow.UINT64} {
+	for _, dataType := range []arrow.Type{arrow.BOOL, arrow.STRING} {
 		s.False(isMapScoreConvertibleType(dataType), dataType.String())
 	}
 }

@@ -217,9 +217,9 @@ func TestClientInvalidResponsesAndSize(t *testing.T) {
 				case "oversize_error":
 					return &pyudfpb.ExecuteResponse{Result: &pyudfpb.ExecuteResponse_Error{Error: &pyudfpb.ExecuteError{Message: string(bytes.Repeat([]byte("x"), MaxErrorMessageBytes+1))}}}, nil
 				case "damaged_output":
-					return &pyudfpb.ExecuteResponse{Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: req.Inputs[:12]}}, nil
+					return &pyudfpb.ExecuteResponse{ExecutionVersion: executionVersion, Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: req.Inputs[:12]}}, nil
 				default:
-					return &pyudfpb.ExecuteResponse{Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: make([]byte, 2<<20)}}, nil
+					return &pyudfpb.ExecuteResponse{ExecutionVersion: executionVersion, Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: make([]byte, 2<<20)}}, nil
 				}
 			})
 			cfg.MaxMessageBytes = 1 << 20
@@ -262,7 +262,7 @@ func TestClientIndependentOutputBatches(t *testing.T) {
 			payload, err := encodeInputs(context.Background(), clientInput(t, sizes...))
 			require.NoError(t, err)
 			cfg, _ := startClientTestServer(t, func(context.Context, *pyudfpb.ExecuteRequest) (*pyudfpb.ExecuteResponse, error) {
-				return &pyudfpb.ExecuteResponse{Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: payload}}, nil
+				return &pyudfpb.ExecuteResponse{ExecutionVersion: executionVersion, Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: payload}}, nil
 			})
 			outputs, err := newTestClient(t, cfg).Execute(context.Background(), clientRequest(t))
 			require.NoError(t, err)

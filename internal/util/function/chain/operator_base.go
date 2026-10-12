@@ -20,11 +20,14 @@ package chain
 
 import (
 	"cmp"
+	"context"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/compute"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -101,8 +104,34 @@ func dispatchPickByIndices(pool memory.Allocator, data arrow.Array, indices []in
 	case *array.String:
 		return pickByIndices(arr, array.NewStringBuilder(pool), indices)
 	default:
-		return nil, merr.WrapErrServiceInternalMsg("unsupported array type %T", data)
+		return takeArrayWithNulls(pool, data, indices)
 	}
+}
+
+// takeArrayWithNulls supports nested List/Struct and fixed-size vector columns.
+// A -1 index creates a typed null, used by outer explode and nullable structs.
+func takeArrayWithNulls(pool memory.Allocator, data arrow.Array, indices []int) (arrow.Array, error) {
+	if data == nil {
+		return nil, merr.WrapErrServiceInternal("take input array is nil")
+	}
+	builder := array.NewInt64Builder(pool)
+	defer builder.Release()
+	for _, index := range indices {
+		if index == -1 {
+			builder.AppendNull()
+		} else if index < 0 || index >= data.Len() {
+			return nil, merr.WrapErrServiceInternalMsg("take index %d exceeds array length %d", index, data.Len())
+		} else {
+			builder.Append(int64(index))
+		}
+	}
+	selection := builder.NewArray()
+	defer selection.Release()
+	result, err := compute.TakeArray(compute.WithAllocator(context.Background(), pool), data, selection)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalErr(err, "Arrow take failed")
+	}
+	return result, nil
 }
 
 // =============================================================================
@@ -111,25 +140,25 @@ func dispatchPickByIndices(pool memory.Allocator, data arrow.Array, indices []in
 
 // BaseOp is the base operator with common fields.
 type BaseOp struct {
-	inputs  []string
-	outputs []string
+	inputs         []string
+	outputs        []string
+	inputDataTypes []schemapb.DataType
 }
 
 func (o *BaseOp) Inputs() []string  { return o.inputs }
 func (o *BaseOp) Outputs() []string { return o.outputs }
 
+func (o *BaseOp) SetInputDataTypes(types []schemapb.DataType) {
+	o.inputDataTypes = append([]schemapb.DataType(nil), types...)
+}
+
+func (o *BaseOp) InputDataTypes() []schemapb.DataType { return o.inputDataTypes }
+
 // ReadInputColumns reads all input columns declared in o.inputs from the DataFrame.
-// Returns an error if any declared input column is missing.
+// It uses the same path resolution as all native operators. Returned columns
+// are owned by the caller and must be released, including top-level columns.
 func (o *BaseOp) ReadInputColumns(opName string, df *DataFrame) ([]*arrow.Chunked, error) {
-	cols := make([]*arrow.Chunked, len(o.inputs))
-	for i, name := range o.inputs {
-		col := df.Column(name)
-		if col == nil {
-			return nil, merr.WrapErrServiceInternalMsg("%s: column %q not found", opName, name)
-		}
-		cols[i] = col
-	}
-	return cols, nil
+	return o.readResolvedColumns(opName, df, memory.DefaultAllocator)
 }
 
 // sliceArray slices an array from start to end using zero-copy.

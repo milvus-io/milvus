@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	"github.com/milvus-io/milvus/internal/util/function/chain/transform"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -41,18 +42,65 @@ func (m *functionChainRerankMeta) GetInputPlan() *chain.DataFrameInputPlan {
 }
 
 func hasFunctionRerank(request *milvuspb.SearchRequest) bool {
-	return request.GetFunctionScore() != nil || len(request.GetFunctionChains()) > 0
+	return request.GetFunctionScore() != nil || hasRerankFunctionChains(request.GetFunctionChains())
 }
 
-func validateFunctionChainSearchRequest(request *milvuspb.SearchRequest, _ bool) error {
-	if request.GetFunctionScore() != nil && len(request.GetFunctionChains()) > 0 {
+func hasRerankFunctionChains(chains []*schemapb.FunctionChain) bool {
+	for _, pb := range chains {
+		switch pb.GetStage() {
+		case schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
+			schemapb.FunctionChainStage_FunctionChainStageL1Rerank,
+			schemapb.FunctionChainStage_FunctionChainStageL2Rerank:
+			return true
+		}
+	}
+	return false
+}
+
+func functionChainsAtStage(chains []*schemapb.FunctionChain, stage schemapb.FunctionChainStage) []*schemapb.FunctionChain {
+	result := make([]*schemapb.FunctionChain, 0, 1)
+	for _, pb := range chains {
+		if pb != nil && pb.GetStage() == stage {
+			result = append(result, pb)
+		}
+	}
+	return result
+}
+
+func validateFunctionChainSearchRequest(request *milvuspb.SearchRequest, hybrid bool) error {
+	if _, _, err := splitFunctionChainsByStage(request.GetFunctionChains()); err != nil {
+		return err
+	}
+	if hybrid {
+		for _, pb := range request.GetFunctionChains() {
+			if pb.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL2Rerank &&
+				pb.GetStage() != schemapb.FunctionChainStage_FunctionChainStagePostProcess {
+				return merr.WrapErrParameterInvalidMsg("top-level hybrid function chains support only L2 and POST_PROCESS; PRE_PROCESS belongs to each sub-search")
+			}
+		}
+	}
+	if request.GetFunctionScore() != nil && hasRerankFunctionChains(request.GetFunctionChains()) {
 		return merr.WrapErrParameterInvalidMsg("function_score and function_chains cannot be used together")
 	}
 	return nil
 }
 
 func selectHybridRerankMeta(request *milvuspb.SearchRequest, schema *schemaInfo) (rerankMeta, error) {
-	functionChains := request.GetFunctionChains()
+	if request.GetFunctionScore() != nil && hasRerankFunctionChains(request.GetFunctionChains()) {
+		return nil, merr.WrapErrParameterInvalidMsg("function_chains cannot be used with function_score")
+	}
+	if err := validateFunctionChainSearchRequest(request, true); err != nil {
+		return nil, err
+	}
+	for _, plan := range request.GetFunctionChains() {
+		if transform.IsTablePlan(plan) && plan.GetPostProcessOptions().GetInput() == schemapb.PostProcessInput_PostProcessInputAnnInputs {
+			if err := validatePostTableSearchOptions(request); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		}
+	}
+	functionChains := functionChainsAtStage(request.GetFunctionChains(), schemapb.FunctionChainStage_FunctionChainStageL2Rerank)
 	if len(functionChains) > 0 {
 		if request.GetFunctionScore() != nil {
 			return nil, merr.WrapErrParameterInvalidMsg("function_chains cannot be used with function_score")
@@ -65,7 +113,7 @@ func selectHybridRerankMeta(request *milvuspb.SearchRequest, schema *schemaInfo)
 
 	if request.GetFunctionScore() != nil {
 		for index, subReq := range request.GetSubReqs() {
-			if len(subReq.GetFunctionChains()) > 0 {
+			if hasRerankFunctionChains(subReq.GetFunctionChains()) {
 				return nil, merr.WrapErrParameterInvalidMsg(
 					"function_score cannot be used with function_chains in sub-search[%d]", index)
 			}
@@ -128,6 +176,11 @@ func splitFunctionChainsByStage(chains []*schemapb.FunctionChain) ([]*schemapb.F
 				return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] must contain at least one op", i)
 			}
 			querynodeChains = append(querynodeChains, chainPB)
+		case schemapb.FunctionChainStage_FunctionChainStagePreProcess,
+			schemapb.FunctionChainStage_FunctionChainStagePostProcess:
+			if err := transform.ValidatePlan(chainPB); err != nil {
+				return nil, nil, merr.Wrapf(err, "function chain[%d]", i)
+			}
 		default:
 			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] stage %s is not supported in search request", i, stage.String())
 		}

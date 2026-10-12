@@ -161,30 +161,24 @@ func TestParseFuncChainProto_BasicOperators(t *testing.T) {
 	assert.IsType(t, &LimitOp{}, chain.operators[1])
 }
 
-func TestFilterOperatorRejected(t *testing.T) {
+func TestFilterOperatorAccepted(t *testing.T) {
 	for _, functionName := range []string{"mock_filter", chainexpr.PyUDFFuncName} {
 		t.Run(functionName, func(t *testing.T) {
-			pb := &schemapb.FunctionChain{
-				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
-				Ops: []*schemapb.FunctionChainOp{{
-					Op: types.OpTypeFilter,
-					Expr: &schemapb.FunctionChainExpr{
-						Name: functionName,
-						Args: []*schemapb.FunctionChainExprArg{columnArg("score")},
-					},
-				}},
+			expr := &schemapb.FunctionChainExpr{Name: functionName, Args: []*schemapb.FunctionChainExprArg{columnArg("score")}}
+			if functionName == chainexpr.PyUDFFuncName {
+				expr.Params = map[string]*schemapb.FunctionParamValue{"resource_name": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "rank_udf"}}}
 			}
+			pb := &schemapb.FunctionChain{Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank, Ops: []*schemapb.FunctionChainOp{{Op: types.OpTypeFilter, Expr: expr}}}
 			_, err := ProtoChainToRepr(pb)
-			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			require.Contains(t, err.Error(), "unknown operator type: filter")
-			_, err = ParseFuncChainProto(pb, memory.NewGoAllocator())
-			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			require.Contains(t, err.Error(), "unknown operator type: filter")
+			require.NoError(t, err)
+			parsed, err := ParseFuncChainProto(pb, memory.NewGoAllocator())
+			require.NoError(t, err)
+			require.IsType(t, &FilterOp{}, parsed.operators[0])
 		})
 	}
 	_, err := operatorFromRepr(&OperatorRepr{Type: types.OpTypeFilter})
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	require.Contains(t, err.Error(), "unknown operator type: filter")
+	require.ErrorIs(t, err, merr.ErrParameterMissing)
+	require.Contains(t, err.Error(), "filter_op: function is required")
 }
 
 func TestParseFuncChainProto_UnknownOperator(t *testing.T) {
@@ -225,7 +219,7 @@ func TestParseFuncChainProto_MissingParams(t *testing.T) {
 				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
 				Ops:   []*schemapb.FunctionChainOp{{Op: "filter"}},
 			},
-			errMsg: "unknown operator type: filter",
+			errMsg: "filter_op: function is required",
 		},
 		{
 			name: "filter missing inputs",
@@ -236,7 +230,7 @@ func TestParseFuncChainProto_MissingParams(t *testing.T) {
 					Expr: &schemapb.FunctionChainExpr{Name: "mock_filter"},
 				}},
 			},
-			errMsg: "unknown operator type: filter",
+			errMsg: "filter_op: inputs is required",
 		},
 		{
 			name: "sort missing column",
@@ -461,23 +455,23 @@ func TestRefreshInfoUsesExplicitDependencies(t *testing.T) {
 		wantAllWritten []string
 	}{
 		{
-			name:           "sort uses explicit inputs only",
+			name:           "sort includes default tie break dependency",
 			op:             OperatorRepr{Type: types.OpTypeSort, Inputs: []string{types.ScoreFieldName}},
-			wantReads:      []string{types.ScoreFieldName},
+			wantReads:      []string{types.ScoreFieldName, types.IDFieldName},
 			wantWrites:     nil,
-			wantRequired:   []string{types.ScoreFieldName},
+			wantRequired:   []string{types.ScoreFieldName, types.IDFieldName},
 			wantAllWritten: []string{},
 		},
 		{
-			name: "group by has no declared field dependencies",
+			name: "group by includes parameter and ranking dependencies",
 			op: OperatorRepr{Type: types.OpTypeGroupBy, Params: map[string]*schemapb.FunctionParamValue{
 				"field":      stringParam("$group_by_101"),
 				"group_size": intParam(2),
 				"limit":      intParam(10),
 			}},
-			wantReads:      nil,
+			wantReads:      []string{"$group_by_101", types.ScoreFieldName, types.IDFieldName},
 			wantWrites:     nil,
-			wantRequired:   []string{},
+			wantRequired:   []string{"$group_by_101", types.ScoreFieldName, types.IDFieldName},
 			wantAllWritten: []string{},
 		},
 	}
@@ -487,7 +481,7 @@ func TestRefreshInfoUsesExplicitDependencies(t *testing.T) {
 			repr := &ChainRepr{Operators: []OperatorRepr{test.op}}
 			require.NoError(t, repr.RefreshInfo())
 			require.Len(t, repr.Info.Ops, 1)
-			assert.Len(t, repr.Operators[0].InputDataTypes, len(test.op.Inputs))
+			assert.Len(t, repr.Operators[0].InputDataTypes, len(test.wantReads))
 			assert.Equal(t, test.wantReads, repr.Info.Ops[0].ReadNames)
 			assert.Equal(t, test.wantWrites, repr.Info.Ops[0].WriteNames)
 			assert.Equal(t, test.wantRequired, repr.Info.RequiredInputs)

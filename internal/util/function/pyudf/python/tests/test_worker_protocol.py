@@ -84,7 +84,19 @@ else:
         request = pyudf_pb2.ExecuteRequest()
         self.assertEqual(
             {field.name: field.number for field in request.DESCRIPTOR.fields},
-            {"resource_name": 2, "udf_path": 3, "stage": 4, "params": 5, "inputs": 6, "input_column_indices": 7},
+            {
+                "resource_name": 2,
+                "udf_path": 3,
+                "stage": 4,
+                "params": 5,
+                "inputs": 6,
+                "input_column_indices": 7,
+                "query_context": 8,
+                "execution_version": 9,
+                "table_result": 10,
+                "reduction": 11,
+                "request_context": 12,
+            },
         )
         request.params.fields["large"].int64_value = -(1 << 63)
         request.params.fields["bytes"].bytes_value = b"\x00\xff"

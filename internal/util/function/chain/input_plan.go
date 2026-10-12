@@ -123,6 +123,7 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 	}
 	plan := &DataFrameInputPlan{Inputs: make([]ResolvedChainInput, 0)}
 	produced := make(map[string]struct{})
+	scopeLocked := false
 	inputOffsets := make(map[string]int)
 
 	for opIdx := range repr.Operators {
@@ -132,8 +133,11 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 		}
 
 		for inputIdx, name := range op.Inputs {
-			if _, ok := produced[name]; ok {
+			if producedColumn(produced, name) {
 				continue
+			}
+			if scopeLocked && (repr.TableResult || !IsFunctionChainSystemName(name)) {
+				return nil, merr.WrapErrParameterInvalidMsg("op[%d] input %q is unavailable after select", opIdx, name)
 			}
 			hint := op.InputDataTypes[inputIdx]
 			if isRuntimeFunctionChainInput(name) {
@@ -165,9 +169,15 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 			plan.Inputs = append(plan.Inputs, input)
 		}
 
+		if reprOpResetsColumnScope(op.Type) {
+			produced = make(map[string]struct{}, len(op.Outputs))
+			scopeLocked = true
+		}
 		for _, output := range op.Outputs {
-			if err := validateChainOutputName(schemaHelper, output); err != nil {
-				return nil, merr.Wrapf(err, "op[%d] output %q", opIdx, output)
+			if op.Type != types.OpTypeSelect && !repr.TableResult {
+				if err := validateChainOutputName(schemaHelper, output); err != nil {
+					return nil, merr.Wrapf(err, "op[%d] output %q", opIdx, output)
+				}
 			}
 			produced[output] = struct{}{}
 		}
@@ -223,10 +233,10 @@ func normalizeOperatorInputDataTypes(op *OperatorRepr) error {
 
 func isRuntimeFunctionChainInput(name string) bool {
 	switch name {
-	case types.IDFieldName, types.ScoreFieldName:
+	case types.IDFieldName, types.ScoreFieldName, types.ElementIndicesFieldName, types.QueryIndexFieldName, types.SubqueryIndexFieldName, types.ANNIndexFieldName:
 		return true
 	default:
-		return false
+		return strings.HasPrefix(name, types.GroupByFieldName+"_")
 	}
 }
 
@@ -273,7 +283,7 @@ func resolveSchemaChainInput(
 		return nil, err
 	}
 	if field.GetDataType() != schemapb.DataType_JSON {
-		if _, err := ToArrowType(field.GetDataType()); err != nil {
+		if !CanImportLegacyFieldType(field.GetDataType()) {
 			return nil, merr.WrapErrParameterInvalidMsg(
 				"function chain input %q has unsupported field type %s", name, field.GetDataType().String())
 		}
@@ -296,7 +306,7 @@ func isExplicitMetaInput(name string) bool {
 
 func validateResolvedInputHint(fieldType schemapb.DataType, nestedPath []string, hint schemapb.DataType) error {
 	if fieldType != schemapb.DataType_JSON {
-		if hint == schemapb.DataType_None {
+		if hint == schemapb.DataType_None || hint == fieldType {
 			return nil
 		}
 		fieldArrowType, fieldErr := ToArrowType(fieldType)

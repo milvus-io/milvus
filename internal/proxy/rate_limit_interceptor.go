@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -74,6 +75,9 @@ func RateLimitInterceptorWithMetaCache(GetMetaCache func() Cache, limiter types.
 			return nil, err
 		}
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
+		if rt == internalpb.RateType_DQLSearch {
+			ctx = taskmodel.WithSearchRateLimit(ctx, limiter, dbID, collectionIDToPartIDs, n)
+		}
 		return handler(ctx, req)
 	}
 }

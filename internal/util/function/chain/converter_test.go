@@ -75,7 +75,7 @@ func (s *ConverterSuite) TestToArrowType() {
 		{schemapb.DataType_String, arrow.BinaryTypes.String, false},
 		{schemapb.DataType_VarChar, arrow.BinaryTypes.String, false},
 		{schemapb.DataType_Text, arrow.BinaryTypes.String, false},
-		{schemapb.DataType_JSON, nil, true},        // Unsupported
+		{schemapb.DataType_JSON, arrow.BinaryTypes.Binary, false},
 		{schemapb.DataType_FloatVector, nil, true}, // Unsupported
 	}
 
@@ -104,6 +104,7 @@ func (s *ConverterSuite) TestToMilvusType() {
 		{arrow.PrimitiveTypes.Float32, schemapb.DataType_Float, false},
 		{arrow.PrimitiveTypes.Float64, schemapb.DataType_Double, false},
 		{arrow.BinaryTypes.String, schemapb.DataType_VarChar, false},
+		{arrow.BinaryTypes.LargeString, schemapb.DataType_VarChar, false},
 		{arrow.BinaryTypes.Binary, schemapb.DataType_None, true}, // Unsupported
 	}
 

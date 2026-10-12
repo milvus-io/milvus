@@ -19,10 +19,14 @@ package rootcoord
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/function/ingestion"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 )
 
 func validateSchemaEvolution(oldColl *model.Collection, newSchema *schemapb.CollectionSchema) error {
+	if err := ingestion.ValidateCollection(newSchema); err != nil {
+		return err
+	}
 	var oldSchema *schemapb.CollectionSchema
 	if oldColl != nil {
 		oldSchema = oldColl.ToCollectionSchemaPB()

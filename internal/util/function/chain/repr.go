@@ -19,6 +19,7 @@
 package chain
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -30,20 +31,22 @@ import (
 
 // ChainRepr is the internal representation of a FuncChain.
 type ChainRepr struct {
-	Name      string
-	Stage     string
-	Operators []OperatorRepr
-	Info      ChainReprInfo
+	Name        string
+	Stage       string
+	Operators   []OperatorRepr
+	Info        ChainReprInfo
+	TableResult bool
 }
 
 // OperatorRepr is the internal representation of an Operator.
 type OperatorRepr struct {
 	Type           string
 	Params         map[string]*schemapb.FunctionParamValue
-	Function       *FunctionRepr // for map/filter operators that evaluate an expression
+	Function       *FunctionRepr // operators that evaluate an expression, including custom aggregate
 	Inputs         []string      // input column names, preserving occurrence order
 	InputDataTypes []schemapb.DataType
 	Outputs        []string // output column names
+	TableResult    bool     // inherited from ChainRepr, never read from operator params
 }
 
 // FunctionRepr is the internal representation of a FunctionExpr.
@@ -92,9 +95,10 @@ func ProtoChainToRepr(pb *schemapb.FunctionChain) (*ChainRepr, error) {
 	}
 
 	repr := &ChainRepr{
-		Name:      pb.GetName(),
-		Stage:     stage,
-		Operators: make([]OperatorRepr, 0, len(pb.GetOps())),
+		Name:        pb.GetName(),
+		Stage:       stage,
+		TableResult: pb.GetPostProcessOptions().GetResultMode() == schemapb.FunctionChainResultMode_FunctionChainResultModeTable,
+		Operators:   make([]OperatorRepr, 0, len(pb.GetOps())),
 	}
 
 	for i, opPB := range pb.GetOps() {
@@ -102,6 +106,7 @@ func ProtoChainToRepr(pb *schemapb.FunctionChain) (*ChainRepr, error) {
 		if err != nil {
 			return nil, merr.WrapErrParameterInvalidMsg("op[%d]: %v", i, err)
 		}
+		opRepr.TableResult = repr.TableResult
 		repr.Operators = append(repr.Operators, *opRepr)
 	}
 
@@ -146,6 +151,16 @@ func ProtoOpToRepr(pb *schemapb.FunctionChainOp) (*OperatorRepr, error) {
 		}
 		repr.Function = expr
 		repr.Inputs = exprInputs
+		if opType == types.OpTypeAggregate {
+			keys, err := types.NewParamReader("aggregate", repr.Params).StringSlice("keys", false)
+			if err != nil {
+				return nil, err
+			}
+			repr.Inputs = append(append([]string(nil), keys...), exprInputs...)
+		}
+	}
+	if opType == types.OpTypeSelect && len(repr.Outputs) == 0 {
+		repr.Outputs = append([]string(nil), repr.Inputs...)
 	}
 
 	inputDataTypes, err := parseInputDataTypes(repr.Params, len(repr.Inputs))
@@ -258,6 +273,7 @@ func (repr *ChainRepr) RefreshInfo() error {
 		Ops:            make([]OperatorReprInfo, 0, len(repr.Operators)),
 	}
 	produced := make(map[string]struct{})
+	scopeLocked := false
 	seenRequiredInputs := make(map[string]struct{})
 	seenWrittenNames := make(map[string]struct{})
 
@@ -275,16 +291,75 @@ func (repr *ChainRepr) RefreshInfo() error {
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("op[%d]: %v", i, err)
 		}
+		if opType == types.OpTypeSelect && len(outputs) == 0 {
+			outputs = append([]string(nil), inputs...)
+		}
+		hints := op.InputDataTypes
+		if hints != nil && len(hints) != len(inputs) {
+			return merr.WrapErrParameterInvalidMsg("op[%d]: input data types count %d does not match input count %d", i, len(hints), len(inputs))
+		}
+		if opType == types.OpTypeAggregate && op.Function != nil {
+			keys, err := types.NewParamReader("aggregate", op.Params).StringSlice("keys", false)
+			if err != nil {
+				return merr.Wrapf(err, "op[%d]", i)
+			}
+			// Expression references exclude grouping keys. Rebuild dependencies
+			// for direct representations too, without duplicating key prefixes
+			// when RefreshInfo runs more than once.
+			if op.Function.Args != nil {
+				refs, err := ProtoExprArgsToInputs(op.Function.Args)
+				if err != nil {
+					return merr.Wrapf(err, "op[%d]", i)
+				}
+				actual := append(append([]string(nil), keys...), refs...)
+				if !slices.Equal(inputs, actual) {
+					if !slices.Equal(inputs, refs) {
+						return merr.WrapErrParameterInvalidMsg("op[%d]: aggregate inputs must match keys and expression references", i)
+					}
+					if hints != nil {
+						hints = append(make([]schemapb.DataType, len(keys)), hints...)
+					}
+				}
+				inputs = actual
+			} else if len(inputs) <= len(keys) || !slices.Equal(inputs[:len(keys)], keys) {
+				return merr.WrapErrParameterInvalidMsg("op[%d]: aggregate inputs must include keys before expression references", i)
+			}
+		}
+		// Legacy sort/group_by parameters also name real column dependencies.
+		// Normalize them before requery planning, pruning and runtime checks.
+		if opType == types.OpTypeSort || opType == types.OpTypeGroupBy {
+			normalized := op
+			normalized.Type, normalized.Inputs, normalized.Outputs = opType, inputs, outputs
+			normalized.TableResult = repr.TableResult
+			factory, _ := GetOperatorFactory(opType)
+			built, err := factory(&normalized, types.FunctionBuildContext{})
+			if err != nil {
+				return merr.Wrapf(err, "op[%d]", i)
+			}
+			actual := built.Inputs()
+			actualHints := make([]schemapb.DataType, len(actual))
+			for at, name := range actual {
+				for before, explicit := range inputs {
+					if explicit != name || hints == nil || hints[before] == schemapb.DataType_None {
+						continue
+					}
+					if actualHints[at] != schemapb.DataType_None && actualHints[at] != hints[before] {
+						return merr.WrapErrParameterInvalidMsg("op[%d]: conflicting type hints for input %q", i, name)
+					}
+					actualHints[at] = hints[before]
+				}
+			}
+			inputs, hints = actual, actualHints
+		}
 
 		repr.Operators[i].Type = opType
 		repr.Operators[i].Inputs = inputs
 		repr.Operators[i].Outputs = outputs
-		if repr.Operators[i].InputDataTypes == nil {
+		repr.Operators[i].TableResult = repr.TableResult
+		if hints == nil {
 			repr.Operators[i].InputDataTypes = make([]schemapb.DataType, len(inputs))
-		} else if len(repr.Operators[i].InputDataTypes) != len(inputs) {
-			return merr.WrapErrParameterInvalidMsg(
-				"op[%d]: input data types count %d does not match input count %d",
-				i, len(repr.Operators[i].InputDataTypes), len(inputs))
+		} else {
+			repr.Operators[i].InputDataTypes = hints
 		}
 
 		_, ok := GetOperatorFactory(opType)
@@ -298,8 +373,11 @@ func (repr *ChainRepr) RefreshInfo() error {
 		})
 
 		for _, input := range inputs {
-			if _, ok := produced[input]; ok {
+			if producedColumn(produced, input) {
 				continue
+			}
+			if scopeLocked && (repr.TableResult || !IsFunctionChainSystemName(input)) {
+				return merr.WrapErrParameterInvalidMsg("op[%d] input %q is unavailable after select", i, input)
 			}
 			if _, ok := seenRequiredInputs[input]; !ok {
 				seenRequiredInputs[input] = struct{}{}
@@ -307,6 +385,10 @@ func (repr *ChainRepr) RefreshInfo() error {
 			}
 		}
 
+		if reprOpResetsColumnScope(opType) {
+			produced = make(map[string]struct{}, len(outputs))
+			scopeLocked = true
+		}
 		for _, output := range outputs {
 			produced[output] = struct{}{}
 			if _, ok := seenWrittenNames[output]; !ok {
@@ -318,6 +400,18 @@ func (repr *ChainRepr) RefreshInfo() error {
 
 	repr.Info = info
 	return nil
+}
+
+func producedColumn(produced map[string]struct{}, name string) bool {
+	if _, ok := produced[name]; ok {
+		return true
+	}
+	root := ColumnReferenceRoot(name)
+	if root != name {
+		_, ok := produced[root]
+		return ok
+	}
+	return false
 }
 
 // FuncChainFromRepr creates a FuncChain from a ChainRepr.
@@ -349,8 +443,10 @@ func funcChainFromRepr(repr *ChainRepr, alloc memory.Allocator, buildCtx types.F
 		chain.SetName(repr.Name)
 	}
 	chain.SetStage(repr.Stage)
+	chain.SetTableResult(repr.TableResult)
 
 	for i, opRepr := range repr.Operators {
+		opRepr.TableResult = repr.TableResult
 		op, err := operatorFromReprWithContext(&opRepr, buildCtx)
 		if err != nil {
 			return nil, merr.Wrapf(err, "operator[%d]", i)
@@ -376,7 +472,19 @@ func operatorFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuil
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("unknown operator type: %s", repr.Type)
 	}
-	return factory(repr, buildCtx)
+	op, err := factory(repr, buildCtx)
+	if err != nil {
+		return nil, err
+	}
+	if len(repr.InputDataTypes) > 0 {
+		if len(repr.InputDataTypes) != len(op.Inputs()) {
+			return nil, merr.WrapErrParameterInvalidMsg("operator %s input type hints do not match inputs", repr.Type)
+		}
+		if typed, ok := op.(interface{ SetInputDataTypes([]schemapb.DataType) }); ok {
+			typed.SetInputDataTypes(repr.InputDataTypes)
+		}
+	}
+	return op, nil
 }
 
 // FunctionFromRepr creates a FunctionExpr from a FunctionRepr.
@@ -481,4 +589,8 @@ func parseInputDataTypes(params map[string]*schemapb.FunctionParamValue, inputCo
 // inputs, not system columns, despite using the '$' prefix.
 func IsFunctionChainSystemName(name string) bool {
 	return strings.HasPrefix(name, "$") && !isExplicitMetaInput(name)
+}
+
+func reprOpResetsColumnScope(name string) bool {
+	return name == types.OpTypeSelect || name == types.OpTypeAggregate
 }

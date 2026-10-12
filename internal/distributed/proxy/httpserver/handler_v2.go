@@ -1550,6 +1550,10 @@ func matchCountRule(outputs []string) bool {
 }
 
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	if err := rejectIgnoredRESTChainFields(c, false); err != nil {
+		abortRESTTransform(c, err)
+		return nil, err
+	}
 	httpReq := anyReq.(*QueryReqV2)
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
@@ -1774,6 +1778,10 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
+		return nil, err
+	}
+	if err := rejectRESTIngestion(collSchema); err != nil {
+		abortRESTTransform(c, err)
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
@@ -2081,6 +2089,10 @@ func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, gro
 }
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	if err := rejectIgnoredRESTChainFields(c, true); err != nil {
+		abortRESTTransform(c, err)
+		return nil, err
+	}
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
@@ -2414,6 +2426,10 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 }
 
 func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	if err := rejectIgnoredRESTChainFields(c, true); err != nil {
+		abortRESTTransform(c, err)
+		return nil, err
+	}
 	httpReq := anyReq.(*HybridSearchReq)
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
@@ -2645,6 +2661,10 @@ func consistencyLevelForCreateCollection(httpReq *CollectionReq) (commonpb.Consi
 }
 
 func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	if err := rejectIgnoredRESTChainFields(c, false); err != nil {
+		abortRESTTransform(c, err)
+		return nil, err
+	}
 	httpReq := anyReq.(*CollectionReq)
 	requestLogField := getTraceLogRequestFieldWithoutSensitiveInfo(anyReq)
 	req := &milvuspb.CreateCollectionRequest{

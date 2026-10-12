@@ -33,6 +33,14 @@ func PruneDataFrame(df *DataFrame, keepNonSystem ColumnSet, policy SystemColumnP
 	dropped := false
 	for _, name := range colNames {
 		keep := keepNonSystem.Contains(name)
+		if !keep {
+			for reference := range keepNonSystem {
+				if ColumnReferenceRoot(reference) == name {
+					keep = true
+					break
+				}
+			}
+		}
 		if policy.KeepAllSystemColumns && IsFunctionChainSystemName(name) {
 			keep = true
 		}

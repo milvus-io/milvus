@@ -358,10 +358,18 @@ func (s *MergeHelperTestSuite) TestBuildEmptyArrayAllTypes() {
 	}
 }
 
-func (s *MergeHelperTestSuite) TestBuildEmptyArrayUnsupportedType() {
-	_, err := buildEmptyArray(s.pool, arrow.BinaryTypes.Binary)
-	s.Error(err)
-	s.Contains(err.Error(), "unsupported type")
+func (s *MergeHelperTestSuite) TestBuildEmptyArrayNestedAndBinaryTypes() {
+	for _, dataType := range []arrow.DataType{
+		arrow.BinaryTypes.Binary, arrow.BinaryTypes.LargeString,
+		arrow.FixedSizeListOf(2, arrow.PrimitiveTypes.Float32),
+		arrow.ListOf(arrow.StructOf(arrow.Field{Name: "text", Type: arrow.BinaryTypes.String})),
+	} {
+		values, err := buildEmptyArray(s.pool, dataType)
+		s.Require().NoError(err)
+		s.True(arrow.TypeEqual(dataType, values.DataType()))
+		s.Zero(values.Len())
+		values.Release()
+	}
 }
 
 // =============================================================================
@@ -2083,7 +2091,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedPassThroughFields() {
 		defer df2.Release()
 
 		_, err := NewMergeOp(MergeStrategyRRF).ExecuteMulti(ctx, []*DataFrame{df1, df2})
-		s.ErrorContains(err, "column payload type int64 does not match output type")
+		s.ErrorContains(err, "type int64 does not match utf8")
 		s.True(errors.Is(err, merr.ErrFunctionFailed))
 	})
 
@@ -2111,7 +2119,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedPassThroughFields() {
 		defer df.Release()
 
 		_, err := NewMergeOp(MergeStrategyRRF).Execute(ctx, df)
-		s.ErrorContains(err, "column payload missing chunk 1")
+		s.ErrorContains(err, "inconsistent chunk count")
 		s.True(errors.Is(err, merr.ErrFunctionFailed))
 	})
 
@@ -2132,7 +2140,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedPassThroughFields() {
 		defer df.Release()
 
 		_, err := NewMergeOp(MergeStrategyRRF).Execute(ctx, df)
-		s.ErrorContains(err, "column payload has no row 0")
+		s.ErrorContains(err, "inconsistent runtime schema")
 		s.True(errors.Is(err, merr.ErrFunctionFailed))
 	})
 }

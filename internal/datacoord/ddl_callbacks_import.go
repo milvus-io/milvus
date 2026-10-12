@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/internal/util/function/ingestion"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -334,6 +335,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 	schema := coll.GetSchema()
 	if schema == nil || schema.GetName() == "" {
 		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
+	}
+	if err := ingestion.RejectUnsupportedWrite(schema, "import"); err != nil {
+		return 0, false, err
 	}
 	schema.Fields = lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
 		return !common.IsSystemField(field.GetFieldID())

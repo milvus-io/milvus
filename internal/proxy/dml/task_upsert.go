@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/util/function/ingestion"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -2016,6 +2017,9 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 
 	schema := colInfo.Schema
 	it.schema = schema
+	if err := ingestion.RejectUnsupportedWrite(schema.CollectionSchema, "upsert"); err != nil {
+		return err
+	}
 	it.schemaVersion = schema.Version
 	if err := dql.ValidateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
 		return err

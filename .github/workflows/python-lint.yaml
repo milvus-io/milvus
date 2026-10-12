@@ -93,7 +93,7 @@ jobs:
         run: |
           python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/pyudf-wheels" ./internal/util/function/pyudf/python
           for wheel in "$RUNNER_TEMP"/pyudf-wheels/milvus_pyudf_runtime-*.whl; do
-            python -m pip install "${wheel}[codegen]"
+            python -m pip install "${wheel}[codegen,test]"
           done
 
       - name: Check PyUDF Python protocol products
@@ -102,4 +102,4 @@ jobs:
       - name: Run PyUDF Python unit tests
         env:
           PYUDF_TEST_INSTALLED_RUNTIME: '1'
-        run: python -m unittest discover -s internal/util/function/pyudf/python/tests -v
+        run: python -m pytest -q internal/util/function/pyudf/python/tests

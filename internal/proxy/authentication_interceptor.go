@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/proxy/requestcontext"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -87,6 +88,9 @@ func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerIntercepto
 // previous globalMetaCache == nil check that this PR's per-proxy cache removed.
 func AuthenticationInterceptorWithMetaCache(GetMetaCache func() Cache) grpc_auth.AuthFunc {
 	return func(ctx context.Context) (context.Context, error) {
+		// Only successful verification below may populate the UDF principal.
+		// Disabled authentication and reused internal contexts remain anonymous.
+		ctx = requestcontext.WithAuthenticatedUser(ctx, "")
 		// The keys within metadata.MD are normalized to lowercase.
 		// See: https://godoc.org/google.golang.org/grpc/metadata#New
 		md, ok := metadata.FromIncomingContext(ctx)
@@ -125,6 +129,7 @@ func AuthenticationInterceptorWithMetaCache(GetMetaCache func() Cache) grpc_auth
 				md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
 				md[util.HeaderToken] = []string{rawToken}
 				ctx = metadata.NewIncomingContext(ctx, md)
+				ctx = requestcontext.WithAuthenticatedUser(ctx, user)
 			} else {
 				// username+password authentication
 				username, password := parseMD(rawToken)
@@ -134,6 +139,7 @@ func AuthenticationInterceptorWithMetaCache(GetMetaCache func() Cache) grpc_auth
 					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
 				}
 				metrics.UserRPCCounter.WithLabelValues(username).Inc()
+				ctx = requestcontext.WithAuthenticatedUser(ctx, username)
 			}
 		}
 		return ctx, nil

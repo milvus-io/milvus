@@ -961,6 +961,8 @@ func serializeAggHitFields(fields map[int64]interface{}, fieldIDToName map[int64
 }
 
 type rerankOperator struct {
+	requestContext   chaintypes.RequestContext
+	queryContext     *chaintypes.QueryContext
 	nq               int64
 	topK             int64
 	offset           int64
@@ -1021,6 +1023,8 @@ func newRerankOperator(t *SearchTask, params map[string]any) (operator, error) {
 			})
 		}
 		return &rerankOperator{
+			requestContext:   t.functionRequestScope(t.ctx),
+			queryContext:     t.queryContext,
 			nq:               t.GetNq(),
 			topK:             t.rankParams.limit,
 			offset:           t.rankParams.offset,
@@ -1035,6 +1039,8 @@ func newRerankOperator(t *SearchTask, params map[string]any) (operator, error) {
 		}, nil
 	}
 	return &rerankOperator{
+		requestContext:   t.functionRequestScope(t.ctx),
+		queryContext:     t.queryContext,
 		nq:               t.GetNq(),
 		topK:             t.GetTopk(),
 		offset:           0, // Search performs Offset in the reduce phase
@@ -1076,6 +1082,9 @@ func buildChainFromMeta(
 }
 
 func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	if op.requestContext != (chaintypes.RequestContext{}) {
+		ctx = chaintypes.WithRequestContext(ctx, op.requestContext)
+	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "rerankOperator")
 	defer sp.End()
 
@@ -1182,6 +1191,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 	// Execute chain. Liveness pruning removes scalar inputs after their last use;
 	// system columns remain available for result export.
 	executeOpts := chain.ExecuteOptions{
+		QueryContext:        op.queryContext,
 		EnableColumnPruning: true,
 		SystemColumnPolicy: chain.SystemColumnPolicy{
 			KeepAllSystemColumns: true,
@@ -1253,6 +1263,9 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 	outputFieldNames := typeutil.NewSet(t.translatedOutputFields...)
 	if t.GetIsAdvanced() && t.rerankMeta != nil {
 		outputFieldNames.Insert(t.rerankMeta.GetInputFieldNames()...)
+	}
+	if t.postProcess != nil {
+		outputFieldNames.Insert(t.postProcess.inputNames...)
 	}
 	// Union order_by field names with output fields for requery
 	// Use OutputFieldName which is the proper name for requery:
@@ -1718,6 +1731,7 @@ type endOperator struct {
 	outputFieldNames []string
 	fieldSchemas     []*schemapb.FieldSchema
 	roundDecimal     int64
+	postProcess      bool
 }
 
 func newEndOperator(t *SearchTask, _ map[string]any) (operator, error) {
@@ -1729,23 +1743,26 @@ func newEndOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		outputFieldNames: t.translatedOutputFields,
 		fieldSchemas:     typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
 		roundDecimal:     roundDecimal,
+		postProcess:      t.postProcess != nil,
 	}, nil
 }
 
 func (op *endOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
-	for _, retField := range result.Results.FieldsData {
-		for _, fieldSchema := range op.fieldSchemas {
-			if retField != nil && retField.FieldId == fieldSchema.FieldID {
-				retField.FieldName = fieldSchema.Name
-				retField.Type = fieldSchema.DataType
-				retField.IsDynamic = fieldSchema.IsDynamic
+	if !op.postProcess {
+		for _, retField := range result.Results.FieldsData {
+			for _, fieldSchema := range op.fieldSchemas {
+				if retField != nil && retField.FieldId == fieldSchema.FieldID {
+					retField.FieldName = fieldSchema.Name
+					retField.Type = fieldSchema.DataType
+					retField.IsDynamic = fieldSchema.IsDynamic
+				}
 			}
 		}
+		result.Results.FieldsData = lo.Filter(result.Results.FieldsData, func(field *schemapb.FieldData, _ int) bool {
+			return lo.Contains(op.outputFieldNames, field.FieldName)
+		})
 	}
-	result.Results.FieldsData = lo.Filter(result.Results.FieldsData, func(field *schemapb.FieldData, _ int) bool {
-		return lo.Contains(op.outputFieldNames, field.FieldName)
-	})
 	allSearchCount := aggregatedAllSearchCount(inputs[1].([]*milvuspb.SearchResults))
 	result.GetResults().AllSearchCount = allSearchCount
 	roundSearchScores(result.GetResults(), op.roundDecimal)
@@ -3585,6 +3602,9 @@ func newBuiltInPipeline(t *SearchTask) (*pipeline, error) {
 }
 
 func newSearchPipeline(t *SearchTask) (*pipeline, error) {
+	if t.hasANNInputTable() {
+		return newANNInputTablePipeline(t)
+	}
 	p, err := newBuiltInPipeline(t)
 	if err != nil {
 		return nil, err
@@ -3595,15 +3615,39 @@ func newSearchPipeline(t *SearchTask) (*pipeline, error) {
 	}
 
 	if t.highlighter != nil {
-		err := p.AddNodes(t, highlightNode, endNode)
+		err := p.AddNodes(t, highlightNode)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		err := p.AddNodes(t, endNode)
-		if err != nil {
+	}
+	if t.postProcess != nil {
+		inputs := []string{"result"}
+		outputs := []string{"result"}
+		if t.hasPostTable() {
+			inputs = append(inputs, "reduced")
+			outputs = []string{pipelineOutput}
+		}
+		if err := p.AddNodes(t, &nodeDef{
+			name: "post_process", inputs: inputs, outputs: outputs, opName: lambdaOp,
+			params: map[string]any{lambdaParamKey: func(ctx context.Context, _ trace.Span, inputs ...any) ([]any, error) {
+				result := inputs[0].(*milvuspb.SearchResults)
+				if t.hasPostTable() {
+					t.tableAllSearchCount = aggregatedAllSearchCount(inputs[1].([]*milvuspb.SearchResults))
+				}
+				if err := t.executeSearchPostProcess(ctx, result); err != nil {
+					return nil, err
+				}
+				return []any{result}, nil
+			}},
+		}); err != nil {
 			return nil, err
 		}
+	}
+	if t.hasPostTable() {
+		return p, nil
+	}
+	if err := p.AddNodes(t, endNode); err != nil {
+		return nil, err
 	}
 	return p, nil
 }

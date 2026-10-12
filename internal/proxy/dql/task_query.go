@@ -96,6 +96,8 @@ type QueryTask struct {
 	storageCost          segcore.StorageCost
 	aggregationFieldMap  *agg.AggregationFieldMap
 	chMgr                channelmgr.ChannelsMgr
+	postProcess          *searchTransformMeta
+	functionDBName       string
 }
 
 // NewQueryTask constructs a query task. The retrieve request carries the
@@ -706,6 +708,11 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.plan.OutputFieldIds = outputFieldIDs
 		t.plan.DynamicFields = t.userDynamicFields
 	}
+	if t.postProcess != nil {
+		if err := t.planQueryPostInputs(); err != nil {
+			return err
+		}
+	}
 
 	mlog.Debug(ctx, "translate output fields to field ids",
 		mlog.Int64s("OutputFieldsID", t.OutputFieldsId),
@@ -789,6 +796,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	if canonicalDBName == "" {
 		canonicalDBName = t.request.GetDbName()
 	}
+	t.functionDBName = canonicalDBName
 
 	var principalName string
 	var enforceRLS bool
@@ -858,6 +866,9 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	t.ReduceType = int32(queryParams.reduceType)
 
 	t.queryParams = queryParams
+	if err := t.prepareQueryPostProcess(); err != nil {
+		return err
+	}
 
 	// ORDER BY requires explicit limit to prevent segment-level OOM.
 	// SortBuffer loads all matching rows into memory for sorting;
@@ -1164,6 +1175,15 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	// FieldName/Type/IsDynamic setting and timestamp column removal are now
 	// handled by complementFieldOperator in the pipeline (for non-aggregation queries).
 	// Only geometry WKB→WKT conversion still needs to happen here.
+	if t.postProcess != nil {
+		// TABLE consumes raw typed fields before the ordinary public geometry
+		// and timestamp formatting, and owns its independent response schema.
+		if err := t.executeQueryPostProcess(ctx); err != nil {
+			return err
+		}
+		metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)
+		return nil
+	}
 	for i, fieldData := range t.result.FieldsData {
 		if fieldData.Type == schemapb.DataType_Geometry {
 			if err := fieldvalidator.ValidateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {

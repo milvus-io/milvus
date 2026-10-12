@@ -2521,7 +2521,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	it := NewInsertTask(ctx, node, request, node.rowIDAllocator, GetIdempotencyKeyFromContext(ctx))
 
-	constructFailedResponse := func(err error) *milvuspb.MutationResult {
+	constructFailedResponse := func(err error, interrupted bool) *milvuspb.MutationResult {
+		if result := it.IngestionFailureResult(err, interrupted); result != nil {
+			return result
+		}
 		numRows := request.NumRows
 		errIndex := make([]uint32, numRows)
 		for i := uint32(0); i < numRows; i++ {
@@ -2538,14 +2541,14 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	if err := node.sched.DmQueue.Enqueue(it); err != nil {
 		mlog.Warn(context.TODO(), "Failed to enqueue insert task: "+err.Error())
-		return constructFailedResponse(err), nil
+		return constructFailedResponse(err, false), nil
 	}
 
 	mlog.Debug(context.TODO(), "Detail of insert request in Proxy")
 
 	if err := it.WaitToFinish(); err != nil {
 		mlog.Warn(context.TODO(), "Failed to execute insert task in task scheduler: "+err.Error())
-		return constructFailedResponse(err), nil
+		return constructFailedResponse(err, true), nil
 	}
 
 	if it.Result().GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -2558,16 +2561,24 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			it.Result().ErrIndex = errIndex
 		}
 
-		setErrorIndex()
+		if it.Result().GetIngestionResult() == nil {
+			setErrorIndex()
+		}
 		mlog.Warn(context.TODO(), "fail to insert data", mlog.Uint32s("err_index", it.Result().ErrIndex))
 	}
 
-	// InsertCnt always equals to the number of entities in the request
-	it.Result().InsertCnt = int64(request.NumRows)
+	// Ordinary inserts retain their request-row count. Ingestion inserts report
+	// only the transformed output rows confirmed by WAL.
+	if it.Result().GetIngestionResult() == nil {
+		it.Result().InsertCnt = int64(request.NumRows)
+	}
 
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.InsertMsg().Size()))
 
 	successCnt := it.Result().InsertCnt - int64(len(it.Result().ErrIndex))
+	if it.Result().GetIngestionResult() != nil {
+		successCnt = it.Result().InsertCnt
+	}
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
@@ -2832,6 +2843,13 @@ func GetCollectionRateSubLabel(req any) string {
 
 // Search searches the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	if request.GetIds() != nil {
+		for _, plan := range request.GetFunctionChains() {
+			if plan.GetStage() == schemapb.FunctionChainStage_FunctionChainStagePreProcess || plan.GetStage() == schemapb.FunctionChainStage_FunctionChainStagePostProcess {
+				return &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrParameterInvalidMsg("PRE_PROCESS and POST_PROCESS do not support search by IDs"))}, nil
+			}
+		}
+	}
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -3050,7 +3068,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
-		Add(float64(qt.Result().GetResults().GetNumQueries()))
+		Add(float64(qt.ResultQueryCount()))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
@@ -3094,7 +3112,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
 			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
-			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
+			hookutil.RelatedCntKey:      qt.AllSearchCount(),
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
 		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
@@ -3112,6 +3130,18 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+	for _, sub := range request.GetRequests() {
+		if sub.GetIds() == nil {
+			continue
+		}
+		for _, plans := range [][]*schemapb.FunctionChain{request.GetFunctionChains(), sub.GetFunctionChains()} {
+			for _, plan := range plans {
+				if plan.GetStage() == schemapb.FunctionChainStage_FunctionChainStagePreProcess || plan.GetStage() == schemapb.FunctionChainStage_FunctionChainStagePostProcess {
+					return &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrParameterInvalidMsg("PRE_PROCESS and POST_PROCESS do not support search by IDs"))}, nil
+				}
+			}
+		}
+	}
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -3317,7 +3347,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
 			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
-			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
+			hookutil.RelatedCntKey:      qt.AllSearchCount(),
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
 		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())

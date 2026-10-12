@@ -114,7 +114,7 @@ func echoExecute(ctx context.Context, req *pyudfpb.ExecuteRequest) (*pyudfpb.Exe
 	if err != nil {
 		return nil, err
 	}
-	return &pyudfpb.ExecuteResponse{Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: payload}}, nil
+	return &pyudfpb.ExecuteResponse{ExecutionVersion: executionVersion, Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: payload}}, nil
 }
 
 func TestClientConnectionsAndConcurrency(t *testing.T) {

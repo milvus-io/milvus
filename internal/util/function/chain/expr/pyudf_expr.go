@@ -58,7 +58,9 @@ func NewPyUDFExpr(resourceName string, udfParams *schemapb.FunctionParamObject, 
 	// Keep construction independent of runtime configuration and connections so
 	// callers can validate IsRunnable before checking enabled or creating a client.
 	return &PyUDFExpr{
-		BaseExpr:     *NewBaseExpr(PyUDFFuncName, []string{types.StageL2Rerank}),
+		BaseExpr: *NewBaseExpr(PyUDFFuncName, []string{
+			types.StageIngestion, types.StagePreProcess, types.StageL2Rerank, types.StagePostProcess,
+		}),
 		resourceName: resourceName,
 		udfParams:    udfParams,
 		client:       client,
@@ -103,24 +105,35 @@ func (e *PyUDFExpr) OutputDataTypes() []arrow.DataType {
 	return nil
 }
 
+func (e *PyUDFExpr) SupportsReduction() bool { return true }
+
 func (e *PyUDFExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
+	_, outputs, err := e.executeWithSchema(ctx, nil, inputs)
+	return outputs, err
+}
+
+func (e *PyUDFExpr) ExecuteWithSchema(ctx *types.FuncContext, schema *arrow.Schema, inputs []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
+	return e.executeWithSchema(ctx, schema, inputs)
+}
+
+func (e *PyUDFExpr) executeWithSchema(ctx *types.FuncContext, schema *arrow.Schema, inputs []*arrow.Chunked) (*arrow.Schema, []*arrow.Chunked, error) {
 	if ctx == nil {
-		return nil, merr.WrapErrServiceInternalMsg("py_udf: function context is nil")
+		return nil, nil, merr.WrapErrServiceInternalMsg("py_udf: function context is nil")
 	}
 	if !e.IsRunnable(ctx.Stage()) {
-		return nil, merr.WrapErrParameterInvalidMsg("py_udf: stage %q is not supported", ctx.Stage())
+		return nil, nil, merr.WrapErrParameterInvalidMsg("py_udf: stage %q is not supported", ctx.Stage())
 	}
 	if err := pyudf.CheckEnabled(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	chunkSizes, err := validatePyUDFInputs(inputs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	path, err := pyudf.ResolveResourcePath(e.resourceName)
 	if err != nil {
-		return nil, merr.Wrap(err, "py_udf: resolve resource")
+		return nil, nil, merr.Wrap(err, "py_udf: resolve resource")
 	}
 	// NewClient returns the process-shared client. Keep it local: expressions
 	// can execute concurrently and must not lazily mutate e.client.
@@ -128,27 +141,45 @@ func (e *PyUDFExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]
 	if client == nil {
 		config, err := pyudf.RuntimeConfig()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		client, err = pyudf.NewClient(config)
 		if err != nil {
-			return nil, merr.Wrap(err, "py_udf: create client")
+			return nil, nil, merr.Wrap(err, "py_udf: create client")
 		}
 	}
-	outputs, err := client.Execute(ctx.Context(), pyudf.ExecuteRequest{
-		ResourceName: e.resourceName, UDFPath: path, Stage: ctx.Stage(), Params: e.udfParams, Inputs: inputs,
-	})
+	request := pyudf.ExecuteRequest{
+		ResourceName: e.resourceName, UDFPath: path, Stage: ctx.Stage(), Params: e.udfParams, Inputs: inputs, InputSchema: schema,
+		QueryContext: ctx.QueryContext(), TableResult: ctx.TableResult(), Reduction: ctx.Reduction(),
+	}
+	if scope := ctx.RequestContext(); scope != (types.RequestContext{}) {
+		request.RequestContext = &scope
+	}
+	var outputSchema *arrow.Schema
+	var outputs []*arrow.Chunked
+	if adapter, ok := client.(interface {
+		ExecuteWithSchema(context.Context, pyudf.ExecuteRequest) (*arrow.Schema, []*arrow.Chunked, error)
+	}); ok && schema != nil {
+		outputSchema, outputs, err = adapter.ExecuteWithSchema(ctx.Context(), request)
+	} else {
+		outputs, err = client.Execute(ctx.Context(), request)
+	}
 	if err != nil {
 		if merr.IsMilvusError(err) || merr.IsCanceledOrTimeout(err) {
-			return nil, merr.Wrap(err, "py_udf: Execute")
+			return nil, nil, merr.Wrap(err, "py_udf: Execute")
 		}
-		return nil, merr.WrapErrServiceInternalErr(err, "py_udf: Execute")
+		return nil, nil, merr.WrapErrServiceInternalErr(err, "py_udf: Execute")
+	}
+	if ctx.Reduction() {
+		for index := range chunkSizes {
+			chunkSizes[index] = 1
+		}
 	}
 	if err := validatePyUDFOutputs(outputs, chunkSizes); err != nil {
 		releasePyUDFOutputs(outputs)
-		return nil, err
+		return nil, nil, err
 	}
-	return outputs, nil
+	return outputSchema, outputs, nil
 }
 
 func validatePyUDFInputs(inputs []*arrow.Chunked) ([]int, error) {
@@ -198,7 +229,7 @@ func validatePyUDFOutputs(outputs []*arrow.Chunked, chunkSizes []int) error {
 		if output == nil {
 			return merr.WrapErrFunctionFailedMsg("py_udf: output column %d is nil", outputIdx)
 		}
-		if !isPyUDFOutputTypeSupported(output.DataType().ID()) {
+		if !isPyUDFOutputDataTypeSupported(output.DataType()) {
 			return merr.WrapErrFunctionFailedMsg("py_udf: output column %d has unsupported type %s", outputIdx, output.DataType())
 		}
 		if len(output.Chunks()) != len(chunkSizes) {
@@ -222,11 +253,17 @@ func isPyUDFOutputTypeSupported(dataType arrow.Type) bool {
 	case arrow.BOOL,
 		arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
 		arrow.FLOAT32, arrow.FLOAT64,
-		arrow.STRING:
+		arrow.STRING, arrow.LARGE_STRING, arrow.BINARY, arrow.LARGE_BINARY, arrow.FIXED_SIZE_BINARY:
 		return true
 	default:
 		return false
 	}
+}
+
+// Nested arrays preserve one outer value per input row. flat_map/explode, rather
+// than the Python callable, change the row count and record its provenance.
+func isPyUDFOutputDataTypeSupported(dataType arrow.DataType) bool {
+	return types.ValidateRuntimeArrowDataType(dataType) == nil
 }
 
 func releasePyUDFOutputs(outputs []*arrow.Chunked) {

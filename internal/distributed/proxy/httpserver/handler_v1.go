@@ -245,12 +245,16 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 		VectorField:        DefaultVectorFieldName,
 		EnableDynamicField: EnableDynamic,
 	}
-	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of create collection is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 		})
+		return
+	}
+	if err := rejectIgnoredRESTChainFields(c, false); err != nil {
+		abortRESTTransform(c, err)
 		return
 	}
 	if httpReq.CollectionName == "" || httpReq.Dimension == 0 {
@@ -500,12 +504,16 @@ func (h *HandlersV1) query(c *gin.Context) {
 		Limit:        100,
 		OutputFields: []string{DefaultOutputFields},
 	}
-	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of query is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 		})
+		return
+	}
+	if err := rejectIgnoredRESTChainFields(c, false); err != nil {
+		abortRESTTransform(c, err)
 		return
 	}
 	if httpReq.CollectionName == "" || httpReq.Filter == "" {
@@ -767,6 +775,10 @@ func (h *HandlersV1) insert(c *gin.Context) {
 		if err != nil || collSchema == nil {
 			return nil, RestRequestInterceptorErr
 		}
+		if err := rejectRESTIngestion(collSchema); err != nil {
+			abortRESTTransform(c, err)
+			return nil, RestRequestInterceptorErr
+		}
 		body, _ := c.Get(gin.BodyBytesKey)
 		var validDataMap map[string][]bool
 		httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
@@ -954,12 +966,16 @@ func (h *HandlersV1) search(c *gin.Context) {
 		DbName: DefaultDbName,
 		Limit:  100,
 	}
-	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of search is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 		})
+		return
+	}
+	if err := rejectIgnoredRESTChainFields(c, false); err != nil {
+		abortRESTTransform(c, err)
 		return
 	}
 	if httpReq.SearchAggregation != nil {

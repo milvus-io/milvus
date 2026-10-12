@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "milvus-transform-demo"
+version = "0.5.0"
+requires-python = ">=3.10"
+dependencies = ["pyarrow==23.0.1"]
+
+[project.entry-points."milvus.pyudf"]
+factory = "milvus_transform_demo:factory"
+
+[tool.setuptools]
+py-modules = ["milvus_transform_demo"]

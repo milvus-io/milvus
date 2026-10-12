@@ -77,7 +77,7 @@ func TestClientCompletionPreservesErrorAndContext(t *testing.T) {
 						return original
 					}).Build().UnPatch()
 				} else {
-					worker.response = &pyudfpb.ExecuteResponse{Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: []byte("controlled result")}}
+					worker.response = &pyudfpb.ExecuteResponse{ExecutionVersion: executionVersion, Result: &pyudfpb.ExecuteResponse_Outputs{Outputs: []byte("controlled result")}}
 					defer mockey.Mock(decodeOutputs).To(func(context.Context, []byte) ([]*arrow.Chunked, error) {
 						builder := array.NewInt64Builder(allocator)
 						builder.Append(42)

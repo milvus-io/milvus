@@ -794,6 +794,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		Fields:            model.CloneFields(coll.Fields),
 		StructArrayFields: model.CloneStructArrayFields(coll.StructArrayFields),
 		Functions:         model.CloneFunctions(coll.Functions),
+		FunctionChains:    model.CloneFunctionChains(coll.FunctionChains),
 		RLSPolicies:       model.CloneRLSPolicyMap(coll.RLSPolicies),
 		Aliases:           aliases,
 		DBID:              coll.DBID,
