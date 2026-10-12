@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -635,6 +636,8 @@ func TestTxnWithPredicates(t *testing.T) {
 	}{
 		{"predicate_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "1")}, true},
 		{"predicate_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "2")}, false},
+		{"key_not_exist_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.KeyNotExist("lease_absent")}, true},
+		{"key_not_exist_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.KeyNotExist("lease1")}, false},
 	}
 
 	for _, test := range multiSaveAndRemovePredTests {
@@ -652,6 +655,179 @@ func TestTxnWithPredicates(t *testing.T) {
 			} else {
 				assert.Error(t, err)
 			}
+		})
+	}
+}
+
+func TestTxnWithKeyNotExistPredicate(t *testing.T) {
+	kv := NewTiKV(txnClient, "/tikv/test/root/key_not_exist")
+	ctx := context.TODO()
+	err := kv.RemoveWithPrefix(ctx, "")
+	require.NoError(t, err)
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	err = kv.Save(ctx, "existing", "1")
+	require.NoError(t, err)
+	valueEqualErr := kv.MultiSaveAndRemove(ctx, map[string]string{"other": "v"}, nil, predicates.ValueEqual("existing", "2"))
+	require.Error(t, valueEqualErr)
+
+	for _, tc := range []struct {
+		tag   string
+		write func(saves map[string]string, preds ...predicates.Predicate) error
+	}{
+		{"MultiSaveAndRemove", func(saves map[string]string, preds ...predicates.Predicate) error {
+			return kv.MultiSaveAndRemove(ctx, saves, nil, preds...)
+		}},
+		{"MultiSaveAndRemoveWithPrefix", func(saves map[string]string, preds ...predicates.Predicate) error {
+			return kv.MultiSaveAndRemoveWithPrefix(ctx, saves, nil, preds...)
+		}},
+	} {
+		t.Run(tc.tag, func(t *testing.T) {
+			key := "create_once_" + tc.tag
+
+			err := tc.write(map[string]string{key: "first"}, predicates.KeyNotExist(key))
+			assert.NoError(t, err)
+			value, err := kv.Load(ctx, key)
+			assert.NoError(t, err)
+			assert.Equal(t, "first", value)
+
+			err = tc.write(map[string]string{key: "second"}, predicates.KeyNotExist(key))
+			assert.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrIoFailed)
+			assert.True(t, errors.Is(err, errPredicateNotMet))
+			assert.Equal(t, merr.Code(valueEqualErr), merr.Code(err))
+			value, err = kv.Load(ctx, key)
+			assert.NoError(t, err)
+			assert.Equal(t, "first", value)
+		})
+	}
+
+	t.Run("deleted key does not exist", func(t *testing.T) {
+		key := "deleted_key"
+		require.NoError(t, kv.Save(ctx, key, "old"))
+		require.NoError(t, kv.Remove(ctx, key))
+
+		err := kv.MultiSaveAndRemove(ctx, map[string]string{key: "new"}, nil, predicates.KeyNotExist(key))
+		assert.NoError(t, err)
+		value, err := kv.Load(ctx, key)
+		assert.NoError(t, err)
+		assert.Equal(t, "new", value)
+	})
+
+	t.Run("concurrent creator wins between read and commit", func(t *testing.T) {
+		key := "race_key"
+		// The first commit attempt of the guarded write lets a second writer
+		// create key after the predicate read and before the commit.
+		raced := false
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			if !raced {
+				raced = true
+				require.NoError(t, kv.Save(ctx, key, "other"))
+			}
+			return tiTxnCommit(ctx, txn)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+
+		begins := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+
+		// Three transactions begin: attempt 1, whose commit fails with a write
+		// conflict on key; the concurrent Save; attempt 2, which reads key and
+		// fails the predicate.
+		err := kv.MultiSaveAndRemove(ctx, map[string]string{key: "mine"}, nil, predicates.KeyNotExist(key))
+		assert.True(t, raced)
+		assert.Equal(t, 3, begins)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.True(t, errors.Is(err, errPredicateNotMet))
+		value, err := kv.Load(ctx, key)
+		assert.NoError(t, err)
+		assert.Equal(t, "other", value)
+	})
+
+	t.Run("read error is retried and is not predicate not met", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+		begins := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+		getMock := mockey.Mock((*transaction.KVTxn).Get).Return(nil, errors.New("epoch_not_match")).Build()
+		defer getMock.UnPatch()
+
+		err := kv.MultiSaveAndRemove(ctx, map[string]string{"read_error_save": "v"}, nil, predicates.KeyNotExist("read_error_key"))
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.False(t, errors.Is(err, errPredicateNotMet))
+		assert.Equal(t, int(writeTxnRetryAttempts), begins)
+	})
+}
+
+func TestTxnWithInvalidPredicate(t *testing.T) {
+	kv := NewTiKV(txnClient, "/tikv/test/root/invalid_predicate")
+	ctx := context.TODO()
+	err := kv.RemoveWithPrefix(ctx, "")
+	require.NoError(t, err)
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	badTarget := predicates.NewMockPredicate(t)
+	badTarget.EXPECT().Key().Return("bad_target_key").Maybe()
+	badTarget.EXPECT().Target().Return(0).Maybe()
+	badExistenceType := predicates.NewMockPredicate(t)
+	badExistenceType.EXPECT().Key().Return("bad_type_key").Maybe()
+	badExistenceType.EXPECT().Target().Return(predicates.PredTargetKeyExistence).Maybe()
+	badExistenceType.EXPECT().Type().Return(0).Maybe()
+
+	for _, tc := range []struct {
+		tag  string
+		pred predicates.Predicate
+	}{
+		{"unknown_target", badTarget},
+		{"unknown_key_existence_type", badExistenceType},
+	} {
+		t.Run(tc.tag, func(t *testing.T) {
+			begins := 0
+			beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+				begins++
+				return tiTxnBegin(txn)
+			}
+			defer func() {
+				beginTxn = tiTxnBegin
+			}()
+
+			// An invalid predicate is rejected before any read.
+			getMock := mockey.Mock((*transaction.KVTxn).Get).Return(nil, errors.New("unexpected predicate read")).Build()
+			defer getMock.UnPatch()
+
+			err := kv.MultiSaveAndRemove(ctx, map[string]string{"invalid_save": "v"}, nil, tc.pred)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			err = kv.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"invalid_save": "v"}, nil, tc.pred)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Equal(t, 2, begins)
+			assert.Equal(t, 0, getMock.Times())
+			_, err = kv.Load(ctx, "invalid_save")
+			assert.Error(t, err)
 		})
 	}
 }
@@ -1024,6 +1200,18 @@ func TestWriteTxnRetry(t *testing.T) {
 				name: "MultiSaveAndRemoveWithPrefixMissingKey",
 				run: func() error {
 					return kv.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"predicate_missing_prefix_save": "v"}, nil, predicates.ValueEqual("predicate_missing_key", "1"))
+				},
+			},
+			{
+				name: "MultiSaveAndRemoveKeyExists",
+				run: func() error {
+					return kv.MultiSaveAndRemove(ctx, map[string]string{"predicate_exists_save": "v"}, nil, predicates.KeyNotExist("predicate_key"))
+				},
+			},
+			{
+				name: "MultiSaveAndRemoveWithPrefixKeyExists",
+				run: func() error {
+					return kv.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"predicate_exists_prefix_save": "v"}, nil, predicates.KeyNotExist("predicate_key"))
 				},
 			},
 		} {
