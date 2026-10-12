@@ -289,3 +289,31 @@ func TestRegistryRecoversAfterPartialChunkedHandoff(t *testing.T) {
 	require.Len(t, recovered, 1)
 	require.Equal(t, viewpb.QueryViewState_QueryViewStateUp, recovered[2].Meta.State)
 }
+
+func TestRequestReleaseContinuesAfterLateStreamingNodeFailure(t *testing.T) {
+	catalog, syncer := newMockCatalog(), newMockSyncer()
+	manager := newTestManager(t, catalog, syncer)
+	version := testVersion(1, 1, 1)
+	require.NoError(t, manager.AddPreparing(t.Context(), testBuilder(1, 1, 1)))
+	simulateNodeResponse(t, syncer, testQN1, version, qviews.QueryViewStateReady)
+	simulateNodeResponse(t, syncer, testSN, version, qviews.QueryViewStateReady)
+	simulateNodeResponse(t, syncer, testSN, version, qviews.QueryViewStateUp)
+	require.NoError(t, manager.RequestRelease(t.Context()))
+	catalog.reset()
+
+	// A dropped channel or SN recovery may fail the view before acknowledging Down.
+	require.True(t, simulateNodeResponse(t, syncer, testSN, version, qviews.QueryViewStateUnrecoverable))
+	require.Contains(t, catalog.savedStates(), viewpb.QueryViewState_QueryViewStateUnrecoverable)
+	manager.mu.Lock()
+	state := manager.views[version].State()
+	manager.mu.Unlock()
+	require.Equal(t, qviews.QueryViewStateDropping, state)
+
+	require.True(t, simulateNodeResponse(t, syncer, testSN, version, qviews.QueryViewStateDropped))
+	require.True(t, simulateNodeResponse(t, syncer, testQN1, version, qviews.QueryViewStateDropped))
+	manager.mu.Lock()
+	remaining := len(manager.views)
+	manager.mu.Unlock()
+	require.Zero(t, remaining)
+	require.Contains(t, catalog.savedStates(), viewpb.QueryViewState_QueryViewStateDropped)
+}

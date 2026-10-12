@@ -584,9 +584,12 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 		if m.upView == sm {
 			m.upView = nil
 		}
-		// Stay Unrecoverable; wait for AddPreparing or RequestRelease
-		// to advance to Dropping so that Dropped sync and new Preparing
-		// sync can be batched together.
+		// A late failure must not strand an explicitly released view.
+		// Loaded shards retain Unrecoverable views until AddPreparing can
+		// batch their cleanup with the replacement.
+		if m.releaseRequested {
+			m.advanceUnrecoverableToDropping()
+		}
 
 	case qviews.QueryViewStateDropping:
 

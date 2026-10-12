@@ -174,7 +174,7 @@ DataView-only PR.
 
 **Automatic Behavior:**
 1. Persist Unrecoverable to ETCD (if not already persisted).
-2. Wait for Manager to advance to Dropping (typically after generating a replacement view).
+2. If the shard has already received RequestRelease, the Manager immediately advances to Dropping, including when a node reports a failure after the release started. Otherwise, wait for the Manager to generate a replacement view before releasing protected resources.
 
 **Transitions:**
 
