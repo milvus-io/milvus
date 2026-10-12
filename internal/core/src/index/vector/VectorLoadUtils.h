@@ -383,8 +383,15 @@ ValidateLoadedShape(const NormalizedLoadMetadata& params,
                   engine.native_index.Count(),
                   valid.valid_count);
     }
+    // A normal embedding-list artifact is not compared with the row count:
+    // with an ordinary metric knowhere replaces the row validity by an
+    // element-domain identity map built from the vector count. The memory
+    // builder skips the same check for embedding lists.
+    const bool row_domain_validity =
+        params.elem_type == DataType::NONE || state != ArtifactState::Normal;
     if (params.num_rows.has_value()) {
-        if (valid.enabled && valid.total_count != *params.num_rows) {
+        if (valid.enabled && row_domain_validity &&
+            valid.total_count != *params.num_rows) {
             if (backend == LoadBackend::Memory) {
                 ThrowInfo(UnexpectedError,
                           "runtime vector row count {} disagrees with nullable "
