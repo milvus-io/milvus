@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/client/v3/index"
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -56,6 +57,9 @@ type rlsSchemaCase struct {
 	special, structured bool
 	nullVector          bool
 	dim                 int
+	partitionKey        string
+	clusteringKey       string
+	isolation           bool
 }
 
 // Small fixtures deliberately use distinct distances for exact ranking and range boundaries.
@@ -293,6 +297,7 @@ func createRLSSchemaCollection(ctx context.Context, t *testing.T, mc *client.Cli
 	schema := entity.NewSchema().WithName(name)
 	for _, c := range rlsSchemaColumns(t, tc) {
 		f := entity.NewField().WithName(c.Name()).WithDataType(c.Type()).WithNullable(c.Nullable())
+		f.WithIsPartitionKey(c.Name() == tc.partitionKey).WithIsClusteringKey(c.Name() == tc.clusteringKey)
 		if c.Name() == "id" {
 			f.WithIsPrimaryKey(true).WithIsAutoID(tc.autoID)
 		}
@@ -328,7 +333,11 @@ func createRLSSchemaCollection(ctx context.Context, t *testing.T, mc *client.Cli
 		}
 		schema.WithField(f)
 	}
-	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema).WithShardNum(1).WithProperty("rls.enabled", true).WithProperty("collection.autocompaction.enabled", false).WithConsistencyLevel(entity.ClStrong)))
+	opt := client.NewCreateCollectionOption(name, schema).WithShardNum(1).WithProperty("rls.enabled", true).WithProperty("collection.autocompaction.enabled", false).WithConsistencyLevel(entity.ClStrong)
+	if tc.partitionKey != "" {
+		opt.WithNumPartitions(2).WithProperty("partitionkey.isolation", tc.isolation)
+	}
+	require.NoError(t, mc.CreateCollection(ctx, opt))
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
@@ -1346,10 +1355,16 @@ func prepareRLSMixedSegments(ctx context.Context, t *testing.T, mc *client.Clien
 	require.Greater(t, threshold, 500)
 	require.LessOrEqual(t, threshold, 3000)
 	name := createRLSSchemaCollection(ctx, t, mc, tc)
-	all := make(map[any]rlsSchemaRow, 4000)
-	vectors := rlsRandomVectorColumn(tc, 4000)
-	seenVectors := make(map[string]bool, 4000)
-	for _, batch := range []struct{ start, count int }{{0, 3000}, {3000, 500}, {3500, 500}} {
+	copies := 1
+	var partitionValues []any
+	if tc.partitionKey != "" {
+		copies = 2
+		partitionValues = rlsPartitionValues(t, tc.partitionKey)
+	}
+	all := make(map[any]rlsSchemaRow, 4000*copies)
+	vectors := rlsRandomVectorColumn(tc, 4000*copies)
+	seenVectors := make(map[string]bool, 4000*copies)
+	for _, batch := range []struct{ start, count int }{{0, 3000 * copies}, {3000 * copies, 500 * copies}, {3500 * copies, 500 * copies}} {
 		rows := make([]rlsSchemaRow, batch.count)
 		for i := range rows {
 			id := batch.start + i + 1
@@ -1359,6 +1374,16 @@ func prepareRLSMixedSegments(ctx context.Context, t *testing.T, mc *client.Clien
 			}
 			// Scalar boundary fixtures stay small; PKs and vectors span the entire dataset.
 			r := rlsSchemaData(t, tc, id%50+1, 0, owner)
+			if tc.partitionKey != "" {
+				r[tc.partitionKey] = partitionValues[((id-1)/2)%2]
+			}
+			if tc.clusteringKey != "" {
+				divisor := 2
+				if tc.partitionKey != "" {
+					divisor = 4
+				}
+				r[tc.clusteringKey] = rlsKeyValue(tc.clusteringKey, ((id-1)/divisor)%2)
+			}
 			r["id"] = int64(id)
 			if tc.varchar {
 				r["id"] = fmt.Sprintf("用户/%04d", id)
@@ -1373,16 +1398,19 @@ func prepareRLSMixedSegments(ctx context.Context, t *testing.T, mc *client.Clien
 		}
 		_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, rows...)...).WithSkipRLS(true))
 		require.NoError(t, err)
-		if batch.start < 3500 {
+		if batch.start < 3500*copies {
 			rlsFlush(ctx, t, mc, name)
 		}
-		if batch.start == 3000 {
+		if batch.start == 3000*copies {
 			idx := rlsSchemaIndex(tc.vector)
 			switch tc.vector {
 			case "binary":
 				idx = index.NewBinIvfFlatIndex(entity.HAMMING, 64)
 			case "float32", "float16", "bfloat16":
 				idx = index.NewIvfFlatIndex(entity.L2, 64)
+			}
+			if tc.isolation {
+				idx = index.NewHNSWIndex(entity.L2, 16, 200)
 			}
 			task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "vector", idx))
 			require.NoError(t, err)
@@ -1392,8 +1420,36 @@ func prepareRLSMixedSegments(ctx context.Context, t *testing.T, mc *client.Clien
 			require.NoError(t, load.Await(ctx))
 		}
 	}
-	checkRLSMixedSegments(ctx, t, mc, name)
+	checkRLSMixedSegments(ctx, t, mc, name, copies)
 	return name, all
+}
+
+func rlsKeyValue(field string, n int) any {
+	if field == "i64" {
+		return int64(n)
+	}
+	return fmt.Sprintf("bucket_%d", n)
+}
+
+// Choose one key per physical partition; both owners share both keys.
+func rlsPartitionValues(t *testing.T, field string) []any {
+	t.Helper()
+	values := make([]any, 2)
+	for n := range 100 {
+		value := rlsKeyValue(field, n)
+		var c column.Column = column.NewColumnVarChar(field, []string{fmt.Sprint(value)})
+		if field == "i64" {
+			c = column.NewColumnInt64(field, []int64{value.(int64)})
+		}
+		buckets, err := typeutil.HashKey2Partitions(c.FieldData(), []string{"_default_0", "_default_1"})
+		require.NoError(t, err)
+		values[buckets[0]] = value
+		if values[0] != nil && values[1] != nil {
+			return values
+		}
+	}
+	t.Fatal("could not choose distinct physical partitions")
+	return nil
 }
 
 func rlsRandomVectorColumn(tc rlsSchemaCase, count int) column.Column {
@@ -1431,8 +1487,12 @@ func rlsQueryVector(kind string, value any) entity.Vector {
 	}
 }
 
-func checkRLSMixedSegments(ctx context.Context, t *testing.T, mc *client.Client, name string) {
+func checkRLSMixedSegments(ctx context.Context, t *testing.T, mc *client.Client, name string, partitionCount ...int) {
 	t.Helper()
+	copies := 1
+	if len(partitionCount) > 0 {
+		copies = partitionCount[0]
+	}
 	// The typed SDK has no loaded-segment wrapper. IndexID is collection metadata,
 	// not proof of physical indexing; the fixture requires the documented row threshold.
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
@@ -1447,15 +1507,18 @@ func checkRLSMixedSegments(ctx context.Context, t *testing.T, mc *client.Client,
 		for _, segment := range resp.GetInfos() {
 			byID[segment.GetSegmentID()] = segment
 		}
-		if !assert.Len(c, byID, 2) {
+		if !assert.Len(c, byID, 2*copies) {
 			return
 		}
-		var counts []int64
+		partitions := map[int64][]int64{}
 		for _, segment := range byID {
-			counts = append(counts, segment.GetNumRows())
+			partitions[segment.GetPartitionID()] = append(partitions[segment.GetPartitionID()], segment.GetNumRows())
 			assert.Equal(c, commonpb.SegmentState_Sealed, segment.GetState())
 		}
-		assert.ElementsMatch(c, []int64{3000, 500}, counts)
+		assert.Len(c, partitions, copies)
+		for _, rows := range partitions {
+			assert.ElementsMatch(c, []int64{3000, 500}, rows)
+		}
 	}, 90*time.Second, time.Second)
 	idx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(name, "vector"))
 	require.NoError(t, err)
@@ -1751,6 +1814,347 @@ func TestRLSSchemaMixedSegments(t *testing.T) {
 				checkRLSMixedSegments(ctx, t, mc, name)
 				t.Run("reads_after_writes", func(t *testing.T) { checkRLSMixedReads(ctx, t, mc, name, tc, all, sealed) })
 			})
+		}
+	}
+}
+
+// Key routing and pruning must preserve the same application-owned RLS oracle.
+func TestRLSSchemaKeys(t *testing.T) {
+	for _, field := range []string{"i64", "text"} {
+		for _, mode := range []string{"partition", "isolation", "clustering", "partition_and_clustering"} {
+			t.Run(mode+"/"+field, func(t *testing.T) {
+				ctx := hp.CreateContext(t, 15*time.Minute)
+				mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+				tc := rlsSchemaCase{vector: "float32", dim: 128, isolation: mode == "isolation"}
+				if mode != "clustering" {
+					tc.partitionKey = field
+				}
+				if mode == "clustering" {
+					tc.clusteringKey = field
+				} else if mode == "partition_and_clustering" {
+					tc.clusteringKey = "text"
+					if field == "text" {
+						tc.clusteringKey = "i64"
+					}
+				}
+				name, all := prepareRLSMixedSegments(ctx, t, mc, tc)
+				copies := 1
+				if tc.partitionKey != "" {
+					copies = 2
+				}
+				sealed := maps.Clone(all)
+				maps.DeleteFunc(sealed, func(id any, _ rlsSchemaRow) bool { return id.(int64) > int64(3500*copies) })
+				t.Run("reads", func(t *testing.T) { checkRLSKeyReads(ctx, t, mc, name, tc, all, sealed) })
+				for stageIndex, stage := range []string{"full_column", "full_row", "partial_column", "partial_row", "delete_ids", "delete_filter", "delete_template", "insert_column", "insert_row", "upsert_new"} {
+					if !t.Run(stage, func(t *testing.T) {
+						for ownerIndex, owner := range []string{"alice", "bob"} {
+							for _, start := range []int{0, 3000 * copies, 3500 * copies} {
+								// Four consecutive IDs contain both owners in both key buckets.
+								for bucket := range 2 {
+									id := int64(start + 1 + stageIndex*4 + bucket*2 + ownerIndex)
+									row := maps.Clone(all[id])
+									row["f64"] = float64(101 + stageIndex)
+									var err error
+									switch stage {
+									case "full_column", "full_row", "partial_column", "partial_row":
+										partial := stage == "partial_column" || stage == "partial_row"
+										if tc.clusteringKey != "" {
+											row[tc.clusteringKey] = rlsKeyValue(tc.clusteringKey, 1-bucket)
+										}
+										patch := row
+										if partial {
+											patch = rlsSchemaRow{"id": id, "f64": row["f64"]}
+											if tc.clusteringKey != "" {
+												patch[tc.clusteringKey] = row[tc.clusteringKey]
+											}
+											// Partition-key partial updates must identify their routing key.
+											if tc.partitionKey != "" {
+												patch[tc.partitionKey] = row[tc.partitionKey]
+											}
+										}
+										if stage == "full_row" || stage == "partial_row" {
+											_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, rlsSchemaRowInput(patch)).WithPartialUpdate(partial).WithRLSPrincipal(owner))
+										} else {
+											_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, patch)...).WithPartialUpdate(partial).WithRLSPrincipal(owner))
+										}
+										if tc.partitionKey != "" {
+											require.ErrorContains(t, err, "RLS upsert with a USING predicate is not supported for partition-key collections")
+											continue
+										}
+										require.NoError(t, err)
+										all[id] = row
+										delete(sealed, id)
+									case "delete_ids", "delete_filter", "delete_template":
+										opt := client.NewDeleteOption(name).WithRLSPrincipal(owner)
+										if stage == "delete_ids" {
+											opt.WithInt64IDs("id", []int64{id})
+										} else if stage == "delete_template" {
+											opt.WithExpr("id == {target}").WithTemplateParam("target", id)
+										} else {
+											opt.WithExpr(fmt.Sprintf("id == %d", id))
+										}
+										_, err = mc.Delete(ctx, opt)
+										require.NoError(t, err)
+										delete(all, id)
+										delete(sealed, id)
+									case "insert_column", "insert_row", "upsert_new":
+										row["id"] = id + int64(20000*(stageIndex+1))
+										row["vector"] = common.GenFloatVector(tc.vectorDim())
+										if stage == "insert_row" {
+											_, err = mc.Insert(ctx, client.NewRowBasedInsertOption(name, rlsSchemaRowInput(row)).WithRLSPrincipal(owner))
+										} else if stage == "upsert_new" {
+											_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, row)...).WithRLSPrincipal(owner))
+										} else {
+											_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, row)...).WithRLSPrincipal(owner))
+										}
+										require.NoError(t, err)
+										all[row["id"]] = row
+									}
+								}
+							}
+							checkRLSSchemaState(ctx, t, mc, name, tc, all, false)
+						}
+					}) {
+						return
+					}
+				}
+				checkRLSMixedSegments(ctx, t, mc, name, copies)
+				t.Run("reads_after_writes", func(t *testing.T) { checkRLSKeyReads(ctx, t, mc, name, tc, all, sealed) })
+				if tc.clusteringKey != "" {
+					t.Run("clustering_compaction", func(t *testing.T) {
+						rlsFlush(ctx, t, mc, name)
+						// The typed SDK does not expose MajorCompaction; use the public RPC.
+						resp, err := mc.GetService().ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{CollectionName: name, MajorCompaction: true})
+						require.NoError(t, err)
+						require.NoError(t, merr.Error(resp.GetStatus()))
+						require.Positive(t, resp.GetCompactionID())
+						require.Positive(t, resp.GetCompactionPlanCount(), "must execute physical clustering work")
+						require.EventuallyWithT(t, func(c *assert.CollectT) {
+							state, err := mc.GetCompactionState(ctx, client.NewGetCompactionStateOption(resp.GetCompactionID()))
+							if assert.NoError(c, err) {
+								assert.Equal(c, entity.CompactionStateCompleted, state)
+							}
+						}, 3*time.Minute, time.Second)
+						require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)))
+						load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
+						require.NoError(t, err)
+						require.NoError(t, load.Await(ctx))
+						checkRLSSchemaState(ctx, t, mc, name, tc, all, false)
+						checkRLSKeyReads(ctx, t, mc, name, tc, all, all)
+					})
+				}
+			})
+		}
+	}
+}
+
+func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name string, tc rlsSchemaCase, all, sealed map[any]rlsSchemaRow) {
+	t.Helper()
+	field := cmp.Or(tc.partitionKey, tc.clusteringKey)
+	values := []any{rlsKeyValue(field, 0), rlsKeyValue(field, 1)}
+	if tc.partitionKey != "" {
+		values = rlsPartitionValues(t, field)
+	}
+	fields := []string{"id", "owner", "vector", "i64", "text", "f64"}
+	params := index.NewCustomAnnParam()
+	params.WithExtraParam("nprobe", 64)
+	params.WithExtraParam("ef", 256)
+	for _, value := range values {
+		clusterValues := []any{nil}
+		if tc.partitionKey != "" && tc.clusteringKey != "" {
+			clusterValues = append(clusterValues, rlsKeyValue(tc.clusteringKey, 0), rlsKeyValue(tc.clusteringKey, 1))
+		}
+		for _, clusterValue := range clusterValues {
+			filter := fmt.Sprintf("%s == {key}", field)
+			literalFilter := fmt.Sprintf("%s == %v", field, value)
+			if field == "text" {
+				literalFilter = fmt.Sprintf("%s == %q", field, value)
+			}
+			if clusterValue != nil {
+				condition := fmt.Sprintf(" AND %s == %v", tc.clusteringKey, clusterValue)
+				if tc.clusteringKey == "text" {
+					condition = fmt.Sprintf(" AND %s == %q", tc.clusteringKey, clusterValue)
+				}
+				filter += condition
+				literalFilter += condition
+			}
+			for _, principal := range []string{"alice", "bob", "nobody", ""} {
+				t.Run(fmt.Sprintf("%v/cluster_%v/principal_%s", value, clusterValue, principal), func(t *testing.T) {
+					want := maps.Clone(all)
+					maps.DeleteFunc(want, func(_ any, row rlsSchemaRow) bool {
+						return row[field] != value || (clusterValue != nil && row[tc.clusteringKey] != clusterValue) || (principal != "" && row["owner"] != principal)
+					})
+					ids := slices.Collect(maps.Keys(want))
+					query := rlsQueryVector(tc.vector, all[int64(1)]["vector"])
+					t.Run("query_get_count", func(t *testing.T) {
+						r, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter(filter).WithTemplateParam("key", value).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+						require.NoError(t, err)
+						require.ElementsMatch(t, ids, checkRLSSchemaRows(t, r, want, fields))
+						var requested []int64
+						for id, row := range all {
+							if row[field] == value && (clusterValue == nil || row[tc.clusteringKey] == clusterValue) {
+								requested = append(requested, id.(int64))
+							}
+						}
+						r, err = mc.Get(ctx, client.NewQueryOption(name).WithIDs(column.NewColumnInt64("id", requested)).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+						require.NoError(t, err)
+						require.ElementsMatch(t, ids, checkRLSSchemaRows(t, r, want, fields))
+						r, err = mc.Query(ctx, client.NewQueryOption(name).WithFilter(filter).WithTemplateParam("key", value).WithOutputFields("count(*)").WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+						require.NoError(t, err)
+						n, err := r.GetColumn("count(*)").GetAsInt64(0)
+						require.NoError(t, err)
+						require.EqualValues(t, len(want), n)
+					})
+					t.Run("query_iterator", func(t *testing.T) {
+						it, err := mc.QueryIterator(ctx, client.NewQueryIteratorOption(name).WithFilter(literalFilter).WithBatchSize(511).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+						require.NoError(t, err)
+						var got []any
+						ended := false
+						for range len(all)/511 + 3 {
+							r, err := it.Next(ctx)
+							if errors.Is(err, io.EOF) {
+								ended = true
+								break
+							}
+							require.NoError(t, err)
+							got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
+						}
+						require.True(t, ended)
+						require.ElementsMatch(t, ids, got)
+					})
+					checkTopK := func(t *testing.T, result client.ResultSet, query entity.Vector, rrf bool) {
+						t.Helper()
+						got := checkRLSSchemaRows(t, result, want, fields)
+						require.Len(t, got, min(20, len(want)))
+						ranked := rlsRankedIDs(query, want)
+						require.Len(t, result.Scores, len(got))
+						recalled := 0
+						for i, id := range got {
+							score := rlsVectorDistance(query, want[id]["vector"])
+							if i > 0 {
+								require.LessOrEqual(t, rlsVectorDistance(query, want[got[i-1]]["vector"]), score)
+							}
+							if rrf {
+								require.InDelta(t, 1.0/float64(61+i), result.Scores[i], 1e-6)
+							} else {
+								require.InDelta(t, score, result.Scores[i], 0.001)
+							}
+							if !tc.isolation {
+								require.InDelta(t, rlsVectorDistance(query, want[ranked[i]]["vector"]), score, 0.001)
+							}
+							if score <= rlsVectorDistance(query, want[ranked[len(got)-1]]["vector"]) {
+								recalled++
+							}
+						}
+						if tc.isolation && len(got) > 0 {
+							require.GreaterOrEqual(t, float64(recalled)/float64(len(got)), 0.9)
+						}
+					}
+					t.Run("search", func(t *testing.T) {
+						rs, err := mc.Search(ctx, client.NewSearchOption(name, 20, []entity.Vector{query}).WithANNSField("vector").WithAnnParam(params).WithFilter(filter).WithTemplateParam("key", value).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+						require.NoError(t, err)
+						require.Len(t, rs, 1)
+						checkTopK(t, rs[0], query, false)
+					})
+					t.Run("hybrid", func(t *testing.T) {
+						req := client.NewAnnRequest("vector", 20, query).WithAnnParam(params).WithFilter(filter).WithTemplateParam("key", value)
+						rs, err := mc.HybridSearch(ctx, client.NewHybridSearchOption(name, 20, req).WithReranker(client.NewRRFReranker().WithK(60)).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+						require.NoError(t, err)
+						require.Len(t, rs, 1)
+						checkTopK(t, rs[0], query, true)
+					})
+					if len(ids) > 0 {
+						t.Run("search_by_ids", func(t *testing.T) {
+							id := ids[0].(int64)
+							rs, err := mc.Search(ctx, client.NewSearchByIDsOption(name, 20, column.NewColumnInt64("id", []int64{id})).WithANNSField("vector").WithAnnParam(params).WithFilter(filter).WithTemplateParam("key", value).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+							require.NoError(t, err)
+							require.Len(t, rs, 1)
+							checkTopK(t, rs[0], rlsQueryVector(tc.vector, want[id]["vector"]), false)
+						})
+					}
+					for _, ignoreGrowing := range []bool{false, true} {
+						t.Run(fmt.Sprintf("search_iterator/ignore_growing_%v", ignoreGrowing), func(t *testing.T) {
+							expected := ids
+							if ignoreGrowing {
+								expected = nil
+								for _, id := range ids {
+									if _, ok := sealed[id]; ok {
+										expected = append(expected, id)
+									}
+								}
+							}
+							it, err := mc.SearchIterator(ctx, client.NewSearchIteratorOption(name, query).WithANNSField("vector").WithAnnParam(params).WithFilter(filter).WithTemplateParam("key", value).WithBatchSize(127).WithIgnoreGrowing(ignoreGrowing).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+							require.NoError(t, err)
+							var got []any
+							ended := false
+							for range len(all)/127 + 3 {
+								r, err := it.Next(ctx)
+								if errors.Is(err, io.EOF) {
+									ended = true
+									break
+								}
+								require.NoError(t, err)
+								got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
+							}
+							require.True(t, ended)
+							require.ElementsMatch(t, expected, got)
+						})
+					}
+				})
+			}
+		}
+	}
+	if tc.isolation {
+		t.Run("reject_missing_or_multiple_partition_keys", func(t *testing.T) {
+			for _, filter := range []string{"owner != ''", fmt.Sprintf("%s in {keys}", field)} {
+				opt := client.NewSearchOption(name, 20, []entity.Vector{entity.FloatVector(common.GenFloatVector(tc.vectorDim()))}).WithANNSField("vector").WithAnnParam(params).WithFilter(filter).WithRLSPrincipal("alice")
+				if field == "i64" {
+					opt.WithTemplateParam("keys", []int64{values[0].(int64), values[1].(int64)})
+				} else {
+					opt.WithTemplateParam("keys", []string{values[0].(string), values[1].(string)})
+				}
+				_, err := mc.Search(ctx, opt)
+				require.ErrorContains(t, err, "partition key")
+			}
+		})
+	}
+	for _, keyField := range []string{tc.partitionKey, tc.clusteringKey} {
+		if keyField == "" {
+			continue
+		}
+		for _, op := range []string{"in", ">"} {
+			for _, principal := range []string{"alice", "bob", "nobody", ""} {
+				t.Run(fmt.Sprintf("key_filter/%s/%s/principal_%s", keyField, op, principal), func(t *testing.T) {
+					keyValues := []any{rlsKeyValue(keyField, 0), rlsKeyValue(keyField, 1)}
+					if keyField == tc.partitionKey {
+						keyValues = rlsPartitionValues(t, keyField)
+					}
+					want := maps.Clone(all)
+					maps.DeleteFunc(want, func(_ any, row rlsSchemaRow) bool {
+						if principal != "" && row["owner"] != principal {
+							return true
+						}
+						if op == "in" {
+							return !slices.Contains(keyValues, row[keyField])
+						}
+						if keyField == "i64" {
+							return row[keyField].(int64) <= keyValues[0].(int64)
+						}
+						return row[keyField].(string) <= keyValues[0].(string)
+					})
+					opt := client.NewQueryOption(name).WithFilter(keyField + " " + op + " {value}").WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong)
+					if op == ">" {
+						opt.WithTemplateParam("value", keyValues[0])
+					} else if keyField == "i64" {
+						opt.WithTemplateParam("value", []int64{keyValues[0].(int64), keyValues[1].(int64)})
+					} else {
+						opt.WithTemplateParam("value", []string{keyValues[0].(string), keyValues[1].(string)})
+					}
+					r, err := mc.Query(ctx, opt)
+					require.NoError(t, err)
+					require.ElementsMatch(t, slices.Collect(maps.Keys(want)), checkRLSSchemaRows(t, r, want, fields))
+				})
+			}
 		}
 	}
 }

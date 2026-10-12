@@ -234,6 +234,15 @@ every authorized row, without duplicates, and an explicit EOF. BIN_IVF_FLAT's
 documented `index not supported` iterator error is checked explicitly; it is not
 counted as successful binary indexed iteration.
 
+`TestRLSSchemaKeys` adds INT64/VARCHAR partition keys, partition-key isolation,
+clustering keys, and combined partition/clustering keys with independent key
+distributions. Partition-key fixtures use two physical partitions, each following
+the same 3,000/500/500 row sequence with both principals. Reads cover key equality,
+joint key conditions, and Query IN/range filters. Existing-row Upsert with an RLS
+USING predicate is rejected for partition-key collections; the tests verify
+unchanged data and separately check new-PK Upsert. Clustering-key updates and
+manual clustering compaction are followed by complete data and read-path checks.
+
 ```bash
 cd tests/go_client
 go test -tags=dynamic,test -gcflags='all=-N -l' -count=1 \
