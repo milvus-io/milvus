@@ -220,6 +220,14 @@ PathMatchScore(const ExprIndexRequirement& req,
     return 1;
 }
 
+// AdaptIndexType builds a TIMESTAMPTZ index over its INT64 storage, so the
+// registered value type of such an index is either type. Scalar requirements
+// compare storage types.
+inline DataType
+ScalarIndexStorageType(DataType type) {
+    return type == DataType::TIMESTAMPTZ ? DataType::INT64 : type;
+}
+
 inline bool
 ValueTypeMatches(const ExprIndexRequirement& req,
                  const segcore::IndexCapabilityEntry& entry) {
@@ -232,10 +240,12 @@ ValueTypeMatches(const ExprIndexRequirement& req,
     if (multi_path_router) {
         return true;
     }
-    const auto expected = req.is_json_field
-                              ? NormalizeJsonValueType(req.value_type)
-                              : req.value_type;
-    if (entry.value_type != expected) {
+    const bool matches =
+        req.is_json_field
+            ? entry.value_type == NormalizeJsonValueType(req.value_type)
+            : ScalarIndexStorageType(entry.value_type) ==
+                  ScalarIndexStorageType(req.value_type);
+    if (!matches) {
         return false;
     }
     if (!req.is_json_field) {
