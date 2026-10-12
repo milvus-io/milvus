@@ -456,7 +456,6 @@ func checkRLSSchemaRows(t *testing.T, result client.ResultSet, want map[any]rlsS
 // Count keys in linear time instead of pairwise matching thousands of rows.
 func checkRLSSchemaIDs(t *testing.T, want, got []any) {
 	t.Helper()
-	require.Len(t, got, len(want))
 	wantCounts, gotCounts := map[any]int{}, map[any]int{}
 	for _, id := range want {
 		wantCounts[id]++
@@ -464,7 +463,18 @@ func checkRLSSchemaIDs(t *testing.T, want, got []any) {
 	for _, id := range got {
 		gotCounts[id]++
 	}
-	require.Equal(t, wantCounts, gotCounts)
+	differences := map[any][2]int{}
+	for id, count := range wantCounts {
+		if gotCounts[id] != count {
+			differences[id] = [2]int{count, gotCounts[id]}
+		}
+	}
+	for id, count := range gotCounts {
+		if wantCounts[id] != count {
+			differences[id] = [2]int{wantCounts[id], count}
+		}
+	}
+	require.Empty(t, differences, "PK -> [expected count, actual count]; expected rows=%d actual rows=%d", len(want), len(got))
 }
 
 // Every read checks exact IDs and complete values; iterator pages additionally check duplicates across pages.
