@@ -1214,13 +1214,18 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
-	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
-		LoadInfo:      newLoadInfo,
-		Schema:        schema,
-		SchemaVersion: schemaVersion,
-	})
+	// V3 conversion may read manifest stats. Do it before taking the collection
+	// lock, which only protects the native preflight snapshot capture.
+	loadInfo, err := segcore.ConvertToSegcoreSegmentLoadInfo(newLoadInfo)
 	if err != nil {
+		return merr.Wrap(err, "failed to convert reopen load info")
+	}
+	future, err := s.collection.startReopen(ctx, s.csegment, loadInfo)
+	if err != nil {
+		return err
+	}
+	defer future.Release()
+	if _, err := future.BlockAndLeakyGet(); err != nil {
 		return err
 	}
 	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())

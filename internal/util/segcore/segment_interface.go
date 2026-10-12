@@ -8,7 +8,11 @@ package segcore
 */
 import "C"
 
-import "context"
+import (
+	"context"
+
+	"github.com/milvus-io/milvus/internal/util/cgo"
+)
 
 // CSegment is the interface of a segcore segment.
 // TODO: We should separate the interface of CGrowingSegment and CSealedSegment,
@@ -35,7 +39,9 @@ type SealedSegment interface {
 	// LoadFieldData loads field data into the segment.
 	LoadFieldData(ctx context.Context, request *LoadFieldDataRequest) (*LoadFieldDataResult, error)
 
-	Reopen(ctx context.Context, request *ReopenRequest) error
+	// Reopen captures the collection schema and starts an asynchronous reopen.
+	// The caller must wait on and release the returned future.
+	Reopen(ctx context.Context, request *ReopenRequest) (cgo.Future, error)
 }
 
 // basicSegmentMethodSet is the basic method set of a segment.

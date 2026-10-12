@@ -129,7 +129,8 @@ GroupChunkTranslator::GroupChunkTranslator(
                     }
                     return false;
                 }(),
-                /* is_index */ false),
+                /* is_index */ false,
+                /* in_load_list */ column_group_info.in_load_list),
             /* support_eviction */ true,
             column_group_info.shard),
       use_mmap_(use_mmap),

@@ -118,6 +118,34 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     int64_t segment_id_ = 0;
 };
 
+TEST_P(GroupChunkTranslatorTest, LoadFieldHintControlsWarmup) {
+    for (bool in_load_list : {false, true}) {
+        auto metadata = LoadGroupChunkMetadata(paths_, {}, "warmup_hint");
+        auto column_group_info =
+            FieldDataInfo(0, 3000, TestLocalPath, in_load_list);
+        auto translator = std::make_unique<GroupChunkTranslator>(
+            segment_id_,
+            GroupChunkType::DEFAULT,
+            schema_->get_fields(),
+            column_group_info,
+            paths_,
+            std::move(metadata.row_group_meta_list),
+            GetParam(),
+            true,
+            schema_->get_field_ids().size(),
+            milvus::proto::common::LoadPriority::LOW,
+            /*warmup_policy=*/"sync",
+            MmapChunkWritebackMode::Disabled);
+
+        // A group excluded from load_fields must remain cold even with an
+        // explicit sync policy. A group containing a selected field keeps
+        // that policy for the whole group.
+        EXPECT_EQ(translator->meta()->cache_warmup_policy,
+                  in_load_list ? CacheWarmupPolicy::CacheWarmupPolicy_Sync
+                               : CacheWarmupPolicy::CacheWarmupPolicy_Disable);
+    }
+}
+
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     const auto previous_enabled = StorageV2AsyncLoadEnabled();
     auto restore_mode = folly::makeGuard(

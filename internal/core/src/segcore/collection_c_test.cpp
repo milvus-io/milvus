@@ -12,8 +12,10 @@
 #include <gtest/gtest.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -46,6 +48,12 @@ TEST(CApiTest, UpdateSchemaTest) {
         knowhere::metric::L2, DIM);
     // CCollection
     auto collection = NewCollection(schema_string.c_str());
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
+    const int64_t load_fields[] = {100, 101};
+    auto status = UpdateLoadFields(collection, load_fields, 2);
+    ASSERT_EQ(status.error_code, Success);
+    auto original_schema = col->get_schema();
+    ASSERT_FALSE(original_schema->ShouldLoadField(FieldId(102)));
 
     // create updated schema with extra field
     namespace schema = milvus::proto::schema;
@@ -86,17 +94,31 @@ TEST(CApiTest, UpdateSchemaTest) {
 
     // Call UpdateSchema CApi here
     // UpdateSchema(CCollection, const void*, const int64_t)
-    auto status = UpdateSchema(collection,
-                               updated_schema_string.c_str(),
-                               updated_schema_string.length(),
-                               100);
+    status = UpdateSchema(collection,
+                          updated_schema_string.c_str(),
+                          updated_schema_string.length(),
+                          100);
     ASSERT_EQ(status.error_code, Success);
 
-    auto col = static_cast<milvus::segcore::Collection*>(collection);
     auto updated_schema = col->get_schema();
     auto add_field = updated_schema->operator[](FieldId(103));
 
     ASSERT_EQ(add_field.get_name().get(), "added_field");
+    EXPECT_TRUE(updated_schema->ShouldLoadField(FieldId(100)));
+    EXPECT_TRUE(updated_schema->ShouldLoadField(FieldId(101)));
+    EXPECT_FALSE(updated_schema->ShouldLoadField(FieldId(102)));
+    EXPECT_FALSE(updated_schema->ShouldLoadField(FieldId(103)));
+    EXPECT_EQ(updated_schema->load_fields().size(), 2);
+    EXPECT_FALSE(original_schema->ShouldLoadField(FieldId(102)));
+    for (uint64_t version : {0, 100}) {
+        auto stale_schema = std::make_shared<Schema>(*updated_schema);
+        stale_schema->set_schema_version(version);
+        stale_schema->UpdateLoadFields({102});
+        col->set_schema(stale_schema);
+        EXPECT_EQ(col->get_schema(), updated_schema);
+        EXPECT_TRUE(updated_schema->ShouldLoadField(FieldId(100)));
+        EXPECT_FALSE(updated_schema->ShouldLoadField(FieldId(102)));
+    }
 
     // Test failure case, no panicking with failure code
     status = UpdateSchema(collection, nullptr, 0, 200);
@@ -105,6 +127,61 @@ TEST(CApiTest, UpdateSchemaTest) {
     DeleteCollection(collection);
     // free error msg, which shall be responsible for go side to call C.free()
     free(const_cast<char*>(status.error_msg));
+}
+
+TEST(CApiTest, UpdateLoadFieldsPublishesSchemaSnapshot) {
+    auto collection = NewCollection(get_default_schema_config().c_str());
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
+    auto original_schema = col->get_schema();
+    const int64_t load_fields[] = {101};
+    auto status = UpdateLoadFields(collection, load_fields, 1);
+    ASSERT_EQ(status.error_code, Success);
+
+    auto partial_schema = col->get_schema();
+    EXPECT_NE(partial_schema, original_schema);
+    EXPECT_EQ(partial_schema->get_schema_version(),
+              original_schema->get_schema_version());
+    EXPECT_EQ(partial_schema->load_fields(), std::vector<int64_t>{101});
+    EXPECT_FALSE(partial_schema->ShouldLoadField(FieldId(100)));
+    EXPECT_TRUE(partial_schema->ShouldLoadField(FieldId(101)));
+    EXPECT_TRUE(original_schema->load_fields().empty());
+    EXPECT_TRUE(original_schema->ShouldLoadField(FieldId(100)));
+
+    // An empty list restores the default policy without changing a snapshot
+    // already held by a segment, and must accept the nil pointer sent by Go.
+    status = UpdateLoadFields(collection, nullptr, 0);
+    ASSERT_EQ(status.error_code, Success);
+    auto default_schema = col->get_schema();
+    EXPECT_NE(default_schema, partial_schema);
+    EXPECT_TRUE(default_schema->load_fields().empty());
+    EXPECT_TRUE(default_schema->ShouldLoadField(FieldId(100)));
+    EXPECT_TRUE(default_schema->ShouldLoadField(FieldId(101)));
+    EXPECT_FALSE(partial_schema->ShouldLoadField(FieldId(100)));
+    DeleteCollection(collection);
+}
+
+TEST(CApiTest, UpdateSchemaPreservesDefaultLoadFields) {
+    auto collection = NewCollection(get_default_schema_config().c_str());
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
+    auto collection_schema = col->get_schema()->ToProto();
+    auto added_field = collection_schema.add_fields();
+    added_field->set_name("added_field");
+    added_field->set_fieldid(102);
+    added_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    added_field->set_nullable(true);
+    const auto updated_schema_string = collection_schema.SerializeAsString();
+    auto status = UpdateSchema(collection,
+                               updated_schema_string.data(),
+                               updated_schema_string.size(),
+                               100);
+    ASSERT_EQ(status.error_code, Success);
+
+    auto updated_schema = col->get_schema();
+    EXPECT_TRUE(updated_schema->load_fields().empty());
+    EXPECT_TRUE(updated_schema->ShouldLoadField(FieldId(100)));
+    EXPECT_TRUE(updated_schema->ShouldLoadField(FieldId(101)));
+    EXPECT_TRUE(updated_schema->ShouldLoadField(FieldId(102)));
+    DeleteCollection(collection);
 }
 
 TEST(CApiTest, SetIndexMetaTest) {
