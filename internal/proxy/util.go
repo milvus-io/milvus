@@ -2870,6 +2870,14 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest,
 		*milvuspb.UnpinSnapshotDataRequest:
 		return merr.Status(err)
+	case *milvuspb.CreateNamespaceRequest:
+		return &milvuspb.CreateNamespaceResponse{
+			Status: merr.Status(err),
+		}
+	case *milvuspb.DropNamespaceRequest:
+		return &milvuspb.DropNamespaceResponse{
+			Status: merr.Status(err),
+		}
 	case *milvuspb.RestoreSnapshotRequest:
 		return &milvuspb.RestoreSnapshotResponse{
 			Status: merr.Status(err),

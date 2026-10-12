@@ -280,6 +280,22 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.CreateNamespaceRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, size)
+		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
+
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.DropNamespaceRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, size)
+		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
+
 		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.CreateIndexRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
@@ -407,6 +423,13 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{}, internalpb.RateType_DDLCompaction, merr.ErrServiceRateLimit, "compaction")
 		testGetFailedResponse(&milvuspb.AddFileResourceRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "addFileResource")
 		testGetFailedResponse(&milvuspb.RemoveFileResourceRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "removeFileResource")
+
+		createNamespaceRsp, ok := GetFailedResponse(&milvuspb.CreateNamespaceRequest{}, merr.ErrServiceRateLimit).(*milvuspb.CreateNamespaceResponse)
+		assert.True(t, ok)
+		assert.ErrorIs(t, merr.Error(createNamespaceRsp.GetStatus()), merr.ErrServiceRateLimit)
+		dropNamespaceRsp, ok := GetFailedResponse(&milvuspb.DropNamespaceRequest{}, merr.ErrServiceRateLimit).(*milvuspb.DropNamespaceResponse)
+		assert.True(t, ok)
+		assert.ErrorIs(t, merr.Error(dropNamespaceRsp.GetStatus()), merr.ErrServiceRateLimit)
 
 		// test illegal
 		rsp := GetFailedResponse(&milvuspb.SearchResults{}, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
