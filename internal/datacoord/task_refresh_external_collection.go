@@ -336,10 +336,15 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	}
 	insertChannel := collInfo.VChannelNames[0]
 	partitionID := collInfo.Partitions[0]
+	transformStart, err := externalRefreshTransformStart(ctx, mt, collectionID, insertChannel)
+	if err != nil {
+		return err
+	}
 	normalizedUpdatedSegments := make([]*datapb.SegmentInfo, 0, len(validUpdatedSegments))
 	normalizedUpsertSegmentMap := make(map[int64]*datapb.SegmentInfo, len(upsertSegmentMap))
 	for _, seg := range validUpdatedSegments {
 		normalized := normalizeExternalRefreshUpdatedSegment(seg, collectionID, partitionID, insertChannel)
+		normalized.TransformStartAfterTimetick = transformStart
 		normalizedUpdatedSegments = append(normalizedUpdatedSegments, normalized)
 		normalizedUpsertSegmentMap[normalized.GetID()] = normalized
 	}
@@ -539,6 +544,30 @@ func normalizeExternalRefreshUpdatedSegment(
 	return normalized
 }
 
+// External collections reject WAL writes. Their W never advances through an
+// L1 Flush, so it retains the business VChannel's CreateCollection TimeTick,
+// including after refresh and recovery. Source-side deletes belong to the
+// refreshed base, not this VChannel's TransformLog.
+func externalRefreshTransformStart(ctx context.Context, mt *meta, collectionID int64, vchannel string) (uint64, error) {
+	if mt.dataViewManager == nil {
+		// Legacy loading without DataViews does not consume Transform cursors.
+		return 0, nil
+	}
+	ref, err := mt.dataViewManager.Latest(ctx, collectionID)
+	if err != nil {
+		return 0, merr.Wrap(err, "read external collection DataView")
+	}
+	if ref != nil {
+		defer ref.Deref()
+		for _, shard := range ref.DataView().GetShards() {
+			if shard.GetVchannel() == vchannel && shard.GetGrowingTransformStartAfterTimetick() != 0 {
+				return shard.GetGrowingTransformStartAfterTimetick(), nil
+			}
+		}
+	}
+	return 0, merr.WrapErrServiceNotReadyMsg("external collection %d CreateCollection Transform origin for %s is not available", collectionID, vchannel)
+}
+
 // externalRefreshManifestAlreadyApplied recognizes an idempotent replay by the
 // manifest a result would install. A manifest base path belongs to one segment,
 // and its versions move forward as that segment gains later manifest updates.
@@ -642,6 +671,7 @@ func validateExternalRefreshBinlogRowCount(segment *datapb.SegmentInfo, expected
 
 func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo) *SegmentInfo {
 	cloned := oldSeg.Clone()
+	cloned.TransformStartAfterTimetick = incoming.GetTransformStartAfterTimetick()
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()

@@ -37,6 +37,7 @@ pair when resolving metadata.
 |---|---|
 | Ordinary WAL-flushed L1 | Earliest effective Insert TimeTick, available as the first data StartPosition |
 | Import | CommitImport TimeTick for this business VChannel |
+| External-table refresh | CreateCollection TimeTick for this business VChannel; retain it for same-ID Manifest updates and new/replacement Segments |
 | Non-L0 compaction | Minimum C of the actual input data versions |
 | Split or exact data copy | Inherit the source data version's C |
 | L0 compaction into Segment deltalogs | Advance to T only after complete coverage of the required interval through T is durable |
@@ -48,6 +49,14 @@ The earliest Insert itself can be the exclusive cursor: current Delete MVCC
 only deletes rows with `insert_ts < delete_ts`. A Delete at or before the
 earliest Insert cannot delete any row in that Segment. Transactions use their
 effective outer commit time. Imported rows use their per-VChannel commit time.
+
+External collections reject Insert/Delete/Upsert and WAL L1 Flush. Their persisted
+W therefore remains the business VChannel creation origin B across refreshes
+and recovery. DataCoord stamps refreshed Segment bases with this W before
+persisting them. Source-table deletes are part of the refreshed base, not the
+target external collection's TransformLog. This rule does not apply to writable
+collections; neither the control-channel refresh timestamp nor a checkpoint is
+a substitute for B. Missing native creation coverage remains not-ready.
 
 Compaction inherits the versions it actually read. If concurrent work advances
 a parent or the shard frontier, an output requiring an earlier cursor cannot
