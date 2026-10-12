@@ -20,6 +20,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
@@ -56,6 +57,9 @@ func (s *Service) manager() (*manifestmanager.Manager, error) {
 // ClaimManifest claims a vchannel for a pchannel term and returns the
 // manifest after the claim.
 func (s *Service) ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifestRequest) (*pkindexpb.ClaimManifestResponse, error) {
+	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
+		return &pkindexpb.ClaimManifestResponse{Status: merr.Status(err)}, nil
+	}
 	m, err := s.manager()
 	if err != nil {
 		return &pkindexpb.ClaimManifestResponse{Status: merr.Status(err)}, nil
@@ -75,6 +79,9 @@ func (s *Service) ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifes
 // CommitFlush adds the uploaded SSTs of a flush and returns the manifest
 // after the commit.
 func (s *Service) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.CommitFlushResponse, error) {
+	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
+		return &pkindexpb.CommitFlushResponse{Status: merr.Status(err)}, nil
+	}
 	m, err := s.manager()
 	if err != nil {
 		return &pkindexpb.CommitFlushResponse{Status: merr.Status(err)}, nil
@@ -93,6 +100,9 @@ func (s *Service) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushReq
 // GetManifest returns the current manifest of a vchannel. Found is false and
 // the manifest is empty when the vchannel has no manifest.
 func (s *Service) GetManifest(ctx context.Context, req *pkindexpb.GetManifestRequest) (*pkindexpb.GetManifestResponse, error) {
+	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
+		return &pkindexpb.GetManifestResponse{Status: merr.Status(err)}, nil
+	}
 	m, err := s.manager()
 	if err != nil {
 		return &pkindexpb.GetManifestResponse{Status: merr.Status(err)}, nil
@@ -104,12 +114,25 @@ func (s *Service) GetManifest(ctx context.Context, req *pkindexpb.GetManifestReq
 	return &pkindexpb.GetManifestResponse{Status: merr.Success(), Found: found, Manifest: got}, nil
 }
 
+// validateTarget checks that a request names a collection and a vchannel that
+// can form a manifest key: a positive collection ID and a non-empty vchannel
+// name that contains neither "/" nor "..".
+func validateTarget(collectionID int64, vchannel string) error {
+	if collectionID <= 0 {
+		return merr.WrapErrParameterInvalidMsg("collection_id must be positive, got %d", collectionID)
+	}
+	if vchannel == "" || strings.Contains(vchannel, "/") || strings.Contains(vchannel, "..") {
+		return merr.WrapErrParameterInvalidMsg("invalid vchannel %q", vchannel)
+	}
+	return nil
+}
+
 // toMerr translates a manifest error at the service boundary. A fenced caller
 // no longer owns the vchannel and gets a code that is not retryable. Every
 // other error translates by its pkerr category.
 func toMerr(err error, vchannel string) error {
 	if errors.Is(err, manifest.ErrFenced) {
-		return merr.WrapErrChannelNotAvailable(vchannel, err.Error())
+		return errors.WithSecondaryError(merr.WrapErrChannelNotAvailable(vchannel, "pchannel term is fenced"), err)
 	}
 	return pkerr.ToMerr(err)
 }
