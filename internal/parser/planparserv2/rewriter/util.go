@@ -43,6 +43,27 @@ func effectiveDataType(c *planpb.ColumnInfo) schemapb.DataType {
 	return dt
 }
 
+// Fixed ARRAY indices use double literals; scalar and element-level FLOAT
+// executors narrow them to float32 before comparing.
+func usesFloat32Comparisons(col *planpb.ColumnInfo) bool {
+	return col.GetDataType() == schemapb.DataType_Float ||
+		(col.GetIsElementLevel() && effectiveDataType(col) == schemapb.DataType_Float)
+}
+
+func float32Literal(value *planpb.GenericValue) float32 {
+	if _, ok := value.GetVal().(*planpb.GenericValue_Int64Val); ok {
+		return float32(value.GetInt64Val())
+	}
+	return float32(value.GetFloatVal())
+}
+
+func equalsGenericForColumn(col *planpb.ColumnInfo, a, b *planpb.GenericValue) bool {
+	if usesFloat32Comparisons(col) {
+		return float32Literal(a) == float32Literal(b)
+	}
+	return equalsGeneric(a, b)
+}
+
 func valueCase(v *planpb.GenericValue) string {
 	switch v.GetVal().(type) {
 	case *planpb.GenericValue_BoolVal:

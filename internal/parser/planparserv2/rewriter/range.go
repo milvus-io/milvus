@@ -1,6 +1,7 @@
 package rewriter
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"sort"
@@ -45,6 +46,10 @@ func resolveEffectiveType(col *planpb.ColumnInfo) (schemapb.DataType, bool) {
 	if dt == schemapb.DataType_Array {
 		et := col.GetElementType()
 		if isSupportedScalarForRange(et) {
+			// Fixed ARRAY indices compare floating literals as double in segcore.
+			if et == schemapb.DataType_Float && !col.GetIsElementLevel() {
+				return schemapb.DataType_Double, true
+			}
 			return et, true
 		}
 	}
@@ -470,7 +475,9 @@ func cmpGeneric(dt schemapb.DataType, a, b *planpb.GenericValue) int {
 			return 1
 		}
 		return 0
-	case schemapb.DataType_Float, schemapb.DataType_Double:
+	case schemapb.DataType_Float:
+		return cmp.Compare(float32Literal(a), float32Literal(b))
+	case schemapb.DataType_Double:
 		switch a.GetVal().(type) {
 		case *planpb.GenericValue_Int64Val:
 			switch b.GetVal().(type) {
