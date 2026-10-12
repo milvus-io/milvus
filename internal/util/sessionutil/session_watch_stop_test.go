@@ -41,7 +41,7 @@ func TestSessionWatcherStop(t *testing.T) {
 			name = "version range"
 		}
 		t.Run(name, func(t *testing.T) {
-			for _, phase := range []string{"idle", "snapshot", "watch setup", "created response", "retry wait", "full event queue"} {
+			for _, phase := range []string{"idle", "snapshot", "watch setup", "watch events", "retry wait", "full event queue"} {
 				t.Run(phase, func(t *testing.T) {
 					mockey.PatchConvey(phase, t, func() {
 						parentCtx, cancelParent := context.WithCancel(context.Background())
