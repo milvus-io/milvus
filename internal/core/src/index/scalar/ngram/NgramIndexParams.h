@@ -21,6 +21,7 @@
 #include <cctype>
 #include <limits>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <string_view>
@@ -107,11 +108,16 @@ ParseString(const Config& params,
     return ReadStringParam(params, key, std::move(fallback), "NGRAM");
 }
 
-inline std::string
+// Returns nullopt when the params carry no JSON path. The empty pointer is a
+// path: it names the JSON field itself.
+inline std::optional<std::string>
 ParseJsonPath(const Config& params) {
     const bool has_json_path = params.is_object() && params.contains(JSON_PATH);
     const bool has_nested_path =
         params.is_object() && params.contains("nested_path");
+    if (!has_json_path && !has_nested_path) {
+        return std::nullopt;
+    }
     const auto json_path = ParseString(params, JSON_PATH);
     const auto nested_path = ParseString(params, "nested_path");
     if (has_json_path && has_nested_path && json_path != nested_path) {

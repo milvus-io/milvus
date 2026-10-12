@@ -97,7 +97,7 @@ ParseRuntimeParams(const Config& params) {
     RuntimeParams result;
     const auto field_type =
         ReadDataTypeParam(params, "field_type")
-            .value_or(path.empty() ? DataType::VARCHAR : DataType::JSON);
+            .value_or(path.has_value() ? DataType::JSON : DataType::VARCHAR);
     const auto configured_value_type =
         ReadDataTypeParam(params, "value_type")
             .value_or(field_type == DataType::JSON ? DataType::VARCHAR
@@ -107,7 +107,7 @@ ParseRuntimeParams(const Config& params) {
                   "NGRAM value_type must be STRING, VARCHAR, or TEXT");
     }
     if (field_type == DataType::JSON) {
-        if (path.empty()) {
+        if (!path.has_value()) {
             ThrowInfo(DataTypeInvalid, "JSON NGRAM requires json_path");
         }
         if (Upper(ParseString(params, JSON_CAST_TYPE)) != "VARCHAR") {
@@ -121,7 +121,7 @@ ParseRuntimeParams(const Config& params) {
                 DataTypeInvalid,
                 "NGRAM field_type must be STRING, VARCHAR, TEXT, or JSON");
         }
-        if (!path.empty()) {
+        if (path.has_value() && !path->empty()) {
             ThrowInfo(DataTypeInvalid,
                       "scalar NGRAM must not carry a JSON path");
         }

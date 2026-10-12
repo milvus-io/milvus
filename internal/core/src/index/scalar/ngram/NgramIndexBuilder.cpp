@@ -81,7 +81,7 @@ ParseBuildParams(const Config& params) {
     }
     const auto nested_path = ParseJsonPath(params);
     if (field_type == DataType::JSON) {
-        if (nested_path.empty()) {
+        if (!nested_path.has_value()) {
             ThrowInfo(DataTypeInvalid, "JSON NGRAM requires json_path");
         }
         const auto cast = Upper(ParseString(params, JSON_CAST_TYPE));
@@ -99,7 +99,7 @@ ParseBuildParams(const Config& params) {
     } else if (!IsStringDataType(field_type)) {
         ThrowInfo(DataTypeInvalid,
                   "NGRAM field_type must be STRING, VARCHAR, TEXT, or JSON");
-    } else if (!nested_path.empty()) {
+    } else if (nested_path.has_value() && !nested_path->empty()) {
         ThrowInfo(DataTypeInvalid, "scalar NGRAM must not carry a JSON path");
     }
 
