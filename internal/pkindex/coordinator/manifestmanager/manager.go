@@ -21,6 +21,7 @@ package manifestmanager
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
@@ -48,6 +49,10 @@ type PointerStore interface {
 }
 
 var marshal = proto.MarshalOptions{Deterministic: true}
+
+// readBackTimeout is the time limit of the pointer read after a pointer write
+// whose result is not known.
+const readBackTimeout = 5 * time.Second
 
 // entry is the current version of one vchannel and the stored pointer value
 // that names it.
@@ -172,7 +177,7 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 	}
 	if err != nil {
 		// the write may have taken effect: the stored pointer decides
-		got, found, rerr := m.pointers.Load(ctx, key)
+		got, found, rerr := m.readBack(ctx, key)
 		if rerr != nil || !found || got != ptr {
 			m.forget(key)
 			if rerr != nil {
@@ -183,6 +188,14 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 	}
 	m.remember(key, &entry{manifest: next, pointer: ptr})
 	return next, nil
+}
+
+// readBack loads the pointer after a pointer write whose result is not known.
+// It does not use the cancellation of ctx, and it stops after readBackTimeout.
+func (m *Manager) readBack(ctx context.Context, key string) (string, bool, error) {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readBackTimeout)
+	defer cancel()
+	return m.pointers.Load(rctx, key)
 }
 
 // load returns the cached entry, or reads it from the stores. It returns nil
