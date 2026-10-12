@@ -140,13 +140,8 @@ ParseRuntimeParams(const Config& params) {
     }
     result.min_gram = static_cast<uintptr_t>(min_gram);
     result.max_gram = static_cast<uintptr_t>(max_gram);
-
-    const auto version = ParseUnsigned(params, TANTIVY_INDEX_VERSION, 0, false);
-    if (version != 0 && version != TANTIVY_INDEX_LATEST_VERSION) {
-        ThrowInfo(DataTypeInvalid,
-                  "NGRAM supports only Tantivy index version {}",
-                  TANTIVY_INDEX_LATEST_VERSION);
-    }
+    // An ngram artifact is always Tantivy v7; TANTIVY_INDEX_VERSION is not
+    // consulted.
     return result;
 }
 

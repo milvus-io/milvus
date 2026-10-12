@@ -50,19 +50,6 @@ ValidateRowDomain(const Config& params) {
     }
 }
 
-void
-ValidateExplicitEngineVersion(const Config& params) {
-    const auto version = ParseUnsigned(params, TANTIVY_INDEX_VERSION, 0, false);
-    // The ngram writer binding has always created Tantivy v7 directly and has
-    // no v5 constructor. Reject an explicit different request rather than
-    // silently producing a newer engine format.
-    if (version != 0 && version != TANTIVY_INDEX_LATEST_VERSION) {
-        ThrowInfo(DataTypeInvalid,
-                  "NGRAM supports only Tantivy index version {}",
-                  TANTIVY_INDEX_LATEST_VERSION);
-    }
-}
-
 template <typename T>
 NgramBuildParams
 ParseBuildParams(const Config& params) {
@@ -72,7 +59,9 @@ ParseBuildParams(const Config& params) {
         ThrowInfo(DataTypeInvalid, "NGRAM build parameters must be an object");
     }
     ValidateRowDomain(params);
-    ValidateExplicitEngineVersion(params);
+    // TANTIVY_INDEX_VERSION is not consulted: the build adapter writes the
+    // generic scalar writer version into every request, and the ngram writer
+    // binding always creates Tantivy v7.
 
     NgramBuildParams result;
     const auto field_id = ParseUnsigned(params, FIELD_ID, 0, true);
