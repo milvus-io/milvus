@@ -41,13 +41,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 
 	var ez *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {
-		schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
-		if err != nil {
-			log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", dt.req.GetCollectionName()), zap.Error(err))
-			return err
-		}
-
-		ez = hookutil.GetEzByCollProperties(schema.GetProperties(), dt.collectionID).AsMessageConfig()
+		ez = hookutil.GetEzByCollProperties(dt.schema.GetProperties(), dt.collectionID).AsMessageConfig()
 	}
 
 	var msgs []message.MutableMessage

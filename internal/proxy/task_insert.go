@@ -11,9 +11,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -37,6 +40,8 @@ type insertTask struct {
 	partitionKeys   *schemapb.FieldData
 	schemaTimestamp uint64
 	collectionID    int64
+	rlsPrincipal    string
+	skipRLS         bool
 }
 
 // TraceCtx returns insertTask context
@@ -145,6 +150,26 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("fail to get collection info", zap.Error(err))
 		return err
 	}
+	rlsEnabled := colInfo.rlsEnabled
+	canonicalDBName := colInfo.dbName
+	if canonicalDBName == "" {
+		canonicalDBName = it.insertMsg.GetDbName()
+	}
+	collectionName = colInfo.schema.GetName()
+	it.insertMsg.DbName = canonicalDBName
+	it.insertMsg.CollectionName = collectionName
+	it.insertMsg.CollectionID = collID
+	if rlsEnabled && it.skipRLS {
+		rlsEnabled, err = resolveRLSEnforcement(ctx, rlsEnabled, colInfo.rlsForce, true,
+			canonicalDBName, collectionName, "insert")
+		if err != nil {
+			return err
+		}
+	}
+	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, it.rlsPrincipal, "insert")
+	if err != nil {
+		return err
+	}
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.updateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
@@ -157,12 +182,16 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
-	if err != nil {
-		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return err
-	}
+	schema := colInfo.schema
 	it.schema = schema.CollectionSchema
+	var rlsCheckPredicate *planpb.Expr
+	if enforceRLS {
+		rlsCheckPredicate, err = rls.ResolveCheckForWrite(ctx, it.collectionID, principalName,
+			rlsutil.PolicyActionInsert, schema.schemaHelper, "insert")
+		if err != nil {
+			return err
+		}
+	}
 
 	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
 		return err
@@ -247,12 +276,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, it.insertMsg.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("check partition key mode failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return err
-	}
-	if partitionKeyMode {
+	if schema.IsPartitionKeyCollection() {
 		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema)
 		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.insertMsg)
 		if err != nil {
@@ -282,6 +306,14 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
 		Validate(it.insertMsg.GetFieldsData(), schema.schemaHelper, it.insertMsg.NRows()); err != nil {
 		return merr.WrapErrAsInputError(err)
+	}
+
+	if enforceRLS {
+		if err := rlsutil.ValidateRowsByPredicate(ctx, it.insertMsg.GetFieldsData(), int(it.insertMsg.NRows()),
+			rlsCheckPredicate, "insert", "check"); err != nil {
+			log.Warn("RLS check expression validation failed for insert", zap.Error(err))
+			return err
+		}
 	}
 
 	log.Debug("Proxy Insert PreExecute done")

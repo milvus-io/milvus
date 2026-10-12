@@ -100,6 +100,8 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 	})
 
 	// Build ImportRequestInternal from the broadcast message
+	// Legacy proxies did not authorize RLS options, so only forward them as raw
+	// options. DataCoord will discard them before writing the new WAL message.
 	importReq := &internalpb.ImportRequestInternal{
 		DbID:           0, // deprecated
 		CollectionID:   body.GetCollectionID(),

@@ -102,6 +102,14 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.ManualCompactionRequest{},
 			&milvuspb.RunAnalyzerRequest{},
+			&milvuspb.CreateRowPolicyRequest{},
+			&milvuspb.UpdateRowPolicyRequest{},
+			&milvuspb.DropRowPolicyRequest{},
+			&milvuspb.ListRowPoliciesRequest{},
+			&milvuspb.SetRLSPrincipalTagsRequest{},
+			&milvuspb.GetRLSPrincipalTagsRequest{},
+			&milvuspb.ListRLSPrincipalsRequest{},
+			&milvuspb.DeleteRLSPrincipalTagsRequest{},
 		}
 
 		md := metadata.Pairs(util.HeaderDBName, "db")

@@ -538,6 +538,7 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			updateTimestamp: 100,
+			schema:          newSchemaInfo(&schemapb.CollectionSchema{Name: "col-0"}),
 		}, nil)
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		err := ut.PreExecute(ctx)
@@ -760,6 +761,20 @@ func TestRetrieveByPKs_PartitionKeyMode(t *testing.T) {
 	})
 }
 
+func TestPackDeleteMessageSkipsEmptyPrimaryKeys(t *testing.T) {
+	task := &upsertTask{
+		upsertMsg: &msgstream.UpsertMsg{
+			DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{
+				PrimaryKeys: &schemapb.IDs{},
+			}},
+		},
+	}
+
+	msgs, err := task.packDeleteMessage(context.Background(), nil)
+	assert.NoError(t, err)
+	assert.Empty(t, msgs)
+}
+
 func TestUpdateTask_queryPreExecute_Success(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_queryPreExecute_Success", t, func() {
 		// Setup mocks
@@ -886,6 +901,8 @@ func TestUpdateTask_queryPreExecute_Success(t *testing.T) {
 			},
 		}
 
+		task.req.PartialUpdate = true
+
 		err := task.queryPreExecute(context.Background())
 
 		// Verify results
@@ -902,6 +919,7 @@ func TestUpdateTask_queryPreExecute_GetPrimaryFieldSchemaError(t *testing.T) {
 
 		task := createTestUpdateTask()
 		task.schema = createTestSchema()
+		task.req.PartialUpdate = true
 
 		err := task.queryPreExecute(context.Background())
 
@@ -924,6 +942,7 @@ func TestUpdateTask_queryPreExecute_GetPrimaryFieldDataError(t *testing.T) {
 
 		task := createTestUpdateTask()
 		task.schema = createTestSchema()
+		task.req.PartialUpdate = true
 
 		err := task.queryPreExecute(context.Background())
 
@@ -953,6 +972,10 @@ func TestUpdateTask_queryPreExecute_EmptyOldIDs(t *testing.T) {
 
 		task := createTestUpdateTask()
 		task.schema = createTestSchema()
+		task.req.PartialUpdate = true
+		task.upsertMsg = &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{FieldsData: task.req.GetFieldsData()},
+		}}
 
 		err := task.queryPreExecute(context.Background())
 
@@ -973,17 +996,14 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
+			schema:          createTestSchema(),
 		}, nil).Build()
-
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(createTestSchema(), nil).Build()
-
-		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 
 		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{
 			name: "_default",
 		}, nil).Build()
 
-		mockey.Mock((*upsertTask).queryPreExecute).Return(nil).Build()
+		mockey.Mock((*upsertTask).prepareUpsert).Return(nil).Build()
 
 		mockey.Mock((*upsertTask).insertPreExecute).Return(nil).Build()
 
@@ -1042,12 +1062,12 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 
 		mockey.Mock(GetReplicateID).Return("", nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
+		schema := createTestSchema()
+		schema.hasPartitionKeyField = true
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
+			schema:          schema,
 		}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(createTestSchema(), nil).Build()
-
-		mockey.Mock(isPartitionKeyMode).Return(true, nil).Build()
 
 		task := createTestUpdateTask()
 		task.req.PartitionName = "custom_partition" // This should cause error in partition key mode
@@ -1067,9 +1087,8 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
+			schema:          createTestSchema(),
 		}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(createTestSchema(), nil).Build()
-		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{
 			name: "_default",
 		}, nil).Build()
@@ -1093,9 +1112,8 @@ func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
+			schema:          createTestSchema(),
 		}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(createTestSchema(), nil).Build()
-		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{
 			name: "_default",
 		}, nil).Build()
@@ -1177,6 +1195,8 @@ func TestUpsertTask_queryPreExecute_MixLogic(t *testing.T) {
 
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
+
+	task.req.PartialUpdate = true
 
 	err := task.queryPreExecute(context.Background())
 	assert.NoError(t, err)
@@ -1267,6 +1287,8 @@ func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
+	task.req.PartialUpdate = true
+
 	err := task.queryPreExecute(context.Background())
 	assert.NoError(t, err)
 
@@ -1354,6 +1376,8 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
+
+	task.req.PartialUpdate = true
 
 	err := task.queryPreExecute(context.Background())
 	assert.NoError(t, err)
@@ -2214,7 +2238,6 @@ func TestUpsertTask_DuplicatePK_Int64(t *testing.T) {
 	}, nil).Maybe()
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil).Maybe()
-	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Maybe()
 	mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{name: "_default"}, nil).Maybe()
 
 	err := ut.PreExecute(ctx)
@@ -2281,7 +2304,6 @@ func TestUpsertTask_DuplicatePK_VarChar(t *testing.T) {
 	}, nil).Maybe()
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil).Maybe()
-	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Maybe()
 	mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{name: "_default"}, nil).Maybe()
 
 	err := ut.PreExecute(ctx)
@@ -2407,9 +2429,10 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			// Setup mocks using mockey
 			mockey.Mock(GetReplicateID).Return("", nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
-			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
-			mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+				updateTimestamp: 12345,
+				schema:          schema,
+			}, nil).Build()
 			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
 			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
@@ -2526,9 +2549,10 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			// Setup mocks using mockey
 			mockey.Mock(GetReplicateID).Return("", nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
-			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
-			mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+				updateTimestamp: 12345,
+				schema:          schema,
+			}, nil).Build()
 			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
 			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
@@ -2656,6 +2680,8 @@ func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
+	task.req.PartialUpdate = true
+
 	err := task.queryPreExecute(context.Background())
 	assert.NoError(t, err)
 
@@ -2745,6 +2771,8 @@ func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
 
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
+
+	task.req.PartialUpdate = true
 
 	err := task.queryPreExecute(context.Background())
 	assert.Error(t, err)
@@ -2840,6 +2868,8 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
 
+		task.req.PartialUpdate = true
+
 		err := task.queryPreExecute(context.Background())
 		assert.NoError(t, err)
 
@@ -2926,6 +2956,8 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
+
+		task.req.PartialUpdate = true
 
 		err := task.queryPreExecute(context.Background())
 		assert.NoError(t, err)
@@ -3031,6 +3063,8 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
+
+		task.req.PartialUpdate = true
 
 		err := task.queryPreExecute(context.Background())
 		assert.NoError(t, err, "queryPreExecute should not fail for 2.5-style non-nullable $meta")
@@ -3164,6 +3198,7 @@ func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 		}
 		mock := mockey.Mock(retrieveByPKs).Return(mockResult, segcore.StorageCost{}, nil).Build()
 		defer mock.UnPatch()
+		task.req.PartialUpdate = true
 		err := task.queryPreExecute(context.Background())
 		assert.NoError(t, err)
 		return task
