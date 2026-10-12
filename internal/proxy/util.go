@@ -2781,20 +2781,13 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest,
 		*milvuspb.PinSnapshotDataRequest, *milvuspb.UnpinSnapshotDataRequest,
-		*milvuspb.ExportSnapshotRequest:
-		// Snapshot management does not consume quota or honor DDL force-deny.
+		*milvuspb.ExportSnapshotRequest, *milvuspb.RestoreSnapshotRequest,
+		*milvuspb.RestoreExternalSnapshotRequest:
+		// Snapshot operations do not consume quota or honor DDL force-deny.
 		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
-	case *milvuspb.RestoreSnapshotRequest:
-		targetDBName := r.GetTargetDbName()
-		if targetDBName == "" {
-			targetDBName = GetCurDBNameFromContextOrDefault(ctx)
-		}
-		return getDatabaseID(metaCache, targetDBName), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.RefreshExternalCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.RestoreExternalSnapshotRequest:
-		return getDatabaseID(metaCache, r.GetDbName()), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil

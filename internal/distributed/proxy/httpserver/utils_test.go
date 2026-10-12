@@ -85,6 +85,9 @@ func TestCheckLimiter_ZeroTokenRequestsBypassLimiter(t *testing.T) {
 		{"pin", &milvuspb.PinSnapshotDataRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
 		{"unpin", &milvuspb.UnpinSnapshotDataRequest{PinId: 1}},
 		{"export", &milvuspb.ExportSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot", TargetS3Path: "s3://bucket/export-root"}},
+		{"restore", &milvuspb.RestoreSnapshotRequest{DbName: "source_db", CollectionName: "source", Name: "snapshot", TargetDbName: "target_db", TargetCollectionName: "target"}},
+		{"restore without target database", &milvuspb.RestoreSnapshotRequest{DbName: "source_db", CollectionName: "source", Name: "snapshot", TargetCollectionName: "target"}},
+		{"external restore", &milvuspb.RestoreExternalSnapshotRequest{DbName: "target_db", TargetCollectionName: "target", SnapshotMetadataUri: "s3://bucket/export-root/snapshots/100/metadata/1.json"}},
 		{"list file resources", &milvuspb.ListFileResourcesRequest{}},
 	}
 	for _, tc := range testCases {
@@ -137,8 +140,6 @@ func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
 		rateType internalpb.RateType
 		tokens   int
 	}{
-		{"restore", &milvuspb.RestoreSnapshotRequest{TargetDbName: "target"}, internalpb.RateType_DDLCollection, 1},
-		{"external restore", &milvuspb.RestoreExternalSnapshotRequest{DbName: "target"}, internalpb.RateType_DDLCollection, 1},
 		{"create collection", &milvuspb.CreateCollectionRequest{DbName: "target", CollectionName: "collection"}, internalpb.RateType_DDLCollection, 1},
 		{"insert", insert, internalpb.RateType_DMLInsert, proto.Size(insert)},
 	}
