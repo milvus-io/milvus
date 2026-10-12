@@ -615,7 +615,7 @@ TEST_F(JsonFlatExpressionTest, RawFallbackPreservesLargeInt64LiteralPrecision) {
         expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
         std::vector<proto::plan::GenericValue>{value},
         false);
-    result = evaluate(term_expr, false);
+    result = evaluate(term_expr, true);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_TRUE(valid_view[16]);
