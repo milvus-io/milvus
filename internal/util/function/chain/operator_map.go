@@ -128,13 +128,11 @@ func (o *MapOp) normalizeScoreOutput(ctx *types.FuncContext, schema *arrow.Schem
 			continue
 		}
 		output := outputs[i]
-		switch output.DataType().ID() {
-		case arrow.FLOAT32:
+		if output.DataType().ID() == arrow.FLOAT32 {
 			continue
-		case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
-			arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64, arrow.FLOAT64:
-		default:
-			return nil, merr.WrapErrFunctionFailedMsg("map_op: %s output must be numeric, got %s", name, output.DataType())
+		}
+		if !isMapScoreConvertibleType(output.DataType().ID()) {
+			return nil, merr.WrapErrFunctionFailedMsg("map_op: output %d mapped to %q must be numeric, got %s", i, name, output.DataType())
 		}
 		if fields == nil {
 			fields = schema.Fields()
@@ -182,6 +180,16 @@ func (o *MapOp) normalizeScoreOutput(ctx *types.FuncContext, schema *arrow.Schem
 	}
 	metadata := schema.Metadata()
 	return arrow.NewSchema(fields, &metadata), nil
+}
+
+func isMapScoreConvertibleType(dataType arrow.Type) bool {
+	switch dataType {
+	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
+		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64, arrow.FLOAT64:
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked) (*DataFrame, error) {

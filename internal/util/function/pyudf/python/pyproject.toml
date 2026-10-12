@@ -16,6 +16,7 @@ classifiers = [
 
 [project.optional-dependencies]
 codegen = ["grpcio-tools==1.74.0"]
+test = ["pytest==9.1.1"]
 
 [tool.setuptools.packages.find]
 include = ["milvus_pyudf_runtime*"]
@@ -28,6 +29,9 @@ extend-exclude = ["*_pb2.py", "*_pb2_grpc.py"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
 ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["milvus_pyudf_runtime"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = ["E402"]

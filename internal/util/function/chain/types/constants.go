@@ -60,8 +60,9 @@ const (
 
 const (
 	// Numeric combine parameter keys
-	NumCombineParamMode    = "mode"
-	NumCombineParamWeights = "weights"
+	NumCombineParamMode       = "mode"
+	NumCombineParamWeights    = "weights"
+	NumCombineParamNullPolicy = "null_policy"
 
 	// Numeric combine mode values
 	NumCombineModeMultiply = "multiply"

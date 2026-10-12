@@ -5,7 +5,7 @@ checkout using the old protocol cannot compile the new collection binding and
 mutation result fields. A PyMilvus checkout with an old protocol submodule
 cannot reproduce its checked-in generated products.
 
-The current local implementation uses this single protocol snapshot:
+The draft implementation uses this single protocol snapshot:
 
 | Consumer | Pin |
 |---|---|
@@ -13,20 +13,20 @@ The current local implementation uses this single protocol snapshot:
 | Milvus root, `pkg/` and `client/` modules | `v3.0.0-20261011152020-7cf29167c3d7` |
 | PyMilvus `pymilvus/grpc_gen/milvus-proto` submodule | `7cf29167c3d71b21be220c4f2af09db51f291d76` |
 
-This revision is a local commit. Publish the protocol dependency before
-running normal remote CI for the dependent changes. Local source/module
-availability does not establish that GitHub or the public Go proxy has it.
+The protocol dependency is published in
+[milvus-proto PR #676](https://github.com/milvus-io/milvus-proto/pull/676).
+The matching SDK is published in
+[PyMilvus PR #3851](https://github.com/milvus-io/pymilvus/pull/3851). A fresh
+module cache with the normal Go proxy and `sum.golang.org` successfully resolved
+the pinned version and matched all three checked-in module checksums. The
+protocol commit is reachable through the published upstream feature branch;
+local source/module availability alone is not remote-resolution evidence.
 If the protocol commit changes during review or merge, resolve its new Go
 version, update all three module requirements/checksums, update the SDK
 submodule, and regenerate the API products again.
 
-For local review before publication, the accompanying delivery directory
-contains a Go file proxy for this protocol version. Use it as the first entry
-in a command-local `GOPROXY` and set command-local `GONOSUMDB` for
-`github.com/milvus-io/milvus-proto/go-api/v3`. Its README gives the exact
-commands. These overrides serve the unpublished local dependency only.
-After publication, verify dependency resolution with the normal proxy and
-checksum database configuration too.
+Local file-proxy and checksum overrides used during initial development are
+not deployment prerequisites and must not substitute for remote resolution.
 
 Verify the server against module requirements, with the normal native build
 environment configured:
@@ -45,11 +45,17 @@ remain unchanged after regeneration. The Python worker runtime has its own
 protocol and wheel; run the Milvus `check-pyudf-proto-product` and
 `build-pyudf-runtime-wheel` targets for it.
 
-The query-context update requires worker runtime 0.2 and execution protocol 2.
+The following versions describe historical protocol milestones; coordinated
+deployment of this draft requires worker runtime **0.6.0**. Host request scope
+uses execution protocol **6**, retaining complete runtime schemas, query origins,
+and TABLE/reduction semantics with exact successful-response acknowledgement.
+See the [minimal call-context design](../design-docs/design_docs/20261012-function-chain-call-context.md).
+
+The query-context update introduced worker runtime 0.2 and execution protocol 2.
 POST TABLE and reduction require runtime 0.3 and execution protocol 3, including
 the new public table-result protocol pinned above. The worker retains legacy
 execution modes; a TABLE request requires an exact version-3 acknowledgment.
-Deploy that wheel with the matching server, and update POST UDFs to implement
+Deploy the current 0.6.0 wheel with the matching server, and update POST UDFs to implement
 `transform_batch`. TABLE changes both the private worker protocol and the public
 result/options protocol. New clients reject a worker
 success response that does not acknowledge the new execution contract.

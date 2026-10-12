@@ -19,6 +19,7 @@
 import concurrent.futures
 import importlib
 import logging
+import threading
 
 import grpc
 import pyarrow as pa
@@ -30,9 +31,18 @@ from milvus_pyudf_runtime.proto import pyudf_pb2 as wire
 
 
 @pytest.fixture
-def worker():
+def worker(monkeypatch):
+    rpc_finished = threading.Event()
+    execute = worker_module.PyUDFWorkerService.Execute
+
+    def observe_rpc(self, request, context):
+        context.add_callback(rpc_finished.set)
+        return execute(self, request, context)
+
+    monkeypatch.setattr(worker_module.PyUDFWorkerService, "Execute", observe_rpc)
     harness = helpers.WorkerTests()
     harness.setUp()
+    harness.rpc_finished = rpc_finished
     try:
         yield harness
     finally:
@@ -267,6 +277,9 @@ def factory(context): return UDF()
         with pytest.raises(grpc.RpcError) as caught:
             future.result(timeout=1)
         assert caught.value.code() == grpc.StatusCode.DEADLINE_EXCEEDED
+    # Client cancellation can finish before the server receives it. Wait for
+    # the server's RPC callback before letting the UDF return its late output.
+    assert worker.rpc_finished.wait(timeout=1)
     module.release.set()
     # Draining only this fixture's executor confirms late output is discarded.
     worker.executor.shutdown(wait=True)

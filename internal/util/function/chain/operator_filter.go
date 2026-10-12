@@ -160,7 +160,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 			filtered, err := filterArray(ctx.Pool(), dataChunk, filterChunks[chunkIdx])
 			if err != nil {
-				return nil, merr.WrapErrFunctionFailed(err, "filter_op: column %s", colName)
+				return nil, merr.Wrapf(err, "filter_op: column %s", colName)
 			}
 			collector.Set(colName, chunkIdx, filtered)
 		}
@@ -202,7 +202,7 @@ func NewFilterOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionB
 	}
 	fn, err := FunctionFromReprWithContext(repr.Function, buildCtx)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("filter function: %v", err)
+		return nil, merr.Wrap(err, "filter function")
 	}
 	if len(repr.Inputs) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("filter_op: inputs is required")

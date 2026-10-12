@@ -21,6 +21,7 @@ package chain
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 
@@ -137,7 +138,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 		}
 
 		// Sort indices based on values, with tie-breaking by ID ascending.
-		// Nulls always sort to the end regardless of sort direction.
+		// Numeric values precede NaNs, which precede nulls in either direction.
 		less, useTypedLess := makeArrayRowLess(sortChunk, tbChunk, o.desc)
 		if useTypedLess {
 			sort.SliceStable(indices, func(i, j int) bool {
@@ -162,6 +163,10 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 				}
 				if jNull {
 					return true // non-null always goes before null
+				}
+				iNaN, jNaN := isArrayValueNaN(sortChunk, vi), isArrayValueNaN(sortChunk, vj)
+				if iNaN != jNaN {
+					return !iNaN
 				}
 
 				cmp := compareArrayValues(sortChunk, vi, vj)
@@ -226,7 +231,11 @@ func makeArrayRowLess(sortArr arrow.Array, tieArr arrow.Array, desc bool) (rowLe
 			return func(i, j int) bool {
 				si := scoreArr.Value(i)
 				sj := scoreArr.Value(j)
-				if si != sj {
+				iNaN, jNaN := math.IsNaN(float64(si)), math.IsNaN(float64(sj))
+				if iNaN != jNaN {
+					return !iNaN
+				}
+				if !iNaN && si != sj {
 					return si > sj
 				}
 				return idArr.Value(i) < idArr.Value(j)
@@ -234,6 +243,17 @@ func makeArrayRowLess(sortArr arrow.Array, tieArr arrow.Array, desc bool) (rowLe
 		}
 	}
 	return nil, false
+}
+
+func isArrayValueNaN(arr arrow.Array, index int) bool {
+	switch a := arr.(type) {
+	case *array.Float32:
+		return math.IsNaN(float64(a.Value(index)))
+	case *array.Float64:
+		return math.IsNaN(a.Value(index))
+	default:
+		return false
+	}
 }
 
 // isComparableType checks if an Arrow data type is comparable for sorting.

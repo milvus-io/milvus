@@ -61,8 +61,10 @@ non-TABLE Map normalizes numeric `$score` outputs to Float32 before downstream
 ranking and export. The cast preserves groups, NULL validity and user metadata,
 while rebinding the score's physical and Milvus logical schemas together.
 Ordinary payload columns and independent TABLE outputs keep their original types;
-TABLE cannot rewrite reserved system columns. Intermediate NaN/Inf and final score
-validity policies remain a separate, unresolved rerank contract.
+TABLE cannot rewrite reserved system columns. The integrated upstream PyUDF
+baseline orders numeric scores before NaNs and NULLs and validates non-null,
+finite Float32 scores at final search-result and QueryNode heap boundaries.
+The schema extension preserves those score checks and their regression tests.
 
 FIRST/LAST/MIN/MAX preserve source types; COLLECT_LIST preserves element
 metadata; EXPLODE transfers it to extracted rows. Generated/aliased fields

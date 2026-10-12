@@ -19,9 +19,11 @@
 package chain
 
 import (
+	"context"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +32,52 @@ import (
 	chainexpr "github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/function/pyudf"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestDisabledPyUDFErrorThroughFunctionChain(t *testing.T) {
+	item := &paramtable.Get().FunctionCfg.PyUDFEnabled
+	old := item.SwapTempValue("false")
+	t.Cleanup(func() { item.SwapTempValue(old) })
+	// Match Proxy startup: capture the disabled configuration without starting
+	// Python, so execution tests the disabled error rather than an uninitialized runtime.
+	require.NoError(t, pyudf.StartSupervisor(context.Background()))
+	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer pool.AssertSize(t, 0)
+	repr := &ChainRepr{
+		Stage: types.StageL2Rerank,
+		Operators: []OperatorRepr{{
+			Type: types.OpTypeMap,
+			Function: &FunctionRepr{
+				Name: chainexpr.PyUDFFuncName,
+				Params: map[string]*schemapb.FunctionParamValue{
+					"resource_name": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "rank_udf"}},
+				},
+				Args: []*schemapb.FunctionChainExprArg{{Arg: &schemapb.FunctionChainExprArg_Column{Column: &schemapb.FunctionChainColumnArg{Name: types.ScoreFieldName}}}},
+			},
+			Inputs: []string{types.ScoreFieldName}, Outputs: []string{types.ScoreFieldName},
+		}},
+	}
+	fc, err := FuncChainFromRepr(repr, pool)
+	require.NoError(t, err, "construction and stage validation do not initialize runtime resources")
+	builder := array.NewFloat32Builder(pool)
+	builder.Append(1)
+	values := builder.NewArray()
+	builder.Release()
+	dfBuilder := NewDataFrameBuilder().SetChunkSizes([]int64{1})
+	require.NoError(t, dfBuilder.AddColumnFromChunks(types.ScoreFieldName, []arrow.Array{values}))
+	df := dfBuilder.Build()
+	defer df.Release()
+	_, err = fc.ExecuteWithContext(context.Background(), df)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "function.pyUDF.enabled is false")
+	status := merr.Status(err)
+	require.EqualValues(t, 1100, status.Code)
+	require.Equal(t, "true", status.ExtraInfo[merr.InputErrorFlagKey])
+	require.False(t, status.Retriable)
+}
 
 // MockFunctionExpr is a mock implementation of FunctionExpr for testing.
 type MockFunctionExpr struct {
@@ -87,14 +134,6 @@ func TestParseFuncChainProto_BasicOperators(t *testing.T) {
 		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
 		Ops: []*schemapb.FunctionChainOp{
 			{
-				Op: "filter",
-				Expr: &schemapb.FunctionChainExpr{
-					Name:   "mock_filter",
-					Args:   []*schemapb.FunctionChainExprArg{columnArg("score")},
-					Params: map[string]*schemapb.FunctionParamValue{},
-				},
-			},
-			{
 				Op:     "sort",
 				Inputs: []string{"score"},
 				Params: map[string]*schemapb.FunctionParamValue{
@@ -116,11 +155,30 @@ func TestParseFuncChainProto_BasicOperators(t *testing.T) {
 	assert.NotNil(t, chain)
 	assert.Equal(t, "test-chain", chain.name)
 	assert.Equal(t, types.StageL2Rerank, chain.Stage())
-	assert.Len(t, chain.operators, 3)
+	assert.Len(t, chain.operators, 2)
 
-	assert.IsType(t, &FilterOp{}, chain.operators[0])
-	assert.IsType(t, &SortOp{}, chain.operators[1])
-	assert.IsType(t, &LimitOp{}, chain.operators[2])
+	assert.IsType(t, &SortOp{}, chain.operators[0])
+	assert.IsType(t, &LimitOp{}, chain.operators[1])
+}
+
+func TestFilterOperatorAccepted(t *testing.T) {
+	for _, functionName := range []string{"mock_filter", chainexpr.PyUDFFuncName} {
+		t.Run(functionName, func(t *testing.T) {
+			expr := &schemapb.FunctionChainExpr{Name: functionName, Args: []*schemapb.FunctionChainExprArg{columnArg("score")}}
+			if functionName == chainexpr.PyUDFFuncName {
+				expr.Params = map[string]*schemapb.FunctionParamValue{"resource_name": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "rank_udf"}}}
+			}
+			pb := &schemapb.FunctionChain{Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank, Ops: []*schemapb.FunctionChainOp{{Op: types.OpTypeFilter, Expr: expr}}}
+			_, err := ProtoChainToRepr(pb)
+			require.NoError(t, err)
+			parsed, err := ParseFuncChainProto(pb, memory.NewGoAllocator())
+			require.NoError(t, err)
+			require.IsType(t, &FilterOp{}, parsed.operators[0])
+		})
+	}
+	_, err := operatorFromRepr(&OperatorRepr{Type: types.OpTypeFilter})
+	require.ErrorIs(t, err, merr.ErrParameterMissing)
+	require.Contains(t, err.Error(), "filter_op: function is required")
 }
 
 func TestParseFuncChainProto_UnknownOperator(t *testing.T) {
@@ -432,6 +490,32 @@ func TestRefreshInfoUsesExplicitDependencies(t *testing.T) {
 	}
 }
 
+func TestProtoChainToReprPreservesDuplicateOpInputsAndDeduplicatesRequiredInputs(t *testing.T) {
+	repr, err := ProtoChainToRepr(&schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
+			{
+				Op: types.OpTypeMap,
+				Expr: &schemapb.FunctionChainExpr{
+					Name: "expr",
+					Args: []*schemapb.FunctionChainExprArg{
+						columnArg("a"),
+						columnArg("a"),
+						columnArg("b"),
+					},
+				},
+				Outputs: []string{"result"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, repr)
+	require.Len(t, repr.Operators, 1)
+	assert.Equal(t, []string{"a", "a", "b"}, repr.Operators[0].Inputs)
+	assert.Equal(t, []string{"a", "a", "b"}, repr.Info.Ops[0].ReadNames)
+	assert.Equal(t, []string{"a", "b"}, repr.Info.RequiredInputs)
+}
+
 func TestProtoStageToReprStage(t *testing.T) {
 	tests := []struct {
 		stage    schemapb.FunctionChainStage
@@ -588,7 +672,9 @@ func TestFuncChainFromReprWithContextPassesBuildContext(t *testing.T) {
 		},
 	}
 
-	chain, err := FuncChainFromReprWithContext(repr, memory.NewGoAllocator(), types.FunctionBuildContext{ModelExtraInfo: extraInfo})
+	chain, err := FuncChainFromReprWithContext(repr, memory.NewGoAllocator(), types.FunctionBuildContext{
+		ModelExtraInfo: extraInfo,
+	})
 	require.NoError(t, err)
 	require.NotNil(t, chain)
 	assert.True(t, called)
@@ -600,14 +686,6 @@ func TestFuncChainFromRepr(t *testing.T) {
 		Name:  "repr-chain",
 		Stage: types.StageL2Rerank,
 		Operators: []OperatorRepr{
-			{
-				Type: types.OpTypeFilter,
-				Function: &FunctionRepr{
-					Name:   "mock_filter",
-					Params: map[string]*schemapb.FunctionParamValue{},
-				},
-				Inputs: []string{"score"},
-			},
 			{
 				Type:   types.OpTypeSort,
 				Inputs: []string{"a"},
@@ -629,7 +707,7 @@ func TestFuncChainFromRepr(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, chain)
 	assert.Equal(t, "repr-chain", chain.name)
-	assert.Len(t, chain.operators, 3)
+	assert.Len(t, chain.operators, 2)
 }
 
 func columnArg(name string) *schemapb.FunctionChainExprArg {
