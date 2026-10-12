@@ -91,80 +91,6 @@ func (_c *MockRootCoordClient_AddCollectionField_Call) Run(run func(ctx context.
 	return _c
 }
 
-// GetRLSMetadata provides a mock function with given fields: ctx, in, opts
-func (_m *MockRootCoordClient) GetRLSMetadata(ctx context.Context, in *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
-	_va := make([]interface{}, len(opts))
-	for _i := range opts {
-		_va[_i] = opts[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, in)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetRLSMetadata")
-	}
-
-	var r0 *rootcoordpb.GetRLSMetadataResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest, ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error)); ok {
-		return rf(ctx, in, opts...)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest, ...grpc.CallOption) *rootcoordpb.GetRLSMetadataResponse); ok {
-		r0 = rf(ctx, in, opts...)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*rootcoordpb.GetRLSMetadataResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest, ...grpc.CallOption) error); ok {
-		r1 = rf(ctx, in, opts...)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockRootCoordClient_GetRLSMetadata_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSMetadata'
-type MockRootCoordClient_GetRLSMetadata_Call struct {
-	*mock.Call
-}
-
-// GetRLSMetadata is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *rootcoordpb.GetRLSMetadataRequest
-//   - opts ...grpc.CallOption
-func (_e *MockRootCoordClient_Expecter) GetRLSMetadata(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetRLSMetadata_Call {
-	return &MockRootCoordClient_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata",
-		append([]interface{}{ctx, in}, opts...)...)}
-}
-
-func (_c *MockRootCoordClient_GetRLSMetadata_Call) Run(run func(ctx context.Context, in *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption)) *MockRootCoordClient_GetRLSMetadata_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]grpc.CallOption, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(grpc.CallOption)
-			}
-		}
-		run(args[0].(context.Context), args[1].(*rootcoordpb.GetRLSMetadataRequest), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockRootCoordClient_GetRLSMetadata_Call) Return(_a0 *rootcoordpb.GetRLSMetadataResponse, _a1 error) *MockRootCoordClient_GetRLSMetadata_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockRootCoordClient_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetRLSMetadataRequest, ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error)) *MockRootCoordClient_GetRLSMetadata_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 func (_c *MockRootCoordClient_AddCollectionField_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_AddCollectionField_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
@@ -1774,6 +1700,80 @@ func (_c *MockRootCoordClient_CreateDatabase_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// CreateNamespace provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) CreateNamespace(ctx context.Context, in *milvuspb.CreateNamespaceRequest, opts ...grpc.CallOption) (*rootcoordpb.CreateNamespaceResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateNamespace")
+	}
+
+	var r0 *rootcoordpb.CreateNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateNamespaceRequest, ...grpc.CallOption) (*rootcoordpb.CreateNamespaceResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateNamespaceRequest, ...grpc.CallOption) *rootcoordpb.CreateNamespaceResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.CreateNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateNamespaceRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_CreateNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateNamespace'
+type MockRootCoordClient_CreateNamespace_Call struct {
+	*mock.Call
+}
+
+// CreateNamespace is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.CreateNamespaceRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) CreateNamespace(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CreateNamespace_Call {
+	return &MockRootCoordClient_CreateNamespace_Call{Call: _e.mock.On("CreateNamespace",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_CreateNamespace_Call) Run(run func(ctx context.Context, in *milvuspb.CreateNamespaceRequest, opts ...grpc.CallOption)) *MockRootCoordClient_CreateNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateNamespaceRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_CreateNamespace_Call) Return(_a0 *rootcoordpb.CreateNamespaceResponse, _a1 error) *MockRootCoordClient_CreateNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_CreateNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateNamespaceRequest, ...grpc.CallOption) (*rootcoordpb.CreateNamespaceResponse, error)) *MockRootCoordClient_CreateNamespace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreatePartition provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -2662,6 +2662,80 @@ func (_c *MockRootCoordClient_DescribeDatabase_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// DescribeNamespace provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) DescribeNamespace(ctx context.Context, in *milvuspb.DescribeNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DescribeNamespaceResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribeNamespace")
+	}
+
+	var r0 *milvuspb.DescribeNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeNamespaceRequest, ...grpc.CallOption) (*milvuspb.DescribeNamespaceResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeNamespaceRequest, ...grpc.CallOption) *milvuspb.DescribeNamespaceResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeNamespaceRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_DescribeNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeNamespace'
+type MockRootCoordClient_DescribeNamespace_Call struct {
+	*mock.Call
+}
+
+// DescribeNamespace is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.DescribeNamespaceRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) DescribeNamespace(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DescribeNamespace_Call {
+	return &MockRootCoordClient_DescribeNamespace_Call{Call: _e.mock.On("DescribeNamespace",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_DescribeNamespace_Call) Run(run func(ctx context.Context, in *milvuspb.DescribeNamespaceRequest, opts ...grpc.CallOption)) *MockRootCoordClient_DescribeNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeNamespaceRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_DescribeNamespace_Call) Return(_a0 *milvuspb.DescribeNamespaceResponse, _a1 error) *MockRootCoordClient_DescribeNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_DescribeNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribeNamespaceRequest, ...grpc.CallOption) (*milvuspb.DescribeNamespaceResponse, error)) *MockRootCoordClient_DescribeNamespace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropAlias provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -2954,6 +3028,80 @@ func (_c *MockRootCoordClient_DropDatabase_Call) Return(_a0 *commonpb.Status, _a
 }
 
 func (_c *MockRootCoordClient_DropDatabase_Call) RunAndReturn(run func(context.Context, *milvuspb.DropDatabaseRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_DropDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropNamespace provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) DropNamespace(ctx context.Context, in *milvuspb.DropNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DropNamespaceResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropNamespace")
+	}
+
+	var r0 *milvuspb.DropNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropNamespaceRequest, ...grpc.CallOption) (*milvuspb.DropNamespaceResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropNamespaceRequest, ...grpc.CallOption) *milvuspb.DropNamespaceResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DropNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropNamespaceRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_DropNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropNamespace'
+type MockRootCoordClient_DropNamespace_Call struct {
+	*mock.Call
+}
+
+// DropNamespace is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.DropNamespaceRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) DropNamespace(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DropNamespace_Call {
+	return &MockRootCoordClient_DropNamespace_Call{Call: _e.mock.On("DropNamespace",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_DropNamespace_Call) Run(run func(ctx context.Context, in *milvuspb.DropNamespaceRequest, opts ...grpc.CallOption)) *MockRootCoordClient_DropNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.DropNamespaceRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_DropNamespace_Call) Return(_a0 *milvuspb.DropNamespaceResponse, _a1 error) *MockRootCoordClient_DropNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_DropNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.DropNamespaceRequest, ...grpc.CallOption) (*milvuspb.DropNamespaceResponse, error)) *MockRootCoordClient_DropNamespace_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3698,6 +3846,80 @@ func (_c *MockRootCoordClient_GetQuotaMetrics_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// GetRLSMetadata provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) GetRLSMetadata(ctx context.Context, in *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSMetadata")
+	}
+
+	var r0 *rootcoordpb.GetRLSMetadataResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest, ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest, ...grpc.CallOption) *rootcoordpb.GetRLSMetadataResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.GetRLSMetadataResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_GetRLSMetadata_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSMetadata'
+type MockRootCoordClient_GetRLSMetadata_Call struct {
+	*mock.Call
+}
+
+// GetRLSMetadata is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *rootcoordpb.GetRLSMetadataRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) GetRLSMetadata(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetRLSMetadata_Call {
+	return &MockRootCoordClient_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_GetRLSMetadata_Call) Run(run func(ctx context.Context, in *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption)) *MockRootCoordClient_GetRLSMetadata_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetRLSMetadataRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_GetRLSMetadata_Call) Return(_a0 *rootcoordpb.GetRLSMetadataResponse, _a1 error) *MockRootCoordClient_GetRLSMetadata_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetRLSMetadataRequest, ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error)) *MockRootCoordClient_GetRLSMetadata_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRLSPrincipalTags provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) GetRLSPrincipalTags(ctx context.Context, in *milvuspb.GetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -3990,6 +4212,80 @@ func (_c *MockRootCoordClient_HasCollection_Call) Return(_a0 *milvuspb.BoolRespo
 }
 
 func (_c *MockRootCoordClient_HasCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.HasCollectionRequest, ...grpc.CallOption) (*milvuspb.BoolResponse, error)) *MockRootCoordClient_HasCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HasNamespace provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) HasNamespace(ctx context.Context, in *milvuspb.HasNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.HasNamespaceResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasNamespace")
+	}
+
+	var r0 *milvuspb.HasNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasNamespaceRequest, ...grpc.CallOption) (*milvuspb.HasNamespaceResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasNamespaceRequest, ...grpc.CallOption) *milvuspb.HasNamespaceResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.HasNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.HasNamespaceRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_HasNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasNamespace'
+type MockRootCoordClient_HasNamespace_Call struct {
+	*mock.Call
+}
+
+// HasNamespace is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.HasNamespaceRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) HasNamespace(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_HasNamespace_Call {
+	return &MockRootCoordClient_HasNamespace_Call{Call: _e.mock.On("HasNamespace",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_HasNamespace_Call) Run(run func(ctx context.Context, in *milvuspb.HasNamespaceRequest, opts ...grpc.CallOption)) *MockRootCoordClient_HasNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.HasNamespaceRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_HasNamespace_Call) Return(_a0 *milvuspb.HasNamespaceResponse, _a1 error) *MockRootCoordClient_HasNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_HasNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.HasNamespaceRequest, ...grpc.CallOption) (*milvuspb.HasNamespaceResponse, error)) *MockRootCoordClient_HasNamespace_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4508,6 +4804,80 @@ func (_c *MockRootCoordClient_ListFileResources_Call) Return(_a0 *milvuspb.ListF
 }
 
 func (_c *MockRootCoordClient_ListFileResources_Call) RunAndReturn(run func(context.Context, *milvuspb.ListFileResourcesRequest, ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error)) *MockRootCoordClient_ListFileResources_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListNamespaces provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) ListNamespaces(ctx context.Context, in *milvuspb.ListNamespacesRequest, opts ...grpc.CallOption) (*milvuspb.ListNamespacesResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListNamespaces")
+	}
+
+	var r0 *milvuspb.ListNamespacesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListNamespacesRequest, ...grpc.CallOption) (*milvuspb.ListNamespacesResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListNamespacesRequest, ...grpc.CallOption) *milvuspb.ListNamespacesResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListNamespacesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListNamespacesRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_ListNamespaces_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListNamespaces'
+type MockRootCoordClient_ListNamespaces_Call struct {
+	*mock.Call
+}
+
+// ListNamespaces is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.ListNamespacesRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) ListNamespaces(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ListNamespaces_Call {
+	return &MockRootCoordClient_ListNamespaces_Call{Call: _e.mock.On("ListNamespaces",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_ListNamespaces_Call) Run(run func(ctx context.Context, in *milvuspb.ListNamespacesRequest, opts ...grpc.CallOption)) *MockRootCoordClient_ListNamespaces_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.ListNamespacesRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_ListNamespaces_Call) Return(_a0 *milvuspb.ListNamespacesResponse, _a1 error) *MockRootCoordClient_ListNamespaces_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_ListNamespaces_Call) RunAndReturn(run func(context.Context, *milvuspb.ListNamespacesRequest, ...grpc.CallOption) (*milvuspb.ListNamespacesResponse, error)) *MockRootCoordClient_ListNamespaces_Call {
 	_c.Call.Return(run)
 	return _c
 }

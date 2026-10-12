@@ -882,6 +882,36 @@ func (s *Server) ShowPartitions(ctx context.Context, request *milvuspb.ShowParti
 	return s.proxy.ShowPartitions(ctx, request)
 }
 
+// CreateNamespace notifies Proxy to create a namespace
+func (s *Server) CreateNamespace(ctx context.Context, request *milvuspb.CreateNamespaceRequest) (*milvuspb.CreateNamespaceResponse, error) {
+	return s.proxy.CreateNamespace(ctx, request)
+}
+
+// DescribeNamespace notifies Proxy to describe a namespace
+func (s *Server) DescribeNamespace(ctx context.Context, request *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error) {
+	return s.proxy.DescribeNamespace(ctx, request)
+}
+
+// ListNamespaces notifies Proxy to list the namespaces of a collection
+func (s *Server) ListNamespaces(ctx context.Context, request *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error) {
+	return s.proxy.ListNamespaces(ctx, request)
+}
+
+// DropNamespace notifies Proxy to drop a namespace
+func (s *Server) DropNamespace(ctx context.Context, request *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error) {
+	return s.proxy.DropNamespace(ctx, request)
+}
+
+// HasNamespace notifies Proxy to check a namespace's existence
+func (s *Server) HasNamespace(ctx context.Context, request *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error) {
+	return s.proxy.HasNamespace(ctx, request)
+}
+
+// GetNamespaceStats notifies Proxy to get the statistics of a namespace
+func (s *Server) GetNamespaceStats(ctx context.Context, request *milvuspb.GetNamespaceStatsRequest) (*milvuspb.GetNamespaceStatsResponse, error) {
+	return s.proxy.GetNamespaceStats(ctx, request)
+}
+
 func (s *Server) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
 	return s.proxy.GetLoadingProgress(ctx, request)
 }

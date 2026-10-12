@@ -292,36 +292,7 @@ func validateCollectionDescription(description string) error {
 }
 
 func validatePartitionTag(partitionTag string, strictCheck bool) error {
-	partitionTag = strings.TrimSpace(partitionTag)
-
-	invalidMsg := "Invalid partition name: " + partitionTag + ". "
-	if partitionTag == "" {
-		msg := invalidMsg + "Partition name should not be empty."
-		return merr.WrapErrParameterInvalidMsg("%s", msg)
-	}
-	if len(partitionTag) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
-		msg := invalidMsg + "The length of a partition name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
-		return merr.WrapErrParameterInvalidMsg("%s", msg)
-	}
-
-	if strictCheck {
-		firstChar := partitionTag[0]
-		if firstChar != '_' && !isAlpha(firstChar) && !isNumber(firstChar) {
-			msg := invalidMsg + "The first character of a partition name must be an underscore or letter."
-			return merr.WrapErrParameterInvalidMsg("%s", msg)
-		}
-
-		tagSize := len(partitionTag)
-		for i := 1; i < tagSize; i++ {
-			c := partitionTag[i]
-			if c != '_' && !isAlpha(c) && !isNumber(c) && c != '-' {
-				msg := invalidMsg + "Partition name can only contain numbers, letters and underscores."
-				return merr.WrapErrParameterInvalidMsg("%s", msg)
-			}
-		}
-	}
-
-	return nil
+	return common.ValidatePartitionName(partitionTag, Params.ProxyCfg.MaxNameLength.GetAsInt(), Params.ProxyCfg.MaxNameLength.GetValue(), strictCheck)
 }
 
 // validateFieldName validates names from user schema requests.
@@ -2801,6 +2772,12 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 	case *milvuspb.DropPartitionRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
+	case *milvuspb.CreateNamespaceRequest:
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
+		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
+	case *milvuspb.DropNamespaceRequest:
+		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
+		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.LoadPartitionsRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
@@ -2893,6 +2870,14 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest,
 		*milvuspb.UnpinSnapshotDataRequest:
 		return merr.Status(err)
+	case *milvuspb.CreateNamespaceRequest:
+		return &milvuspb.CreateNamespaceResponse{
+			Status: merr.Status(err),
+		}
+	case *milvuspb.DropNamespaceRequest:
+		return &milvuspb.DropNamespaceResponse{
+			Status: merr.Status(err),
+		}
 	case *milvuspb.RestoreSnapshotRequest:
 		return &milvuspb.RestoreSnapshotResponse{
 			Status: merr.Status(err),

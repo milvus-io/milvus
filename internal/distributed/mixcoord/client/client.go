@@ -471,6 +471,61 @@ func (c *Client) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPa
 	return resp, err
 }
 
+func (c *Client) CreateNamespace(ctx context.Context, in *milvuspb.CreateNamespaceRequest, opts ...grpc.CallOption) (*rootcoordpb.CreateNamespaceResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.CreateNamespaceResponse, error) {
+		return client.CreateNamespace(ctx, in)
+	})
+}
+
+func (c *Client) DescribeNamespace(ctx context.Context, in *milvuspb.DescribeNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DescribeNamespaceResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.DescribeNamespaceResponse, error) {
+		return client.DescribeNamespace(ctx, in)
+	})
+}
+
+func (c *Client) ListNamespaces(ctx context.Context, in *milvuspb.ListNamespacesRequest, opts ...grpc.CallOption) (*milvuspb.ListNamespacesResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ListNamespacesResponse, error) {
+		return client.ListNamespaces(ctx, in)
+	})
+}
+
+func (c *Client) DropNamespace(ctx context.Context, in *milvuspb.DropNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DropNamespaceResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.DropNamespaceResponse, error) {
+		return client.DropNamespace(ctx, in)
+	})
+}
+
+func (c *Client) HasNamespace(ctx context.Context, in *milvuspb.HasNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.HasNamespaceResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.HasNamespaceResponse, error) {
+		return client.HasNamespace(ctx, in)
+	})
+}
+
 // AllocTimestamp global timestamp allocator
 func (c *Client) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
 	in = typeutil.Clone(in)
