@@ -184,6 +184,25 @@ func TestSwapUncertainButApplied(t *testing.T) {
 	assert.True(t, proto.Equal(got, read))
 }
 
+// The caller's ctx ends during the pointer swap and the swap took effect: the
+// read back does not use the ended ctx, and the commit reports success.
+func TestSwapUncertainAfterCallerCtxEnds(t *testing.T) {
+	m, p, s := newTestManager()
+	_, err := m.Claim(context.Background(), claim(1))
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p.BeforeWrite = cancel
+	p.WriteErr, p.WriteApplies = context.Canceled, true
+	got, err := m.CommitFlush(ctx, 1, "v", flush(1, 5, 1))
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, got.GetVersion())
+
+	read, _, err := New(p, s, testLayout).Get(context.Background(), 1, "v")
+	require.NoError(t, err)
+	assert.True(t, proto.Equal(got, read))
+}
+
 // The first pointer write reports an error after it took effect: the manager
 // reads the pointer back and reports success.
 func TestCreateUncertainButApplied(t *testing.T) {
