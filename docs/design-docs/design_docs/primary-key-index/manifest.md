@@ -270,6 +270,7 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | Error | Source | merr code | Retryable |
 |---|---|---|---|
 | Service has no manager yet | Service start | `ServiceNotReady` | Yes |
+| `collection_id` is not positive, `vchannel` is empty, or `vchannel` contains `/` or `..` | Request check, all three RPCs | `ParameterInvalid` | No (caller bug) |
 | `ErrFenced` | Claim, flush | `ChannelNotAvailable` | No. Stop the writes on the vchannel |
 | Meta kv or object storage failure (`ErrUnavailable`) | Load, write, read-back, walk | `ServiceUnavailable` | Yes |
 | Pointer write failed and the read-back does not show the new body | Commit step 5 | `ServiceUnavailable` | Yes |
@@ -286,8 +287,13 @@ Notes:
   and `ErrUnavailable` from the caller. `ToMerr` checks `ErrCorrupted` first.
 - The edit errors are caller bugs. A correct caller does not send them.
 - The client uses `merr.CheckRPCCall`, so the caller receives the merr code.
-  The client retries only gRPC `UNAVAILABLE` transport failures. The caller
-  decides the retry of a merr code.
+  The client translates a connection failure or a gRPC transport error that has
+  no merr code to `ServiceUnavailable` and keeps the cause. It returns a
+  context cancel or deadline error unchanged. The client retries only gRPC
+  `UNAVAILABLE` transport failures. The caller decides the retry of a merr code.
+- The service rejects an invalid request before it calls the manager. The
+  `ErrFenced` translation keeps the original error as a secondary error, so
+  logs that print the stack show the recorded and requested terms.
 
 ## Garbage Collection
 
@@ -383,6 +389,10 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
 - **Tables in use by streaming nodes.** Lazy reads from object storage will let
   a streaming node read an SST after a compaction replaced it in the manifest.
   GC has no input for these tables yet.
+- **Compaction commit retry.** If the pointer write of a compaction commit took
+  effect but the read-back failed, the service reports the commit as
+  unavailable. A retry of the same edit is then rejected as a stale edit, so the
+  compaction caller must read the manifest again before it retries.
 - **Pointer listing cost.** Each GC round lists all pointers in one call. The
   cost with very many vchannels is not measured.
 - **Stalled commits.** A commit that stalls longer than `grace` loses its
