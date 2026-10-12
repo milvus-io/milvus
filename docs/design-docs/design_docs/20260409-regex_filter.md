@@ -216,8 +216,8 @@ The `EnsureRegexCache()` method is called before the per-batch lambda and the ca
 
 For brute-force (no index) execution, a Volnitsky substring searcher pre-filters rows before invoking RE2. The algorithm:
 
-1. Extract literal substrings from the regex pattern (reusing `extract_literals_from_regex`).
-2. Select the longest literal as the Volnitsky needle.
+1. Obtain a mandatory scan substring from the canonical matcher's public `RE2::RequiredLiterals()` API in the pinned Milvus RE2 package.
+2. Use that original-byte substring as the Volnitsky needle; an empty result disables the prefilter.
 3. For each row: if `VolnitskySearcher::contains(row)` returns false, skip RE2 entirely.
 4. Only rows passing the Volnitsky pre-filter are verified with `RE2::PartialMatch`.
 
@@ -261,11 +261,12 @@ This is the same two-phase architecture already used by `LIKE` on ngram indexes.
 ### 3.1 FMIndex Candidate Path
 
 For a `VARCHAR` field with an `FMINDEX`, regex preparation uses RE2's
-`FilteredRE2` prefilter to build a bounded Boolean condition over required byte
-literals. FMIndex counts the retained literals on the current segment, selects
-the lowest-cost child of each AND, evaluates the selected condition as
-candidate bitmaps, and the expression layer rechecks candidate values with the
-canonical RE2 matcher. AND/OR relationships remain intact, so alternatives
+public `RequiredLiterals()` API to build a bounded Boolean condition over
+original-byte literals from the compiled matcher's AST. FMIndex counts the
+retained literals on the current segment, selects the lowest-cost child of each
+AND, and evaluates the selected condition as candidate bitmaps. The expression
+layer rechecks candidate values with the canonical RE2 matcher. AND/OR
+relationships remain intact, so alternatives
 retain coverage while selective literals can be chosen per segment. See the
 [FMIndex regex candidate design](20261004-fmindex-regex-candidates.md) for the
 condition contract and budgets.

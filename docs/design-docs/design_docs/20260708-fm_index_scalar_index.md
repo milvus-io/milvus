@@ -339,15 +339,15 @@ dominate.
 
 ### Regex (`RegexMatch`): candidate extraction and recheck
 
-The regex follow-up uses RE2's `FilteredRE2` prefilter to derive a bounded
-Boolean condition over required byte literals. The condition preserves AND/OR
-relationships, maps RE2's lowercased atoms back to exact FM-index byte
+Regex candidate extraction uses the pinned Milvus RE2 package's public
+`RE2::RequiredLiterals()` API to derive a bounded Boolean condition from the
+compiled matcher's AST. It preserves AND/OR relationships and original byte
 spellings, and weakens unsupported or over-budget branches conservatively.
 `FMIndex` counts the retained literals on the current segment, selects the
 lowest-cost child of each AND, evaluates the selected condition as candidate
 bitmaps, and rechecks candidate values with the canonical RE2 matcher.
 
-Patterns without a safe non-empty condition use the existing scan path. The
+Patterns without a safe non-empty condition use the scan path. The
 full extraction contract, budgets and examples are maintained in the [regex
 candidate design](20261004-fmindex-regex-candidates.md).
 

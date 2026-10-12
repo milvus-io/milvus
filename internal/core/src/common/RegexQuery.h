@@ -17,9 +17,15 @@
 #include <re2/re2.h>
 #include <utility>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "common/EasyAssert.h"
+#if !defined(RE2_REQUIRED_LITERALS_API_VERSION) || \
+    RE2_REQUIRED_LITERALS_API_VERSION != 1
+#error "Milvus requires the pinned RE2 public necessary-literal API v1"
+#endif
+
 namespace milvus {
 bool
 is_special(char c);
@@ -200,17 +206,14 @@ struct PartialRegexMatcher {
         return lower.substr(0, length);
     }
 
-    // A mandatory byte substring for raw-scan prefiltering. Bounded structural
-    // analysis in RegexLiteral.cpp preserves literals across concatenation,
-    // groups and repetition. Unsupported syntax falls back to RequiredPrefix().
-    // Empty means no filter.
+    // A mandatory byte substring from the compiled RE2 AST for raw-scan
+    // prefiltering. May be one byte; empty means no filter.
     std::string
     RequiredLiteral() const;
 
-    // Bounded necessary AND/OR condition from RE2's parsed Regexp/Prefilter,
-    // checked against the original-byte structural condition. Unproved atom
-    // mappings or exhausted adapter budgets retain that structural condition;
-    // short/optional/unsupported OR branches are never dropped.
+    // Bounded necessary AND/OR condition from RE2's public API, using original
+    // bytes. No second parser, atom remapping or subset enumeration. Both
+    // getters share one lazy analysis, including on concurrent calls.
     RegexLiteralCondition
     RequiredIndexCondition() const;
 
@@ -220,10 +223,13 @@ struct PartialRegexMatcher {
     PrepareIndexCondition(const std::string& pattern);
 
  private:
+    const RE2::LiteralRequirements&
+    RequiredLiterals() const;
+
     bool
     CanExtractLiteral() const {
         // An empty-input match proves no nonempty byte string is mandatory.
-        // Reject before either structural analysis or RE2 range construction.
+        // Preserve the existing Milvus size guard before AST extraction.
         return re2_->pattern().size() <= kMaxProgramSize &&
                re2_->ProgramSize() <= kMaxProgramSize &&
                !RE2::FullMatch(re2::StringPiece("", 0), *re2_);
@@ -233,6 +239,8 @@ struct PartialRegexMatcher {
     static constexpr int kMaxScanLiteralBytes = 4096;
     static constexpr int kMaxProgramSize = 4096;
     std::unique_ptr<RE2> re2_;
+    mutable std::once_flag requirements_once_;
+    mutable RE2::LiteralRequirements requirements_;
 };
 
 template <>

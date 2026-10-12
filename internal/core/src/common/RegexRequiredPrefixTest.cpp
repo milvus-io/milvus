@@ -94,18 +94,21 @@ TEST(RegexRequiredPrefix, IndexConditionsRetainBooleanRelationships) {
     using Op = RegexLiteralCondition::Op;
     const auto literal = RegexLiteralCondition::Literal;
     auto both = PartialRegexMatcher("foo.*bar").RequiredIndexCondition();
-    EXPECT_EQ(both,
-              RegexLiteralCondition::Combine(
-                  Op::And, literal("foo"), literal("bar")));
     auto branches =
         PartialRegexMatcher("foo.*bar|baz.*qux").RequiredIndexCondition();
-    EXPECT_EQ(branches,
-              RegexLiteralCondition::Combine(
-                  Op::Or,
-                  RegexLiteralCondition::Combine(
-                      Op::And, literal("foo"), literal("bar")),
-                  RegexLiteralCondition::Combine(
-                      Op::And, literal("baz"), literal("qux"))));
+    // RE2 may reorder/factor its AST. Check the Boolean contract rather than
+    // the old adapter's sorted child order.
+    for (int mask = 0; mask < 16; ++mask) {
+        std::string row;
+        const std::string atoms[]{"foo", "bar", "baz", "qux"};
+        for (int bit = 0; bit < 4; ++bit) {
+            if (mask & (1 << bit))
+                row += atoms[bit] + " ";
+        }
+        EXPECT_EQ(ConditionMatches(both, row), (mask & 3) == 3);
+        EXPECT_EQ(ConditionMatches(branches, row),
+                  (mask & 3) == 3 || (mask & 12) == 12);
+    }
     const auto suffix =
         PartialRegexMatcher("(ERROR|WARN).*timeout").RequiredIndexCondition();
     double cost;
@@ -143,9 +146,9 @@ TEST(RegexRequiredPrefix, IndexConditionsRetainBooleanRelationships) {
             Op::And, literal("COMMON_LONG"), literal("RARE")));
 }
 
-TEST(RegexRequiredPrefix, PrefilterByteMappingPreservesBranchCoverage) {
-    // RE2 merges lowercased atoms across branches. A spelling from one branch
-    // cannot constrain a folded or character-class occurrence in another.
+TEST(RegexRequiredPrefix, OriginalBytesPreserveBranchCoverage) {
+    // Exact bytes from one branch cannot constrain a folded or character-class
+    // occurrence in another. Keep regressions from the former atom mapper.
     for (const auto& [pattern, match] :
          std::vector<std::pair<std::string, std::string>>{
              {"(?i:foo).*bar|foo.*baz", "FOO bar"},
@@ -196,7 +199,7 @@ TEST(RegexRequiredPrefix, PrefilterByteMappingPreservesBranchCoverage) {
     }
 }
 
-TEST(RegexRequiredPrefix, UnmappedAtomsRetainIndependentConditions) {
+TEST(RegexRequiredPrefix, LongAtomsRetainIndependentConditions) {
     const std::string long_text = std::string(500, 'x') + "COMMON_LONG";
     const std::vector<std::string> rows{long_text, long_text + "RARE"};
     std::vector<std::string_view> docs(rows.begin(), rows.end());
@@ -238,7 +241,7 @@ TEST(RegexRequiredPrefix, UnmappedAtomsRetainIndependentConditions) {
         }
     }
     // An unfilterable OR branch must still cover its matches, even when the
-    // other branch offers exact atoms that the RE2 prefilter can map.
+    // other branch offers exact byte atoms.
     const auto unknown_or = PartialRegexMatcher("(?i:foo)|x{500}COMMON_LONG")
                                 .RequiredIndexCondition();
     EXPECT_TRUE(unknown_or.IsTrue());
@@ -260,21 +263,32 @@ TEST(RegexRequiredPrefix, ConditionBudgetsAndDeduplicatedCounts) {
             EXPECT_GE(atom.size(), 2);
             EXPECT_LE(atom.size(), 64);
         }
-        if (pattern == alternative) {
-            EXPECT_TRUE(condition.IsTrue());
-        } else if (pattern == "(?:" + alternative + ").*SUFFIX") {
-            EXPECT_EQ(condition, RegexLiteralCondition::Literal("SUFFIX"));
+        // Factoring in RE2 can keep this wide alternation within budget.
+        // Every original branch must remain covered in either case.
+        if (pattern != conjunction) {
+            for (int i = 0; i < 150; ++i) {
+                const auto row = "L" + std::to_string(i) + "XSUFFIX";
+                EXPECT_TRUE(ConditionMatches(condition, row));
+            }
+        }
+        if (pattern == "(?:" + alternative + ").*SUFFIX") {
+            double cost;
+            EXPECT_EQ(condition.Select(
+                          [](const std::string& atom) -> size_t {
+                              return atom == "SUFFIX" ? 1 : 1000;
+                          },
+                          cost),
+                      RegexLiteralCondition::Literal("SUFFIX"));
         }
     }
-    // Fourteen independent atoms fit the output tree but exhaust the bounded
-    // AllPotentials subset probes. Retain the original AND, not TRUE.
-    std::string probe_limited;
+    // Independent atoms no longer require exponential subset probes.
+    std::string independent_atoms;
     for (int i = 0; i < 14; ++i) {
-        probe_limited += (i == 0 ? "" : ".*") + std::string("ATOM") +
-                         std::to_string(i) + "X";
+        independent_atoms += (i == 0 ? "" : ".*") + std::string("ATOM") +
+                             std::to_string(i) + "X";
     }
     const auto retained =
-        PartialRegexMatcher(probe_limited).RequiredIndexCondition();
+        PartialRegexMatcher(independent_atoms).RequiredIndexCondition();
     EXPECT_EQ(ConditionAtoms(retained).size(), 14);
     auto repeated =
         PartialRegexMatcher("(foo.*bar)|(baz.*foo)").RequiredIndexCondition();
@@ -423,6 +437,52 @@ TEST(RegexRequiredPrefix, PreparationCacheIsThreadLocal) {
     std::thread second(exercise, "SECOND");
     first.join();
     second.join();
+}
+
+TEST(RegexRequiredPrefix, PublicAPITraversalBudgetAndSharedMatcher) {
+    // A wide AST must fall back before allocating/visiting its children when
+    // the input traversal budget is exhausted. Output node bounds are separate.
+    std::string wide;
+    for (int i = 0; i < 64; ++i) {
+        wide += (i == 0 ? "" : ".*") + std::string("ATOM") + std::to_string(i);
+    }
+    RE2 regexp(wide);
+    ASSERT_TRUE(regexp.ok());
+    for (size_t visits : {size_t{0}, size_t{1}, size_t{2}}) {
+        const auto required = regexp.RequiredLiterals(127, 64, 4096, visits);
+        EXPECT_EQ(required.condition.op, RE2::LiteralCondition::Op::True);
+        EXPECT_TRUE(required.literal.empty());
+    }
+    const auto complete = regexp.RequiredLiterals();
+    EXPECT_NE(complete.condition.op, RE2::LiteralCondition::Op::True);
+
+    // Exercise the lazy once-only analysis on a shared matcher, including
+    // escaped NUL bytes, external boundaries and a folded alternative.
+    const std::string pattern = R"((?:\Bfoo\x00bar|(?i:baz)).*SUFFIX)";
+    PartialRegexMatcher shared(pattern);
+    const std::vector<std::string> rows{
+        std::string("afoo\0barSUFFIX", 14), "BAZSUFFIX", "baz", "SUFFIX", ""};
+    auto exercise = [&](bool index_first) {
+        for (int repeat = 0; repeat < 100; ++repeat) {
+            if (index_first)
+                shared.RequiredIndexCondition();
+            const auto literal = shared.RequiredLiteral();
+            const auto condition = shared.RequiredIndexCondition();
+            EXPECT_EQ(literal, "SUFFIX");
+            for (const auto& row : rows) {
+                if (shared(row)) {
+                    EXPECT_NE(row.find(literal), std::string::npos);
+                    EXPECT_TRUE(ConditionMatches(condition, row));
+                }
+            }
+        }
+    };
+    std::thread first(exercise, true);
+    std::thread second(exercise, false);
+    first.join();
+    second.join();
+    EXPECT_TRUE(shared(rows[0]));
+    EXPECT_TRUE(shared(rows[1]));
 }
 
 TEST(RegexRequiredPrefix, RawScanPreservesSelectiveInteriorLiterals) {
@@ -591,7 +651,7 @@ TEST(RegexRequiredPrefix, RawLiteralGrammarAndFallback) {
              {"x.*RARE{0}", "RAR"},
              {"x.*(?P<name>RARE)", "RARE"},
              {"x.*RARE(?i)end", "RARE"},
-             {R"(.*RARE[\x41]END)", "RARE"},
+             {R"(.*RARE[\x41]END)", "RAREAEND"},
              {R"(.*\x41)", "A"},
              {R"(.*\141)", "a"},
              {R"(.*\Qfoo.*\E)", "foo.*"},
@@ -614,17 +674,18 @@ TEST(RegexRequiredPrefix, RawLiteralGrammarAndFallback) {
         EXPECT_EQ(PartialRegexMatcher(pattern).RequiredLiteral(), literal)
             << pattern;
     }
-    // Unsupported alternatives discard every tentative requirement, including
-    // branches with external context. Noncanonical braces are not repetitions.
-    for (const std::string pattern : {"x.*RARE|bar",
-                                      "x.*(RARE|bar)",
-                                      R"(x.*RARE\B|bar)",
-                                      R"(\b-foo|bar)",
-                                      "x.*RARE{01}",
-                                      "x.*RARE{literal}",
-                                      R"(.*a{\Q2\E})"}) {
-        PartialRegexMatcher matcher(pattern);
-        EXPECT_EQ(matcher.RequiredLiteral(), matcher.RequiredPrefix())
+    // These alternatives have no common scan substring. Braces that RE2
+    // parses as literal text now retain the complete decoded run.
+    for (const auto& [pattern, literal] :
+         std::vector<std::pair<std::string, std::string>>{
+             {"x.*RARE|bar", ""},
+             {"x.*(RARE|bar)", "x"},
+             {R"(x.*RARE\B|bar)", ""},
+             {R"(\b-foo|bar)", ""},
+             {"x.*RARE{01}", "RARE{01}"},
+             {"x.*RARE{literal}", "RARE{literal}"},
+             {R"(.*a{\Q2\E})", "a{2}"}}) {
+        EXPECT_EQ(PartialRegexMatcher(pattern).RequiredLiteral(), literal)
             << pattern;
     }
     EXPECT_EQ(
@@ -636,10 +697,10 @@ TEST(RegexRequiredPrefix, RawLiteralGrammarAndFallback) {
                                   std::string(64, ')'))
                   .RequiredLiteral(),
               "RARE");
-    EXPECT_TRUE(PartialRegexMatcher(".*" + std::string(65, '(') + "RARE" +
-                                    std::string(65, ')'))
-                    .RequiredLiteral()
-                    .empty());
+    EXPECT_EQ(PartialRegexMatcher(".*" + std::string(65, '(') + "RARE" +
+                                  std::string(65, ')'))
+                  .RequiredLiteral(),
+              "RARE");
 }
 
 TEST(RegexRequiredPrefix, EveryMatchContainsTheRequirement) {

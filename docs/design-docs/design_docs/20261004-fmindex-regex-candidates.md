@@ -24,68 +24,55 @@ Compile the canonical RE2 matcher before extracting any conditions. Preparation
 returns a necessary Boolean condition with TRUE, literal, AND and OR nodes.
 It is a candidate superset, never a final regex result. TRUE means no pruning.
 
-`RequiredIndexCondition()` uses the RE2 prefilter tree for the index contract.
-RE2's parsed structure preserves independent concatenation requirements and
-alternative branch conditions. Optional and case-folded bodies contribute TRUE.
-The existing bounded analyzer supplies original byte spellings and a necessary
-structural condition used to verify the mapped prefilter. It also supplies the
-fallback when the adapter cannot safely reconstruct a condition. A fixed suffix
-remains pending until a gap, so a long run does not exhaust the tree budget with
-overlapping windows.
+`RequiredLiteral()` and `RequiredIndexCondition()` consume the public
+`RE2::RequiredLiterals()` API from the pinned package:
+`re2/20230301-milvus-regex1@milvus/dev#836c4df4da0690eb2122225b136b04b2`.
+Conan applies this requirement to transitive consumers such as Arrow and
+gRPC. The CMake target is `re2::re2`; the public header is `re2/re2.h`.
+See the [package API contract](https://github.com/milvus-io/conanfiles/blob/864e3194c2c07aeed3f243cb83f2f8c1c5e69f86/recipes/re2/regex-v1/README.md).
 
-The implementation uses RE2's public `FilteredRE2` entry point, which invokes the
-pinned version's parsed `Regexp` walker and `Prefilter` internally. `FilteredRE2`
-returns lowercased atoms by design, so the adapter maps each atom back to exact
-byte spellings from the canonical literal summary before FMIndex lookup.
-Finding a spelling somewhere in the pattern is not sufficient: lowercased atoms
-merge occurrences across branches, including folded and character-class forms.
-A bounded implication check must prove that the original-byte condition implies
-the mapped condition. If it cannot, the adapter returns the original condition.
-For example, `(?i:foo).*bar|foo.*baz` retains `bar OR (foo AND baz)` and must not
-require lowercase `foo` for the first branch.
-
-Unmapped atoms, such as a long RE2 atom exceeding the retained 64-byte endpoints,
-also return the original condition, preserving independent literals such as
-`RARE` and the bounded endpoints. This keeps the Conan package boundary on RE2's
-installed public headers while retaining safe AND/OR relationships. RE2 validates
-the full pattern and decodes consuming escapes. A bounded monotone-probe pass
-over `AllPotentials` reconstructs minimal satisfying atom sets; if its budget is
-exceeded, the original structural condition is retained as well.
+The API reads the canonical matcher's existing AST. It returns an original-byte
+mandatory scan substring and a necessary TRUE/LITERAL/AND/OR condition. Milvus
+converts the returned condition into its internal representation. Both getters
+share one lazy, thread-safe analysis per matcher. Matchers used only for recheck
+do not perform extraction.
 
 Bounds:
 
-- “2gram” means **two bytes**, not two Unicode characters. Atoms are original,
-  case-sensitive bytes, including embedded NULs; a multi-byte rune qualifies.
-- Each atom is at most 64 bytes. Longer fixed runs contribute their first and
-  last fragments. Truncated fragments are never joined as if adjacent.
-- A condition has at most 127 nodes, hence at most 126 literal occurrences.
-  AND may omit an over-budget child; an over-budget OR becomes TRUE in full.
-- The adapter allows at most 8,128 `AllPotentials` probes and 16,129 recursive
-  implication checks. Exhausting either budget retains the original condition.
-- Patterns and RE2 programs above 4096 bytes/instructions, or matching empty
-  input, produce TRUE. Parser nesting is capped at 64. Repeats use bounded
-  summaries and exponentiation rather than expanded strings. Together these
-  bound traversal, intermediate strings, final tree size and Count work.
+- Index atoms contain 2 to 64 original, case-sensitive bytes, including
+  embedded NULs. A multi-byte rune qualifies. Fragments may end within a UTF-8
+  sequence because lookups operate on bytes. Long runs retain bounded
+  endpoints; truncation does not make those endpoints adjacent.
+- Scan substrings contain at most 4096 bytes and may be one byte long.
+- The condition has at most 127 nodes. AND may omit requirements to satisfy
+  this budget; OR never drops a viable branch.
+- The API visits at most 4096 AST nodes and reserves child visits before
+  allocating child summaries. Traversal exhaustion yields TRUE and an empty
+  scan literal for the whole regexp. This is separate from output-tree limits.
+- Milvus declines extraction for patterns above 4096 bytes, RE2 programs above
+  4096 instructions, or patterns that match empty input.
 
-Dropping an OR branch is forbidden: `a|timeout` becomes TRUE because `a` is too
-short, not `timeout`. TRUE in an AND can be omitted. Unsupported consuming
-atoms break adjacency; zero-width assertions do not. External word boundaries
-are retained structurally but disable the RE2 range-prefix fallback because
-anchored range analysis can omit matches using preceding row bytes.
+Optional, folded, non-singleton character classes and unknown operators
+contribute no mandatory bytes. Singleton classes and escapes are decoded by
+RE2. Zero-width assertions preserve byte adjacency and are evaluated during
+RE2 recheck.
 
-| Pattern | Necessary condition |
+Dropping an OR branch is forbidden: `a|timeout` has a TRUE index condition,
+because the short branch cannot supply a two-byte atom. TRUE in an AND can be
+omitted. RE2 may factor shared prefixes or suffixes, so equivalent patterns can
+produce different condition trees.
+
+| Pattern | Example necessary condition |
 | --- | --- |
 | `foo.*bar` | `foo AND bar` |
 | `.*COMMON_LONG.*RARE` | `COMMON_LONG AND RARE` |
 | `(ERROR\|WARN).*timeout` | `(ERROR OR WARN) AND timeout` |
 | `foo.*bar\|baz.*qux` | `(foo AND bar) OR (baz AND qux)` |
 | `a\|timeout`, `(?i:foo)\|bar`, `foo\|`, `a*` | TRUE |
-| `\Bfoo\|bar` | `foo OR bar`; never the unsafe anchored prefix `bar` |
+| `\Bfoo\|bar` | `foo OR bar` |
 | `\x41\141\.` | decoded `Aa.` |
 
-Raw scanning retains the existing `RequiredLiteral()`/Volnitsky prefilter,
-including its conservative alternation fallback. Its 4096-byte literal budget
-is separate from the index's 64-byte atoms.
+Raw scanning uses the API's mandatory substring as its Volnitsky prefilter.
 
 ## Planning and execution
 
@@ -104,7 +91,7 @@ number of final candidate rows; it does not yet exploit intersections of
 individually common atoms.
 
 TRUE declines routing. Zero estimated occurrences accepts immediately;
-otherwise retain the existing guard:
+otherwise routing uses this guard:
 `selected_occurrences * sa_sample_rate < fmindexCostRatio * TotalTokens`.
 Occurrence counts upper-bound row counts and the sum prices every selected
 branch, even overlapping branches. The guard does not price preparation,
@@ -126,22 +113,18 @@ Implementation: [analysis and selection](../../../internal/core/src/common/Regex
 
 ## Verification
 
-The standalone differential harness builds against the **pinned RE2
-2023-03-01 source** and compares canonical RE2 matches with both the complete
-condition tree and the Count-selected condition. It exercises nested
+Differential tests compare canonical RE2 matches with both the complete
+condition tree and the Count-selected condition. They exercise nested
 alternatives, short and case-folded branches, embedded NULs, Unicode, external
 word boundaries, extraction budgets, cache replacement and concurrent
-preparation. It also builds two FM indexes with opposite `foo`/`bar`
-selectivity and verifies that Count chooses the literal that is rare on the
-current index. Sanitizer runs rebuild the harness and its RE2, GoogleTest and
-libsais dependencies with ASan and UBSan.
+preparation. They also build two FM indexes with opposite `foo`/`bar`
+selectivity and verify that Count chooses the literal that is rare on the
+current index. Assertions check that every regex match passes the extracted
+condition, allowing RE2 to factor the AST into equivalent trees.
 
-The source-to-consumer review follows literal construction and adjacency,
-optional/repeat weakening, OR absorption, budget exhaustion, prefix fallback,
-cache publication, current-index Count, exact contains, NULL exclusion, input
-intersection, raw recheck and final NOT. Native tests exercise the same
-conditions through sealed-column reads, batches, multiple chunks, offset
-fallback and invalid syntax.
+Native tests cover sealed-column reads, batches, multiple chunks, NULL handling,
+input bitmap intersection, NOT, offset fallback and invalid syntax. Dependency
+integration checks require the pinned RE2 package across Milvus, Arrow and gRPC.
 
 ### Native performance experiments
 
@@ -151,13 +134,11 @@ rotating mode order. It records preparation, Count, candidate lookup, bitset
 work, sealed-column reads, RE2 recheck and total time in gtest XML. Parity with
 canonical RE2 is checked after every timed sample.
 
-The stage experiment compares a raw literal/RE2 pipeline, the former
-longest-literal/prefix candidate policy, full AND/OR bitset execution and
-Count-selected execution. Each mode fetches selected strings through the sealed
-chunk reader and records preparation, Count, lookup, bitset, raw-read, recheck
-and total time. A separate mixed-pattern sweep measures physical-expression
-compilation, routing, reads and recheck on indexed and unindexed segments, with
-expression-result caching explicitly disabled.
+The stage experiment compares a raw literal/RE2 pipeline, full AND/OR
+bitset execution and Count-selected execution. Each mode fetches selected
+strings through the sealed chunk reader. A separate mixed-pattern sweep measures
+physical-expression compilation, routing, reads and recheck on indexed and
+unindexed segments, with expression-result caching disabled.
 
 Workloads include independent common/rare literals, a shorter rare literal,
 alternatives with a mandatory suffix, multiple OR branches, frequent and long

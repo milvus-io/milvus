@@ -2382,7 +2382,7 @@ TEST(FMIndex, RegexSealedColumnExperiment) {
         {"folded_branch", "(?i:foo)|bar"},
         {"fallback", ".*"},
     };
-    const std::string modes[]{"raw", "legacy", "all", "selected"};
+    const std::string modes[]{"raw", "all", "selected"};
     const std::string stages[]{
         "prepare", "count", "lookup", "bitset", "raw_read", "recheck", "total"};
     RecordProperty("expression_result_cache",
@@ -2397,40 +2397,19 @@ TEST(FMIndex, RegexSealedColumnExperiment) {
                 for (size_t i = 0; i < rows.size(); i += 100) input.set(i);
             }
             for (bool cold : {false, true}) {
-                std::optional<std::pair<std::string, RegexLiteralCondition>>
-                    legacy_cache;
+                // The old policy must be measured from a frozen old binary;
+                // using RequiredLiteral() here would silently upgrade it too.
                 auto prepare = [&](int mode) {
-                    if (mode == 0)
-                        return RegexLiteralCondition{};
-                    if (mode != 1)
-                        return PartialRegexMatcher::PrepareIndexCondition(
-                            pattern);
-                    if (legacy_cache && legacy_cache->first == pattern)
-                        return legacy_cache->second;
-                    // Reproduce the old longest-literal + RE2-prefix contract.
-                    PartialRegexMatcher matcher(pattern);
-                    auto best = matcher.RequiredLiteral();
-                    std::vector<std::string> atoms{best.substr(0, 64),
-                                                   matcher.RequiredPrefix()};
-                    if (best.size() > 64)
-                        atoms.push_back(best.substr(best.size() - 64));
-                    RegexLiteralCondition condition;
-                    for (const auto& atom : atoms) {
-                        if (!atom.empty())
-                            condition = RegexLiteralCondition::Combine(
-                                RegexLiteralCondition::Op::And,
-                                std::move(condition),
-                                {RegexLiteralCondition::Op::Literal, atom, {}});
-                    }
-                    legacy_cache = std::make_pair(pattern, condition);
-                    return condition;
+                    return mode == 0
+                               ? RegexLiteralCondition{}
+                               : PartialRegexMatcher::PrepareIndexCondition(
+                                     pattern);
                 };
-                std::array<std::array<std::vector<double>, 7>, 4> samples;
+                std::array<std::array<std::vector<double>, 7>, 3> samples;
                 for (int round = 0; round < 4; ++round) {
-                    for (int turn = 0; turn < 4; ++turn) {
-                        const int mode = (round + turn) % 4;
+                    for (int turn = 0; turn < 3; ++turn) {
+                        const int mode = (round + turn) % 3;
                         if (cold) {
-                            legacy_cache.reset();
                             PartialRegexMatcher::PrepareIndexCondition(
                                 "__evict__");
                         } else {
@@ -2457,7 +2436,7 @@ TEST(FMIndex, RegexSealedColumnExperiment) {
                                 reinterpret_cast<const uint8_t*>(atom.data()),
                                 atom.size());
                         };
-                        if (mode == 1 || mode == 3) {
+                        if (mode == 2) {
                             condition = condition.Select(count, cost);
                         }
                         elapsed[1] = micros(start);
@@ -2538,7 +2517,7 @@ TEST(FMIndex, RegexSealedColumnExperiment) {
                         }
                     }
                 }
-                for (int mode = 0; mode < 4; ++mode) {
+                for (int mode = 0; mode < 3; ++mode) {
                     for (size_t stage = 0; stage < 7; ++stage) {
                         auto& values = samples[mode][stage];
                         std::sort(values.begin(), values.end());
