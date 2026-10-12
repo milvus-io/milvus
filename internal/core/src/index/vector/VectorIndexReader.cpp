@@ -581,22 +581,28 @@ VectorIndexReader::BoundSearchBitset(const BitsetView& bitset,
     // therefore what keeps rows appended after publication out of the top-k.
     const auto prefix =
         CheckedInputSize(logical_count_, "growing vector logical row count");
+    BitsetView bounded;
     if (bitset.empty()) {
         storage = TargetBitmap(prefix, false);
-        return BitsetView(storage);
+        bounded = BitsetView(storage);
+    } else if (!bitset.has_out_ids() && bitset.size() <= prefix) {
+        bounded = bitset;
+    } else {
+        // A mapped view's out_ids array covers its original domain.
+        // Materialize it before a live engine can return newer IDs beyond that
+        // borrowed array.
+        storage = TargetBitmap(prefix, true);
+        const auto copy_count = std::min(prefix, bitset.size());
+        for (size_t i = 0; i < copy_count; ++i) {
+            storage[i] = bitset.test(static_cast<int64_t>(i));
+        }
+        bounded = BitsetView(storage);
     }
-    if (!bitset.has_out_ids() && bitset.size() <= prefix) {
-        return bitset;
-    }
-
-    // A mapped view's out_ids array covers its original domain. Materialize it
-    // before a live engine can return newer IDs beyond that borrowed array.
-    storage = TargetBitmap(prefix, true);
-    const auto copy_count = std::min(prefix, bitset.size());
-    for (size_t i = 0; i < copy_count; ++i) {
-        storage[i] = bitset.test(static_cast<int64_t>(i));
-    }
-    return BitsetView(storage);
+    // While an Add is in flight a live engine already holds the new backend
+    // ids but has not advanced its count, so knowhere sees no ids beyond the
+    // bitmap and skips the boundary filter unless it is required explicitly.
+    bounded.set_require_id_boundary(true);
+    return bounded;
 }
 
 BitsetView
@@ -618,7 +624,10 @@ VectorIndexReader::BoundIteratorBitset(const BitsetView& bitset) const {
                "logical row count {}",
                bitset.size(),
                prefix);
-    return bitset;
+    auto bounded = bitset;
+    // Same in-flight Add window as BoundSearchBitset.
+    bounded.set_require_id_boundary(true);
+    return bounded;
 }
 
 void
