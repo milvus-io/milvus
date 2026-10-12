@@ -171,9 +171,17 @@ A compaction replaces a run of SSTs (inputs) with merged SSTs (outputs).
 | Condition | Result |
 |---|---|
 | No manifest | `ErrNotClaimed` |
+| Inputs are not empty, no input is in the list, and all outputs are in the list | No write. Return the current version |
 | Inputs are empty, or are not a contiguous run of the list in the same order | `ErrStaleEdit` |
 | An output ID is in the manifest, or is twice in the outputs | `ErrDuplicateSST` |
 | Otherwise | New version: outputs take the place of the inputs. Checkpoint and term do not change |
+
+The second row makes a compaction commit idempotent. If the pointer write of
+a compaction took effect but the caller got an error, the caller sends the same
+edit again. The outputs have new global IDs, and no other edit can add them to
+the list. Thus "no input in the list and all outputs in the list" occurs only
+when this compaction took effect. Every other mismatch, for example some inputs
+in the list or only some outputs in the list, gets `ErrStaleEdit`.
 
 Compaction is in-process only. `Manager.CommitCompact` exists, but the gRPC
 service has no compaction method yet.
@@ -204,11 +212,17 @@ Manager (holds the vchannel lock)
   4. Write the pointer:
        first version: on the condition KeyNotExist(pointer key)
        later version: on the condition ValueEqual(pointer key, loaded value)
-  5. On an error in step 4, read the pointer again.
+  5. On an error in step 4, read the pointer again, with a new context
+     (no cancel from the caller, 5 s timeout).
        It names the new body: the commit took effect.
        Otherwise: forget the cache entry and return a retryable error.
   6. Put the new version in the cache and return it.
 ```
+
+The read-back in step 5 does not use the context of the caller. A timeout is
+the most frequent cause of an unknown result. At that time the context of the
+caller is often expired, and a read with it always fails. The manager uses
+`context.WithoutCancel` on the caller context, with a timeout of 5 seconds.
 
 The pointer value is the deterministic encoding of `ManifestPointer`. The body
 key has a UUID, so each version has a unique pointer value. `ValueEqual` thus
@@ -219,7 +233,7 @@ Crash windows:
 | Crash point | State after the crash | Effect |
 |---|---|---|
 | Before step 3 completes | No new object, or a partial upload | Caller retries |
-| After step 3, before step 4 | An unreferenced body | GC deletes it after the grace window |
+| After step 3, before step 4 | An unreferenced body | GC deletes it after `grace` while its version is above the current version. After a later commit reaches its version, GC deletes it by the body retention rules |
 | During step 4, result unknown | Pointer is old or new | Step 5 reads the pointer and decides |
 | After step 4, before the reply | New version is committed | A flush retry with the same term is idempotent |
 
@@ -270,7 +284,9 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | Error | Source | merr code | Retryable |
 |---|---|---|---|
 | Service has no manager yet | Service start | `ServiceNotReady` | Yes |
-| `collection_id` is not positive, `vchannel` is empty, or `vchannel` contains `/` or `..` | Request check, all three RPCs | `ParameterInvalid` | No (caller bug) |
+| `collection_id` is not positive, or `vchannel` is empty, `.`, `..`, or contains `/` | Request check, all three RPCs | `ParameterInvalid` | No (caller bug) |
+| `pk_data_type` is not `Int64` or `VarChar` | Request check, `ClaimManifest` | `ParameterInvalid` | No (caller bug) |
+| `checkpoint_time_tick` is 0 | Request check, `CommitFlush` | `ParameterInvalid` | No (caller bug) |
 | `ErrFenced` | Claim, flush | `ChannelNotAvailable` | No. Stop the writes on the vchannel |
 | Meta kv or object storage failure (`ErrUnavailable`) | Load, write, read-back, walk | `ServiceUnavailable` | Yes |
 | Pointer write failed and the read-back does not show the new body | Commit step 5 | `ServiceUnavailable` | Yes |
@@ -289,8 +305,20 @@ Notes:
 - The client uses `merr.CheckRPCCall`, so the caller receives the merr code.
   The client translates a connection failure or a gRPC transport error that has
   no merr code to `ServiceUnavailable` and keeps the cause. It returns a
-  context cancel or deadline error unchanged. The client retries only gRPC
-  `UNAVAILABLE` transport failures. The caller decides the retry of a merr code.
+  context cancel or deadline error unchanged. It also returns a gRPC status
+  error with code `DeadlineExceeded` or `Canceled` unchanged. gRPC does not
+  wrap the context error in these status errors, so the client checks
+  `status.Code(err)`. The client retries only gRPC `UNAVAILABLE` transport
+  failures.
+- The caller decides the retry with `merr.IsRetryableErr`. `ServiceUnavailable`
+  and `ServiceNotReady` are retryable.
+- Code 503 (`ChannelNotAvailable`) means "fenced" only in an error that this
+  client returns. Other components use the same code for a retryable state, for
+  example `GetChannelRecoveryInfo` in DataCoord. The caller must classify the
+  client error at the call site. It must not use `errors.Is` on an error chain
+  that has other errors in it. A caller that uses `retry.Do` must pass
+  `retry.RetryErr(merr.IsRetryableErr)`. Without this option, `retry.Do`
+  retries a fenced call.
 - The service rejects an invalid request before it calls the manager. The
   `ErrFenced` translation keeps the original error as a secondary error, so
   logs that print the stack show the recorded and requested terms.
@@ -325,6 +353,11 @@ Manifest bodies:
 | Version ≤ current | Version is in the newest `manifestRetainVersions` versions (current included), or age ≤ `manifestRetainDuration` |
 | Version > current (not committed yet, or never) | Age ≤ `grace` |
 
+GC deletes a body at or below the current version and outside the newest
+`manifestRetainVersions` versions when the body is older than
+`manifestRetainDuration`. `grace` does not apply to it. The pointer only moves
+up, so such a body never becomes the current version again.
+
 A body in the retained version range is kept even when it lost the pointer
 write. Bodies do not record their parent, so GC cannot tell the winner from the
 loser in that range.
@@ -343,8 +376,11 @@ commit:
 - an SST upload to its flush commit,
 - a compaction output upload to its compaction commit.
 
-GC deletes an object that stays uncommitted longer than `grace`. GC rejects a
-`grace` of 0. Compaction outputs do not depend on `grace`, because they are in
+GC deletes an SST, or a body above the current version, that stays
+uncommitted longer than `grace`. GC rejects a `grace` below `MinGrace`
+(10 minutes). DataCoord then logs an error and does not start GC. The unit of
+the parameter is seconds. A duration string such as `"1h"` reads as 0, so GC
+does not start. Compaction outputs do not depend on `grace`, because they are in
 the in-flight set until their commit takes effect.
 
 ### Layout mismatch
@@ -359,9 +395,12 @@ directory that GC does not own, for example after a root path change.
 | Parameter | Default | Meaning |
 |---|---|---|
 | `dataCoord.pkindex.gc.interval` | 3600 s | Time between two rounds. Must be positive |
-| `dataCoord.pkindex.gc.grace` | 86400 s | Minimum age of an unreferenced object before GC deletes it. Must be positive |
+| `dataCoord.pkindex.gc.grace` | 86400 s | Minimum age of an unreferenced SST, or of a body above the current version, before GC deletes it. Must be at least 600 s (`MinGrace`) |
 | `dataCoord.pkindex.gc.manifestRetainVersions` | 8 | Number of newest versions kept, current included |
-| `dataCoord.pkindex.gc.manifestRetainDuration` | 3600 s | Bodies written within this time are kept |
+| `dataCoord.pkindex.gc.manifestRetainDuration` | 3600 s | Minimum age of a body at or below the current version, outside the newest versions, before GC deletes it |
+
+The duration parameters are in seconds. If one value is not valid, DataCoord
+logs an error and does not start GC. The manifest service still runs.
 
 ## Meta KV Predicate `KeyNotExist`
 
@@ -391,11 +430,18 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
   GC has no input for these tables yet.
 - **Compaction commit retry.** If the pointer write of a compaction commit took
   effect but the read-back failed, the service reports the commit as
-  unavailable. A retry of the same edit is then rejected as a stale edit, so the
-  compaction caller must read the manifest again before it retries.
+  unavailable. A retry of the same edit returns the current version, because
+  the compaction rule accepts an applied retry.
 - **Pointer listing cost.** Each GC round lists all pointers in one call. The
   cost with very many vchannels is not measured.
 - **Stalled commits.** A commit that stalls longer than `grace` loses its
   objects. The committed manifest can then refer to deleted files.
 - **Stale cache.** After a DataCoord failover, an old DataCoord can keep a stale
   cache entry. It refreshes the entry only after a failed pointer write.
+- **Two live coordinators.** The manager does not read the meta kv again for an
+  edit that changes nothing. When two DataCoords are live at the same time, a
+  claim or a flush that changes nothing can succeed on a stale cache for a
+  fenced owner. The first edit from that owner that changes the manifest fails
+  the conditional pointer write. The manager then forgets the cache entry and
+  returns a retryable error. The retry loads the new version and gets
+  `ErrFenced`. The fenced owner does not write bad data.
