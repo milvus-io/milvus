@@ -210,28 +210,39 @@ RunQueryBody(const ReaderBackend& backend,
                       Op::ShouldUse(*contract, query.args);
                   }) {
         const auto policy = Op::QueryPolicy(backend, query.args);
-        const auto should_use = Op::ShouldUse(*contract, query.args);
-        switch (policy) {
-            case PatternQueryPolicy::UseAndRun:
-                EXPECT_TRUE(should_use);
-                break;
-            case PatternQueryPolicy::DeclineButRun:
-                EXPECT_FALSE(should_use);
-                break;
-            case PatternQueryPolicy::SelectiveAndRun:
-                if (query.expected_should_use.has_value()) {
-                    EXPECT_EQ(should_use, *query.expected_should_use);
-                }
-                break;
-            case PatternQueryPolicy::Unsupported:
-                EXPECT_FALSE(should_use);
-                expected_error = ErrorCode::Unsupported;
-                break;
-            case PatternQueryPolicy::CandidatesAndRun:
-                if (query.expected_should_use.has_value()) {
-                    EXPECT_EQ(should_use, *query.expected_should_use);
-                }
-                break;
+        if (policy == PatternQueryPolicy::Unsupported) {
+            expected_error = ErrorCode::Unsupported;
+        }
+        try {
+            const auto should_use = Op::ShouldUse(*contract, query.args);
+            switch (policy) {
+                case PatternQueryPolicy::UseAndRun:
+                    EXPECT_TRUE(should_use);
+                    break;
+                case PatternQueryPolicy::DeclineButRun:
+                    EXPECT_FALSE(should_use);
+                    break;
+                case PatternQueryPolicy::SelectiveAndRun:
+                    if (query.expected_should_use.has_value()) {
+                        EXPECT_EQ(should_use, *query.expected_should_use);
+                    }
+                    break;
+                case PatternQueryPolicy::Unsupported:
+                    EXPECT_FALSE(should_use);
+                    break;
+                case PatternQueryPolicy::CandidatesAndRun:
+                    if (query.expected_should_use.has_value()) {
+                        EXPECT_EQ(should_use, *query.expected_should_use);
+                    }
+                    break;
+            }
+        } catch (const SegcoreError& error) {
+            if (!expected_error.has_value()) {
+                throw;
+            }
+            // Routing may validate the pattern. Still require the query below
+            // to reject it independently with the same expected error code.
+            EXPECT_EQ(error.get_error_code(), *expected_error);
         }
     }
 

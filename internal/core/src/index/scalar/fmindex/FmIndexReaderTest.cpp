@@ -51,7 +51,7 @@ TEST(FmIndexReaderTest, AdvertisesSelectiveVarcharPatternPolicy) {
         EXPECT_EQ(backend.PatternPolicy(PatternOp::InnerMatch),
                   PatternQueryPolicy::SelectiveAndRun);
         EXPECT_EQ(backend.PatternPolicy(PatternOp::RegexMatch),
-                  PatternQueryPolicy::Unsupported);
+                  PatternQueryPolicy::CandidatesAndRun);
     }
 }
 
@@ -188,6 +188,181 @@ TEST(FmIndexReaderTest, GeneralLikeCandidatesPreserveEveryExactMatch) {
             }
         }
         EXPECT_EQ(rechecked, expected);
+    }
+}
+
+std::shared_ptr<const IPatternMatchReader>
+BuildFmPatternReader(const std::vector<std::string>& rows) {
+    std::shared_ptr<IIndexReaderBase> reader(BuildFmReader(rows));
+    return std::dynamic_pointer_cast<const IPatternMatchReader>(std::move(reader));
+}
+
+TEST(FmIndexReaderTest, RegexCandidatesAndRecheckEqualCanonicalScan) {
+    const std::vector<std::string> rows{
+        "",
+        "foo",
+        "foobar",
+        "foo\nbar",
+        "barfoo",
+        "FOO",
+        "food",
+        "fool",
+        "Aa.",
+        "41",
+        "a|b",
+        "a\\b",
+        "ab.*",
+        "aab",
+        "b",
+        "ééb",
+        "你好世界",
+        std::string("a\0b", 3),
+        std::string("a\xff"
+                    "b",
+                    3),
+        "12a",
+    };
+    auto idx = BuildFmPatternReader(rows);
+    EXPECT_FALSE(idx->PatternMatchIsExact(PatternOp::RegexMatch));
+    const std::vector<std::string> patterns{
+        "",
+        "^$",
+        ".*",
+        "foo.*bar",
+        "^foo.*bar$",
+        "foo|bar",
+        "foo|",
+        "foo(?:d|l)",
+        "(?:foo)?bar",
+        "(?i)foo",
+        "[a-z]+",
+        "a{0,2}b",
+        R"(\x41\141\.)",
+        R"(a\|b)",
+        R"(a\\b)",
+        R"(\Qab.*\E)",
+        R"(a\x00b)",
+        R"(\d+a)",
+        "é+b",
+        "你好.*世界",
+        "ABSENT.*",
+    };
+    for (const auto& pattern : patterns) {
+        PartialRegexMatcher matcher(pattern);
+        const auto candidates =
+            idx->PatternMatch(pattern, PatternOp::RegexMatch);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const bool expected = matcher(rows[i]);
+            EXPECT_EQ(candidates[i] && matcher(rows[i]), expected)
+                << "pattern=" << pattern << " row=" << i;
+        }
+    }
+    // Candidate membership alone must never be treated as a final result.
+    const auto candidates =
+        idx->PatternMatch("foo.*bar", PatternOp::RegexMatch);
+    EXPECT_TRUE(
+        candidates[4]);  // "barfoo" has both literals in the wrong order.
+    EXPECT_FALSE(PartialRegexMatcher("foo.*bar")(rows[4]));
+    EXPECT_LT(candidates.count(), rows.size());
+}
+
+TEST(FmIndexReaderTest, RegexGuardDeclinesEmptyAndAcceptsZeroHit) {
+    auto reader = BuildFmReader({"apple", "banana"});
+    EXPECT_FALSE(reader->Caps().predicate);
+    EXPECT_FALSE(reader->Caps().value_lookup);
+    const auto* patterns = dynamic_cast<const IPatternMatchReader*>(reader.get());
+    ASSERT_NE(patterns, nullptr);
+    for (const auto op : {PatternOp::PrefixMatch, PatternOp::PostfixMatch,
+                          PatternOp::InnerMatch}) {
+        EXPECT_TRUE(patterns->ShouldUseForOp(op, ""));
+    }
+    EXPECT_TRUE(patterns->ShouldUseForOp(PatternOp::Match, "%ZZZ%"));
+    EXPECT_FALSE(patterns->ShouldUseForOp(PatternOp::Match, ""));
+    EXPECT_FALSE(patterns->ShouldUseForOp(PatternOp::RegexMatch, ""));
+    EXPECT_TRUE(patterns->ShouldUseForOp(PatternOp::RegexMatch, "ZZZ.*"));
+    LikePatternMatcher matcher("a%e");
+    const auto candidates = patterns->PatternMatch("a%e", PatternOp::Match);
+    EXPECT_TRUE(candidates[0] && matcher(std::string("apple")));
+    EXPECT_FALSE(candidates[1] && matcher(std::string("banana")));
+}
+
+TEST(FmIndexReaderTest, RegexGuardAndFallback) {
+    std::vector<std::string> rows(1000, std::string(500, 'x'));
+    rows[500] += "RARE123";
+    auto idx = BuildFmPatternReader(rows);
+    EXPECT_TRUE(idx->ShouldUseForOp(PatternOp::RegexMatch, R"(RARE\d+)"));
+    EXPECT_TRUE(idx->ShouldUseForOp(PatternOp::RegexMatch, "ABSENT.*"));
+    EXPECT_TRUE(idx->ShouldUseForOp(PatternOp::RegexMatch, ".*RARE"));
+    EXPECT_TRUE(idx->ShouldUseForOp(PatternOp::RegexMatch, "x.*RARE123"));
+    EXPECT_EQ(idx->PatternMatch("x.*RARE123", PatternOp::RegexMatch).count(),
+              1);
+    for (const std::string pattern : {"x+", ".*", "", "RARE|", "(?i)rare"}) {
+        EXPECT_FALSE(idx->ShouldUseForOp(PatternOp::RegexMatch, pattern))
+            << pattern;
+    }
+    EXPECT_FALSE(
+        idx->ShouldUseForOp(PatternOp::RegexMatch, std::string(4097, 'a')));
+}
+
+TEST(FmIndexReaderTest, RegexCandidatesKeepRarePrefixWhenInteriorIsCommon) {
+    std::vector<std::string> rows(1000, std::string(500, 'x') + "COMMON");
+    rows[500] = "RARE" + rows[500];
+    auto idx = BuildFmPatternReader(rows);
+    EXPECT_TRUE(idx->ShouldUseForOp(PatternOp::RegexMatch, "RARE.*COMMON"));
+    const auto candidates =
+        idx->PatternMatch("RARE.*COMMON", PatternOp::RegexMatch);
+    EXPECT_EQ(candidates.count(), 1);
+    EXPECT_TRUE(candidates[500]);
+}
+
+TEST(FmIndexReaderTest, RegexPreparationDoesNotCacheIndexStatistics) {
+    std::vector<std::string> first_rows(1000, std::string(500, 'x') + "bar");
+    first_rows[7] = "foo" + first_rows[7];
+    std::vector<std::string> second_rows(1000, "foo" + std::string(500, 'x'));
+    second_rows[9] += "bar";
+    auto first = BuildFmPatternReader(first_rows);
+    auto second = BuildFmPatternReader(second_rows);
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        EXPECT_TRUE(first->ShouldUseForOp(PatternOp::RegexMatch, "foo.*bar"));
+        EXPECT_TRUE(second->ShouldUseForOp(PatternOp::RegexMatch, "foo.*bar"));
+        // The same cached requirements choose different rarest fragments.
+        const auto first_candidates =
+            first->PatternMatch("foo.*bar", PatternOp::RegexMatch);
+        const auto second_candidates =
+            second->PatternMatch("foo.*bar", PatternOp::RegexMatch);
+        EXPECT_EQ(first_candidates.count(), 1);
+        EXPECT_TRUE(first_candidates[7]);
+        EXPECT_EQ(second_candidates.count(), 1);
+        EXPECT_TRUE(second_candidates[9]);
+    }
+}
+
+TEST(FmIndexReaderTest, RegexBooleanConditionsUseCurrentCounts) {
+    std::vector<std::string> rows(
+        1000, std::string(500, 'x') + "COMMON_LONG foo qux ERROR");
+    rows[9] += "RARE bar timeout";
+    rows[19] += "baz";
+    auto index = BuildFmPatternReader(rows);
+    for (const auto& [pattern, expected] :
+         std::vector<std::pair<std::string, size_t>>{
+             {".*COMMON_LONG.*RARE", 1},
+             {"(ERROR|WARN).*timeout", 1},
+             {"foo.*bar|baz.*qux", 2},
+             {"foo.*ABSENT|baz.*qux", 1}}) {
+        EXPECT_TRUE(index->ShouldUseForOp(PatternOp::RegexMatch, pattern));
+        auto candidates = index->PatternMatch(pattern, PatternOp::RegexMatch);
+        EXPECT_EQ(candidates.count(), expected) << pattern;
+        PartialRegexMatcher matcher(pattern);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            EXPECT_EQ(candidates[i] && matcher(rows[i]), matcher(rows[i]))
+                << pattern;
+        }
+    }
+    for (const std::string pattern :
+         {"a|timeout", "(?i:foo)|timeout", "(foo)?|timeout"}) {
+        EXPECT_FALSE(index->ShouldUseForOp(PatternOp::RegexMatch, pattern));
+        EXPECT_EQ(index->PatternMatch(pattern, PatternOp::RegexMatch).count(),
+                  rows.size());
     }
 }
 
