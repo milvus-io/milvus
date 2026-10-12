@@ -123,6 +123,35 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value1")
 	assertFieldPropertiesNotFound(t, ctx, core, dbName, collectionName, fieldName, "key2")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+
+	// A description-only edit preserves the existing field properties.
+	req := &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: "key1", Value: "value1"},
+			{Key: common.FieldDescriptionKey, Value: "updated description"},
+		},
+	}
+	resp, err = core.AlterCollectionField(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	require.NoError(t, err)
+	var description string
+	for _, field := range coll.Fields {
+		if field.Name == fieldName {
+			description = field.Description
+			break
+		}
+	}
+	require.Equal(t, "updated description", description)
+	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value1")
+
+	req.Properties[0].Value = "value2"
+	resp, err = core.AlterCollectionField(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value2")
 }
 
 func assertFieldPropertiesNotFound(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, fieldName string, key string) {
