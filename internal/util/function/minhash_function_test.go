@@ -64,8 +64,10 @@ func runMinHashTest(t *testing.T, texts []string, params map[string]string) []by
 	}
 	coll := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{Name: "text", FieldID: 100, DataType: schemapb.DataType_VarChar},
-		{Name: "signature", FieldID: 101, DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true,
-			TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: strconv.Itoa(numHashes * 32)}}},
+		{
+			Name: "signature", FieldID: 101, DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: strconv.Itoa(numHashes * 32)}},
+		},
 	}}
 	function := &schemapb.FunctionSchema{
 		Name: "minhash", Type: schemapb.FunctionType_MinHash,
@@ -143,10 +145,14 @@ func TestMinHashFunctionCharSignatures(t *testing.T) {
 	// Golden values from the independent Python xxHash/MT19937-64 reference
 	// previously compared through raw Query output in the client tests.
 	expected := [][]uint32{
-		{420291426, 316837721, 514581153, 1241663375, 22040188, 48408789, 553090275, 952986231,
-			147146527, 412698415, 183941347, 641178125, 1674576963, 342011049, 224130818, 224920081},
-		{821509702, 2131162617, 329166583, 241079645, 1586733937, 43573419, 606157031, 60037816,
-			1275287656, 34392379, 309094149, 901619182, 673753560, 381323488, 565331532, 1089662188},
+		{
+			420291426, 316837721, 514581153, 1241663375, 22040188, 48408789, 553090275, 952986231,
+			147146527, 412698415, 183941347, 641178125, 1674576963, 342011049, 224130818, 224920081,
+		},
+		{
+			821509702, 2131162617, 329166583, 241079645, 1586733937, 43573419, 606157031, 60037816,
+			1275287656, 34392379, 309094149, 901619182, 673753560, 381323488, 565331532, 1089662188,
+		},
 	}
 	data := runMinHashTest(t, []string{"hello world", "abcdefg"}, map[string]string{
 		SeedKey: "42", TokenLevelKey: "char", ShingleSizeKey: "3", NumHashesKey: "16",
