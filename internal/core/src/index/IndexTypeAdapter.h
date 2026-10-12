@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include <array>
 #include <string>
+#include <string_view>
 
 #include "common/JsonCastType.h"
 #include "common/Types.h"
@@ -56,6 +58,20 @@ struct AdaptedIndexType {
 
 AdaptedIndexType
 AdaptIndexType(const IndexTypeAdapterRequest& request);
+
+// Normalized build-contract keys Milvus writes for its own build families.
+// None of them is an engine parameter: knowhere forwards undeclared keys to
+// vanilla FAISS, which rejects unknown ones, so a builder removes them before
+// handing its params to an index engine.
+inline constexpr std::array<std::string_view, 5> kNormalizedBuildContractKeys{
+    "field_type", "value_type", "array_element_type", "nested", "is_nested"};
+
+inline void
+EraseNormalizedBuildContract(Config& params) {
+    for (const auto key : kNormalizedBuildContractKeys) {
+        params.erase(std::string(key));
+    }
+}
 
 // The cast a JSON index with this persisted index type and cast runs with.
 // AdaptIndexType writes it to JSON_CAST_TYPE; segment index registration must
