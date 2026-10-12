@@ -166,14 +166,19 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
 
 void
 PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    auto input = context.get_offset_input();
+    // Lazy offset readers must bind their mode before selecting an index.
+    // A prefetch worker may read this plain bool, so join it before writing.
+    if (input != nullptr && !prefetch_future_.has_value()) {
+        SetHasOffsetInput(true);
+    }
     WaitPrefetch();
+    SetHasOffsetInput(input != nullptr);
     tracer::AutoSpan span(
         "PhyUnaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));
     span.SetAttribute("op_type", static_cast<int>(expr_->op_type_));
 
-    auto input = context.get_offset_input();
-    SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
         data_type = expr_->column_.element_type_;

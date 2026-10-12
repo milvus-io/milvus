@@ -20,11 +20,13 @@
 
 #include "common/Schema.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanProto.h"
 #include "test_utils/GenExprProto.h"
+#include "exec/QueryContext.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -823,5 +825,61 @@ TEST(NgramExpressionTest, RegexAlternationMatchesRe2) {
                              proto::plan::OpType::RegexMatch,
                              expected,
                              /*forward_to_br=*/!test_case.ngram);
+    }
+}
+
+TEST(NgramExpressionTest, NativeOffsetsDoNotFetchNgram) {
+    const std::vector<std::string> rows{"abcdef", "xyz", "ab123"};
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = schema->AddDebugField("text", DataType::VARCHAR);
+    test::expr_index::RawFieldFiles raw_files;
+    auto field = test::expr_index::StringField(rows);
+    auto segment = CreateSealedSegment(schema);
+    segment->LoadFieldData(raw_files.Prepare(field_id, {field}));
+    auto opened = test::expr_index::BuildIndex(
+        field_id,
+        DataType::VARCHAR,
+        index::NGRAM_INDEX_TYPE,
+        {field},
+        {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
+    OpContext untouched;
+    OpContext* observed_pin = &untouched;
+    test::expr_index::InstallIndex(*segment,
+                                   field_id,
+                                   DataType::VARCHAR,
+                                   std::move(opened),
+                                   DataType::NONE,
+                                   &observed_pin);
+    proto::plan::GenericValue literal;
+    literal.set_string_val("ab%");
+    auto filter = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(field_id, DataType::VARCHAR),
+        proto::plan::OpType::Match,
+        literal);
+    exec::PhyUnaryRangeFilterExpr physical({},
+                                           filter,
+                                           "ngram-offset",
+                                           nullptr,
+                                           segment.get(),
+                                           rows.size(),
+                                           rows.size(),
+                                           0);
+    exec::QueryContext query_context(
+        "ngram-offset", segment.get(), rows.size(), MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    exec::OffsetVector offsets{2, 1, 0, 2};
+    exec::EvalCtx context(&exec_context, &offsets);
+    VectorPtr result;
+    physical.Eval(context, result);
+    EXPECT_EQ(physical.GetExecPath(), exec::ExprExecPath::RawData);
+    EXPECT_EQ(observed_pin, &untouched);
+    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(column, nullptr);
+    ASSERT_EQ(column->size(), offsets.size());
+    TargetBitmapView bits(column->GetRawData(), column->size());
+    TargetBitmapView valid(column->GetValidRawData(), column->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_TRUE(valid[i]);
+        EXPECT_EQ(bits[i], offsets[i] != 1);
     }
 }
