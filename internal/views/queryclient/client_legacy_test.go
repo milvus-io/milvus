@@ -224,7 +224,7 @@ func TestLegacyClientSearchReturnsUnconsumedStream(t *testing.T) {
 	openCount := 0
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 2, EnableReduceStream: true},
+		ViewQueryClientConfig{MaxRetries: 2, EnableReduceStream: true, ReduceStreamChunkBytes: 32},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardID.VChannel: legacySearchPlan(shardID, queryNode),
 		}},
