@@ -9,7 +9,7 @@ segment handles. Only Up accepts new tasks; Down does not become queryable.
 
 ## Configuration and renewal
 
-`queryView.leaseDuration` defaults to `60s` and is not refreshable.
+`queryView.leaseDuration` defaults to `5s` and is not refreshable.
 The duration is captured when the PChannel handler is created and inherited by
 its shard handlers. Non-positive durations disable timed retention while
 preserving active call references. A duration is not a maximum request execution
