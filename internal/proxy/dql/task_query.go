@@ -1166,12 +1166,13 @@ func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.Execut
 
 func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	legacy := t.viewQueryClient.Legacy()
+	allowStreaming := queryclient.SupportsQueryStream(t.RetrieveRequest)
 	request := &queryclient.LegacyQueryRequest{
 		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
-		BarrierMVCC: t.MvccTimestamp,
+		BarrierMVCC: t.MvccTimestamp, AllowStreaming: allowStreaming,
 	}
 
-	retryStreaming := len(t.queryViewPlans) == 0 && legacy.ReduceStreamEnabled() && queryclient.SupportsQueryStream(t.RetrieveRequest)
+	retryStreaming := len(t.queryViewPlans) == 0 && allowStreaming && legacy.ReduceStreamEnabled()
 	maxAttempts := 1
 	if retryStreaming {
 		maxAttempts = max(1, legacy.MaxRetries())
