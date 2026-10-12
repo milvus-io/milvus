@@ -27,6 +27,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
+#include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "index/vector/VectorBuilderUtils.h"
@@ -59,12 +60,14 @@ CountValidParents(int64_t logical_rows, ValidityView parent_validity) {
     return valid;
 }
 
+// knowhere reads the embedding-list layout from the dataset, so the build
+// config carries only the request's engine params.
 knowhere::Json
-PrepareBuildConfig(const knowhere::Json& build_params, bool embedding_list) {
+PrepareBuildConfig(const knowhere::Json& build_params) {
     auto config = build_params;
     config.erase(INSERT_FILES_KEY);
     config.erase(VEC_OPT_FIELDS);
-    config[EMB_LIST] = embedding_list;
+    EraseNormalizedBuildContract(config);
     return config;
 }
 
@@ -209,7 +212,7 @@ BuildIdMapOnly(KnowhereEngine& engine,
         dataset->SetIsSparse(true);
     }
     dataset->SetIdMapData(prepared.IdMapDataFor(logical_rows, true));
-    auto config = PrepareBuildConfig(build_params, prepared.embedding_list);
+    auto config = PrepareBuildConfig(build_params);
     const auto status =
         engine.native_index.Build(dataset, config, engine.UseBuildPool());
     if (status != knowhere::Status::success) {
@@ -487,8 +490,7 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
                 prepared.IdMapDataFor(input.logical_rows, true));
         }
 
-        auto config =
-            PrepareBuildConfig(build_params_, prepared.embedding_list);
+        auto config = PrepareBuildConfig(build_params_);
         const auto status =
             engine.native_index.Build(dataset, config, engine.UseBuildPool());
         if (status != knowhere::Status::success) {
@@ -547,7 +549,7 @@ VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
 
         AssertInfo(input.physical_rows > 0,
                    "non-empty interim vector input has no physical vectors");
-        auto config = PrepareBuildConfig(build_params_, false);
+        auto config = PrepareBuildConfig(build_params_);
 
         bool built = false;
         for (const auto chunk : input.physical_chunks) {
