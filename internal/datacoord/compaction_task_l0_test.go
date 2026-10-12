@@ -66,9 +66,8 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 		Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: deltaPath, EntriesNum: 3, MemorySize: 128}},
 	}}
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
-			require.Equal(t, basePath, base)
-			require.EqualValues(t, 7, version)
+		func(baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			require.Equal(t, oldManifest, baseManifest)
 			require.Equal(t, []packed.DeltaLogEntry{{Path: deltaPath, NumEntries: 3}}, updates.DeltaLogs)
 			return newManifest, nil
 		},
@@ -107,7 +106,7 @@ func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
 
 	var commitCount int
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(_ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+		func(_ string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
 			commitCount++
 			return newManifest, nil
 		},
@@ -307,13 +306,13 @@ func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
 	release := make(chan struct{})
 	var entered atomic.Int32
 	mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+		func(baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
 			if entered.Add(1) == targets {
 				close(release)
 			}
 			select {
 			case <-release:
-				return packed.MarshalManifestPath(base, version+1), nil
+				return advanceManifest(baseManifest, 1)
 			case <-time.After(30 * time.Second):
 				return "", errors.New("v3 manifest commits did not overlap; batch fan-out is serial")
 			}

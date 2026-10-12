@@ -328,7 +328,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
 					return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath())
 				}
-			} else if latest.GetManifestPath() != segment.GetManifestPath() {
+			} else if !packed.SameManifestPath(latest.GetManifestPath(), segment.GetManifestPath()) {
 				// A structured mutation was generated from the in-lock snapshot. The
 				// manifest lock serializes every framework writer, so a pointer that
 				// moved between that snapshot and this publication section can only
@@ -566,11 +566,7 @@ func commitManifestMutation(baseManifest string, commit SegmentManifestCommit) (
 		if commit.Mutation.Updates == nil {
 			return "", merr.WrapErrServiceInternalMsg("manifest updates are nil for segmentID=%d", commit.SegmentID)
 		}
-		basePath, version, err := packed.UnmarshalManifestPath(baseManifest)
-		if err != nil {
-			return "", merr.Wrap(err, "parse expected manifest")
-		}
-		manifestPath, err := packed.CommitManifestUpdates(basePath, version, commit.StorageConfig, commit.Mutation.Updates)
+		manifestPath, err := packed.CommitManifestUpdates(baseManifest, commit.StorageConfig, commit.Mutation.Updates)
 		if err != nil {
 			return "", merr.Wrap(err, "commit segment manifest")
 		}
@@ -660,7 +656,7 @@ func staleSegmentManifestError(segmentID int64, expected, current string) error 
 }
 
 func matchesExpectedManifest(expected, current string) bool {
-	return expected == "" || expected == current
+	return expected == "" || packed.SameManifestPath(expected, current)
 }
 
 // validateExpectedManifestUsage enforces the CAS contract described on
@@ -1039,7 +1035,7 @@ func (m *meta) publishSegmentManifestOperator(prepared preparedSegmentManifest) 
 			if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
 				return modPack.fail(staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath()))
 			}
-		} else if latest.GetManifestPath() != prepared.baseManifest {
+		} else if !packed.SameManifestPath(latest.GetManifestPath(), prepared.baseManifest) {
 			// Same rule as CommitSegmentManifest: the pointer moved since the stage-2
 			// snapshot, so an out-of-lock writer advanced it during manifest I/O and
 			// the prepared revision does not contain that revision's contents. Abort

@@ -57,12 +57,22 @@ func addV3Segment(t *testing.T, meta *meta, segmentID int64, basePath string, ve
 	})))
 }
 
+// advanceManifest returns the revision n versions after baseManifest, the way a
+// mocked loon transaction publishes onto the base it was handed.
+func advanceManifest(baseManifest string, n int64) (string, error) {
+	base, version, err := packed.UnmarshalManifestPath(baseManifest)
+	if err != nil {
+		return "", err
+	}
+	return packed.MarshalManifestPath(base, version+n), nil
+}
+
 // bumpVersionMock mocks the loon transaction to return the next revision of the
 // base it was handed, so each segment advances independently and deterministically.
 func bumpVersionMock() *mockey.Mocker {
 	return mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
-			return packed.MarshalManifestPath(base, version+1), nil
+		func(baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			return advanceManifest(baseManifest, 1)
 		},
 	).Build()
 }
@@ -315,10 +325,10 @@ func TestCommitSegmentManifestsAbortsWhenPointerAdvancesDuringManifestIO(t *test
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
 	mock := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+		func(baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
 			entered <- struct{}{}
 			<-release
-			return packed.MarshalManifestPath(base, version+2), nil
+			return advanceManifest(baseManifest, 2)
 		},
 	).Build()
 	defer mock.UnPatch()

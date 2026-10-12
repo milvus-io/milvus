@@ -41,6 +41,57 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// A re-report of the current revision in another spelling (sorted keys, extra
+// fields) must not rewrite the pointer: exact-text comparisons downstream
+// would see a phantom manifest change.
+func TestUpdateManifestKeepsPointerForSameRevision(t *testing.T) {
+	const segmentID = 230
+	basePath := "/tmp/milvus/insert_log/1/10/230"
+	current := packed.MarshalManifestPath(basePath, 4)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   current,
+	})))
+
+	respelled := `{"base_path":"/tmp/milvus/insert_log/1/10/230","size":1024,"ver":4}`
+	require.NoError(t, meta.UpdateSegmentsInfo(context.Background(), UpdateManifest(segmentID, respelled)))
+	require.Equal(t, current, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+
+	next := packed.MarshalManifestPath(basePath, 5)
+	require.NoError(t, meta.UpdateSegmentsInfo(context.Background(), UpdateManifest(segmentID, next)))
+	require.Equal(t, next, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+}
+
+// The Noop CAS pins a revision, so a caller holding another spelling of the
+// current revision still publishes.
+func TestCommitSegmentManifestMatchesExpectedManifestByRevision(t *testing.T) {
+	const segmentID = 231
+	basePath := "/tmp/milvus/insert_log/1/10/231"
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(basePath, 4),
+	})))
+
+	next := packed.MarshalManifestPath(basePath, 5)
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:        segmentID,
+		ExpectedManifest: `{"base_path":"/tmp/milvus/insert_log/1/10/231","ver":4}`,
+		Mutation: ManifestMutation{
+			Type:         ManifestMutationNoop,
+			ManifestPath: next,
+		},
+	}))
+	require.Equal(t, next, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+}
+
 func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
@@ -55,9 +106,8 @@ func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
 	})))
 
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
-			require.Equal(t, basePath, base)
-			require.EqualValues(t, 7, version)
+		func(baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			require.Equal(t, oldManifest, baseManifest)
 			require.Len(t, updates.DeltaLogs, 1)
 			return newManifest, nil
 		},
@@ -239,10 +289,10 @@ func TestCommitSegmentManifestDoesNotSerializeDifferentSegmentsDuringManifestIO(
 	entered := make(chan string, 2)
 	release := make(chan struct{})
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
-			entered <- base
+		func(baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			entered <- baseManifest
 			<-release
-			return packed.MarshalManifestPath(base, version+1), nil
+			return advanceManifest(baseManifest, 1)
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -296,7 +346,7 @@ func TestCommitSegmentManifestRebasesCatalogMutationAfterManifestIO(t *testing.T
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+		func(string, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
 			close(entered)
 			<-release
 			return newManifest, nil
@@ -347,10 +397,10 @@ func TestCommitSegmentManifestFailsStaleWhenPointerAdvancesDuringManifestIO(t *t
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+		func(baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
 			close(entered)
 			<-release
-			return packed.MarshalManifestPath(base, version+2), nil
+			return advanceManifest(baseManifest, 2)
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -473,13 +523,17 @@ func TestCommitSegmentManifestSerializesSameSegment(t *testing.T) {
 	release := make(chan struct{})
 	var once sync.Once
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+		func(baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			_, version, err := packed.UnmarshalManifestPath(baseManifest)
+			if err != nil {
+				return "", err
+			}
 			versions <- version
 			once.Do(func() {
 				close(firstEntered)
 				<-release
 			})
-			return packed.MarshalManifestPath(base, version+1), nil
+			return advanceManifest(baseManifest, 1)
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -690,11 +744,10 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 	}))
 
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+		func(baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			// The transaction opens at the segment's currently published
 			// revision, not at whatever revision the build was issued against.
-			require.Equal(t, basePath, base)
-			require.EqualValues(t, 3, version)
+			require.Equal(t, oldManifest, baseManifest)
 			require.Len(t, updates.Indexes, 1)
 			require.EqualValues(t, indexID, updates.Indexes[0].IndexID)
 			return newManifest, nil
@@ -791,7 +844,7 @@ func TestCommitSegmentManifestRejectsStaleIndexTaskProjection(t *testing.T) {
 
 	manifestCalls := 0
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+		func(string, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
 			manifestCalls++
 			return packed.MarshalManifestPath(basePath, 4), nil
 		},
@@ -934,9 +987,8 @@ func TestCommitSegmentManifestRemovesSegmentIndexWithRetraction(t *testing.T) {
 	}))
 
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
-			require.Equal(t, basePath, base)
-			require.EqualValues(t, 3, version)
+		func(baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			require.Equal(t, oldManifest, baseManifest)
 			require.Len(t, updates.DropIndexes, 1)
 			require.EqualValues(t, indexID, updates.DropIndexes[0].IndexID)
 			return newManifest, nil
@@ -1111,7 +1163,7 @@ func TestCommitSegmentManifestRejectsAmbiguousSegmentIndexBatchBeforeManifestIO(
 			require.NoError(t, err)
 			manifestCalls := 0
 			commitManifest := mockey.Mock(packed.CommitManifestUpdates).To(
-				func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+				func(string, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
 					manifestCalls++
 					return "", nil
 				}).Build()

@@ -897,70 +897,76 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.talon_enable_for_external_table};
 }
 
+std::optional<std::pair<std::string, int64_t>>
+ParseLoonManifestPath(const std::string& path) {
+    auto j = json::parse(path, nullptr, /*allow_exceptions=*/false);
+    if (j.is_discarded() || !j.is_object()) {
+        return std::nullopt;
+    }
+    auto base_path = j.find("base_path");
+    auto ver = j.find("ver");
+    if (base_path == j.end() || !base_path->is_string() || ver == j.end() ||
+        !ver->is_number_integer()) {
+        return std::nullopt;
+    }
+    return std::make_pair(base_path->get<std::string>(), ver->get<int64_t>());
+}
+
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<milvus_storage::api::Properties>& properties) {
-    try {
-        // Parse the JSON string
-        json j = json::parse(path);
-
-        // Extract base_path & version
-        std::string base_path = j.at("base_path").get<std::string>();
-        int64_t version = j.at("ver").get<int64_t>();
-
-        auto fs_result =
-            milvus_storage::FilesystemCache::getInstance().get(*properties);
-        if (!fs_result.ok()) {
-            auto error = milvus_storage::ToSegcoreError(fs_result.status());
-            ThrowInfo(error.get_error_code(),
-                      "Failed to get filesystem: {}",
-                      error.what());
-        }
-        auto fs = std::move(fs_result.ValueOrDie());
-
-        auto transaction_result =
-            milvus_storage::api::transaction::Transaction::Open(
-                fs,
-                base_path,
-                version,
-                milvus_storage::api::transaction::FailResolver,
-                1);
-        if (!transaction_result.ok()) {
-            auto error =
-                milvus_storage::ToSegcoreError(transaction_result.status());
-            ThrowInfo(error.get_error_code(),
-                      "Failed to open transaction: {}",
-                      error.what());
-        }
-        auto transaction = std::move(transaction_result.ValueOrDie());
-        auto manifest_result = transaction->GetManifest();
-        if (!manifest_result.ok()) {
-            auto error =
-                milvus_storage::ToSegcoreError(manifest_result.status());
-            ThrowInfo(error.get_error_code(),
-                      "Failed to get manifest: {}",
-                      error.what());
-        }
-        auto current_manifest = manifest_result.ValueOrDie();
-        return current_manifest;
-    } catch (const json::parse_error& e) {
+    auto revision = ParseLoonManifestPath(path);
+    if (!revision.has_value()) {
         ThrowInfo(milvus::ErrorCode::DataFormatBroken,
-                  "{}",
-                  std::string(std::string("Failed to parse manifest JSON: ") +
-                              e.what()));
-    } catch (const json::out_of_range& e) {
-        ThrowInfo(
-            milvus::ErrorCode::DataFormatBroken,
-            "{}",
-            std::string(std::string("Missing required field in manifest: ") +
-                        e.what()));
-    } catch (const json::type_error& e) {
-        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
-                  "{}",
-                  std::string(std::string("Invalid field type in manifest: ") +
-                              e.what()));
+                  "Invalid manifest path: {}",
+                  path);
     }
+    const auto& [base_path, version] = *revision;
+
+    auto fs_result =
+        milvus_storage::FilesystemCache::getInstance().get(*properties);
+    if (!fs_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(fs_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "Failed to get filesystem: {}",
+                  error.what());
+    }
+    auto fs = std::move(fs_result.ValueOrDie());
+
+    auto transaction_result =
+        milvus_storage::api::transaction::Transaction::Open(
+            fs,
+            base_path,
+            version,
+            milvus_storage::api::transaction::FailResolver,
+            1);
+    if (!transaction_result.ok()) {
+        auto error =
+            milvus_storage::ToSegcoreError(transaction_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "Failed to open transaction: {}",
+                  error.what());
+    }
+    auto transaction = std::move(transaction_result.ValueOrDie());
+    auto manifest_result = transaction->GetManifest();
+    if (!manifest_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(manifest_result.status());
+        ThrowInfo(
+            error.get_error_code(), "Failed to get manifest: {}", error.what());
+    }
+    return manifest_result.ValueOrDie();
+}
+
+bool
+IsSameLoonManifestPath(const std::string& lhs, const std::string& rhs) {
+    if (lhs == rhs) {
+        return true;
+    }
+    auto lhs_revision = ParseLoonManifestPath(lhs);
+    auto rhs_revision = ParseLoonManifestPath(rhs);
+    return lhs_revision.has_value() && rhs_revision.has_value() &&
+           *lhs_revision == *rhs_revision;
 }
 
 // ==================== C-ABI: external spec injection ====================

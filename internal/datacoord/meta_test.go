@@ -2289,6 +2289,46 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.EqualValues(5, got.GetInsertBinlogCount())
 	})
 
+	suite.Run("replay naming the current revision in another spelling stays a replay", func() {
+		// The result names the current revision with reordered JSON keys, so it is
+		// the adoption that already persisted: it must not add the stats increment
+		// again, rewrite the pointer text, or bump DataVersion.
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		old.SchemaVersion = 3
+		old.DataVersion = 7
+		old.Stats = &datapb.Statistics{InsertBinlogSize: 1024, InsertBinlogCount: 1}
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:      1,
+				NumOfRows:      5,
+				Manifest:       `{"base_path":"/data/segments/1","ver":12}`,
+				BaseManifest:   packed.MarshalManifestPath("/data/segments/1", 10),
+				StorageVersion: storage.StorageV3,
+				Stats:          &datapb.Statistics{InsertBinlogSize: 768, InsertBinlogCount: 2},
+			}},
+		}
+		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+		suite.Equal(currentManifest, infos[0].GetManifestPath())
+		suite.EqualValues(1024, infos[0].GetStats().GetInsertBinlogSize())
+		suite.EqualValues(1, infos[0].GetStats().GetInsertBinlogCount())
+		suite.EqualValues(7, infos[0].GetDataVersion())
+	})
+
 	suite.Run("in-place result atomically merges ordinary and function-output column groups", func() {
 		// The compactor ships only the groups this run wrote, so the receiver
 		// must upsert them: the live Binlogs keeps the complete column set and

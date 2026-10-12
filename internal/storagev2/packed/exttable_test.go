@@ -263,26 +263,23 @@ func TestAppendSegmentManifestColumnsUsesCommitManifestUpdates(t *testing.T) {
 	mockRead := mockey.Mock(readColumnGroupsFromManifest).Return(nil, nil).Build()
 	defer mockRead.UnPatch()
 
-	var gotBasePath string
-	var gotVersion int64
+	var gotBaseManifest string
 	var gotAddNewColumnGroups bool
 	mockCommit := mockey.Mock(CommitManifestUpdates).
-		To(func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
-			gotBasePath = basePath
-			gotVersion = baseVersion
+		To(func(baseManifest string, storageConfig *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
+			gotBaseManifest = baseManifest
 			cgs, ok := updates.NewFiles.(*ColumnGroups)
 			require.True(t, ok)
 			require.NotNil(t, cgs.cColumnGroups)
 			gotAddNewColumnGroups = cgs.addNewColumnGroups
-			return MarshalManifestPath(basePath, baseVersion+1), nil
+			return MarshalManifestPath("segment", 4), nil
 		}).Build()
 	defer mockCommit.UnPatch()
 
 	got, err := AppendSegmentManifestColumns(ctx, oldManifestPath, "parquet", []string{"score"}, fragments, config)
 	require.NoError(t, err)
 	assert.Equal(t, MarshalManifestPath("segment", 4), got)
-	assert.Equal(t, "segment", gotBasePath)
-	assert.Equal(t, int64(3), gotVersion)
+	assert.Equal(t, oldManifestPath, gotBaseManifest)
 	assert.True(t, gotAddNewColumnGroups)
 }
 
@@ -331,8 +328,8 @@ func TestAppendSegmentManifestColumnsReadAndNoopPaths(t *testing.T) {
 	mockReadParse := mockey.Mock(readColumnGroupsFromManifest).Return(nil, nil).Build()
 	_, err = AppendSegmentManifestColumns(context.Background(), "not-json", "parquet", []string{"score"}, fragments, config)
 	mockReadParse.UnPatch()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse manifest path")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Contains(t, err.Error(), "parse base manifest path")
 }
 
 func TestFileInfo_Struct(t *testing.T) {
@@ -822,6 +819,29 @@ func TestMarshalManifestPath_EmptyBasePath(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "", basePath)
 	assert.Equal(t, int64(0), ver)
+}
+
+func TestManifestPathKey(t *testing.T) {
+	canonical := MarshalManifestPath("files/insert_log/1/2/3", 7)
+	// The C++ milvus-table writer emits nlohmann's sorted keys, and a newer
+	// writer may add optional fields; neither changes the revision.
+	reordered := `{"base_path":"files/insert_log/1/2/3","ver":7}`
+	extended := `{"ver":7,"base_path":"files/insert_log/1/2/3","size":1024}`
+
+	assert.Equal(t, canonical, ManifestPathKey(canonical))
+	assert.Equal(t, canonical, ManifestPathKey(reordered))
+	assert.Equal(t, canonical, ManifestPathKey(extended))
+	assert.True(t, SameManifestPath(reordered, extended))
+
+	assert.False(t, SameManifestPath(canonical, MarshalManifestPath("files/insert_log/1/2/3", 8)))
+	assert.False(t, SameManifestPath(canonical, MarshalManifestPath("files/insert_log/1/2/4", 7)))
+
+	// Values that are not manifest paths, such as external table files, are
+	// their own key.
+	for _, raw := range []string{"", "s3://bucket/data/part-0.parquet", "{not json", `{"ver":1}`} {
+		assert.Equal(t, raw, ManifestPathKey(raw))
+	}
+	assert.False(t, SameManifestPath("s3://bucket/a.parquet", "s3://bucket/b.parquet"))
 }
 
 func TestCreateSegmentManifestWithBasePath_CanceledContext(t *testing.T) {

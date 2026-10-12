@@ -40,9 +40,37 @@
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
+#include "storage/loon_ffi/util.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
+
+TEST(LoonManifestPathTest, IsSameLoonManifestPathComparesRevision) {
+    const std::string manifest = R"({"ver":3,"base_path":"files/b"})";
+    EXPECT_TRUE(IsSameLoonManifestPath(manifest, manifest));
+    EXPECT_TRUE(IsSameLoonManifestPath(
+        manifest, R"({"base_path":"files/b","size":1024,"ver":3})"));
+    EXPECT_FALSE(
+        IsSameLoonManifestPath(manifest, R"({"ver":4,"base_path":"files/b"})"));
+    EXPECT_FALSE(
+        IsSameLoonManifestPath(manifest, R"({"ver":3,"base_path":"files/c"})"));
+    EXPECT_FALSE(IsSameLoonManifestPath(
+        manifest, R"({"ver":"3","base_path":"files/b"})"));
+    // Values that are not manifest path JSON compare as plain strings.
+    EXPECT_TRUE(IsSameLoonManifestPath("/path/a", "/path/a"));
+    EXPECT_FALSE(IsSameLoonManifestPath("/path/a", "/path/b"));
+}
+
+TEST(LoonManifestPathTest, ParseLoonManifestPathRequiresBasePathAndVersion) {
+    auto revision = ParseLoonManifestPath(R"({"base_path":"files/b","ver":3})");
+    ASSERT_TRUE(revision.has_value());
+    EXPECT_EQ(revision->first, "files/b");
+    EXPECT_EQ(revision->second, 3);
+    EXPECT_FALSE(
+        ParseLoonManifestPath(R"({"base_path":"files/b"})").has_value());
+    EXPECT_FALSE(ParseLoonManifestPath(R"({"ver":3})").has_value());
+    EXPECT_FALSE(ParseLoonManifestPath("/path/a").has_value());
+}
 
 class SegmentLoadInfoTest : public ::testing::Test {
  protected:
@@ -461,6 +489,62 @@ TEST_F(SegmentLoadInfoTest,
                         diff.fields_to_fill_default.end(),
                         FieldId(102)),
               diff.fields_to_fill_default.end());
+}
+
+// A manifest path names a revision by base_path and ver. Another producer's
+// spelling of the same revision (sorted keys, optional fields) must not be
+// treated as a manifest change.
+TEST_F(SegmentLoadInfoTest, ComputeDiffComparesManifestRevision) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    current_proto.set_manifest_path(
+        R"({"ver":3,"base_path":"files/insert_log/1/2/100"})");
+    auto same_proto = current_proto;
+    same_proto.set_manifest_path(
+        R"({"base_path":"files/insert_log/1/2/100","size":1024,"ver":3})");
+    auto next_proto = current_proto;
+    next_proto.set_manifest_path(
+        R"({"ver":4,"base_path":"files/insert_log/1/2/100"})");
+
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    SegmentLoadInfo current_info(current_proto, schema_);
+    current_info.SetColumnGroupsForTesting(column_groups);
+    SegmentLoadInfo same_info(same_proto, schema_);
+    same_info.SetColumnGroupsForTesting(column_groups);
+    SegmentLoadInfo next_info(next_proto, schema_);
+    next_info.SetColumnGroupsForTesting(column_groups);
+
+    EXPECT_FALSE(current_info.ComputeDiff(same_info).manifest_updated);
+    auto diff = current_info.ComputeDiff(next_info);
+    EXPECT_TRUE(diff.manifest_updated);
+    EXPECT_EQ(diff.new_manifest_path, next_proto.manifest_path());
+}
+
+TEST_F(SegmentLoadInfoTest, InheritCachedColumnGroupsBySameManifestRevision) {
+    proto::segcore::SegmentLoadInfo source_proto;
+    source_proto.set_manifest_path(
+        R"({"ver":3,"base_path":"files/insert_log/1/2/100"})");
+    SegmentLoadInfo source(source_proto, schema_);
+    auto group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    group->columns = {"101"};
+    source.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>(
+            milvus_storage::api::ColumnGroups{group}));
+
+    auto same_proto = source_proto;
+    same_proto.set_manifest_path(
+        R"({"base_path":"files/insert_log/1/2/100","ver":3})");
+    SegmentLoadInfo same(same_proto, schema_);
+    same.InheritCachedColumnGroupsFrom(source);
+    EXPECT_TRUE(same.HasManifestColumn("101"));
+
+    auto next_proto = source_proto;
+    next_proto.set_manifest_path(
+        R"({"ver":4,"base_path":"files/insert_log/1/2/100"})");
+    SegmentLoadInfo next(next_proto, schema_);
+    next.InheritCachedColumnGroupsFrom(source);
+    EXPECT_FALSE(next.HasManifestColumn("101"));
 }
 
 TEST_F(SegmentLoadInfoTest,

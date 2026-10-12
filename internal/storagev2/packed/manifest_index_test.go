@@ -55,7 +55,7 @@ func TestCommitManifestUpdates_IndexRoundTrip(t *testing.T) {
 	basePath := path.Join(cfg.GetRootPath(), "commit_index_roundtrip/seg1")
 	indexPrefix := path.Join(cfg.GetRootPath(), "index_v1/1/2/3/500/1")
 
-	committed, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	committed, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, indexPrefix, 10, 500)},
 	})
 	require.NoError(t, err)
@@ -94,14 +94,12 @@ func TestCommitManifestUpdates_IndexRepublishReplaces(t *testing.T) {
 	firstPrefix := path.Join(cfg.GetRootPath(), "index_v1/1/2/3/500/1")
 	secondPrefix := path.Join(cfg.GetRootPath(), "index_v1/1/2/3/501/2")
 
-	first, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	first, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, firstPrefix, 10, 500)},
 	})
 	require.NoError(t, err)
-	_, version, err := UnmarshalManifestPath(first)
-	require.NoError(t, err)
 
-	second, err := CommitManifestUpdates(basePath, version, cfg, &ManifestUpdates{
+	second, err := CommitManifestUpdates(first, cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, secondPrefix, 10, 501)},
 	})
 	require.NoError(t, err)
@@ -117,20 +115,18 @@ func TestCommitManifestUpdates_DropIndex(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	basePath := path.Join(cfg.GetRootPath(), "commit_index_drop/seg1")
 
-	published, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	published, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{
 			indexEntry(t, basePath, path.Join(cfg.GetRootPath(), "index_v1/1/2/3/500/1"), 10, 500),
 			indexEntry(t, basePath, path.Join(cfg.GetRootPath(), "index_v1/1/2/3/600/1"), 11, 600),
 		},
 	})
 	require.NoError(t, err)
-	_, version, err := UnmarshalManifestPath(published)
-	require.NoError(t, err)
 
 	t.Run("rejects a build the manifest no longer holds", func(t *testing.T) {
 		// GC collected build 499's metadata; a rebuild already published 500
 		// under the same index. Dropping by index_id would delete the live one.
-		_, err := CommitManifestUpdates(basePath, version, cfg, &ManifestUpdates{
+		_, err := CommitManifestUpdates(published, cfg, &ManifestUpdates{
 			DropIndexes: []DropIndexEntry{{IndexID: 10, ExpectedBuildID: 499}},
 		})
 		require.Error(t, err)
@@ -138,16 +134,17 @@ func TestCommitManifestUpdates_DropIndex(t *testing.T) {
 
 	t.Run("absent index is a no-op, not an empty commit", func(t *testing.T) {
 		// loon refuses a transaction with zero staged ops, so a retry of an
-		// already-completed drop must not open one.
-		got, err := CommitManifestUpdates(basePath, version, cfg, &ManifestUpdates{
+		// already-completed drop must not open one, and the unchanged pointer
+		// comes back verbatim.
+		got, err := CommitManifestUpdates(published, cfg, &ManifestUpdates{
 			DropIndexes: []DropIndexEntry{{IndexID: 99, ExpectedBuildID: 999}},
 		})
 		require.NoError(t, err)
-		require.Equal(t, MarshalManifestPath(basePath, version), got)
+		require.Equal(t, published, got)
 	})
 
 	t.Run("drops only the matching index", func(t *testing.T) {
-		got, err := CommitManifestUpdates(basePath, version, cfg, &ManifestUpdates{
+		got, err := CommitManifestUpdates(published, cfg, &ManifestUpdates{
 			DropIndexes: []DropIndexEntry{{IndexID: 10, ExpectedBuildID: 500}},
 		})
 		require.NoError(t, err)

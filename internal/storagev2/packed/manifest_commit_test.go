@@ -11,6 +11,7 @@
 package packed
 
 import (
+	"fmt"
 	"path"
 	"testing"
 
@@ -22,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -43,10 +45,13 @@ func manifestTestStorageConfig(t *testing.T) *indexpb.StorageConfig {
 
 // TestCommitManifestUpdates_EmptyShortCircuit verifies that an empty
 // ManifestUpdates returns the unchanged manifest path without opening a
-// loon transaction (and therefore without bumping the version).
+// loon transaction (and therefore without bumping the version). The path comes
+// back verbatim rather than re-marshaled, so a pointer spelled differently from
+// MarshalManifestPath keeps its exact text.
 func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	basePath := path.Join(cfg.RootPath, "commit_empty_test/seg1")
+	baseManifest := fmt.Sprintf(`{"base_path":%q,"ver":%d}`, basePath, ManifestEarliest)
 
 	cases := []struct {
 		name string
@@ -58,12 +63,23 @@ func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, tc.u)
+			got, err := CommitManifestUpdates(baseManifest, cfg, tc.u)
 			require.NoError(t, err)
-			require.Equal(t, MarshalManifestPath(basePath, ManifestEarliest), got,
-				"empty updates must return the unchanged manifest path")
+			require.Equal(t, baseManifest, got,
+				"empty updates must return the unchanged manifest path verbatim")
 		})
 	}
+}
+
+// TestCommitManifestUpdates_InvalidBaseManifest verifies that a base pointer
+// that is not a manifest path is reported as corrupt metadata before any
+// transaction is opened.
+func TestCommitManifestUpdates_InvalidBaseManifest(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	_, err := CommitManifestUpdates("not a manifest path", cfg, &ManifestUpdates{
+		DeltaLogs: []DeltaLogEntry{{Path: "delta/1", NumEntries: 1}},
+	})
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
 // TestCommitManifestUpdates_StatsOnly exercises the stats-without-inserts
@@ -76,7 +92,7 @@ func TestCommitManifestUpdates_StatsOnly(t *testing.T) {
 	statPath := path.Join(basePath, "_stats/bloom_filter.100/1")
 	require.NoError(t, WriteFile(cfg, statPath, []byte("bloom-blob")))
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Stats: []StatEntry{{
 			Key:      "bloom_filter.100",
 			Files:    []string{statPath},
@@ -107,7 +123,7 @@ func TestStatsBinlogSizeFromManifest(t *testing.T) {
 	require.NoError(t, WriteFile(cfg, bm25Path, []byte("bm25-blob")))
 	require.NoError(t, WriteFile(cfg, textPath, []byte("text-blob")))
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Stats: []StatEntry{
 			{Key: "bloom_filter.100", Files: []string{bloomPath}, Metadata: map[string]string{"memory_size": "10"}},
 			{Key: "bm25.101", Files: []string{bm25Path}, Metadata: map[string]string{"memory_size": "20"}},
@@ -137,7 +153,7 @@ func TestCommitManifestUpdates_DeltaOnly(t *testing.T) {
 	deltaPath := path.Join(basePath, "_delta/delta-1")
 	require.NoError(t, WriteFile(cfg, deltaPath, []byte("delta-payload")))
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		DeltaLogs: []DeltaLogEntry{{Path: deltaPath, NumEntries: 7}},
 	})
 	require.NoError(t, err)
@@ -191,7 +207,7 @@ func TestCommitManifestUpdates_AllSections(t *testing.T) {
 	deltaPath := path.Join(basePath, "_delta/delta-1")
 	require.NoError(t, WriteFile(cfg, deltaPath, []byte("delta-payload")))
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		NewFiles:  out,
 		DeltaLogs: []DeltaLogEntry{{Path: deltaPath, NumEntries: 4}},
 		Stats: []StatEntry{{
@@ -244,7 +260,7 @@ func TestCommitManifestUpdates_AddNewColumnGroups(t *testing.T) {
 	require.True(t, cgs.addNewColumnGroups,
 		"AsNewColumnGroups should propagate into ColumnGroups handle")
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg,
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg,
 		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	_, version, err := UnmarshalManifestPath(got)
@@ -276,7 +292,7 @@ func TestCommitManifestUpdates_AddEmptyColumnGroup(t *testing.T) {
 	out, err := w.Close()
 	require.NoError(t, err)
 	defer out.Destroy()
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	fields, err := GetManifestFieldIDs(manifest, cfg)

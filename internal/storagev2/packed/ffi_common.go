@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -445,6 +446,27 @@ func CompareManifestPath(a, b string) (int, error) {
 	default:
 		return 0, nil
 	}
+}
+
+// ManifestPathKey returns the identity of a manifest path: its base path and
+// version. Spellings of the same revision (JSON key order, optional fields)
+// share one key, so compare and index manifest paths by this key rather than
+// by their text. A value that is not a manifest path, such as an external
+// table file path, is returned unchanged.
+func ManifestPathKey(path string) string {
+	if !strings.HasPrefix(path, "{") {
+		return path
+	}
+	basePath, version, err := UnmarshalManifestPath(path)
+	if err != nil || basePath == "" {
+		return path
+	}
+	return MarshalManifestPath(basePath, version)
+}
+
+// SameManifestPath reports whether two manifest paths name the same revision.
+func SameManifestPath(a, b string) bool {
+	return a == b || ManifestPathKey(a) == ManifestPathKey(b)
 }
 
 // LobFileInfo represents metadata for a LOB (Large Object) file.

@@ -558,12 +558,16 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 	s := &fakeManifestStore{revisions: make(map[string][]packed.ManifestIndexInfo)}
 
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(basePath string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+		func(baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			published, err := advanceManifest(baseManifest, 1)
+			if err != nil {
+				return "", err
+			}
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			s.commitCount++
 			// A revision is a full snapshot resolved onto the one it opens at.
-			current := s.revisions[packed.MarshalManifestPath(basePath, version)]
+			current := s.revisions[baseManifest]
 			next := make([]packed.ManifestIndexInfo, 0, len(current)+len(updates.Indexes))
 			for _, entry := range current {
 				dropped := false
@@ -578,7 +582,6 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 				}
 			}
 			next = append(next, updates.Indexes...)
-			published := packed.MarshalManifestPath(basePath, version+1)
 			s.revisions[published] = next
 			return published, nil
 		}).Build()

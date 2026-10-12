@@ -85,11 +85,14 @@ type manifestColumnGroup struct {
 	Format    string
 }
 
+// FragmentIdentity identifies a fragment by its file and row range.
 // External-table refresh assumes existing file ranges are immutable; overwrite
 // is unsupported. Properties are preserved for reads, but are deliberately not
-// hashed into fragment identity.
-func fragmentIdentity(f Fragment) string {
-	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
+// hashed into fragment identity. A milvus-table fragment's file is a source
+// segment manifest path, which is identified by its revision rather than its
+// spelling (see ManifestPathKey).
+func FragmentIdentity(f Fragment) string {
+	return fmt.Sprintf("%s:%d:%d", ManifestPathKey(f.FilePath), f.StartRow, f.EndRow)
 }
 
 func sameFragmentSet(a, b []Fragment) bool {
@@ -99,10 +102,10 @@ func sameFragmentSet(a, b []Fragment) bool {
 
 	seen := make(map[string]int, len(a))
 	for _, fragment := range a {
-		seen[fragmentIdentity(fragment)]++
+		seen[FragmentIdentity(fragment)]++
 	}
 	for _, fragment := range b {
-		identity := fragmentIdentity(fragment)
+		identity := FragmentIdentity(fragment)
 		if seen[identity] == 0 {
 			return false
 		}
@@ -117,7 +120,7 @@ func manifestColumnGroupsToFragments(groups []manifestColumnGroup) []Fragment {
 
 	for _, group := range groups {
 		for _, fragment := range group.Fragments {
-			identity := fragmentIdentity(fragment)
+			identity := FragmentIdentity(fragment)
 			if _, ok := seen[identity]; ok {
 				continue
 			}
@@ -838,11 +841,6 @@ func AppendSegmentManifestColumns(
 		return oldManifestPath, nil
 	}
 
-	basePath, version, err := UnmarshalManifestPath(oldManifestPath)
-	if err != nil {
-		return "", merr.Wrap(err, "failed to parse manifest path")
-	}
-
 	columnGroups, err := createColumnGroups(columns, format, fragments)
 	if err != nil {
 		return "", merr.Wrap(err, "failed to create column groups")
@@ -861,7 +859,7 @@ func AppendSegmentManifestColumns(
 		return "", merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", columnGroups.num_of_column_groups)
 	}
 
-	return CommitManifestUpdates(basePath, version, storageConfig, &ManifestUpdates{
+	return CommitManifestUpdates(oldManifestPath, storageConfig, &ManifestUpdates{
 		NewFiles: newFiles,
 	})
 }

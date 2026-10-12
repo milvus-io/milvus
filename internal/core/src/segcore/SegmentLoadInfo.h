@@ -800,14 +800,9 @@ class SegmentLoadInfo {
     HasManifestColumn(const std::string& column_name) const;
 
     // Reuses manifest column groups when another load info points at the same
-    // manifest path.
+    // manifest revision.
     void
-    InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source) {
-        if (source.HasManifestPath() &&
-            source.GetManifestPath() == GetManifestPath()) {
-            column_groups_ = source.column_groups_;
-        }
-    }
+    InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source);
 
     /**
      * @brief Pre-populate the column group cache without parsing a manifest

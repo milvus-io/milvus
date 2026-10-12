@@ -47,7 +47,7 @@ func TestExternalFilePropertiesRoundTrip(t *testing.T) {
 			config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
 			exploreBase := filepath.Join(dir, "explore")
 			filePath := filepath.Join(dir, "source.parquet")
-			exploreManifest, err := CommitManifestUpdates(exploreBase, ManifestEarliest, config, &ManifestUpdates{
+			exploreManifest, err := CommitManifestUpdates(MarshalManifestPath(exploreBase, ManifestEarliest), config, &ManifestUpdates{
 				ColumnGroups: []ColumnGroupEntry{{
 					Columns: []string{"id"}, Format: tc.format,
 					Files: []ColumnGroupFileEntry{{Path: filePath, StartIndex: 0, EndIndex: 4, Properties: tc.properties}},
@@ -137,7 +137,7 @@ func createBaseManifest(t *testing.T, basePath string, storageConfig *indexpb.St
 	require.NoError(t, err)
 	defer out.Destroy()
 
-	manifestPath, err := CommitManifestUpdates(basePath, ManifestEarliest, storageConfig,
+	manifestPath, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), storageConfig,
 		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	return manifestPath

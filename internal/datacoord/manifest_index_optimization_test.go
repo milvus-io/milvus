@@ -121,7 +121,7 @@ func TestManifestLastIndexDropClearsMarkerAtomically(t *testing.T) {
 		require.NoError(t, err)
 		return packed.ManifestIndexInfo{ColumnName: "vector", IndexName: "idx", IndexType: "HNSW", Path: relative, FieldID: 101, IndexID: id, BuildID: id, IndexVersion: 1, NumRows: 100, IndexFileKeys: []string{"index.bin"}}
 	}
-	manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry(1), entry(2)}})
+	manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry(1), entry(2)}})
 	require.NoError(t, err)
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{ID: 8001, CollectionID: 300, PartitionID: 30, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3, ManifestPath: manifest, ManifestHasIndex: true})))
 	drop := func(id int64) error {
