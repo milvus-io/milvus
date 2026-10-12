@@ -56,6 +56,10 @@ import (
 //     token, so the watch owner must re-watch. Re-watching issues a unary
 //     request first, which goes through clientv3's unary retry interceptor and
 //     refreshes the auth token, so the new watch stream recovers.
+//   - transient availability/overload errors accepted by IsRetriableEtcdErr:
+//     stream setup can fail in getToken/Authenticate, which converts gRPC
+//     errors to EtcdError. clientv3's isHaltErr does not recognize their gRPC
+//     status and can terminate the watch instead of reconnecting it.
 //
 // Genuine authorization failures (permission denied, bad credentials) carry
 // different codes (PermissionDenied, InvalidArgument, FailedPrecondition) and
@@ -74,7 +78,8 @@ func IsRetriableWatchErr(err error) bool {
 	return errors.Is(err, rpctypes.ErrCompacted) ||
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
-		errors.Is(err, rpctypes.ErrAuthOldRevision)
+		errors.Is(err, rpctypes.ErrAuthOldRevision) ||
+		IsRetriableEtcdErr(err)
 }
 
 // IsRetriableEtcdErr reports whether an etcd error is transient and safe to
@@ -87,6 +92,9 @@ func IsRetriableWatchErr(err error) bool {
 // connection established yet). These are the errors that Session.Init /
 // Session.Register can legitimately observe during a cold start and should
 // backoff-and-retry rather than treat as fatal.
+// Member shutdown (ErrStopped) and Raft apply backlog (ErrTooManyRequests) can
+// also recover after failover or backoff. Match the overload sentinel rather
+// than all ResourceExhausted errors, which include a full database (ErrNoSpace).
 //
 // Genuine authorization failures, permission denials, data loss (corrupt
 // cluster) and other non-transient errors carry different codes and are
@@ -103,6 +111,8 @@ func IsRetriableEtcdErr(err error) bool {
 		errors.Is(err, rpctypes.ErrNoLeader) ||
 		errors.Is(err, rpctypes.ErrNotLeader) ||
 		errors.Is(err, rpctypes.ErrNotCapable) ||
+		errors.Is(err, rpctypes.ErrStopped) ||
+		errors.Is(err, rpctypes.ErrTooManyRequests) ||
 		errors.Is(err, rpctypes.ErrTimeout) ||
 		errors.Is(err, rpctypes.ErrTimeoutDueToLeaderFail) ||
 		errors.Is(err, rpctypes.ErrTimeoutDueToConnectionLost) ||
