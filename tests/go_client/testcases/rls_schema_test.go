@@ -1954,10 +1954,14 @@ func TestRLSSchemaKeys(t *testing.T) {
 						require.Positive(t, resp.GetCompactionID())
 						require.Positive(t, resp.GetCompactionPlanCount(), "must execute physical clustering work")
 						require.EventuallyWithT(t, func(c *assert.CollectT) {
-							state, err := mc.GetCompactionState(ctx, client.NewGetCompactionStateOption(resp.GetCompactionID()))
-							if assert.NoError(c, err) {
-								assert.Equal(c, entity.CompactionStateCompleted, state)
+							state, err := mc.GetService().GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{CompactionID: resp.GetCompactionID()})
+							if !assert.NoError(c, err) || !assert.NoError(c, merr.Error(state.GetStatus())) {
+								return
 							}
+							assert.Equal(c, commonpb.CompactionState_Completed, state.GetState())
+							assert.Zero(c, state.GetFailedPlanNo())
+							assert.Zero(c, state.GetTimeoutPlanNo())
+							assert.EqualValues(c, resp.GetCompactionPlanCount(), state.GetCompletedPlanNo())
 						}, 3*time.Minute, time.Second)
 						require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)))
 						load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
