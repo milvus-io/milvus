@@ -29,10 +29,14 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	pkindexservice "github.com/milvus-io/milvus/internal/pkindex/coordinator/service"
 	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestPKIndexMetaKVPointers(t *testing.T) {
@@ -115,4 +119,25 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	require.NoError(t, s.MultiRemove(ctx, written))
 	_, err = s.Read(ctx, written[0])
 	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+}
+
+func TestInitPKIndexInvalidGCConfig(t *testing.T) {
+	key := Params.DataCoordCfg.PKIndexGCGrace.Key
+	paramtable.Get().Save(key, "0")
+	defer paramtable.Get().Reset(key)
+
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: Params.EtcdCfg.Endpoints.GetAsStrings(), DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer client.Close()
+	kv := etcdkv.NewEtcdKV(client, "pkindex-init-"+uuid.NewString()+"/meta")
+
+	s := &Server{ctx: context.Background(), kv: kv, pkindexService: pkindexservice.New()}
+	s.initPKIndex(storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())))
+	assert.Nil(t, s.pkindexGC)
+
+	resp, err := s.pkindexService.GetManifest(context.Background(), &pkindexpb.GetManifestRequest{CollectionId: 1, Vchannel: "v"})
+	require.NoError(t, err)
+	assert.NotEqual(t, merr.Code(merr.ErrServiceNotReady), resp.GetStatus().GetCode())
 }

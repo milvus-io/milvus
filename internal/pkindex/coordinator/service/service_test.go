@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -222,6 +223,50 @@ func TestToMerr(t *testing.T) {
 			got := toMerr(c.err, "v")
 			assert.Equal(t, c.code, merr.Code(got))
 			assert.Equal(t, c.retryable, merr.IsRetryableErr(got))
+			assert.Equal(t, c.code, merr.Status(got).GetCode())
+		})
+	}
+}
+
+func TestToMerrFencedKeepsCause(t *testing.T) {
+	cause := errors.Wrap(manifest.ErrFenced, "recorded term 5 is above request term 3")
+	got := toMerr(cause, "v")
+	assert.Contains(t, fmt.Sprintf("%+v", got), "recorded term 5 is above request term 3")
+	assert.NotContains(t, got.Error(), "recorded term 5")
+}
+
+func TestInvalidRequest(t *testing.T) {
+	s, _, _ := newService()
+	ctx := context.Background()
+	cases := []struct {
+		name         string
+		collectionID int64
+		vchannel     string
+	}{
+		{"zero collection", 0, "v"},
+		{"negative collection", -1, "v"},
+		{"empty vchannel", 1, ""},
+		{"slash in vchannel", 1, "a/b"},
+		{"dot dot in vchannel", 1, "a..b"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			claim, err := s.ClaimManifest(ctx, &pkindexpb.ClaimManifestRequest{
+				CollectionId: c.collectionID, Vchannel: c.vchannel, PchannelTerm: 1, PkDataType: schemapb.DataType_Int64,
+			})
+			require.NoError(t, err)
+			assertCode(t, claim.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
+
+			flush, err := s.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{
+				CollectionId: c.collectionID, Vchannel: c.vchannel, PchannelTerm: 1,
+				AddSsts: []*pkindexpb.SSTRef{{Id: 1}}, CheckpointTimeTick: 1,
+			})
+			require.NoError(t, err)
+			assertCode(t, flush.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
+
+			get, err := s.GetManifest(ctx, &pkindexpb.GetManifestRequest{CollectionId: c.collectionID, Vchannel: c.vchannel})
+			require.NoError(t, err)
+			assertCode(t, get.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
 		})
 	}
 }
