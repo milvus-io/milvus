@@ -352,6 +352,42 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("CreateNamespace", func(t *testing.T) {
+		mockProxy.EXPECT().CreateNamespace(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.CreateNamespace(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DescribeNamespace", func(t *testing.T) {
+		mockProxy.EXPECT().DescribeNamespace(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.DescribeNamespace(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("ListNamespaces", func(t *testing.T) {
+		mockProxy.EXPECT().ListNamespaces(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.ListNamespaces(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DropNamespace", func(t *testing.T) {
+		mockProxy.EXPECT().DropNamespace(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.DropNamespace(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("HasNamespace", func(t *testing.T) {
+		mockProxy.EXPECT().HasNamespace(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.HasNamespace(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("GetNamespaceStats", func(t *testing.T) {
+		mockProxy.EXPECT().GetNamespaceStats(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.GetNamespaceStats(ctx, nil)
+		assert.NoError(t, err)
+	})
+
 	t.Run("GetLoadingProgress", func(t *testing.T) {
 		mockProxy.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.GetLoadingProgress(ctx, nil)
