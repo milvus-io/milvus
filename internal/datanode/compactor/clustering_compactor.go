@@ -607,7 +607,14 @@ func (t *clusteringCompactionTask) mappingSegment(
 		mlog.Warn(ctx, "new record materializer wrong", mlog.Err(err))
 		return err
 	}
-	rr = newMaterializedRecordReader(rr, materializer)
+	preparer, err := newFunctionInputPreparer(t.plan.Schema, t.plan.Schema.GetFunctions(), existingFields,
+		segment.GetManifest(), t.compactionParams.StorageConfig)
+	if err != nil {
+		materializer.Close()
+		rr.Close()
+		return err
+	}
+	rr = newMaterializedRecordReader(ctx, rr, materializer, preparer)
 	rr = wrapReaderWithTimestampOverwrite(rr, segment.GetCommitTimestamp())
 	defer rr.Close()
 

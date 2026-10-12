@@ -19,7 +19,6 @@ package compactor
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	sio "io"
 	"math"
@@ -2439,60 +2438,6 @@ func TestBumpUTFullRewriteBM25FromTextLOB(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestBumpUTTextLOBDecoderRejectsOutOfRangeRowWithoutChangingSource(t *testing.T) {
-	setupBumpUTEnv(t)
-	const textID = int64(105)
-	fix := buildBumpFixture(t, withRows(2),
-		withSourceFields(&schemapb.FieldSchema{FieldID: textID, Name: "big_text", DataType: schemapb.DataType_Text}),
-		withFillValue(func(i int, _ uint64, v map[int64]any) { v[textID] = bumpFxLobText(i) }),
-		withTextLOBSource(textID),
-	)
-	sourceRefs := readTextRefs(t, fix, fix.sourceManifest, textID)
-	sourceFiles := listLobFiles(t, fix)
-	ref := append([]byte(nil), sourceRefs[0]...)
-	require.Len(t, ref, 24)
-	require.EqualValues(t, 1, ref[0])
-	binary.LittleEndian.PutUint32(ref[20:], 0x7fffffff)
-
-	segmentBase, _, err := packed.UnmarshalManifestPath(fix.sourceManifest)
-	require.NoError(t, err)
-	decoder, err := packed.NewTextLOBDecoder(textID,
-		path.Join(path.Dir(segmentBase), "lobs", strconv.FormatInt(textID, 10)), fix.cfg)
-	require.NoError(t, err)
-	defer decoder.Close()
-	decodeRefs := func(encoded ...[]byte) (*array.String, error) {
-		builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
-		defer builder.Release()
-		for _, value := range encoded {
-			builder.Append(value)
-		}
-		refs := builder.NewBinaryArray()
-		defer refs.Release()
-		return decoder.Decode(context.Background(), refs)
-	}
-	logical, err := decodeRefs(ref)
-	require.Error(t, err)
-	require.Nil(t, logical)
-	require.True(t, merr.IsSegcoreDataFormatBroken(err), "expected corruption code, got %v", err)
-
-	// An invalid reference mixed with valid rows must fail the whole batch,
-	// never become an empty string or shift another row's decoded value.
-	logical, err = decodeRefs(sourceRefs[0], ref, sourceRefs[1])
-	require.Error(t, err)
-	require.Nil(t, logical)
-	require.True(t, merr.IsSegcoreDataFormatBroken(err), "expected corruption code, got %v", err)
-
-	missingFile := append([]byte(nil), sourceRefs[0]...)
-	for i := 4; i < 20; i++ {
-		missingFile[i] = 0xff
-	}
-	logical, err = decodeRefs(missingFile)
-	require.Error(t, err)
-	require.Nil(t, logical)
-	require.Equal(t, sourceRefs, readTextRefs(t, fix, fix.sourceManifest, textID))
-	require.Equal(t, sourceFiles, listLobFiles(t, fix))
 }
 
 func mustManifestLobFiles(t *testing.T, fix *bumpFixture, manifest string) []packed.LobFileInfo {

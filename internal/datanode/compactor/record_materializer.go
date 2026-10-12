@@ -17,6 +17,8 @@
 package compactor
 
 import (
+	"context"
+	"io"
 	"sync"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -332,18 +334,20 @@ func (r *selectedRecord) cleanupDerived() {
 }
 
 type materializedRecordReader struct {
+	ctx          context.Context
 	base         storage.RecordReader
 	materializer *RecordMaterializer
+	preparer     *functionInputPreparer
 	current      storage.Record
 }
 
 var _ storage.RecordReader = (*materializedRecordReader)(nil)
 
-func newMaterializedRecordReader(base storage.RecordReader, materializer *RecordMaterializer) storage.RecordReader {
+func newMaterializedRecordReader(ctx context.Context, base storage.RecordReader, materializer *RecordMaterializer, preparer *functionInputPreparer) storage.RecordReader {
 	if !materializer.hasMaterialization() {
 		return base
 	}
-	return &materializedRecordReader{base: base, materializer: materializer}
+	return &materializedRecordReader{ctx: ctx, base: base, materializer: materializer, preparer: preparer}
 }
 
 func (r *materializedRecordReader) Next() (storage.Record, error) {
@@ -353,9 +357,25 @@ func (r *materializedRecordReader) Next() (storage.Record, error) {
 	}
 	rec, err := r.base.Next()
 	if err != nil {
+		if err == io.EOF && r.preparer != nil {
+			if finishErr := r.preparer.Finish(); finishErr != nil {
+				return nil, finishErr
+			}
+		}
 		return nil, err
 	}
-	wrapped, err := r.materializer.Wrap(rec)
+	var wrapped storage.Record
+	if r.preparer == nil || len(r.preparer.requiredTextIDs) == 0 {
+		wrapped, err = r.materializer.Wrap(rec)
+	} else {
+		var logical storage.Record
+		var cleanup func()
+		logical, cleanup, err = r.preparer.Prepare(r.ctx, rec)
+		if err == nil {
+			wrapped, err = r.materializer.WrapWithInputs(rec, logical)
+		}
+		cleanup()
+	}
 	if err != nil {
 		// rec stays owned by the base reader; it is released on its next
 		// Next/Close, never here.
@@ -371,7 +391,15 @@ func (r *materializedRecordReader) Close() error {
 		r.current = nil
 	}
 	r.materializer.Close()
-	return r.base.Close()
+	var preparerErr error
+	if r.preparer != nil {
+		preparerErr = r.preparer.Close()
+	}
+	baseErr := r.base.Close()
+	if preparerErr != nil {
+		return preparerErr
+	}
+	return baseErr
 }
 
 type bm25FunctionMaterializer struct {

@@ -721,6 +721,9 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(diff *schemaBumpP
 				return nil, err
 			}
 			if selection != nil && selection.Len() == 0 {
+				if err := preparer.Skip(t.ctx, record); err != nil {
+					return nil, err
+				}
 				continue
 			}
 		}
@@ -745,6 +748,9 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(diff *schemaBumpP
 
 		writtenRows += int64(wrapped.Len())
 		cleanupMaterializedRecord(wrapped)
+	}
+	if err := preparer.Finish(); err != nil {
+		return nil, err
 	}
 
 	if readRows != t.plan.GetTotalRows() {
@@ -1187,7 +1193,26 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 
 	var readDuration, computeDuration, writeDuration, updateStatsDuration time.Duration
 
-	reader, _, err := t.openRecordReader(segment, inputSchema)
+	preparer, err := newFunctionInputPreparer(t.plan.GetSchema(), diff.missingFunctions,
+		diff.existingFields, segment.GetManifest(), t.compactionParams.StorageConfig)
+	if err != nil {
+		return nil, err
+	}
+	defer preparer.Close()
+	var reader storage.RecordReader
+	if textIDs := preparer.presentTextIDs(); len(textIDs) > 0 {
+		configs, configErr := preparer.sourceTextConfigs(textIDs)
+		if configErr != nil {
+			return nil, configErr
+		}
+		reader, err = storage.NewTextDecodedManifestRecordReader(ctx, segment.GetManifest(), inputSchema, configs,
+			storage.WithPresentFields(diff.existingFields),
+			storage.WithCollectionID(collectionID),
+			storage.WithVersion(segment.GetStorageVersion()),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
+	} else {
+		reader, _, err = t.openRecordReader(segment, inputSchema)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1220,14 +1245,6 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 		return nil, err
 	}
 	defer materializer.Close()
-	preparer, err := newFunctionInputPreparer(t.plan.GetSchema(), diff.missingFunctions,
-		diff.existingFields, segment.GetManifest(), t.compactionParams.StorageConfig)
-	if err != nil {
-		span.End()
-		return nil, err
-	}
-	defer preparer.Close()
-
 	var totalRows int64
 	for {
 		readStart := time.Now()
@@ -1287,6 +1304,10 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 
 		totalRows += int64(wrapped.Len())
 		cleanupMaterializedRecord(wrapped)
+	}
+	if err := preparer.Finish(); err != nil {
+		span.End()
+		return nil, err
 	}
 	span.End()
 	if totalRows != t.plan.GetTotalRows() {

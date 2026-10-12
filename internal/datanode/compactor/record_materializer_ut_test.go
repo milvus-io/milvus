@@ -295,7 +295,7 @@ func TestRMMaterializedReaderWrapFailure(t *testing.T) {
 	ints := newInt64Array(t, []int64{1, 2})
 	defer ints.Release()
 	base := &materializerTestRecord{len: 2, columns: map[storage.FieldID]arrow.Array{100: ints}}
-	reader := newMaterializedRecordReader(&stubRecordReader{records: []storage.Record{base}}, materializer)
+	reader := newMaterializedRecordReader(context.Background(), &stubRecordReader{records: []storage.Record{base}}, materializer, nil)
 
 	_, err := reader.Next()
 	require.Error(t, err)

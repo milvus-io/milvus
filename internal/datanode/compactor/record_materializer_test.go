@@ -1,6 +1,7 @@
 package compactor
 
 import (
+	"context"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -757,7 +758,7 @@ func TestMaterializedRecordReaderReleasesPreviousRecordOnNextAndClose(t *testing
 	first := &materializerTestRecord{len: 1}
 	second := &materializerTestRecord{len: 1}
 	base := &materializerTestReader{records: []*materializerTestRecord{first, second}}
-	reader := newMaterializedRecordReader(base, materializer)
+	reader := newMaterializedRecordReader(context.Background(), base, materializer, nil)
 
 	_, err = reader.Next()
 	require.NoError(t, err)
@@ -804,7 +805,7 @@ func TestMaterializedRecordReaderRetainedRecordSurvivesAdvance(t *testing.T) {
 	first := &materializerTestRecord{len: 1}
 	second := &materializerTestRecord{len: 1}
 	base := &materializerTestReader{records: []*materializerTestRecord{first, second}}
-	reader := newMaterializedRecordReader(base, materializer)
+	reader := newMaterializedRecordReader(context.Background(), base, materializer, nil)
 
 	retained, err := reader.Next()
 	require.NoError(t, err)
