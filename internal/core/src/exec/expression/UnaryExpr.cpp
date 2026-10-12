@@ -2094,6 +2094,8 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     }
 
     if (data_type == DataType::JSON &&
+        expr_->op_type_ != proto::plan::OpType::Equal &&
+        expr_->op_type_ != proto::plan::OpType::NotEqual &&
         expr_->val_.val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val &&
         !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
