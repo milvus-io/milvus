@@ -66,6 +66,17 @@ type coordinatorBroker struct {
 	mixCoord types.MixCoord
 }
 
+// CollectionAvailability is an optional in-process fast path. Only true is
+// conclusive; false must fall back to HasCollection before deciding to GC.
+type CollectionAvailability interface {
+	IsCollectionAvailable(collectionID int64) bool
+}
+
+func (b *coordinatorBroker) IsCollectionAvailable(collectionID int64) bool {
+	checker, ok := b.mixCoord.(CollectionAvailability)
+	return ok && checker.IsCollectionAvailable(collectionID)
+}
+
 func NewCoordinatorBroker(mixCoord types.MixCoord) *coordinatorBroker {
 	return &coordinatorBroker{
 		mixCoord: mixCoord,

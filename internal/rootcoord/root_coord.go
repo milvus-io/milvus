@@ -1206,6 +1206,16 @@ func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateColl
 	}, nil
 }
 
+// IsCollectionAvailable lets in-process GC skip live collections without
+// materializing their schemas. False means unknown, not safe to delete.
+func (c *Core) IsCollectionAvailable(collectionID int64) bool {
+	if c.GetStateCode() != commonpb.StateCode_Healthy {
+		return false
+	}
+	checker, ok := c.meta.(interface{ IsCollectionAvailable(int64) bool })
+	return ok && checker.IsCollectionAvailable(collectionID)
+}
+
 // HasCollection check collection existence
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
