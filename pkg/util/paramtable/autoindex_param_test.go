@@ -110,8 +110,8 @@ func TestAutoIndexParams_build(t *testing.T) {
 	})
 
 	t.Run("test metric-specific sparse params with legacy fallback", func(t *testing.T) {
-		assert.NotEmpty(t, CParams.AutoIndexConfig.SparseIPIndexParams.DefaultValue)
-		assert.NotEmpty(t, CParams.AutoIndexConfig.SparseBM25IndexParams.DefaultValue)
+		assert.Empty(t, CParams.AutoIndexConfig.SparseIPIndexParams.DefaultValue)
+		assert.Empty(t, CParams.AutoIndexConfig.SparseBM25IndexParams.DefaultValue)
 
 		err := bt.Save(CParams.AutoIndexConfig.SparseIndexParams.Key,
 			`{"index_type": "SPARSE_WAND", "drop_ratio_build": 0.2}`)
