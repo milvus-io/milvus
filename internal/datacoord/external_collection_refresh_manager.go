@@ -645,8 +645,12 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 
 	if currentSource == newSource && currentSpec == newSpec {
 		// Nothing to deliver - the collection already describes this refresh.
-		// That is a delivered publish, so keep the key.
+		// That is a delivered publish, so keep the key. The collection meta
+		// already carries the refreshed source/spec, so the applied segments can
+		// be enqueued for index building now. When a publish is due, the builds
+		// are enqueued once it lands, in BroadcastAlteredCollection.
 		published = true
+		notifyExternalCollectionIndexBuild(ctx, m.mt, job.GetCollectionId())
 		return
 	}
 

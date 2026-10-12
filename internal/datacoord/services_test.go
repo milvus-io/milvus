@@ -1364,6 +1364,33 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.True(t, ok)
 		assert.NotNil(t, coll.Properties)
 	})
+
+	t.Run("published external source enqueues unindexed segments", func(t *testing.T) {
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
+		drainBuildIndexOverflowChForTest()
+		defer drainBuildIndexOverflowChForTest()
+
+		spec := `{"format":"parquet"}`
+		s := &Server{meta: newExternalRefreshIndexMeta("s3://bucket/a", spec)}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
+			CollectionID: 100,
+			Schema:       externalRefreshIndexSchema("s3://bucket/a", spec),
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assertNoBuildIndexEvent(t)
+
+		resp, err = s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
+			CollectionID: 100,
+			Schema:       externalRefreshIndexSchema("s3://bucket/b", spec),
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assertBuildIndexEvents(t, 10, 11)
+		assertNoBuildIndexEvent(t)
+	})
 }
 
 func TestServer_GcConfirm(t *testing.T) {

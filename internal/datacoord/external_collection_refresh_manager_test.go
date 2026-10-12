@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -1080,7 +1081,10 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaselin
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
 }
 
-func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsNotifiesUpdatedSegments(t *testing.T) {
+// Applying a refresh must not enqueue index builds by itself: a refresh that
+// rebinds the collection publishes its new source/spec only afterwards, and a
+// build dispatched before that reads the previous source and fails terminally.
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsDoesNotNotifyIndexBuild(t *testing.T) {
 	drainBuildIndexChForTest()
 	defer drainBuildIndexChForTest()
 	drainBuildIndexOverflowChForTest()
@@ -1125,7 +1129,6 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsNotifiesUpdate
 	})
 	assert.NoError(t, err)
 
-	assertBuildIndexEvents(t, 10)
 	assertNoBuildIndexEvent(t)
 }
 
@@ -2170,6 +2173,125 @@ func TestHandleJobFinished_SchemaUnchanged(t *testing.T) {
 	concreteManager.handleJobFinished(ctx, job)
 
 	assert.False(t, updaterCalled, "schemaUpdater should NOT be called when source/spec unchanged")
+}
+
+// newExternalRefreshIndexMeta builds a meta holding external collection 100
+// with one index: segment 1 already has an index task, segments 10 and 11 are
+// flushed without one, segment 12 is L0 and segment 13 is still growing.
+func newExternalRefreshIndexMeta(source, spec string) *meta {
+	const (
+		collectionID = int64(100)
+		indexID      = int64(1000)
+	)
+	indexedSegment := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	indexedSegment.Insert(indexID, &model.SegmentIndex{SegmentID: 1, CollectionID: collectionID, IndexID: indexID, BuildID: 1})
+	segmentIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segmentIndexes.Insert(1, indexedSegment)
+
+	mt := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collectionID: {indexID: {CollectionID: collectionID, FieldID: 101, IndexID: indexID, IndexName: "vec_idx"}},
+			},
+			segmentIndexes: segmentIndexes,
+		},
+	}
+	mt.collections.Insert(collectionID, &collectionInfo{ID: collectionID, Schema: externalRefreshIndexSchema(source, spec)})
+	for _, segment := range []*datapb.SegmentInfo{
+		{ID: 1, CollectionID: collectionID, State: commonpb.SegmentState_Flushed},
+		{ID: 10, CollectionID: collectionID, State: commonpb.SegmentState_Flushed},
+		{ID: 11, CollectionID: collectionID, State: commonpb.SegmentState_Flushed},
+		{ID: 12, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0},
+		{ID: 13, CollectionID: collectionID, State: commonpb.SegmentState_Growing},
+	} {
+		mt.segments.SetSegment(segment.GetID(), NewSegmentInfo(segment))
+	}
+	return mt
+}
+
+func externalRefreshIndexSchema(source, spec string) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:           "external_collection",
+		ExternalSource: source,
+		ExternalSpec:   spec,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec"},
+		},
+	}
+}
+
+func TestHandleJobFinished_SchemaUnchangedNotifiesUnindexedSegments(t *testing.T) {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+	drainBuildIndexOverflowChForTest()
+	defer drainBuildIndexOverflowChForTest()
+
+	ctx := context.Background()
+	spec := `{"format":"parquet"}`
+	mt := newExternalRefreshIndexMeta("s3://bucket/a", spec)
+	updaterCalled := false
+	schemaUpdater := func(context.Context, int64, string, string) error {
+		updaterCalled = true
+		return nil
+	}
+	mgr := NewExternalCollectionRefreshManager(ctx, mt, newStubScheduler(), &stubAllocator{}, createTestRefreshMeta(t), nil, testCollectionGetter(mt), schemaUpdater, nil)
+
+	mgr.(*externalCollectionRefreshManager).handleJobFinished(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:          1,
+		CollectionId:   100,
+		ExternalSource: "s3://bucket/a",
+		ExternalSpec:   spec,
+	})
+
+	assert.False(t, updaterCalled)
+	assertBuildIndexEvents(t, 10, 11)
+	assertNoBuildIndexEvent(t)
+}
+
+func TestHandleJobFinished_SchemaChangedDefersIndexBuildToPublish(t *testing.T) {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+	drainBuildIndexOverflowChForTest()
+	defer drainBuildIndexOverflowChForTest()
+
+	ctx := context.Background()
+	spec := `{"format":"parquet"}`
+	mt := newExternalRefreshIndexMeta("s3://bucket/a", spec)
+	updaterCalled := false
+	schemaUpdater := func(context.Context, int64, string, string) error {
+		updaterCalled = true
+		return nil
+	}
+	mgr := NewExternalCollectionRefreshManager(ctx, mt, newStubScheduler(), &stubAllocator{}, createTestRefreshMeta(t), nil, testCollectionGetter(mt), schemaUpdater, nil)
+
+	mgr.(*externalCollectionRefreshManager).handleJobFinished(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:          1,
+		CollectionId:   100,
+		ExternalSource: "s3://bucket/b",
+		ExternalSpec:   spec,
+	})
+
+	// The collection meta still carries the previous source until the publish
+	// lands in BroadcastAlteredCollection, so nothing may be enqueued yet.
+	assert.True(t, updaterCalled)
+	assertNoBuildIndexEvent(t)
+}
+
+func TestExternalSourceChanged(t *testing.T) {
+	spec := `{"format":"parquet"}`
+	external := externalRefreshIndexSchema("s3://bucket/a", spec)
+
+	assert.False(t, externalSourceChanged(nil, nil))
+	assert.False(t, externalSourceChanged(nil, &schemapb.CollectionSchema{ExternalSource: "s3://bucket/a"}),
+		"a collection without external fields is not external")
+	assert.True(t, externalSourceChanged(nil, external))
+	assert.False(t, externalSourceChanged(externalRefreshIndexSchema("s3://bucket/a", spec), external))
+	assert.True(t, externalSourceChanged(externalRefreshIndexSchema("s3://bucket/b", spec), external))
+	assert.True(t, externalSourceChanged(externalRefreshIndexSchema("s3://bucket/a", `{"format":"orc"}`), external))
 }
 
 func TestHandleJobFinished_NilSchemaUpdater(t *testing.T) {

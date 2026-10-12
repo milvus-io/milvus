@@ -1911,13 +1911,23 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			VChannelNames:  req.GetVChannels(),
 		}
 		s.meta.AddCollection(collInfo)
+		if externalSourceChanged(nil, req.GetSchema()) {
+			notifyExternalCollectionIndexBuild(ctx, s.meta, req.GetCollectionID())
+		}
 		return merr.Success(), nil
 	}
 
+	oldSchema := clonedColl.Schema
 	clonedColl.Properties = properties
 	// add field will change the schema
 	clonedColl.Schema = req.GetSchema()
 	s.meta.AddCollection(clonedColl)
+	// A refresh that rebinds an external collection applies its segments before
+	// publishing the new source/spec; their index builds wait until here, where
+	// the published source/spec becomes visible to index dispatch.
+	if externalSourceChanged(oldSchema, req.GetSchema()) {
+		notifyExternalCollectionIndexBuild(ctx, s.meta, req.GetCollectionID())
+	}
 	return merr.Success(), nil
 }
 
