@@ -34,6 +34,7 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 		return context.Canceled
 	}
 	r.collection = collection
+	r.view = view
 	if view.PartitionIDs != nil {
 		r.loadedPartitions = make(map[int64]struct{}, len(view.PartitionIDs))
 		for _, id := range view.PartitionIDs {
@@ -48,6 +49,15 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 			r.Close()
 		}
 	}()
+	if err := r.prepareSegments(ctx, view); err != nil {
+		return err
+	}
+	prepared = true
+	return nil
+}
+
+func (r *Runtime) prepareSegments(ctx context.Context, view walview.VChannelWALView) error {
+	collection := r.collection
 	for _, visible := range view.SegmentSnapshot.Segments {
 		if !r.partitionLoaded(visible.PartitionID) {
 			continue
@@ -92,7 +102,6 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 	}
 	r.markGrowingTimeTick(view.BaseGrowingTimeTick)
 	r.markTransformTimeTick(view.BaseTransformTimeTick)
-	prepared = true
 	return nil
 }
 

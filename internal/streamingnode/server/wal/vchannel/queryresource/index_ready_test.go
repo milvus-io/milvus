@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/growingruntime"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -99,16 +100,20 @@ func TestIndexRefreshSerializesResolutionAndPublication(t *testing.T) {
 	}).Build()
 	defer update.UnPatch()
 	firstDone := make(chan error, 1)
-	go func() { firstDone <- runtime.PrepareIndexMeta(t.Context(), 100, 1, provider) }()
+	go func() {
+		firstDone <- runtime.PrepareIndexMeta(t.Context(), &viewpb.QueryViewMeta{CollectionId: 100, LoadInfoVersion: 1}, provider)
+	}()
 	<-firstFetch
 	current.Store(2)
 	secondDone := make(chan error, 1)
-	go func() { secondDone <- runtime.PrepareIndexMeta(t.Context(), 100, 2, provider) }()
+	go func() {
+		secondDone <- runtime.PrepareIndexMeta(t.Context(), &viewpb.QueryViewMeta{CollectionId: 100, LoadInfoVersion: 2}, provider)
+	}()
 	close(resumeFetch)
 	require.NoError(t, <-firstDone)
 	require.NoError(t, <-secondDone)
 	require.Equal(t, []int64{1, 2}, applied)
-	require.True(t, errors.Is(runtime.PrepareIndexMeta(t.Context(), 100, 1, provider), merr.ErrServiceNotReady))
+	require.True(t, errors.Is(runtime.PrepareIndexMeta(t.Context(), &viewpb.QueryViewMeta{CollectionId: 100, LoadInfoVersion: 1}, provider), merr.ErrServiceNotReady))
 	require.Equal(t, []int64{1, 2}, applied, "stale preparation cannot roll back native metadata")
 }
 
@@ -121,6 +126,6 @@ func TestIndexRefreshDoesNotPublishAfterClose(t *testing.T) {
 		return QueryViewLoadInfo{}, nil
 	}).Build()
 	defer resolve.UnPatch()
-	require.ErrorIs(t, runtime.PrepareIndexMeta(t.Context(), 100, 7, provider), context.Canceled)
+	require.ErrorIs(t, runtime.PrepareIndexMeta(t.Context(), &viewpb.QueryViewMeta{CollectionId: 100, LoadInfoVersion: 7}, provider), context.Canceled)
 	require.Zero(t, runtime.indexVersion)
 }

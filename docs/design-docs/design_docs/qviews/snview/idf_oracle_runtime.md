@@ -170,8 +170,11 @@ still applies to sealed statistics. Lazy preparation does not promise eager
 sealed I/O completion.
 
 This covers IDF reconstruction for schema/load-info handoff, including enabling
-the first BM25 function. GrowingRuntime partition/load-field scope reconciliation
-and field-removal MVCC semantics remain separate work.
+the first BM25 function. GrowingRuntime partition expansion and per-view query
+scopes are prepared separately as described in
+[Growing Segment Runtime](growing_segment_runtime.md#57-partition-load-handoff).
+General load-field scope reconciliation and field-removal MVCC semantics remain
+separate work.
 
 ## Query behavior
 

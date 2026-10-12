@@ -132,6 +132,19 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	if len(m.refs) == 0 {
 		runtime, task = m.takeRuntimeLocked()
 	}
+	if m.runtime != nil && m.task == nil {
+		m.runtime.mu.Lock()
+		retained := make(map[uint64]bool, len(m.refs))
+		for _, ref := range m.refs {
+			retained[ref.meta.GetLoadInfoVersion()] = true
+		}
+		for version := range m.runtime.partitionScopes {
+			if !retained[version] {
+				delete(m.runtime.partitionScopes, version)
+			}
+		}
+		m.runtime.mu.Unlock()
+	}
 	if task != nil {
 		m.releasing.Add(1)
 	}
@@ -420,7 +433,7 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	}
 	// Schema transitions are applied on the WAL path; fence that path before
 	// checking the target revision and refreshing shared search index metadata.
-	// Partition/load-field resource changes still need reprepare.
+	// Modules prepare changed load scopes before this view can become Ready.
 	err := func() error {
 		var schemaErr error
 		runtime.RangeModules(func(module QueryRuntimeModule) bool {
@@ -438,7 +451,7 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 		if err := runtime.CheckSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {
 			return err
 		}
-		return runtime.PrepareIndexMeta(ctx, ref.meta.GetCollectionId(), ref.meta.GetLoadInfoVersion(), m.loadInfoProvider)
+		return runtime.PrepareIndexMeta(ctx, ref.meta, m.loadInfoProvider)
 	}()
 	if err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {

@@ -371,3 +371,29 @@ source of truth for MVCC waiting, handle acquisition, and execution.
 
 `Close` releases all segment handles and stops module-local workers. It is
 called only by `QueryRuntime.Close`.
+
+### 5.7 Partition load handoff
+
+LoadInfoVersion identifies an immutable logical partition scope for each retained
+view. Phase 1 validates explicit partitions before empty-worker pruning and
+expands an unspecified partition filter to that view's loaded set. Phase 2
+validates the same scope. Scope entries are discarded when their views release.
+
+The singleton's physical coverage may be wider than a particular view. When a
+new load config adds partitions, GrowingRuntime captures a fresh WAL view and
+installs a bounded live-event queue under the VChannel owner lock. It loads only
+previously uncovered partitions, including persisted data, pending inserts and
+bounded TransformLog delete replay. The serving dispatcher must reach the
+snapshot frontiers before the staged segments can be merged; this prevents
+queued prefix inserts from being applied twice. The captured live tail is then
+drained, and publication is atomic with live-event delivery. Failed preparation
+leaves the old coverage and serving resources intact. Runtime cancellation wakes
+queue producers before Close waits for the dispatcher.
+
+Existing segments are retained for old views and pinned queries. Shrinking a
+view's logical scope does not immediately destroy singleton Growing resources:
+physical reclamation follows the existing sealed DataVersion watermark, or the
+last view's release. Newly prepared partitions borrow the pinned native
+collection, so the snapshot and existing segments share WAL-driven schema and
+index metadata. Ready is reported only after scope expansion and index metadata
+preparation both succeed.

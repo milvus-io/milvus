@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -77,4 +78,25 @@ func TestQueryPlanCannotUseOldSchemaView(t *testing.T) {
 	req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{SchemaVersion: 2}}
 	_, err = w.GetQueryPlan(t.Context(), req)
 	require.True(t, viewerror.AsViewError(err).IsRetryable())
+}
+
+func TestQueryPlanRejectsUnloadedPartitionBeforePruning(t *testing.T) {
+	mockey.PatchConvey("even an empty shard must validate the leased scope", t, func() {
+		view := &viewpb.QueryViewOfShard{Meta: &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, LoadInfoVersion: 2, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}}}
+		lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { t.Fatal("invalid partition must not renew lease") }, Release: func() {}}
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireLatestUpView).Return(lease, nil).Build()
+		mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).To(func(_ *queryresource.QueryRuntime, version uint64, partitions []int64) ([]int64, error) {
+			require.Equal(t, uint64(2), version)
+			require.Equal(t, []int64{20}, partitions)
+			return nil, merr.WrapErrPartitionNotLoaded(20)
+		}).Build()
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
+		req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
+		req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{PartitionIDs: []int64{20}}}
+		_, err := w.GetQueryPlan(t.Context(), req)
+		require.ErrorIs(t, err, merr.ErrPartitionNotLoaded)
+		req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{PartitionIDs: []int64{20}}}
+		_, err = w.GetQueryPlan(t.Context(), req)
+		require.ErrorIs(t, err, merr.ErrPartitionNotLoaded)
+	})
 }

@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -28,6 +29,12 @@ type Builder interface {
 
 // Runtime is the csegment-backed growing side prepared for one DataVersion.
 type Runtime struct {
+	prepareMu sync.Mutex
+	eventMu   sync.Mutex
+	eventCond *sync.Cond
+	refresh   *partitionRefresh
+	view      walview.VChannelWALView
+
 	mu                       sync.RWMutex
 	mvccCond                 *sync.Cond
 	closed                   bool
@@ -47,6 +54,7 @@ func newRuntime() *Runtime {
 	runtime := &Runtime{
 		segments: make(map[int64]*growingSegment),
 	}
+	runtime.eventCond = sync.NewCond(&runtime.eventMu)
 	runtime.mvccCond = sync.NewCond(&runtime.mu)
 	return runtime
 }

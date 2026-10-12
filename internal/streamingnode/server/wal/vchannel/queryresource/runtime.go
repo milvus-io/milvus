@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -21,11 +22,12 @@ type QueryRuntime struct {
 	pending      []walview.VChannelResourceEvent
 	pendingLimit int
 
-	dispatcher     *Dispatcher
-	drainScheduled bool
-	applyMu        sync.Mutex
-	indexMu        sync.Mutex // serializes load-info resolution and index publication
-	indexVersion   uint64     // load-info identity, not an ordered version
+	dispatcher      *Dispatcher
+	drainScheduled  bool
+	applyMu         sync.Mutex
+	indexMu         sync.Mutex         // serializes load-info resolution and index publication
+	partitionScopes map[uint64][]int64 // immutable scopes retained for serving views
+	indexVersion    uint64             // load-info identity, not an ordered version
 
 	latestAdvance qviews.DataVersion
 	hasAdvance    bool
@@ -82,6 +84,7 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 	}
 	view.RuntimeContext = r.ctx
 	r.indexVersion = view.LoadInfoVersion
+	r.partitionScopes = map[uint64][]int64{view.LoadInfoVersion: append([]int64{}, view.PartitionIDs...)}
 	view.ResourceEventBarrier = func(ctx context.Context) error {
 		return r.resourceEventBarrier(ctx, view.WithResourceEventLock, nil)
 	}
@@ -213,18 +216,31 @@ func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.
 // Hold indexMu across the RPC: an older concurrent preparation must resolve its
 // version against Coord after a newer publication, rather than overwrite it with
 // a response captured earlier. Load-info versions are hashes and cannot be ordered.
-func (r *QueryRuntime) PrepareIndexMeta(ctx context.Context, collectionID int64, version uint64, provider LoadInfoProvider) error {
+func (r *QueryRuntime) PrepareIndexMeta(ctx context.Context, meta *viewpb.QueryViewMeta, provider LoadInfoProvider) error {
+	version := meta.GetLoadInfoVersion()
 	if version == 0 || provider == nil {
 		return nil
 	}
 	r.indexMu.Lock()
 	defer r.indexMu.Unlock()
-	if r.indexVersion == version {
+	r.mu.Lock()
+	_, scopePrepared := r.partitionScopes[version]
+	r.mu.Unlock()
+	if r.indexVersion == version && scopePrepared {
 		return nil
 	}
-	info, err := provider.QueryViewLoadInfo(ctx, collectionID, version)
+	info, err := provider.QueryViewLoadInfo(ctx, meta.GetCollectionId(), version)
 	if err != nil {
 		return err
+	}
+	for _, module := range r.modules {
+		if partitioned, ok := module.(interface {
+			PreparePartitions(context.Context, *viewpb.QueryViewMeta, []int64) error
+		}); ok {
+			if err := partitioned.PreparePartitions(ctx, meta, info.PartitionIDs); err != nil {
+				return err
+			}
+		}
 	}
 	// Do not hold applyMu during the RPC. WAL application and Close must remain
 	// independent of coordinator availability.
@@ -246,6 +262,12 @@ func (r *QueryRuntime) PrepareIndexMeta(ctx context.Context, collectionID int64,
 			}
 		}
 	}
+	r.mu.Lock()
+	if r.partitionScopes == nil {
+		r.partitionScopes = make(map[uint64][]int64)
+	}
+	r.partitionScopes[version] = append([]int64{}, info.PartitionIDs...)
+	r.mu.Unlock()
 	r.indexVersion = version
 	return nil
 }

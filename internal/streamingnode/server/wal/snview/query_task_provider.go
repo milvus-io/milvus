@@ -45,7 +45,16 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, selectedPartitionIDs(req.GetPartitionIDs()))
+	partitions := selectedPartitionIDs(req.GetPartitionIDs())
+	if scoped, ok := runtime.(interface {
+		ResolvePartitions(uint64, []int64) ([]int64, error)
+	}); ok {
+		partitions, err = scoped.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), partitions)
+		if err != nil {
+			return nil, err
+		}
+	}
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +105,16 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, selectedPartitionIDs(req.GetPartitionIDs()))
+	partitions := selectedPartitionIDs(req.GetPartitionIDs())
+	if scoped, ok := runtime.(interface {
+		ResolvePartitions(uint64, []int64) ([]int64, error)
+	}); ok {
+		partitions, err = scoped.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), partitions)
+		if err != nil {
+			return nil, err
+		}
+	}
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
 	if err != nil {
 		return nil, err
 	}
