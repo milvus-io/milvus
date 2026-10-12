@@ -10658,47 +10658,45 @@ ChunkedSegmentSealedImpl::Prewarm(
     const std::vector<FieldId>& requested_field_ids) const {
     std::vector<FieldId> field_ids = requested_field_ids;
     if (field_ids.empty()) {
-        field_ids.reserve(schema_->get_fields().size());
-        for (const auto& field : schema_->get_fields()) {
+        auto schema_snapshot = CaptureSchemaSnapshot();
+        field_ids.reserve(schema_snapshot->get_fields().size());
+        for (const auto& field : schema_snapshot->get_fields()) {
             field_ids.push_back(field.first);
         }
     }
 
+    // The captured runtime state is immutable and keeps every index slot
+    // alive while its cells are pinned.
+    auto runtime = CaptureRuntimeResourceState();
     for (auto field_id : field_ids) {
         prefetch_chunks(op_ctx, field_id);
 
-        vector_indexings_.prewarm(field_id, op_ctx);
-
         std::vector<index::CacheIndexBasePtr> index_slots;
-        scalar_indexings_.withRLock([&](const auto& mapping) {
-            auto iter = mapping.find(field_id);
-            if (iter != mapping.end()) {
-                index_slots.push_back(iter->second);
-            }
-        });
-        ngram_indexings_.withRLock([&](const auto& mapping) {
-            auto iter = mapping.find(field_id);
-            if (iter == mapping.end()) {
-                return;
-            }
+        if (auto vector_entry = GetVectorIndexing(runtime, field_id);
+            vector_entry != nullptr) {
+            index_slots.push_back(vector_entry->indexing_);
+        }
+        if (auto iter = runtime->scalar_indexings.find(field_id);
+            iter != runtime->scalar_indexings.end()) {
+            index_slots.push_back(iter->second);
+        }
+        if (auto iter = runtime->ngram_indexings.find(field_id);
+            iter != runtime->ngram_indexings.end()) {
             for (const auto& slot_entry : iter->second) {
                 index_slots.push_back(slot_entry.second);
             }
-        });
-        json_indices.withRLock([&](const auto& indices) {
-            for (const auto& index : indices) {
-                if (index.field_id == field_id) {
-                    index_slots.push_back(index.index);
-                }
+        }
+        for (const auto& index : runtime->json_indices) {
+            if (index.field_id == field_id) {
+                index_slots.push_back(index.index);
             }
-        });
+        }
 
         for (const auto& slot : index_slots) {
             if (slot == nullptr) {
                 continue;
             }
-            auto ca = SemiInlineGet(slot->PinCells(op_ctx, {0}));
-            (void)ca;
+            cachinglayer::SemiInlineGet(slot->PinCells(op_ctx, {0}));
         }
     }
 }
