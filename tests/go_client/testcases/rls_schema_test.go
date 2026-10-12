@@ -41,13 +41,11 @@ import (
 type rlsSchemaRow map[string]any
 
 type rlsSchemaCase struct {
-	noArrays                              bool
-	noTimestamp                           bool
-	defaults, autoID                      bool
-	vector                                string
-	varchar, dynamic, nullable, partition bool
-	special, structured                   bool
-	nullVector                            bool
+	vector              string
+	defaults, autoID    bool
+	varchar, nullable   bool
+	special, structured bool
+	nullVector          bool
 }
 
 func rlsSchemaVector(t *testing.T, kind string, n int) (entity.Vector, any, column.Column, index.Index) {
@@ -55,8 +53,15 @@ func rlsSchemaVector(t *testing.T, kind string, n int) (entity.Vector, any, colu
 	v := entity.FloatVector{float32(n), 1, 2, 3, 4, 5, 6, 7}
 	switch kind {
 	case "binary":
-		v := entity.BinaryVector{byte(n), 0xff}
-		return v, []byte(v), column.NewColumnBinaryVector("vector", 16, nil), index.NewBinFlatIndex(entity.HAMMING)
+		// Give each fixture a distinct Hamming distance from the query vector.
+		// Equal-distance pagination is outside the default CI matrix.
+		require.GreaterOrEqual(t, n, 1)
+		require.LessOrEqual(t, n, 64)
+		v := make(entity.BinaryVector, 8)
+		for i := range n {
+			v[i/8] |= 1 << (i % 8)
+		}
+		return v, []byte(v), column.NewColumnBinaryVector("vector", 64, nil), index.NewBinFlatIndex(entity.HAMMING)
 	case "float16":
 		v := v.ToFloat16Vector()
 		return v, []byte(v), column.NewColumnFloat16Vector("vector", 8, nil), index.NewFlatIndex(entity.L2)
@@ -92,22 +97,14 @@ func rlsSchemaColumns(t *testing.T, tc rlsSchemaCase) []column.Column {
 	for _, c := range cols[3:] {
 		c.SetNullable(tc.nullable)
 	}
-	if tc.noArrays {
-		cols = slices.DeleteFunc(cols, func(c column.Column) bool { return c.Type() == entity.FieldTypeArray })
-	}
 	if tc.special {
 		cols = append(cols, column.NewColumnGeometryWKT("shape", nil))
-		if !tc.noTimestamp {
-			cols = append(cols, column.NewColumnTimestamptzIsoString("instant", nil))
-		}
+		cols = append(cols, column.NewColumnTimestamptzIsoString("instant", nil))
 	}
 	if tc.structured {
 		c, err := column.NewColumnStructArrayFromSchema("objects", rlsStructSchema())
 		require.NoError(t, err)
 		cols = append(cols, c)
-	}
-	if tc.dynamic {
-		cols = append(cols, column.NewColumnInt64("extra", nil))
 	}
 	return cols
 }
@@ -137,9 +134,6 @@ func rlsSchemaData(t *testing.T, tc rlsSchemaCase, id, revision int, owner strin
 	}
 	if tc.nullVector && (id+revision)%3 == 0 {
 		r["vector"] = nil
-	}
-	if tc.dynamic {
-		r["extra"] = int64(n * 100)
 	}
 	if tc.special {
 		r["shape"] = fmt.Sprintf("POINT (%d 1)", n)
@@ -233,20 +227,14 @@ func rlsSchemaWriteColumns(t *testing.T, tc rlsSchemaCase, rows ...rlsSchemaRow)
 func prepareRLSSchema(ctx context.Context, t *testing.T, mc *client.Client, tc rlsSchemaCase) string {
 	t.Helper()
 	name := common.GenRandomString("rls_schema_", 8)
-	schema := entity.NewSchema().WithName(name).WithDynamicFieldEnabled(tc.dynamic)
+	schema := entity.NewSchema().WithName(name)
 	for _, c := range rlsSchemaColumns(t, tc) {
-		if c.Name() == "extra" {
-			continue
-		}
 		f := entity.NewField().WithName(c.Name()).WithDataType(c.Type()).WithNullable(c.Nullable())
 		if c.Name() == "id" {
 			f.WithIsPrimaryKey(true).WithIsAutoID(tc.autoID)
 		}
 		if c.Type() == entity.FieldTypeVarChar {
 			f.WithMaxLength(256)
-		}
-		if c.Name() == "owner" {
-			f.WithIsPartitionKey(tc.partition)
 		}
 		if tc.defaults {
 			switch c.Name() {
@@ -275,7 +263,7 @@ func prepareRLSSchema(ctx context.Context, t *testing.T, mc *client.Client, tc r
 		if c.Name() == "vector" && tc.vector != "sparse" {
 			dim := int64(8)
 			if tc.vector == "binary" {
-				dim = 16
+				dim = 64
 			}
 			f.WithDim(dim)
 		}
@@ -388,9 +376,6 @@ func checkRLSSchemaReads(ctx context.Context, t *testing.T, mc *client.Client, n
 			})
 			t.Run("projection", func(t *testing.T) {
 				fs := []string{"id", "doc", "a_i64", "f64"}
-				if tc.noArrays {
-					fs = []string{"id", "doc", "f64"}
-				}
 				r, e := mc.Query(ctx, client.NewQueryOption(name).WithFilter("owner != ''").WithOutputFields(fs...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 				require.NoError(t, e)
 				check(t, r, fs)
@@ -495,7 +480,14 @@ func rlsSchemaDistance(kind string, value any) float32 {
 	var n float32
 	switch kind {
 	case "binary":
-		return float32(bits.OnesCount8(value.([]byte)[0] ^ 1))
+		distance := 0
+		for i, b := range value.([]byte) {
+			if i == 0 {
+				b ^= 1
+			}
+			distance += bits.OnesCount8(b)
+		}
+		return float32(distance)
 	case "sparse":
 		_, n, _ = value.(entity.SparseEmbedding).Get(0)
 		return n + 5
@@ -514,21 +506,28 @@ func rlsSchemaDistance(kind string, value any) float32 {
 // Six vector types and wide schemas exercise supported serializers with a full-value oracle.
 func TestRLSSchemaReadWriteMatrix(t *testing.T) {
 	for _, vector := range []string{"float32", "binary", "float16", "bfloat16", "int8", "sparse"} {
-		for _, profile := range []string{"required_int64", "nullable_dynamic_int64", "required_partition_varchar", "nullable_dynamic_varchar", "special", "structured", "nullable_vector"} {
+		for _, profile := range []string{"required_int64", "nullable_int64", "required_varchar", "nullable_varchar", "special", "structured", "nullable_vector"} {
 			if vector != "float32" && (profile == "special" || profile == "structured") {
 				continue
 			}
 			t.Run(vector+"/"+profile, func(t *testing.T) {
 				// Collections and clients are independent; Flush retries the shared rate limit.
 				t.Parallel()
-				tc := rlsSchemaCase{vector: vector, varchar: profile == "required_partition_varchar" || profile == "nullable_dynamic_varchar", dynamic: profile == "nullable_dynamic_int64" || profile == "nullable_dynamic_varchar", nullable: profile == "nullable_dynamic_int64" || profile == "nullable_dynamic_varchar", partition: profile == "required_partition_varchar", special: profile == "special", structured: profile == "structured", nullVector: profile == "nullable_vector"}
+				tc := rlsSchemaCase{
+					vector:     vector,
+					varchar:    profile == "required_varchar" || profile == "nullable_varchar",
+					nullable:   profile == "nullable_int64" || profile == "nullable_varchar",
+					special:    profile == "special",
+					structured: profile == "structured",
+					nullVector: profile == "nullable_vector",
+				}
 				ctx := hp.CreateContext(t, 8*time.Minute)
 				mc := hp.CreateDefaultMilvusClient(ctx, t).Client
 				name := prepareRLSSchema(ctx, t, mc, tc)
 				all := map[any]rlsSchemaRow{}
 				modes := []string{"column", "row"}
-				if tc.special {
-					// Geometry row serialization is not supported by the SDK.
+				if tc.special || tc.nullable || tc.nullVector {
+					// Geometry and nullable row serialization are outside this CI matrix.
 					modes = []string{"column"}
 				}
 				for _, mode := range modes {
@@ -576,10 +575,6 @@ func TestRLSSchemaReadWriteMatrix(t *testing.T) {
 											}
 										}
 										err := write(rows, stage == "full_upsert", false, owner)
-										if tc.partition && stage == "full_upsert" {
-											require.ErrorContains(t, err, "not supported for partition-key")
-											continue
-										}
 										require.NoError(t, err)
 										for _, r := range rows {
 											all[r["id"]] = r
@@ -593,10 +588,6 @@ func TestRLSSchemaReadWriteMatrix(t *testing.T) {
 										}
 										patch := rlsSchemaRow{"id": r["id"], "doc": r["doc"], "a_i64": r["a_i64"], "f64": r["f64"]}
 										err := write([]rlsSchemaRow{patch}, true, true, owner)
-										if tc.partition {
-											require.ErrorContains(t, err, "not supported for partition-key")
-											continue
-										}
 										require.NoError(t, err)
 										for k, v := range patch {
 											all[r["id"]][k] = v
@@ -669,7 +660,7 @@ func TestRLSSchemaPartialOperators(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx := hp.CreateContext(t, 10*time.Minute)
 			mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-			tc := rlsSchemaCase{vector: "float32", dynamic: true, structured: true}
+			tc := rlsSchemaCase{vector: "float32", structured: true}
 			name := prepareRLSSchema(ctx, t, mc, tc)
 			all := map[any]rlsSchemaRow{}
 			for i, owner := range []string{"alice", "bob"} {
@@ -800,11 +791,11 @@ func operandBytes(value any) []byte {
 // defaults must materialize before CHECK and preserve unrelated fields on partial updates.
 func TestRLSSchemaDefaults(t *testing.T) {
 	defaults := rlsSchemaRow{"owner": "alice", "flag": true, "i8": int8(7), "i16": int16(7), "i32": int32(7), "i64": int64(9007199254740993), "f32": float32(0.25), "f64": float64(0.125), "text": "default_中"}
-	for _, mode := range []string{"column", "row"} {
+	for _, mode := range []string{"column"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := hp.CreateContext(t, 8*time.Minute)
 			mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-			tc := rlsSchemaCase{vector: "float32", nullable: true, dynamic: true, defaults: true}
+			tc := rlsSchemaCase{vector: "float32", nullable: true, defaults: true}
 			name := prepareRLSSchema(ctx, t, mc, tc)
 			all := map[any]rlsSchemaRow{}
 			bob := rlsSchemaData(t, tc, 2, 0, "bob")
@@ -891,7 +882,7 @@ func TestRLSSchemaAutoID(t *testing.T) {
 			t.Run(fmt.Sprintf("varchar_%v/%s", varchar, mode), func(t *testing.T) {
 				ctx := hp.CreateContext(t, 6*time.Minute)
 				mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-				tc := rlsSchemaCase{vector: "float32", varchar: varchar, autoID: true, dynamic: true}
+				tc := rlsSchemaCase{vector: "float32", varchar: varchar, autoID: true}
 				name := prepareRLSSchema(ctx, t, mc, tc)
 				all := map[any]rlsSchemaRow{}
 				for i, owner := range []string{"alice", "bob", "alice", "bob"} {

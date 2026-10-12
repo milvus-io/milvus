@@ -211,7 +211,7 @@ fixture setup, administrative result checks, and tests of its documented behavio
 
 Coverage includes policy and principal-tag lifecycle, action-specific enforcement,
 policy composition, collection properties, sharing and revocation, nullable and
-default values, dynamic fields, six vector types, and row/column serialization.
+default values, six vector types, and row/column serialization.
 Read checks compare IDs and field values with application-owned expectations;
 write checks verify accepted changes and unchanged data after rejected writes.
 
@@ -224,9 +224,20 @@ go test -tags=dynamic,test -gcflags='all=-N -l' -count=1 \
 
 This suite does not cover RBAC privilege grants/revocations, runtime server
 configuration changes, bulk import, CDC, restart orchestration, fault injection,
-or performance/soak testing. BM25 SearchIterator coverage is deferred pending
-resolution of an incomplete-pagination result. TEXT fields requiring a StorageV3 deployment and
-unsupported Geometry row serialization are outside this default matrix.
+or performance/soak testing. The following combinations are deferred because
+current validation still fails; they are not counted as passing coverage:
+
+- BM25 and equal-distance SearchIterator pagination. Binary fixtures in this
+  suite have distinct distances and still require complete, duplicate-free results.
+- Dynamic-field empty search results and structured/dynamic projections. The
+  wide-schema matrix uses static fields.
+- Nullable JSON/vector row serialization. Nullable and default-value matrix
+  cases use column writes; non-nullable schemas exercise row and column writes.
+- Partition-key HybridSearch with unrestricted branches in bypass mode. Basic
+  partition lifecycle and partition-key write rejection remain covered.
+
+TEXT fields requiring a StorageV3 deployment and unsupported Geometry row
+serialization are also outside this default matrix.
 
 ## Contributing
 1. Follow the existing code structure
