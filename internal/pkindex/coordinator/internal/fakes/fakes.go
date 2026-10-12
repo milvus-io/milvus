@@ -139,18 +139,22 @@ func (p *Pointers) List(_ context.Context, prefix string) ([]string, []string, e
 }
 
 // Store is an in-memory manifest.ObjectStore. Now sets the modification time
-// of written objects. ReadErr and WriteErr inject faults; each one applies to
-// the next call only and is then cleared.
+// of written objects. ReadErr, WriteErr and RemoveErr inject faults; each one
+// applies to the next matching call only and is then cleared.
 type Store struct {
 	mu   sync.Mutex
 	objs map[string][]byte
 	mod  map[string]time.Time
 	Now  func() time.Time
 
-	// ReadErr is returned by the next Read.
-	ReadErr error
+	// ReadErr is returned by the next Read. When ReadErrKey is not empty,
+	// ReadErr is returned only by the next Read of that key.
+	ReadErr    error
+	ReadErrKey string
 	// WriteErr is returned by the next Write, which does not write.
 	WriteErr error
+	// RemoveErr is returned by the next MultiRemove, which removes nothing.
+	RemoveErr error
 }
 
 // NewStore returns an empty Store whose clock is time.Now.
@@ -176,8 +180,8 @@ func (s *Store) Write(_ context.Context, key string, data []byte) error {
 func (s *Store) Read(_ context.Context, key string) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.ReadErr; err != nil {
-		s.ReadErr = nil
+	if err := s.ReadErr; err != nil && (s.ReadErrKey == "" || s.ReadErrKey == key) {
+		s.ReadErr, s.ReadErrKey = nil, ""
 		return nil, err
 	}
 	b, ok := s.objs[key]
@@ -212,6 +216,10 @@ func (s *Store) Walk(_ context.Context, prefix string, fn func(string, time.Time
 func (s *Store) MultiRemove(_ context.Context, keys []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.RemoveErr; err != nil {
+		s.RemoveErr = nil
+		return err
+	}
 	for _, k := range keys {
 		delete(s.objs, k)
 		delete(s.mod, k)
