@@ -614,10 +614,8 @@ refreshDone:
 			hits.Scores[:min(5, hits.Len())])
 	}
 
-	// Note: BM25 sparse_vec is intentionally not retrievable by users
-	// (CanRetrieveRawFieldData returns false for BM25 function outputs),
-	// so the take() fast path for function-output fields is exercised in
-	// the MinHash test below (mh_sig is user-visible).
+	// Note: BM25 and MinHash function outputs are intentionally not retrievable
+	// by users. Both remain available as search inputs.
 
 	t.Log("All E2E steps passed: create, refresh, index, load, search")
 }
@@ -837,19 +835,12 @@ mhRefreshDone:
 		t.Logf("MinHash %q -> %d/%d hits in class %d", q.text, matched, hits.Len(), q.expectedMod)
 	}
 
-	// Exercise take() fast path for the MinHash signature output.
-	takeRes, err := mc.Search(ctx, client.NewSearchOption(collName, 5,
+	// Raw MinHash outputs are not retrievable through Search.
+	_, err = mc.Search(ctx, client.NewSearchOption(collName, 5,
 		[]entity.Vector{entity.Text(queries[0].text)}).
 		WithANNSField("mh_sig").
 		WithOutputFields("id", "mh_sig"))
-	common.CheckErr(t, err, true)
-	require.Greater(t, len(takeRes), 0)
-	sigCol, ok := takeRes[0].GetColumn("mh_sig").(*column.ColumnBinaryVector)
-	require.True(t, ok, "mh_sig output column must be present")
-	require.Equal(t, takeRes[0].Len(), sigCol.Len())
-	require.Greater(t, len(sigCol.Data()), 0)
-	t.Logf("take() path returned %d mh_sig rows (%d bytes/row)", sigCol.Len(),
-		len(sigCol.Data()[0]))
+	common.CheckErr(t, err, false, "not allowed to retrieve raw data of field mh_sig")
 
 	t.Log("MinHash E2E passed: create, refresh, index, load, search")
 }
