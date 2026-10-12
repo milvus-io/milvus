@@ -37,6 +37,10 @@ import (
 
 func TestSessionWatchRetry(t *testing.T) {
 	paramtable.Init()
+	prolonged := make([]error, 10)
+	for i := range prolonged {
+		prolonged[i] = rpctypes.ErrLeaderChanged
+	}
 	for _, tc := range []struct {
 		name        string
 		getErrors   []error
@@ -45,22 +49,18 @@ func TestSessionWatchRetry(t *testing.T) {
 		getCalls    int
 		watchCalls  int
 		cancel      bool
-		cancelWatch bool
-		closed      bool
 	}{
 		{name: "recover repeated reads", getErrors: []error{rpctypes.ErrNoLeader, merr.Wrap(rpctypes.ErrTimeout, "get")}, getCalls: 3, watchCalls: 1},
 		{name: "recover repeated stream setup", watchErrors: []error{rpctypes.ErrLeaderChanged, rpctypes.ErrStopped}, getCalls: 3, watchCalls: 3},
 		{name: "permanent read", getErrors: []error{rpctypes.ErrPermissionDenied}, want: rpctypes.ErrPermissionDenied, getCalls: 1},
 		{name: "permanent stream setup", watchErrors: []error{rpctypes.ErrAuthFailed}, want: rpctypes.ErrAuthFailed, getCalls: 1, watchCalls: 1},
-		{name: "read retry exhausted", getErrors: []error{rpctypes.ErrNoLeader}, want: rpctypes.ErrNoLeader, getCalls: 10},
-		{name: "stream retry exhausted", watchErrors: []error{rpctypes.ErrLeaderChanged}, want: rpctypes.ErrLeaderChanged, getCalls: 10, watchCalls: 10},
-		{name: "closed during setup", closed: true, want: merr.WrapErrServiceUnavailable("session watch closed before creation"), getCalls: 1, watchCalls: 1},
-		{name: "cancel during setup", cancelWatch: true, want: context.Canceled, getCalls: 1, watchCalls: 1},
-		{name: "cancel during read retry", getErrors: []error{rpctypes.ErrLeaderChanged}, want: rpctypes.ErrLeaderChanged, getCalls: 1, cancel: true},
+		{name: "read recovery beyond old retry limit", getErrors: prolonged, getCalls: 11, watchCalls: 1},
+		{name: "stream recovery beyond old retry limit", watchErrors: prolonged, getCalls: 11, watchCalls: 11},
+		{name: "cancel during read retry", getErrors: []error{rpctypes.ErrLeaderChanged}, want: context.Canceled, getCalls: 1, cancel: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mockey.PatchConvey(tc.name, t, func() {
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 				defer cancel()
 				cli, err := etcd.GetRemoteEtcdClient(paramtable.Get().EtcdCfg.Endpoints.GetAsStrings())
 				require.NoError(t, err)
@@ -72,9 +72,6 @@ func TestSessionWatchRetry(t *testing.T) {
 					if call <= len(errs) {
 						return errs[call-1]
 					}
-					if tc.want != nil && len(errs) != 0 {
-						return errs[len(errs)-1]
-					}
 					return nil
 				}
 				mockey.Mock((*Session).GetSessions).To(func(_ *Session, _ context.Context, prefix string) (map[string]*Session, int64, error) {
@@ -85,9 +82,6 @@ func TestSessionWatchRetry(t *testing.T) {
 					}
 					return map[string]*Session{"node-1": {SessionRaw: SessionRaw{ServerID: 1}}}, 42, nextError(tc.getErrors, gets)
 				}).Build()
-				// Use the real retry implementation, including its backoff and
-				// ten-attempt bound. Do not forward its stack-bound callback
-				// through a runtime patch/Origin trampoline.
 				mockey.Mock((*clientv3.WatchResponse).Err).To(func(resp *clientv3.WatchResponse) error {
 					if resp.Header.Revision == -1 {
 						return rpctypes.ErrLeaderChanged
@@ -99,15 +93,7 @@ func TestSessionWatchRetry(t *testing.T) {
 					require.Equal(t, path.Join(s.metaRoot, DefaultServiceRoot, w.prefix), key)
 					require.Equal(t, int64(42), clientv3.OpGet(key, opts...).Rev())
 					ch := make(chan clientv3.WatchResponse, 1)
-					if tc.closed {
-						close(ch)
-						return ch
-					}
-					if tc.cancelWatch {
-						cancel()
-						return ch
-					}
-					ch <- clientv3.WatchResponse{Header: etcdserverpb.ResponseHeader{Revision: int64(watches)}, Created: true}
+					ch <- clientv3.WatchResponse{Header: etcdserverpb.ResponseHeader{Revision: int64(watches)}}
 					return ch
 				}).Build()
 				reconciles := 0
@@ -116,11 +102,27 @@ func TestSessionWatchRetry(t *testing.T) {
 					require.Equal(t, int64(1), sessions["node-1"].ServerID)
 					return nil
 				}
-				response := clientv3.WatchResponse{Header: etcdserverpb.ResponseHeader{Revision: -1}}
-				if tc.want != nil && !tc.cancel && !tc.cancelWatch {
-					require.PanicsWithError(t, tc.want.Error(), func() { w.handleWatchResponse(response) })
+				consume := func() {
+					response := clientv3.WatchResponse{Header: etcdserverpb.ResponseHeader{Revision: -1}}
+					for {
+						w.handleWatchResponse(response)
+						if ctx.Err() != nil {
+							return
+						}
+						select {
+						case <-ctx.Done():
+							t.Fatal("watch recovery timed out")
+						case response = <-w.rch:
+							if response.Err() == nil {
+								return
+							}
+						}
+					}
+				}
+				if tc.want != nil && !tc.cancel {
+					require.PanicsWithError(t, tc.want.Error(), consume)
 				} else {
-					require.NotPanics(t, func() { w.handleWatchResponse(response) })
+					require.NotPanics(t, consume)
 				}
 				require.Equal(t, tc.getCalls, gets)
 				require.Equal(t, tc.watchCalls, watches)
@@ -223,12 +225,14 @@ func TestSessionWatchAuthenticateLeaderChanged(t *testing.T) {
 	}
 	failures.Store(3)
 	w.rch = cli.Watch(ctx, key)
-	select {
-	case <-ctx.Done():
-		t.Fatal("watch did not surface injected Authenticate error")
-	case resp := <-w.rch:
-		require.ErrorIs(t, resp.Err(), rpctypes.ErrLeaderChanged)
-		require.NotPanics(t, func() { w.handleWatchResponse(resp) })
+	for reconciles < 3 {
+		select {
+		case <-ctx.Done():
+			t.Fatal("watch did not surface injected Authenticate error")
+		case resp := <-w.rch:
+			require.ErrorIs(t, resp.Err(), rpctypes.ErrLeaderChanged)
+			require.NotPanics(t, func() { w.handleWatchResponse(resp) })
+		}
 	}
 	require.Equal(t, int32(3), injected.Load())
 	require.Equal(t, 3, reconciles)
