@@ -20,9 +20,43 @@
 
 #include "cachinglayer/Translator.h"
 #include "common/Types.h"
+#include "common/OpContext.h"
 #include "index/contracts/Registry.h"
 
 namespace milvus::segcore::storagev1translator {
+
+// Each load owns its effective priority without mutating a shared caller context.
+// Storage counters are returned even when loading throws.
+class IndexLoadContext {
+ public:
+    IndexLoadContext(milvus::OpContext* parent, int32_t configured_priority)
+        : parent_(parent) {
+        ctx.runtime_load_priority = configured_priority;
+        if (parent_ != nullptr) {
+            ctx.cancellation_token = parent_->cancellation_token;
+            ctx.runtime_load_priority = parent_->runtime_load_priority.value_or(configured_priority);
+            ctx.coload_fields = parent_->coload_fields;
+            ctx.pinned_segment_state = parent_->pinned_segment_state;
+            ctx.pinned_state_owner = parent_->pinned_state_owner;
+            ctx.trace_context = parent_->trace_context;
+            ctx.trace_span = parent_->trace_span;
+        }
+    }
+
+    ~IndexLoadContext() {
+        if (parent_ != nullptr) {
+            parent_->storage_usage.scanned_cold_bytes.fetch_add(
+                ctx.storage_usage.scanned_cold_bytes.load());
+            parent_->storage_usage.scanned_total_bytes.fetch_add(
+                ctx.storage_usage.scanned_total_bytes.load());
+        }
+    }
+
+    milvus::OpContext ctx;
+
+ private:
+    milvus::OpContext* parent_;
+};
 
 // Common cache translator contract for readers selected through the index
 // family registry. Loading, accounting, and cache metadata remain translator
