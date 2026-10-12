@@ -214,6 +214,25 @@ policy composition, collection properties, sharing and revocation, nullable and
 default values, six vector types, and row/column serialization.
 Read checks compare IDs and field values with application-owned expectations;
 write checks verify accepted changes and unchanged data after rejected writes.
+The small schema fixtures check exact top-K ordering with distinct query vectors
+and the nearest row per group. Every write stage checks complete stored values;
+the complete read API matrix runs at insert, update, and delete checkpoints.
+
+`TestRLSSchemaMixedSegments` covers six vector types and both primary-key types
+with 3,000 indexed sealed rows, 500 unindexed sealed rows, and 500 growing rows.
+Both principals have records in every group. It uses the shared random vector
+generators, checks encoded-vector uniqueness, and verifies loaded segment/index
+metadata and exact per-group iterator membership, including `ignore_growing`.
+The index row threshold must be greater than 500 and no greater than 3,000
+(`indexCoord.segment.minSegmentNumRowsToEnableIndex`, default 1,024). The existing
+`hp.GetServerConfig` helper reads this prerequisite through the standalone
+management endpoint (port 9091); unavailable or incompatible configuration fails
+fixture setup. Collection-level automatic compaction is disabled for these fixtures.
+Writes check both principals and the administrator after each owner's changes.
+HNSW top-K checks use a 90% recall floor; supported iterator checks still require
+every authorized row, without duplicates, and an explicit EOF. BIN_IVF_FLAT's
+documented `index not supported` iterator error is checked explicitly; it is not
+counted as successful binary indexed iteration.
 
 ```bash
 cd tests/go_client
@@ -227,8 +246,9 @@ configuration changes, bulk import, CDC, restart orchestration, fault injection,
 or performance/soak testing. The following combinations are deferred because
 current validation still fails; they are not counted as passing coverage:
 
-- BM25 and equal-distance SearchIterator pagination. Binary fixtures in this
-  suite have distinct distances and still require complete, duplicate-free results.
+- BM25 and dedicated equal-distance SearchIterator pagination stress cases.
+  Small binary fixtures have distinct distances; random mixed-segment fixtures
+  may have ties and still require complete, duplicate-free iterator results.
 - Dynamic-field empty search results and structured/dynamic projections. The
   wide-schema matrix uses static fields.
 - Nullable JSON/vector row serialization. Nullable and default-value matrix

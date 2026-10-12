@@ -61,9 +61,8 @@ func rlsFlush(ctx context.Context, t *testing.T, mc *client.Client, name string)
 func TestRLSStorageLifecycle(t *testing.T) {
 	ctx := hp.CreateContext(t, 5*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-	name := prepareRLSCollection(ctx, t, mc, "", false)
-	createRLSPolicy(ctx, t, mc, name, "owner", "owner == $current_principal", "", milvuspb.RowPolicyAction_Query, milvuspb.RowPolicyAction_Search)
-	rlsFlush(ctx, t, mc, name)
+	tc := rlsSchemaCase{vector: "float32", dim: 128}
+	name, all := prepareRLSMixedSegments(ctx, t, mc, tc)
 	for _, mode := range []string{"full_reload", "partial_load", "mmap", "reindex"} {
 		t.Run(mode, func(t *testing.T) {
 			require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)))
@@ -83,11 +82,22 @@ func TestRLSStorageLifecycle(t *testing.T) {
 			task, err := mc.LoadCollection(ctx, opt)
 			require.NoError(t, err)
 			require.NoError(t, task.Await(ctx))
-			queryRLS(ctx, t, mc, name, "alice", false, 1, 3)
-			queryRLS(ctx, t, mc, name, "bob", false, 2, 4)
-			result, err := mc.Search(ctx, client.NewSearchOption(name, 4, []entity.Vector{entity.FloatVector{0, 1, 2, 3}}).WithRLSPrincipal("alice").WithConsistencyLevel(entity.ClStrong))
-			require.NoError(t, err)
-			checkRLSIDs(t, result[0].IDs, 1, 3)
+			checkRLSMixedSegments(ctx, t, mc, name)
+			for _, owner := range []string{"alice", "bob"} {
+				var expected []int64
+				want := map[any]rlsSchemaRow{}
+				for id, row := range all {
+					if row["owner"] == owner {
+						expected = append(expected, id.(int64))
+						want[id] = row
+					}
+				}
+				queryRLS(ctx, t, mc, name, owner, false, expected...)
+				result, err := mc.Search(ctx, client.NewSearchOption(name, 20, []entity.Vector{entity.FloatVector(common.GenFloatVector(tc.vectorDim()))}).WithOutputFields("id", "owner").WithRLSPrincipal(owner).WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				require.Len(t, result, 1)
+				require.Len(t, checkRLSSchemaRows(t, result[0], want, []string{"id", "owner"}), 20)
+			}
 		})
 	}
 }
