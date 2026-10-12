@@ -17,6 +17,7 @@
 #include "ConsumerExprTestBase.h"
 #include "ExprBatchTestUtils.h"
 #include "ExprIndexIntegrationTestUtils.h"
+#include "TermExpr.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
@@ -670,8 +671,20 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         jsons.emplace_back(simdjson::padded_string(json));
     }
     json_field->add_json_data(jsons);
-    InstallJsonConsumerIndex(
-        *seg, json_fid, {json_field}, "/a", JsonCastType::FromString("DOUBLE"));
+    OpContext untouched;
+    OpContext* observed_pin = &untouched;
+    auto projected = milvus::test::expr_index::BuildIndex(
+        json_fid,
+        DataType::JSON,
+        index::INVERTED_INDEX_TYPE,
+        {json_field},
+        {{JSON_PATH, "/a"}, {JSON_CAST_TYPE, "DOUBLE"}});
+    milvus::test::expr_index::InstallIndex(*seg,
+                                           json_fid,
+                                           DataType::JSON,
+                                           std::move(projected),
+                                           DataType::NONE,
+                                           &observed_pin);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -694,6 +707,33 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         proto::plan::OpType::Equal,
         value,
         std::vector<proto::plan::GenericValue>());
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{value},
+        false);
+    class TermPinProbe : public exec::PhyTermFilterExpr {
+     public:
+        using exec::PhyTermFilterExpr::PhyTermFilterExpr;
+        bool
+        HasSelectedPin() const {
+            return static_cast<bool>(selected_root_pin_);
+        }
+    };
+    TermPinProbe physical_expr({},
+                               term_expr,
+                               "term-pin-probe",
+                               nullptr,
+                               seg.get(),
+                               json_strs.size(),
+                               MAX_TIMESTAMP,
+                               2,
+                               0);
+    ASSERT_EQ(observed_pin, &untouched);
+    physical_expr.DetermineExecPath();
+    EXPECT_EQ(physical_expr.GetExecPath(), exec::ExprExecPath::RawData);
+    EXPECT_FALSE(physical_expr.HasSelectedPin());
+    EXPECT_EQ(observed_pin, &untouched);
+
     auto result = evaluate(equal_expr);
     TargetBitmapView result_view(result->GetRawData(), result->size());
     TargetBitmapView valid_view(result->GetValidRawData(), result->size());
@@ -704,10 +744,9 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
     EXPECT_TRUE(result_view[1]);
     EXPECT_FALSE(result_view[2]);
 
-    auto term_expr = std::make_shared<expr::TermFilterExpr>(
-        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
-        std::vector<proto::plan::GenericValue>{value},
-        false);
+    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+        term_expr, seg.get(), json_strs.size()));
+
     result = evaluate(term_expr);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
@@ -739,6 +778,7 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
     EXPECT_FALSE(result_view[0]);
     EXPECT_TRUE(result_view[1]);
     EXPECT_FALSE(result_view[2]);
+    EXPECT_EQ(observed_pin, &untouched);
 }
 
 TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
