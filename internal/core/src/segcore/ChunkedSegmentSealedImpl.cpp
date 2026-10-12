@@ -8222,35 +8222,30 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                                              PublishedSegmentState&) mutable {
                     runtime.reader = std::move(reader);
                 });
-            if (!diff.column_groups_to_load.empty()) {
+            // New fields are either eager or lazy, never both, so one batch
+            // opens all of them instead of a second serial round for lazy
+            // fields.
+            if (!diff.column_groups_to_load.empty() ||
+                !diff.column_groups_to_lazyload.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
                                  diff.column_groups_to_load,
-                                 segment_load_info,
-                                 schema_snapshot,
-                                 true,
-                                 op_ctx,
-                                 false,
-                                 committer);
-            }
-            if (!diff.column_groups_to_lazyload.empty()) {
-                LoadColumnGroups(column_groups,
-                                 properties,
                                  diff.column_groups_to_lazyload,
                                  segment_load_info,
                                  schema_snapshot,
-                                 false,
                                  op_ctx,
                                  false,
                                  committer);
             }
+            // Replace batches stay ordered: ComputeDiffReloadFields and
+            // ComputeDiffColumnGroups may both emit the same field.
             if (!diff.column_groups_to_replace.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
                                  diff.column_groups_to_replace,
+                                 /*lazy_cg_field_ids=*/{},
                                  segment_load_info,
                                  schema_snapshot,
-                                 true,
                                  op_ctx,
                                  true,
                                  committer);
@@ -8258,10 +8253,10 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
             if (!diff.column_groups_to_lazyreplace.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
+                                 /*eager_cg_field_ids=*/{},
                                  diff.column_groups_to_lazyreplace,
                                  segment_load_info,
                                  schema_snapshot,
-                                 false,
                                  op_ctx,
                                  true,
                                  committer);
@@ -9111,18 +9106,21 @@ void
 ChunkedSegmentSealedImpl::LoadColumnGroups(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
-    const std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
+    const std::vector<std::pair<int, std::vector<FieldId>>>& eager_cg_field_ids,
+    const std::vector<std::pair<int, std::vector<FieldId>>>& lazy_cg_field_ids,
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
-    bool eager_load,
     milvus::OpContext* op_ctx,
     bool is_replace,
     StagedStateCommitter& committer) {
     const auto reader = committer.runtime()->reader;
     std::vector<ManifestLoadTask> tasks;
-    tasks.reserve(cg_field_ids.size());
-    for (const auto& [cg_index, field_ids] : cg_field_ids) {
-        tasks.push_back({cg_index, field_ids, eager_load, {}, {}});
+    tasks.reserve(eager_cg_field_ids.size() + lazy_cg_field_ids.size());
+    for (const auto& [cg_index, field_ids] : eager_cg_field_ids) {
+        tasks.push_back({cg_index, field_ids, /*eager_load=*/true, {}, {}});
+    }
+    for (const auto& [cg_index, field_ids] : lazy_cg_field_ids) {
+        tasks.push_back({cg_index, field_ids, /*eager_load=*/false, {}, {}});
     }
     const bool enable_async_load =
         storagev2translator::StorageV2AsyncLoadEnabled();

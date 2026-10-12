@@ -22,6 +22,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -30,6 +31,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -456,6 +458,41 @@ class WarmupTestReader : public milvus_storage::api::Reader {
     std::string* chunk_rows_thread_name_;
     std::shared_ptr<std::atomic<int>> chunk_reader_calls_;
     std::shared_ptr<std::atomic<int>> estimate_calls_;
+};
+
+// Holds every synchronous chunk reader open until `parties` opens are in
+// flight, so it only succeeds when those opens run concurrently.
+class RendezvousTestReader : public WarmupTestReader {
+ public:
+    RendezvousTestReader(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups,
+        int parties)
+        : WarmupTestReader(std::move(column_groups)), parties_(parties) {
+    }
+
+    arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>
+    get_chunk_reader(int64_t index,
+                     const std::shared_ptr<std::vector<std::string>>& columns)
+        const override {
+        {
+            std::unique_lock lock(mutex_);
+            ++arrived_;
+            cv_.notify_all();
+            if (!cv_.wait_for(lock, std::chrono::seconds(10), [&] {
+                    return arrived_ >= parties_;
+                })) {
+                return arrow::Status::Invalid(
+                    "chunk reader opens did not run concurrently");
+            }
+        }
+        return WarmupTestReader::get_chunk_reader(index, columns);
+    }
+
+ private:
+    const int parties_;
+    mutable std::mutex mutex_;
+    mutable std::condition_variable cv_;
+    mutable int arrived_{0};
 };
 
 class CancellationObservingIndexTranslator
@@ -4789,8 +4826,7 @@ TEST(SealedSegmentCowState,
         {vec},
         segment_load_info,
         schema,
-        std::move(reader),
-        /*eager_load=*/true);
+        std::move(reader));
 
     auto proxy_column = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
     ASSERT_NE(proxy_column, nullptr);
@@ -4824,8 +4860,7 @@ TEST(SealedSegmentCowState,
         {vec},
         segment_load_info,
         schema,
-        std::move(reader),
-        /*eager_load=*/true);
+        std::move(reader));
 
     EXPECT_NE(std::dynamic_pointer_cast<ProxyChunkColumn>(column), nullptr);
 }
@@ -4861,8 +4896,7 @@ TEST(SealedSegmentCowState,
         {vec},
         segment_load_info,
         schema,
-        std::move(reader),
-        /*eager_load=*/true));
+        std::move(reader)));
 
     EXPECT_NE(chunk_rows_thread, caller_thread);
     EXPECT_TRUE(chunk_rows_thread_name.starts_with("MIDD_SEGC_POOL"))
@@ -4915,10 +4949,10 @@ TEST(SealedSegmentCowState,
                 column_groups,
                 std::make_shared<milvus_storage::api::Properties>(),
                 {{0, {vec}}},
+                /*lazy_cg_field_ids=*/{},
                 segment_load_info,
                 schema,
-                std::move(reader),
-                /*eager_load=*/true);
+                std::move(reader));
             ASSERT_EQ(columns.size(), 1);
             auto column =
                 std::dynamic_pointer_cast<ProxyChunkColumn>(columns.front());
@@ -4995,11 +5029,11 @@ TEST(SealedSegmentCowState, MixedManifestTasksOnlyPreopenRegularReaders) {
         auto columns = sealed->TestStageLoadColumnGroupsWithReader(
             column_groups,
             std::make_shared<milvus_storage::api::Properties>(),
+            /*eager_cg_field_ids=*/{},
             {{0, {vec}}, {0, {pk}}},
             load_info,
             schema,
-            std::move(reader),
-            /*eager_load=*/false);
+            std::move(reader));
         ASSERT_EQ(columns.size(), 2);
         auto lazy = std::dynamic_pointer_cast<ProxyChunkColumn>(columns[0]);
         auto regular = std::dynamic_pointer_cast<ProxyChunkColumn>(columns[1]);
@@ -5057,11 +5091,11 @@ TEST(SealedSegmentCowState, StagedManifestTasksShareColumnGroupSizeEstimate) {
     auto columns = sealed->TestStageLoadColumnGroupsWithReader(
         column_groups,
         std::make_shared<milvus_storage::api::Properties>(),
+        /*eager_cg_field_ids=*/{},
         std::move(tasks),
         segment_load_info,
         schema,
-        std::move(reader),
-        /*eager_load=*/false);
+        std::move(reader));
 
     ASSERT_EQ(columns.size(), 2);
     EXPECT_EQ(chunk_reader_calls->load(std::memory_order_relaxed), 2);
@@ -5084,11 +5118,11 @@ TEST(SealedSegmentCowState, StagedManifestTasksShareColumnGroupSizeEstimate) {
         columns = sealed->TestStageLoadColumnGroupsWithReader(
             column_groups,
             std::make_shared<milvus_storage::api::Properties>(),
+            /*eager_cg_field_ids=*/{},
             {{0, {first}}, {0, {second}}},
             segment_load_info,
             schema,
-            std::move(lazy_reader),
-            /*eager_load=*/false);
+            std::move(lazy_reader));
         ASSERT_EQ(columns.size(), 2);
         EXPECT_EQ(chunk_reader_calls->load(), 0);
         EXPECT_EQ(estimate_calls->load(), 0);
@@ -5119,6 +5153,48 @@ TEST(SealedSegmentCowState, StagedManifestTasksShareColumnGroupSizeEstimate) {
         EXPECT_EQ(estimate_calls->load(), 1);
         EXPECT_TRUE(captured_reader.expired());
     }
+}
+
+TEST(SealedSegmentCowState, StagedEagerAndLazyManifestTasksOpenInOneBatch) {
+    LazyColumnGroupConfigGuard lazy_group_guard(false);
+    auto async_guard = SetStorageV2AsyncLoadForTest(false);
+    auto schema = std::make_shared<Schema>();
+    auto eager = schema->AddDebugField("eager", DataType::INT64);
+    auto lazy = schema->AddDebugField("lazy", DataType::INT64);
+
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 1010, SegcoreConfig::default_config());
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1010);
+    load_proto.set_num_of_rows(1);
+    load_proto.set_storageversion(STORAGE_V3);
+    load_proto.set_manifest_path("test-manifest");
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    for (const auto field_id : {eager, lazy}) {
+        auto column_group =
+            std::make_shared<milvus_storage::api::ColumnGroup>();
+        column_group->columns = {std::to_string(field_id.get())};
+        column_groups->push_back(std::move(column_group));
+    }
+
+    // A serial lazy batch would leave the eager open waiting alone.
+    auto columns = sealed->TestStageLoadColumnGroupsWithReader(
+        column_groups,
+        std::make_shared<milvus_storage::api::Properties>(),
+        {{0, {eager}}},
+        {{1, {lazy}}},
+        segment_load_info,
+        schema,
+        std::make_shared<RendezvousTestReader>(column_groups, /*parties=*/2));
+
+    ASSERT_EQ(columns.size(), 2);
+    EXPECT_EQ(columns[0]->DataByteSize(), 1);
+    EXPECT_EQ(columns[1]->DataByteSize(), 1);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
