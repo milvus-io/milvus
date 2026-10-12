@@ -502,7 +502,7 @@ func NewSegment(ctx context.Context,
 		logger.Warn(ctx, "create segment failed", mlog.Err(err))
 		return nil, err
 	}
-	logger.Info(ctx, "create segment done")
+	logger.Debug(ctx, "create segment done")
 
 	segment := &LocalSegment{
 		baseSegment:        base,
