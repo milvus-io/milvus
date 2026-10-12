@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // =============================================================================
@@ -474,8 +475,8 @@ func (s *GroupByOpTestSuite) TestGroupByOp_NonExistentGroupField() {
 	op := NewGroupByOp("nonexistent", 2, 10, 0)
 
 	_, err := op.Execute(ctx, df)
-	s.Error(err)
-	s.Contains(err.Error(), "not found")
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Contains(err.Error(), "nonexistent")
 }
 
 func (s *GroupByOpTestSuite) TestGroupByOp_NoScoreColumn() {

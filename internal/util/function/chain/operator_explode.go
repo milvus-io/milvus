@@ -70,6 +70,34 @@ func (o *ExplodeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 	if column.DataType().ID() != arrow.LIST && column.DataType().ID() != arrow.LARGE_LIST {
 		return nil, merr.WrapErrFunctionFailedMsg("explode input %q must be List, got %s", o.inputs[0], column.DataType())
 	}
+	inputSchema, err := functionInputSchema(input, o.inputs)
+	if err != nil {
+		return nil, err
+	}
+	sourceField := inputSchema.Field(0)
+	elementField := sourceField.Type.(arrow.ListLikeType).ElemField()
+	if _, annotated := elementField.Metadata.GetValue(types.MetadataKeyMilvusDataType); !annotated {
+		// Persisted ArrayOfVector encodes element type/dimension on the parent;
+		// expansion must transfer those semantics to each extracted vector.
+		if logical, err := types.MilvusSchemaFromArrowField(sourceField); err == nil &&
+			(logical.GetDataType() == schemapb.DataType_Array || logical.GetDataType() == schemapb.DataType_ArrayOfVector) {
+			child := &schemapb.FieldSchema{Name: o.outputs[0], DataType: logical.GetElementType(), Nullable: elementField.Nullable, TypeParams: logical.GetTypeParams()}
+			if recursive := logical.GetTypeSchema().GetArrayElement(); recursive != nil {
+				child.TypeSchema = recursive
+				child.DataType = recursive.GetLeafType()
+				if recursive.GetArrayElement() != nil {
+					child.DataType = schemapb.DataType_Array
+				}
+			}
+			if annotated, err := types.ArrowFieldFromMilvusSchema(child); err == nil {
+				elementField.Metadata = annotated.Metadata
+			}
+		}
+	}
+	elementField, err = normalizeRuntimeArrowField(elementField, o.outputs[0], elementField.Nullable || o.options.Outer, true)
+	if err != nil {
+		return nil, err
+	}
 	parentIndices := make([][]int, input.NumChunks())
 	newSizes := make([]int64, input.NumChunks())
 	colNames := make([]string, 0, input.NumColumns()+2)
@@ -157,6 +185,10 @@ func (o *ExplodeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 		}
 		if name != o.outputs[0] && name != o.options.Position {
 			builder.CopyFieldMetadata(input, name)
+		} else if name == o.outputs[0] {
+			if err := setFunctionOutputField(builder, name, elementField); err != nil {
+				return nil, err
+			}
 		} else {
 			builder.SetFieldNullable(name, true)
 		}

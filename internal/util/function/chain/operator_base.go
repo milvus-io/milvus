@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/compute"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -139,25 +140,25 @@ func takeArrayWithNulls(pool memory.Allocator, data arrow.Array, indices []int) 
 
 // BaseOp is the base operator with common fields.
 type BaseOp struct {
-	inputs  []string
-	outputs []string
+	inputs         []string
+	outputs        []string
+	inputDataTypes []schemapb.DataType
 }
 
 func (o *BaseOp) Inputs() []string  { return o.inputs }
 func (o *BaseOp) Outputs() []string { return o.outputs }
 
+func (o *BaseOp) SetInputDataTypes(types []schemapb.DataType) {
+	o.inputDataTypes = append([]schemapb.DataType(nil), types...)
+}
+
+func (o *BaseOp) InputDataTypes() []schemapb.DataType { return o.inputDataTypes }
+
 // ReadInputColumns reads all input columns declared in o.inputs from the DataFrame.
-// Returns an error if any declared input column is missing.
+// It uses the same path resolution as all native operators. Returned columns
+// are owned by the caller and must be released, including top-level columns.
 func (o *BaseOp) ReadInputColumns(opName string, df *DataFrame) ([]*arrow.Chunked, error) {
-	cols := make([]*arrow.Chunked, len(o.inputs))
-	for i, name := range o.inputs {
-		col := df.Column(name)
-		if col == nil {
-			return nil, merr.WrapErrServiceInternalMsg("%s: column %q not found", opName, name)
-		}
-		cols[i] = col
-	}
-	return cols, nil
+	return o.readResolvedColumns(opName, df, memory.DefaultAllocator)
 }
 
 // sliceArray slices an array from start to end using zero-copy.

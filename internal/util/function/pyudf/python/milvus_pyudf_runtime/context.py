@@ -25,6 +25,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
+import pyarrow as pa
+
 
 @dataclass(frozen=True, slots=True)
 class PyUDFContext:
@@ -82,3 +84,6 @@ class PyUDFCallContext:
     table_result: bool = False
     # A reducer returns one row per group; a map preserves each group's rows.
     reduction: bool = False
+    # Fields follow the selected positional arguments, including logical Milvus
+    # type metadata. Arrow carries the schema; no function registration is needed.
+    input_schema: pa.Schema | None = None

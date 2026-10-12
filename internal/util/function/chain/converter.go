@@ -38,55 +38,40 @@ import (
 
 // ToArrowType converts Milvus DataType to Arrow DataType.
 func ToArrowType(t schemapb.DataType) (arrow.DataType, error) {
-	switch t {
-	case schemapb.DataType_Bool:
-		return arrow.FixedWidthTypes.Boolean, nil
-	case schemapb.DataType_Int8:
-		return arrow.PrimitiveTypes.Int8, nil
-	case schemapb.DataType_Int16:
-		return arrow.PrimitiveTypes.Int16, nil
-	case schemapb.DataType_Int32:
-		return arrow.PrimitiveTypes.Int32, nil
-	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
-		return arrow.PrimitiveTypes.Int64, nil
-	case schemapb.DataType_Float:
-		return arrow.PrimitiveTypes.Float32, nil
-	case schemapb.DataType_Double:
-		return arrow.PrimitiveTypes.Float64, nil
-	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
-		return arrow.BinaryTypes.String, nil
-	default:
-		return nil, merr.WrapErrServiceInternalMsg("unsupported data type: %s", t.String())
+	field, err := types.ArrowFieldFromMilvusSchema(&schemapb.FieldSchema{Name: "value", DataType: t})
+	if err != nil {
+		return nil, merr.Wrap(err, "convert Milvus type to Arrow")
 	}
+	return field.Type, nil
 }
 
-// ToMilvusType converts Arrow DataType to Milvus DataType.
+// ToMilvusType infers only unambiguous physical values. Parameterized/logical
+// types use metadata-aware MilvusSchemaFromArrowField instead.
 func ToMilvusType(t arrow.DataType) (schemapb.DataType, error) {
-	switch t.ID() {
-	case arrow.BOOL:
-		return schemapb.DataType_Bool, nil
-	case arrow.INT8:
-		return schemapb.DataType_Int8, nil
-	case arrow.INT16:
-		return schemapb.DataType_Int16, nil
-	case arrow.INT32:
-		return schemapb.DataType_Int32, nil
-	case arrow.INT64:
-		return schemapb.DataType_Int64, nil
-	case arrow.FLOAT32:
-		return schemapb.DataType_Float, nil
-	case arrow.FLOAT64:
-		return schemapb.DataType_Double, nil
-	case arrow.STRING:
-		return schemapb.DataType_VarChar, nil
-	default:
-		return schemapb.DataType_None, merr.WrapErrServiceInternalMsg("unsupported arrow type: %s", t.Name())
+	schema, err := types.MilvusSchemaFromArrowField(arrow.Field{Name: "value", Type: t, Nullable: true})
+	if err != nil {
+		return schemapb.DataType_None, merr.Wrap(err, "infer Milvus type from Arrow")
 	}
+	return schema.GetDataType(), nil
 }
 
 // =============================================================================
 // Generic Import Helpers
 // =============================================================================
+
+// CanImportLegacyFieldType describes the older rerank FieldData importer.
+// General schema conversion is broader; that does not expand this endpoint.
+func CanImportLegacyFieldType(t schemapb.DataType) bool {
+	switch t {
+	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
+		schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Timestamptz,
+		schemapb.DataType_Float, schemapb.DataType_Double, schemapb.DataType_String,
+		schemapb.DataType_VarChar, schemapb.DataType_Text:
+		return true
+	default:
+		return false
+	}
+}
 
 // batchBuilder is an Arrow builder that supports batch append.
 type batchBuilder[T any] interface {

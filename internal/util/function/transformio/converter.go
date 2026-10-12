@@ -26,26 +26,29 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const DataTypeMetadataKey = "milvus.data_type"
+const DataTypeMetadataKey = types.MetadataKeyMilvusDataType
 
 // FromFieldData borrows input protos and returns an owned, one-group table.
-func FromFieldData(fields []*schemapb.FieldData, rows int64, alloc memory.Allocator) (arrow.Table, error) {
-	return FromFieldDataWithTimezone(fields, rows, alloc, "UTC")
+func FromFieldData(fields []*schemapb.FieldData, rows int64, alloc memory.Allocator, schemas ...*schemapb.FieldSchema) (arrow.Table, error) {
+	return FromFieldDataWithTimezone(fields, rows, alloc, "UTC", schemas...)
 }
 
 // FromFieldDataWithTimezone accepts the public TIMESTAMPTZ string wire format
 // while exposing canonical UTC microseconds to functions. Other fields are
 // borrowed, and normalization never mutates the original request.
-func FromFieldDataWithTimezone(fields []*schemapb.FieldData, rows int64, alloc memory.Allocator, timezone string) (arrow.Table, error) {
+func FromFieldDataWithTimezone(fields []*schemapb.FieldData, rows int64, alloc memory.Allocator, timezone string, schemas ...*schemapb.FieldSchema) (arrow.Table, error) {
 	if rows < 0 || rows > math.MaxUint32 || len(fields) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("transform input requires fields and a valid row count")
 	}
@@ -86,13 +89,50 @@ func FromFieldDataWithTimezone(fields []*schemapb.FieldData, rows int64, alloc m
 			cloned.GetScalars().Data = &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: data}}
 			field = cloned
 		}
-		values, err := fieldToArrow(field, rows, alloc)
+		var declared *schemapb.FieldSchema
+		for _, schema := range schemas {
+			if schema.GetName() == field.GetFieldName() {
+				declared = schema
+				break
+			}
+		}
+		if field.GetType() == schemapb.DataType_Geometry && field.GetScalars().GetGeometryWktData() != nil {
+			normalized := proto.Clone(field).(*schemapb.FieldData)
+			strings := field.GetScalars().GetGeometryWktData().GetData()
+			data := make([][]byte, len(strings))
+			valid := typeutil.GetFieldDataValidData(field)
+			for index, value := range strings {
+				if len(valid) == len(strings) && !valid[index] {
+					continue
+				}
+				encoded, err := common.ConvertWKTToWKB(value)
+				if err != nil {
+					return nil, merr.WrapErrParameterInvalidErr(err, "invalid transform geometry WKT input")
+				}
+				data[index] = encoded
+			}
+			normalized.GetScalars().Data = &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: data}}
+			field = normalized
+		}
+		values, err := fieldToArrowWithSchema(field, rows, alloc, declared)
 		if err != nil {
 			return nil, merr.Wrapf(err, "transform input field %q", field.GetFieldName())
 		}
 		arrays = append(arrays, values)
-		arrowFields = append(arrowFields, arrow.Field{Name: field.GetFieldName(), Type: values.DataType(), Nullable: true,
-			Metadata: arrow.NewMetadata([]string{DataTypeMetadataKey, "milvus.field_id", "dim", "element_type"}, []string{strconv.Itoa(int(field.GetType())), strconv.FormatInt(field.GetFieldId(), 10), strconv.FormatInt(field.GetVectors().GetDim(), 10), strconv.Itoa(int(field.GetScalars().GetArrayData().GetElementType()))})})
+		metadataSchema := fieldDataSchema(field)
+		if declared != nil {
+			metadataSchema = proto.Clone(declared).(*schemapb.FieldSchema)
+		}
+		metadataSchema.Nullable = true // A wire payload alone does not declare non-nullability.
+		encoded, err := protojson.Marshal(metadataSchema)
+		if err != nil {
+			return nil, merr.WrapErrServiceInternalErr(err, "serialize transform input schema")
+		}
+		metadata := map[string]string{DataTypeMetadataKey: strconv.Itoa(int(field.GetType())), types.MetadataKeyMilvusFieldSchema: string(encoded), "milvus.field_id": strconv.FormatInt(field.GetFieldId(), 10), "element_type": strconv.Itoa(int(metadataSchema.GetElementType()))}
+		for _, param := range metadataSchema.GetTypeParams() {
+			metadata[param.GetKey()] = param.GetValue()
+		}
+		arrowFields = append(arrowFields, arrow.Field{Name: field.GetFieldName(), Type: values.DataType(), Nullable: true, Metadata: arrow.MetadataFrom(metadata)})
 	}
 	record := array.NewRecord(arrow.NewSchema(arrowFields, nil), arrays, rows)
 	defer record.Release()
@@ -107,9 +147,9 @@ func scalarType(dataType schemapb.DataType) (arrow.DataType, error) {
 		return arrow.PrimitiveTypes.Int8, nil
 	case schemapb.DataType_Int16:
 		return arrow.PrimitiveTypes.Int16, nil
-	case schemapb.DataType_Int32:
+	case schemapb.DataType_Int32, schemapb.DataType_Date:
 		return arrow.PrimitiveTypes.Int32, nil
-	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz, schemapb.DataType_Time:
 		return arrow.PrimitiveTypes.Int64, nil
 	case schemapb.DataType_Float:
 		return arrow.PrimitiveTypes.Float32, nil
@@ -117,8 +157,12 @@ func scalarType(dataType schemapb.DataType) (arrow.DataType, error) {
 		return arrow.PrimitiveTypes.Float64, nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return arrow.BinaryTypes.String, nil
-	case schemapb.DataType_JSON, schemapb.DataType_Geometry:
+	case schemapb.DataType_JSON, schemapb.DataType_Geometry, schemapb.DataType_Mol:
 		return arrow.BinaryTypes.Binary, nil
+	case schemapb.DataType_Decimal:
+		return &arrow.FixedSizeBinaryType{ByteWidth: 8}, nil
+	case schemapb.DataType_UUID:
+		return &arrow.FixedSizeBinaryType{ByteWidth: 16}, nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported transform scalar type %s", dataType)
 	}
@@ -144,6 +188,14 @@ func scalarLen(field *schemapb.ScalarField, dataType schemapb.DataType) int {
 		return len(field.GetJsonData().GetData())
 	case schemapb.DataType_Geometry:
 		return len(field.GetGeometryData().GetData())
+	case schemapb.DataType_Mol:
+		return len(field.GetMolData().GetData())
+	case schemapb.DataType_Date:
+		return len(field.GetDateData().GetData())
+	case schemapb.DataType_Time:
+		return len(field.GetTimeData().GetData())
+	case schemapb.DataType_Decimal, schemapb.DataType_UUID:
+		return len(field.GetBytesData().GetData())
 	default:
 		return -1
 	}
@@ -181,6 +233,19 @@ func appendScalar(builder array.Builder, field *schemapb.ScalarField, dataType s
 		builder.(*array.BinaryBuilder).Append(field.GetJsonData().Data[index])
 	case schemapb.DataType_Geometry:
 		builder.(*array.BinaryBuilder).Append(field.GetGeometryData().Data[index])
+	case schemapb.DataType_Mol:
+		builder.(*array.BinaryBuilder).Append(field.GetMolData().Data[index])
+	case schemapb.DataType_Date:
+		builder.(*array.Int32Builder).Append(field.GetDateData().Data[index])
+	case schemapb.DataType_Time:
+		builder.(*array.Int64Builder).Append(field.GetTimeData().Data[index])
+	case schemapb.DataType_Decimal, schemapb.DataType_UUID:
+		value := field.GetBytesData().Data[index]
+		width := builder.(*array.FixedSizeBinaryBuilder).Type().(*arrow.FixedSizeBinaryType).ByteWidth
+		if len(value) != width {
+			return merr.WrapErrParameterInvalidMsg("%s payload has invalid byte width", dataType)
+		}
+		builder.(*array.FixedSizeBinaryBuilder).Append(value)
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported transform scalar type %s", dataType)
 	}
@@ -223,20 +288,49 @@ func logicalIndexes(valid []bool, rows int64, dataLen int) ([]int, error) {
 }
 
 func fieldToArrow(field *schemapb.FieldData, rows int64, alloc memory.Allocator) (arrow.Array, error) {
+	return fieldToArrowWithSchema(field, rows, alloc, nil)
+}
+
+func fieldDataSchema(field *schemapb.FieldData) *schemapb.FieldSchema {
+	schema := &schemapb.FieldSchema{Name: field.GetFieldName(), FieldID: field.GetFieldId(), DataType: field.GetType(), Nullable: true, ElementNullable: true}
+	if data := field.GetScalars().GetArrayData(); data != nil {
+		schema.ElementType = data.GetElementType()
+	}
+	if vector := field.GetVectors(); vector != nil {
+		dim := vector.GetDim()
+		if vectors := vector.GetVectorArray(); vectors != nil {
+			dim = vectors.GetDim()
+			schema.ElementType = vectors.GetElementType()
+		}
+		schema.TypeParams = []*commonpb.KeyValuePair{{Key: "dim", Value: strconv.FormatInt(dim, 10)}}
+	}
+	return schema
+}
+
+func fieldToArrowWithSchema(field *schemapb.FieldData, rows int64, alloc memory.Allocator, schema *schemapb.FieldSchema) (arrow.Array, error) {
 	if field.GetStructArrays() != nil {
 		return structToArrow(field, rows, alloc)
 	}
 	if field.GetVectors() != nil {
+		if field.GetType() == schemapb.DataType_ArrayOfVector {
+			return vectorArrayToArrow(field, rows, alloc)
+		}
 		return vectorToArrow(field, rows, alloc)
 	}
 	scalars := field.GetScalars()
 	if scalars == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("scalar payload is missing")
 	}
+	if err := validateScalarInputType(scalars, field.GetType()); err != nil {
+		return nil, err
+	}
 	if field.GetType() == schemapb.DataType_Array {
 		data := scalars.GetArrayData()
 		if data == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("array payload is missing")
+		}
+		if data.GetElementType() == schemapb.DataType_Array || schema != nil && schema.GetTypeSchema().GetArrayElement().GetArrayElement() != nil {
+			return nestedArrayToArrow(field, rows, alloc, schema)
 		}
 		elementType, err := scalarType(data.GetElementType())
 		if err != nil {
@@ -246,7 +340,8 @@ func fieldToArrow(field *schemapb.FieldData, rows int64, alloc memory.Allocator)
 		if err != nil {
 			return nil, err
 		}
-		builder := array.NewListBuilder(alloc, elementType)
+		elementField := arrow.Field{Name: "item", Type: elementType, Nullable: true, Metadata: arrow.NewMetadata([]string{types.MetadataKeyMilvusDataType}, []string{strconv.Itoa(int(data.GetElementType()))})}
+		builder := array.NewListBuilderWithField(alloc, elementField)
 		defer builder.Release()
 		for _, index := range indexes {
 			builder.Append(index >= 0)
@@ -419,7 +514,18 @@ func structToArrow(field *schemapb.FieldData, rows int64, alloc memory.Allocator
 			return nil, merr.WrapErrParameterInvalidMsg("struct child %q must be a scalar array", child.GetFieldName())
 		}
 		arrays = append(arrays, list)
-		fields = append(fields, arrow.Field{Name: child.GetFieldName(), Type: list.ListValues().DataType(), Nullable: true})
+		childSchema := fieldDataSchema(child)
+		childSchema.DataType = childSchema.GetElementType()
+		childSchema.ElementType = schemapb.DataType_None
+		encoded, err := protojson.Marshal(childSchema)
+		if err != nil {
+			return nil, merr.WrapErrServiceInternalErr(err, "encode transform struct child schema")
+		}
+		metadata := map[string]string{DataTypeMetadataKey: strconv.Itoa(int(childSchema.GetDataType())), types.MetadataKeyMilvusFieldSchema: string(encoded), "milvus.field_id": strconv.FormatInt(child.GetFieldId(), 10)}
+		for _, param := range childSchema.GetTypeParams() {
+			metadata[param.GetKey()] = param.GetValue()
+		}
+		fields = append(fields, arrow.Field{Name: child.GetFieldName(), Type: list.ListValues().DataType(), Nullable: true, Metadata: arrow.MetadataFrom(metadata)})
 	}
 	builder := array.NewListBuilder(alloc, arrow.StructOf(fields...))
 	defer builder.Release()
@@ -479,18 +585,66 @@ func appendArrowValue(builder array.Builder, values arrow.Array, index int) erro
 		builder.(*array.StringBuilder).Append(values.Value(index))
 	case *array.Binary:
 		builder.(*array.BinaryBuilder).Append(values.Value(index))
+	case *array.LargeBinary:
+		builder.(*array.BinaryBuilder).Append(values.Value(index))
+	case *array.LargeString:
+		builder.(*array.StringBuilder).Append(values.Value(index))
+	case *array.FixedSizeBinary:
+		builder.(*array.FixedSizeBinaryBuilder).Append(values.Value(index))
+	case *array.FixedSizeList:
+		target, ok := builder.(*array.FixedSizeListBuilder)
+		if !ok {
+			return nilBuilderType(values)
+		}
+		target.Append(true)
+		start, end := values.ValueOffsets(index)
+		for child := start; child < end; child++ {
+			if err := appendArrowValue(target.ValueBuilder(), values.ListValues(), int(child)); err != nil {
+				return err
+			}
+		}
+	case *array.List:
+		target, ok := builder.(*array.ListBuilder)
+		if !ok {
+			return nilBuilderType(values)
+		}
+		target.Append(true)
+		start, end := values.ValueOffsets(index)
+		for child := start; child < end; child++ {
+			if err := appendArrowValue(target.ValueBuilder(), values.ListValues(), int(child)); err != nil {
+				return err
+			}
+		}
+	case *array.Struct:
+		target, ok := builder.(*array.StructBuilder)
+		if !ok {
+			return nilBuilderType(values)
+		}
+		target.Append(true)
+		for child := 0; child < values.NumField(); child++ {
+			if err := appendArrowValue(target.FieldBuilder(child), values.Field(child), index); err != nil {
+				return err
+			}
+		}
 	default:
 		return merr.WrapErrFunctionFailedMsg("unsupported struct child Arrow type %s", values.DataType())
 	}
 	return nil
 }
 
+func nilBuilderType(values arrow.Array) error {
+	return merr.WrapErrFunctionFailedMsg("nested Arrow output builder differs from %s", values.DataType())
+}
+
 // ToFieldData binds output columns by name. A nil schema list infers response
 // types; an explicit list enforces storage types and dimensions. No Arrow
 // buffer is retained by the returned protos.
-func ToFieldData(table arrow.Table, schemas []*schemapb.FieldSchema) ([]*schemapb.FieldData, error) {
+func ToFieldData(table arrow.Table, schemas []*schemapb.FieldSchema, structs ...*schemapb.StructArrayFieldSchema) ([]*schemapb.FieldData, error) {
 	if table == nil {
 		return nil, merr.WrapErrServiceInternalMsg("transform output table is nil")
+	}
+	if err := types.ValidateRuntimeArrowSchema(table.Schema()); err != nil {
+		return nil, err
 	}
 	byName := make(map[string]*schemapb.FieldSchema, len(schemas))
 	for _, schema := range schemas {
@@ -509,6 +663,24 @@ func ToFieldData(table arrow.Table, schemas []*schemapb.FieldSchema) ([]*schemap
 				return nil, err
 			}
 		}
+		if len(schemas) > 0 {
+			if raw, ok := field.Metadata.GetValue(DataTypeMetadataKey); ok {
+				parsed, err := strconv.ParseInt(raw, 10, 32)
+				if err != nil {
+					return nil, merr.WrapErrFunctionFailedMsg("invalid output logical type metadata")
+				}
+				actual := schemapb.DataType(parsed)
+				special := func(t schemapb.DataType) bool {
+					return typeutil.IsVectorType(t) || t == schemapb.DataType_ArrayOfVector || t == schemapb.DataType_JSON || t == schemapb.DataType_Geometry || t == schemapb.DataType_Mol || t == schemapb.DataType_Timestamptz || t == schemapb.DataType_Date || t == schemapb.DataType_Time || t == schemapb.DataType_Decimal || t == schemapb.DataType_UUID
+				}
+				materializesJSON := schema.GetDataType() == schemapb.DataType_JSON && !special(actual)
+				materializesGeometry := schema.GetDataType() == schemapb.DataType_Geometry && (actual == schemapb.DataType_String || actual == schemapb.DataType_VarChar || actual == schemapb.DataType_Text)
+				materializesTimestamp := schema.GetDataType() == schemapb.DataType_Timestamptz && actual == schemapb.DataType_Int64
+				if actual != schema.GetDataType() && (special(actual) || special(schema.GetDataType())) && !materializesJSON && !materializesGeometry && !materializesTimestamp {
+					return nil, merr.WrapErrFunctionFailedMsg("output logical type %s differs from destination %s", actual, schema.GetDataType())
+				}
+			}
+		}
 		var values arrow.Array
 		var err error
 		if len(table.Column(column).Data().Chunks()) == 0 {
@@ -519,7 +691,23 @@ func ToFieldData(table arrow.Table, schemas []*schemapb.FieldSchema) ([]*schemap
 		if err != nil {
 			return nil, merr.WrapErrFunctionFailed(err, "cannot concatenate transform output column %q", field.Name)
 		}
-		data, err := arrowToField(values, schema)
+		var data *schemapb.FieldData
+		if err := validateStorageNullability(values, schema); err != nil {
+			values.Release()
+			return nil, err
+		}
+		var children []*schemapb.FieldSchema
+		for _, structure := range structs {
+			if structure.GetName() == schema.GetName() {
+				children = structure.GetFields()
+				break
+			}
+		}
+		if schema.GetDataType() == schemapb.DataType_ArrayOfStruct {
+			data, err = arrowToStruct(values, schema, children...)
+		} else {
+			data, err = arrowToField(values, schema)
+		}
 		values.Release()
 		if err != nil {
 			return nil, merr.Wrapf(err, "transform output field %q", field.Name)
@@ -530,73 +718,13 @@ func ToFieldData(table arrow.Table, schemas []*schemapb.FieldSchema) ([]*schemap
 }
 
 func inferredSchema(field arrow.Field) (*schemapb.FieldSchema, error) {
-	schema := &schemapb.FieldSchema{Name: field.Name, Nullable: field.Nullable}
-	if value, exists := field.Metadata.GetValue("dim"); exists && value != "0" {
-		schema.TypeParams = []*commonpb.KeyValuePair{{Key: "dim", Value: value}}
+	// Scalar Struct has no FieldData wire carrier. The historical HITS export
+	// projects it as JSON; independent TABLE results retain the complete Arrow
+	// structure and its schema.
+	if field.Type.ID() == arrow.STRUCT {
+		return &schemapb.FieldSchema{Name: field.Name, DataType: schemapb.DataType_JSON, Nullable: field.Nullable}, nil
 	}
-	if value, exists := field.Metadata.GetValue("element_type"); exists {
-		if parsed, err := strconv.ParseInt(value, 10, 32); err == nil {
-			schema.ElementType = schemapb.DataType(parsed)
-		}
-	}
-	if value, exists := field.Metadata.GetValue(DataTypeMetadataKey); exists {
-		if parsed, err := strconv.ParseInt(value, 10, 32); err == nil {
-			schema.DataType = schemapb.DataType(parsed)
-		}
-	}
-	if schema.GetDataType() == schemapb.DataType_None {
-		switch field.Type.ID() {
-		case arrow.BOOL:
-			schema.DataType = schemapb.DataType_Bool
-		case arrow.INT8:
-			schema.DataType = schemapb.DataType_Int8
-		case arrow.INT16:
-			schema.DataType = schemapb.DataType_Int16
-		case arrow.INT32:
-			schema.DataType = schemapb.DataType_Int32
-		case arrow.INT64:
-			schema.DataType = schemapb.DataType_Int64
-		case arrow.FLOAT32:
-			schema.DataType = schemapb.DataType_Float
-		case arrow.FLOAT64:
-			schema.DataType = schemapb.DataType_Double
-		case arrow.STRING, arrow.LARGE_STRING:
-			schema.DataType = schemapb.DataType_VarChar
-		case arrow.BINARY, arrow.STRUCT:
-			schema.DataType = schemapb.DataType_JSON
-		case arrow.LIST, arrow.LARGE_LIST:
-			list := field.Type.(arrow.ListLikeType)
-			if list.Elem().ID() == arrow.STRUCT {
-				schema.DataType = schemapb.DataType_ArrayOfStruct
-			} else {
-				schema.DataType = schemapb.DataType_Array
-				child, err := inferredSchema(arrow.Field{Type: list.Elem()})
-				if err != nil {
-					return nil, err
-				}
-				schema.ElementType = child.DataType
-			}
-		case arrow.FIXED_SIZE_LIST:
-			schema.DataType = schemapb.DataType_FloatVector
-		default:
-			return nil, merr.WrapErrFunctionFailedMsg("unsupported response Arrow type %s", field.Type)
-		}
-	}
-	if schema.GetDataType() == schemapb.DataType_FloatVector {
-		if list, ok := field.Type.(*arrow.FixedSizeListType); ok {
-			schema.TypeParams = []*commonpb.KeyValuePair{{Key: "dim", Value: strconv.Itoa(int(list.Len()))}}
-		}
-	}
-	if schema.GetDataType() == schemapb.DataType_Array && schema.GetElementType() == schemapb.DataType_None {
-		if list, ok := field.Type.(arrow.ListLikeType); ok {
-			child, err := inferredSchema(arrow.Field{Type: list.Elem()})
-			if err != nil {
-				return nil, err
-			}
-			schema.ElementType = child.DataType
-		}
-	}
-	return schema, nil
+	return types.MilvusSchemaFromArrowField(field)
 }
 
 func arrowToField(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
@@ -605,7 +733,7 @@ func arrowToField(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.F
 	for row := range valid {
 		valid[row] = values.IsValid(row)
 	}
-	if typeutil.IsVectorType(schema.GetDataType()) {
+	if typeutil.IsVectorType(schema.GetDataType()) || schema.GetDataType() == schemapb.DataType_ArrayOfVector {
 		vector, err := arrowToVector(values, schema)
 		if err != nil {
 			return nil, err
@@ -615,7 +743,7 @@ func arrowToField(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.F
 		if schema.GetDataType() == schemapb.DataType_ArrayOfStruct {
 			return arrowToStruct(values, schema)
 		}
-		scalars, err := arrowToScalar(values, schema.GetDataType(), schema.GetElementType())
+		scalars, err := arrowToScalarForSchema(values, schema)
 		if err != nil {
 			return nil, err
 		}
@@ -628,6 +756,9 @@ func arrowToField(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.F
 }
 
 func arrowToScalar(values arrow.Array, dataType, elementType schemapb.DataType) (*schemapb.ScalarField, error) {
+	if err := validateScalarOutputType(values, dataType); err != nil {
+		return nil, err
+	}
 	result := &schemapb.ScalarField{}
 	switch dataType {
 	case schemapb.DataType_Bool:
@@ -655,7 +786,7 @@ func arrowToScalar(values arrow.Array, dataType, elementType schemapb.DataType) 
 			data[i] = int32(v)
 		}
 		result.Data = &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: data}}
-	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz, schemapb.DataType_Time:
 		data := make([]int64, values.Len())
 		for i := range data {
 			if values.IsNull(i) {
@@ -667,11 +798,53 @@ func arrowToScalar(values arrow.Array, dataType, elementType schemapb.DataType) 
 			}
 			data[i] = v
 		}
-		if dataType == schemapb.DataType_Timestamptz {
+		if dataType == schemapb.DataType_Time {
+			result.Data = &schemapb.ScalarField_TimeData{TimeData: &schemapb.TimeArray{Data: data}}
+		} else if dataType == schemapb.DataType_Timestamptz {
 			result.Data = &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: data}}
 		} else {
 			result.Data = &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: data}}
 		}
+	case schemapb.DataType_Date:
+		data := make([]int32, values.Len())
+		for i := range data {
+			if values.IsNull(i) {
+				continue
+			}
+			v, ok := integerValue(values, i)
+			if !ok || v < math.MinInt32 || v > math.MaxInt32 {
+				return nil, typeMismatch(dataType, values)
+			}
+			data[i] = int32(v)
+		}
+		result.Data = &schemapb.ScalarField_DateData{DateData: &schemapb.DateArray{Data: data}}
+	case schemapb.DataType_Decimal, schemapb.DataType_UUID:
+		data := make([][]byte, values.Len())
+		width := 8
+		if dataType == schemapb.DataType_UUID {
+			width = 16
+		}
+		for i := range data {
+			if values.IsNull(i) {
+				continue
+			}
+			var raw []byte
+			switch v := values.(type) {
+			case *array.FixedSizeBinary:
+				raw = v.Value(i)
+			case *array.Binary:
+				raw = v.Value(i)
+			case *array.LargeBinary:
+				raw = v.Value(i)
+			default:
+				return nil, typeMismatch(dataType, values)
+			}
+			if len(raw) != width {
+				return nil, merr.WrapErrFunctionFailedMsg("%s output has invalid byte width", dataType)
+			}
+			data[i] = append([]byte(nil), raw...)
+		}
+		result.Data = &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: data}}
 	case schemapb.DataType_Float:
 		data := make([]float32, values.Len())
 		for i := range data {
@@ -714,7 +887,7 @@ func arrowToScalar(values arrow.Array, dataType, elementType schemapb.DataType) 
 			}
 		}
 		result.Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: data}}
-	case schemapb.DataType_JSON, schemapb.DataType_Geometry:
+	case schemapb.DataType_JSON, schemapb.DataType_Geometry, schemapb.DataType_Mol:
 		data := make([][]byte, values.Len())
 		for i := range data {
 			if values.IsNull(i) {
@@ -723,8 +896,18 @@ func arrowToScalar(values arrow.Array, dataType, elementType schemapb.DataType) 
 			switch v := values.(type) {
 			case *array.Binary:
 				data[i] = append([]byte(nil), v.Value(i)...)
+			case *array.LargeBinary:
+				data[i] = append([]byte(nil), v.Value(i)...)
 			case *array.String:
-				data[i] = []byte(v.Value(i))
+				if dataType == schemapb.DataType_Geometry {
+					encoded, err := common.ConvertWKTToWKB(v.Value(i))
+					if err != nil {
+						return nil, merr.WrapErrFunctionFailed(err, "invalid geometry WKT output")
+					}
+					data[i] = encoded
+				} else {
+					data[i] = []byte(v.Value(i))
+				}
 			default:
 				if dataType != schemapb.DataType_JSON {
 					return nil, typeMismatch(dataType, values)
@@ -739,12 +922,21 @@ func arrowToScalar(values arrow.Array, dataType, elementType schemapb.DataType) 
 				return nil, merr.WrapErrFunctionFailedMsg("transform JSON output is malformed")
 			}
 		}
-		if dataType == schemapb.DataType_JSON {
+		if dataType == schemapb.DataType_Mol {
+			result.Data = &schemapb.ScalarField_MolData{MolData: &schemapb.MolArray{Data: data}}
+		} else if dataType == schemapb.DataType_JSON {
 			result.Data = &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: data}}
 		} else {
 			result.Data = &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: data}}
 		}
 	case schemapb.DataType_Array:
+		if elementType == schemapb.DataType_None {
+			childSchema, err := types.MilvusSchemaFromArrowField(values.DataType().(arrow.ListLikeType).ElemField())
+			if err != nil {
+				return nil, err
+			}
+			elementType = childSchema.GetDataType()
+		}
 		data := make([]*schemapb.ScalarField, values.Len())
 		for row := range data {
 			start, end, child, ok := listValues(values, row)
@@ -789,6 +981,7 @@ func integerValue(values arrow.Array, index int) (int64, bool) {
 		return 0, false
 	}
 }
+
 func floatValue(values arrow.Array, index int) (float64, bool) {
 	switch v := values.(type) {
 	case *array.Float32:
@@ -799,9 +992,11 @@ func floatValue(values arrow.Array, index int) (float64, bool) {
 		return 0, false
 	}
 }
+
 func typeMismatch(expected schemapb.DataType, values arrow.Array) error {
 	return merr.WrapErrFunctionFailedMsg("output Arrow type %s does not match %s", values.DataType(), expected)
 }
+
 func listValues(values arrow.Array, row int) (int64, int64, arrow.Array, bool) {
 	switch list := values.(type) {
 	case *array.List:
@@ -819,6 +1014,9 @@ func listValues(values arrow.Array, row int) (int64, int64, arrow.Array, bool) {
 }
 
 func arrowToVector(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.VectorField, error) {
+	if schema.GetDataType() == schemapb.DataType_ArrayOfVector {
+		return arrowToVectorArray(values, schema)
+	}
 	if schema.GetDataType() == schemapb.DataType_SparseFloatVector {
 		binaryValues, ok := values.(*array.Binary)
 		if !ok {
@@ -842,6 +1040,12 @@ func arrowToVector(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.
 	dim, err := typeutil.GetDim(schema)
 	if err != nil {
 		return nil, merr.Wrap(err, "transform vector output dimension")
+	}
+	if dim <= 0 || dim > math.MaxInt32 {
+		return nil, merr.WrapErrFunctionFailedMsg("output vector dimension must be positive")
+	}
+	if schema.GetDataType() == schemapb.DataType_BinaryVector && dim%8 != 0 {
+		return nil, merr.WrapErrFunctionFailedMsg("output binary vector dimension must be byte aligned")
 	}
 	vector := &schemapb.VectorField{Dim: dim}
 	if schema.GetDataType() == schemapb.DataType_FloatVector {
@@ -883,6 +1087,8 @@ func arrowToVector(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.
 			bytes = v.Value(row)
 		case *array.Binary:
 			bytes = v.Value(row)
+		case *array.LargeBinary:
+			bytes = v.Value(row)
 		default:
 			return nil, typeMismatch(schema.GetDataType(), values)
 		}
@@ -906,7 +1112,7 @@ func arrowToVector(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.
 	return vector, nil
 }
 
-func arrowToStruct(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
+func arrowToStruct(values arrow.Array, schema *schemapb.FieldSchema, schemas ...*schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	var raw arrow.Array
 	switch list := values.(type) {
 	case *array.List:
@@ -920,20 +1126,91 @@ func arrowToStruct(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.
 	if !ok {
 		return nil, typeMismatch(schema.GetDataType(), values)
 	}
+	for row := 0; row < values.Len(); row++ {
+		if values.IsNull(row) {
+			continue
+		}
+		start, end, _, _ := listValues(values, row)
+		for element := start; element < end; element++ {
+			if structs.IsNull(int(element)) {
+				return nil, merr.WrapErrFunctionFailedMsg("Milvus StructArray cannot encode null struct elements")
+			}
+		}
+	}
+	if len(schemas) > 0 && len(schemas) != structs.NumField() {
+		return nil, merr.WrapErrFunctionFailedMsg("struct output child count differs from destination schema")
+	}
 	children := make([]*schemapb.FieldData, structs.NumField())
 	for column := range children {
 		childField := structs.DataType().(*arrow.StructType).Field(column)
 		childSchema, err := inferredSchema(childField)
+		if len(schemas) > 0 {
+			childSchema = nil
+			for _, candidate := range schemas {
+				if candidate.GetName() == childField.Name || strings.TrimSuffix(strings.TrimPrefix(candidate.GetName(), schema.GetName()+"["), "]") == childField.Name {
+					childSchema = candidate
+					break
+				}
+			}
+			if childSchema == nil {
+				return nil, merr.WrapErrFunctionFailedMsg("unknown struct output child %q", childField.Name)
+			}
+			err = nil
+		}
 		if err != nil {
 			return nil, err
 		}
+		destinationID := childSchema.GetFieldID()
+		leafSchema := proto.Clone(childSchema).(*schemapb.FieldSchema)
+		if childSchema.GetDataType() == schemapb.DataType_Array || childSchema.GetDataType() == schemapb.DataType_ArrayOfVector {
+			leafSchema.DataType = childSchema.GetElementType()
+			leafSchema.ElementType = schemapb.DataType_None
+			leafSchema.Nullable = childSchema.GetElementNullable()
+		}
+		if typeutil.IsVectorType(leafSchema.GetDataType()) {
+			vectorRows := make([]*schemapb.VectorField, values.Len())
+			valid := make([]bool, values.Len())
+			for row := range vectorRows {
+				start, end, _, _ := listValues(values, row)
+				valid[row] = values.IsValid(row)
+				sliced := array.NewSlice(structs.Field(column), start, end)
+				if sliced.NullN() > 0 && !leafSchema.GetNullable() {
+					sliced.Release()
+					return nil, merr.WrapErrFunctionFailedMsg("nonnullable struct vector child %q contains null", childField.Name)
+				}
+				vector, err := arrowToVector(sliced, leafSchema)
+				if err != nil {
+					sliced.Release()
+					return nil, err
+				}
+				if sliced.NullN() > 0 {
+					vector.ValidData = make([]bool, sliced.Len())
+					for i := range vector.ValidData {
+						vector.ValidData[i] = sliced.IsValid(i)
+					}
+				}
+				sliced.Release()
+				vectorRows[row] = vector
+			}
+			dim, err := typeutil.GetDim(leafSchema)
+			if err != nil {
+				return nil, merr.Wrap(err, "struct vector child dimension")
+			}
+			children[column] = &schemapb.FieldData{Type: schemapb.DataType_ArrayOfVector, FieldName: childField.Name, FieldId: destinationID, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, ValidData: valid, Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Dim: dim, ElementType: leafSchema.GetDataType(), Data: vectorRows}}}}}
+			continue
+		}
+		childSchema = leafSchema
 		rows := make([]*schemapb.ScalarField, values.Len())
 		valid := make([]bool, values.Len())
 		for row := range rows {
 			start, end, _, _ := listValues(values, row)
 			valid[row] = values.IsValid(row)
 			sliced := array.NewSlice(structs.Field(column), start, end)
-			inner, err := arrowToScalar(sliced, childSchema.GetDataType(), schemapb.DataType_None)
+			if sliced.NullN() > 0 && !childSchema.GetNullable() {
+				sliced.Release()
+				return nil, merr.WrapErrFunctionFailedMsg("nonnullable struct output child %q contains null", childField.Name)
+			}
+			inner, err := arrowToScalar(sliced, childSchema.GetDataType(), childSchema.GetElementType())
 			if err != nil {
 				sliced.Release()
 				return nil, err
@@ -947,7 +1224,7 @@ func arrowToStruct(values arrow.Array, schema *schemapb.FieldSchema) (*schemapb.
 			sliced.Release()
 			rows[row] = inner
 		}
-		children[column] = &schemapb.FieldData{Type: schemapb.DataType_Array, FieldName: childField.Name, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: rows, ElementType: childSchema.GetDataType()}}, ValidData: valid}}}
+		children[column] = &schemapb.FieldData{Type: schemapb.DataType_Array, FieldName: childField.Name, FieldId: destinationID, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: rows, ElementType: childSchema.GetDataType()}}, ValidData: valid}}}
 	}
 	return &schemapb.FieldData{Type: schemapb.DataType_ArrayOfStruct, FieldName: schema.GetName(), FieldId: schema.GetFieldID(), Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: children}}}, nil
 }

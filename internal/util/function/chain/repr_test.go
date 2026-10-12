@@ -397,23 +397,23 @@ func TestRefreshInfoUsesExplicitDependencies(t *testing.T) {
 		wantAllWritten []string
 	}{
 		{
-			name:           "sort uses explicit inputs only",
+			name:           "sort includes default tie break dependency",
 			op:             OperatorRepr{Type: types.OpTypeSort, Inputs: []string{types.ScoreFieldName}},
-			wantReads:      []string{types.ScoreFieldName},
+			wantReads:      []string{types.ScoreFieldName, types.IDFieldName},
 			wantWrites:     nil,
-			wantRequired:   []string{types.ScoreFieldName},
+			wantRequired:   []string{types.ScoreFieldName, types.IDFieldName},
 			wantAllWritten: []string{},
 		},
 		{
-			name: "group by has no declared field dependencies",
+			name: "group by includes parameter and ranking dependencies",
 			op: OperatorRepr{Type: types.OpTypeGroupBy, Params: map[string]*schemapb.FunctionParamValue{
 				"field":      stringParam("$group_by_101"),
 				"group_size": intParam(2),
 				"limit":      intParam(10),
 			}},
-			wantReads:      nil,
+			wantReads:      []string{"$group_by_101", types.ScoreFieldName, types.IDFieldName},
 			wantWrites:     nil,
-			wantRequired:   []string{},
+			wantRequired:   []string{"$group_by_101", types.ScoreFieldName, types.IDFieldName},
 			wantAllWritten: []string{},
 		},
 	}
@@ -423,7 +423,7 @@ func TestRefreshInfoUsesExplicitDependencies(t *testing.T) {
 			repr := &ChainRepr{Operators: []OperatorRepr{test.op}}
 			require.NoError(t, repr.RefreshInfo())
 			require.Len(t, repr.Info.Ops, 1)
-			assert.Len(t, repr.Operators[0].InputDataTypes, len(test.op.Inputs))
+			assert.Len(t, repr.Operators[0].InputDataTypes, len(test.wantReads))
 			assert.Equal(t, test.wantReads, repr.Info.Ops[0].ReadNames)
 			assert.Equal(t, test.wantWrites, repr.Info.Ops[0].WriteNames)
 			assert.Equal(t, test.wantRequired, repr.Info.RequiredInputs)

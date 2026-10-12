@@ -42,7 +42,7 @@ func (o *ReduceOp) String() string                 { return "Reduce(" + o.functi
 func (o *ReduceOp) Expression() types.FunctionExpr { return o.function }
 
 func NewReduceOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error) {
-	if repr.Function == nil {
+	if repr == nil || repr.Function == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("reduce requires an expression")
 	}
 	for key := range repr.Params {
@@ -86,10 +86,7 @@ func NewReduceOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionB
 }
 
 func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	if !ctx.TableResult() || ctx.Stage() != types.StagePostProcess {
-		return nil, merr.WrapErrParameterInvalidMsg("reduce requires POST TABLE")
-	}
-	if err := ctx.Context().Err(); err != nil {
+	if err := requirePostTable(ctx, "reduce"); err != nil {
 		return nil, err
 	}
 	groups, err := groupPostTable(ctx, input, o.keys)
@@ -124,6 +121,15 @@ func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 		return nil, err
 	}
 	defer releaseColumns(columns)
+	inputSchema, err := functionInputSchema(input, o.inputs[len(o.keys):])
+	if err != nil {
+		return nil, err
+	}
+	for index, column := range columns {
+		if err := types.ValidateRuntimeArrowDataType(column.DataType()); err != nil {
+			return nil, merr.Wrapf(err, "reduce input %q", o.inputs[index])
+		}
+	}
 	arguments := make([]*arrow.Chunked, 0, len(columns)-len(o.keys))
 	defer func() { releaseColumns(arguments) }()
 	for _, column := range columns[len(o.keys):] {
@@ -149,7 +155,7 @@ func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 			chunk.Release()
 		}
 	}
-	outputs, err := o.function.Execute(ctx.WithReduction(true), arguments)
+	outputSchema, outputs, err := executeFunction(ctx.WithReduction(true), o.function, inputSchema, arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +173,9 @@ func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
 	builder.SetChunkSizes(sizes).SetLineage(lineage)
+	if _, aware := o.function.(types.SchemaAwareFunctionExpr); aware && outputSchema != nil {
+		builder.SetArrowSchemaMetadata(outputSchema.Metadata())
+	}
 	for column, name := range o.outputs {
 		chunks := make([]arrow.Array, 0, len(groups))
 		position := 0
@@ -198,7 +207,19 @@ func (o *ReduceOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 		if err := builder.AddColumnFromChunks(name, chunks); err != nil {
 			return nil, err
 		}
-		builder.SetFieldNullable(name, true)
+		var field arrow.Field
+		if column < len(o.keys) {
+			field, err = postTableSourceField(input, o.keys[column])
+			field.Nullable = true
+		} else {
+			field = outputSchema.Field(column - len(o.keys))
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := setFunctionOutputField(builder, name, field); err != nil {
+			return nil, err
+		}
 	}
 	return builder.Build(), nil
 }

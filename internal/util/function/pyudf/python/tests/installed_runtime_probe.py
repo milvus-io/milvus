@@ -26,8 +26,9 @@ import zipfile
 from pathlib import Path
 
 import grpc
-import milvus_pyudf_runtime
 import pyarrow as pa
+
+import milvus_pyudf_runtime
 from milvus_pyudf_runtime.proto import pyudf_pb2 as wire
 from milvus_pyudf_runtime.proto import pyudf_pb2_grpc
 
@@ -49,9 +50,13 @@ def main():
             """
 import pyarrow as pa
 class UDF:
- def transform_query(self, params, columns):
+ def transform_query(self, params, columns, *, context=None):
   assert len(columns) == 2 and columns[0] is columns[1]
   values = [value.as_py() * params['factor'] for value in columns[0]]
+  if context is not None:
+   assert context.input_schema.names == ['c0', 'c0']
+   field=pa.field('multiplied',pa.int64(),nullable=False,metadata={'milvus.data_type':'5'})
+   return pa.record_batch([pa.array(values,type=pa.int64())],schema=pa.schema([field]))
   return [pa.array(values, type=pa.int64())]
 def factory(context): return UDF()
 """,
@@ -108,6 +113,16 @@ def factory(context): return UDF()
                         outputs = list(reader)
                     assert [batch.num_rows for batch in outputs] == [0, 2], outputs
                     assert outputs[1].column(0).to_pylist() == [6, 9], outputs
+                    request.execution_version = 4
+                    request.query_context.original_queries.add(data_type="VarChar", values=[b"empty", b"hits"])
+                    request.query_context.queries.add(data_type="VarChar", values=[b"empty", b"hits"])
+                    response = pyudf_pb2_grpc.PyUDFWorkerStub(channel).Execute(request, timeout=5)
+                    assert response.WhichOneof("result") == "outputs" and response.execution_version == 4, response
+                    with pa.ipc.open_stream(response.outputs) as reader:
+                        outputs = list(reader)
+                    assert outputs[1].column(0).to_pylist() == [6, 9], outputs
+                    assert outputs[0].schema.field(0).nullable is False
+                    assert outputs[0].schema.field(0).metadata == {b"milvus.data_type": b"5"}
                 process.terminate()
                 assert process.wait(timeout=5) == 0
             finally:

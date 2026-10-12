@@ -78,13 +78,14 @@ func (s *DataFrameSuite) TestColumnAccess() {
 	s.Len(names, 3) // $id, int_col, str_col
 }
 
-func (s *DataFrameSuite) TestColumnNames_NilSchema() {
+func (s *DataFrameSuite) TestColumnNames_EmptySchema() {
 	builder := NewDataFrameBuilder()
 	df := builder.Build()
 	defer df.Release()
 
 	names := df.ColumnNames()
-	s.Nil(names)
+	s.Empty(names)
+	s.NotNil(df.Schema(), "empty runtime schemas still carry schema metadata")
 }
 
 // =============================================================================

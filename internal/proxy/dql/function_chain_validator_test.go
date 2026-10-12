@@ -372,6 +372,19 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
 	})
 
+	t.Run("group by parameter field is fetched as a schema input", func(t *testing.T) {
+		chainPB := l2FunctionChain(&schemapb.FunctionChainOp{
+			Op: types.OpTypeGroupBy,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"field": chainStringParam("ts"), "group_size": chainIntParam(2), "limit": chainIntParam(10),
+			},
+		})
+		meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
+		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+	})
+
 	t.Run("struct array sub field input is unsupported", func(t *testing.T) {
 		structSchema := newFunctionChainStructTestSchema()
 		chainPB := l2FunctionChain(mapOp("score1", "expr", columnArg("struct_scalar_array")))

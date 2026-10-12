@@ -2,6 +2,7 @@ from types import MappingProxyType
 
 import pyarrow as pa
 import pytest
+
 from milvus_pyudf_runtime.errors import PyUDFExecutionError
 from milvus_pyudf_runtime.instance import PyUDFInstance
 
@@ -47,7 +48,7 @@ def test_wrong_callable_is_rejected_before_model_runs():
 def test_nested_unsupported_type_is_rejected():
     class Invalid:
         def transform(self, params, columns):
-            return [pa.array([[1]], type=pa.list_(pa.uint64()))]
+            return [pa.array(["one"]).dictionary_encode()]
 
     with pytest.raises(PyUDFExecutionError, match="unsupported type"):
         PyUDFInstance(Invalid()).execute(MappingProxyType({}), [pa.array([1])], "ingestion")

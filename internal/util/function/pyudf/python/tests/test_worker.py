@@ -36,13 +36,14 @@ import pyarrow as pa
 from grpc_health.v1 import health_pb2, health_pb2_grpc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from test_milvus_pyudf_runtime import WheelFixture  # noqa: E402
+
 from milvus_pyudf_runtime import PyUDFLoader, loader  # noqa: E402
 from milvus_pyudf_runtime.config import MAX_PARAM_NESTING_DEPTH, ServerConfig  # noqa: E402
 from milvus_pyudf_runtime.errors import RequestInactive, WorkerError  # noqa: E402
 from milvus_pyudf_runtime.proto import pyudf_pb2 as wire  # noqa: E402
 from milvus_pyudf_runtime.proto import pyudf_pb2_grpc  # noqa: E402
 from milvus_pyudf_runtime.worker import WorkerServer, _params_object  # noqa: E402
-from test_milvus_pyudf_runtime import WheelFixture  # noqa: E402
 
 
 def encode(batches, compression=None):
@@ -527,7 +528,7 @@ def factory(context): return UDF()
             "[pa.array([1]), pa.array([1,2])]",
             "[[1,2]]",
             "pa.array([1,2])",
-            "[pa.array([1,2],type=pa.uint8())]",
+            "[pa.array(['a','b']).dictionary_encode()]",
         ):
             with self.subTest(expression=expression):
                 path, _ = self.wheel(

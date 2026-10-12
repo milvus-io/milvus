@@ -6,6 +6,10 @@
 
 ## Contract
 
+The [runtime schema extension](20261012-function-chain-runtime-schema.md)
+unifies nested paths and validates actual Arrow schemas while preserving logical
+types. Python runtime 0.4.0 adds schema-aware execution version 4.
+
 An explicitly selected POST TABLE chain transforms finite query/search result
 tables into a new table. Output fields, row count and grouping are independent
 of collection fields, hit IDs/scores and request NQ. Existing POST HITS chains

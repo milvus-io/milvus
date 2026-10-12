@@ -79,7 +79,7 @@ class WheelFixture:
 
 class PyUDFRuntimeTest(unittest.TestCase):
     def test_runtime_api_version(self) -> None:
-        self.assertEqual(RUNTIME_API_VERSION, 3)
+        self.assertEqual(RUNTIME_API_VERSION, 4)
 
     def test_loader_cache_and_process_import_ownership(self) -> None:
         wheel = self.fixtures.make()

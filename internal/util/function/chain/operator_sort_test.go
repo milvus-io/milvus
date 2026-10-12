@@ -287,8 +287,8 @@ func (s *SortOpTestSuite) TestSortColumnNotFound() {
 	op := newSortOp("nonexistent", true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	_, err := op.Execute(ctx, df)
-	s.Error(err)
-	s.Contains(err.Error(), "not found")
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Contains(err.Error(), "nonexistent")
 }
 
 func (s *SortOpTestSuite) TestSortEmptyChunk() {
@@ -438,7 +438,7 @@ func (s *SortOpTestSuite) TestSortFastPathFloat32DescWithInt64TieBreak() {
 	s.Equal(int64(3), ids.Value(3))
 }
 
-func (s *SortOpTestSuite) TestSortIgnoresNonComparableTieBreakAndStringHelpers() {
+func (s *SortOpTestSuite) TestSortBooleanTieBreakAndStringHelpers() {
 	builder := NewDataFrameBuilder()
 	builder.SetChunkSizes([]int64{3})
 
@@ -471,20 +471,20 @@ func (s *SortOpTestSuite) TestSortIgnoresNonComparableTieBreakAndStringHelpers()
 	defer result.Release()
 
 	ids := result.Column(types.IDFieldName).Chunk(0).(*array.Int64)
-	s.Equal(int64(3), ids.Value(0))
-	s.Equal(int64(2), ids.Value(1))
+	s.Equal(int64(2), ids.Value(0))
+	s.Equal(int64(3), ids.Value(1))
 	s.Equal(int64(1), ids.Value(2))
 
 	emptyOp := &SortOp{}
 	s.Empty(emptyOp.Column())
 
-	// A user can select a Bool column (including a projected JSON path), but
-	// sorting it must fail as an input error, including after a wire round trip.
-	_, err = NewFuncChainWithAllocator(s.pool).
+	// Bool has an explicit scalar order: false before true. It must not be
+	// accepted as a tie-break and then ignored.
+	ordered, err := NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL1Rerank).
 		Sort("bool_tie", false, types.IDFieldName).
 		Execute(df)
-	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
-	s.Equal(merr.InputError, merr.GetErrorType(merr.Error(merr.Status(err))))
-	s.False(merr.Status(err).GetRetriable())
+	s.Require().NoError(err)
+	defer ordered.Release()
+	s.Equal(int64(2), ordered.Column(types.IDFieldName).Chunk(0).(*array.Int64).Value(0))
 }

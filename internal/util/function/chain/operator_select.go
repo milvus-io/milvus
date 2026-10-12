@@ -97,6 +97,15 @@ func (o *SelectOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 				builder.SetFieldType(output, schemapb.DataType(value))
 			}
 		}
+		if name != output || !input.HasColumn(name) {
+			field, err := input.resolveArrowField(name)
+			if err != nil {
+				return nil, err
+			}
+			if err := setFunctionOutputField(builder, output, field); err != nil {
+				return nil, err
+			}
+		}
 		kept[output] = struct{}{}
 	}
 	// Search identity and internal provenance survive projection. Schema/dynamic

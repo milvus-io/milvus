@@ -291,17 +291,45 @@ func (repr *ChainRepr) RefreshInfo() error {
 		if opType == types.OpTypeSelect && len(outputs) == 0 {
 			outputs = append([]string(nil), inputs...)
 		}
+		hints := op.InputDataTypes
+		if hints != nil && len(hints) != len(inputs) {
+			return merr.WrapErrParameterInvalidMsg("op[%d]: input data types count %d does not match input count %d", i, len(hints), len(inputs))
+		}
+		// Legacy sort/group_by parameters also name real column dependencies.
+		// Normalize them before requery planning, pruning and runtime checks.
+		if opType == types.OpTypeSort || opType == types.OpTypeGroupBy {
+			normalized := op
+			normalized.Type, normalized.Inputs, normalized.Outputs = opType, inputs, outputs
+			normalized.TableResult = repr.TableResult
+			factory, _ := GetOperatorFactory(opType)
+			built, err := factory(&normalized, types.FunctionBuildContext{})
+			if err != nil {
+				return merr.Wrapf(err, "op[%d]", i)
+			}
+			actual := built.Inputs()
+			actualHints := make([]schemapb.DataType, len(actual))
+			for at, name := range actual {
+				for before, explicit := range inputs {
+					if explicit != name || hints == nil || hints[before] == schemapb.DataType_None {
+						continue
+					}
+					if actualHints[at] != schemapb.DataType_None && actualHints[at] != hints[before] {
+						return merr.WrapErrParameterInvalidMsg("op[%d]: conflicting type hints for input %q", i, name)
+					}
+					actualHints[at] = hints[before]
+				}
+			}
+			inputs, hints = actual, actualHints
+		}
 
 		repr.Operators[i].Type = opType
 		repr.Operators[i].Inputs = inputs
 		repr.Operators[i].Outputs = outputs
 		repr.Operators[i].TableResult = repr.TableResult
-		if repr.Operators[i].InputDataTypes == nil {
+		if hints == nil {
 			repr.Operators[i].InputDataTypes = make([]schemapb.DataType, len(inputs))
-		} else if len(repr.Operators[i].InputDataTypes) != len(inputs) {
-			return merr.WrapErrParameterInvalidMsg(
-				"op[%d]: input data types count %d does not match input count %d",
-				i, len(repr.Operators[i].InputDataTypes), len(inputs))
+		} else {
+			repr.Operators[i].InputDataTypes = hints
 		}
 
 		_, ok := GetOperatorFactory(opType)
@@ -414,7 +442,19 @@ func operatorFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuil
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("unknown operator type: %s", repr.Type)
 	}
-	return factory(repr, buildCtx)
+	op, err := factory(repr, buildCtx)
+	if err != nil {
+		return nil, err
+	}
+	if len(repr.InputDataTypes) > 0 {
+		if len(repr.InputDataTypes) != len(op.Inputs()) {
+			return nil, merr.WrapErrParameterInvalidMsg("operator %s input type hints do not match inputs", repr.Type)
+		}
+		if typed, ok := op.(interface{ SetInputDataTypes([]schemapb.DataType) }); ok {
+			typed.SetInputDataTypes(repr.InputDataTypes)
+		}
+	}
+	return op, nil
 }
 
 // FunctionFromRepr creates a FunctionExpr from a FunctionRepr.

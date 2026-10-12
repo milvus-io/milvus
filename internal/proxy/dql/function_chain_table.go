@@ -176,7 +176,7 @@ func (t *SearchTask) buildPostTableInput(ctx context.Context, result *milvuspb.S
 		}
 	}
 	sort.SliceStable(chainFields, func(i, j int) bool { return chainFields[i].GetFieldName() < chainFields[j].GetFieldName() })
-	table, err := transformio.FromFieldData(chainFields, rows, memory.DefaultAllocator)
+	table, err := transformio.FromFieldData(chainFields, rows, memory.DefaultAllocator, t.schema.GetFields()...)
 	if err != nil {
 		if merr.GetErrorType(err) == merr.InputError {
 			return transform.Batch{}, merr.WrapErrServiceInternalErr(err, "malformed POST TABLE source fields")
@@ -184,7 +184,10 @@ func (t *SearchTask) buildPostTableInput(ctx context.Context, result *milvuspb.S
 		return transform.Batch{}, merr.Wrap(err, "POST TABLE decode source fields")
 	}
 	defer table.Release()
-	normalized := normalizePostTableSourceSchema(table, t.schema)
+	normalized, err := normalizePostTableSourceSchema(table, t.schema)
+	if err != nil {
+		return transform.Batch{}, err
+	}
 	defer normalized.Release()
 	table = normalized
 	if t.postProcess.jsonPlan != nil {
@@ -257,7 +260,7 @@ func (t *SearchTask) completeEmptyPostTableSources(fields []*schemapb.FieldData)
 // Wire ValidData may be absent in an empty branch or a branch without nulls.
 // Collection nullability and the optional element source remain stable across
 // branches, so their Arrow schemas do not depend on which rows were selected.
-func normalizePostTableSourceSchema(table arrow.Table, schema *schemaInfo) arrow.Table {
+func normalizePostTableSourceSchema(table arrow.Table, schema *schemaInfo) (arrow.Table, error) {
 	fields := table.Schema().Fields()
 	columns := make([]arrow.Column, len(fields))
 	for index, field := range fields {
@@ -266,12 +269,17 @@ func normalizePostTableSourceSchema(table arrow.Table, schema *schemaInfo) arrow
 		} else if source, err := schema.SchemaHelper.GetFieldFromName(field.Name); err == nil {
 			field.Nullable = source.GetNullable()
 		}
+		field, err := chain.RebindArrowField(field, field.Name, field.Nullable)
+		if err != nil {
+			return nil, merr.Wrap(err, "POST TABLE source schema")
+		}
 		fields[index] = field
 		column := arrow.NewColumn(field, table.Column(index).Data())
 		columns[index] = *column
 		defer column.Release()
 	}
-	return array.NewTable(arrow.NewSchema(fields, nil), columns, table.NumRows())
+	metadata := table.Schema().Metadata()
+	return array.NewTable(arrow.NewSchema(fields, &metadata), columns, table.NumRows()), nil
 }
 
 func executePostTable(ctx context.Context, meta *searchTransformMeta, input transform.Batch) (*schemapb.FunctionChainTableResult, error) {

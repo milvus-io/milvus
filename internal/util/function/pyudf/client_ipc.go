@@ -29,11 +29,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pyudfpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func encodeInputs(ctx context.Context, inputs []*arrow.Chunked) ([]byte, error) {
+	return encodeInputsWithSchema(ctx, inputs, nil)
+}
+
+func encodeInputsWithSchema(ctx context.Context, inputs []*arrow.Chunked, inputSchema *arrow.Schema) ([]byte, error) {
 	if len(inputs) == 0 || inputs[0] == nil {
 		return nil, merr.WrapErrServiceInternalMsg("py_udf: invalid input columns")
 	}
@@ -42,15 +47,31 @@ func encodeInputs(ctx context.Context, inputs []*arrow.Chunked) ([]byte, error) 
 		return nil, merr.WrapErrServiceInternalMsg("py_udf: invalid query count")
 	}
 	fields := make([]arrow.Field, len(inputs))
+	if inputSchema != nil && inputSchema.NumFields() != len(inputs) {
+		return nil, merr.WrapErrServiceInternalMsg("py_udf: input schema column count differs from arguments")
+	}
 	for column, input := range inputs {
 		if input == nil || input.DataType() == nil || len(input.Chunks()) != count {
 			return nil, merr.WrapErrServiceInternalMsg("py_udf: inconsistent input chunks column=%d", column)
 		}
 		fields[column] = arrow.Field{Name: fmt.Sprintf("c%d", column), Type: input.DataType(), Nullable: true}
+		if inputSchema != nil {
+			fields[column] = inputSchema.Field(column)
+			if !arrow.TypeEqual(fields[column].Type, input.DataType()) {
+				return nil, merr.WrapErrServiceInternalMsg("py_udf: input schema physical type differs from column %d", column)
+			}
+		}
 	}
 
 	var sink bytes.Buffer
 	schema := arrow.NewSchema(fields, nil)
+	if inputSchema != nil {
+		metadata := inputSchema.Metadata()
+		schema = arrow.NewSchema(fields, &metadata)
+	}
+	if err := types.ValidateRuntimeArrowSchema(schema); err != nil {
+		return nil, err
+	}
 	writer := ipc.NewWriter(&sink, ipc.WithSchema(schema))
 	defer writer.Close()
 	columns := make([]arrow.Array, len(inputs))
@@ -69,6 +90,9 @@ func encodeInputs(ctx context.Context, inputs []*arrow.Chunked) ([]byte, error) 
 			}
 			if int64(chunk.Len()) != rows {
 				return nil, merr.WrapErrServiceInternalMsg("py_udf: inconsistent query rows")
+			}
+			if err := types.ValidateArrowArrayAgainstField(chunk, fields[column]); err != nil {
+				return nil, err
 			}
 			columns[column] = chunk
 		}
@@ -96,7 +120,12 @@ func ipcEncodeError(err error) error {
 	return merr.WrapErrServiceInternalErr(err, "py_udf: encode IPC")
 }
 
-func decodeOutputs(ctx context.Context, payload []byte) (outputs []*arrow.Chunked, err error) {
+func decodeOutputs(ctx context.Context, payload []byte) ([]*arrow.Chunked, error) {
+	_, outputs, err := decodeOutputsWithSchema(ctx, payload)
+	return outputs, err
+}
+
+func decodeOutputsWithSchema(ctx context.Context, payload []byte) (schema *arrow.Schema, outputs []*arrow.Chunked, err error) {
 	var chunks [][]arrow.Array
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -110,48 +139,55 @@ func decodeOutputs(ctx context.Context, payload []byte) (outputs []*arrow.Chunke
 		if err != nil {
 			releaseColumns(outputs)
 			outputs = nil
+			schema = nil
 		}
 	}()
 	if err := ctx.Err(); err != nil {
-		return nil, merr.Wrap(err, "py_udf: decode outputs")
+		return nil, nil, merr.Wrap(err, "py_udf: decode outputs")
 	}
 	// Delay schema decoding so Release is registered even if the schema is invalid.
 	reader, err := ipc.NewReader(bytes.NewReader(payload), ipc.WithDelayReadSchema(true))
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "py_udf: decode IPC")
+		return nil, nil, merr.WrapErrServiceInternalErr(err, "py_udf: decode IPC")
 	}
 	defer reader.Release()
-	schema := reader.Schema()
+	schema = reader.Schema()
 	if reader.Err() != nil {
-		return nil, merr.WrapErrServiceInternalErr(reader.Err(), "py_udf: decode schema")
+		return nil, nil, merr.WrapErrServiceInternalErr(reader.Err(), "py_udf: decode schema")
 	}
 	if schema == nil {
-		return nil, merr.WrapErrServiceInternalMsg("py_udf: invalid output schema")
+		return nil, nil, merr.WrapErrServiceInternalMsg("py_udf: invalid output schema")
+	}
+	if err := types.ValidateRuntimeArrowSchema(schema); err != nil {
+		return nil, nil, err
 	}
 	chunks = make([][]arrow.Array, schema.NumFields())
 	for reader.Next() {
 		if err := ctx.Err(); err != nil {
-			return nil, merr.Wrap(err, "py_udf: decode outputs")
+			return nil, nil, merr.Wrap(err, "py_udf: decode outputs")
 		}
 		record := reader.Record()
 		for i, column := range record.Columns() {
 			if err := validateOutputArray(column); err != nil {
-				return nil, merr.Wrapf(err, "py_udf: output column=%d", i)
+				return nil, nil, merr.Wrapf(err, "py_udf: output column=%d", i)
+			}
+			if err := types.ValidateArrowArrayAgainstField(column, schema.Field(i)); err != nil {
+				return nil, nil, err
 			}
 			column.Retain()
 			chunks[i] = append(chunks[i], column)
 		}
 	}
 	if reader.Err() != nil {
-		return nil, merr.WrapErrServiceInternalErr(reader.Err(), "py_udf: decode output batch")
+		return nil, nil, merr.WrapErrServiceInternalErr(reader.Err(), "py_udf: decode output batch")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, merr.Wrap(err, "py_udf: decode outputs")
+		return nil, nil, merr.Wrap(err, "py_udf: decode outputs")
 	}
 	for i, column := range chunks {
 		outputs = append(outputs, arrow.NewChunked(schema.Field(i).Type, column))
 	}
-	return outputs, nil
+	return schema, outputs, nil
 }
 
 // Arrow's string constructor checks the final offset but does not validate
@@ -273,21 +309,45 @@ func encodeExecuteRequest(ctx context.Context, request ExecuteRequest) (*pyudfpb
 	} else if request.Reduction {
 		return nil, merr.WrapErrServiceInternal("py_udf: reduction requires TABLE execution")
 	}
+	if request.InputSchema != nil {
+		wire.ExecutionVersion = schemaExecutionVersion
+	}
 	// BaseOp resolves repeated field references to the same Chunked object.
 	// Deduplicate by identity, not equal values: distinct columns stay distinct.
+	// Schema-aware calls also require the complete field to match, since aliases
+	// and logical types can differ while sharing the same physical column.
 	unique := make([]*arrow.Chunked, 0, len(request.Inputs))
-	positions := make(map[*arrow.Chunked]uint32, len(request.Inputs))
+	uniqueFields := make([]arrow.Field, 0, len(request.Inputs))
+	if request.InputSchema != nil && request.InputSchema.NumFields() != len(request.Inputs) {
+		return nil, merr.WrapErrServiceInternal("py_udf: input schema does not align with arguments")
+	}
+	positions := make(map[*arrow.Chunked][]uint32, len(request.Inputs))
 	wire.InputColumnIndices = make([]uint32, len(request.Inputs))
 	for i, column := range request.Inputs {
-		position, exists := positions[column]
+		var position uint32
+		var exists bool
+		for _, candidate := range positions[column] {
+			if request.InputSchema == nil || request.InputSchema.Field(i).Equal(uniqueFields[candidate]) {
+				position, exists = candidate, true
+				break
+			}
+		}
 		if !exists {
 			position = uint32(len(unique))
-			positions[column] = position
+			positions[column] = append(positions[column], position)
 			unique = append(unique, column)
+			if request.InputSchema != nil {
+				uniqueFields = append(uniqueFields, request.InputSchema.Field(i))
+			}
 		}
 		wire.InputColumnIndices[i] = position
 	}
-	payload, err := encodeInputs(ctx, unique)
+	var uniqueSchema *arrow.Schema
+	if request.InputSchema != nil {
+		metadata := request.InputSchema.Metadata()
+		uniqueSchema = arrow.NewSchema(uniqueFields, &metadata)
+	}
+	payload, err := encodeInputsWithSchema(ctx, unique, uniqueSchema)
 	if err != nil {
 		return nil, err
 	}

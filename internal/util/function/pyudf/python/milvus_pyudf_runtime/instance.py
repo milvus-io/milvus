@@ -25,6 +25,7 @@ from typing import Any
 import pyarrow as pa
 
 from .errors import PyUDFExecutionError, PyUDFLoadError
+from .ipc import ArrowOutputs
 from .proto import pyudf_pb2 as wire
 
 
@@ -32,10 +33,18 @@ def _supported_type(dtype: pa.DataType) -> bool:
     if (
         pa.types.is_boolean(dtype)
         or pa.types.is_signed_integer(dtype)
+        or pa.types.is_unsigned_integer(dtype)
         or dtype in (pa.float32(), pa.float64(), pa.string(), pa.large_string())
         or pa.types.is_binary(dtype)
         or pa.types.is_large_binary(dtype)
         or pa.types.is_fixed_size_binary(dtype)
+        or pa.types.is_date32(dtype)
+        or pa.types.is_date64(dtype)
+        or pa.types.is_time32(dtype)
+        or pa.types.is_time64(dtype)
+        or pa.types.is_duration(dtype)
+        or pa.types.is_timestamp(dtype)
+        or pa.types.is_decimal128(dtype)
     ):
         return True
     if pa.types.is_list(dtype) or pa.types.is_large_list(dtype) or pa.types.is_fixed_size_list(dtype):
@@ -148,6 +157,21 @@ class PyUDFInstance:
     def _validate_outputs(self, result):
         expected = self.callable_name
 
+        schema = None
+        if isinstance(result, (pa.RecordBatch, pa.Table)):
+            try:
+                result.validate(full=True)
+                schema = result.schema
+                result = (
+                    tuple(column.combine_chunks() for column in result.columns)
+                    if isinstance(result, pa.Table)
+                    else tuple(result.columns)
+                )
+            except MemoryError:
+                raise
+            except Exception as exc:
+                raise PyUDFExecutionError(f"{expected} returned an invalid Arrow table") from exc
+
         if not isinstance(result, Sequence) or isinstance(result, (str, bytes, bytearray)):
             raise PyUDFExecutionError(f"{expected} must return a sequence of pyarrow.Array")
         try:
@@ -169,7 +193,7 @@ class PyUDFInstance:
                 raise PyUDFExecutionError(f"{expected} output {index} is an invalid Arrow array") from exc
             if len(output) != len(outputs[0]):
                 raise PyUDFExecutionError(f"{expected} output columns must have equal lengths")
-        return outputs
+        return ArrowOutputs(outputs, schema)
 
     def close(self) -> None:
         """Explicit instance cleanup; never called by worker process shutdown."""

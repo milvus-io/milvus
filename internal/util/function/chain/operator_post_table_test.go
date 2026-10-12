@@ -357,8 +357,8 @@ func TestPostTableAggregateTypeValidationMatchesRuntime(t *testing.T) {
 		{"float64", arrow.PrimitiveTypes.Float64, "[2,null,3]", true, true},
 		{"string", arrow.BinaryTypes.String, `["b",null,"a"]`, false, true},
 		{"timestamp", &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}, "[2,null,3]", false, true},
-		{"bool", arrow.FixedWidthTypes.Boolean, "[true,null,false]", false, false},
-		{"uint64", arrow.PrimitiveTypes.Uint64, "[2,null,3]", false, false},
+		{"bool", arrow.FixedWidthTypes.Boolean, "[true,null,false]", false, true},
+		{"uint64", arrow.PrimitiveTypes.Uint64, "[2,null,3]", false, true},
 		{"list", arrow.ListOf(arrow.PrimitiveTypes.Int32), "[[2],null,[3]]", false, false},
 	}
 	for _, test := range cases {

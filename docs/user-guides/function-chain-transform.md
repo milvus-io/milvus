@@ -8,6 +8,11 @@ contract. The SDK checks server capability before sending a binding or stage.
 For source builds and coordinated protocol/SDK revisions, see the
 [dependency delivery guide](../dev/function_chain_delivery.md).
 
+The [runtime schema extension](../design-docs/design_docs/20261012-function-chain-runtime-schema.md)
+uses runtime 0.4.0 for complete Arrow schema transport. UDFs can inspect
+`context.input_schema` and return `pyarrow.RecordBatch`/`Table` to preserve logical
+type metadata. Separate function input/output schema declarations are unnecessary.
+
 The complete deterministic example is
 [PyMilvus `function_chain_transform_demo.py`](https://github.com/milvus-io/pymilvus/blob/master/examples/function_chain_transform_demo.py).
 Its wheel source is

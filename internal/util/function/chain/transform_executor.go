@@ -129,8 +129,12 @@ func FromArrowBatch(input transform.Batch, allocator memory.Allocator) (*DataFra
 		if table.NumCols() != int64(len(schema.Fields())) {
 			return nil, merr.WrapErrServiceInternal("transform Arrow column count differs from schema")
 		}
+		if err := types.ValidateRuntimeArrowSchema(schema); err != nil {
+			return nil, merr.Wrapf(err, "invalid transform Arrow schema in group %d", group)
+		}
 	}
 	builder.SetChunkSizes(sizes).SetIdentityLineage()
+	builder.SetArrowSchemaMetadata(schema.Metadata())
 	for column, field := range schema.Fields() {
 		chunks := make([]arrow.Array, len(input.Groups))
 		for group, table := range input.Groups {
@@ -144,6 +148,16 @@ func FromArrowBatch(input transform.Batch, allocator memory.Allocator) (*DataFra
 				return nil, merr.WrapErrServiceInternal("transform Arrow column row count differs from table")
 			}
 			var err error
+			for _, chunk := range values.Data().Chunks() {
+				if err := types.ValidateArrowArrayAgainstField(chunk, field); err != nil {
+					for _, owned := range chunks {
+						if owned != nil {
+							owned.Release()
+						}
+					}
+					return nil, merr.Wrapf(err, "invalid transform Arrow column %q group %d", field.Name, group)
+				}
+			}
 			if len(values.Data().Chunks()) == 0 {
 				chunks[group] = array.MakeArrayOfNull(allocator, field.Type, 0)
 			} else {
@@ -189,12 +203,12 @@ func ToArrowBatch(frame *DataFrame) (transform.Batch, error) {
 	if err := validateFrameShape(frame); err != nil {
 		return transform.Batch{}, err
 	}
-	fields := make([]arrow.Field, frame.NumColumns())
-	var frameFields []arrow.Field
-	if frame.schema != nil {
-		frameFields = frame.schema.Fields()
+	runtimeSchema, err := functionInputSchema(frame, frame.ColumnNames())
+	if err != nil {
+		return transform.Batch{}, err
 	}
-	for column, field := range frameFields {
+	fields := runtimeSchema.Fields()
+	for column, field := range fields {
 		metadata := field.Metadata.ToMap()
 		if dataType, ok := frame.FieldType(field.Name); ok {
 			metadata[transformio.DataTypeMetadataKey] = strconv.Itoa(int(dataType))
@@ -205,7 +219,8 @@ func ToArrowBatch(frame *DataFrame) (transform.Batch, error) {
 		field.Metadata = arrow.MetadataFrom(metadata)
 		fields[column] = field
 	}
-	schema := arrow.NewSchema(fields, nil)
+	metadata := runtimeSchema.Metadata()
+	schema := arrow.NewSchema(fields, &metadata)
 	result := transform.Batch{Groups: make([]arrow.Table, frame.NumChunks())}
 	for group, size := range frame.chunkSizes {
 		columns := make([]arrow.Array, frame.NumColumns())
@@ -234,6 +249,11 @@ func validateFrameShape(frame *DataFrame) error {
 	if frame.schema == nil && frame.NumColumns() != 0 || frame.schema != nil && len(frame.schema.Fields()) != frame.NumColumns() {
 		return merr.WrapErrServiceInternal("DataFrame schema/column count is inconsistent")
 	}
+	if frame.schema != nil {
+		if err := types.ValidateRuntimeArrowSchema(frame.schema); err != nil {
+			return merr.Wrap(err, "invalid DataFrame schema")
+		}
+	}
 	for _, size := range frame.chunkSizes {
 		if size < 0 {
 			return merr.WrapErrServiceInternal("DataFrame has negative chunk size")
@@ -244,9 +264,30 @@ func validateFrameShape(frame *DataFrame) error {
 		if column == nil || len(column.Chunks()) != frame.NumChunks() {
 			return merr.WrapErrServiceInternalMsg("DataFrame column %q has inconsistent chunk count", name)
 		}
+		schema, err := functionInputSchema(frame, []string{name})
+		if err != nil {
+			return err
+		}
+		field := schema.Field(0)
+		if !arrow.TypeEqual(field.Type, column.DataType()) {
+			return merr.WrapErrServiceInternalMsg("DataFrame column %q differs from schema type", name)
+		}
 		for group, chunk := range column.Chunks() {
 			if chunk == nil || int64(chunk.Len()) != frame.chunkSizes[group] {
 				return merr.WrapErrServiceInternalMsg("DataFrame column %q group %d has inconsistent row count", name, group)
+			}
+			if err := types.ValidateArrowArrayAgainstField(chunk, field); err != nil {
+				return merr.Wrapf(err, "invalid DataFrame column %q group %d", name, group)
+			}
+		}
+	}
+	if frame.lineage != nil {
+		if len(frame.lineage) != frame.NumChunks() {
+			return merr.WrapErrServiceInternal("DataFrame lineage group count differs")
+		}
+		for group, rows := range frame.lineage {
+			if int64(len(rows)) != frame.chunkSizes[group] {
+				return merr.WrapErrServiceInternalMsg("DataFrame lineage row count differs in group %d", group)
 			}
 		}
 	}

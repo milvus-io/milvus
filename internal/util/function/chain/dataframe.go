@@ -139,7 +139,7 @@ func (df *DataFrame) Column(name string) *arrow.Chunked {
 
 // ColumnNames returns all column names in schema order.
 func (df *DataFrame) ColumnNames() []string {
-	if df.schema == nil {
+	if df.schema == nil || df.schema.NumFields() == 0 {
 		return nil
 	}
 	fields := df.schema.Fields()
@@ -223,8 +223,9 @@ func (df *DataFrame) Release() {
 //   - CopyFieldMetadata: copy field type/ID/nullable from source DataFrame
 //   - Build: construct the DataFrame and invalidate the builder
 type DataFrameBuilder struct {
-	result *DataFrame
-	fields []arrow.Field // accumulated fields, schema created in Build()
+	result        *DataFrame
+	fields        []arrow.Field // accumulated fields, schema created in Build()
+	arrowMetadata arrow.Metadata
 }
 
 // NewDataFrameBuilder creates a new empty DataFrameBuilder.
@@ -311,6 +312,11 @@ func (b *DataFrameBuilder) SetArrowFieldMetadata(name string, metadata arrow.Met
 	return b
 }
 
+func (b *DataFrameBuilder) SetArrowSchemaMetadata(metadata arrow.Metadata) *DataFrameBuilder {
+	b.arrowMetadata = arrow.MetadataFrom(metadata.ToMap())
+	return b
+}
+
 // SetMetadata sets a metadata key-value pair.
 func (b *DataFrameBuilder) SetMetadata(key, value string) *DataFrameBuilder {
 	if b.result == nil {
@@ -353,7 +359,7 @@ func (b *DataFrameBuilder) addColumn(name string, col *arrow.Chunked) error {
 // addColumnUnchecked adds a column without validation (internal use).
 func (b *DataFrameBuilder) addColumnUnchecked(name string, col *arrow.Chunked) {
 	// Accumulate field for deferred schema creation in Build()
-	b.fields = append(b.fields, arrow.Field{Name: name, Type: col.DataType(), Nullable: true})
+	b.fields = append(b.fields, arrow.Field{Name: name, Type: col.DataType(), Nullable: col.NullN() > 0})
 
 	// Add column
 	b.result.columns = append(b.result.columns, col)
@@ -493,6 +499,9 @@ func (b *DataFrameBuilder) CopyAllMetadata(source *DataFrame) *DataFrameBuilder 
 	for k, v := range source.metadata {
 		b.result.metadata[k] = v
 	}
+	if source.schema != nil {
+		b.SetArrowSchemaMetadata(source.schema.Metadata())
+	}
 	b.result.lineage = cloneLineage(source.lineage)
 	return b
 }
@@ -540,18 +549,23 @@ func pickLineage(input *DataFrame, indices [][]int) ([][]transform.RowLineage, e
 // After Build(), Release() becomes a no-op.
 func (b *DataFrameBuilder) Build() *DataFrame {
 	// Create schema from accumulated fields with correct nullable settings
-	if len(b.fields) > 0 {
+	if b.result != nil {
 		finalFields := make([]arrow.Field, len(b.fields))
 		for i, f := range b.fields {
-			// Look up nullable setting, default to false (Milvus default)
+			// Destination constraints override inference; otherwise the runtime
+			// schema must describe null values already present in the array.
+			nullable, declared := b.result.fieldNullables[f.Name]
+			if !declared {
+				nullable = f.Nullable
+			}
 			finalFields[i] = arrow.Field{
 				Name:     f.Name,
 				Type:     f.Type,
-				Nullable: b.result.fieldNullables[f.Name],
+				Nullable: nullable,
 				Metadata: b.result.fieldMetadata[f.Name],
 			}
 		}
-		b.result.schema = arrow.NewSchema(finalFields, nil)
+		b.result.schema = arrow.NewSchema(finalFields, &b.arrowMetadata)
 	}
 
 	result := b.result

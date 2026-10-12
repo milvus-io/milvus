@@ -201,8 +201,16 @@ func groupPostTable(ctx *types.FuncContext, input *DataFrame, keys []string) ([]
 		}
 		columns[index] = column
 		defer column.Release()
+		if err := types.ValidateRuntimeArrowDataType(column.DataType()); err != nil {
+			return nil, merr.Wrapf(err, "aggregate key %q", key)
+		}
 		if !postTableKeyType(column.DataType().ID()) {
 			return nil, merr.WrapErrParameterInvalidMsg("aggregate key %q has unsupported type %s", key, column.DataType())
+		}
+		if column.DataType().ID() != arrow.NULL {
+			if err := validateComparableColumn(input, key, "aggregate key"); err != nil {
+				return nil, err
+			}
 		}
 	}
 	groups := make([][]postTableRowGroup, input.NumChunks())
@@ -252,7 +260,8 @@ func postTableKeyType(id arrow.Type) bool {
 	switch id {
 	case arrow.NULL, arrow.BOOL, arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
 		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64, arrow.FLOAT32, arrow.FLOAT64,
-		arrow.STRING, arrow.LARGE_STRING, arrow.BINARY, arrow.LARGE_BINARY, arrow.TIMESTAMP, arrow.DATE32, arrow.DATE64:
+		arrow.STRING, arrow.LARGE_STRING, arrow.BINARY, arrow.LARGE_BINARY, arrow.FIXED_SIZE_BINARY,
+		arrow.TIMESTAMP, arrow.DATE32, arrow.DATE64, arrow.TIME32, arrow.TIME64, arrow.DURATION:
 		return true
 	default:
 		return false
@@ -300,6 +309,12 @@ func encodePostTableKey(key *bytes.Buffer, data arrow.Array, row int) {
 		bits = uint64(value.Value(row))
 	case *array.Date64:
 		bits = uint64(value.Value(row))
+	case *array.Time32:
+		bits = uint64(value.Value(row))
+	case *array.Time64:
+		bits = uint64(value.Value(row))
+	case *array.Duration:
+		bits = uint64(value.Value(row))
 	case *array.Float32:
 		v := float64(value.Value(row))
 		if math.IsNaN(v) {
@@ -321,6 +336,8 @@ func encodePostTableKey(key *bytes.Buffer, data arrow.Array, row int) {
 	case *array.Binary:
 		variable, variableType = value.Value(row), true
 	case *array.LargeBinary:
+		variable, variableType = value.Value(row), true
+	case *array.FixedSizeBinary:
 		variable, variableType = value.Value(row), true
 	}
 	if variableType {
@@ -412,20 +429,51 @@ func (o *AggregateOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFr
 		if err := builder.AddColumnFromChunks(o.outputs[index], chunks); err != nil {
 			return nil, err
 		}
-		builder.SetFieldNullable(o.outputs[index], true)
+		field, err := postTableSourceField(input, key)
+		if err != nil {
+			return nil, err
+		}
+		field.Nullable = true
+		if err := setFunctionOutputField(builder, o.outputs[index], field); err != nil {
+			return nil, err
+		}
 	}
 	for index, spec := range o.specs {
 		var column *arrow.Chunked
+		var sourceField arrow.Field
 		if spec.Input != "" {
 			column, err = input.ResolveColumn(spec.Input, ctx.Pool())
 			if err != nil {
 				return nil, err
 			}
 			defer column.Release()
+			sourceField, err = postTableSourceField(input, spec.Input)
+			if err != nil {
+				return nil, err
+			}
+			if spec.Op == "min" || spec.Op == "max" {
+				if err := validateComparableArrowField(sourceField, "aggregate "+spec.Op); err != nil {
+					return nil, err
+				}
+			}
+			if spec.Op == "sum" || spec.Op == "avg" {
+				if err := validateNumericAggregateField(sourceField, spec.Op); err != nil {
+					return nil, err
+				}
+			}
 		}
 		dt, accumulator, err := aggregateOutputType(spec, column)
 		if err != nil {
 			return nil, err
+		}
+		if spec.Op == "collect_list" {
+			// Element metadata distinguishes encoded vectors/JSON from plain
+			// binary, while the new outer list owns its independent schema.
+			sourceField, err = normalizeRuntimeArrowField(sourceField, "item", true, true)
+			if err != nil {
+				return nil, err
+			}
+			dt = arrow.ListOfField(sourceField)
 		}
 		chunks := make([]arrow.Array, len(groups))
 		for chunk, chunkGroups := range groups {
@@ -444,8 +492,46 @@ func (o *AggregateOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFr
 			return nil, err
 		}
 		builder.SetFieldNullable(name, spec.Op != "count" && spec.Op != "collect_list")
+		if spec.Op == "first" || spec.Op == "last" || spec.Op == "min" || spec.Op == "max" {
+			sourceField.Nullable = true
+			if err := setFunctionOutputField(builder, name, sourceField); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return builder.Build(), nil
+}
+
+func postTableSourceField(input *DataFrame, name string) (arrow.Field, error) {
+	schema, err := functionInputSchema(input, []string{name})
+	if err != nil {
+		return arrow.Field{}, err
+	}
+	return schema.Field(0), nil
+}
+
+func validateNumericAggregateField(field arrow.Field, operation string) error {
+	switch field.Type.ID() {
+	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64, arrow.FLOAT32, arrow.FLOAT64:
+	default:
+		return merr.WrapErrParameterInvalidMsg("aggregate %s requires a signed integer or float column, got %s", operation, field.Type)
+	}
+	_, hasType := field.Metadata.GetValue(types.MetadataKeyMilvusDataType)
+	_, hasSchema := field.Metadata.GetValue(types.MetadataKeyMilvusFieldSchema)
+	if !hasType && !hasSchema {
+		return nil
+	}
+	schema, err := types.MilvusSchemaFromArrowField(field)
+	if err != nil {
+		return merr.Wrapf(err, "aggregate %s input %q", operation, field.Name)
+	}
+	switch schema.GetDataType() {
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
+		schemapb.DataType_Int64, schemapb.DataType_Float, schemapb.DataType_Double:
+		return nil
+	default:
+		return merr.WrapErrParameterInvalidMsg("aggregate %s does not support logical type %s", operation, schema.GetDataType())
+	}
 }
 
 func releaseAggregateArrays(values []arrow.Array) {
@@ -457,6 +543,11 @@ func releaseAggregateArrays(values []arrow.Array) {
 }
 
 func aggregateOutputType(spec AggregateSpec, input *arrow.Chunked) (arrow.DataType, agg.AggregateBase, error) {
+	if input != nil {
+		if err := types.ValidateRuntimeArrowDataType(input.DataType()); err != nil {
+			return nil, nil, merr.Wrapf(err, "aggregate %s", spec.Op)
+		}
+	}
 	if spec.Op == "first" || spec.Op == "last" {
 		return input.DataType(), nil, nil
 	}
@@ -466,15 +557,16 @@ func aggregateOutputType(spec AggregateSpec, input *arrow.Chunked) (arrow.DataTy
 	if spec.Op == "count" {
 		return arrow.PrimitiveTypes.Int64, &agg.CountAggregate{}, nil
 	}
-	dataType, err := ToMilvusType(input.DataType())
-	if input.DataType().ID() == arrow.TIMESTAMP {
-		dataType, err = schemapb.DataType_Timestamptz, nil
+	if spec.Op == "min" || spec.Op == "max" {
+		if !isComparableType(input.DataType()) {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("aggregate %s does not support type %s", spec.Op, input.DataType())
+		}
+		return input.DataType(), nil, nil
 	}
-	if err != nil {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("aggregate %s does not support type %s", spec.Op, input.DataType())
-	}
-	if err := agg.ValidateAggFieldType(spec.Op, dataType); err != nil {
-		return nil, nil, err
+	switch input.DataType().ID() {
+	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64, arrow.FLOAT32, arrow.FLOAT64:
+	default:
+		return nil, nil, merr.WrapErrParameterInvalidMsg("aggregate %s requires a signed integer or float column, got %s", spec.Op, input.DataType())
 	}
 	var accumulator agg.AggregateBase
 	var result arrow.DataType = input.DataType()
@@ -488,15 +580,38 @@ func aggregateOutputType(spec AggregateSpec, input *arrow.Chunked) (arrow.DataTy
 		}
 	case "avg":
 		accumulator, result = agg.NewAvgAggregate(0, ""), arrow.PrimitiveTypes.Float64
-	case "min":
-		accumulator = &agg.MinAggregate{}
-	case "max":
-		accumulator = &agg.MaxAggregate{}
 	}
 	return result, accumulator, nil
 }
 
 func executeAggregateChunk(ctx *types.FuncContext, spec AggregateSpec, input *arrow.Chunked, dt arrow.DataType, accumulator agg.AggregateBase, chunk int, groups []postTableRowGroup) (arrow.Array, error) {
+	if spec.Op == "min" || spec.Op == "max" {
+		data := input.Chunk(chunk)
+		indices := make([]int, len(groups))
+		for index, group := range groups {
+			best := -1
+			for position, row := range group.Rows {
+				if position%1024 == 0 {
+					if err := ctx.Context().Err(); err != nil {
+						return nil, err
+					}
+				}
+				if data.IsNull(row) {
+					continue
+				}
+				if best == -1 {
+					best = row
+					continue
+				}
+				comparison := compareAggregateValues(data, row, best)
+				if spec.Op == "min" && comparison < 0 || spec.Op == "max" && comparison > 0 {
+					best = row
+				}
+			}
+			indices[index] = best
+		}
+		return takeArrayWithNulls(ctx.Pool(), data, indices)
+	}
 	if spec.Op == "first" || spec.Op == "last" {
 		indices := make([]int, len(groups))
 		for row, group := range groups {
@@ -612,6 +727,24 @@ func aggregateScalarValue(data arrow.Array, row int) (any, error) {
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("numeric/ordered aggregate does not support type %s", data.DataType())
 	}
+}
+
+// Aggregate min/max previously used direct floating-point comparisons rather
+// than sort's total NaN ordering. Preserve that behavior until the public NaN
+// policy changes: a NaN never replaces a selected value, and an initial NaN
+// remains selected. Other comparable types use the shared Arrow comparator.
+func compareAggregateValues(data arrow.Array, left, right int) int {
+	switch values := data.(type) {
+	case *array.Float32:
+		if math.IsNaN(float64(values.Value(left))) || math.IsNaN(float64(values.Value(right))) {
+			return 0
+		}
+	case *array.Float64:
+		if math.IsNaN(values.Value(left)) || math.IsNaN(values.Value(right)) {
+			return 0
+		}
+	}
+	return compareArrayValues(data, left, right)
 }
 
 func appendAggregateScalar(builder array.Builder, value any) error {

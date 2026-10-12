@@ -79,9 +79,13 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 		return nil, err
 	}
 	defer releaseColumns(inputs)
+	inputSchema, err := functionInputSchema(input, o.inputs)
+	if err != nil {
+		return nil, err
+	}
 
 	// Execute FunctionExpr to get boolean result
-	outputs, err := o.function.Execute(ctx, inputs)
+	_, outputs, err := executeFunction(ctx, o.function, inputSchema, inputs)
 	if err != nil {
 		return nil, merr.Wrap(err, "filter_op: function execution failed")
 	}

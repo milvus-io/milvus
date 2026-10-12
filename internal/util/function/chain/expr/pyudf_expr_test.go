@@ -404,7 +404,15 @@ func TestValidatePyUDFOutputs(t *testing.T) {
 	defer validFloat.Release()
 	validString := newPyUDFStringChunked(pool, [][]string{{"a", "b"}, {"c"}})
 	defer validString.Release()
-	unsupported := newPyUDFUint64Chunked(pool, [][]uint64{{1, 2}, {3}})
+	validUnsigned := newPyUDFUint64Chunked(pool, [][]uint64{{1, 2}, {3}})
+	defer validUnsigned.Release()
+	// Scalar Float16 remains unsupported; Milvus Float16Vector uses encoded
+	// binary storage and has separate positive runtime-schema coverage.
+	unsupportedArrays := []arrow.Array{array.MakeArrayOfNull(pool, arrow.FixedWidthTypes.Float16, 2), array.MakeArrayOfNull(pool, arrow.FixedWidthTypes.Float16, 1)}
+	unsupported := arrow.NewChunked(arrow.FixedWidthTypes.Float16, unsupportedArrays)
+	for _, values := range unsupportedArrays {
+		values.Release()
+	}
 	defer unsupported.Release()
 	badChunks := newPyUDFFloat32Chunked(pool, [][]float32{{1, 2, 3}})
 	defer badChunks.Release()
@@ -413,6 +421,7 @@ func TestValidatePyUDFOutputs(t *testing.T) {
 
 	assert.NoError(t, validatePyUDFOutputs([]*arrow.Chunked{}, []int{2, 1}))
 	assert.NoError(t, validatePyUDFOutputs([]*arrow.Chunked{validFloat, validString}, []int{2, 1}))
+	assert.NoError(t, validatePyUDFOutputs([]*arrow.Chunked{validUnsigned}, []int{2, 1}))
 	assert.Error(t, validatePyUDFOutputs(nil, []int{2, 1}))
 	assert.Error(t, validatePyUDFOutputs([]*arrow.Chunked{nil}, []int{2, 1}))
 	assert.ErrorContains(t, validatePyUDFOutputs([]*arrow.Chunked{unsupported}, []int{2, 1}), "unsupported type")

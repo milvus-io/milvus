@@ -118,7 +118,7 @@ func (it *InsertTask) applyIngestion(ctx context.Context, schema *schemaInfo) er
 	if err := ingestion.ValidateCollection(schema.CollectionSchema); err != nil {
 		return merr.WrapErrAsSysError(merr.Wrap(err, "persisted ingestion schema is invalid"))
 	}
-	input, err := transformio.FromFieldDataWithTimezone(it.insertMsg.GetFieldsData(), int64(inputRows), memory.DefaultAllocator, schema.SchemaHelper.GetTimezone())
+	input, err := transformio.FromFieldDataWithTimezone(it.insertMsg.GetFieldsData(), int64(inputRows), memory.DefaultAllocator, schema.SchemaHelper.GetTimezone(), schema.GetFields()...)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func (it *InsertTask) applyIngestion(ctx context.Context, schema *schemaInfo) er
 	for _, field := range schema.GetStructArrayFields() {
 		fields = append(fields, &schemapb.FieldSchema{Name: field.GetName(), FieldID: field.GetFieldID(), DataType: schemapb.DataType_ArrayOfStruct, Nullable: field.GetNullable()})
 	}
-	converted, err := transformio.ToFieldData(table, fields)
+	converted, err := transformio.ToFieldData(table, fields, schema.GetStructArrayFields()...)
 	if err != nil {
 		return err
 	}

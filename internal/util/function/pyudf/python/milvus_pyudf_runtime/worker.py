@@ -27,6 +27,7 @@ from dataclasses import replace
 from types import MappingProxyType
 
 import grpc
+import pyarrow as pa
 
 from .config import MAX_PARAM_NESTING_DEPTH, ServerConfig, parse_startup_args
 from .context import PyUDFCallContext, PyUDFQueryInput
@@ -88,6 +89,11 @@ def _query_inputs(inputs, nq):
     return tuple(result)
 
 
+def _argument_schema(request, batch):
+    indices = tuple(request.input_column_indices)
+    return pa.schema([batch.schema.field(index) for index in indices]) if indices else batch.schema
+
+
 def _call_context(request, batches):
     stage = request.stage.lower()
     if stage not in ("ingestion", "pre_process", "l0_rerank", "l1_rerank", "l2_rerank", "post_process"):
@@ -97,7 +103,7 @@ def _call_context(request, batches):
     if stage == "ingestion":
         if request.HasField("query_context"):
             raise WorkerError("ingestion must not contain query metadata")
-        return PyUDFCallContext(request.stage, 0)
+        return PyUDFCallContext(request.stage, 0, input_schema=_argument_schema(request, batches[0]))
     if stage == "pre_process":
         if len(batches) != 1:
             raise WorkerError("PRE_PROCESS requires one query-row batch")
@@ -124,6 +130,7 @@ def _call_context(request, batches):
         result_offsets=offsets,
         table_result=request.table_result,
         reduction=request.reduction,
+        input_schema=_argument_schema(request, batches[0]),
     )
 
 
@@ -138,11 +145,16 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
 
         try:
             check_active()
-            if request.execution_version not in (0, 2, 3):
+            if request.execution_version not in (0, 2, 3, 4):
                 raise WorkerError("unsupported execution version", wire.UNSUPPORTED)
             if request.execution_version == 3:
                 if not request.table_result or request.stage.lower() != "post_process":
                     raise WorkerError("execution version 3 requires POST TABLE")
+            elif request.execution_version == 4:
+                if request.table_result and request.stage.lower() != "post_process":
+                    raise WorkerError("schema execution TABLE requires POST_PROCESS")
+                if request.reduction and not request.table_result:
+                    raise WorkerError("schema execution reduction requires TABLE")
             elif request.table_result or request.reduction:
                 raise WorkerError("table and reduction flags require execution version 3")
             if not request.resource_name.strip():
@@ -172,9 +184,9 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
                 groups = tuple(arguments(batch) for batch in batches)
                 results = instance.execute_batch(params, groups, call_context)
                 check_active()
-                for values in results:
+                for index, values in enumerate(results):
                     check_active()
-                    output.append(values)
+                    output.append(values, inputs=groups[index], input_schema=_argument_schema(request, batches[index]))
             else:
                 for query, batch in enumerate(batches):
                     check_active()
@@ -182,14 +194,15 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
                     if call_context is not None and request.stage.lower() in ("l0_rerank", "l1_rerank", "l2_rerank"):
                         group_context = replace(call_context, query_index=query)
                     try:
+                        selected = arguments(batch)
                         if group_context is None:
-                            values = instance.execute(params, arguments(batch), request.stage)
+                            values = instance.execute(params, selected, request.stage)
                         else:
-                            values = instance.execute(params, arguments(batch), request.stage, context=group_context)
+                            values = instance.execute(params, selected, request.stage, context=group_context)
                     except WorkerError as exc:
                         raise WorkerError(f"query={query}: UDF execution failed", exc.code) from exc
                     check_active()
-                    output.append(values)
+                    output.append(values, inputs=selected, input_schema=_argument_schema(request, batch))
             payload = output.finish(check_active)
             response = wire.ExecuteResponse(outputs=payload, execution_version=request.execution_version)
             check_active()

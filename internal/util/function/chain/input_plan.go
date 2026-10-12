@@ -236,7 +236,7 @@ func isRuntimeFunctionChainInput(name string) bool {
 	case types.IDFieldName, types.ScoreFieldName, types.ElementIndicesFieldName, types.QueryIndexFieldName, types.ANNIndexFieldName:
 		return true
 	default:
-		return false
+		return strings.HasPrefix(name, types.GroupByFieldName+"_")
 	}
 }
 
@@ -283,7 +283,7 @@ func resolveSchemaChainInput(
 		return nil, err
 	}
 	if field.GetDataType() != schemapb.DataType_JSON {
-		if _, err := ToArrowType(field.GetDataType()); err != nil {
+		if !CanImportLegacyFieldType(field.GetDataType()) {
 			return nil, merr.WrapErrParameterInvalidMsg(
 				"function chain input %q has unsupported field type %s", name, field.GetDataType().String())
 		}
@@ -306,7 +306,7 @@ func isExplicitMetaInput(name string) bool {
 
 func validateResolvedInputHint(fieldType schemapb.DataType, nestedPath []string, hint schemapb.DataType) error {
 	if fieldType != schemapb.DataType_JSON {
-		if hint == schemapb.DataType_None {
+		if hint == schemapb.DataType_None || hint == fieldType {
 			return nil
 		}
 		fieldArrowType, fieldErr := ToArrowType(fieldType)

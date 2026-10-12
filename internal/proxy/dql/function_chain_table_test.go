@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/chain/transform"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -299,6 +300,41 @@ func TestHybridFusedPostTableKeepsL2LimitBeforeAggregation(t *testing.T) {
 	table := decodePostTableTest(t, result.GetPostProcessResult())
 	require.Equal(t, []int64{2}, postTableIntColumn(t, table, "count"), "one L2-limited candidate for each of the two queries")
 	require.Equal(t, int64(18), task.AllSearchCount())
+}
+
+func TestPostTableConsumesStoredStructVectorArray(t *testing.T) {
+	schema := proto.Clone(newFunctionChainTestSchema().CollectionSchema).(*schemapb.CollectionSchema)
+	schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Name: "documents", Fields: []*schemapb.FieldSchema{
+		{FieldID: 201, Name: "documents[embedding]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}}},
+	}}}
+	for _, rows := range []int64{0, 3} {
+		plan := postTableTestPlan(t, false,
+			&schemapb.FunctionChainOp{Op: "explode", Inputs: []string{"documents"}, Outputs: []string{"document"}},
+			&schemapb.FunctionChainOp{Op: "select", Inputs: []string{"document.embedding"}, Outputs: []string{"embedding"}},
+		)
+		task := transformTestTask(&milvuspb.SearchRequest{Nq: 1, FunctionChains: []*schemapb.FunctionChain{plan}})
+		task.schema = mustNewSchemaInfo(schema)
+		require.NoError(t, task.prepareSearchTransforms())
+		require.Contains(t, task.postProcess.inputIDs, int64(201))
+		result := transformTestResults([]int64{rows})
+		vectors := make([]*schemapb.VectorField, rows)
+		for index := range vectors {
+			vectors[index] = &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}
+		}
+		result.Results.FieldsData = append(result.Results.FieldsData, &schemapb.FieldData{
+			FieldId: 201, Type: schemapb.DataType_ArrayOfVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Dim: 2, ElementType: schemapb.DataType_FloatVector, Data: vectors}}}},
+		})
+		batch, err := task.buildPostTableInput(context.Background(), result, -1, false)
+		require.NoError(t, err)
+		processed, err := executePostTable(context.Background(), task.postProcess, batch)
+		chain.ReleaseArrowBatch(batch)
+		require.NoError(t, err)
+		table := decodePostTableTest(t, processed)
+		require.Equal(t, rows*2, table.NumRows())
+		require.Equal(t, "embedding", table.Schema().Field(0).Name)
+		table.Release()
+	}
 }
 
 func TestHybridANNPostTablePreservesFetchFailureCodes(t *testing.T) {

@@ -122,7 +122,7 @@ func (meta *searchTransformMeta) planPostInputs(schema *schemaInfo) error {
 			}
 			names.Insert(name)
 			for _, child := range field.GetFields() {
-				if child.GetDataType() == schemapb.DataType_ArrayOfVector {
+				if child.GetDataType() == schemapb.DataType_ArrayOfVector && !meta.repr.TableResult {
 					return merr.WrapErrParameterInvalidMsg("POST_PROCESS does not yet support ArrayOfVector source %q in struct %q", child.GetName(), name)
 				}
 				ids.Insert(child.GetFieldID())
@@ -130,7 +130,7 @@ func (meta *searchTransformMeta) planPostInputs(schema *schemaInfo) error {
 			continue
 		}
 		if field, err := schema.SchemaHelper.GetFieldFromName(name); err == nil {
-			if field.GetDataType() == schemapb.DataType_ArrayOfVector {
+			if field.GetDataType() == schemapb.DataType_ArrayOfVector && !meta.repr.TableResult {
 				return merr.WrapErrParameterInvalidMsg("POST_PROCESS does not yet support ArrayOfVector source %q", name)
 			}
 			if err := meta.validatePostSourceHint(name, field.GetDataType()); err != nil {
@@ -754,7 +754,7 @@ func (t *SearchTask) executeSearchPostProcess(ctx context.Context, result *milvu
 	// Only declared inputs enter Arrow. Untouched requested payloads retain
 	// their original wire representation, including types the chain engine
 	// cannot consume yet, and do not incur a second copy of large vectors.
-	table, err := transformio.FromFieldData(chainFields, rows, memory.DefaultAllocator)
+	table, err := transformio.FromFieldData(chainFields, rows, memory.DefaultAllocator, t.schema.GetFields()...)
 	if err != nil {
 		if merr.GetErrorType(err) == merr.InputError {
 			// The converter also serves INSERT user inputs. Here the values are

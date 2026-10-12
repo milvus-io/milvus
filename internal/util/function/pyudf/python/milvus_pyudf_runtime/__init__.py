@@ -18,7 +18,7 @@
 
 from importlib import import_module
 
-RUNTIME_API_VERSION = 3
+RUNTIME_API_VERSION = 4
 
 _EXPORTS = {
     "PyUDFInstance": "instance",

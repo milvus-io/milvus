@@ -49,10 +49,10 @@ func TestSearchQueryContextFlowsThroughPreRerankAndPost(t *testing.T) {
 	client := &pyudf.Client{}
 	defer mockey.Mock(pyudf.NewClient).Return(client, nil).Build().UnPatch()
 	var observed []pyudf.ExecuteRequest
-	defer mockey.Mock((*pyudf.Client).Execute).To(func(_ *pyudf.Client, _ context.Context, request pyudf.ExecuteRequest) ([]*arrow.Chunked, error) {
+	defer mockey.Mock((*pyudf.Client).ExecuteWithSchema).To(func(_ *pyudf.Client, _ context.Context, request pyudf.ExecuteRequest) (*arrow.Schema, []*arrow.Chunked, error) {
 		observed = append(observed, request)
 		request.Inputs[0].Retain()
-		return []*arrow.Chunked{request.Inputs[0]}, nil
+		return request.InputSchema, []*arrow.Chunked{request.Inputs[0]}, nil
 	}).Build().UnPatch()
 	pre, err := transform.PreProcess("translate", transformTestMap("query", "query", "CN:"))
 	require.NoError(t, err)

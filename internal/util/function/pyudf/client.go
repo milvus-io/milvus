@@ -40,6 +40,7 @@ type ExecuteRequest struct {
 	Stage        string
 	Params       *schemapb.FunctionParamObject
 	Inputs       []*arrow.Chunked
+	InputSchema  *arrow.Schema
 	QueryContext *types.QueryContext
 	TableResult  bool
 	Reduction    bool
@@ -49,6 +50,9 @@ type ExecuteRequest struct {
 const executionVersion uint32 = 2
 
 const tableExecutionVersion uint32 = 3
+
+// Schema-aware calls require fields/nullability/logical metadata to survive IPC.
+const schemaExecutionVersion uint32 = 4
 
 // Client owns the process's fixed worker connections. Concurrent Execute calls
 // share these connections without a queue, admission limit or business retries.
@@ -124,9 +128,20 @@ func CloseClients() error {
 // Execute returns caller-owned output columns. On failure no partial output is
 // returned. Encoding/decoding run synchronously, checking the deadline between
 // batches and before publishing results; no background operation borrows inputs.
-func (c *Client) Execute(ctx context.Context, request ExecuteRequest) (outputs []*arrow.Chunked, err error) {
+func (c *Client) Execute(ctx context.Context, request ExecuteRequest) ([]*arrow.Chunked, error) {
+	_, outputs, err := c.executeWithSchema(ctx, request, false)
+	return outputs, err
+}
+
+// ExecuteWithSchema preserves the worker's complete schema alongside owned
+// output columns; ordinary Execute retains the same ownership/error contract.
+func (c *Client) ExecuteWithSchema(ctx context.Context, request ExecuteRequest) (*arrow.Schema, []*arrow.Chunked, error) {
+	return c.executeWithSchema(ctx, request, true)
+}
+
+func (c *Client) executeWithSchema(ctx context.Context, request ExecuteRequest, preserveSchema bool) (schema *arrow.Schema, outputs []*arrow.Chunked, err error) {
 	if ctx == nil {
-		return nil, merr.WrapErrServiceInternalMsg("py_udf: nil Execute context")
+		return nil, nil, merr.WrapErrServiceInternalMsg("py_udf: nil Execute context")
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.rpcTimeout)
 	defer cancel()
@@ -139,41 +154,46 @@ func (c *Client) Execute(ctx context.Context, request ExecuteRequest) (outputs [
 		if err != nil {
 			releaseColumns(outputs)
 			outputs = nil
+			schema = nil
 		}
 	}()
 	if err := ctx.Err(); err != nil {
-		return nil, merr.Wrap(err, "py_udf: Execute")
+		return nil, nil, merr.Wrap(err, "py_udf: Execute")
 	}
 	if c.closed.Load() {
-		return nil, merr.WrapErrServiceUnavailableMsg("py_udf: client is closed")
+		return nil, nil, merr.WrapErrServiceUnavailableMsg("py_udf: client is closed")
 	}
 	wire, err := encodeExecuteRequest(ctx, request)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, merr.Wrap(err, "py_udf: encode inputs")
+		return nil, nil, merr.Wrap(err, "py_udf: encode inputs")
 	}
 	index := c.next.Inc() % uint64(len(c.conns))
 	response, err := pyudfpb.NewPyUDFWorkerClient(c.conns[index]).Execute(ctx, wire)
 	if err != nil {
-		return nil, transportError(err)
+		return nil, nil, transportError(err)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, merr.Wrap(err, "py_udf: Execute")
+		return nil, nil, merr.Wrap(err, "py_udf: Execute")
 	}
 	if response == nil {
-		return nil, merr.WrapErrServiceInternalMsg("py_udf: missing response")
+		return nil, nil, merr.WrapErrServiceInternalMsg("py_udf: missing response")
 	}
 	switch result := response.Result.(type) {
 	case *pyudfpb.ExecuteResponse_Error:
-		return nil, executionError(result.Error)
+		return nil, nil, executionError(result.Error)
 	case *pyudfpb.ExecuteResponse_Outputs:
 		if response.GetExecutionVersion() != wire.GetExecutionVersion() {
-			return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "py_udf worker does not acknowledge execution version %d", wire.GetExecutionVersion())
+			return nil, nil, merr.Wrapf(merr.ErrServiceUnimplemented, "py_udf worker does not acknowledge execution version %d", wire.GetExecutionVersion())
 		}
-		return decodeOutputs(ctx, result.Outputs)
+		if preserveSchema {
+			return decodeOutputsWithSchema(ctx, result.Outputs)
+		}
+		columns, err := decodeOutputs(ctx, result.Outputs)
+		return nil, columns, err
 	default:
-		return nil, merr.WrapErrServiceInternalMsg("py_udf: missing response result")
+		return nil, nil, merr.WrapErrServiceInternalMsg("py_udf: missing response result")
 	}
 }

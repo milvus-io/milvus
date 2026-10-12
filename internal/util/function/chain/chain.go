@@ -275,6 +275,9 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFram
 // ExecuteWithOptions executes the chain with optional optimization metadata.
 // FuncChain remains the only executor; OptimizationPlan only guides execution.
 func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions, inputs ...*DataFrame) (*DataFrame, error) {
+	if ctx == nil {
+		return nil, merr.WrapErrServiceInternal("chain execution context is nil")
+	}
 	if len(inputs) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("at least one input is required")
 	}
@@ -282,6 +285,11 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 	// Validate chain before execution
 	if err := fc.Validate(); err != nil {
 		return nil, err
+	}
+	for i, input := range inputs {
+		if err := validateFrameShape(input); err != nil {
+			return nil, merr.Wrapf(err, "chain input[%d]", i)
+		}
 	}
 
 	plan, err := fc.buildOptimizationPlan(opts)
@@ -303,6 +311,10 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 				return nil, merr.Wrapf(err, "%s failed", mergeOp.Name())
 			}
 			startIdx = 1
+			if err := validateFrameShape(result); err != nil {
+				fc.releaseIfOwned(result, inputs)
+				return nil, merr.Wrap(err, "Merge output")
+			}
 			if plan != nil {
 				result, err = fc.pruneIfNeeded(result, plan.PruneAfter[0], plan.SystemColumnPolicy, inputs)
 				if err != nil {
@@ -346,6 +358,10 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 
 		var newResult *DataFrame
 		var err error
+		if err := validateOperatorInputSchema(op, result); err != nil {
+			fc.releaseIfOwned(result, inputs)
+			return nil, merr.Wrapf(err, "operator[%d] %s input schema", i, op.Name())
+		}
 		if flatMap, ok := op.(*FlatMapOp); ok && plan != nil {
 			newResult, err = flatMap.executeWithProjection(funcCtx, result, plan.PruneAfter[i], plan.SystemColumnPolicy)
 		} else {
@@ -354,6 +370,13 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 		if err != nil {
 			fc.releaseIfOwned(result, inputs)
 			return nil, merr.Wrapf(err, "%s failed", op.Name())
+		}
+		if err := validateFrameShape(newResult); err != nil {
+			if newResult != result {
+				fc.releaseIfOwned(newResult, inputs)
+			}
+			fc.releaseIfOwned(result, inputs)
+			return nil, merr.Wrapf(err, "operator[%d] %s output schema", i, op.Name())
 		}
 
 		// Release intermediate results (but not the original inputs)

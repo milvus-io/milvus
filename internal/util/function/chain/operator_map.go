@@ -76,9 +76,13 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 		return nil, err
 	}
 	defer releaseColumns(inputs)
+	inputSchema, err := functionInputSchema(input, o.inputs)
+	if err != nil {
+		return nil, err
+	}
 
 	// 2. Call FunctionExpr to process columns
-	outputs, err := o.function.Execute(ctx, inputs)
+	outputSchema, outputs, err := executeFunction(ctx, o.function, inputSchema, inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +97,7 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 				out.Release()
 			}
 		}
-		return nil, merr.WrapErrServiceInternalMsg("map_op: function returned %d outputs, expected %d",
+		return nil, merr.WrapErrFunctionFailedMsg("map_op: function returned %d outputs, expected %d",
 			len(outputs), len(o.outputs))
 	}
 	if err := validateFunctionOutputShape(outputs, input.chunkSizes); err != nil {
@@ -101,16 +105,25 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 		return nil, err
 	}
 
-	return o.buildOutputDataFrame(input, outputs)
+	return o.buildOutputDataFrameWithSchema(input, outputs, outputSchema)
 }
 
 func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked) (*DataFrame, error) {
+	return o.buildOutputDataFrameWithSchema(input, outputs, nil)
+}
+
+func (o *MapOp) buildOutputDataFrameWithSchema(input *DataFrame, outputs []*arrow.Chunked, schema *arrow.Schema) (*DataFrame, error) {
 	// 4. Create builder
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
 
 	builder.SetChunkSizes(input.chunkSizes)
 	builder.CopyAllMetadata(input)
+	if schema != nil {
+		if _, aware := o.function.(types.SchemaAwareFunctionExpr); aware {
+			builder.SetArrowSchemaMetadata(schema.Metadata())
+		}
+	}
 
 	// Build set of output column names (these will replace any existing columns with the same name)
 	outputColSet := make(map[string]struct{})
@@ -143,9 +156,30 @@ func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked)
 			builder.SetFieldType(name, dataType)
 		}
 		builder.SetFieldNullable(name, outputs[i].NullN() > 0)
-		if original := input.Column(name); original != nil && arrow.TypeEqual(original.DataType(), outputs[i].DataType()) {
+		_, schemaAware := o.function.(types.SchemaAwareFunctionExpr)
+		if original := input.Column(name); !schemaAware && original != nil && arrow.TypeEqual(original.DataType(), outputs[i].DataType()) {
 			builder.CopyFieldMetadata(input, name)
 			builder.SetFieldNullable(name, input.fieldNullables[name] || outputs[i].NullN() > 0)
+		}
+		if schema != nil {
+			field := schema.Field(i)
+			// Schema-aware adapters may return a new logical type even when its
+			// physical Arrow representation is unchanged.
+			if schemaAware || field.Metadata.Len() > 0 || input.Column(name) == nil || !arrow.TypeEqual(input.Column(name).DataType(), field.Type) {
+				if err := setFunctionOutputField(builder, name, field); err != nil {
+					return nil, err
+				}
+			} else {
+				preserved, err := functionInputSchema(input, []string{name})
+				if err != nil {
+					return nil, err
+				}
+				field = preserved.Field(0)
+				field.Nullable = field.Nullable || outputs[i].NullN() > 0
+				if err := setFunctionOutputField(builder, name, field); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 
@@ -192,7 +226,7 @@ func validateFunctionOutputShape(outputs []*arrow.Chunked, sizes []int64) error 
 			return merr.WrapErrFunctionFailedMsg("function output %d has inconsistent chunk count", index)
 		}
 		for group, chunk := range output.Chunks() {
-			if chunk == nil || int64(chunk.Len()) != sizes[group] {
+			if chunk == nil || !arrow.TypeEqual(chunk.DataType(), output.DataType()) || int64(chunk.Len()) != sizes[group] {
 				return merr.WrapErrFunctionFailedMsg("function output %d group %d must preserve %d rows", index, group, sizes[group])
 			}
 		}

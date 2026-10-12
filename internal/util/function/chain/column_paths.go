@@ -104,6 +104,10 @@ func unquoteStructKey(contents string, quote byte) (string, error) {
 // ResolveColumn returns an owned retained/materialized column. The caller must
 // Release it. Struct parent nulls are applied to projected child values.
 func (df *DataFrame) ResolveColumn(name string, pool memory.Allocator) (*arrow.Chunked, error) {
+	field, err := df.resolveArrowField(name)
+	if err != nil {
+		return nil, err
+	}
 	if column := df.Column(name); column != nil {
 		column.Retain()
 		return column, nil
@@ -114,7 +118,7 @@ func (df *DataFrame) ResolveColumn(name string, pool memory.Allocator) (*arrow.C
 	}
 	root := df.Column(parts[0])
 	if root == nil || len(parts) == 1 {
-		return nil, merr.WrapErrServiceInternalMsg("column %q not found", name)
+		return nil, merr.WrapErrParameterInvalidMsg("column %q not found", name)
 	}
 	chunks := make([]arrow.Array, len(root.Chunks()))
 	defer func() {
@@ -154,26 +158,17 @@ func (df *DataFrame) ResolveColumn(name string, pool memory.Allocator) (*arrow.C
 		}
 		chunks[group] = current
 	}
-	dataType := root.DataType()
-	for _, part := range parts[1:] {
-		structure, ok := dataType.(*arrow.StructType)
-		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("column %q does not contain struct field %q", name, part)
-		}
-		index, ok := structure.FieldIdx(part)
-		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("column %q has no struct field %q", name, part)
-		}
-		dataType = structure.Field(index).Type
-	}
-	return arrow.NewChunked(dataType, chunks), nil
+	return arrow.NewChunked(field.Type, chunks), nil
 }
 
 func (df *DataFrame) resolveArrowField(name string) (arrow.Field, error) {
 	if df.schema == nil {
 		return arrow.Field{}, merr.WrapErrServiceInternal("DataFrame schema is nil")
 	}
-	if indexes := df.schema.FieldIndices(name); len(indexes) == 1 {
+	if indexes := df.schema.FieldIndices(name); len(indexes) > 0 {
+		if len(indexes) != 1 {
+			return arrow.Field{}, merr.WrapErrParameterInvalidMsg("column %q is ambiguous", name)
+		}
 		return df.schema.Field(indexes[0]), nil
 	}
 	parts, err := splitStructPath(name)
@@ -182,7 +177,7 @@ func (df *DataFrame) resolveArrowField(name string) (arrow.Field, error) {
 	}
 	indexes := df.schema.FieldIndices(parts[0])
 	if len(indexes) != 1 {
-		return arrow.Field{}, merr.WrapErrParameterInvalidMsg("column %q is not available", name)
+		return arrow.Field{}, merr.WrapErrParameterInvalidMsg("column %q not found", name)
 	}
 	field := df.schema.Field(indexes[0])
 	nullable := field.Nullable
@@ -194,6 +189,15 @@ func (df *DataFrame) resolveArrowField(name string) (arrow.Field, error) {
 		index, ok := structure.FieldIdx(part)
 		if !ok {
 			return arrow.Field{}, merr.WrapErrParameterInvalidMsg("column %q has no struct field %q", name, part)
+		}
+		matches := 0
+		for _, child := range structure.Fields() {
+			if child.Name == part {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return arrow.Field{}, merr.WrapErrParameterInvalidMsg("column %q has ambiguous struct field %q", name, part)
 		}
 		field = structure.Field(index)
 		nullable = nullable || field.Nullable

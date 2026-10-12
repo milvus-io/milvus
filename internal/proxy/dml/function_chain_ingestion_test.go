@@ -73,6 +73,39 @@ func TestApplyIngestionExplodesStructBeforeIDAllocation(t *testing.T) {
 	require.Zero(t, task.result.GetIngestionResult().GetOutputRows(), "no output is confirmed before WAL")
 }
 
+func TestIngestionBindsTargetStructChildSchemaBeforeWriting(t *testing.T) {
+	for _, elementType := range []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_Int64} {
+		t.Run(elementType.String(), func(t *testing.T) {
+			task := ingestionTestTask()
+			original := proto.Clone(task.insertMsg.InsertRequest)
+			schema := ingestionTestSchema()
+			schema.Fields = schema.Fields[:2]
+			schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "documents", FieldID: 200, Fields: []*schemapb.FieldSchema{
+				{Name: "documents[text]", FieldID: 201, DataType: schemapb.DataType_Array, ElementType: elementType},
+			}}}
+			schema.FunctionChains[0].Ops = []*schemapb.FunctionChainOp{{Op: "select", Inputs: []string{"doc_id", "sections"}, Outputs: []string{"doc_id", "documents"}}}
+			err := task.applyIngestion(context.Background(), mustNewSchemaInfo(schema))
+			if elementType == schemapb.DataType_Int64 {
+				require.ErrorIs(t, err, merr.ErrFunctionFailed)
+				require.True(t, proto.Equal(original, task.insertMsg.InsertRequest))
+				require.Empty(t, task.ingestionLineage)
+				require.Zero(t, task.result.GetIngestionResult().GetOutputRows())
+				return
+			}
+			require.NoError(t, err)
+			field := task.insertMsg.FieldsData[1]
+			require.EqualValues(t, 200, field.GetFieldId())
+			require.Len(t, field.GetStructArrays().GetFields(), 1)
+			child := field.GetStructArrays().GetFields()[0]
+			require.EqualValues(t, 201, child.GetFieldId())
+			require.Equal(t, schemapb.DataType_VarChar, child.GetScalars().GetArrayData().GetElementType())
+			require.Equal(t, []string{"a", "b"}, child.GetScalars().GetArrayData().GetData()[0].GetStringData().GetData())
+			require.Equal(t, []string{"c"}, child.GetScalars().GetArrayData().GetData()[1].GetStringData().GetData())
+			require.Empty(t, task.insertMsg.GetRowIDs(), "schema binding precedes IDs and WAL")
+		})
+	}
+}
+
 func TestIngestionIdempotencyRejectsBeforeInputAndUDF(t *testing.T) {
 	task := ingestionTestTask()
 	task.idempotencyKey = "retry-key"
