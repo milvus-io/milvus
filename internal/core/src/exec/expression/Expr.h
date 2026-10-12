@@ -1258,16 +1258,16 @@ class SegmentExpr : public Expr {
         TargetBitmap result;
         TargetBitmap valid;
         if (element_level_result) {
-            auto array_offsets = segment_->GetArrayOffsets(field_id_);
-            AssertInfo(array_offsets != nullptr,
+            auto struct_element_offsets = segment_->GetStructElementOffsets(field_id_);
+            AssertInfo(struct_element_offsets != nullptr,
                        "array offsets are required for element-level index");
             const auto data_pos = current_index_chunk_pos_;
             const auto batch_rows =
                 std::min(batch_size_, active_count_ - data_pos);
             const auto [elem_start, _] =
-                array_offsets->ElementIDRangeOfRow(data_pos);
+                struct_element_offsets->ElementIDRangeOfRow(data_pos);
             const auto [elem_end, __] =
-                array_offsets->ElementIDRangeOfRow(data_pos + batch_rows);
+                struct_element_offsets->ElementIDRangeOfRow(data_pos + batch_rows);
             const auto elem_count = elem_end - elem_start;
             AssertInfo(cached_index_chunk_res_->size() >=
                            static_cast<size_t>(elem_end),

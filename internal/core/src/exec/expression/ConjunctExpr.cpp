@@ -19,6 +19,7 @@
 #include <algorithm>
 
 #include "LikeConjunctExpr.h"
+#include "RawExprCacheAdapter.h"
 #include "UnaryExpr.h"
 #include "common/EasyAssert.h"
 #include "common/Tracer.h"
@@ -115,9 +116,14 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         std::vector<std::shared_ptr<PhyUnaryRangeFilterExpr>> ngram_exprs;
         if (!has_input_offset) {
             for (size_t idx : like_indices_) {
-                auto unary_expr =
-                    std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(
-                        inputs_[idx]);
+                auto input = inputs_[idx];
+                if (auto cached = std::dynamic_pointer_cast<RawExprCacheAdapter>(input)) {
+                    input = cached->wrapped_expr();
+                }
+                auto unary_expr = std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(input);
+                if (unary_expr) {
+                    unary_expr->EnsureExecPathDetermined();
+                }
                 if (unary_expr && unary_expr->CanUseNgramIndex()) {
                     ngram_exprs.push_back(unary_expr);
                     batch_ngram_indices_.insert(idx);
