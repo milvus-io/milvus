@@ -23,7 +23,7 @@
 
 #include "cachinglayer/Translator.h"
 #include "common/Types.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/ChunkManager.h"
