@@ -499,8 +499,13 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	}
 	if messageutil.IsSchemaChange(header) {
 		version := body.GetUpdates().GetSchema().GetVersion()
+		addedFields := make([]*messagespb.LoadFieldConfig, 0, len(body.GetUpdates().GetBoundFieldIndexes()))
+		for _, field := range body.GetUpdates().GetBoundFieldIndexes() {
+			info := field.GetIndexInfo()
+			addedFields = append(addedFields, &messagespb.LoadFieldConfig{FieldId: info.GetFieldID(), IndexId: info.GetIndexID()})
+		}
 		status, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
-			CollectionIDs: []int64{header.CollectionId}, SchemaVersion: &version,
+			CollectionIDs: []int64{header.CollectionId}, SchemaVersion: &version, AddedLoadFields: addedFields,
 		})
 		if err := merr.CheckRPCCall(status, err); err != nil {
 			return merr.Wrap(err, "wait for schema QueryView handoff")

@@ -97,8 +97,11 @@ The AlterCollection acknowledgement follows this order:
 1. RootCoord persists and publishes the new schema in MetaTable.
 2. RootCoord refreshes DataCoord metadata and applies bound index metadata.
 3. RootCoord requests schema handoff through `UpdateLoadConfig.schema_version`.
-   This is a reconciliation notification and a completion lower bound, not a
-   load-config write. It must not acquire another collection broadcast lock.
+   The schema revision is a reconciliation notification and completion lower
+   bound. Newly added bound function outputs additionally carry an explicit
+   field/index delta: QueryCoord persists eligible additions before handoff,
+   preserving other unloaded fields. Schema-only changes do not write load
+   configuration. Neither path acquires another collection broadcast lock.
 4. Balancer reads the latest schema revision per affected collection for the
    planning pass. A newer revision forces a new QueryVersion even with unchanged
    DataView, load configuration and placement. It supersedes an older Preparing

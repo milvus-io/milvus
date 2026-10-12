@@ -24,6 +24,9 @@ func (s *Server) updateQueryViewSchema(ctx context.Context, req *querypb.UpdateL
 		if !s.qviewsRuntime.loadConfigStore.Contains(collectionID) {
 			continue
 		}
+		if err := s.qviewsRuntime.loadConfigStore.AddFunctionFields(ctx, collectionID, collection.GetSchema(), req.GetAddedLoadFields()); err != nil {
+			return err
+		}
 		// This is a wake-up, not a persisted schema requirement. Reconciliation
 		// always reads the latest published metadata, also after restart.
 		s.qviewsRuntime.balancer.Trigger(balancer.TriggerScope{DirtyCollections: []int64{collectionID}})

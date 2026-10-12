@@ -1134,6 +1134,8 @@ message UpdateLoadConfigRequest {
     // RootCoord sends this only after publishing the schema. No WAL broadcast
     // is needed here: the AlterCollection callback already owns the DDL lock.
     optional int32 schema_version = 6;
+    // Newly added function outputs with indexes materialized by this DDL.
+    repeated .milvus.proto.messages.LoadFieldConfig added_load_fields = 7;
 }
 
 message UpdateSchemaRequest {

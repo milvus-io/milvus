@@ -193,7 +193,7 @@ with a missing/unready DataView waits or retries, rather than releasing views.
 | Source event | Cache publication | Reconcile scope |
 |---|---|---|
 | LoadConfig Put/Remove | Desired field and replica/RG indexes | Collection |
-| Published collection schema | No load-config mutation; latest metadata read before planning | Collection |
+| Published collection schema | Latest metadata read before planning; explicit added function field/index delta updates load membership when present | Collection |
 | DataView publication/drop | Membership, RowNum, per-shard totals/counts | Collection |
 | Preparing completion / Unrecoverable | Actual shard and node contributions | Shard |
 | Ordinary progress report | Actual shard and affected node contributions | Periodic optimization may evaluate wider effects |
@@ -1146,3 +1146,15 @@ reported while the new load config is Loading; it does not imply readiness for
 the new configuration.
 
 **Recovery**: On startup: LoadConfigStore recovers from ETCD → ShardViewRegistry recovers persisted managers, stats, and indexes → Balancer triggers a full reconcile that hydrates the row-count ledger before planning.
+
+### Added function output fields during schema handoff
+
+A schema revision itself remains outside LoadInfoVersion. An AlterCollection
+that adds indexed function outputs also carries a concrete load-field delta:
+RootCoord forwards the WAL-persisted bound field/index IDs after applying that
+index metadata. QueryCoord adds only these new outputs whose input fields are
+loaded, preserving other explicitly unloaded fields. It persists the resulting
+LoadConfig under the collection guard before triggering and waiting for schema
+handoff. This changes LoadInfoVersion because field/index membership changed,
+not because the schema revision changed. Replays are idempotent; absent load
+state is never recreated. Ordinary schema-only changes do not mutate LoadConfig.
