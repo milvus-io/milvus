@@ -103,17 +103,23 @@ class SegmentReadSnapshot {
  public:
     virtual ~SegmentReadSnapshot() = default;
 
+    // Layout lookups can open lazy column-group metadata. Query callers must
+    // supply their context even when no raw data is being pinned yet.
     virtual int64_t
-    chunk_size(FieldId f, int64_t c) const = 0;
+    chunk_size(FieldId f, int64_t c, OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
-    num_rows_until_chunk(FieldId f, int64_t c) const = 0;
+    num_rows_until_chunk(FieldId f,
+                         int64_t c,
+                         OpContext* op_ctx = nullptr) const = 0;
 
     virtual std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId f, int64_t off) const = 0;
+    get_chunk_by_offset(FieldId f,
+                        int64_t off,
+                        OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
-    num_chunk_data(FieldId f) const = 0;
+    num_chunk_data(FieldId f, OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
     get_row_count() const = 0;
@@ -135,6 +141,15 @@ class SegmentReadSnapshot {
     GetColumn(FieldId field_id) const {
         return GetDataScanResources(field_id).get();
     }
+
+    // Returns nullptr when this field has no struct mapping in the captured
+    // state. Consumers that require element-to-row conversion must check it.
+    virtual std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id, OpContext* op_ctx) const = 0;
+
+    // Must return a non-null schema from the same captured state as the columns.
+    virtual SchemaPtr
+    get_schema_snapshot() const = 0;
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -406,10 +421,12 @@ class SegmentInterface {
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx) = 0;
 
-    // Get IArrayOffsets for element-level filtering on array fields
-    // Returns nullptr if the field doesn't have IArrayOffsets
+    // Get the shared struct-element mapping for a struct sub-field.
+    // Returns nullptr if the field has no struct-element mapping.
+    // Sealed segments build it on first use, using the caller's cancellation
+    // token and normal column cache; later calls reuse the immutable metadata.
     virtual std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const = 0;
+    GetArrayOffsets(FieldId field_id, OpContext* op_ctx = nullptr) const = 0;
 };
 
 // internal API for DSL calculation
@@ -747,10 +764,12 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // count of chunk that has raw data
     virtual int64_t
-    num_chunk_data(FieldId field_id) const = 0;
+    num_chunk_data(FieldId field_id, OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const = 0;
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         OpContext* op_ctx = nullptr) const = 0;
 
     // bitset 1 means not hit. 0 means hit.
     virtual void
@@ -763,10 +782,14 @@ class SegmentInternalInterface : public SegmentInterface {
     num_chunk(FieldId field_id) const = 0;
 
     virtual int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const = 0;
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               OpContext* op_ctx = nullptr) const = 0;
 
     virtual std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const = 0;
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        OpContext* op_ctx = nullptr) const = 0;
 
     // element size in each chunk
     virtual int64_t

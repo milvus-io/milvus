@@ -1092,6 +1092,63 @@ ChunkedSegmentSealedImpl::CaptureRuntimeResourceState() const {
     return state->runtime;
 }
 
+std::shared_ptr<const IArrayOffsets>
+ChunkedSegmentSealedImpl::GetArrayOffsets(FieldId field_id,
+                                          milvus::OpContext* op_ctx) const {
+    return GetArrayOffsetsFromState(*CapturePublishedState(), field_id, op_ctx);
+}
+
+std::shared_ptr<const IArrayOffsets>
+ChunkedSegmentSealedImpl::GetArrayOffsetsFromState(
+    const PublishedSegmentState& state,
+    FieldId field_id,
+    milvus::OpContext* op_ctx) {
+    if (state.runtime == nullptr) {
+        return nullptr;
+    }
+    const auto& runtime = *state.runtime;
+    auto it = runtime.array_offsets_map.find(field_id);
+    if (it == runtime.array_offsets_map.end()) {
+        return nullptr;
+    }
+    const auto& entry = it->second;
+    return entry->GetOrBuild(op_ctx, [&] {
+        const FieldMeta* source_meta = nullptr;
+        const ChunkedColumnInterface* source_column = nullptr;
+        // All aliases reference the same struct generation. Select from this
+        // read snapshot, preferring scalar arrays, then the lowest field ID;
+        // loading/commit order cannot choose a cold vector column for us.
+        for (const auto& [candidate_id, candidate_entry] :
+             runtime.array_offsets_map) {
+            if (candidate_entry != entry ||
+                !state.schema->has_field(candidate_id)) {
+                continue;
+            }
+            auto column = runtime.fields.find(candidate_id);
+            if (column == runtime.fields.end() || column->second == nullptr) {
+                continue;
+            }
+            const auto& meta = state.schema->operator[](candidate_id);
+            const bool vector = meta.get_data_type() == DataType::VECTOR_ARRAY;
+            const bool source_vector =
+                source_meta &&
+                source_meta->get_data_type() == DataType::VECTOR_ARRAY;
+            if (!source_meta || (source_vector && !vector) ||
+                (source_vector == vector &&
+                 candidate_id.get() < source_meta->get_id().get())) {
+                source_meta = &meta;
+                source_column = column->second.get();
+            }
+        }
+        AssertInfo(source_column != nullptr,
+                   "no column available to build struct element offsets for "
+                   "field {}",
+                   field_id.get());
+        return ArrayOffsetsSealed::BuildFromColumn(
+            *source_column, *source_meta, runtime.row_count, op_ctx);
+    });
+}
+
 // State-only read view: every access derives purely from the captured
 // PublishedSegmentState. No segment pointer is held — the immutable state
 // carries the field columns, readiness bitsets, and row count that the exec
@@ -1106,45 +1163,61 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
     explicit SealedReadSnapshot(
         std::shared_ptr<const PublishedSegmentState> state)
         : state_(std::move(state)) {
-        AssertInfo(state_ != nullptr && state_->runtime != nullptr,
+        AssertInfo(state_ != nullptr && state_->schema != nullptr &&
+                       state_->runtime != nullptr,
                    "sealed read snapshot must hold a published state with a "
-                   "non-null runtime");
+                   "non-null schema and runtime");
     }
 
     int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const override {
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               OpContext* op_ctx = nullptr) const override {
         if (!FieldDataReady(field_id)) {
             return 0;
         }
         auto* column = Column(field_id);
+        if (column) {
+            column->Prepare(op_ctx);
+        }
         return column ? column->chunk_row_nums(chunk_id)
                       : state_->runtime->row_count;
     }
 
     int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         OpContext* op_ctx = nullptr) const override {
         auto* column = Column(field_id);
         AssertInfo(column != nullptr,
                    "field {} must exist when getting rows until chunk",
                    field_id.get());
+        column->Prepare(op_ctx);
         return column->GetNumRowsUntilChunk(chunk_id);
     }
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        OpContext* op_ctx = nullptr) const override {
         auto* column = Column(field_id);
         AssertInfo(column != nullptr,
                    "field {} must exist when getting chunk by offset",
                    field_id.get());
+        column->Prepare(op_ctx);
         return column->GetChunkIDByOffset(offset);
     }
 
     int64_t
-    num_chunk_data(FieldId field_id) const override {
+    num_chunk_data(FieldId field_id,
+                   OpContext* op_ctx = nullptr) const override {
         if (!FieldDataReady(field_id)) {
             return 0;
         }
         auto* column = Column(field_id);
+        if (column) {
+            column->Prepare(op_ctx);
+        }
         return column ? column->num_chunks() : 1;
     }
 
@@ -1164,6 +1237,17 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
     const ChunkedColumnInterface*
     GetColumn(FieldId field_id) const override {
         return Column(field_id);
+    }
+
+    std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id,
+                    milvus::OpContext* op_ctx) const override {
+        return GetArrayOffsetsFromState(*state_, field_id, op_ctx);
+    }
+
+    SchemaPtr
+    get_schema_snapshot() const override {
+        return state_->schema;
     }
 
     // Plain (non-virtual) accessor so the enclosing segment's ToPublishedState
@@ -3556,12 +3640,16 @@ ChunkedSegmentSealedImpl::AddFieldDataInfoForSealed(
 }
 
 int64_t
-ChunkedSegmentSealedImpl::num_chunk_data(FieldId field_id) const {
+ChunkedSegmentSealedImpl::num_chunk_data(FieldId field_id,
+                                         OpContext* op_ctx) const {
     auto snapshot = CapturePublishedState();
     if (!get_bit(snapshot->field_data_ready_bitset, field_id)) {
         return 0;
     }
     auto column = get_column(snapshot->runtime, field_id);
+    if (column) {
+        column->Prepare(op_ctx);
+    }
     return column ? column->num_chunks() : 1;
 }
 
@@ -3581,35 +3669,44 @@ ChunkedSegmentSealedImpl::size_per_chunk() const {
 }
 
 int64_t
-ChunkedSegmentSealedImpl::chunk_size(FieldId field_id, int64_t chunk_id) const {
+ChunkedSegmentSealedImpl::chunk_size(FieldId field_id,
+                                     int64_t chunk_id,
+                                     OpContext* op_ctx) const {
     auto snapshot = CapturePublishedState();
     if (!get_bit(snapshot->field_data_ready_bitset, field_id)) {
         return 0;
     }
     auto column = get_column(snapshot->runtime, field_id);
+    if (column) {
+        column->Prepare(op_ctx);
+    }
     return column ? column->chunk_row_nums(chunk_id)
                   : snapshot->runtime->row_count;
 }
 
 std::pair<int64_t, int64_t>
 ChunkedSegmentSealedImpl::get_chunk_by_offset(FieldId field_id,
-                                              int64_t offset) const {
+                                              int64_t offset,
+                                              OpContext* op_ctx) const {
     auto snapshot = CapturePublishedState();
     auto column = get_column(snapshot->runtime, field_id);
     AssertInfo(column != nullptr,
                "field {} must exist when getting chunk by offset",
                field_id.get());
+    column->Prepare(op_ctx);
     return column->GetChunkIDByOffset(offset);
 }
 
 int64_t
 ChunkedSegmentSealedImpl::num_rows_until_chunk(FieldId field_id,
-                                               int64_t chunk_id) const {
+                                               int64_t chunk_id,
+                                               OpContext* op_ctx) const {
     auto snapshot = CapturePublishedState();
     auto column = get_column(snapshot->runtime, field_id);
     AssertInfo(column != nullptr,
                "field {} must exist when getting rows until chunk",
                field_id.get());
+    column->Prepare(op_ctx);
     return column->GetNumRowsUntilChunk(chunk_id);
 }
 
@@ -7464,30 +7561,13 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         segcore_config_.get_enable_geometry_cache()) {
         staged_geometry_cache = BuildGeometryCacheDetached(field_id, column);
     }
-
     auto& field_meta = schema_snapshot->operator[](field_id);
-    auto prepare_array_offsets = [&](RuntimeResourceState& target_runtime) {
-        if (auto parsed_struct_name = GetStructNameForArrayField(field_meta);
-            parsed_struct_name.has_value()) {
-            auto& struct_name = *parsed_struct_name;
-            auto it = target_runtime.struct_to_array_offsets.find(struct_name);
-            if (it != target_runtime.struct_to_array_offsets.end()) {
-                target_runtime.array_offsets_map[field_id] = it->second;
-                return;
-            }
-
-            auto new_offsets = ArrayOffsetsSealed::BuildFromColumn(
-                *column, field_meta, num_rows);
-            target_runtime.struct_to_array_offsets[struct_name] = new_offsets;
-            target_runtime.array_offsets_map[field_id] = new_offsets;
-        }
-    };
-
     auto apply_loaded_column =
         [&](RuntimeResourceState& target_runtime,
             const std::shared_ptr<ChunkedColumnInterface>& old_column,
             const PublishedSegmentState& state_snapshot) {
-            prepare_array_offsets(target_runtime);
+            RegisterArrayOffsetsForField(
+                field_meta, target_runtime, is_replace);
 
             if (IsVariableDataType(data_type)) {
                 if (enable_mmap) {
@@ -8249,6 +8329,32 @@ ChunkedSegmentSealedImpl::fill_empty_field(
 }
 
 void
+ChunkedSegmentSealedImpl::RegisterArrayOffsetsForField(
+    const FieldMeta& field_meta,
+    RuntimeResourceState& runtime,
+    bool is_replace) {
+    auto struct_name = GetStructNameForArrayField(field_meta);
+    if (!struct_name.has_value()) {
+        return;
+    }
+    auto& entry = runtime.struct_to_array_offsets[*struct_name];
+    if (!entry || is_replace) {
+        auto previous = std::move(entry);
+        entry = std::make_shared<LazyArrayOffsets>();
+        // Retire the old generation only in the staged/new runtime. Existing
+        // read snapshots still own its entry and column resources.
+        if (previous) {
+            for (auto& [field_id, alias] : runtime.array_offsets_map) {
+                if (alias == previous) {
+                    alias = entry;
+                }
+            }
+        }
+    }
+    runtime.array_offsets_map[field_meta.get_id()] = entry;
+}
+
+void
 ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
     const FieldMeta& field_meta,
     int64_t row_count,
@@ -8260,10 +8366,13 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
 
     auto it = runtime.struct_to_array_offsets.find(*struct_name);
     if (it == runtime.struct_to_array_offsets.end()) {
-        auto array_offsets = ArrayOffsetsSealed::BuildAllZeros(row_count);
-        it =
-            runtime.struct_to_array_offsets.emplace(*struct_name, array_offsets)
-                .first;
+        auto array_offsets = ArrayOffsetsSealed::BuildAllZeros(
+            row_count, !field_meta.is_nullable());
+        it = runtime.struct_to_array_offsets
+                 .emplace(*struct_name,
+                          std::make_shared<LazyArrayOffsets>(
+                              std::move(array_offsets)))
+                 .first;
     }
 
     runtime.array_offsets_map[field_meta.get_id()] = it->second;
