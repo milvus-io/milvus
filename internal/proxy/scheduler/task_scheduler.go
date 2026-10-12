@@ -283,17 +283,9 @@ func (queue *DdTaskQueue) updateMetrics() {
 	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "ddl", metrics.InProgressIndexTaskLabel).Set(float64(activateTaskNum))
 }
 
-type pChanStatInfo struct {
-	taskmodel.PChanStatistics
-	tsSet map[taskmodel.Timestamp]struct{}
-}
-
 // DmTaskQueue represents queue for DML task such as insert/delete/upsert
 type DmTaskQueue struct {
 	*BaseTaskQueue
-
-	statsLock            sync.RWMutex
-	pChanStatisticsInfos map[taskmodel.PChan]*pChanStatInfo
 }
 
 func (queue *DmTaskQueue) updateMetrics() {
@@ -309,11 +301,6 @@ func (queue *DmTaskQueue) updateMetrics() {
 }
 
 func (queue *DmTaskQueue) Enqueue(t taskmodel.Task) error {
-	// This statsLock has two functions:
-	//	1) Protect member pChanStatisticsInfos
-	//	2) Serialize the timestamp allocation for dml tasks
-
-	// 1. set the current pChannels for this dmTask
 	dmt := t.(taskmodel.DMLTask)
 	err := dmt.SetChannels()
 	if err != nil {
@@ -321,106 +308,7 @@ func (queue *DmTaskQueue) Enqueue(t taskmodel.Task) error {
 		return err
 	}
 
-	// 2. enqueue dml task
-	queue.statsLock.Lock()
-	defer queue.statsLock.Unlock()
-	err = queue.BaseTaskQueue.Enqueue(t)
-	if err != nil {
-		return err
-	}
-	// 3. commit will use pChannels got previously when preAdding and will definitely succeed
-	pChannels := dmt.GetChannels()
-	queue.commitPChanStats(dmt, pChannels)
-	// there's indeed a possibility that the collection info cache was expired after preAddPChanStats
-	// but considering root coord knows everything about meta modification, invalid stats appended after the meta changed
-	// will be discarded by root coord and will not lead to inconsistent state
-	return nil
-}
-
-func (queue *DmTaskQueue) PopActiveTask(taskID taskmodel.UniqueID) taskmodel.Task {
-	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
-	t, ok := queue.activeTasks[taskID]
-	if ok {
-		queue.statsLock.Lock()
-		defer queue.statsLock.Unlock()
-
-		delete(queue.activeTasks, taskID)
-		mlog.Debug(t.TraceCtx(), "Proxy DmTaskQueue popPChanStats", mlog.FieldTaskID(t.ID()))
-		queue.popPChanStats(t)
-	} else {
-		mlog.Warn(context.TODO(), "Proxy task not in active task list!", mlog.FieldTaskID(taskID))
-	}
-	return t
-}
-
-func (queue *DmTaskQueue) commitPChanStats(dmt taskmodel.DMLTask, pChannels []taskmodel.PChan) {
-	// 1. prepare new stat for all pChannels
-	newStats := make(map[taskmodel.PChan]taskmodel.PChanStatistics)
-	beginTs := dmt.BeginTs()
-	endTs := dmt.EndTs()
-	for _, channel := range pChannels {
-		newStats[channel] = taskmodel.PChanStatistics{
-			MinTs: beginTs,
-			MaxTs: endTs,
-		}
-	}
-	// 2. update stats for all pChannels
-	for cName, newStat := range newStats {
-		currentStat, ok := queue.pChanStatisticsInfos[cName]
-		if !ok {
-			currentStat = &pChanStatInfo{
-				PChanStatistics: newStat,
-				tsSet: map[taskmodel.Timestamp]struct{}{
-					newStat.MinTs: {},
-				},
-			}
-			queue.pChanStatisticsInfos[cName] = currentStat
-		} else {
-			if currentStat.MinTs > newStat.MinTs {
-				currentStat.MinTs = newStat.MinTs
-			}
-			if currentStat.MaxTs < newStat.MaxTs {
-				currentStat.MaxTs = newStat.MaxTs
-			}
-			currentStat.tsSet[newStat.MinTs] = struct{}{}
-		}
-	}
-}
-
-func (queue *DmTaskQueue) popPChanStats(t taskmodel.Task) {
-	channels := t.(taskmodel.DMLTask).GetChannels()
-	taskTs := t.BeginTs()
-	for _, cName := range channels {
-		info, ok := queue.pChanStatisticsInfos[cName]
-		if ok {
-			delete(info.tsSet, taskTs)
-			if len(info.tsSet) <= 0 {
-				delete(queue.pChanStatisticsInfos, cName)
-			} else {
-				newMinTs := info.MaxTs
-				for ts := range info.tsSet {
-					if newMinTs > ts {
-						newMinTs = ts
-					}
-				}
-				info.MinTs = newMinTs
-			}
-		}
-	}
-}
-
-func (queue *DmTaskQueue) getPChanStatsInfo() (map[taskmodel.PChan]*taskmodel.PChanStatistics, error) {
-	ret := make(map[taskmodel.PChan]*taskmodel.PChanStatistics)
-	queue.statsLock.RLock()
-	defer queue.statsLock.RUnlock()
-	for cName, info := range queue.pChanStatisticsInfos {
-		ret[cName] = &taskmodel.PChanStatistics{
-			MinTs: info.MinTs,
-			MaxTs: info.MaxTs,
-		}
-	}
-	return ret, nil
+	return queue.BaseTaskQueue.Enqueue(t)
 }
 
 // DqTaskQueue represents queue for DQL task such as search/query
@@ -495,8 +383,7 @@ func newDdTaskQueue(tsoAllocatorIns taskmodel.TsoAllocator) *DdTaskQueue {
 
 func newDmTaskQueue(tsoAllocatorIns taskmodel.TsoAllocator) *DmTaskQueue {
 	return &DmTaskQueue{
-		BaseTaskQueue:        newBaseTaskQueue(tsoAllocatorIns),
-		pChanStatisticsInfos: make(map[taskmodel.PChan]*pChanStatInfo),
+		BaseTaskQueue: newBaseTaskQueue(tsoAllocatorIns),
 	}
 }
 
@@ -727,10 +614,6 @@ func (sched *TaskScheduler) Start() error {
 func (sched *TaskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
-}
-
-func (sched *TaskScheduler) GetPChanStatistics() (map[taskmodel.PChan]*taskmodel.PChanStatistics, error) {
-	return sched.DmQueue.getPChanStatsInfo()
 }
 
 func (sched *TaskScheduler) getTaskQueueMetrics(queue *BaseTaskQueue, queueType string) metricsinfo.TaskQueueMetrics {
