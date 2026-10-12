@@ -101,6 +101,12 @@ type PhysicalSegmentManager interface {
 	ApplyLoadInfoSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot)
 }
 
+// PhysicalSegmentReferenceRetainer pins existing resources before asynchronous
+// collection preparation, so an old view cannot close their subscription.
+type PhysicalSegmentReferenceRetainer interface {
+	Retain(req AcquirePhysicalSegments)
+}
+
 type PhysicalSegmentResetter interface {
 	ResetSegment(segmentID int64)
 }
@@ -228,11 +234,12 @@ type SegmentUpdateTask struct {
 	loader    PhysicalSegmentLoader
 	estimator SegmentResourceEstimator
 
-	Context    context.Context
-	Segment    TransformSegment
-	Collection CollectionRuntime
-	Snapshot   SegmentLoadInfoSnapshot
-	Current    SegmentLoadInfoRevision
+	Context     context.Context
+	Segment     TransformSegment
+	Collection  CollectionRuntime
+	Snapshot    SegmentLoadInfoSnapshot
+	Current     SegmentLoadInfoRevision
+	ForceReopen bool
 
 	OnUpdated func(SegmentLoadInfoRevision)
 	OnFailed  func(error)

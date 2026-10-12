@@ -82,13 +82,13 @@ Incoming QueryView(Preparing)
        -> SegmentManager.Acquire
             -> QueryViewSegmentReadinessManager.Acquire
                  -> TransformLogBuffer.Acquire
+                 -> retain existing physical references before async preparation
                  -> QueryViewCollectionRuntimeManager.Acquire
                       -> QueryViewLoadMetadataProvider.DescribeCollection
                       -> collectionManager.PutOrRef
                  -> record transform refs and waiters
-                 -> report already transform-ready segments, if any
                  -> report empty OnReady if this QN has no assigned segments
-                 -> ViewScopedPhysicalSegmentManager.Acquire for missing segments
+                 -> ViewScopedPhysicalSegmentManager.Acquire for every assigned segment
                       -> record physical refs
                       -> subscribe the shared SegmentLoadInfoStream for each referenced segment
                       -> if segment is missing:
@@ -98,7 +98,9 @@ Incoming QueryView(Preparing)
                                 -> SegmentResourceEstimator.Reserve
                                 -> PhysicalSegmentLoader.Load
                       -> if segment is already physically loaded:
-                           -> reuse loaded segment
+                           -> retain its metadata subscription
+                           -> reconcile changed schema/load-info requirements via Reopen
+                           -> wait for pending physical updates
                       -> physical OnLoaded callback
                  -> TransformLogBuffer.RegisterSegment
                  -> TransformRegistration.WaitCatchup
@@ -224,8 +226,9 @@ Acquire behavior:
    new physical segment state;
 4. create load state only for segments that are missing or reset;
 5. submit load tasks only for segments that are not already loading or loaded;
-6. if all requested segments are already physically loaded, call `OnLoaded`
-   with those segments.
+6. report `OnLoaded` only for segments that satisfy the requesting view's
+   schema/load-info requirements and have no pending physical update; callbacks
+   are deduplicated per view and segment.
 
 Load task behavior:
 
@@ -309,9 +312,22 @@ For each physically loaded segment:
 5. mark the segment transform-loaded;
 6. notify all waiting QueryViews through `OnReady`.
 
-If another QueryView references a segment that is already transform-loaded, the
-transform manager reports it ready immediately without reloading or
-re-registering the segment.
+If another QueryView references a segment that is already transform-loaded,
+it reuses the transform registration and catch-up state but still acquires a
+physical reference. Ready joins that view's physical preparation callback with
+the shared transform-ready state. Collection metadata preparation must not
+leave a reference gap: existing physical references are retained synchronously
+when the replacement view is recorded, before its asynchronous collection task.
+
+The physical manager retains the latest watched snapshot and the schema/load-info
+versions successfully applied to each segment. A changed requirement schedules
+Reopen even if the snapshot content hash is unchanged. Requests arriving during
+load/update remain pending until their requirements are applied; an older task
+cannot acknowledge a newer requirement. Metadata updates select the newest live
+schema/load-info requirement, rather than an arbitrary older view. The final
+view release closes the metadata subscription; an old view release alone does
+not. This continues to reuse the shared mutable segment model, not immutable
+historical-schema resources.
 
 If registration or catch-up fails:
 

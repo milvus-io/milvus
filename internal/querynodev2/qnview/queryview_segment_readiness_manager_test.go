@@ -600,7 +600,9 @@ func TestQueryViewSegmentReadinessManager_LoadedSegmentAcquireDoesNotReleaseShar
 	physical := fakePhysicalSegmentManager{
 		acquire: func(req AcquirePhysicalSegments) {
 			acquireCalls <- req
-			req.OnLoaded([]TransformSegment{segment})
+			if req.Key == key1 {
+				req.OnLoaded([]TransformSegment{segment})
+			}
 		},
 		release: func(req ReleaseSegments) { req.OnDropped() },
 	}
@@ -631,12 +633,17 @@ func TestQueryViewSegmentReadinessManager_LoadedSegmentAcquireDoesNotReleaseShar
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for second view") },
 	})
 
-	assert.Equal(t, map[int64][]int64{10: {1000}}, <-ready2)
 	select {
-	case <-acquireCalls:
-		t.Fatal("already loaded segment should not trigger another physical acquire")
-	case <-time.After(20 * time.Millisecond):
+	case req := <-acquireCalls:
+		require.Empty(t, ready2, "transform readiness alone does not satisfy the new view")
+		req.OnLoaded([]TransformSegment{segment})
+	case <-time.After(time.Second):
+		t.Fatal("reused segment must acquire a physical reference for the new view")
 	}
+	assert.Equal(t, map[int64][]int64{10: {1000}}, <-ready2)
+	buffer.mu.Lock()
+	assert.Len(t, buffer.regs, 1, "handoff reuses transform registration")
+	buffer.mu.Unlock()
 	assert.False(t, segment.released)
 }
 

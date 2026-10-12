@@ -727,6 +727,9 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 	}))
 	assert.Empty(t, scheduler.Updates())
 	scheduler.Tasks()[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
+	require.Empty(t, loadedCh, "pending metadata must be applied before physical readiness")
+	require.Len(t, scheduler.Updates(), 1)
+	scheduler.Updates()[0].OnUpdated(updatedRevision)
 
 	select {
 	case loaded := <-loadedCh:
@@ -738,7 +741,6 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 	require.Len(t, stream.subscriptions, 1)
 	require.Len(t, scheduler.Updates(), 1)
 	assert.Equal(t, updatedRevision, scheduler.Updates()[0].Snapshot.Revision)
-	scheduler.Updates()[0].OnUpdated(updatedRevision)
 	require.Len(t, stream.subscriptions, 1)
 
 	droppedCh := make(chan struct{}, 1)

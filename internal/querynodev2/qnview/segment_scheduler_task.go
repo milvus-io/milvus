@@ -107,6 +107,9 @@ func (t *SegmentUpdateTask) Execute(schedulerCtx context.Context) error {
 
 func (t *SegmentUpdateTask) update(ctx context.Context) error {
 	action := classifySegmentUpdate(t.Current, t.Snapshot.Revision)
+	if t.ForceReopen {
+		action |= SegmentUpdateReopen
+	}
 	if action == SegmentUpdateNone {
 		if t.OnUpdated != nil {
 			t.OnUpdated(t.Current)

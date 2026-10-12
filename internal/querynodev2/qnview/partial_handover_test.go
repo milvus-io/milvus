@@ -71,7 +71,7 @@ func TestPendingReplacementRetainsReadySegmentsBeforeOldRelease(t *testing.T) {
 	require.True(t, exclusive.released, "unshared successful loads must be released")
 	unblock.Do(func() { close(resume) })
 	waitReady(1)
-	require.Equal(t, 1, loads, "shared successful load should not be repeated")
+	require.Equal(t, 2, loads, "each view must acquire its physical reference")
 	manager.Release(ReleaseSegments{Key: replacement})
 	require.True(t, shared.released)
 }
