@@ -314,3 +314,21 @@ func TestRLSQuotaBoundaries(t *testing.T) {
 	createRLSPolicy(ctx, t, mc, name, "replacement", "owner == $current_principal", "", milvuspb.RowPolicyAction_Query)
 	queryRLS(ctx, t, mc, name, "alice", false, 1, 3)
 }
+
+func TestRLSToggleSchemaDependencies(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+	name := prepareRLSCollectionWithEnforcement(ctx, t, mc, "", false, false)
+	createRLSPolicy(ctx, t, mc, name, "owner", "owner == $current_principal", "", milvuspb.RowPolicyAction_Query)
+	require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)))
+	require.ErrorContains(t, mc.DropCollectionField(ctx, client.NewDropCollectionFieldOption(name, "owner")), "RLS")
+	require.NoError(t, mc.AlterCollectionFieldProperty(ctx, client.NewAlterCollectionFieldPropertiesOption(name, "owner").WithProperty("field.description", "Owner identity")))
+	require.Error(t, mc.UpdateRowPolicy(ctx, client.NewUpdateRowPolicyOption(name, "owner", milvuspb.RowPolicyType_RowPolicyTypePermissive, milvuspb.RowPolicyAction_Query).WithUsingExpr("missing == 'alice'")))
+	policies, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	require.Equal(t, "owner == $current_principal", policies[0].GetUsingExpr())
+	require.NoError(t, mc.DropRowPolicy(ctx, client.NewDropRowPolicyOption(name, "owner")))
+	require.NoError(t, mc.DropCollectionField(ctx, client.NewDropCollectionFieldOption(name, "owner")))
+}

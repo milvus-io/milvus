@@ -22,6 +22,7 @@ import (
 	"io"
 	"maps"
 	"math/bits"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -943,4 +944,250 @@ func TestRLSSchemaAutoID(t *testing.T) {
 
 func rlsSchemaRowInput(r rlsSchemaRow) map[string]any {
 	return maps.Clone(map[string]any(r))
+}
+
+// specialized reads verify application-owned state after each mutation.
+func TestRLSSchemaSearchVariants(t *testing.T) {
+	for _, vector := range []string{"float32", "binary", "float16", "bfloat16", "int8", "sparse"} {
+		for _, varchar := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/varchar_%v", vector, varchar), func(t *testing.T) {
+				t.Parallel()
+				ctx := hp.CreateContext(t, 5*time.Minute)
+				mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+				tc := rlsSchemaCase{vector: vector, varchar: varchar}
+				name := prepareRLSSchema(ctx, t, mc, tc)
+				all := map[any]rlsSchemaRow{}
+				var fields []string
+				for _, c := range rlsSchemaColumns(t, tc) {
+					fields = append(fields, c.Name())
+				}
+				qv, _, _, _ := rlsSchemaVector(t, vector, 1)
+				for i := 1; i <= 8; i++ {
+					owner := "alice"
+					if i%2 == 0 {
+						owner = "bob"
+					}
+					r := rlsSchemaData(t, tc, i, 0, owner)
+					_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, r)...).WithRLSPrincipal(owner))
+					require.NoError(t, err)
+					all[r["id"]] = r
+				}
+				for _, stage := range []string{"insert", "full_upsert", "partial_upsert", "delete", "flushed"} {
+					t.Run(stage, func(t *testing.T) {
+						changed := rlsSchemaData(t, tc, 1, 1, "alice")
+						switch stage {
+						case "full_upsert":
+							_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, changed)...).WithRLSPrincipal("alice"))
+							require.NoError(t, err)
+							all[changed["id"]] = changed
+						case "partial_upsert":
+							patch := rlsSchemaRow{"id": changed["id"], "f64": float64(99.125)}
+							_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, patch)...).WithPartialUpdate(true).WithRLSPrincipal("alice"))
+							require.NoError(t, err)
+							all[changed["id"]]["f64"] = patch["f64"]
+						case "delete":
+							_, err := mc.Delete(ctx, client.NewDeleteOption(name).WithExpr("id == {target}").WithTemplateParam("target", changed["id"]).WithRLSPrincipal("alice"))
+							require.NoError(t, err)
+							delete(all, changed["id"])
+						case "flushed":
+							rlsFlush(ctx, t, mc, name)
+						}
+						for _, principal := range []string{"alice", "bob", "nobody", ""} {
+							t.Run("principal_"+principal, func(t *testing.T) {
+								want := maps.Clone(all)
+								maps.DeleteFunc(want, func(_ any, r rlsSchemaRow) bool { return principal != "" && r["owner"] != principal })
+								for _, mode := range []string{"range", "group", "aggregation", "ordered_query", "template_query"} {
+									t.Run(mode, func(t *testing.T) {
+										if mode == "ordered_query" || mode == "template_query" {
+											o := client.NewQueryOption(name).WithFilter("i32 >= {minimum}").WithTemplateParam("minimum", int64(100000)).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong)
+											if mode == "ordered_query" {
+												o.WithOrderByFields("f64:desc").WithLimit(100)
+											}
+											r, err := mc.Query(ctx, o)
+											require.NoError(t, err)
+											ids := checkRLSSchemaRows(t, r, want, fields)
+											require.ElementsMatch(t, slices.Collect(maps.Keys(want)), ids)
+											if mode == "ordered_query" {
+												for i := 1; i < len(ids); i++ {
+													require.Greater(t, want[ids[i-1]]["f64"].(float64), want[ids[i]]["f64"].(float64))
+												}
+											}
+											return
+										}
+										o := client.NewSearchOption(name, 100, []entity.Vector{qv}).WithANNSField("vector").WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong)
+										rangeWant := maps.Clone(want)
+										switch mode {
+										case "range":
+											params := index.NewCustomAnnParam()
+											threshold := float32(9)
+											if vector == "binary" {
+												threshold = 2
+											}
+											if vector == "sparse" {
+												params.WithRadius(8.5)
+												params.WithRangeFilter(100)
+												maps.DeleteFunc(rangeWant, func(_ any, r rlsSchemaRow) bool {
+													d := rlsSchemaDistance(vector, r["vector"])
+													return d <= 8.5 || d > 100
+												})
+											} else {
+												params.WithRadius(float64(threshold))
+												params.WithRangeFilter(0)
+												maps.DeleteFunc(rangeWant, func(_ any, r rlsSchemaRow) bool { return rlsSchemaDistance(vector, r["vector"]) >= threshold })
+											}
+											o.WithAnnParam(params)
+										case "group":
+											o.WithGroupByField("owner")
+										case "aggregation":
+											o.WithOutputFields("owner", "f64").WithSearchAggregation(client.NewSearchAggregation([]string{"owner"}, 100).WithMetric("n", "count", "*").WithMetric("total", "sum", "f64").WithTopHits(client.NewTopHits(100)))
+										}
+										rs, err := mc.Search(ctx, o)
+										if mode == "group" && vector == "binary" {
+											require.ErrorContains(t, err, "not support search_group_by operation based on binary vector column")
+											return // Binary vectors reject legacy group-by search.
+										}
+										require.NoError(t, err)
+										require.Len(t, rs, 1)
+										r := rs[0]
+										require.NoError(t, r.Err)
+										if mode == "range" {
+											require.ElementsMatch(t, slices.Collect(maps.Keys(rangeWant)), checkRLSSchemaRows(t, r, rangeWant, fields))
+											return
+										}
+										owners := map[string][]any{}
+										for id, row := range want {
+											owner := row["owner"].(string)
+											owners[owner] = append(owners[owner], id)
+										}
+										if mode == "group" {
+											ids := checkRLSSchemaRows(t, r, want, fields)
+											require.Len(t, ids, len(owners))
+											seen := map[string]bool{}
+											for i, id := range ids {
+												owner := want[id]["owner"].(string)
+												require.False(t, seen[owner])
+												seen[owner] = true
+												g, e := r.GroupByValue.Get(i)
+												require.NoError(t, e)
+												require.Equal(t, owner, g)
+											}
+											return
+										}
+										require.Len(t, r.AggregationBuckets, len(owners))
+										var returned []any
+										for _, b := range r.AggregationBuckets {
+											require.Len(t, b.Key, 1)
+											owner := b.Key[0].Value.(string)
+											require.Contains(t, owners, owner)
+											require.EqualValues(t, len(owners[owner]), b.Count)
+											require.EqualValues(t, b.Count, b.Metrics["n"])
+											var sum float64
+											for _, id := range owners[owner] {
+												sum += want[id]["f64"].(float64)
+											}
+											require.InDelta(t, sum, b.Metrics["total"], 0.001)
+											var ids []any
+											for _, h := range b.Hits {
+												require.Contains(t, want, h.PK)
+												require.Equal(t, owner, h.Fields["owner"])
+												require.Equal(t, want[h.PK]["f64"], h.Fields["f64"])
+												ids = append(ids, h.PK)
+											}
+											require.ElementsMatch(t, owners[owner], ids)
+											returned = append(returned, ids...)
+										}
+										require.ElementsMatch(t, slices.Collect(maps.Keys(want)), returned)
+									})
+								}
+							})
+						}
+					})
+				}
+			})
+		}
+	}
+}
+
+// Generate concrete tagged struct fields for each vector representation, without six duplicate row types.
+func rlsSchemaStructInput(r rlsSchemaRow) any {
+	names := slices.Sorted(maps.Keys(r))
+	fields := make([]reflect.StructField, len(names))
+	for i, name := range names {
+		fields[i] = reflect.StructField{Name: fmt.Sprintf("Field%d", i), Type: reflect.TypeOf(r[name]), Tag: reflect.StructTag(fmt.Sprintf(`milvus:"name:%s"`, name))}
+	}
+	value := reflect.New(reflect.StructOf(fields))
+	for i, name := range names {
+		value.Elem().Field(i).Set(reflect.ValueOf(r[name]))
+	}
+	return value.Interface()
+}
+
+// existing/new mixed upsert batches exercise all vectors and both PK types through all serializers.
+func TestRLSSchemaUpsertCreatesRows(t *testing.T) {
+	for _, vector := range []string{"float32", "binary", "float16", "bfloat16", "int8", "sparse"} {
+		for _, varchar := range []bool{false, true} {
+			for _, mode := range []string{"column", "row_map", "row_struct"} {
+				t.Run(fmt.Sprintf("%s/varchar_%v/%s", vector, varchar, mode), func(t *testing.T) {
+					t.Parallel()
+					ctx := hp.CreateContext(t, 6*time.Minute)
+					mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+					tc := rlsSchemaCase{vector: vector, varchar: varchar}
+					name := prepareRLSSchema(ctx, t, mc, tc)
+					all := map[any]rlsSchemaRow{}
+					for i, owner := range []string{"alice", "bob", "alice", "bob"} {
+						r := rlsSchemaData(t, tc, i+1, 0, owner)
+						_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, r)...).WithRLSPrincipal(owner))
+						require.NoError(t, err)
+						all[r["id"]] = r
+					}
+					for _, stage := range []string{"full_mixed", "partial_create", "partial_mixed", "rejected_mixed"} {
+						t.Run(stage, func(t *testing.T) {
+							ids := []int{1, 5}
+							partial := false
+							switch stage {
+							case "partial_create":
+								ids = []int{7}
+								partial = true
+							case "partial_mixed":
+								ids = []int{3, 9}
+								partial = true
+							case "rejected_mixed":
+								ids = []int{1, 2}
+								partial = true
+							}
+							rows := make([]rlsSchemaRow, len(ids))
+							values := make([]any, len(ids))
+							for i, id := range ids {
+								rows[i] = rlsSchemaData(t, tc, id, 2, "alice")
+								if mode == "row_struct" {
+									values[i] = rlsSchemaStructInput(rows[i])
+								} else {
+									values[i] = rlsSchemaRowInput(rows[i])
+								}
+							}
+							var option client.UpsertOption
+							if mode == "column" {
+								option = client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, rows...)...).WithPartialUpdate(partial).WithRLSPrincipal("alice")
+							} else {
+								option = client.NewRowBasedInsertOption(name, values...).WithPartialUpdate(partial).WithRLSPrincipal("alice")
+							}
+							result, err := mc.Upsert(ctx, option)
+							if stage == "rejected_mixed" {
+								require.ErrorContains(t, err, "RLS")
+							} else {
+								require.NoError(t, err)
+								require.EqualValues(t, len(rows), result.UpsertCount)
+								for _, r := range rows {
+									all[r["id"]] = r
+								}
+							}
+							checkRLSSchemaReads(ctx, t, mc, name, tc, all)
+						})
+					}
+					rlsFlush(ctx, t, mc, name)
+					t.Run("flushed", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+				})
+			}
+		}
+	}
 }
