@@ -17,6 +17,9 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -26,7 +29,10 @@
 
 #include <sys/stat.h>
 #include <unistd.h>
+#include <dlfcn.h>
 
+#include "common/EasyAssert.h"
+#include "folly/ScopeGuard.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Util.h"
@@ -247,6 +253,66 @@ TEST_F(V1FileSourceTest, RepeatedTransfersFindEachNewlyAppendedCachePath) {
         EXPECT_EQ(ReadFile(paths.front()), entries_.at(name));
         EXPECT_GT(manager_->whole_reads.load(), before);
         EXPECT_TRUE(CachedFiles().empty());
+    }
+}
+
+// The dedicated runner preloads the syscall fault library before starting
+// all_tests. Ordinary test runs report this external prerequisite as a skip.
+TEST_F(V1FileSourceTest, RollbackFailurePreservesCodeAndPath) {
+    using ArmFaults = void (*)(const char*, int, int, int);
+    using FaultCounts = void (*)(int*, int*);
+    const auto arm = reinterpret_cast<ArmFaults>(
+        ::dlsym(RTLD_DEFAULT, "milvus_artifact_arm_faults"));
+    const auto counts = reinterpret_cast<FaultCounts>(
+        ::dlsym(RTLD_DEFAULT, "milvus_artifact_fault_counts"));
+    if (arm == nullptr || counts == nullptr) {
+        GTEST_SKIP() << "run unittest/storage_artifact/"
+                        "run_publication_fault_tests.sh with this binary";
+    }
+    for (const auto* suffix :
+         {"publication-{fault}", "publication-{fault", "publication-}fault"}) {
+        for (const int rollback : {1, 2}) {
+            SCOPED_TRACE(suffix);
+            SCOPED_TRACE(rollback);
+            const auto target =
+                root_->Path() + "/" + suffix + std::to_string(rollback);
+            std::filesystem::create_directories(target);
+            if (rollback == 2) {
+                std::ofstream previous(target + "/first");
+                previous << "previous first";
+                ASSERT_TRUE(previous.good());
+            }
+            auto source = Source();
+            const auto rollback_errno = rollback == 1 ? EROFS : EACCES;
+            arm(target.c_str(), rollback, EIO, rollback_errno);
+            const auto disarm =
+                folly::makeGuard([&] { arm(nullptr, 0, 0, 0); });
+            try {
+                source->ReadEntriesToLocalDir({"first", "second"}, target);
+                FAIL() << "expected publication and rollback failures";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), FileWriteFailed);
+                const std::string message = error.what();
+                EXPECT_NE(message.find(rollback == 1 ? "failed to roll back"
+                                                     : "failed to restore"),
+                          std::string::npos);
+                EXPECT_NE(message.find(target + "/first"), std::string::npos);
+                EXPECT_NE(message.find(std::strerror(rollback_errno)),
+                          std::string::npos);
+                EXPECT_EQ(message.find("argument not found"),
+                          std::string::npos);
+                auto status = FailureCStatus(&error);
+                EXPECT_EQ(status.error_code, 2015);
+                ASSERT_NE(status.error_msg, nullptr);
+                EXPECT_EQ(std::string(status.error_msg), message);
+                std::free(const_cast<char*>(status.error_msg));
+            }
+            int publish_failures = 0;
+            int rollback_failures = 0;
+            counts(&publish_failures, &rollback_failures);
+            EXPECT_EQ(publish_failures, 1);
+            EXPECT_EQ(rollback_failures, 1);
+        }
     }
 }
 

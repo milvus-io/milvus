@@ -322,7 +322,7 @@ CommitAll(std::vector<StagedLocalFile>& files) {
             }
         }
         if (!rollback_error.empty()) {
-            ThrowInfo(FileWriteFailed, rollback_error);
+            ThrowInfo(FileWriteFailed, "{}", rollback_error);
         }
         throw;
     }
