@@ -123,7 +123,8 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 
 func TestInitPKIndexInvalidGCConfig(t *testing.T) {
 	key := Params.DataCoordCfg.PKIndexGCGrace.Key
-	paramtable.Get().Save(key, "0")
+	// one second below the minimum grace of the primary key index gc
+	paramtable.Get().Save(key, "599")
 	defer paramtable.Get().Reset(key)
 
 	client, err := clientv3.New(clientv3.Config{

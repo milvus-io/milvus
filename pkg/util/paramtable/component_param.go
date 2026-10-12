@@ -7335,7 +7335,7 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Key:          "dataCoord.pkindex.gc.grace",
 		Version:      "3.1.0-beta",
 		DefaultValue: "86400",
-		Doc:          "Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second.",
+		Doc:          "Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second. The minimum is 600 (10 minutes); a lower value disables the garbage collection of primary key index files.",
 		Export:       true,
 	}
 	p.PKIndexGCGrace.Init(base.mgr)
