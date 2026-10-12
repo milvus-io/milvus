@@ -1,6 +1,8 @@
+use rust_stemmers::Algorithm;
 use tantivy::tokenizer::*;
 
 use super::filter::stop_words;
+use super::filter::Stemmer;
 use super::filter::*;
 use super::options::FileResourcePathHelper;
 use super::tokenizers::*;
@@ -35,7 +37,7 @@ pub fn arabic_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
         .filter(LowerCaser)
         .filter(DecimalDigitFilter)
         .filter(ArabicNormalizationFilter)
-        .filter(Stemmer::new(Language::Arabic))
+        .filter(Stemmer::new(Algorithm::Arabic))
         .filter(StopWordFilter::remove(
             stop_words::ARABIC.iter().map(|&word| word.to_owned()),
         ));
@@ -65,7 +67,7 @@ pub fn thai_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
 pub fn english_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
     let builder = standard_builder()
         .filter(LowerCaser)
-        .filter(Stemmer::new(Language::English))
+        .filter(Stemmer::new(Algorithm::English))
         .filter(StopWordFilter::remove(
             stop_words::ENGLISH.iter().map(|&word| word.to_owned()),
         ));
