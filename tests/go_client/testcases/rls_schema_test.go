@@ -1955,20 +1955,39 @@ func TestRLSSchemaKeys(t *testing.T) {
 						require.NoError(t, merr.Error(resp.GetStatus()))
 						require.Positive(t, resp.GetCompactionID())
 						require.Positive(t, resp.GetCompactionPlanCount(), "must execute physical clustering work")
+						var targets []int64
 						require.EventuallyWithT(t, func(c *assert.CollectT) {
-							state, err := mc.GetService().GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{CompactionID: resp.GetCompactionID()})
+							state, err := mc.GetService().GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{CompactionID: resp.GetCompactionID()})
 							if !assert.NoError(c, err) || !assert.NoError(c, merr.Error(state.GetStatus())) {
 								return
 							}
 							assert.Equal(c, commonpb.CompactionState_Completed, state.GetState())
-							assert.Zero(c, state.GetFailedPlanNo())
-							assert.Zero(c, state.GetTimeoutPlanNo())
-							assert.EqualValues(c, resp.GetCompactionPlanCount(), state.GetCompletedPlanNo())
+							assert.Len(c, state.GetMergeInfos(), int(resp.GetCompactionPlanCount()))
+							targets = nil
+							for _, plan := range state.GetMergeInfos() {
+								assert.Equal(c, commonpb.CompactionType_CompactionTypeClustering, plan.GetType())
+								// Successful plans quickly transition to Cleaned and leave CompletedPlanNo.
+								assert.Contains(c, []commonpb.CompactionTaskState{commonpb.CompactionTaskState_CompactionTaskStateCompleted, commonpb.CompactionTaskState_CompactionTaskStateCleaned}, plan.GetState())
+								assert.Empty(c, plan.GetFailureReason())
+								assert.NotEmpty(c, plan.GetTargets())
+								targets = append(targets, plan.GetTargets()...)
+							}
 						}, 3*time.Minute, time.Second)
 						require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)))
 						load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
 						require.NoError(t, err)
 						require.NoError(t, load.Await(ctx))
+						require.EventuallyWithT(t, func(c *assert.CollectT) {
+							loaded, err := mc.GetService().GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{CollectionName: name})
+							if !assert.NoError(c, err) || !assert.NoError(c, merr.Error(loaded.GetStatus())) {
+								return
+							}
+							ids := map[int64]bool{}
+							for _, segment := range loaded.GetInfos() {
+								ids[segment.GetSegmentID()] = true
+							}
+							assert.ElementsMatch(c, targets, slices.Collect(maps.Keys(ids)), "load the actual clustering outputs")
+						}, time.Minute, time.Second)
 						checkRLSSchemaState(ctx, t, mc, name, tc, all, false)
 						checkRLSKeyReads(ctx, t, mc, name, tc, all, all)
 					})
