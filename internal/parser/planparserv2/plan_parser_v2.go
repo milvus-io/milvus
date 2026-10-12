@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/samber/lo"
@@ -25,13 +24,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-var (
-	exprCache   = newBoundedExprCache(1024, time.Minute*10, exprCacheMaxBytes, exprCacheMaxEntryBytes)
-	trueLiteral = &ExprWithType{
-		dataType: schemapb.DataType_Bool,
-		expr:     alwaysTrueExpr(),
-	}
-)
+var trueLiteral = &ExprWithType{
+	dataType: schemapb.DataType_Bool,
+	expr:     alwaysTrueExpr(),
+}
 
 type ExprParams struct {
 	UseJSONStats bool
@@ -101,7 +97,8 @@ func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) pla
 }
 
 func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
-	val, ok := exprCache.Get(exprStr)
+	cache := getExprCache()
+	val, ok := cache.Get(exprStr)
 	if ok {
 		switch v := val.(type) {
 		case planparserv2.IExprContext:
@@ -116,7 +113,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	// Note that the errors will be cached, too.
 	defer func() {
 		if err != nil {
-			exprCache.Add(exprStr, err, errorCost(exprStr, err))
+			cache.Add(exprStr, err, errorCost(exprStr, err))
 		}
 	}()
 	exprNormal := convertHanToASCII(exprStr)
@@ -157,7 +154,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 		tokens = stream.Size()
 	}
 
-	exprCache.Add(exprStr, ast, treeCost(exprStr, exprNormal, tokens))
+	cache.Add(exprStr, ast, treeCost(exprStr, exprNormal, tokens))
 	return
 }
 

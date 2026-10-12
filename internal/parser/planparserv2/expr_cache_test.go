@@ -28,6 +28,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // liveCosts sums the accounted cost of the entries the LRU still holds; the
@@ -43,9 +45,9 @@ func liveCosts(c *boundedExprCache) int64 {
 // withExprCache swaps the process-wide parse cache for the test's duration.
 func withExprCache(t *testing.T, c *boundedExprCache) {
 	t.Helper()
-	orig := exprCache
-	exprCache = c
-	t.Cleanup(func() { exprCache = orig })
+	orig := getExprCache
+	getExprCache = func() *boundedExprCache { return c }
+	t.Cleanup(func() { getExprCache = orig })
 }
 
 func TestBoundedExprCacheReplacementReleasesTheOldCost(t *testing.T) {
@@ -105,8 +107,64 @@ func TestExprCacheCostPolicy(t *testing.T) {
 	assert.Equal(t, int64(8192+3+4*3+350*2), treeCost("a>1", "a>1", 2))
 	assert.Equal(t, int64(2048+3+4), errorCost("a>(", errors.New("boom")))
 	// The process-wide cache is bounded, at the documented sizes.
-	assert.Equal(t, int64(64<<20), exprCache.maxBytes)
-	assert.Equal(t, int64(8<<20), exprCache.maxEntry)
+	assert.Equal(t, paramtable.Get().ProxyCfg.ExprCacheMaxBytes.GetAsInt64(), getExprCache().maxBytes)
+	assert.Equal(t, paramtable.Get().ProxyCfg.ExprCacheMaxEntryBytes.GetAsInt64(), getExprCache().maxEntry)
+}
+
+func TestExprCacheConfiguredAdmission(t *testing.T) {
+	params := paramtable.Get()
+	for key, value := range map[string]string{
+		"proxy.exprCache.maxBytes":      "16384",
+		"proxy.exprCache.maxEntryBytes": "4096",
+	} {
+		require.NoError(t, params.Save(key, value))
+		t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+	}
+	orig := getExprCache
+	getExprCache = sync.OnceValue(newExprCache)
+	t.Cleanup(func() { getExprCache = orig })
+	_, err := handleInternal("a > 1")
+	require.NoError(t, err)
+	assert.Zero(t, getExprCache().Len(), "a valid parse above the configured admission limit is returned uncached")
+	_, err = handleInternal("a > (")
+	require.Error(t, err)
+	_, cached := getExprCache().Get("a > (")
+	assert.True(t, cached, "a smaller syntax error is still cached under the same limits")
+}
+
+func TestExprCacheConfiguredEvictionAndStartupSnapshot(t *testing.T) {
+	params := paramtable.Get()
+	for key, value := range map[string]string{
+		"proxy.exprCache.maxBytes":      "17000",
+		"proxy.exprCache.maxEntryBytes": "20000",
+	} {
+		require.NoError(t, params.Save(key, value))
+		t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+	}
+	orig := getExprCache
+	getExprCache = sync.OnceValue(newExprCache)
+	t.Cleanup(func() { getExprCache = orig })
+
+	first, err := handleInternal("a > 1")
+	require.NoError(t, err)
+	c := getExprCache()
+	assert.Equal(t, int64(17000), c.maxEntry, "the configured admission limit is clamped to the total")
+	again, err := handleInternal("a > 1")
+	require.NoError(t, err)
+	assert.Same(t, first, again, "a cache hit retains the same tree")
+
+	// Configuration is fixed at the first parse, even if the raw source changes.
+	require.NoError(t, params.Save("proxy.exprCache.maxBytes", "90000"))
+	require.NoError(t, params.Save("proxy.exprCache.maxEntryBytes", "90000"))
+	_, err = handleInternal("b > 2")
+	require.NoError(t, err)
+	assert.Same(t, c, getExprCache())
+	assert.Equal(t, 1, c.Len(), "the startup budget still evicts the older tree")
+	_, cached := c.Get("a > 1")
+	assert.False(t, cached)
+	_, cached = c.Get("b > 2")
+	assert.True(t, cached)
+	assert.LessOrEqual(t, c.Retained(), int64(17000))
 }
 
 func TestBoundedExprCacheSkipsAnEntryOverThePerEntryLimit(t *testing.T) {
@@ -272,7 +330,7 @@ func integerList(n int) string {
 // accounted. The bound here is loose on purpose — the gap it guards is an
 // order of magnitude, not a percentage.
 func TestCachedTreesDoNotPinTheFailedParseTheirParserRanNext(t *testing.T) {
-	c := newBoundedExprCache(1024, time.Hour, exprCacheMaxBytes, exprCacheMaxEntryBytes)
+	c := newBoundedExprCache(1024, time.Hour, 64<<20, 8<<20)
 	withExprCache(t, c)
 	list := integerList(7000)
 	keys := make([]string, 0, 20)
@@ -299,7 +357,7 @@ func TestCachedTreesDoNotPinTheFailedParseTheirParserRanNext(t *testing.T) {
 func TestCachedTreesDoNotPinTheUncachedParseTheirParserRanNext(t *testing.T) {
 	// A 1 MiB per-entry limit keeps the uncached expression small enough to
 	// parse quickly, even under -race.
-	c := newBoundedExprCache(1024, time.Hour, exprCacheMaxBytes, 1<<20)
+	c := newBoundedExprCache(1024, time.Hour, 64<<20, 1<<20)
 	withExprCache(t, c)
 	// Over that limit, so these parses are never cached.
 	list := integerList(5000)
@@ -355,9 +413,9 @@ func BenchmarkExprCacheRetainedVsAccounted(b *testing.B) {
 			b.Run(name+"/"+mode+"-parser", func(b *testing.B) {
 				const n = 100
 				c := newBoundedExprCache(1024, time.Hour, 1<<40, 1<<40)
-				orig := exprCache
-				exprCache = c
-				defer func() { exprCache = orig }()
+				orig := getExprCache
+				getExprCache = func() *boundedExprCache { return c }
+				defer func() { getExprCache = orig }()
 				for iter := 0; iter < b.N; iter++ {
 					c.Purge()
 					keys := make([]string, n)

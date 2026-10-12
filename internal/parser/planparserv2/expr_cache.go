@@ -22,21 +22,19 @@ import (
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-const (
-	// exprCacheMaxBytes bounds the heap the parse cache is accounted to retain,
-	// on top of its entry count and TTL. Short filters keep the full 1,024
-	// entries under it (about 10 KiB each); only unusually large expressions
-	// compete for it.
-	exprCacheMaxBytes int64 = 64 << 20
-	// exprCacheMaxEntryBytes is the largest single entry the cache admits. A
-	// parse that would cost more is returned uncached rather than evicting an
-	// eighth of the cache on its own. It sits at roughly a 24K-token
-	// expression — an `in [...]` list of about 11K integers — so only filters
-	// that already take several milliseconds to parse are parsed again.
-	exprCacheMaxEntryBytes int64 = 8 << 20
-)
+// Read startup configuration on the first parse, after paramtable initialization,
+// rather than during package initialization. Both limits require a restart.
+var getExprCache = sync.OnceValue(newExprCache)
+
+func newExprCache() *boundedExprCache {
+	cfg := &paramtable.Get().ProxyCfg
+	return newBoundedExprCache(1024, 10*time.Minute,
+		cfg.ExprCacheMaxBytes.GetAsInt64(), cfg.ExprCacheMaxEntryBytes.GetAsInt64())
+}
 
 // Accounting policy for what a cached parse retains (#53754). Measured on this
 // parser with retained heap after GC over distinct expressions of each shape,
