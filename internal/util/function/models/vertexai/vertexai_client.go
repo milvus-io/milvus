@@ -122,8 +122,7 @@ func (c *VertexAIEmbedding) Check() error {
 	return nil
 }
 
-func (c *VertexAIEmbedding) getAccessToken() (string, error) {
-	ctx := context.Background()
+func (c *VertexAIEmbedding) getAccessToken(ctx context.Context) (string, error) {
 	creds, err := google.CredentialsFromJSON(ctx, c.jsonKey, c.scopes)
 	if err != nil {
 		return "", merr.Wrap(err, "failed to find credentials")
@@ -135,7 +134,7 @@ func (c *VertexAIEmbedding) getAccessToken() (string, error) {
 	return token.AccessToken, nil
 }
 
-func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, taskType string, timeoutMs int64) (*GeminiEmbedContentResponse, error) {
+func (c *VertexAIEmbedding) GeminiEmbedding(ctx context.Context, url string, text string, dim int64, taskType string, timeoutMs int64) (*GeminiEmbedContentResponse, error) {
 	req := GeminiEmbedContentRequest{
 		Content: GeminiContent{
 			Parts: []GeminiPart{{Text: text}},
@@ -153,7 +152,7 @@ func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, 
 	if c.token != "" {
 		token = c.token
 	} else {
-		token, err = c.getAccessToken()
+		token, err = c.getAccessToken(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -163,14 +162,14 @@ func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, 
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", token),
 	}
-	res, err := models.PostRequest[GeminiEmbedContentResponse](req, url, headers, timeoutMs)
+	res, err := models.PostRequest[GeminiEmbedContentResponse](ctx, req, url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int64, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
+func (c *VertexAIEmbedding) Embedding(ctx context.Context, modelName string, texts []string, dim int64, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	for _, text := range texts {
 		r.Instances = append(r.Instances, Instance{TaskType: taskType, Content: text})
@@ -184,7 +183,7 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 	if c.token != "" {
 		token = c.token
 	} else {
-		token, err = c.getAccessToken()
+		token, err = c.getAccessToken(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -194,7 +193,7 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", token),
 	}
-	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutMs)
+	res, err := models.PostRequest[EmbeddingResponse](ctx, r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
