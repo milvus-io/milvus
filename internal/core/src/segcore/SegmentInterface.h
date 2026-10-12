@@ -103,17 +103,23 @@ class SegmentReadSnapshot {
  public:
     virtual ~SegmentReadSnapshot() = default;
 
+    // Layout lookups can open lazy column-group metadata. Query callers must
+    // supply their context even when no raw data is being pinned yet.
     virtual int64_t
-    chunk_size(FieldId f, int64_t c) const = 0;
+    chunk_size(FieldId f, int64_t c, OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
-    num_rows_until_chunk(FieldId f, int64_t c) const = 0;
+    num_rows_until_chunk(FieldId f,
+                         int64_t c,
+                         OpContext* op_ctx = nullptr) const = 0;
 
     virtual std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId f, int64_t off) const = 0;
+    get_chunk_by_offset(FieldId f,
+                        int64_t off,
+                        OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
-    num_chunk_data(FieldId f) const = 0;
+    num_chunk_data(FieldId f, OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
     get_row_count() const = 0;
@@ -725,10 +731,12 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // count of chunk that has raw data
     virtual int64_t
-    num_chunk_data(FieldId field_id) const = 0;
+    num_chunk_data(FieldId field_id, OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const = 0;
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         OpContext* op_ctx = nullptr) const = 0;
 
     // bitset 1 means not hit. 0 means hit.
     virtual void
@@ -741,10 +749,14 @@ class SegmentInternalInterface : public SegmentInterface {
     num_chunk(FieldId field_id) const = 0;
 
     virtual int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const = 0;
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               OpContext* op_ctx = nullptr) const = 0;
 
     virtual std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const = 0;
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        OpContext* op_ctx = nullptr) const = 0;
 
     // element size in each chunk
     virtual int64_t

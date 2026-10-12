@@ -518,7 +518,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // count of chunk that has raw data
     int64_t
-    num_chunk_data(FieldId field_id) const override;
+    num_chunk_data(FieldId field_id,
+                   OpContext* op_ctx = nullptr) const override;
 
     int64_t
     num_chunk(FieldId field_id) const override;
@@ -528,7 +529,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     size_per_chunk() const override;
 
     int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const override;
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               OpContext* op_ctx = nullptr) const override;
 
     // Capture the current published snapshot once per request. Returns a
     // state-only SegmentReadSnapshot; nullptr is never returned (sealed
@@ -537,10 +540,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     CaptureReadSnapshot() const override;
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const override;
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        OpContext* op_ctx = nullptr) const override;
 
     int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override;
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         OpContext* op_ctx = nullptr) const override;
 
     SegcoreError
     Delete(int64_t size,
