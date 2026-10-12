@@ -23,6 +23,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -42,12 +44,21 @@ import (
 var _ Client = (*client)(nil)
 
 // Client calls PKIndexCoordService. Every method returns a merr error, except
-// that a context cancel or deadline error is returned unchanged.
+// that a context cancel or deadline error, and a gRPC status error with code
+// DeadlineExceeded or Canceled, is returned unchanged.
 //
-// A merr.ErrChannelNotAvailable error means the term of the caller is fenced
-// by a newer owner of the vchannel; the caller must stop writing that vchannel.
-// A merr.ErrServiceUnavailable error is retryable. It also covers a connection
-// failure and a gRPC transport error that carries no merr code.
+// The caller decides whether to retry with merr.IsRetryableErr. The retryable
+// errors include merr.ErrServiceUnavailable, which also covers a connection
+// failure and a gRPC transport error that carries no merr code, and
+// merr.ErrServiceNotReady.
+//
+// A merr.ErrChannelNotAvailable error (code 503) that a method of Client
+// returns means the term of the caller is fenced by a newer owner of the
+// vchannel; the caller must stop writing that vchannel. Other components use
+// the same code for a retryable state, so the caller must classify the error
+// that Client returns at the call site, not on an error chain that has other
+// errors in it. With retry.Do, the caller must pass
+// retry.RetryErr(merr.IsRetryableErr); else retry.Do retries a fenced call.
 type Client interface {
 	// ClaimManifest claims the manifest of a vchannel for the term in the request.
 	ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifestRequest) (*pkindexpb.Manifest, error)
@@ -171,11 +182,15 @@ func (c *client) GetManifest(ctx context.Context, req *pkindexpb.GetManifestRequ
 	return resp.GetManifest(), resp.GetFound(), nil
 }
 
-// toClientErr returns err unchanged when it is nil, a merr error, or a context
-// cancel or deadline error. Any other error is a connection or transport
-// failure; it becomes a retryable merr.ErrServiceUnavailable that keeps the cause.
+// toClientErr returns err unchanged when it is nil, a merr error, a context
+// cancel or deadline error, or a gRPC status error with code DeadlineExceeded
+// or Canceled. Any other error is a connection or transport failure; it
+// becomes a retryable merr.ErrServiceUnavailable that keeps the cause.
 func toClientErr(err error) error {
 	if err == nil || merr.IsMilvusError(err) || merr.IsCanceledOrTimeout(err) {
+		return err
+	}
+	if code := status.Code(err); code == codes.DeadlineExceeded || code == codes.Canceled {
 		return err
 	}
 	return merr.WrapErrServiceUnavailableErr(err, "call primary key index coordinator")
