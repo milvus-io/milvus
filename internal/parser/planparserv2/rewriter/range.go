@@ -35,8 +35,9 @@ func isSupportedScalarForRange(dt schemapb.DataType) bool {
 // resolveEffectiveType returns (dt, ok) where ok indicates this column is eligible for range optimization.
 // Eligible when the column is a supported scalar, or an array whose element type is a supported scalar,
 // or a JSON field with a nested path (type will be determined from literal values).
+// Fixed FLOAT array indices are excluded because precision depends on the operator.
 func resolveEffectiveType(col *planpb.ColumnInfo) (schemapb.DataType, bool) {
-	if col == nil {
+	if col == nil || isFixedFloatArray(col) {
 		return schemapb.DataType_None, false
 	}
 	dt := col.GetDataType()
@@ -46,12 +47,6 @@ func resolveEffectiveType(col *planpb.ColumnInfo) (schemapb.DataType, bool) {
 	if dt == schemapb.DataType_Array {
 		et := col.GetElementType()
 		if isSupportedScalarForRange(et) {
-			// Retain the existing fixed-array rewrite policy here. BinaryRange
-			// uses double bounds, while UnaryRange narrows FLOAT bounds; one
-			// column-level type cannot establish equivalence for both operators.
-			if et == schemapb.DataType_Float && !col.GetIsElementLevel() {
-				return schemapb.DataType_Double, true
-			}
 			return et, true
 		}
 	}

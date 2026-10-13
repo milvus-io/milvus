@@ -122,6 +122,7 @@ func TestRewriteFloat32AlgebraPreservesExecutorSemantics(t *testing.T) {
 	}{
 		{"scalar_float", &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Float}},
 		{"element_float", &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float, IsElementLevel: true}},
+		{"fixed_array_index", &planpb.ColumnInfo{FieldId: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float, NestedPath: []string{"0"}}},
 		{"double", &planpb.ColumnInfo{FieldId: 103, DataType: schemapb.DataType_Double}},
 		{"json", &planpb.ColumnInfo{FieldId: 104, DataType: schemapb.DataType_JSON, NestedPath: []string{"n"}}},
 	}
@@ -155,6 +156,9 @@ func TestRewriteFloat32AlgebraPreservesExecutorSemantics(t *testing.T) {
 				{"nan_intersection", and(term(math.NaN(), 2), term(math.NaN(), 2, 3))},
 				{"signed_zero", and(term(math.Copysign(0, -1), 2), unary(planpb.OpType_Equal, 0))},
 				{"in_not_equal", and(term(16777217, 2), unary(planpb.OpType_NotEqual, 16777216))},
+				{"singleton_in", term(16777217)},
+				{"or_equal", edgeTestLogical(planpb.BinaryExpr_LogicalOr, unary(planpb.OpType_Equal, 16777217), unary(planpb.OpType_Equal, 2))},
+				{"or_in_equal", edgeTestLogical(planpb.BinaryExpr_LogicalOr, term(16777217, 2), unary(planpb.OpType_Equal, 16777217))},
 			}
 			for _, tc := range cases {
 				for _, optimize := range []bool{false, true} {
@@ -190,7 +194,21 @@ func TestFixedArrayFloatOperatorPrecision(t *testing.T) {
 	require.Equal(t, 2, evalFloatRewritePlan(t, unary, &row), "UnaryRange narrows 16777217 to 16777216")
 	require.Equal(t, 0, evalFloatRewritePlan(t, term, &row), "Term retains the double literal")
 	require.Equal(t, 0, evalFloatRewritePlan(t, binary, &row), "BinaryRange retains the double bounds")
-
+	for _, tc := range []struct {
+		name string
+		op   planpb.BinaryExpr_BinaryOp
+		want int
+	}{
+		{"and", planpb.BinaryExpr_LogicalAnd, 0},
+		{"or", planpb.BinaryExpr_LogicalOr, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := edgeTestLogical(tc.op, edgeTestUnaryRange(col, planpb.OpType_GreaterThan, edgeTestFloatValue(16777216)), unary)
+			rewritten := rewriter.RewriteExprWithConfig(proto.Clone(original).(*planpb.Expr), true)
+			require.Equal(t, tc.want, evalFloatRewritePlan(t, original, &row))
+			require.Equal(t, tc.want, evalFloatRewritePlan(t, rewritten, &row), "fixed-array rewrite must preserve mixed precision; plan %s", rewritten)
+		})
+	}
 }
 
 func TestRewriteFloat32ParsedAndTemplateFilters(t *testing.T) {

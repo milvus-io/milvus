@@ -51,6 +51,17 @@ func usesFloat32Comparisons(col *planpb.ColumnInfo) bool {
 		(col.GetIsElementLevel() && effectiveDataType(col) == schemapb.DataType_Float)
 }
 
+// Fixed ARRAY<FLOAT> paths use different executor precision depending on the
+// expression kind: UnaryRange narrows literals to float32, while Term and
+// BinaryRange retain double precision.  Until those executor paths agree,
+// algebra that changes or combines expression kinds must leave these columns
+// untouched to preserve the original semantics.
+func isFixedFloatArray(col *planpb.ColumnInfo) bool {
+	return col != nil && col.GetDataType() == schemapb.DataType_Array &&
+		col.GetElementType() == schemapb.DataType_Float &&
+		!col.GetIsElementLevel() && len(col.GetNestedPath()) > 0
+}
+
 func float32Literal(value *planpb.GenericValue) float32 {
 	if _, ok := value.GetVal().(*planpb.GenericValue_Int64Val); ok {
 		return float32(value.GetInt64Val())

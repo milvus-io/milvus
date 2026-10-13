@@ -24,7 +24,7 @@ func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		col := u.GetColumnInfo()
-		if col == nil {
+		if col == nil || isFixedFloatArray(col) {
 			others = append(others, e)
 			continue
 		}
@@ -72,7 +72,7 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 			continue
 		}
 		col := u.GetColumnInfo()
-		if col == nil {
+		if col == nil || isFixedFloatArray(col) {
 			others = append(others, e)
 			continue
 		}
@@ -146,6 +146,10 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
+			if isFixedFloatArray(te.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := termGroupKey(te)
 			if !ok {
 				others = append(others, idx)
@@ -161,6 +165,10 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_Equal && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
+			if isFixedFloatArray(ue.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
 			if !ok {
 				others = append(others, idx)
@@ -271,6 +279,10 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
+			if isFixedFloatArray(te.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := termGroupKey(te)
 			if !ok {
 				others = append(others, idx)
@@ -286,6 +298,10 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_Equal && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
+			if isFixedFloatArray(ue.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
 			if !ok {
 				others = append(others, idx)
@@ -332,9 +348,6 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 
 func resolveInRangeComparisonType(col *planpb.ColumnInfo, value *planpb.GenericValue) (schemapb.DataType, bool) {
 	dt := effectiveDataType(col)
-	if col.GetDataType() == schemapb.DataType_Array && dt == schemapb.DataType_Float && !col.GetIsElementLevel() {
-		dt = schemapb.DataType_Double
-	}
 	if dt != schemapb.DataType_JSON {
 		if !isSupportedScalarForRange(dt) || !valueMatchesType(dt, value) {
 			return schemapb.DataType_None, false
@@ -381,6 +394,10 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 	}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
+			if isFixedFloatArray(te.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := termGroupKey(te)
 			if !ok {
 				others = append(others, idx)
@@ -410,6 +427,10 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && isRange(ue.GetOp()) && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
+			if isFixedFloatArray(ue.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
 			if !ok {
 				others = append(others, idx)
