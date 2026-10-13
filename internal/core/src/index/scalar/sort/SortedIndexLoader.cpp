@@ -451,24 +451,6 @@ DecodePackedValidity(const std::vector<uint8_t>& bytes, size_t count) {
     return result;
 }
 
-// Check sort order and coordinate bounds before auxiliary arrays index those
-// coordinates.
-template <typename T>
-void
-ValidateNumericData(const IndexStructure<T>* data, size_t size, size_t count) {
-    for (size_t i = 0; i < size; ++i) {
-        if (i != 0 && data[i] < data[i - 1]) {
-            ThrowInfo(DataFormatBroken, "sorted numeric data is not ordered");
-        }
-        if (data[i].idx_ < 0 || static_cast<size_t>(data[i].idx_) >= count) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted numeric row {} exceeds count {}",
-                      data[i].idx_,
-                      count);
-        }
-    }
-}
-
 // Rebuild validity and reverse offsets; require unique coordinates where the
 // domain demands it.
 template <typename T>
@@ -480,6 +462,12 @@ RebuildNumericAux(const IndexStructure<T>* data,
     TargetBitmap validity(count, false);
     auto offsets = std::make_shared<std::vector<int32_t>>(count, -1);
     for (size_t i = 0; i < size; ++i) {
+        if (data[i].idx_ < 0 || static_cast<size_t>(data[i].idx_) >= count) {
+            ThrowInfo(DataFormatBroken,
+                      "sorted numeric row {} exceeds count {}",
+                      data[i].idx_,
+                      count);
+        }
         const auto row = static_cast<size_t>(data[i].idx_);
         if (params.one_value_per_coordinate && validity[row]) {
             ThrowInfo(DataFormatBroken,
@@ -495,72 +483,6 @@ RebuildNumericAux(const IndexStructure<T>* data,
                   "coordinate");
     }
     return {std::move(validity), std::move(offsets)};
-}
-
-// Cross-check supplied validity and reverse offsets against already
-// range-checked postings.
-template <typename T>
-void
-ValidateNumericAux(const IndexStructure<T>* data,
-                   size_t size,
-                   const TargetBitmap& validity,
-                   const int32_t* offsets,
-                   size_t count,
-                   const RuntimeParams& params) {
-    TargetBitmap seen(count, false);
-    for (size_t i = 0; i < size; ++i) {
-        const auto row = static_cast<size_t>(data[i].idx_);
-        if (!validity[row]) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted numeric posting references null row {}",
-                      row);
-        }
-        if (params.one_value_per_coordinate && seen[row]) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted scalar row {} has multiple values",
-                      row);
-        }
-        seen.set(row);
-    }
-    for (size_t row = 0; row < count; ++row) {
-        if (!validity[row]) {
-            if (params.nested) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted nested data does not cover element "
-                          "coordinate {}",
-                          row);
-            }
-            // Legacy JSON numeric V3 writers did not define reverse offsets
-            // for null rows, so those unused slots can contain stale values.
-            continue;
-        }
-        const auto offset = offsets[row];
-        if (offset < -1 ||
-            (offset >= 0 && static_cast<size_t>(offset) >= size)) {
-            ThrowInfo(DataFormatBroken,
-                      "invalid sorted numeric offset {} for row {}",
-                      offset,
-                      row);
-        }
-        if (offset >= 0 && data[static_cast<size_t>(offset)].idx_ !=
-                               static_cast<int32_t>(row)) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted numeric offset {} does not map row {}",
-                      offset,
-                      row);
-        }
-        if (params.value_lookup && validity[row] && offset < 0) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted scalar valid row {} has no reverse offset",
-                      row);
-        }
-        if (params.nested && (!validity[row] || !seen[row])) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted nested data does not cover element coordinate "
-                      "{}",
-                      row);
-        }
-    }
 }
 
 // Load heap or mmap numeric data and rebuild the auxiliary state omitted by
@@ -610,8 +532,6 @@ LoadNumericState(bool use_async,
         args.storage.data_heap_bytes =
             owner->capacity() * sizeof(IndexStructure<T>);
     }
-    ValidateNumericData(args.storage.data, args.storage.size, meta.count);
-
     auto rebuilt = RebuildNumericAux(
         args.storage.data, args.storage.size, meta.count, params);
     args.state.valid_bitset =
@@ -629,63 +549,7 @@ LoadNumericState(bool use_async,
     co_return args;
 }
 
-// Cross-check validity and reverse lookup against the validated string
-// layout.
-void
-ValidateStringAux(const SortedStringLayout& layout,
-                  const TargetBitmap& validity,
-                  const int32_t* offsets,
-                  size_t count,
-                  const RuntimeParams& params) {
-    TargetBitmap seen(count, false);
-    for (size_t value = 0; value < layout.UniqueCount(); ++value) {
-        const auto posting = layout.Posting(value);
-        for (size_t i = 0; i < posting.size; ++i) {
-            const auto row = posting.At(i);
-            if (!validity[row]) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted string posting references null row {}",
-                          row);
-            }
-            if (params.one_value_per_coordinate && seen[row]) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted string row {} has multiple values",
-                          row);
-            }
-            seen.set(row);
-            if (params.one_value_per_coordinate &&
-                offsets[row] != static_cast<int32_t>(value)) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted string reverse offset disagrees for row {}",
-                          row);
-            }
-        }
-    }
-    for (size_t row = 0; row < count; ++row) {
-        const auto value = offsets[row];
-        if (value < -1 || (value >= 0 && static_cast<size_t>(value) >=
-                                             layout.UniqueCount())) {
-            ThrowInfo(DataFormatBroken,
-                      "invalid sorted string offset {} for row {}",
-                      value,
-                      row);
-        }
-        if (params.value_lookup && validity[row] && value < 0) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted string valid row {} has no reverse offset",
-                      row);
-        }
-        if (params.nested && (!validity[row] || !seen[row])) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted nested string data does not cover element "
-                      "coordinate {}",
-                      row);
-        }
-    }
-}
-
-// Load the string layout and validity, then rebuild and validate reverse
-// offsets.
+// Load the legacy string layout and validity, then rebuild reverse offsets.
 folly::coro::Task<SortedIndexReader<std::string_view>::OpenArgs>
 LoadStringState(bool use_async,
                 storage::FileSource& source,
@@ -712,12 +576,12 @@ LoadStringState(bool use_async,
             ThrowInfo(DataFormatBroken, "sorted string index_data is empty");
         }
         args.storage.layout =
-            SortedStringLayout::FromPackedMmap(std::move(owner), meta.count);
+            SortedStringLayout::FromPackedMmap(std::move(owner));
     } else {
         auto packed =
             co_await source.ReadEntryAsync(sort_format::kIndexData, use_async);
         args.storage.layout =
-            SortedStringLayout::FromPackedHeap(std::move(packed), meta.count);
+            SortedStringLayout::FromPackedHeap(std::move(packed));
     }
     const auto validity =
         co_await source.ReadEntryAsync(sort_format::kValidBitset, use_async);
@@ -731,11 +595,6 @@ LoadStringState(bool use_async,
     args.state.idx_to_offsets_heap_bytes =
         offsets->capacity() * sizeof(int32_t);
     args.state.idx_to_offsets_owner = std::move(offsets);
-    ValidateStringAux(*args.storage.layout,
-                      *args.state.valid_bitset,
-                      args.state.idx_to_offsets,
-                      meta.count,
-                      params);
 
     args.state.total_num_rows = meta.count;
     args.state.value_type = params.value_type;
@@ -840,8 +699,8 @@ MapSortedTarget(const storage::IndexFileTarget& file) {
     return owner;
 }
 
-// Attach loaded payload owners and validate or rebuild auxiliary arrays
-// before publication.
+// Attach persisted auxiliary arrays directly; only missing arrays need a
+// payload scan to rebuild them before publication.
 template <typename T>
 IIndexReaderBasePtr
 FinishPackedSortedState(PackedSortedState& state,
@@ -851,11 +710,11 @@ FinishPackedSortedState(PackedSortedState& state,
     typename SortedIndexReader<T>::OpenArgs args;
     if constexpr (string) {
         if (state.data_file) {
-            args.storage.layout = SortedStringLayout::FromPackedMmap(
-                std::move(data_mapping), state.meta.count);
+            args.storage.layout =
+                SortedStringLayout::FromPackedMmap(std::move(data_mapping));
         } else {
             args.storage.layout = SortedStringLayout::FromPackedHeap(
-                std::move(*state.string_data), state.meta.count);
+                std::move(*state.string_data));
         }
     } else {
         args.storage.size = state.meta.index_length;
@@ -871,8 +730,6 @@ FinishPackedSortedState(PackedSortedState& state,
             args.storage.data_owner = state.data_owner;
             args.storage.data_heap_bytes = state.data_heap_bytes;
         }
-        ValidateNumericData(
-            args.storage.data, args.storage.size, state.meta.count);
     }
     if (state.has_offsets) {
         if (state.offsets_file) {
@@ -910,20 +767,6 @@ FinishPackedSortedState(PackedSortedState& state,
         args.state.idx_to_offsets_heap_bytes =
             rebuilt.second->capacity() * sizeof(int32_t);
         args.state.idx_to_offsets_owner = std::move(rebuilt.second);
-    }
-    if constexpr (string) {
-        ValidateStringAux(*args.storage.layout,
-                          *args.state.valid_bitset,
-                          args.state.idx_to_offsets,
-                          state.meta.count,
-                          state.params);
-    } else {
-        ValidateNumericAux(args.storage.data,
-                           args.storage.size,
-                           *args.state.valid_bitset,
-                           args.state.idx_to_offsets,
-                           state.meta.count,
-                           state.params);
     }
     args.state.total_num_rows = state.meta.count;
     args.state.value_type = state.params.value_type;

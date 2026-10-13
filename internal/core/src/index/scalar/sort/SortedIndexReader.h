@@ -110,11 +110,10 @@ class SortedStringLayout {
              size_t total_num_rows);
 
     static std::shared_ptr<const SortedStringLayout>
-    FromPackedHeap(std::vector<uint8_t> packed, size_t total_num_rows);
+    FromPackedHeap(std::vector<uint8_t> packed);
 
     static std::shared_ptr<const SortedStringLayout>
-    FromPackedMmap(std::shared_ptr<SortedMmapOwner> owner,
-                   size_t total_num_rows);
+    FromPackedMmap(std::shared_ptr<SortedMmapOwner> owner);
 };
 
 namespace sorted_reader_detail {
