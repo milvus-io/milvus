@@ -109,6 +109,89 @@ where `host` should be set as the IP address of the Milvus service, and `*.html`
    $ python3 -W ignore -m pytest <test_file_name>
    ```
 
+### RLS SDK coverage
+
+`milvus_client/test_milvus_client_rls.py` covers synchronous and asynchronous RLS
+policy/tag management, principal binding, sharing/revocation, collection
+properties, database overrides, and supported read/write paths. Its schema
+matrix checks six vector types with Int64 and VarChar primary keys, including
+JSON, string arrays, and nullable scalar values. Each case owns its collections;
+the suite uses the configured administrator for setup and complete stored-data
+checks. It does not provision RBAC users or change server configuration.
+
+The mixed-segment cases interleave Alice and Bob in **every** segment group:
+
+| Segment path | Alice | Bob | Total |
+| --- | ---: | ---: | ---: |
+| Sealed with a completed vector index | 1,500 | 1,500 | 3,000 |
+| Sealed without a vector index | 250 | 250 | 500 |
+| Growing | 250 | 250 | 500 |
+
+Setup inserts and flushes 3,000 rows, inserts and flushes 500 rows, creates the
+index and waits for readiness, loads the collection, then inserts 500 rows
+without flushing. Both owners alternate within every batch. One shard and
+collection-scoped auto-compaction disablement preserve the intended layout.
+The test environment must use `500 < indexCoord.segment.minSegmentNumRowsToEnableIndex
+<= 3000` (the standard value is `1024`); confirm this when preparing the instance.
+Tests use SDK index-readiness and loaded-segment metadata checks, plus exact
+row comparisons with and without `ignore_growing`. They do not use the segment
+`index_id` as evidence of physical index files. Sealed segment identities are
+checked again around writes.
+Each mutation API targets distinct original rows belonging to its principal
+in all three groups, followed by complete stored-value checks for both owners.
+Mixed-segment coverage includes synchronous schema/read/write cases, async
+reads/writes, rejected batches, and sharing/revocation. Small fixtures remain
+for SDK argument and metadata-management cases where segment shape is irrelevant.
+Vectors use the suite's shared `cf.gen_vectors` helper with dimension 128.
+Each mixed fixture generates a full batch and checks that all 4,000 vectors
+remain distinct after dtype conversion. Full updates and new inserts also use
+fresh vectors from the same helper. Expected search scores are computed from
+the encoded vectors rather than from primary-key ordinals.
+SearchIterator has a separate matrix that exhausts every segment group, using
+Alice, Bob, an unbound principal, and administrative bypass, each with and
+without `ignore_growing`. It checks exact IDs, every returned scalar field,
+duplicates, and EOF. This uses all candidate rows; the small sentinel set in
+top-K Search/HybridSearch is not evidence of complete iteration.
+The Go and Python matrices use batch size 127 and dimension 128. INT8 vectors
+sample the full signed-byte range through each suite's shared generator, with
+HNSW `M=16`, `efConstruction=200`, and search `ef=4096`. Fixtures are independently
+random, not identical cross-SDK datasets. Other vector types retain their shared
+generator defaults. Distinct vectors can still have equal distances; ties do
+not relax iterator completeness assertions.
+For `BIN_IVF_FLAT`, iterator construction and page retrieval explicitly check
+the unsupported-index error when encountered. It is not counted as successful
+indexed iteration; supported paths must still exhaust all authorized rows.
+
+`requirements.txt` pins `pymilvus[bulk_writer]==3.1.0rc96` from Test PyPI,
+which includes the merged [RLS APIs](https://github.com/milvus-io/pymilvus/pull/3827).
+Use a fresh Python 3.12 virtual environment and install this requirements file;
+its `--find-links` entry provides the pinned RC package. The RLS tests no longer
+require a Git checkout of the SDK.
+
+Negative cases check rejected metadata and request-context changes against the
+previous policy, tags, and stored rows. Synthetic tenant/space cases cover
+read-only and writable memberships, direct/group/link sharing, revocation,
+resource moves, and enabling RLS on existing data. Legacy-schema migration adds
+nullable permission fields, leaves some rows unfilled, and verifies partial
+backfill before and after enforcement. Schema changes seal existing growing
+segments; the migration case checks that transition and NULL values explicitly.
+
+Strict SearchIterator completeness assertions are retained for the known
+equal-distance pagination issue [#54188](https://github.com/milvus-io/milvus/issues/54188).
+A passing subset does not imply that the complete RLS matrix is green.
+
+From the Milvus repository root, run against an existing development deployment:
+
+```bash
+milvus-dev-cli pysdk-e2e local . -b master --deploy <deployment-name> \
+  -t tests/python_client/milvus_client/test_milvus_client_rls.py \
+  -- -n 6 --timeout 180
+```
+
+This is SDK functional coverage. RBAC privilege separation, bulk import, CDC,
+fault injection, and the known security issues #54025, #54026, and #54027 are
+outside this module's coverage; a passing result is not RLS security sign-off.
+
 ## An Introduction to Test Modules
 
 ### Module Overview
