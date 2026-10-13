@@ -68,14 +68,11 @@ BuildProjectedHybrid(const std::vector<std::string>& raw,
         {SCALAR_INDEX_ENGINE_VERSION, 3},
         {HYBRID_LOW_CARDINALITY_INDEX_TYPE, BITMAP_INDEX_TYPE},
         {HYBRID_HIGH_CARDINALITY_INDEX_TYPE,
-         value_type == DataType::VARCHAR ? INVERTED_INDEX_TYPE : ASCENDING_SORT},
+         value_type == DataType::VARCHAR ? INVERTED_INDEX_TYPE
+                                         : ASCENDING_SORT},
     };
     auto materializer = indexbuilder::MakeScalarBuildInputMaterializer(
-        DataType::JSON,
-        value_type,
-        raw.size(),
-        families::kHybrid,
-        params);
+        DataType::JSON, value_type, raw.size(), families::kHybrid, params);
     materializer->Add(RawJsonFieldData(raw));
     auto artifact = std::move(*materializer).Build();
     EXPECT_NE(artifact, nullptr);
@@ -86,8 +83,7 @@ BuildProjectedHybrid(const std::vector<std::string>& raw,
 }
 
 void
-ExpectSelector(const TestArtifactData& persisted,
-               ScalarIndexType selector) {
+ExpectSelector(const TestArtifactData& persisted, ScalarIndexType selector) {
     ASSERT_TRUE(persisted.metadata.contains(INDEX_TYPE));
     EXPECT_EQ(persisted.metadata.at(INDEX_TYPE).get<uint8_t>(),
               static_cast<uint8_t>(selector));
@@ -132,9 +128,10 @@ TEST(JsonProjectedHybridIndexBuilderTest, HighCardinalityNumbersSelectSorted) {
     }
     const auto persisted =
         BuildProjectedHybrid(raw, DataType::DOUBLE, "DOUBLE", "/n");
-    ASSERT_NO_FATAL_FAILURE(ExpectSelector(persisted, ScalarIndexType::STLSORT));
-    const auto& backend = ScalarReaderBackends().Get<double>(
-        "JsonProjectedHybridDouble");
+    ASSERT_NO_FATAL_FAILURE(
+        ExpectSelector(persisted, ScalarIndexType::STLSORT));
+    const auto& backend =
+        ScalarReaderBackends().Get<double>("JsonProjectedHybridDouble");
     auto reader = OpenV3(backend,
                          persisted,
                          {.row_count = static_cast<int64_t>(raw.size()),
@@ -151,7 +148,8 @@ TEST(JsonProjectedHybridIndexBuilderTest, HighCardinalityNumbersSelectSorted) {
     EXPECT_EQ(predicate->Range(500.0, CompareOp::GreaterThan).count(), 499);
 }
 
-TEST(JsonProjectedHybridIndexBuilderTest, MissingAndCastInvalidRowsDoNotRaiseCardinality) {
+TEST(JsonProjectedHybridIndexBuilderTest,
+     MissingAndCastInvalidRowsDoNotRaiseCardinality) {
     std::vector<std::string> raw;
     raw.reserve(110);
     for (size_t i = 0; i < 10; ++i) {
@@ -162,8 +160,8 @@ TEST(JsonProjectedHybridIndexBuilderTest, MissingAndCastInvalidRowsDoNotRaiseCar
     const auto persisted =
         BuildProjectedHybrid(raw, DataType::DOUBLE, "DOUBLE", "/v");
     ASSERT_NO_FATAL_FAILURE(ExpectSelector(persisted, ScalarIndexType::BITMAP));
-    const auto& backend = ScalarReaderBackends().Get<double>(
-        "JsonProjectedHybridDouble");
+    const auto& backend =
+        ScalarReaderBackends().Get<double>("JsonProjectedHybridDouble");
     auto reader = OpenV3(backend,
                          persisted,
                          {.row_count = static_cast<int64_t>(raw.size()),

@@ -147,7 +147,10 @@ class SortedStorageView {
     explicit SortedStorageView(OpenArgs args);
 
     void
-    ApplyMembership(TargetBitmap& result, size_t n, const T* values, bool match) const;
+    ApplyMembership(TargetBitmap& result,
+                    size_t n,
+                    const T* values,
+                    bool match) const;
 
     void
     SetEqual(TargetBitmap& result, const T& value) const;
@@ -203,7 +206,10 @@ class SortedStorageView<std::string_view> {
     explicit SortedStorageView(OpenArgs args);
 
     void
-    ApplyMembership(TargetBitmap& result, size_t n, const std::string_view* values, bool match) const;
+    ApplyMembership(TargetBitmap& result,
+                    size_t n,
+                    const std::string_view* values,
+                    bool match) const;
 
     void
     SetEqual(TargetBitmap& result, const std::string_view& value) const;
@@ -240,9 +246,7 @@ class SortedStorageView<std::string_view> {
     FileUsage() const;
 
     TargetBitmap
-    PatternMatch(size_t count,
-                 std::string_view pattern,
-                 PatternOp op) const;
+    PatternMatch(size_t count, std::string_view pattern, PatternOp op) const;
 
  private:
     std::shared_ptr<const SortedStringLayout> layout_;

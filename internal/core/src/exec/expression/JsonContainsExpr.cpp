@@ -2447,7 +2447,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     // point, as constrained by index/contracts/README.md. Offsets come from the
     // column via execution, not from the index. TODO: consolidate the projection
     // helpers with UnaryExpr and Expr at plan-selected boundaries.
-    auto struct_element_offsets = segment_->GetStructElementOffsets(expr_->column_.field_id_);
+    auto struct_element_offsets =
+        segment_->GetStructElementOffsets(expr_->column_.field_id_);
 
     // ProcessIndexChunksImpl invokes this only on an index-result cache miss,
     // so the term list is converted here rather than on every batch: with
@@ -2455,12 +2456,14 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     // ExprResCache hit skips the conversion entirely.
     auto execute_sub_batch =
         [this, &struct_element_offsets](
-            const index::IScalarPredicateReader<GetType>* index_ptr) -> TargetBitmap {
+            const index::IScalarPredicateReader<GetType>* index_ptr)
+        -> TargetBitmap {
         std::unordered_set<GetType> elements;
         for (const auto& element : expr_->vals_) {
             elements.insert(GetValueWithCastNumber<GetType>(element));
         }
-        boost::container::vector<GetType> vals(elements.begin(), elements.end());
+        boost::container::vector<GetType> vals(elements.begin(),
+                                               elements.end());
         // Query helper: for nested index, convert element-level to row-level
         auto query_in = [&](size_t n, const GetType* data) -> TargetBitmap {
             auto element_bitset = index_ptr->In(n, data);

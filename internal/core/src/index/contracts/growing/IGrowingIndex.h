@@ -136,8 +136,8 @@ class IGrowingIndex {
         AssertInfo(reader != nullptr && covered_row_end >= 0,
                    "invalid growing snapshot publication");
         std::shared_ptr<const GrowingIndexSnapshotPin::Snapshot> next =
-            std::make_shared<const GrowingIndexSnapshotPin::Snapshot>(std::move(reader),
-                                                          covered_row_end);
+            std::make_shared<const GrowingIndexSnapshotPin::Snapshot>(
+                std::move(reader), covered_row_end);
         {
             std::lock_guard<std::mutex> lock(snapshot_mutex_);
             AssertInfo(

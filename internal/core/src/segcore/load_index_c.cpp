@@ -202,8 +202,7 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info,
         AssertInfo(c_load_index_info != nullptr, "load index info is null");
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        *request =
-            EstimateLoadIndexResourceFromLoadInfo(load_index_info);
+        *request = EstimateLoadIndexResourceFromLoadInfo(load_index_info);
         return milvus::SuccessCStatus();
     }
     // Estimation failure must reach the Go caller as an error: a swallowed
@@ -225,8 +224,9 @@ EstimateLoadIndexResourceFromSerializedInfo(
         *load_resource_request = {};
         AssertInfo(serialized_load_index_info != nullptr,
                    "serialized load index info is null");
-        AssertInfo(len <= static_cast<uint64_t>(std::numeric_limits<int>::max()),
-                   "load index info is too large");
+        AssertInfo(
+            len <= static_cast<uint64_t>(std::numeric_limits<int>::max()),
+            "load index info is too large");
         auto info_proto = milvus::proto::cgo::LoadIndexInfo();
         auto parsed =
             info_proto.ParseFromArray(serialized_load_index_info, len);

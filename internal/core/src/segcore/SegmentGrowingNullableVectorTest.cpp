@@ -266,10 +266,10 @@ TEST_F(GrowingNullableVectorTest, IndexedTypesKeepLogicalOffsets) {
                 ASSERT_TRUE(index_pin);
                 EXPECT_EQ(index_pin.CoveredRowEnd(), expected_.size());
                 EXPECT_EQ(index_pin.Reader().Count(),
-                          std::count_if(expected_.begin(), expected_.end(),
-                                        [](const auto& row) {
-                                            return row.has_value();
-                                        }));
+                          std::count_if(
+                              expected_.begin(),
+                              expected_.end(),
+                              [](const auto& row) { return row.has_value(); }));
                 ASSERT_EQ(impl_->CanReadRawVectorFromIndex(vec_),
                           interim == "IVF_FLAT_CC");
                 std::vector<int64_t> offsets(expected_.size());

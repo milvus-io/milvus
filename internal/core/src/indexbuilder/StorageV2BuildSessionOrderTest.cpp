@@ -55,9 +55,9 @@ class StorageV2BuildSessionOrderTest : public SourceBuildTest {
                 int64_t log_id,
                 const std::shared_ptr<arrow::Array>& values) const {
         const auto& fs = prepared.file_manager_context.fs;
-        ASSERT_TRUE(fs->CreateDir(directory_->Path() + "/" +
-                                 std::to_string(field_id))
-                        .ok());
+        ASSERT_TRUE(
+            fs->CreateDir(directory_->Path() + "/" + std::to_string(field_id))
+                .ok());
         const auto schema = arrow::schema({arrow::field(
             "values",
             values->type(),
@@ -102,8 +102,7 @@ class StorageV2BuildSessionOrderTest : public SourceBuildTest {
         ASSERT_TRUE(builder.AppendValues(values).ok());
         std::shared_ptr<arrow::Array> array;
         ASSERT_TRUE(builder.Finish(&array).ok());
-        ASSERT_NO_FATAL_FAILURE(
-            WriteColumn(prepared, field_id, log_id, array));
+        ASSERT_NO_FATAL_FAILURE(WriteColumn(prepared, field_id, log_id, array));
     }
 };
 
@@ -138,30 +137,26 @@ TEST_F(StorageV2BuildSessionOrderTest, BothReadersSortNumericBinlogIds) {
     EXPECT_EQ(outcome, storage::VisitOutcome::Exhausted);
     EXPECT_EQ(values(streamed), expected);
     EXPECT_EQ(files, original_files);
-    const auto collected = storage::GetFieldDatasFromStorageV2(
-        files,
-        100,
-        DataType::INT64,
-        DataType::NONE,
-        1,
-        prepared.file_manager_context.fs);
+    const auto collected =
+        storage::GetFieldDatasFromStorageV2(files,
+                                            100,
+                                            DataType::INT64,
+                                            DataType::NONE,
+                                            1,
+                                            prepared.file_manager_context.fs);
     EXPECT_EQ(values(collected), expected);
     // Keep all caller-owned source metadata unchanged for another field/pass.
     EXPECT_EQ(files, original_files);
 }
 
 TEST_F(StorageV2BuildSessionOrderTest, ScalarPredicateUsesNumericBinlogOrder) {
-    auto prepared = Prepare(DataType::INT64,
-                            DataType::NONE,
-                            false,
-                            index::ASCENDING_SORT,
-                            4,
-                            1);
+    auto prepared = Prepare(
+        DataType::INT64, DataType::NONE, false, index::ASCENDING_SORT, 4, 1);
     ASSERT_NO_FATAL_FAILURE(WriteIntegers(prepared, 100, 2, {10, 11}));
     ASSERT_NO_FATAL_FAILURE(WriteIntegers(prepared, 100, 10, {20, 21}));
     // Lexicographic ordering and request ordering both put log 10 first.
-    prepared.request.source = StorageV2BuildSource{{{Path(100, 10),
-                                                    Path(100, 2)}}};
+    prepared.request.source =
+        StorageV2BuildSource{{{Path(100, 10), Path(100, 2)}}};
     const auto stats = Publish(prepared);
     auto reader = Open(prepared, stats);
     ASSERT_NE(reader, nullptr);
@@ -182,23 +177,21 @@ TEST_F(StorageV2BuildSessionOrderTest, VectorAndOptionalFieldKeepRowIds) {
     constexpr int64_t rows = 1024;
     constexpr int64_t dim = 4;
     constexpr int64_t side_field_id = 101;
-    const OptFieldT opt_fields{
-        {side_field_id,
-         std::make_tuple("tenant",
-                         DataType::INT64,
-                         DataType::NONE,
-                         std::vector<std::string>{})}};
-    auto prepared =
-        Prepare(DataType::VECTOR_FLOAT,
-                DataType::NONE,
-                false,
-                knowhere::IndexEnum::INDEX_HNSW,
-                rows,
-                dim,
-                {{index::METRIC_TYPE, "L2"},
-                 {knowhere::indexparam::M, 16},
-                 {knowhere::indexparam::EFCONSTRUCTION, 96},
-                 {"mv_build_minimum_category_size", 128}});
+    const OptFieldT opt_fields{{side_field_id,
+                                std::make_tuple("tenant",
+                                                DataType::INT64,
+                                                DataType::NONE,
+                                                std::vector<std::string>{})}};
+    auto prepared = Prepare(DataType::VECTOR_FLOAT,
+                            DataType::NONE,
+                            false,
+                            knowhere::IndexEnum::INDEX_HNSW,
+                            rows,
+                            dim,
+                            {{index::METRIC_TYPE, "L2"},
+                             {knowhere::indexparam::M, 16},
+                             {knowhere::indexparam::EFCONSTRUCTION, 96},
+                             {"mv_build_minimum_category_size", 128}});
     // Prepare serializes ordinary index params as strings. Optional-field
     // metadata is a typed config value, as produced by AdaptOptionalFields.
     prepared.request.params[PARTITION_KEY_ISOLATION_KEY] = true;
@@ -208,15 +201,13 @@ TEST_F(StorageV2BuildSessionOrderTest, VectorAndOptionalFieldKeepRowIds) {
         arrow::FixedSizeBinaryBuilder builder(
             arrow::fixed_size_binary(dim * sizeof(float)));
         for (int64_t row = begin; row < begin + rows / 2; ++row) {
-            const std::array<float, dim> vector{
-                static_cast<float>(row),
-                static_cast<float>(2 * row),
-                static_cast<float>(3 * row),
-                static_cast<float>(4 * row)};
-            ASSERT_TRUE(builder.Append(
-                                   reinterpret_cast<const uint8_t*>(
-                                       vector.data()))
-                            .ok());
+            const std::array<float, dim> vector{static_cast<float>(row),
+                                                static_cast<float>(2 * row),
+                                                static_cast<float>(3 * row),
+                                                static_cast<float>(4 * row)};
+            ASSERT_TRUE(
+                builder.Append(reinterpret_cast<const uint8_t*>(vector.data()))
+                    .ok());
         }
         std::shared_ptr<arrow::Array> array;
         ASSERT_TRUE(builder.Finish(&array).ok());
@@ -224,10 +215,10 @@ TEST_F(StorageV2BuildSessionOrderTest, VectorAndOptionalFieldKeepRowIds) {
         std::vector<int64_t> tenants(rows / 2);
         for (int64_t i = 0; i < rows / 2; ++i) {
             const auto row = begin + i;
-            tenants[i] = row < rows / 4 ||
-                                 (row >= rows / 2 && row < 5 * rows / 8)
-                             ? 2
-                             : row < rows / 2 ? 3 : 4;
+            tenants[i] =
+                row < rows / 4 || (row >= rows / 2 && row < 5 * rows / 8) ? 2
+                : row < rows / 2                                          ? 3
+                                                                          : 4;
         }
         ASSERT_NO_FATAL_FAILURE(
             WriteIntegers(prepared, side_field_id, log_id, tenants));
@@ -315,28 +306,26 @@ TEST_F(StorageV2BuildSessionOrderTest, DenseDiskCacheUsesNumericBinlogOrder) {
         arrow::FixedSizeBinaryBuilder builder(
             arrow::fixed_size_binary(dim * sizeof(float)));
         for (int64_t row = begin; row < begin + 2; ++row) {
-            const std::array<float, dim> vector{
-                static_cast<float>(row),
-                static_cast<float>(2 * row),
-                static_cast<float>(3 * row),
-                static_cast<float>(4 * row)};
-            ASSERT_TRUE(builder.Append(
-                                   reinterpret_cast<const uint8_t*>(
-                                       vector.data()))
-                            .ok());
+            const std::array<float, dim> vector{static_cast<float>(row),
+                                                static_cast<float>(2 * row),
+                                                static_cast<float>(3 * row),
+                                                static_cast<float>(4 * row)};
+            ASSERT_TRUE(
+                builder.Append(reinterpret_cast<const uint8_t*>(vector.data()))
+                    .ok());
         }
         std::shared_ptr<arrow::Array> array;
         ASSERT_TRUE(builder.Finish(&array).ok());
         ASSERT_NO_FATAL_FAILURE(WriteColumn(prepared, 100, log_id, array));
     }
     storage::DiskFileManagerImpl manager(prepared.file_manager_context);
-    Config config{{STORAGE_VERSION_KEY, STORAGE_V2},
-                  {SEGMENT_INSERT_FILES_KEY,
-                   std::vector<std::vector<std::string>>{
-                       {Path(100, 10), Path(100, 2)}}},
-                  {DATA_TYPE_KEY, DataType::VECTOR_FLOAT},
-                  {ELEMENT_TYPE_KEY, DataType::NONE},
-                  {DIM_KEY, dim}};
+    Config config{
+        {STORAGE_VERSION_KEY, STORAGE_V2},
+        {SEGMENT_INSERT_FILES_KEY,
+         std::vector<std::vector<std::string>>{{Path(100, 10), Path(100, 2)}}},
+        {DATA_TYPE_KEY, DataType::VECTOR_FLOAT},
+        {ELEMENT_TYPE_KEY, DataType::NONE},
+        {DIM_KEY, dim}};
     const auto path = manager.CacheRawDataToDisk<float>(config);
     std::ifstream raw(path, std::ios::binary);
     ASSERT_TRUE(raw.good());
@@ -357,14 +346,10 @@ TEST_F(StorageV2BuildSessionOrderTest, DenseDiskCacheUsesNumericBinlogOrder) {
 }
 
 TEST_F(StorageV2BuildSessionOrderTest, RejectsNonNumericBinlogBasenames) {
-    const auto prepared = Prepare(DataType::INT64,
-                                  DataType::NONE,
-                                  false,
-                                  index::ASCENDING_SORT,
-                                  1,
-                                  1);
-    for (const auto name : {"not-a-log", "2.parquet", "10suffix", "",
-                            "9223372036854775808"}) {
+    const auto prepared = Prepare(
+        DataType::INT64, DataType::NONE, false, index::ASCENDING_SORT, 1, 1);
+    for (const auto name :
+         {"not-a-log", "2.parquet", "10suffix", "", "9223372036854775808"}) {
         SCOPED_TRACE(name);
         auto request = prepared.request;
         // A one-file group must be validated even though sorting it needs no

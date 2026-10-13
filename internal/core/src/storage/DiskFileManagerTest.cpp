@@ -155,13 +155,15 @@ struct PublishedConsumerIndex {
         AssertInfo(static_cast<bool>(loader), "storage consumer has no loader");
         if (packed) {
             return loader.Load(
-                {index::IndexFiles{std::move(context), Files(),
+                {index::IndexFiles{std::move(context),
+                                   Files(),
                                    index::PackedIndexStorageConfig{}},
                  std::move(options)});
         }
         return loader.Load(
             {index::IndexFiles{
-                 std::move(context), Files(),
+                 std::move(context),
+                 Files(),
                  index::LegacyIndexStorageConfig{
                      type.family == index::families::kVectorDisk
                          ? storage::V1SourceLayout::DiskFiles
@@ -175,13 +177,14 @@ PersistedVectorRowCount(const PublishedConsumerIndex& published,
                         storage::FileManagerContext context) {
     context.set_for_loading_index(true);
     storage::DiskFileManagerImpl manager(context);
-    const auto valid_files = index::FilterValidDataDiskFileSlices(
-        published.Files());
-    AssertInfo(!valid_files.empty(), "nullable consumer has no valid_data file");
+    const auto valid_files =
+        index::FilterValidDataDiskFileSlices(published.Files());
+    AssertInfo(!valid_files.empty(),
+               "nullable consumer has no valid_data file");
     manager.CacheIndexToDisk(valid_files, proto::common::LoadPriority::HIGH);
     auto local = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    const auto path = manager.GetLocalIndexObjectPrefix() + "/" +
-                      index::VALID_DATA_KEY;
+    const auto path =
+        manager.GetLocalIndexObjectPrefix() + "/" + index::VALID_DATA_KEY;
     uint64_t wire_count = 0;
     local->Read(path, &wire_count, sizeof(wire_count));
     return index::FromValidDataCount(wire_count);
@@ -194,18 +197,19 @@ PublishScalarV3(const storage::FileManagerContext& context,
                 const std::string& index_type,
                 std::span<const T> values) {
     milvus::Config params = {{index::FIELD_ID, context.fieldDataMeta.field_id},
-                     {index::SCALAR_INDEX_ENGINE_VERSION, 3},
-                     {"nullable", false},
-                     {NUM_ROWS_KEY, values.size()}};
+                             {index::SCALAR_INDEX_ENGINE_VERSION, 3},
+                             {"nullable", false},
+                             {NUM_ROWS_KEY, values.size()}};
     auto adapted = index::AdaptIndexType({.index_type = index_type,
                                           .field_type = field_type,
                                           .params = std::move(params)});
-    auto builder = index::BuilderRegistry<index::ScalarBuildInput<T>>::Instance()
-                       .Create(adapted.family, adapted.params);
+    auto builder =
+        index::BuilderRegistry<index::ScalarBuildInput<T>>::Instance().Create(
+            adapted.family, adapted.params);
     AssertInfo(builder != nullptr, "storage consumer has no scalar builder");
     const index::ScalarBuildBatch<T> batch{values, {}};
-    auto artifact = std::move(*builder).Build(
-        index::ScalarBuildInput<T>{{&batch, 1}});
+    auto artifact =
+        std::move(*builder).Build(index::ScalarBuildInput<T>{{&batch, 1}});
     builder.reset();
 
     storage::MemFileManagerImpl manager(context);
@@ -247,8 +251,8 @@ PublishedConsumerIndex
 PublishDiskResident(const storage::FileManagerContext& context,
                     const FieldDataPtr& data,
                     milvus::Config params) {
-    auto adapted = DiskConsumerType(context, data->get_num_rows(),
-                                    std::move(params));
+    auto adapted =
+        DiskConsumerType(context, data->get_num_rows(), std::move(params));
     indexbuilder::VectorDiskBuildMaterializer materializer(
         TestLocalPath,
         data->get_data_type(),
@@ -1115,8 +1119,9 @@ TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
     knowhere::IdMap loaded_id_map;
     const auto restored = index::RestoreIdMapFromValidData(
         loaded_id_map,
-        index::ValidDataView{true, static_cast<size_t>(total_count),
-                            cached_valid_data.data() + sizeof(uint64_t)});
+        index::ValidDataView{true,
+                             static_cast<size_t>(total_count),
+                             cached_valid_data.data() + sizeof(uint64_t)});
     loaded_id_map.FinalizeVectorIds();
 
     ASSERT_TRUE(restored.has_valid_data);
@@ -1859,8 +1864,8 @@ TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
     std::fill_n(valid_data.get(), num_rows, false);
 
     std::vector<float> vec_data(dim, 0.0f);
-    auto data = NullableDiskVectors(
-        num_rows, dim, vec_data.data(), valid_data.get());
+    auto data =
+        NullableDiskVectors(num_rows, dim, vec_data.data(), valid_data.get());
 
     milvus::Config config;
     config[DIM_KEY] = dim;
@@ -1927,8 +1932,8 @@ TEST_F(DiskAnnFileManagerTest,
     for (size_t i = 0; i < vec_data.size(); ++i) {
         vec_data[i] = static_cast<float>(i % 100);
     }
-    auto data = NullableDiskVectors(
-        num_rows, dim, vec_data.data(), valid_data.get());
+    auto data =
+        NullableDiskVectors(num_rows, dim, vec_data.data(), valid_data.get());
 
     milvus::Config config;
     config[DIM_KEY] = dim;
@@ -2031,8 +2036,8 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
     std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
     std::fill_n(valid_data.get(), num_rows, false);
     std::vector<float> vec_data(dim, 0.0f);
-    auto data = NullableDiskVectors(
-        num_rows, dim, vec_data.data(), valid_data.get());
+    auto data =
+        NullableDiskVectors(num_rows, dim, vec_data.data(), valid_data.get());
     milvus::Config config;
     config[DIM_KEY] = dim;
     config[index::DISK_ANN_BUILD_THREAD_NUM] = "1";
@@ -2312,8 +2317,7 @@ TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
             *loaded_reader);
     EXPECT_EQ(loaded_reader->Count(), static_cast<int64_t>(N));
     const auto& value_reader =
-        dynamic_cast<const index::IScalarValueReader<int64_t>&>(
-            *loaded_reader);
+        dynamic_cast<const index::IScalarValueReader<int64_t>&>(*loaded_reader);
 
     {
         std::vector<int64_t> query_vals = {0, 3, 6};
@@ -2325,8 +2329,8 @@ TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
     }
 
     {
-        auto bitset =
-            predicate.Range(static_cast<int64_t>(6), index::CompareOp::LessThan);
+        auto bitset = predicate.Range(static_cast<int64_t>(6),
+                                      index::CompareOp::LessThan);
         EXPECT_TRUE(bitset[0]);
         EXPECT_TRUE(bitset[1]);
         EXPECT_FALSE(bitset[2]);

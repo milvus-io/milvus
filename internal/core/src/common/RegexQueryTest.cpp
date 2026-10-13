@@ -217,8 +217,9 @@ class StringValueOnlyReader final
  public:
     explicit StringValueOnlyReader(index::IIndexReaderBasePtr reader)
         : reader_(std::move(reader)),
-          values_(dynamic_cast<const index::IScalarValueReader<
-                      std::string_view>*>(reader_.get())) {
+          values_(
+              dynamic_cast<const index::IScalarValueReader<std::string_view>*>(
+                  reader_.get())) {
         AssertInfo(values_ != nullptr, "fallback fixture needs string values");
     }
 
@@ -228,10 +229,22 @@ class StringValueOnlyReader final
                 .cheap_value_lookup = reader_->Caps().cheap_value_lookup};
     }
 
-    index::Domain CoordDomain() const override { return reader_->CoordDomain(); }
-    int64_t Count() const override { return reader_->Count(); }
-    DataType ValueType() const override { return reader_->ValueType(); }
-    int64_t MemoryUsage() const override { return reader_->MemoryUsage(); }
+    index::Domain
+    CoordDomain() const override {
+        return reader_->CoordDomain();
+    }
+    int64_t
+    Count() const override {
+        return reader_->Count();
+    }
+    DataType
+    ValueType() const override {
+        return reader_->ValueType();
+    }
+    int64_t
+    MemoryUsage() const override {
+        return reader_->MemoryUsage();
+    }
     cachinglayer::ResourceUsage
     CellByteSize() const override {
         return reader_->CellByteSize();
@@ -245,9 +258,8 @@ class StringValueOnlyReader final
     void
     Gather(const int64_t* offsets,
            int64_t count,
-           const std::function<
-               void(int64_t, const std::string_view*, bool)>& output)
-        const override {
+           const std::function<void(int64_t, const std::string_view*, bool)>&
+               output) const override {
         values_->Gather(offsets, count, output);
     }
 
@@ -313,9 +325,11 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             *seg,
             field_id,
             DataType::INT64,
-            test::consumer::BuildScalarReader<int64_t>(
-                field_id, DataType::INT64, index::ASCENDING_SORT, N,
-                raw_int.data()));
+            test::consumer::BuildScalarReader<int64_t>(field_id,
+                                                       DataType::INT64,
+                                                       index::ASCENDING_SORT,
+                                                       N,
+                                                       raw_int.data()));
     }
 
     void
@@ -326,7 +340,9 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             field_id,
             DataType::VARCHAR,
             test::expr_index::BuildIndex(
-                field_id, DataType::VARCHAR, index::INVERTED_INDEX_TYPE,
+                field_id,
+                DataType::VARCHAR,
+                index::INVERTED_INDEX_TYPE,
                 {test::expr_index::StringField(raw_str)}));
     }
 
@@ -334,7 +350,9 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
     LoadMockIndex() {
         const auto field_id = schema->get_field_id(FieldName("str"));
         auto opened = test::expr_index::BuildIndex(
-            field_id, DataType::VARCHAR, index::MARISA_TRIE,
+            field_id,
+            DataType::VARCHAR,
+            index::MARISA_TRIE,
             {test::expr_index::StringField(raw_str)});
         opened.reader =
             std::make_unique<StringValueOnlyReader>(std::move(opened.reader));
@@ -620,13 +638,16 @@ TEST(InvertedIndexRegexQueryTest, RegexQueryUsesRe2CharacterClassSemantics) {
         "\xD9\xA3",
     };
 
-    auto opened = test::expr_index::BuildIndex(
-        FieldId(100), DataType::VARCHAR, index::INVERTED_INDEX_TYPE,
-        {test::expr_index::StringField(raw_str)});
+    auto opened =
+        test::expr_index::BuildIndex(FieldId(100),
+                                     DataType::VARCHAR,
+                                     index::INVERTED_INDEX_TYPE,
+                                     {test::expr_index::StringField(raw_str)});
     const auto* patterns =
         dynamic_cast<const index::IPatternMatchReader*>(opened.reader.get());
     ASSERT_NE(patterns, nullptr);
-    auto bitset = patterns->PatternMatch("^\\d+$", index::PatternOp::RegexMatch);
+    auto bitset =
+        patterns->PatternMatch("^\\d+$", index::PatternOp::RegexMatch);
     ASSERT_TRUE(bitset[0]);
     ASSERT_FALSE(bitset[1]);
 }

@@ -42,39 +42,48 @@ class FailingArchiveSource final : public storage::FileSource {
         : source_(data), archive_(std::move(archive)) {
     }
 
-    storage::Generation Gen() const override { return source_.Gen(); }
-    std::vector<std::string> EntryNames() const override {
+    storage::Generation
+    Gen() const override {
+        return source_.Gen();
+    }
+    std::vector<std::string>
+    EntryNames() const override {
         return source_.EntryNames();
     }
-    bool HasEntry(std::string_view name) const override {
+    bool
+    HasEntry(std::string_view name) const override {
         return source_.HasEntry(name);
     }
-    int64_t EntrySize(std::string_view name) const override {
+    int64_t
+    EntrySize(std::string_view name) const override {
         return source_.EntrySize(name);
     }
-    std::vector<uint8_t> ReadEntry(std::string_view name) override {
+    std::vector<uint8_t>
+    ReadEntry(std::string_view name) override {
         if (name == archive_) {
             ThrowInfo(FileReadFailed, "injected R-Tree archive read failure");
         }
         return source_.ReadEntry(name);
     }
-    void ReadEntryToLocalFile(std::string_view name,
-                              const std::string& path) override {
+    void
+    ReadEntryToLocalFile(std::string_view name,
+                         const std::string& path) override {
         if (name == archive_) {
             ThrowInfo(FileReadFailed, "injected R-Tree archive read failure");
         }
         source_.ReadEntryToLocalFile(name, path);
     }
-    void ReadEntriesToLocalFile(const std::vector<std::string>& names,
-                                const std::string& path) override {
+    void
+    ReadEntriesToLocalFile(const std::vector<std::string>& names,
+                           const std::string& path) override {
         if (std::find(names.begin(), names.end(), archive_) != names.end()) {
             ThrowInfo(FileReadFailed, "injected R-Tree archive read failure");
         }
         source_.ReadEntriesToLocalFile(names, path);
     }
-    std::vector<std::string> ReadEntriesToLocalDir(
-        const std::vector<std::string>& names,
-        const std::string& dir) override {
+    std::vector<std::string>
+    ReadEntriesToLocalDir(const std::vector<std::string>& names,
+                          const std::string& dir) override {
         if (std::find(names.begin(), names.end(), archive_) != names.end()) {
             ThrowInfo(FileReadFailed, "injected R-Tree archive read failure");
         }

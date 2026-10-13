@@ -108,7 +108,9 @@ CreateJsonStatsRowRanges(const std::vector<FieldDataPtr>& field_datas,
 class JsonKeyStats {
  public:
     cachinglayer::ResourceUsage
-    CellByteSize() const { return {0, 0}; }
+    CellByteSize() const {
+        return {0, 0};
+    }
 
     static constexpr int64_t kDefaultWriteBatchSize = 81920;
 

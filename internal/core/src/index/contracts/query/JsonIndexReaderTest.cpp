@@ -473,14 +473,12 @@ AddJsonFlatRoutingCases(IndexTestCases& cases) {
             ASSERT_NE(json, nullptr);
             const auto cast = Cast("VARCHAR");
             JsonResolvedReader first;
-            const auto* first_predicate =
-                ResolvedPredicate<std::string_view>(
-                    *json, "/profile/name/first", cast, data.values.size(), first);
+            const auto* first_predicate = ResolvedPredicate<std::string_view>(
+                *json, "/profile/name/first", cast, data.values.size(), first);
             ASSERT_NE(first_predicate, nullptr);
             JsonResolvedReader second;
-            const auto* second_predicate =
-                ResolvedPredicate<std::string_view>(
-                    *json, "/profile/name/first", cast, data.values.size(), second);
+            const auto* second_predicate = ResolvedPredicate<std::string_view>(
+                *json, "/profile/name/first", cast, data.values.size(), second);
             ASSERT_NE(second_predicate, nullptr);
 
             ExpectHits(Membership(*first_predicate, {"Alice"}, false),
@@ -635,13 +633,20 @@ AddJsonFlatRoutingCases(IndexTestCases& cases) {
                                                           {"tilde"},
                                                           false,
                                                           {0});
-    for (const auto& [name, path, value] : {
-             std::tuple{"LiteralDotKey", "/a.b", "dot"},
-             std::tuple{"LiteralBackslashKey", "/a\\b", "backslash"},
-             std::tuple{"EmptyNestedKey", "/empty/", "empty"}}) {
+    for (const auto& [name, path, value] :
+         {std::tuple{"LiteralDotKey", "/a.b", "dot"},
+          std::tuple{"LiteralBackslashKey", "/a\\b", "backslash"},
+          std::tuple{"EmptyNestedKey", "/empty/", "empty"}}) {
         AddMembershipCase<std::string_view, std::string_view>(
-            cases, name, "JsonEscapedPaths", shape, path,
-            Cast("VARCHAR"), {value}, false, {0});
+            cases,
+            name,
+            "JsonEscapedPaths",
+            shape,
+            path,
+            Cast("VARCHAR"),
+            {value},
+            false,
+            {0});
     }
 }
 

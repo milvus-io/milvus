@@ -722,8 +722,7 @@ TEST_P(SegmentChunkReaderStringTest,
 TEST_P(SegmentChunkReaderStringTest,
        RandomChunkAccessorKeepsBorrowedDataPinned) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    auto accessor =
-        reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1);
+    auto accessor = reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1);
     auto value = accessor(0);
     column_->ManualEvictCache();
     EXPECT_FALSE(lifetimes_[1].expired());

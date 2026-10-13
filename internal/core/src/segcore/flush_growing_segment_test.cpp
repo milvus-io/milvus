@@ -2237,8 +2237,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
         insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
 
         segment->PreInsert(N);
-        segment->Insert(
-            0, N, row_ids.data(), timestamps.data(), insert_data);
+        segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
         C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path =

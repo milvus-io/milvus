@@ -28,10 +28,10 @@ namespace milvus::index {
 // columns store one SparseRow object per physical vector. Dense datatypes use
 // the same type for both roles.
 template <typename T>
-using GrowingVectorStorageType = std::conditional_t<
-    std::is_same_v<T, sparse_u32_f32>,
-    knowhere::sparse::SparseRow<sparse_u32_f32::ValueType>,
-    T>;
+using GrowingVectorStorageType =
+    std::conditional_t<std::is_same_v<T, sparse_u32_f32>,
+                       knowhere::sparse::SparseRow<sparse_u32_f32::ValueType>,
+                       T>;
 
 // Typed access to the growing column's compact physical row domain. The
 // implementation owns the underlying chunk storage, not the Segment or its

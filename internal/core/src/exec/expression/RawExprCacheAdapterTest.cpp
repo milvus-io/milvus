@@ -1372,14 +1372,20 @@ INSTANTIATE_TEST_SUITE_P(MemoryAndDisk,
 TEST_F(RawExprCacheAdapterTest, CachedLikeChildrenStillUseBatchNgram) {
     auto schema = std::make_shared<Schema>();
     const auto field_id = schema->AddDebugField("text", DataType::VARCHAR);
-    const std::vector<std::string> rows{
-        "alpha beta", "alpha only", "beta only", "alpha middle beta", "neither"};
+    const std::vector<std::string> rows{"alpha beta",
+                                        "alpha only",
+                                        "beta only",
+                                        "alpha middle beta",
+                                        "neither"};
     auto field = milvus::test::expr_index::StringField(rows);
     milvus::test::expr_index::RawFieldFiles raw_files;
     auto segment = segcore::CreateSealedSegment(schema);
     segment->LoadFieldData(raw_files.Prepare(field_id, {field}));
     auto opened = milvus::test::expr_index::BuildIndex(
-        field_id, DataType::VARCHAR, index::NGRAM_INDEX_TYPE, {field},
+        field_id,
+        DataType::VARCHAR,
+        index::NGRAM_INDEX_TYPE,
+        {field},
         {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
     milvus::test::expr_index::InstallIndex(
         *segment, field_id, DataType::VARCHAR, std::move(opened));
@@ -1388,7 +1394,8 @@ TEST_F(RawExprCacheAdapterTest, CachedLikeChildrenStillUseBatchNgram) {
         value.set_string_val(literal);
         return std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(field_id, DataType::VARCHAR),
-            proto::plan::OpType::InnerMatch, value);
+            proto::plan::OpType::InnerMatch,
+            value);
     };
     auto logical = std::make_shared<expr::LogicalBinaryExpr>(
         expr::LogicalBinaryExpr::OpType::And, like("alpha"), like("beta"));
@@ -1397,11 +1404,13 @@ TEST_F(RawExprCacheAdapterTest, CachedLikeChildrenStillUseBatchNgram) {
     ExecContext exec_context(&query_context);
     auto compiled = CompileExpressions({logical}, &exec_context, {}, false);
     ASSERT_EQ(compiled.size(), 1);
-    auto conjunction = std::dynamic_pointer_cast<PhyConjunctFilterExpr>(compiled[0]);
+    auto conjunction =
+        std::dynamic_pointer_cast<PhyConjunctFilterExpr>(compiled[0]);
     ASSERT_NE(conjunction, nullptr);
     ASSERT_EQ(conjunction->GetInputsRef().size(), 2);
     for (const auto& child : conjunction->GetInputsRef()) {
-        ASSERT_NE(std::dynamic_pointer_cast<RawExprCacheAdapter>(child), nullptr);
+        ASSERT_NE(std::dynamic_pointer_cast<RawExprCacheAdapter>(child),
+                  nullptr);
     }
     ASSERT_TRUE(conjunction->CanExecuteAllAtOnce());
     conjunction->SetExecuteAllAtOnce();
@@ -1419,7 +1428,8 @@ TEST_F(RawExprCacheAdapterTest, CachedLikeChildrenStillUseBatchNgram) {
     EXPECT_TRUE(matches[3]);
     ASSERT_EQ(conjunction->GetInputsRef().size(), 3);
     EXPECT_NE(std::dynamic_pointer_cast<PhyLikeConjunctExpr>(
-                  conjunction->GetInputsRef().back()), nullptr);
+                  conjunction->GetInputsRef().back()),
+              nullptr);
     EXPECT_EQ(ExprResCacheManager::Instance().GetEntryCount(), 0);
 }
 

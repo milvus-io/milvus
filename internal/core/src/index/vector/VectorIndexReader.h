@@ -115,11 +115,13 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     IsRowValid(int64_t logical_offset) const override;
 
     void
-    ApplyValidDataByRange(int64_t logical_offset, int64_t count,
+    ApplyValidDataByRange(int64_t logical_offset,
+                          int64_t count,
                           TargetBitmapView valid_result) const override;
 
     void
-    ApplyValidDataByOffsets(const int64_t* offsets, int64_t count,
+    ApplyValidDataByOffsets(const int64_t* offsets,
+                            int64_t count,
                             TargetBitmapView valid_result) const override;
 
     knowhere::expected<knowhere::DataSetPtr>
@@ -141,7 +143,10 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     };
 
     static constexpr std::array<const char*, 5> kGrowingQueryOverrides = {
-        "radius", "range_filter", "drop_ratio_search", "dim_max_score_ratio",
+        "radius",
+        "range_filter",
+        "drop_ratio_search",
+        "dim_max_score_ratio",
         "skip_refine"};
 
     bool

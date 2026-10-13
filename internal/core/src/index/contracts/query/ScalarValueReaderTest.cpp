@@ -309,9 +309,8 @@ ValueCases() {
                                "GatherAcrossEmptyBatches",
                                "PredicateEdgesWithEmptyBatches",
                                {5, 0, 2, 1, 0});
-        AddLookupAllCase<int64_t>(result,
-                                  "LookupAcrossPackedBitBoundary",
-                                  "BitBoundaryNullable");
+        AddLookupAllCase<int64_t>(
+            result, "LookupAcrossPackedBitBoundary", "BitBoundaryNullable");
         AddGatherCase<int64_t>(result,
                                "GatherAcrossPackedBitBoundary",
                                "BitBoundaryNullable",

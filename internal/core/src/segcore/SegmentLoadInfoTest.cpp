@@ -3934,22 +3934,22 @@ TEST(IndexFactoryRawDataTest,
     // elements). VECTOR_ARRAY currently keeps its field column for struct
     // offsets and parent-row validity. None of them may substitute for the raw
     // column, regardless of the index's own has_raw_data flag.
-    EXPECT_FALSE(milvus::index::CanUseIndexRawDataForField(
-        DataType::JSON, true));
-    EXPECT_FALSE(milvus::index::CanUseIndexRawDataForField(
-        DataType::ARRAY, true));
+    EXPECT_FALSE(
+        milvus::index::CanUseIndexRawDataForField(DataType::JSON, true));
+    EXPECT_FALSE(
+        milvus::index::CanUseIndexRawDataForField(DataType::ARRAY, true));
     EXPECT_FALSE(milvus::index::CanUseIndexRawDataForField(
         DataType::VECTOR_ARRAY, true));
     // Other field types pass the index's has_raw_data through unchanged.
-    EXPECT_TRUE(milvus::index::CanUseIndexRawDataForField(
-        DataType::INT64, true));
+    EXPECT_TRUE(
+        milvus::index::CanUseIndexRawDataForField(DataType::INT64, true));
     EXPECT_TRUE(milvus::index::CanUseIndexRawDataForField(
         DataType::VECTOR_FLOAT, true));
-    EXPECT_TRUE(milvus::index::CanUseIndexRawDataForField(
-        DataType::VARCHAR, true));
+    EXPECT_TRUE(
+        milvus::index::CanUseIndexRawDataForField(DataType::VARCHAR, true));
     // has_raw_data == false is always false.
-    EXPECT_FALSE(milvus::index::CanUseIndexRawDataForField(
-        DataType::INT64, false));
-    EXPECT_FALSE(milvus::index::CanUseIndexRawDataForField(
-        DataType::JSON, false));
+    EXPECT_FALSE(
+        milvus::index::CanUseIndexRawDataForField(DataType::INT64, false));
+    EXPECT_FALSE(
+        milvus::index::CanUseIndexRawDataForField(DataType::JSON, false));
 }

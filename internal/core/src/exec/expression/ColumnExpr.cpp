@@ -57,9 +57,8 @@ PhyColumnExpr::GatherFromValueReader(const int64_t* offsets,
                        i,
                        count);
             const auto pos = static_cast<size_t>(i);
-            AssertInfo(seen[pos] == 0,
-                       "value gather produced output {} twice",
-                       i);
+            AssertInfo(
+                seen[pos] == 0, "value gather produced output {} twice", i);
             seen[pos] = 1;
             valid[pos] = is_valid;
             if (!is_valid) {
@@ -298,9 +297,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
 template <typename T>
 VectorPtr
 PhyColumnExpr::DoEvalFromValueReader(OffsetVector* input) {
-    const auto real_batch_size =
-        input != nullptr ? static_cast<int64_t>(input->size())
-                         : GetNextBatchSize();
+    const auto real_batch_size = input != nullptr
+                                     ? static_cast<int64_t>(input->size())
+                                     : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -317,8 +316,8 @@ PhyColumnExpr::DoEvalFromValueReader(OffsetVector* input) {
         }
     }
 
-    auto result = std::make_shared<ColumnVector>(
-        expr_->GetColumn().data_type_, real_batch_size);
+    auto result = std::make_shared<ColumnVector>(expr_->GetColumn().data_type_,
+                                                 real_batch_size);
     auto* values = result->RawAsValues<T>();
     TargetBitmapView valid(result->GetValidRawData(), real_batch_size);
     valid.set();

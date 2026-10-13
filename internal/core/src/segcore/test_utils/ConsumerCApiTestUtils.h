@@ -424,17 +424,16 @@ get_default_index_meta() {
     return conf.c_str();
 }
 
-
 // C API consumers need the same IVF parameters as their former fixture, while
 // construction and loading are owned by the current builder/loader contracts.
 inline Config
 generate_build_conf(const IndexType& index_type, const MetricType& metric) {
-    return {{knowhere::meta::METRIC_TYPE, metric},
-            {knowhere::meta::DIM,
-             index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT
-                 ? BINARY_DIM
-                 : DIM},
-            {knowhere::indexparam::NLIST, 16}};
+    return {
+        {knowhere::meta::METRIC_TYPE, metric},
+        {knowhere::meta::DIM,
+         index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT ? BINARY_DIM
+                                                                    : DIM},
+        {knowhere::indexparam::NLIST, 16}};
 }
 
 inline Config
@@ -445,7 +444,8 @@ generate_search_conf(const IndexType&, const MetricType& metric) {
 
 inline VectorSearchParams
 MakeVectorSearchParams(const SearchInfo& info) {
-    return {info.search_params_, info.metric_type_, info.topk_, info.trace_ctx_};
+    return {
+        info.search_params_, info.metric_type_, info.topk_, info.trace_ctx_};
 }
 
 inline milvus::test::expr_index::OpenedIndex
@@ -461,7 +461,11 @@ generate_index(const void* raw_data,
     }
     auto build = [&]<typename T>() {
         auto opened = milvus::test::consumer::BuildVectorReader<T>(
-            field_type, index_type, metric_type, dim, rows,
+            field_type,
+            index_type,
+            metric_type,
+            dim,
+            rows,
             static_cast<const typename index::VectorBuildInput<T>::value_type*>(
                 raw_data),
             config);

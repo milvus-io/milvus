@@ -165,9 +165,9 @@ TextMatchIndexTranslator::estimated_byte_size_of_cell(
     // localStorage, then copied into the staging directory, and the cache is
     // removed when the load finishes. Peak disk is twice the index size.
     auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
-    auto resident_bytes = bitmap_bytes +
-                          static_cast<int64_t>(
-                              index::kScalarIndexFixedResidentBytes);
+    auto resident_bytes =
+        bitmap_bytes +
+        static_cast<int64_t>(index::kScalarIndexFixedResidentBytes);
     if (load_info_.enable_mmap) {
         return {{resident_bytes, load_info_.index_size},
                 {load_info_.index_size, load_info_.index_size}};
@@ -209,8 +209,10 @@ TextMatchIndexTranslator::get_cells(
     options.enable_mmap = load_info_.enable_mmap;
     options.estimated_bytes = load_info_.index_size;
     options.params = config_;
-    IndexLoadContext load_ctx(ctx,
-        index::GetValueFromConfig<int32_t>(config_, "load_priority").value_or(0));
+    IndexLoadContext load_ctx(
+        ctx,
+        index::GetValueFromConfig<int32_t>(config_, "load_priority")
+            .value_or(0));
     options.op_ctx = &load_ctx.ctx;
     // Text files are staged under localStorage with or without mmap.
     options.mmap_dir_path =

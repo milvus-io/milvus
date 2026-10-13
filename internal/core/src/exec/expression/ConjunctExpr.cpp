@@ -117,10 +117,12 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         if (!has_input_offset) {
             for (size_t idx : like_indices_) {
                 auto input = inputs_[idx];
-                if (auto cached = std::dynamic_pointer_cast<RawExprCacheAdapter>(input)) {
+                if (auto cached =
+                        std::dynamic_pointer_cast<RawExprCacheAdapter>(input)) {
                     input = cached->wrapped_expr();
                 }
-                auto unary_expr = std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(input);
+                auto unary_expr =
+                    std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(input);
                 if (unary_expr) {
                     unary_expr->EnsureExecPathDetermined();
                 }
@@ -138,10 +140,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             // runtime node exists. Inherit its inputs' effective batch size.
             auto batch_size = ngram_exprs[0]->GetNextBatchSize();
             auto like_conjunct = std::make_shared<PhyLikeConjunctExpr>(
-                std::move(ngram_exprs),
-                op_ctx_,
-                active_count,
-                batch_size);
+                std::move(ngram_exprs), op_ctx_, active_count, batch_size);
             inputs_.push_back(like_conjunct);
         } else {
             batch_ngram_indices_.clear();

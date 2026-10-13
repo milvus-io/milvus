@@ -290,7 +290,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     struct RuntimeResourceState {
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
             fields;
-        std::unordered_map<std::string, std::shared_ptr<StructElementOffsetsSealed>>
+        std::unordered_map<std::string,
+                           std::shared_ptr<StructElementOffsetsSealed>>
             struct_to_element_offsets;
         std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsSealed>>
             struct_element_offsets_map;
@@ -299,8 +300,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::unordered_map<FieldId, std::shared_ptr<const VecIndexConfig>>
             vec_binlog_config;
         std::unordered_map<FieldId, std::string> text_lob_paths;
-        std::unordered_map<FieldId, std::shared_ptr<
-            milvus::cachinglayer::CacheSlot<index::JsonKeyStats>>> json_stats;
+        std::unordered_map<FieldId,
+                           std::shared_ptr<milvus::cachinglayer::CacheSlot<
+                               index::JsonKeyStats>>>
+            json_stats;
         std::shared_ptr<milvus_storage::api::Reader> reader;
         std::shared_ptr<TimestampData> timestamps;
         std::shared_ptr<const TimestampIndex> timestamp_index;
@@ -1316,10 +1319,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     };
 
     ValidResult
-    FilterVectorValidOffsetsFromIndex(
-        const index::IVectorReader& reader,
-        const int64_t* seg_offsets,
-        int64_t count) const;
+    FilterVectorValidOffsetsFromIndex(const index::IVectorReader& reader,
+                                      const int64_t* seg_offsets,
+                                      int64_t count) const;
 
     ValidResult
     FilterVectorValidOffsetsFromColumn(milvus::OpContext* op_ctx,
@@ -1503,10 +1505,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         FieldId field_id);
 
     IndexPin
-    PinVectorIndex(
-        const std::shared_ptr<const RuntimeResourceState>& runtime,
-        milvus::OpContext* op_ctx,
-        FieldId field_id) const;
+    PinVectorIndex(const std::shared_ptr<const RuntimeResourceState>& runtime,
+                   milvus::OpContext* op_ctx,
+                   FieldId field_id) const;
 
     static std::vector<IndexInventory::RootSlot>
     EraseJsonIndexesAtPath(RuntimeResourceState& runtime,

@@ -149,15 +149,19 @@ MakeLongTextZebraRows(size_t nb) {
     return data;
 }
 
-
 std::shared_ptr<const index::FmIndexReader>
 BuildFmPatternReader(const std::vector<std::string>& rows) {
     auto engine = std::make_shared<index::fmindex::FMIndex>();
     std::vector<std::string_view> docs(rows.begin(), rows.end());
     engine->Build(docs, 32);
-    auto storage = index::FmIndexStorage::Create(
-        nullptr, std::move(engine), TargetBitmap(rows.size(), false),
-        rows.size(), DataType::VARCHAR, false, index::FmIndexStateOrigin::Builder);
+    auto storage =
+        index::FmIndexStorage::Create(nullptr,
+                                      std::move(engine),
+                                      TargetBitmap(rows.size(), false),
+                                      rows.size(),
+                                      DataType::VARCHAR,
+                                      false,
+                                      index::FmIndexStateOrigin::Builder);
     return std::make_shared<const index::FmIndexReader>(std::move(storage));
 }
 
@@ -326,8 +330,10 @@ TEST(FmIndexExpressionTest, MatchCandidatesAreRecheckedAndSyntaxIsValidated) {
 class FmIndexPatternExpressionTest
     : public ::testing::TestWithParam<proto::plan::OpType> {};
 
-INSTANTIATE_TEST_SUITE_P(FmIndex, FmIndexPatternExpressionTest,
-    ::testing::Values(proto::plan::OpType::Match, proto::plan::OpType::RegexMatch));
+INSTANTIATE_TEST_SUITE_P(FmIndex,
+                         FmIndexPatternExpressionTest,
+                         ::testing::Values(proto::plan::OpType::Match,
+                                           proto::plan::OpType::RegexMatch));
 
 TEST_P(FmIndexPatternExpressionTest, BatchesAndBitmap) {
     const auto op = GetParam();
@@ -342,8 +348,7 @@ TEST_P(FmIndexPatternExpressionTest, BatchesAndBitmap) {
     for (size_t i = 0; i < nb; i++) {
         ints[i] = static_cast<int64_t>(i);
     }
-    auto loaded =
-        LoadSealedFMMatch(rows, {}, false, nullptr, &ints);
+    auto loaded = LoadSealedFMMatch(rows, {}, false, nullptr, &ints);
 
     auto match_expr = MakeMatchTypedExpr(
         loaded.schema, loaded.varchar_id, pattern, false, op);
@@ -459,7 +464,8 @@ TEST_P(FmIndexPatternExpressionTest, NullableAndOffsets) {
         }
     }
     rows[52] = filler + "ZEBRA";
-    auto loaded = LoadSealedFMMatch(rows, {}, true, valid_bitmap.data(), nullptr);
+    auto loaded =
+        LoadSealedFMMatch(rows, {}, true, valid_bitmap.data(), nullptr);
     const size_t nb = rows.size();
     auto match_expr = MakeMatchTypedExpr(
         loaded.schema,
@@ -502,7 +508,8 @@ TEST(FmIndexExpressionTest, RegexExternalWordBoundaryCandidatesAndRawFallback) {
     auto idx = BuildFmPatternReader(rows);
     for (const std::string pattern :
          {R"(\Bfoo|bar)", R"(\b-foo|bar)", R"((?:\Bfoo|bar))"}) {
-        EXPECT_FALSE(idx->ShouldUseForOp(index::PatternOp::RegexMatch, pattern));
+        EXPECT_FALSE(
+            idx->ShouldUseForOp(index::PatternOp::RegexMatch, pattern));
         const auto candidates =
             idx->PatternMatch(pattern, index::PatternOp::RegexMatch);
         EXPECT_LT(candidates.count(), rows.size());
@@ -515,7 +522,8 @@ TEST(FmIndexExpressionTest, RegexExternalWordBoundaryCandidatesAndRawFallback) {
     // Exercise the physical raw-data executor both with an FMIndex that must
     // decline and on a segment without any scalar index.
     for (bool with_index : {true, false}) {
-        auto loaded = LoadSealedFMMatch(rows, {}, false, nullptr, nullptr, with_index);
+        auto loaded =
+            LoadSealedFMMatch(rows, {}, false, nullptr, nullptr, with_index);
         for (const std::string pattern :
              {R"(\Bfoo|bar)", R"(\b-foo|bar)", R"((?:\Bfoo|bar))"}) {
             auto expression = MakeMatchTypedExpr(loaded.schema,
@@ -552,12 +560,8 @@ TEST(FmIndexExpressionTest, RegexInteriorLiteralCandidatesAndFallback) {
     std::vector<uint8_t> validity((rows.size() + 7) / 8, 0xff);
     validity[0] &= ~(1u << 7);
     for (bool with_index : {false, true}) {
-        auto loaded = LoadSealedFMMatch(rows,
-                                        {},
-                                        true,
-                                        validity.data(),
-                                        nullptr,
-                                        with_index);
+        auto loaded = LoadSealedFMMatch(
+            rows, {}, true, validity.data(), nullptr, with_index);
         for (const auto& [pattern, uses_index] :
              std::vector<std::pair<std::string, bool>>{
                  {".*RARE", true},
@@ -609,7 +613,8 @@ TEST(FmIndexExpressionTest, RegexInteriorLiteralCandidatesAndFallback) {
     }
 }
 
-TEST(FmIndexExpressionTest, RegexBooleanConditionsAcrossChunksBatchesNullAndNot) {
+TEST(FmIndexExpressionTest,
+     RegexBooleanConditionsAcrossChunksBatchesNullAndNot) {
     constexpr size_t n = 384;
     std::vector<std::string> rows(n, std::string(500, 'x'));
     std::vector<uint8_t> validity(n / 8, 0xff);
@@ -623,11 +628,14 @@ TEST(FmIndexExpressionTest, RegexBooleanConditionsAcrossChunksBatchesNullAndNot)
     std::vector<FieldDataPtr> chunks;
     for (size_t base : {0, 128, 256}) {
         auto chunk = test::expr_index::StringField(
-            std::vector<std::string>(rows.begin() + base, rows.begin() + base + 128),
-            true, validity.data() + base / 8);
+            std::vector<std::string>(rows.begin() + base,
+                                     rows.begin() + base + 128),
+            true,
+            validity.data() + base / 8);
         chunks.push_back(std::move(chunk));
     }
-    auto loaded = LoadSealedFMMatch(rows, chunks, true, validity.data(), nullptr);
+    auto loaded =
+        LoadSealedFMMatch(rows, chunks, true, validity.data(), nullptr);
     ASSERT_EQ(loaded.segment->num_chunk_data(loaded.varchar_id), 3);
     milvus::test::ExprBatchSizeGuard batch_guard(64);
     for (const std::string pattern : {"foo.*bar|baz.*qux",
@@ -913,7 +921,8 @@ TEST(FmIndexExpressionTest, RegexSealedColumnExperiment) {
                              name == "mandatory_suffix" || name == "branches" ||
                              name == "long")) {
                             EXPECT_GT(checked, 0u) << name;
-                            EXPECT_LT(checked, rows.size()) << name << " " << modes[mode];
+                            EXPECT_LT(checked, rows.size())
+                                << name << " " << modes[mode];
                         }
                         for (size_t row = 0; row < rows.size(); ++row) {
                             ASSERT_EQ(candidates[row],
@@ -1011,8 +1020,7 @@ TEST(FmIndexExpressionTest, DISABLED_RegexEndToEndBenchmark) {
             rows[i] = "RAREwrong" + rows[i];  // rejected by exact recheck
         }
     }
-    auto indexed =
-        LoadSealedFMMatch(rows, {}, false, nullptr, nullptr);
+    auto indexed = LoadSealedFMMatch(rows, {}, false, nullptr, nullptr);
     auto scan = LoadSealedFMMatch(rows, {}, false, nullptr, nullptr, false);
     auto candidate_index = BuildFmPatternReader(rows);
     const std::vector<std::pair<std::string, std::string>> workloads{
@@ -1040,8 +1048,8 @@ TEST(FmIndexExpressionTest, DISABLED_RegexEndToEndBenchmark) {
             segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio()));
     for (const auto& [name, pattern] : workloads) {
         PartialRegexMatcher matcher(pattern);
-        const auto candidates =
-            candidate_index->PatternMatch(pattern, index::PatternOp::RegexMatch);
+        const auto candidates = candidate_index->PatternMatch(
+            pattern, index::PatternOp::RegexMatch);
         RecordProperty(name + "_candidates",
                        static_cast<int>(candidates.count()));
         auto measure = [&](const SealedFMMatch& fixture, bool cold = false) {

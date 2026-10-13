@@ -13,7 +13,8 @@
 
 #include "common/StructElementOffsets.h"
 
-TEST(StructElementOffsetsSealedTest, BuildAllZerosKeepsEmptyRangesAcrossRepeatedConstruction) {
+TEST(StructElementOffsetsSealedTest,
+     BuildAllZerosKeepsEmptyRangesAcrossRepeatedConstruction) {
     constexpr int64_t kRowCount = 1000;
     auto offsets = milvus::StructElementOffsetsSealed::BuildAllZeros(kRowCount);
     ASSERT_NE(offsets, nullptr);

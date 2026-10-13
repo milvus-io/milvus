@@ -48,8 +48,8 @@ class LocalDirectory {
     CreateOwned(const std::string& parent,
                 const char* pattern,
                 std::string_view context) {
-        auto result = std::make_shared<LocalDirectory>(
-            Pattern(parent, pattern, context));
+        auto result =
+            std::make_shared<LocalDirectory>(Pattern(parent, pattern, context));
         result->Create(parent, context);
         return result;
     }

@@ -533,9 +533,11 @@ TEST_P(ExprTest, TestCompareWithScalarIndex) {
         *seg,
         i32_fid,
         DataType::INT32,
-        test::consumer::BuildScalarReader<int32_t>(
-            i32_fid, DataType::INT32, index::ASCENDING_SORT, N,
-            age32_col.data()));
+        test::consumer::BuildScalarReader<int32_t>(i32_fid,
+                                                   DataType::INT32,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age32_col.data()));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
@@ -544,9 +546,11 @@ TEST_P(ExprTest, TestCompareWithScalarIndex) {
         *seg,
         i64_fid,
         DataType::INT64,
-        test::consumer::BuildScalarReader<int64_t>(
-            i64_fid, DataType::INT64, index::ASCENDING_SORT, N,
-            age64_col.data()));
+        test::consumer::BuildScalarReader<int64_t>(i64_fid,
+                                                   DataType::INT64,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age64_col.data()));
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
     SetSchema(schema);
@@ -662,9 +666,12 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable) {
         *seg,
         nullable_fid,
         DataType::INT32,
-        test::consumer::BuildScalarReader<int32_t>(
-            nullable_fid, DataType::INT32, index::ASCENDING_SORT, N,
-            nullable_col.data(), valid_data_col.data()));
+        test::consumer::BuildScalarReader<int32_t>(nullable_fid,
+                                                   DataType::INT32,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   nullable_col.data(),
+                                                   valid_data_col.data()));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
@@ -673,9 +680,11 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable) {
         *seg,
         i64_fid,
         DataType::INT64,
-        test::consumer::BuildScalarReader<int64_t>(
-            i64_fid, DataType::INT64, index::ASCENDING_SORT, N,
-            age64_col.data()));
+        test::consumer::BuildScalarReader<int64_t>(i64_fid,
+                                                   DataType::INT64,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age64_col.data()));
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
     SetSchema(schema);
@@ -791,9 +800,12 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable2) {
         *seg,
         nullable_fid,
         DataType::INT32,
-        test::consumer::BuildScalarReader<int32_t>(
-            nullable_fid, DataType::INT32, index::ASCENDING_SORT, N,
-            nullable_col.data(), valid_data_col.data()));
+        test::consumer::BuildScalarReader<int32_t>(nullable_fid,
+                                                   DataType::INT32,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   nullable_col.data(),
+                                                   valid_data_col.data()));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
@@ -802,9 +814,11 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable2) {
         *seg,
         i64_fid,
         DataType::INT64,
-        test::consumer::BuildScalarReader<int64_t>(
-            i64_fid, DataType::INT64, index::ASCENDING_SORT, N,
-            age64_col.data()));
+        test::consumer::BuildScalarReader<int64_t>(i64_fid,
+                                                   DataType::INT64,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age64_col.data()));
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
     SetSchema(schema);

@@ -40,17 +40,18 @@ class RTreeBuildSessionTest : public SourceBuildTest {
     WriteGeometry(const std::vector<std::string>& values,
                   const std::vector<uint8_t>& validity = {}) {
         const auto prepared = Prepare(DataType::GEOMETRY,
-                                       DataType::NONE,
-                                       !validity.empty(),
-                                       index::RTREE_INDEX_TYPE,
-                                       values.size(),
-                                       0);
+                                      DataType::NONE,
+                                      !validity.empty(),
+                                      index::RTREE_INDEX_TYPE,
+                                      values.size(),
+                                      0);
         auto data = storage::CreateFieldData(
             DataType::GEOMETRY, DataType::NONE, !validity.empty());
         if (validity.empty()) {
             data->FillFieldData(values.data(), values.size());
         } else {
-            data->FillFieldData(values.data(), validity.data(), values.size(), 0);
+            data->FillFieldData(
+                values.data(), validity.data(), values.size(), 0);
         }
         WriteInsert(prepared, data);
         return prepared;
@@ -68,10 +69,12 @@ TEST_F(RTreeBuildSessionTest, BinlogBuildPublishesOnePackedArtifact) {
     const auto reader = Open(prepared, stats);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), values.size());
-    const auto* spatial = dynamic_cast<const index::ISpatialReader*>(reader.get());
+    const auto* spatial =
+        dynamic_cast<const index::ISpatialReader*>(reader.get());
     ASSERT_NE(spatial, nullptr);
     const Geometry query(GetThreadLocalGEOSContext(), "POINT(0 0)");
-    const auto candidates = spatial->Candidates(index::SpatialOp::Intersects, query);
+    const auto candidates =
+        spatial->Candidates(index::SpatialOp::Intersects, query);
     ASSERT_EQ(candidates.size(), values.size());
     EXPECT_TRUE(candidates[0]);
     EXPECT_FALSE(candidates[1]);
@@ -82,8 +85,9 @@ TEST_F(RTreeBuildSessionTest, PackedLoadResolvesBasenameAndFullPath) {
     const auto prepared = WriteGeometry(values);
     const auto stats = Publish(prepared);
     ASSERT_EQ(stats.Files().size(), 1);
-    const auto basename =
-        std::filesystem::path(stats.Files().front().file_name).filename().string();
+    const auto basename = std::filesystem::path(stats.Files().front().file_name)
+                              .filename()
+                              .string();
     const auto by_name = Open(prepared, stats, false, {basename});
     const auto by_path =
         Open(prepared, stats, false, {directory_->Path() + "/" + basename});
@@ -95,16 +99,15 @@ TEST_F(RTreeBuildSessionTest, PackedLoadResolvesBasenameAndFullPath) {
 
 TEST_F(RTreeBuildSessionTest, MissingRemoteArtifactFailsLoad) {
     const auto prepared = Prepare(DataType::GEOMETRY,
-                                   DataType::NONE,
-                                   false,
-                                   index::RTREE_INDEX_TYPE,
-                                   2,
-                                   0);
-    EXPECT_THROW(static_cast<void>(Open(prepared,
-                                        storage::ArtifactStats{},
-                                        false,
-                                        {"does_not_exist.bgi"})),
-                 SegcoreError);
+                                  DataType::NONE,
+                                  false,
+                                  index::RTREE_INDEX_TYPE,
+                                  2,
+                                  0);
+    EXPECT_THROW(
+        static_cast<void>(Open(
+            prepared, storage::ArtifactStats{}, false, {"does_not_exist.bgi"})),
+        SegcoreError);
 }
 
 TEST_F(RTreeBuildSessionTest, LargeBinlogRoundTripPreservesRows) {
@@ -125,10 +128,10 @@ TEST_F(RTreeBuildSessionTest, LargeBinlogRoundTripPreservesRows) {
 
 TEST_F(RTreeBuildSessionTest, BinlogNullAndCorruptWkbKeepAbsoluteRows) {
     std::vector<std::string> values{Wkb("POINT(0 0)"),
-                                     Wkb("POINT(1 1)"),
-                                     Wkb("POINT(2 2)"),
-                                     Wkb("POINT(3 3)"),
-                                     Wkb("POINT(4 4)")};
+                                    Wkb("POINT(1 1)"),
+                                    Wkb("POINT(2 2)"),
+                                    Wkb("POINT(3 3)"),
+                                    Wkb("POINT(4 4)")};
     values[3].resize(values[3].size() / 2);
     const auto prepared = WriteGeometry(values, {0b00011101});
     const auto stats = Publish(prepared);
@@ -136,7 +139,8 @@ TEST_F(RTreeBuildSessionTest, BinlogNullAndCorruptWkbKeepAbsoluteRows) {
     ASSERT_NE(reader, nullptr);
     ASSERT_EQ(reader->Count(), values.size());
     const auto* nulls = dynamic_cast<const index::INullReader*>(reader.get());
-    const auto* spatial = dynamic_cast<const index::ISpatialReader*>(reader.get());
+    const auto* spatial =
+        dynamic_cast<const index::ISpatialReader*>(reader.get());
     ASSERT_NE(nulls, nullptr);
     ASSERT_NE(spatial, nullptr);
     const auto null_bits = nulls->IsNull();
@@ -145,7 +149,8 @@ TEST_F(RTreeBuildSessionTest, BinlogNullAndCorruptWkbKeepAbsoluteRows) {
         EXPECT_EQ(null_bits[row], row == 1);
     }
     const Geometry query(GetThreadLocalGEOSContext(), "POINT(0 0)");
-    const auto candidates = spatial->Candidates(index::SpatialOp::Intersects, query);
+    const auto candidates =
+        spatial->Candidates(index::SpatialOp::Intersects, query);
     ASSERT_EQ(candidates.size(), values.size());
     EXPECT_TRUE(candidates[0]);
     EXPECT_TRUE(candidates[3]);

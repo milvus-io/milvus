@@ -29,8 +29,10 @@ TEST(TextArtifactPublicationTest, LegacyAndPackedPublishRelativeTextLogNames) {
         paths.reserve(stats.Files().size());
         for (const auto& file : stats.Files()) {
             EXPECT_FALSE(file.file_name.empty());
-            EXPECT_EQ(file.file_name.find(fixture.root->Path()), std::string::npos);
-            EXPECT_EQ(file.file_name.find(TEXT_LOG_ROOT_PATH), std::string::npos);
+            EXPECT_EQ(file.file_name.find(fixture.root->Path()),
+                      std::string::npos);
+            EXPECT_EQ(file.file_name.find(TEXT_LOG_ROOT_PATH),
+                      std::string::npos);
             EXPECT_GT(file.file_size, 0);
             paths.push_back(file.file_name);
         }
@@ -43,13 +45,26 @@ TEST(TextArtifactPublicationTest, LegacyAndPackedPublishRelativeTextLogNames) {
                           {"value_type", DataType::VARCHAR},
                           {"nested", false},
                           {"analyzer_params", "{}"}};
-        const auto storage_config = packed
-            ? std::variant<index::PackedIndexStorageConfig, index::LegacyIndexStorageConfig>{index::PackedIndexStorageConfig{ArtifactStorageNamespace::TextLog}}
-            : std::variant<index::PackedIndexStorageConfig, index::LegacyIndexStorageConfig>{index::LegacyIndexStorageConfig{V1SourceLayout::DiskFiles, ArtifactStorageNamespace::TextLog}};
-        auto reader = index::LoaderRegistry::Instance().Lookup(index::families::kText).Load(
-            {index::IndexFiles{fixture.context, paths, storage_config}, options});
+        const auto storage_config =
+            packed
+                ? std::variant<
+                      index::PackedIndexStorageConfig,
+                      index::
+                          LegacyIndexStorageConfig>{index::PackedIndexStorageConfig{
+                      ArtifactStorageNamespace::TextLog}}
+                : std::variant<index::PackedIndexStorageConfig,
+                               index::LegacyIndexStorageConfig>{
+                      index::LegacyIndexStorageConfig{
+                          V1SourceLayout::DiskFiles,
+                          ArtifactStorageNamespace::TextLog}};
+        auto reader = index::LoaderRegistry::Instance()
+                          .Lookup(index::families::kText)
+                          .Load({index::IndexFiles{
+                                     fixture.context, paths, storage_config},
+                                 options});
         ASSERT_NE(reader, nullptr);
-        const auto* text = dynamic_cast<const index::ITextMatchReader*>(reader.get());
+        const auto* text =
+            dynamic_cast<const index::ITextMatchReader*>(reader.get());
         ASSERT_NE(text, nullptr);
         const auto hits = text->MatchQuery("alpha", 1);
         ASSERT_EQ(hits.size(), 3);

@@ -333,7 +333,8 @@ VectorIndexReader::GetSparseVector(const DatasetPtr& dataset) const {
         const knowhere::sparse::SparseRow<SparseValueType>[]>(tensor);
 }
 
-MetricType VectorIndexReader::Metric() const {
+MetricType
+VectorIndexReader::Metric() const {
     return engine_.Metric();
 }
 
@@ -378,13 +379,15 @@ VectorIndexReader::IsRowValid(int64_t logical_offset) const {
 }
 
 void
-VectorIndexReader::ApplyValidDataByRange(int64_t logical_offset, int64_t count,
-                                       TargetBitmapView valid_result) const {
+VectorIndexReader::ApplyValidDataByRange(int64_t logical_offset,
+                                         int64_t count,
+                                         TargetBitmapView valid_result) const {
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity range result size mismatch");
-    IdMap().AndValidityByRange(logical_offset, static_cast<size_t>(count),
-                              reinterpret_cast<uint8_t*>(valid_result.data()),
-                              valid_result.offset());
+    IdMap().AndValidityByRange(logical_offset,
+                               static_cast<size_t>(count),
+                               reinterpret_cast<uint8_t*>(valid_result.data()),
+                               valid_result.offset());
     if (IsGrowingGeneration()) {
         for (int64_t i = 0; i < count; ++i) {
             const auto row = static_cast<uint64_t>(logical_offset) +
@@ -397,12 +400,14 @@ VectorIndexReader::ApplyValidDataByRange(int64_t logical_offset, int64_t count,
 }
 
 void
-VectorIndexReader::ApplyValidDataByOffsets(const int64_t* offsets, int64_t count,
-                                         TargetBitmapView valid_result) const {
+VectorIndexReader::ApplyValidDataByOffsets(
+    const int64_t* offsets,
+    int64_t count,
+    TargetBitmapView valid_result) const {
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity offset result size mismatch");
-    IdMap().ApplyValidityByOffsets(offsets, static_cast<size_t>(count),
-        [&](size_t i, bool valid) {
+    IdMap().ApplyValidityByOffsets(
+        offsets, static_cast<size_t>(count), [&](size_t i, bool valid) {
             if (!valid || (IsGrowingGeneration() &&
                            (offsets[i] < 0 || offsets[i] >= logical_count_))) {
                 valid_result[i] = false;

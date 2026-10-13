@@ -100,8 +100,7 @@ IndexInventory::Slots() const {
 }
 
 IndexPin
-IndexInventory::PinIndex(milvus::OpContext* op_ctx,
-                         const IndexKey& key) const {
+IndexInventory::PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const {
     const auto it = entries_.find(key);
     if (it == entries_.end()) {
         return {};

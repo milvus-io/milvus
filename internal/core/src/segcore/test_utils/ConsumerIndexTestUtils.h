@@ -49,7 +49,8 @@ BuildScalarReader(FieldId field_id,
                   const T* values,
                   const bool* validity = nullptr,
                   Config params = Config::object()) {
-    auto field = std::make_shared<FieldData<T>>(field_type, validity != nullptr);
+    auto field =
+        std::make_shared<FieldData<T>>(field_type, validity != nullptr);
     FieldDataBase& output = *field;
     if (validity != nullptr) {
         std::vector<uint8_t> packed((rows + 7) / 8, 0);
@@ -96,7 +97,8 @@ BuildVectorReader(DataType field_type,
                                           .field_type = field_type,
                                           .index_engine_version = version,
                                           .params = std::move(params)});
-    std::unique_ptr<index::IArtifactBuilder<index::VectorBuildInput<T>>> builder;
+    std::unique_ptr<index::IArtifactBuilder<index::VectorBuildInput<T>>>
+        builder;
     if (use_build_pool) {
         builder = index::BuilderRegistry<index::VectorBuildInput<T>>::Instance()
                       .Create(adapted.family, adapted.params);
@@ -105,9 +107,13 @@ BuildVectorReader(DataType field_type,
         // retains the existing explicit no-build-pool consumer scenario.
         AssertInfo(adapted.family == index::families::kVectorMem,
                    "resident consumer fixture needs a memory vector family");
-        builder = std::make_unique<index::VectorMemBuilder<T>>(
-            DataType::NONE, index_type, metric, version, dim, adapted.params,
-            false);
+        builder = std::make_unique<index::VectorMemBuilder<T>>(DataType::NONE,
+                                                               index_type,
+                                                               metric,
+                                                               version,
+                                                               dim,
+                                                               adapted.params,
+                                                               false);
     }
     AssertInfo(builder != nullptr,
                "consumer vector fixture has no resident-input builder");
@@ -133,11 +139,10 @@ BuildVectorReader(DataType field_type,
     config.storage_type = "local";
     config.root_path = directory->Path();
     const auto id = static_cast<int64_t>(expr_index::NextFixtureId()) + 100000;
-    storage::FileManagerContext context(
-        storage::FieldDataMeta{1, 2, id, 100},
-        storage::IndexMeta{id, 100, id, 1},
-        storage::CreateChunkManager(config),
-        storage::InitArrowFileSystem(config));
+    storage::FileManagerContext context(storage::FieldDataMeta{1, 2, id, 100},
+                                        storage::IndexMeta{id, 100, id, 1},
+                                        storage::CreateChunkManager(config),
+                                        storage::InitArrowFileSystem(config));
     storage::V1DiskSink sink(context);
     artifact->Serialize(sink);
     const auto stats = sink.Finish();
@@ -150,13 +155,16 @@ BuildVectorReader(DataType field_type,
     options.params = adapted.params;
     options.estimated_bytes = stats.MemSize();
     context.set_for_loading_index(true);
-    const auto loader = index::LoaderRegistry::Instance().Lookup(adapted.family);
-    AssertInfo(static_cast<bool>(loader), "consumer vector fixture has no loader");
+    const auto loader =
+        index::LoaderRegistry::Instance().Lookup(adapted.family);
+    AssertInfo(static_cast<bool>(loader),
+               "consumer vector fixture has no loader");
     const auto caps = loader.derive_caps(adapted.params);
-    auto reader = loader.Load(
-        {index::IndexFiles{std::move(context), std::move(files),
-                           index::LegacyIndexStorageConfig{}},
-         std::move(options)});
+    auto reader =
+        loader.Load({index::IndexFiles{std::move(context),
+                                       std::move(files),
+                                       index::LegacyIndexStorageConfig{}},
+                     std::move(options)});
     sink.ReleaseLocalStaging();
     return {std::move(reader), adapted.family, std::move(adapted.params), caps};
 }
@@ -164,9 +172,9 @@ BuildVectorReader(DataType field_type,
 inline std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>>
 CreateReaderCache(index::IIndexReaderBasePtr reader,
                   OpContext** observed = nullptr) {
-    std::unique_ptr<cachinglayer::Translator<index::IIndexReaderBase>> translator =
-        std::make_unique<expr_index::ReaderTranslator>(std::move(reader),
-                                                        observed);
+    std::unique_ptr<cachinglayer::Translator<index::IIndexReaderBase>>
+        translator = std::make_unique<expr_index::ReaderTranslator>(
+            std::move(reader), observed);
     return cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator));
 }
@@ -188,17 +196,16 @@ MakeLoadIndexInfo(OpenedIndex opened,
     info.index_caps = opened.caps;
     // Nullable vector readers count physical vectors; segment metadata must
     // retain the logical parent-row count from the build input.
-    info.num_rows = opened.params.value(INDEX_NUM_ROWS_KEY,
-                                        opened.reader->Count());
+    info.num_rows =
+        opened.params.value(INDEX_NUM_ROWS_KEY, opened.reader->Count());
     info.index_size = opened.reader->MemoryUsage();
     if (const auto* vector =
             dynamic_cast<const index::IVectorReader*>(opened.reader.get())) {
         info.dim = vector->Dim();
     }
     for (const auto& [key, value] : opened.params.items()) {
-        info.index_params.emplace(key, value.is_string()
-                                           ? value.get<std::string>()
-                                           : value.dump());
+        info.index_params.emplace(
+            key, value.is_string() ? value.get<std::string>() : value.dump());
     }
     info.load_resource_request = LoadResourceRequest{};
     info.cache_index = CreateReaderCache(std::move(opened.reader));

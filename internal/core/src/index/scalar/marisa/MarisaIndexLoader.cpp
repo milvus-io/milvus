@@ -649,7 +649,7 @@ MarisaIndexLoader::LoadLegacy(storage::FileSource& source,
     auto projection = PrepareJsonProjectedOpen(families::kMarisa, source, opts);
     auto storage = (co_await LoadState(use_async, source, opts));
     auto reader = std::make_unique<MarisaIndexReader>(std::move(storage));
-    co_return(co_await FinishJsonProjectedOpenAsync(
+    co_return (co_await FinishJsonProjectedOpenAsync(
         use_async, std::move(projection), source, std::move(reader)));
 }
 

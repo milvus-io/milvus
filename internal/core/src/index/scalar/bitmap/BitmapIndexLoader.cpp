@@ -1126,7 +1126,7 @@ BitmapIndexLoader::LoadLegacy(storage::FileSource& source,
     auto projection = PrepareJsonProjectedOpen(families::kBitmap, source, opts);
     auto inner = co_await LoadBitmapPayload(
         use_async, source, opts, state_->params, state_->meta, state_->layout);
-    co_return(co_await FinishJsonProjectedOpenAsync(
+    co_return (co_await FinishJsonProjectedOpenAsync(
         use_async, std::move(projection), source, std::move(inner)));
 }
 

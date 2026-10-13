@@ -117,8 +117,8 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     GEOSContextHandle_t ctx = GetThreadLocalGEOSContext();
     Geometry query_geom(ctx, p.query_wkt.c_str());
 
-    auto tmp = spatial_reader_->Candidates(gis_detail::ToSpatialOp(p.op),
-                                           query_geom);
+    auto tmp =
+        spatial_reader_->Candidates(gis_detail::ToSpatialOp(p.op), query_geom);
     // Query() returns a bitmap sized index->Count() -- every row appended to
     // the index -- while Eval combines it into a candidate bitmap sized
     // active_count_, the MVCC-visible row count at the query timestamp. On a

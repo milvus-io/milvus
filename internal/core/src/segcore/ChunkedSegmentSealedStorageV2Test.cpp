@@ -741,13 +741,16 @@ TEST_P(TestLazyManifest, LazyManifestPreparesInterimIndex) {
             ASSERT_TRUE(column->IsLazy());
             if (num_rows == 1) {
                 EXPECT_FALSE(column->IsMaterialized());
-                EXPECT_EQ((LazyTestIndexSlot(snapshot->runtime->indexes, vec) != nullptr), 0);
+                EXPECT_EQ((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
+                           nullptr),
+                          0);
                 EXPECT_FALSE(snapshot->binlog_index_bitset[vec.get() -
                                                            START_USER_FIELDID]);
                 continue;
             }
 
-            ASSERT_TRUE((LazyTestIndexSlot(snapshot->runtime->indexes, vec) != nullptr));
+            ASSERT_TRUE((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
+                         nullptr));
             EXPECT_TRUE(
                 snapshot->binlog_index_bitset[vec.get() - START_USER_FIELDID]);
             auto slot = LazyTestIndexSlot(snapshot->runtime->indexes, vec);

@@ -37,11 +37,10 @@
 namespace milvus::index {
 
 template <typename T>
-class BitmapIndexReader
-    : public IIndexReaderBase,
-      public IScalarPredicateReader<T>,
-      public IScalarValueReader<T>,
-      public INullReader {
+class BitmapIndexReader : public IIndexReaderBase,
+                          public IScalarPredicateReader<T>,
+                          public IScalarValueReader<T>,
+                          public INullReader {
  public:
     ~BitmapIndexReader() override = default;
 };
@@ -120,10 +119,9 @@ struct BitmapReaderOptions {
 
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
-CreateBitmapIndexReader(
-    BitmapRoaringPostingMap<T> postings,
-    BitmapReaderOptions options,
-    std::shared_ptr<BitmapMmapOwner> mmap_owner = nullptr);
+CreateBitmapIndexReader(BitmapRoaringPostingMap<T> postings,
+                        BitmapReaderOptions options,
+                        std::shared_ptr<BitmapMmapOwner> mmap_owner = nullptr);
 
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>

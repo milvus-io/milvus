@@ -339,12 +339,11 @@ RunBuildFailure(const ReaderBackend& backend,
 }
 
 template <typename F, typename T>
-concept ObservationCallback = requires(std::decay_t<F>& callback,
-                                       const ReaderBackend& backend,
-                                       const ScalarTestData<T>& data,
-                                       IIndexReaderBasePtr& reader) {
-    callback(backend, data, reader);
-};
+concept ObservationCallback =
+    requires(std::decay_t<F>& callback,
+             const ReaderBackend& backend,
+             const ScalarTestData<T>& data,
+             IIndexReaderBasePtr& reader) { callback(backend, data, reader); };
 
 }  // namespace detail
 
@@ -454,7 +453,7 @@ class CaseBody {
     }
 
     template <typename F>
-    requires detail::ObservationCallback<F, T>
+        requires detail::ObservationCallback<F, T>
     CaseBody(F&& observe)
         : CaseBody(Observe<T>{.run = std::forward<F>(observe)}) {
     }

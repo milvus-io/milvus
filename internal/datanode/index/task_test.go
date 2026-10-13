@@ -64,6 +64,7 @@ func (index *emptyIndex) Delete() error {
 	index.deleted = true
 	return nil
 }
+
 func (*emptyIndex) UpLoad() (*cgopb.IndexStats, error) {
 	return &cgopb.IndexStats{}, nil
 }

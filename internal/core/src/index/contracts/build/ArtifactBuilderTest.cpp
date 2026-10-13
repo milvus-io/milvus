@@ -160,8 +160,8 @@ RunScalarValidityBoundary(const ReaderBackend& backend,
         }
     }
     const ScalarTestInput<int64_t> input(data);
-    auto builder = backend.CreateBuilder<int64_t>(
-        {.row_count = data.values.size()});
+    auto builder =
+        backend.CreateBuilder<int64_t>({.row_count = data.values.size()});
     ASSERT_NE(builder, nullptr);
     const auto initial_spec = builder->InputSpec();
     EXPECT_EQ(builder->InputSpec().side_inputs, initial_spec.side_inputs);
@@ -169,8 +169,8 @@ RunScalarValidityBoundary(const ReaderBackend& backend,
 
     auto artifact = std::move(*builder).Build(input.View());
     ASSERT_NE(artifact, nullptr);
-    auto reader = backend.Open(std::move(artifact),
-                               {.row_count = data.values.size()});
+    auto reader =
+        backend.Open(std::move(artifact), {.row_count = data.values.size()});
     ASSERT_NE(reader, nullptr);
     ASSERT_EQ(reader->Count(), 3);
     const auto* null_reader = dynamic_cast<const INullReader*>(reader.get());
@@ -202,11 +202,13 @@ ScalarValidityBoundaryCases() {
                     std::string_view(scenario.first) != "AllValidImplicit";
                 result.push_back({
                     .name = backend.Name() + "_" + scenario.first,
-                    .run = [backend, all_null = scenario.second,
-                            validity_present] {
-                        RunScalarValidityBoundary(
-                            backend, all_null, validity_present);
-                    },
+                    .run =
+                        [backend,
+                         all_null = scenario.second,
+                         validity_present] {
+                            RunScalarValidityBoundary(
+                                backend, all_null, validity_present);
+                        },
                 });
             }
         }
@@ -653,9 +655,9 @@ TEST(ArtifactBuilderInputTest, PreparedFilesRejectMissingAndEmptyPaths) {
 
     auto empty_validity = create();
     ASSERT_NE(empty_validity, nullptr);
-    EXPECT_ANY_THROW(std::move(*empty_validity)
-                         .Build({.raw_path = "/dev/null",
-                                 .validity_path = std::string{}}));
+    EXPECT_ANY_THROW(
+        std::move(*empty_validity)
+            .Build({.raw_path = "/dev/null", .validity_path = std::string{}}));
 
     auto empty_offsets = create();
     ASSERT_NE(empty_offsets, nullptr);
@@ -726,10 +728,11 @@ TEST_F(VectorSideInputFixture,
     options.params.erase(VEC_OPT_FIELDS_PATH);
     auto source = std::make_shared<TestArtifactSource>(
         persisted, storage::Generation::V1V2);
-    auto reader = LoaderRegistry::Instance()
-                      .Lookup(adapted.family)
-                      .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
-                             options});
+    auto reader =
+        LoaderRegistry::Instance()
+            .Lookup(adapted.family)
+            .Load(
+                {OpenedIndexSource{LegacyIndexSource{source, false}}, options});
     ASSERT_NE(reader, nullptr);
     ExpectReaderResults(*reader, knowhere::IndexEnum::INDEX_HNSW);
 }
@@ -767,17 +770,17 @@ TEST_F(VectorSideInputFixture,
             WritePreparedFiles(physical, raw_path, scalar_path));
 
         auto missing_delivery =
-            BuilderRegistry<PreparedVectorBuildFiles<float>>::Instance()
-                .Create(adapted.family, adapted.params);
+            BuilderRegistry<PreparedVectorBuildFiles<float>>::Instance().Create(
+                adapted.family, adapted.params);
         ASSERT_NE(missing_delivery, nullptr);
         ExpectDeclaredField(*missing_delivery);
-        EXPECT_ANY_THROW(std::move(*missing_delivery)
-                             .Build({.raw_path = raw_path}));
+        EXPECT_ANY_THROW(
+            std::move(*missing_delivery).Build({.raw_path = raw_path}));
 
         auto caller_params = adapted.params;
         auto builder =
-            BuilderRegistry<PreparedVectorBuildFiles<float>>::Instance()
-                .Create(adapted.family, caller_params);
+            BuilderRegistry<PreparedVectorBuildFiles<float>>::Instance().Create(
+                adapted.family, caller_params);
         ASSERT_NE(builder, nullptr);
         ExpectDeclaredField(*builder);
         caller_params[VEC_OPT_FIELDS] = OptFieldT{};
@@ -796,12 +799,18 @@ TEST_F(VectorSideInputFixture,
     config.storage_type = "local";
     config.root_path = root->Path() + "/objects/";
     std::filesystem::create_directories(config.root_path);
-    storage::FileManagerContext context(
-        {1, 2, 3, 100},
-        {3, 100, 1000, 1, "contract_vector_side_input", "vector",
-         DataType::VECTOR_FLOAT, kDim, false},
-        storage::CreateChunkManager(config),
-        storage::InitArrowFileSystem(config));
+    storage::FileManagerContext context({1, 2, 3, 100},
+                                        {3,
+                                         100,
+                                         1000,
+                                         1,
+                                         "contract_vector_side_input",
+                                         "vector",
+                                         DataType::VECTOR_FLOAT,
+                                         kDim,
+                                         false},
+                                        storage::CreateChunkManager(config),
+                                        storage::InitArrowFileSystem(config));
     context.use_async_load = false;
     storage::V1DiskSink sink(context);
     artifact->Serialize(sink);
@@ -819,14 +828,14 @@ TEST_F(VectorSideInputFixture,
     options.params.erase(VEC_OPT_FIELDS);
     options.params.erase(VEC_OPT_FIELDS_PATH);
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
-    auto reader = LoaderRegistry::Instance()
-                      .Lookup(adapted.family)
-                      .Load({IndexFiles{
-                                 context,
-                                 std::move(paths),
-                                 LegacyIndexStorageConfig{
-                                     storage::V1SourceLayout::DiskFiles}},
-                             options});
+    auto reader =
+        LoaderRegistry::Instance()
+            .Lookup(adapted.family)
+            .Load({IndexFiles{context,
+                              std::move(paths),
+                              LegacyIndexStorageConfig{
+                                  storage::V1SourceLayout::DiskFiles}},
+                   options});
     ASSERT_NE(reader, nullptr);
     ExpectReaderResults(*reader, knowhere::IndexEnum::INDEX_DISKANN);
 #endif

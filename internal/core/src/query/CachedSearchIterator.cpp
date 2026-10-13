@@ -69,8 +69,8 @@ CachedSearchIterator::CachedSearchIterator(
     index::CheckAndUpdateKnowhereRangeSearchParam(
         search_params, batch_size_, reader.Metric(), search_json);
 
-    auto expected_iterators = reader.Iterators(
-        query_ds, search_json, bitset, op_context);
+    auto expected_iterators =
+        reader.Iterators(query_ds, search_json, bitset, op_context);
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {

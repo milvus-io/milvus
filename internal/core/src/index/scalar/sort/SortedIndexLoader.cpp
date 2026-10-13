@@ -182,7 +182,7 @@ ReadOptionalPod(bool use_async,
     if (!source.HasEntry(name)) {
         co_return std::nullopt;
     }
-    co_return(co_await ReadRequiredPod<T>(use_async, source, name));
+    co_return (co_await ReadRequiredPod<T>(use_async, source, name));
 }
 
 /** @brief Persisted coordinate count and optional legacy nesting metadata. */
@@ -1112,7 +1112,7 @@ SortedIndexLoader::LoadLegacy(storage::FileSource& source,
                       "unsupported sorted value type {}",
                       static_cast<int>(params.value_type));
     }
-    co_return(co_await FinishJsonProjectedOpenAsync(
+    co_return (co_await FinishJsonProjectedOpenAsync(
         use_async, std::move(projection), source, std::move(inner)));
 }
 

@@ -286,11 +286,12 @@ BuildNullableFloatVectorColumn(const FieldMeta& field_meta,
 }
 
 test::consumer::OpenedIndex
-BuildNullableVectorIndex(int64_t total_count,
-                         int64_t dim,
-                         const bool* valid_data,
-                         const std::vector<float>& vectors,
-                         const std::string& index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+BuildNullableVectorIndex(
+    int64_t total_count,
+    int64_t dim,
+    const bool* valid_data,
+    const std::vector<float>& vectors,
+    const std::string& index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
     return test::consumer::BuildVectorReader<float>(
         DataType::VECTOR_FLOAT,
         index_type,
@@ -298,7 +299,8 @@ BuildNullableVectorIndex(int64_t total_count,
         dim,
         total_count,
         vectors.data(),
-        index_type == "HNSW" ? Config{{"M", 16}, {"efConstruction", 100}} : Config{{knowhere::indexparam::NLIST, "128"}},
+        index_type == "HNSW" ? Config{{"M", 16}, {"efConstruction", 100}}
+                             : Config{{knowhere::indexparam::NLIST, "128"}},
         true,
         ValidityView::FromExpanded(valid_data),
         vectors.size() / dim);
@@ -582,7 +584,8 @@ TEST(StrictGroupHnswSearch, PreservesParametersForIndependentPhaseTwo) {
     std::fill_n(valid.get(), n, true);
     auto index =
         BuildNullableVectorIndex(n, kDim, valid.get(), vectors, "HNSW");
-    const auto& entry = dynamic_cast<const index::IVectorReader&>(*index.reader);
+    const auto& entry =
+        dynamic_cast<const index::IVectorReader&>(*index.reader);
     for (const auto& [ef, as_string] : std::vector<std::pair<int, bool>>{
              {0, false}, {32, false}, {64, false}, {32, true}, {64, true}}) {
         SCOPED_TRACE(ef);
@@ -673,7 +676,8 @@ TEST(StrictGroupIvfSearch, IndependentPhaseTwoPreservesSearchParameters) {
     auto valid = std::make_unique<bool[]>(n);
     std::fill_n(valid.get(), n, true);
     auto index = BuildNullableVectorIndex(n, kDim, valid.get(), vectors);
-    const auto& entry = dynamic_cast<const index::IVectorReader&>(*index.reader);
+    const auto& entry =
+        dynamic_cast<const index::IVectorReader&>(*index.reader);
     auto info = MakeGroupBySearchInfo(field, group, knowhere::metric::COSINE);
     info.topk_ = 2;
     info.group_size_ = 5;

@@ -71,7 +71,8 @@ AdaptStorageConfig(const proto::indexcgo::StorageConfig& config) {
     result.talon_coordinator = config.talon_coordinator();
     result.talon_block_size = config.talon_block_size();
     result.talon_max_idle_per_addr = config.talon_max_idle_per_addr();
-    result.talon_enable_for_external_table = config.talon_enable_for_external_table();
+    result.talon_enable_for_external_table =
+        config.talon_enable_for_external_table();
     return result;
 }
 

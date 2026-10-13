@@ -35,9 +35,8 @@ namespace milvus::index {
 class VectorMemArtifact final : public storage::Artifact,
                                 public IReaderConvertible {
  public:
-    explicit VectorMemArtifact(
-        KnowhereEngine engine,
-        std::vector<size_t> empty_emb_list_offsets = {});
+    explicit VectorMemArtifact(KnowhereEngine engine,
+                               std::vector<size_t> empty_emb_list_offsets = {});
 
     ~VectorMemArtifact() override = default;
 
@@ -47,7 +46,8 @@ class VectorMemArtifact final : public storage::Artifact,
     Serialize(storage::FileSink& sink) const override;
 
     IIndexReaderBasePtr
-    IntoReader() && override;
+        IntoReader() &&
+        override;
 
  private:
     KnowhereEngine engine_;

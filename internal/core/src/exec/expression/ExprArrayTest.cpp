@@ -200,12 +200,22 @@ MakeSealedVectorIndexOnlySegment(const SchemaPtr& schema,
     auto vectors =
         MakeCompactFloatVectors(std::max<int64_t>(valid_count, 1), dim);
     std::unique_ptr<bool[]> valid_data_bool(new bool[row_count]);
-    for (int64_t i = 0; i < row_count; ++i) { valid_data_bool[i] = valid_data[i]; }
+    for (int64_t i = 0; i < row_count; ++i) {
+        valid_data_bool[i] = valid_data[i];
+    }
     auto opened = test::consumer::BuildVectorReader<float>(
-        DataType::VECTOR_FLOAT, knowhere::IndexEnum::INDEX_FAISS_IDMAP,
-        knowhere::metric::L2, dim, row_count, vectors.data(), Config::object(),
-        true, ValidityView::FromExpanded(valid_data_bool.get()), valid_count);
-    const auto* vec_indexing = dynamic_cast<const index::IVectorReader*>(opened.reader.get());
+        DataType::VECTOR_FLOAT,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        dim,
+        row_count,
+        vectors.data(),
+        Config::object(),
+        true,
+        ValidityView::FromExpanded(valid_data_bool.get()),
+        valid_count);
+    const auto* vec_indexing =
+        dynamic_cast<const index::IVectorReader*>(opened.reader.get());
     AssertInfo(vec_indexing != nullptr, "invalid generated vector reader");
 
     TargetBitmap range_storage(row_count + 6, false);
@@ -403,9 +413,8 @@ class ArrayEqualityCountingIndex final
               dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(
                   reader_.get())),
           nulls_(dynamic_cast<const index::INullReader*>(reader_.get())) {
-        AssertInfo(
-            predicates_ != nullptr && nulls_ != nullptr,
-            "ARRAY equality fixture needs predicate and null readers");
+        AssertInfo(predicates_ != nullptr && nulls_ != nullptr,
+                   "ARRAY equality fixture needs predicate and null readers");
     }
 
     mutable size_t callback_calls = 0;
@@ -474,7 +483,6 @@ class ArrayEqualityCountingIndex final
     const index::IScalarPredicateReader<int64_t>* predicates_;
     const index::INullReader* nulls_;
 };
-
 
 }  // namespace
 
@@ -1178,14 +1186,23 @@ TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
                 if (nested) {
                     ASSERT_NE(segment.GetStructElementOffsets(field), nullptr);
                 }
-                auto opened = test::expr_index::BuildIndex(
-                    field, DataType::ARRAY, index::INVERTED_INDEX_TYPE,
-                    {field_data}, Config::object(), DataType::INT64, nested);
-                auto counting = std::make_unique<ArrayEqualityCountingIndex>(std::move(opened.reader));
+                auto opened =
+                    test::expr_index::BuildIndex(field,
+                                                 DataType::ARRAY,
+                                                 index::INVERTED_INDEX_TYPE,
+                                                 {field_data},
+                                                 Config::object(),
+                                                 DataType::INT64,
+                                                 nested);
+                auto counting = std::make_unique<ArrayEqualityCountingIndex>(
+                    std::move(opened.reader));
                 auto* index_ptr = counting.get();
                 opened.reader = std::move(counting);
-                test::expr_index::InstallIndex(segment, field, DataType::ARRAY,
-                                               std::move(opened), DataType::INT64);
+                test::expr_index::InstallIndex(segment,
+                                               field,
+                                               DataType::ARRAY,
+                                               std::move(opened),
+                                               DataType::INT64);
                 ASSERT_TRUE(segment.HasIndex(field));
 
                 const std::vector<std::vector<int64_t>> targets{
@@ -1377,15 +1394,20 @@ TEST(Expr, TestArrayNullExprWithBitmapIndex) {
         storage::CreateFieldData(DataType::ARRAY, DataType::INT64, true);
     field_data->FillFieldData(arrays.data(), valid_bitmap.data(), N, 0);
 
-    auto bitmap_index = test::expr_index::BuildIndex(
-        long_array_fid, DataType::ARRAY, index::BITMAP_INDEX_TYPE, {field_data},
-        Config::object(), DataType::INT64);
+    auto bitmap_index = test::expr_index::BuildIndex(long_array_fid,
+                                                     DataType::ARRAY,
+                                                     index::BITMAP_INDEX_TYPE,
+                                                     {field_data},
+                                                     Config::object(),
+                                                     DataType::INT64);
     ASSERT_EQ(bitmap_index.reader->CoordDomain(), index::Domain::Row);
     ASSERT_FALSE(bitmap_index.caps.nested);
     ASSERT_EQ(bitmap_index.reader->Count(), N);
-    test::expr_index::InstallIndex(
-        *segment, long_array_fid, DataType::ARRAY, std::move(bitmap_index),
-        DataType::INT64);
+    test::expr_index::InstallIndex(*segment,
+                                   long_array_fid,
+                                   DataType::ARRAY,
+                                   std::move(bitmap_index),
+                                   DataType::INT64);
 
     auto null_expr = std::make_shared<expr::NullExpr>(
         expr::ColumnInfo(
@@ -1615,7 +1637,8 @@ TEST(Expr, TestFloatVectorNullExprUsesGrowingIndexValidity) {
     auto index_pin = growing_segment->PinGrowingIndex(vector_fid);
     ASSERT_TRUE(index_pin);
     ASSERT_GE(index_pin.CoveredRowEnd(), N);
-    const auto* vec_index = dynamic_cast<const index::IVectorReader*>(&index_pin.Reader());
+    const auto* vec_index =
+        dynamic_cast<const index::IVectorReader*>(&index_pin.Reader());
     ASSERT_NE(vec_index, nullptr);
     ASSERT_TRUE(vec_index->HasValidData());
 
@@ -3971,12 +3994,19 @@ TEST(Expr, TestArrayContainsForStruct) {
         }
         auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
         field->FillFieldData(arrays.data(), arrays.size());
-        auto arr_index = test::expr_index::BuildIndex(
-            int_array_fid, DataType::ARRAY, index::INVERTED_INDEX_TYPE, {field},
-            Config::object(), DataType::INT32, true);
-        test::expr_index::InstallIndex(
-            *segment, int_array_fid, DataType::ARRAY, std::move(arr_index),
-            DataType::INT32);
+        auto arr_index =
+            test::expr_index::BuildIndex(int_array_fid,
+                                         DataType::ARRAY,
+                                         index::INVERTED_INDEX_TYPE,
+                                         {field},
+                                         Config::object(),
+                                         DataType::INT32,
+                                         true);
+        test::expr_index::InstallIndex(*segment,
+                                       int_array_fid,
+                                       DataType::ARRAY,
+                                       std::move(arr_index),
+                                       DataType::INT32);
 
         // Now search with index
         std::string expr = "array_contains_any(structA[price_array], [5])";

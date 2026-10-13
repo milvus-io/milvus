@@ -115,7 +115,8 @@ NestedIntArrayRows(const std::vector<ScalarFieldProto>& rows,
         values.emplace_back(row);
     }
     const bool nullable = parent_validity != nullptr;
-    auto field_data = std::make_shared<FieldData<Array>>(DataType::ARRAY, nullable);
+    auto field_data =
+        std::make_shared<FieldData<Array>>(DataType::ARRAY, nullable);
     if (nullable) {
         field_data->FillFieldData(
             values.data(), parent_validity, values.size(), 0);
@@ -170,7 +171,8 @@ ExpectNestedHits(const index::IIndexReaderBase& reader,
     }
 }
 
-TEST(MaterializerArrayTest, NullParentsBeforeValidNestedElementsSurviveRoundTrip) {
+TEST(MaterializerArrayTest,
+     NullParentsBeforeValidNestedElementsSurviveRoundTrip) {
     std::vector<ScalarFieldProto> rows(6);
     rows[1].mutable_int_data()->add_data(10);
     rows[1].mutable_int_data()->add_data(20);
@@ -182,8 +184,8 @@ TEST(MaterializerArrayTest, NullParentsBeforeValidNestedElementsSurviveRoundTrip
 
     for (const auto name : {"BitmapInt32Nested", "SortedInt32Nested"}) {
         SCOPED_TRACE(name);
-        auto reader = BuildNestedReader<int32_t>(
-            rows, &parent_validity, name, 5);
+        auto reader =
+            BuildNestedReader<int32_t>(rows, &parent_validity, name, 5);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->CoordDomain(), index::Domain::Element);
         EXPECT_EQ(reader->Count(), 5);
@@ -195,8 +197,7 @@ TEST(MaterializerArrayTest, NullParentsBeforeValidNestedElementsSurviveRoundTrip
             dynamic_cast<const index::IScalarPredicateReader<int32_t>*>(
                 reader.get());
         ASSERT_NE(predicate, nullptr);
-        const auto range =
-            predicate->Range(15, index::CompareOp::GreaterThan);
+        const auto range = predicate->Range(15, index::CompareOp::GreaterThan);
         ASSERT_EQ(range.size(), 5);
         EXPECT_FALSE(range[0]);
         for (size_t i = 1; i < 5; ++i) {

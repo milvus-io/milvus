@@ -380,17 +380,20 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
             double cost;
             auto selected = condition.Select(
                 [&](const std::string& literal) {
-                    return storage_->Engine().Count(Bytes(literal), literal.size());
+                    return storage_->Engine().Count(Bytes(literal),
+                                                    literal.size());
                 },
                 cost);
             // Selected AND children may be omitted; every OR branch remains.
             // These contains lookups are candidates for canonical RE2 recheck.
             return selected.Evaluate(
                 [&](const std::string& literal) {
-                    TargetBitmap hits(static_cast<size_t>(storage_->Count()), false);
+                    TargetBitmap hits(static_cast<size_t>(storage_->Count()),
+                                      false);
                     storage_->Engine().VisitMatchingDocs(
                         Bytes(literal), literal.size(), [&](uint64_t row) {
-                            if (row < static_cast<uint64_t>(storage_->Count()) &&
+                            if (row <
+                                    static_cast<uint64_t>(storage_->Count()) &&
                                 !storage_->NullBitmap()[row]) {
                                 hits.set(static_cast<size_t>(row));
                             }
@@ -468,9 +471,8 @@ FmIndexReader::RarestMatchFragment(std::string_view pattern) const {
     }
     RarestFragment rarest;
     rarest.literal = parts[0];
-    rarest.occurrences =
-        SaturatingSize(storage_->Engine().Count(Bytes(parts[0]),
-                                                parts[0].size()));
+    rarest.occurrences = SaturatingSize(
+        storage_->Engine().Count(Bytes(parts[0]), parts[0].size()));
     for (size_t i = 1; i < parts.size(); ++i) {
         const auto occurrences = SaturatingSize(
             storage_->Engine().Count(Bytes(parts[i]), parts[i].size()));
@@ -510,7 +512,8 @@ FmIndexReader::MatchGuardAccepts(std::string_view pattern) const {
 
 bool
 FmIndexReader::RegexGuardAccepts(std::string_view pattern) const {
-    auto condition = PartialRegexMatcher::PrepareIndexCondition(std::string(pattern));
+    auto condition =
+        PartialRegexMatcher::PrepareIndexCondition(std::string(pattern));
     if (condition.IsTrue()) {
         return false;
     }
@@ -525,7 +528,8 @@ FmIndexReader::RegexGuardAccepts(std::string_view pattern) const {
     }
     // Counts belong to this index and upper-bound locate work, including every
     // selected OR branch. Like the LIKE guard, this does not price raw reads.
-    return occurrences * static_cast<double>(storage_->Engine().sa_sample_rate()) <
+    return occurrences *
+               static_cast<double>(storage_->Engine().sa_sample_rate()) <
            cost_ratio_ * static_cast<double>(storage_->TotalTokens());
 }
 

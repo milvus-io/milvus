@@ -73,7 +73,8 @@ AddSpatialCase(IndexTestCases& cases,
                                 << "spatial candidates dropped exact hit "
                                 << offset;
                         }
-                        auto repeated = spatial->Candidates(test_case.op, query);
+                        auto repeated =
+                            spatial->Candidates(test_case.op, query);
                         ExpectBitmap(actual, repeated);
                         ExpectNullState(data, *reader);
                     },

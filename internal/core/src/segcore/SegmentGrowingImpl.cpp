@@ -118,13 +118,12 @@ constexpr int64_t kPendingValidityBlockRows = 4096;
 template <typename IsValid>
 std::vector<int64_t>
 BuildValidityPrefix(int64_t row_count, IsValid&& is_valid) {
-    AssertInfo(row_count >= 0,
-               "negative pending vector row count {}",
-               row_count);
+    AssertInfo(
+        row_count >= 0, "negative pending vector row count {}", row_count);
     std::vector<int64_t> prefix;
-    prefix.reserve(static_cast<size_t>(
-        row_count / kPendingValidityBlockRows +
-        (row_count % kPendingValidityBlockRows != 0)));
+    prefix.reserve(
+        static_cast<size_t>(row_count / kPendingValidityBlockRows +
+                            (row_count % kPendingValidityBlockRows != 0)));
 
     int64_t valid_count = 0;
     for (int64_t i = 0; i < row_count; ++i) {
@@ -169,13 +168,12 @@ WithProtoVectorValues(const DataArray& data,
     if constexpr (std::is_same_v<EngineType, float>) {
         const auto& values = data.vectors().float_vector().data();
         const auto dim = field_meta.get_dim();
-        AssertInfo(values.size() >=
-                       static_cast<size_t>((physical_begin + physical_count) *
-                                           dim),
-                   "growing float vector payload is truncated");
-        consume(physical_count == 0
-                    ? nullptr
-                    : values.data() + physical_begin * dim,
+        AssertInfo(
+            values.size() >=
+                static_cast<size_t>((physical_begin + physical_count) * dim),
+            "growing float vector payload is truncated");
+        consume(physical_count == 0 ? nullptr
+                                    : values.data() + physical_begin * dim,
                 dim);
     } else if constexpr (std::is_same_v<EngineType, float16>) {
         const auto& bytes = data.vectors().float16_vector();
@@ -204,8 +202,7 @@ WithProtoVectorValues(const DataArray& data,
     } else {
         static_assert(std::is_same_v<EngineType, sparse_u32_f32>);
         const auto& sparse = data.vectors().sparse_float_vector();
-        AssertInfo(sparse.contents_size() >=
-                       physical_begin + physical_count,
+        AssertInfo(sparse.contents_size() >= physical_begin + physical_count,
                    "growing sparse vector payload is truncated");
         std::vector<std::string_view> rows;
         rows.reserve(static_cast<size_t>(physical_count));
@@ -237,9 +234,7 @@ WithLoadedVectorValues(const FieldDataPtr& data,
     } else {
         const auto dim = field_meta.get_dim();
         const auto* values = static_cast<const StorageType*>(data->Data());
-        consume(physical_count == 0
-                    ? nullptr
-                    : values + physical_begin * dim,
+        consume(physical_count == 0 ? nullptr : values + physical_begin * dim,
                 dim);
     }
 }
@@ -621,8 +616,7 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId,
     auto& field_meta = schema.operator[](fieldId);
     auto data_type = field_meta.get_data_type();
     if (IsVectorDataType(data_type)) {
-        if (growing_indexes_.CanReleaseVectorColumn(fieldId,
-                                                    covered_row_end)) {
+        if (growing_indexes_.CanReleaseVectorColumn(fieldId, covered_row_end)) {
             auto vec_data_base = insert_record_.get_data_base(fieldId);
             if (vec_data_base && vec_data_base->num_chunk() > 0) {
                 // No lock, and no try_lock: clear() swaps the container's
@@ -684,9 +678,7 @@ SegmentGrowingImpl::StageInsertVectorInput(
                        row_count);
             location.valid_prefix = BuildValidityPrefix(
                 row_count,
-                [&](int64_t i) {
-                    return validity[static_cast<size_t>(i)];
-                });
+                [&](int64_t i) { return validity[static_cast<size_t>(i)]; });
         }
         pending.field_locations.emplace(field_id, std::move(location));
     }
@@ -735,9 +727,8 @@ SegmentGrowingImpl::StageLoadedVectorInput(
     if (field_meta.is_nullable()) {
         size_t part = 0;
         int64_t part_begin = 0;
-        location.valid_prefix = BuildValidityPrefix(
-            logical_rows,
-            [&](int64_t i) {
+        location.valid_prefix =
+            BuildValidityPrefix(logical_rows, [&](int64_t i) {
                 while (i >= location.loaded_row_ends[part]) {
                     part_begin = location.loaded_row_ends[part++];
                 }
@@ -776,9 +767,8 @@ SegmentGrowingImpl::CompleteGrowingRawRange(int64_t row_begin,
     std::lock_guard lock(growing_index_feed_mutex_);
     growing_raw_ready_.AddSegment(row_begin, row_end);
     if (require_index_flush) {
-        growing_index_required_flush_end_ =
-            std::max(growing_index_required_flush_end_.value_or(row_end),
-                     row_end);
+        growing_index_required_flush_end_ = std::max(
+            growing_index_required_flush_end_.value_or(row_end), row_end);
     }
     PublishGrowingIndexesThroughRawReady();
 }
@@ -795,13 +785,12 @@ SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
     const auto configured_batch_rows = segcore_config_.get_chunk_rows();
     AssertInfo(configured_batch_rows > 0,
                "growing index feed batch size must be positive");
-    const auto batch_rows = std::min<int64_t>(
-        configured_batch_rows, kTextLobIndexBuildBatchSize);
+    const auto batch_rows =
+        std::min<int64_t>(configured_batch_rows, kTextLobIndexBuildBatchSize);
 
     auto flush_required_generation = [&]() {
         if (growing_index_required_flush_end_.has_value() &&
-            growing_index_feed_cursor_ >=
-                *growing_index_required_flush_end_) {
+            growing_index_feed_cursor_ >= *growing_index_required_flush_end_) {
             growing_indexes_.FlushAll();
             growing_index_required_flush_end_.reset();
         }
@@ -824,10 +813,8 @@ SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
             } else {
                 if (pending_it != pending_vector_inputs_.begin()) {
                     const auto previous = std::prev(pending_it);
-                    if (previous->second.row_end >
-                        growing_index_feed_cursor_) {
-                        next_end =
-                            std::min(next_end, previous->second.row_end);
+                    if (previous->second.row_end > growing_index_feed_cursor_) {
+                        next_end = std::min(next_end, previous->second.row_end);
                     }
                 }
                 if (pending_it != pending_vector_inputs_.end()) {
@@ -847,9 +834,8 @@ SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
 
         for (const auto& [field_id, field_meta] : schema->get_fields()) {
             if (growing_indexes_.Has(field_id)) {
-                FeedGrowingIndexRange(field_meta,
-                                      growing_index_feed_cursor_,
-                                      batch_end);
+                FeedGrowingIndexRange(
+                    field_meta, growing_index_feed_cursor_, batch_end);
             }
         }
 
@@ -867,13 +853,12 @@ SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
     // became visible. A later staged input may still be writing into the raw
     // generation outside this mutex; retain that generation until the staged
     // range itself reaches this accepted boundary.
-    const bool has_unaccepted_staged_input =
-        std::any_of(pending_vector_inputs_.begin(),
-                    pending_vector_inputs_.end(),
-                    [&](const auto& input) {
-                        return input.second.row_end >
-                               growing_index_feed_cursor_;
-                    });
+    const bool has_unaccepted_staged_input = std::any_of(
+        pending_vector_inputs_.begin(),
+        pending_vector_inputs_.end(),
+        [&](const auto& input) {
+            return input.second.row_end > growing_index_feed_cursor_;
+        });
     if (!has_unaccepted_staged_input) {
         for (const auto& [field_id, field_meta] : schema->get_fields()) {
             if (IsVectorDataType(field_meta.get_data_type())) {
@@ -892,8 +877,8 @@ SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
         // AckResponder inserts the new end before erasing the existing begin.
         // Allocation failure therefore leaves the query-visible boundary
         // unchanged, while the already-fed prefix remains retryable here.
-        insert_record_.ack_responder_.AddSegment(
-            visible_end, growing_index_feed_cursor_);
+        insert_record_.ack_responder_.AddSegment(visible_end,
+                                                 growing_index_feed_cursor_);
     }
 
     const auto published_end = insert_record_.ack_responder_.GetAck();
@@ -905,11 +890,10 @@ SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
 }
 
 void
-SegmentGrowingImpl::FeedGrowingIndexRange(
-    const FieldMeta& field_meta,
-    int64_t row_begin,
-    int64_t row_end,
-    GrowingIndexSet::Appender* staged) {
+SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
+                                          int64_t row_begin,
+                                          int64_t row_end,
+                                          GrowingIndexSet::Appender* staged) {
     AssertInfo(row_begin >= 0 && row_begin <= row_end,
                "invalid growing index feed range [{}, {}) for field {}",
                row_begin,
@@ -975,19 +959,16 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
         };
 
         auto feed_typed = [&]<typename EngineType, typename RawTrait>() {
-            using StorageType =
-                index::GrowingVectorStorageType<EngineType>;
+            using StorageType = index::GrowingVectorStorageType<EngineType>;
 
             if (pending != nullptr && pending->insert_record != nullptr) {
-                auto offset_it =
-                    pending->insert_field_offsets.find(field_id);
+                auto offset_it = pending->insert_field_offsets.find(field_id);
                 if (offset_it != pending->insert_field_offsets.end()) {
-                    const auto& data = pending->insert_record->fields_data(
-                        offset_it->second);
+                    const auto& data =
+                        pending->insert_record->fields_data(offset_it->second);
                     const auto source_begin = row_begin - pending_begin;
                     const auto source_count = row_end - row_begin;
-                    auto location_it =
-                        pending->field_locations.find(field_id);
+                    auto location_it = pending->field_locations.find(field_id);
                     AssertInfo(
                         location_it != pending->field_locations.end(),
                         "pending growing vector field {} has no input location",
@@ -996,9 +977,9 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
                     const auto& validity = GetFieldDataRowValidData(data);
                     AssertInfo(
                         !field_meta.is_nullable() ||
-                            validity.size() == static_cast<size_t>(
-                                                   pending->row_end -
-                                                   pending_begin),
+                            validity.size() ==
+                                static_cast<size_t>(pending->row_end -
+                                                    pending_begin),
                         "nullable growing vector field {} validity has {} "
                         "rows, expected {}",
                         field_id.get(),
@@ -1029,21 +1010,19 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
                         physical_count,
                         field_meta,
                         [&](const StorageType* values, int64_t dim) {
-                            append_vector(
-                                row_begin,
-                                index::VectorBatch<StorageType>{
-                                    static_cast<size_t>(source_count),
-                                    values,
-                                    dim,
-                                    valid_data});
+                            append_vector(row_begin,
+                                          index::VectorBatch<StorageType>{
+                                              static_cast<size_t>(source_count),
+                                              values,
+                                              dim,
+                                              valid_data});
                         });
                     return;
                 }
             }
 
             if (pending != nullptr) {
-                auto location_it =
-                    pending->field_locations.find(field_id);
+                auto location_it = pending->field_locations.find(field_id);
                 if (location_it != pending->field_locations.end() &&
                     !location_it->second.loaded_fields.empty()) {
                     const auto& location = location_it->second;
@@ -1069,9 +1048,8 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
                                    field_id.get(),
                                    source_offset);
                         const auto begin =
-                            index == 0
-                                ? 0
-                                : location.loaded_row_ends[index - 1];
+                            index == 0 ? 0
+                                       : location.loaded_row_ends[index - 1];
                         return loaded[index]->is_valid(source_offset - begin);
                     };
 
@@ -1080,9 +1058,8 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
                         const auto& data = loaded[part];
                         const auto field_begin =
                             pending_begin +
-                            (part == 0
-                                 ? 0
-                                 : location.loaded_row_ends[part - 1]);
+                            (part == 0 ? 0
+                                       : location.loaded_row_ends[part - 1]);
                         const auto field_end =
                             pending_begin + location.loaded_row_ends[part];
                         const auto part_begin =
@@ -1157,12 +1134,12 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
                 valid_data = valid.data();
             }
             const auto& mapping = raw->get_offset_mapping();
-            const auto physical_begin =
-                mapping.IsEnabled() ? mapping.ValidCountBelow(row_begin)
-                                    : row_begin;
-            const auto physical_end =
-                mapping.IsEnabled() ? mapping.ValidCountBelow(row_end)
-                                    : row_end;
+            const auto physical_begin = mapping.IsEnabled()
+                                            ? mapping.ValidCountBelow(row_begin)
+                                            : row_begin;
+            const auto physical_end = mapping.IsEnabled()
+                                          ? mapping.ValidCountBelow(row_end)
+                                          : row_end;
             const auto physical_count = physical_end - physical_begin;
 
             const auto* typed =
@@ -1178,26 +1155,23 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
                 AssertInfo(row != nullptr,
                            "growing vector raw row {} is unavailable",
                            physical_begin + i);
-                std::copy_n(row,
-                            elements,
-                            values.data() + i * elements);
+                std::copy_n(row, elements, values.data() + i * elements);
             }
-            int64_t dim = field_meta.get_data_type() ==
-                                  DataType::VECTOR_SPARSE_U32_F32
-                              ? 0
-                              : field_meta.get_dim();
+            int64_t dim =
+                field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32
+                    ? 0
+                    : field_meta.get_dim();
             if constexpr (std::is_same_v<EngineType, sparse_u32_f32>) {
                 for (const auto& row : values) {
                     dim = std::max(dim, static_cast<int64_t>(row.dim()));
                 }
             }
-            append_vector(
-                row_begin,
-                index::VectorBatch<StorageType>{
-                    static_cast<size_t>(row_end - row_begin),
-                    values.data(),
-                    dim,
-                    valid_data});
+            append_vector(row_begin,
+                          index::VectorBatch<StorageType>{
+                              static_cast<size_t>(row_end - row_begin),
+                              values.data(),
+                              dim,
+                              valid_data});
         };
 
         switch (data_type) {
@@ -1211,8 +1185,8 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
                 feed_typed.template operator()<bfloat16, BFloat16Vector>();
                 break;
             case DataType::VECTOR_SPARSE_U32_F32:
-                feed_typed.template operator()<sparse_u32_f32,
-                                               SparseFloatVector>();
+                feed_typed
+                    .template operator()<sparse_u32_f32, SparseFloatVector>();
                 break;
             default:
                 ThrowInfo(UnexpectedError,
@@ -1235,11 +1209,10 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
     const auto configured_batch_rows = segcore_config_.get_chunk_rows();
     AssertInfo(configured_batch_rows > 0,
                "growing index feed batch size must be positive");
-    const auto batch_rows =
-        data_type == DataType::TEXT
-            ? std::min<int64_t>(configured_batch_rows,
-                                kTextLobIndexBuildBatchSize)
-            : configured_batch_rows;
+    const auto batch_rows = data_type == DataType::TEXT
+                                ? std::min<int64_t>(configured_batch_rows,
+                                                    kTextLobIndexBuildBatchSize)
+                                : configured_batch_rows;
 
     auto append = [&](int64_t offset, const index::TextBatch& batch) {
         if (staged != nullptr) {
@@ -1268,19 +1241,17 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
             std::vector<int64_t> offsets(static_cast<size_t>(count));
             for (int64_t i = 0; i < count; ++i) {
                 offsets[static_cast<size_t>(i)] =
-                    valid_data == nullptr || valid_data[i]
-                        ? offset + i
-                        : INVALID_SEG_OFFSET;
+                    valid_data == nullptr || valid_data[i] ? offset + i
+                                                           : INVALID_SEG_OFFSET;
             }
             owned.resize(static_cast<size_t>(count));
-            bulk_subscript_text_impl(
-                field_id,
-                values,
-                offsets.data(),
-                count,
-                [&](size_t i, std::string value) {
-                    owned[i] = std::move(value);
-                });
+            bulk_subscript_text_impl(field_id,
+                                     values,
+                                     offsets.data(),
+                                     count,
+                                     [&](size_t i, std::string value) {
+                                         owned[i] = std::move(value);
+                                     });
             for (size_t i = 0; i < owned.size(); ++i) {
                 views[i] = owned[i];
             }
@@ -1292,9 +1263,8 @@ SegmentGrowingImpl::FeedGrowingIndexRange(
         }
 
         append(offset,
-               index::TextBatch{static_cast<size_t>(count),
-                                views.data(),
-                                valid_data});
+               index::TextBatch{
+                   static_cast<size_t>(count), views.data(), valid_data});
     }
 }
 
@@ -1476,8 +1446,7 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
         std::shared_lock lock(text_lob_mutex_);
         for (const auto& [field_id, spillover] : text_lob_spillovers_) {
             if (spillover) {
-                disk_bytes +=
-                    static_cast<int64_t>(spillover->GetDiskUsage());
+                disk_bytes += static_cast<int64_t>(spillover->GetDiskUsage());
             }
         }
     }
@@ -1540,11 +1509,12 @@ SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
 // shardDelegator::ProcessInsert), delivering a growing segment's inserts one at
 // a time in reserved logical order.
 void
-SegmentGrowingImpl::Insert(int64_t reserved_offset,
-                           int64_t num_rows,
-                           const int64_t* row_ids,
-                           const Timestamp* timestamps_raw,
-                           std::shared_ptr<InsertRecordProto> insert_record_proto) {
+SegmentGrowingImpl::Insert(
+    int64_t reserved_offset,
+    int64_t num_rows,
+    const int64_t* row_ids,
+    const Timestamp* timestamps_raw,
+    std::shared_ptr<InsertRecordProto> insert_record_proto) {
     AssertInfo(insert_record_proto->num_rows() == num_rows,
                "Entities_raw count not equal to insert size");
     // protect schema being changed during insert
@@ -1740,7 +1710,6 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         }
 
         stats_.mem_size += field_data_size;
-
     }
 
     // step 4: set pks to offset
@@ -1940,11 +1909,10 @@ SegmentGrowingImpl::load_field_data_common(
     const auto& field_meta = (*schema)[field_id];
 
     if (IsVectorDataType(field_meta.get_data_type())) {
-        StageLoadedVectorInput(
-            field_id,
-            static_cast<int64_t>(reserved_offset),
-            static_cast<int64_t>(reserved_offset + num_rows),
-            field_data);
+        StageLoadedVectorInput(field_id,
+                               static_cast<int64_t>(reserved_offset),
+                               static_cast<int64_t>(reserved_offset + num_rows),
+                               field_data);
     }
 
     if (insert_record_.is_valid_data_exist(field_id)) {
@@ -1958,8 +1926,7 @@ SegmentGrowingImpl::load_field_data_common(
         IsVectorDataType(field_meta.get_data_type()) &&
         growing_indexes_.CanReleaseVectorColumn(
             field_id, insert_record_.ack_responder_.GetAck());
-    if (!index_owns_raw_data &&
-        field_meta.get_data_type() == DataType::TEXT &&
+    if (!index_owns_raw_data && field_meta.get_data_type() == DataType::TEXT &&
         !text_is_remote_lob_ref) {
         auto* spillover = GetTextLobSpillover(field_id);
         AssertInfo(spillover != nullptr,
@@ -1991,8 +1958,8 @@ SegmentGrowingImpl::load_field_data_common(
                         refs.push_back(spillover->WriteAndEncode("", 0));
                     } else {
                         const auto& value = strings[row];
-                        refs.push_back(
-                            spillover->WriteAndEncode(value.data(), value.size()));
+                        refs.push_back(spillover->WriteAndEncode(value.data(),
+                                                                 value.size()));
                     }
                 }
                 text_column->set_data_raw(
@@ -2000,12 +1967,12 @@ SegmentGrowingImpl::load_field_data_common(
             }
             output_offset += rows;
         }
-        AssertInfo(output_offset ==
-                       static_cast<int64_t>(reserved_offset + num_rows),
-                   "TEXT field {} load contains {} rows, expected {}",
-                   field_id.get(),
-                   output_offset - static_cast<int64_t>(reserved_offset),
-                   num_rows);
+        AssertInfo(
+            output_offset == static_cast<int64_t>(reserved_offset + num_rows),
+            "TEXT field {} load contains {} rows, expected {}",
+            field_id.get(),
+            output_offset - static_cast<int64_t>(reserved_offset),
+            num_rows);
     } else if (!index_owns_raw_data) {
         insert_record_.get_data_base(field_id)->set_data_raw(reserved_offset,
                                                              field_data);
@@ -2849,11 +2816,8 @@ SegmentGrowingImpl::bulk_subscript_text_impl(FieldId field_id,
             resolved.Add();
         }
         auto& cache = GetGlobalTextColumnCache();
-        cache.ReadBatchInto(lob_base_path,
-                            fs,
-                            *properties,
-                            encoded_refs,
-                            &resolved);
+        cache.ReadBatchInto(
+            lob_base_path, fs, *properties, encoded_refs, &resolved);
         for (size_t j = 0; j < loaded_indices.size(); ++j) {
             set_output(loaded_indices[j], std::move(*resolved.Mutable(j)));
         }
@@ -3288,13 +3252,11 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     ids->SetIds(seg_offsets);
     ids->SetIsOwner(false);
     auto retrieved = reader->GetVector(ids);
-    AssertInfo(retrieved.size() ==
-                   static_cast<size_t>(count * element_sizeof),
+    AssertInfo(retrieved.size() == static_cast<size_t>(count * element_sizeof),
                "growing vector reader returned {} bytes, expected {}",
                retrieved.size(),
                count * element_sizeof);
-    milvus::fastmem::FastMemcpy(
-        output_raw, retrieved.data(), retrieved.size());
+    milvus::fastmem::FastMemcpy(output_raw, retrieved.data(), retrieved.size());
 }
 
 template <typename S, typename T>
@@ -3800,34 +3762,31 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             }
 
             if (appender->caps.text_match) {
-                const bool has_default =
-                    field_meta.default_value().has_value();
+                const bool has_default = field_meta.default_value().has_value();
                 AssertInfo(has_default || field_meta.is_nullable(),
                            "new non-nullable text field {} has no default",
                            field_id.get());
                 const std::string value =
-                    has_default
-                        ? field_meta.default_value()->string_data()
-                        : std::string();
-                const auto batch_rows = std::min<int64_t>(
-                    segcore_config_.get_chunk_rows(),
-                    kTextLobIndexBuildBatchSize);
+                    has_default ? field_meta.default_value()->string_data()
+                                : std::string();
+                const auto batch_rows =
+                    std::min<int64_t>(segcore_config_.get_chunk_rows(),
+                                      kTextLobIndexBuildBatchSize);
                 AssertInfo(batch_rows > 0,
                            "growing text backfill batch size must be positive");
                 for (int64_t offset = 0; offset < accepted_row_count;
                      offset += batch_rows) {
-                    const auto count =
-                        std::min<int64_t>(batch_rows,
-                                          accepted_row_count - offset);
+                    const auto count = std::min<int64_t>(
+                        batch_rows, accepted_row_count - offset);
                     std::vector<std::string_view> values(
                         static_cast<size_t>(count), value);
-                    FixedVector<bool> valid(
-                        static_cast<size_t>(count), has_default);
+                    FixedVector<bool> valid(static_cast<size_t>(count),
+                                            has_default);
                     index::TextBatch batch{
                         .row_count = static_cast<size_t>(count),
                         .values = values.data(),
-                        .valid = field_meta.is_nullable() ? valid.data()
-                                                          : nullptr,
+                        .valid =
+                            field_meta.is_nullable() ? valid.data() : nullptr,
                     };
                     GrowingIndexSet::AppendTo(
                         *appender, field_id, offset, batch);
@@ -3969,7 +3928,8 @@ SegmentGrowingImpl::FillAbsentFieldsThrough(int64_t row_end) {
                 insert_record_.is_valid_data_exist(field_id) &&
                 insert_record_.get_valid_data(field_id)->empty()) {
                 fill_empty_field(field_meta, row_end);
-                EnsureStructElementOffsetsForField(field_meta, row_end, *schema);
+                EnsureStructElementOffsetsForField(
+                    field_meta, row_end, *schema);
             }
             continue;
         }
@@ -4322,8 +4282,7 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
                         : std::string();
         const auto batch_rows = std::min<int64_t>(
             segcore_config_.get_chunk_rows(), kTextLobIndexBuildBatchSize);
-        AssertInfo(batch_rows > 0,
-                   "TEXT backfill batch size must be positive");
+        AssertInfo(batch_rows > 0, "TEXT backfill batch size must be positive");
         for (int64_t offset = filled; offset < total_row_num;
              offset += batch_rows) {
             const auto count =
@@ -4387,7 +4346,6 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
             BuildGeometryCacheForInsert(field_id, data.get(), filled, missing);
         }
     }
-
 
     LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
              field_meta.get_data_type(),

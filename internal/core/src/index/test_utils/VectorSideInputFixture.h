@@ -159,14 +159,12 @@ class VectorSideInputFixture : public ::testing::Test {
                 parity + 2, parity + 6, parity + 10};
             std::vector<uint8_t> excluded((kRows + 7) / 8, 0xff);
             for (const auto row : expected) {
-                excluded[row / 8] &=
-                    static_cast<uint8_t>(~(1U << (row % 8)));
+                excluded[row / 8] &= static_cast<uint8_t>(~(1U << (row % 8)));
             }
-            const std::array<float, kDim> query{
-                static_cast<float>(parity),
-                static_cast<float>(2 * parity),
-                static_cast<float>(3 * parity),
-                static_cast<float>(4 * parity)};
+            const std::array<float, kDim> query{static_cast<float>(parity),
+                                                static_cast<float>(2 * parity),
+                                                static_cast<float>(3 * parity),
+                                                static_cast<float>(4 * parity)};
             SearchResult result;
             vectors->Search(GenDataset(1, kDim, query.data()),
                             params,
@@ -203,8 +201,7 @@ class VectorSideInputFixture : public ::testing::Test {
         const std::shared_ptr<storage::LocalDirectory>& directory) {
         // Probe the real engine independently of the InputSpec under test.
         // A regression dropping the declaration must fail, not turn into skip.
-        auto manager =
-            std::make_shared<VectorDiskBuildFileManager>(directory);
+        auto manager = std::make_shared<VectorDiskBuildFileManager>(directory);
         auto pack = knowhere::Pack(
             std::static_pointer_cast<milvus::FileManager>(manager));
         const KnowhereEngine engine(
@@ -228,9 +225,9 @@ class VectorSideInputFixture : public ::testing::Test {
         const auto dim = static_cast<uint32_t>(kDim);
         raw.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
         raw.write(reinterpret_cast<const char*>(&dim), sizeof(dim));
-        raw.write(reinterpret_cast<const char*>(input.values.data()),
-                  static_cast<std::streamsize>(input.values.size() *
-                                               sizeof(float)));
+        raw.write(
+            reinterpret_cast<const char*>(input.values.data()),
+            static_cast<std::streamsize>(input.values.size() * sizeof(float)));
         raw.close();
         ASSERT_FALSE(raw.fail());
 
@@ -246,7 +243,8 @@ class VectorSideInputFixture : public ::testing::Test {
         scalar.write(reinterpret_cast<const char*>(&version), sizeof(version));
         scalar.write(reinterpret_cast<const char*>(&field_count),
                      sizeof(field_count));
-        scalar.write(reinterpret_cast<const char*>(&field_id), sizeof(field_id));
+        scalar.write(reinterpret_cast<const char*>(&field_id),
+                     sizeof(field_id));
         scalar.write(reinterpret_cast<const char*>(&category_count),
                      sizeof(category_count));
         for (const auto& category : input.categories) {
