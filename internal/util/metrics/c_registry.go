@@ -193,42 +193,42 @@ func applyCollectionLevelMetricsMode(metricFamilies map[string]*dto.MetricFamily
 	aggregateGaugeMetricFamilyLabel(metricFamily, "shard", pkgmetrics.AllLabel)
 }
 
+// aggregateGaugeMetricFamilyLabel collapses labelName to aggregateValue and
+// sums gauges that end up with the same label set. The family is parsed for
+// the current scrape only, so its metrics are relabeled in place and the
+// first metric of each label set accumulates the others.
 func aggregateGaugeMetricFamilyLabel(metricFamily *dto.MetricFamily, labelName, aggregateValue string) {
-	aggregated := make(map[string]*dto.Metric, len(metricFamily.Metric))
-	unaggregated := make([]*dto.Metric, 0)
+	aggregateValuePtr := proto.String(aggregateValue)
+	aggregated := make(map[string]*dto.Metric)
+	kept := metricFamily.Metric[:0]
 	for _, metric := range metricFamily.Metric {
-		if metric.GetGauge() == nil {
-			unaggregated = append(unaggregated, metric)
+		label := findMetricLabel(metric, labelName)
+		if metric.GetGauge() == nil || label == nil {
+			kept = append(kept, metric)
 			continue
 		}
-		normalized := proto.Clone(metric).(*dto.Metric)
-		found := false
-		for _, label := range normalized.Label {
-			if label.GetName() == labelName {
-				label.Value = proto.String(aggregateValue)
-				found = true
-				break
-			}
-		}
-		if !found {
-			unaggregated = append(unaggregated, metric)
-			continue
-		}
-		sort.Slice(normalized.Label, func(i, j int) bool {
-			return normalized.Label[i].GetName() < normalized.Label[j].GetName()
+		label.Value = aggregateValuePtr
+		sort.Slice(metric.Label, func(i, j int) bool {
+			return metric.Label[i].GetName() < metric.Label[j].GetName()
 		})
-		key := metricLabelKey(normalized.Label)
+		key := metricLabelKey(metric.Label)
 		if current, ok := aggregated[key]; ok {
-			current.Gauge.Value = proto.Float64(current.GetGauge().GetValue() + normalized.GetGauge().GetValue())
+			current.Gauge.Value = proto.Float64(current.GetGauge().GetValue() + metric.GetGauge().GetValue())
 			continue
 		}
-		aggregated[key] = normalized
+		aggregated[key] = metric
+		kept = append(kept, metric)
 	}
+	metricFamily.Metric = kept
+}
 
-	metricFamily.Metric = append(metricFamily.Metric[:0], unaggregated...)
-	for _, metric := range aggregated {
-		metricFamily.Metric = append(metricFamily.Metric, metric)
+func findMetricLabel(metric *dto.Metric, labelName string) *dto.LabelPair {
+	for _, label := range metric.Label {
+		if label.GetName() == labelName {
+			return label
+		}
 	}
+	return nil
 }
 
 func metricLabelKey(labels []*dto.LabelPair) string {

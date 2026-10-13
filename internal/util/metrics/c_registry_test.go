@@ -41,10 +41,15 @@ func TestApplyCollectionLevelMetricsModeAggregatesCacheShardMetric(t *testing.T)
 		),
 	}
 
+	parsed := append([]*dto.Metric(nil), metricFamilies[cacheShardDiskUsageMetricName].Metric...)
+
 	applyCollectionLevelMetricsMode(metricFamilies)
 
 	metricFamily := metricFamilies[cacheShardDiskUsageMetricName]
 	require.Len(t, metricFamily.Metric, 2)
+	// The parsed metrics are relabeled in place rather than cloned.
+	require.Same(t, parsed[0], metricFamily.Metric[0])
+	require.Same(t, parsed[2], metricFamily.Metric[1])
 	values := make(map[string]float64, 2)
 	for _, metric := range metricFamily.Metric {
 		labels := make(map[string]string, len(metric.Label))
