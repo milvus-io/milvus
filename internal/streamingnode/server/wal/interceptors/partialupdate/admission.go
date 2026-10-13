@@ -22,6 +22,7 @@ type partialUpdateState struct {
 	pkVersions          *pkVersionIndex
 	fences              *collectionFenceIndex
 	incompleteTxnFences *vchannelFenceIndex
+	writeGuards         *writeGuards
 	txnMu               sync.RWMutex
 	txns                map[message.TxnID]*pendingTxn
 }
@@ -41,6 +42,7 @@ func newPartialUpdateStateWithBudget(
 		pkVersions:          newPKVersionIndexWithBudget(versionIndexTTL, versionIndexBudget),
 		fences:              newCollectionFenceIndex(),
 		incompleteTxnFences: newVChannelFenceIndex(),
+		writeGuards:         newWriteGuards(),
 		txns:                make(map[message.TxnID]*pendingTxn),
 	}
 }

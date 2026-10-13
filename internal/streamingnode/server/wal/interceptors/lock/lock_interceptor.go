@@ -60,15 +60,9 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 		// DDL is serialized by the broadcaster resource-key lock. PChannel-level
 		// messages already acquire the global write lock above.
 	}
-	if msg.MessageType() == message.MessageTypeCommitTxn &&
-		message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil {
-		r.glock.RLock()
-		r.vchannelLocker.Lock(vchannel)
-		return func() {
-			r.vchannelLocker.Unlock(vchannel)
-			r.glock.RUnlock()
-		}
-	}
+	// DML, including CAS commits, keeps the shard lifecycle stable with a
+	// shared lock. Row-level commit admission is synchronized by PK before
+	// the TimeTick interceptor allocates the write timestamp.
 	r.glock.RLock()
 	r.vchannelLocker.RLock(vchannel)
 	return func() {

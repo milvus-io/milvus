@@ -47,10 +47,14 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		state.historyStartTs = param.LastTimeTickMessage.TimeTick()
 	}
 	pkDescriptorGetter, _ := param.ShardManager.(primaryKeyDescriptorGetter)
-	return &appendInterceptor{
+	interceptor := &appendInterceptor{
 		state:              state,
 		pkDescriptorGetter: pkDescriptorGetter,
 	}
+	// Builders share this per-WAL parameter. TimeTick invokes the guard at
+	// append time, after every builder has completed, before assigning writeTS.
+	param.WriteGuard = interceptor
+	return interceptor
 }
 
 type appendInterceptor struct {
@@ -140,28 +144,16 @@ func (i *appendInterceptor) appendWrite(
 			return nil, err
 		}
 	} else {
-		extractedPKs, ok, err := extractPKsWithContext(ctx, msg)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			pks = extractedPKs
-		} else if collectionID, ok := extractCollectionFenceID(msg); ok {
-			if collectionID == 0 {
-				return nil, status.NewUnrecoverableError("partial update collection fence has empty collection id")
-			}
-			fenceCollectionID = collectionID
-		} else if collectionID, ok := extractDropCollectionID(msg); ok {
-			if collectionID == 0 {
-				return nil, status.NewUnrecoverableError("partial update dropped collection has empty collection id")
-			}
-			droppedCollectionID = collectionID
-		} else if msg.MessageType() == message.MessageTypeInsert {
-			pks, fenceCollectionID, err = extractPKsFromOrdinaryInsertWithContext(ctx, msg, i.pkDescriptorGetter)
+		set, cached := ctx.Value(ordinaryWriteSetContextKey{}).(ordinaryWriteSet)
+		if !cached {
+			set, err = i.extractOrdinaryWriteSet(ctx, msg)
 			if err != nil {
 				return nil, err
 			}
 		}
+		pks = set.pks
+		fenceCollectionID = set.fenceCollectionID
+		droppedCollectionID = set.droppedCollectionID
 	}
 
 	if msg.TxnContext() != nil {

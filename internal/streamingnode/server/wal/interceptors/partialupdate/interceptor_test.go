@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	lockinterceptor "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -194,10 +196,12 @@ func TestPartialUpdateChainPublishesCASBeforeNextOrdinaryWriter(t *testing.T) {
 	commitAtWAL := make(chan struct{})
 	releaseCommit := make(chan struct{})
 	commitDone := make(chan error, 1)
+	var commitTS uint64
 	go func() {
 		_, err := env.append(
 			commit,
-			func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
+				commitTS = msg.TimeTick()
 				close(commitAtWAL)
 				<-releaseCommit
 				return env.nextMessageID(), nil
@@ -214,8 +218,8 @@ func TestPartialUpdateChainPublishesCASBeforeNextOrdinaryWriter(t *testing.T) {
 			newDeleteMessage(&schemapb.IDs{
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}},
 			}),
-			func(context.Context, message.MutableMessage) (message.MessageID, error) {
-				writerAtWAL <- env.hasPKVersionAfter("v1", int64(10), readTS)
+			func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
+				writerAtWAL <- msg.TimeTick() > commitTS && env.hasPKVersionAfter("v1", int64(10), readTS)
 				return env.nextMessageID(), nil
 			},
 		)
@@ -226,13 +230,13 @@ func TestPartialUpdateChainPublishesCASBeforeNextOrdinaryWriter(t *testing.T) {
 	case <-writerAtWAL:
 		close(releaseCommit)
 		require.NoError(t, <-commitDone)
-		t.Fatal("ordinary writer reached the WAL while the CAS commit held the vchannel lock")
+		t.Fatal("ordinary writer reached the WAL while the CAS commit held its PK lock")
 	case <-time.After(20 * time.Millisecond):
 	}
 
 	close(releaseCommit)
 	require.NoError(t, <-commitDone)
-	require.True(t, <-writerAtWAL, "CAS PK version was not published before the next writer acquired the vchannel lock")
+	require.True(t, <-writerAtWAL, "next same-PK writer must see the CAS publication and receive a newer timestamp")
 	require.NoError(t, <-writerDone)
 }
 
@@ -825,6 +829,7 @@ func newPartialUpdateChainTestEnvWithBuilders(
 	}
 	param := &interceptors.InterceptorBuildParam{
 		ChannelInfo:            channel,
+		WAL:                    syncutil.NewFuture[wal.WAL](),
 		LastTimeTickMessage:    lastTimeTick,
 		LastConfirmedMessageID: lastConfirmed,
 		MVCCManager:            mvcc.NewMVCCManager(lastTimeTick.TimeTick()),
@@ -878,7 +883,7 @@ func (e *partialUpdateChainTestEnv) allocateReadTS(t *testing.T) uint64 {
 	return readTS
 }
 
-func (e *partialUpdateChainTestEnv) prepareCASTxn(t *testing.T, readTS uint64, pk int64) message.TxnContext {
+func (e *partialUpdateChainTestEnv) prepareCASTxn(t *testing.T, readTS uint64, pks ...int64) message.TxnContext {
 	t.Helper()
 	begin := message.NewBeginTxnMessageBuilderV2().
 		WithVChannel("v1").
@@ -889,7 +894,7 @@ func (e *partialUpdateChainTestEnv) prepareCASTxn(t *testing.T, readTS uint64, p
 	require.NoError(t, err)
 	require.NotNil(t, result.TxnCtx)
 
-	body := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(pk)}, validCASMeta(readTS, 1)).
+	body := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(pks...)}, validCASMeta(readTS, 1)).
 		WithTxnContext(*result.TxnCtx)
 	_, err = e.append(body, nil)
 	require.NoError(t, err)
