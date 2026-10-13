@@ -1270,6 +1270,12 @@ common:
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
+  arrow:
+    # Process-wide Arrow pools and the shared storage Tokio runtime; all four settings require a restart.
+    cpuThreadPoolCoefficient: 1 # CPU cores x coefficient (truncated, minimum 1); sets Arrow CPU capacity and Tokio workers. 0 uses CPU cores and ignores the cap.
+    cpuThreadPoolMaxCapacity: 0 # Upper bound on CPU threads; 0 disables the cap.
+    ioThreadPoolCoefficient: 0 # CPU cores x coefficient (truncated, minimum 1); sets Arrow IO capacity and Tokio blocking-thread limit. 0 uses 8 threads and ignores the cap.
+    ioThreadPoolMaxCapacity: 0 # Upper bound on IO threads; 0 disables the cap.
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool

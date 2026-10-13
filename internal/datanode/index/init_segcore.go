@@ -40,6 +40,10 @@ import (
 )
 
 func InitSegcore(nodeID int64) error {
+	if err := initcore.InitStorageRuntime(); err != nil {
+		return err
+	}
+
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.IndexBuilderInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
@@ -100,9 +104,6 @@ func InitSegcore(nodeID int64) error {
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
 
-	// Apply Arrow IO thread pool capacity from paramtable.
-	initcore.ApplyArrowIOThreadPoolCapacity("datanode", "init")
-
 	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
 	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
 		return err
@@ -124,9 +125,8 @@ func InitSegcore(nodeID int64) error {
 		return err
 	}
 
-	// Wire hot-reload watchers so capacity / coalescing-limit changes take effect
+	// Wire hot-reload watchers so reader / coalescing-limit changes take effect
 	// without restart, matching QueryNode behavior.
-	initcore.RegisterArrowIOThreadPoolWatchers(paramtable.Get(), "datanode")
 	initcore.RegisterArrowReaderConfigWatchers(paramtable.Get(), "datanode")
 	initcore.RegisterLoonReaderConfigWatchers(paramtable.Get(), "datanode")
 	initcore.RegisterJSONStatsBuildExecutorWatcher(paramtable.Get(), "datanode")
