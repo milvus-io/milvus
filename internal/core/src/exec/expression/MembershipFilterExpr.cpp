@@ -102,8 +102,8 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
     auto* input = context.get_offset_input();
 
     // Index-only sealed field: no raw data to scan. DetermineExecPath()
-    // committed to ScalarIndex iff a reverse-lookup-capable index was pinned;
-    // route the probe through Reverse_Lookup. If it did NOT, fail with a clear
+    // committed to ScalarIndex iff a reverse-lookup-capable index was
+    // selected; route the probe through it. If it did NOT, fail with a clear
     // SegcoreError rather than reading zero rows and tripping the batch-size
     // assertion. Field data being absent is a load/state condition, not the
     // request's fault, so this is a System error and stays retriable.
@@ -215,8 +215,8 @@ template <typename T>
 VectorPtr
 PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
     EvalCtx& context) {
-    // Index-only path: recover each value from the scalar index via
-    // Reverse_Lookup and probe it exactly as the raw-data path would,
+    // Index-only path: recover each value from the selected index's typed
+    // value-lookup reader and probe it exactly as the raw-data path would,
     // reusing the framework's mask-aware reverse-lookup helper. An empty
     // candidate mask degenerates to the unmasked behavior, so one code path
     // serves both.

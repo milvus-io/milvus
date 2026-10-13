@@ -268,8 +268,8 @@ class PhyGISRefineConjunctExpr : public SegmentExpr {
 
     // The refine node reads the raw geometry column only for survivors (via the
     // geometry cache or a bulk_subscript over their offsets) and never touches
-    // pinned_index_ -- only the Coarse node queries the R-Tree, via its own
-    // EnsurePinnedIndex() in RunRTreeQuery(). The SegmentExpr default would see
+    // reader pin -- only the Coarse node queries the R-Tree, via its own
+    // exact capability selection in RunRTreeQuery(). The SegmentExpr default would see
     // HasIndex() == true, pin an index cell this node never reads (a pointless
     // cold fetch under tiered storage), and commit to ScalarIndex. Commit to
     // RawData instead so no index is pinned. This exec_path_ choice is about

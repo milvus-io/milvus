@@ -20,7 +20,7 @@
 #include "common/CGoCatch.h"
 #include "futures/future_c_types.h"
 #include "glog/logging.h"
-#include "index/json_stats/JsonStatsBuildMemoryBudget.h"
+#include "segcore/json_stats/JsonStatsBuildMemoryBudget.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "prometheus/gauge.h"

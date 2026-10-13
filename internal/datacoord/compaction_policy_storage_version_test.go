@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -153,6 +154,94 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerNoCollections() {
 	gotViews, ok := events[TriggerTypeStorageVersionUpgrade]
 	s.True(ok)
 	s.Empty(gotViews)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerNoCandidatesSkipsAllocID() {
+	params := paramtable.Get()
+	params.Save(params.CommonCfg.UseLoonFFI.Key, "true")
+	params.Save(params.DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	params.Save(params.DataCoordCfg.StorageFormatCompactionEnabled.Key, "false")
+	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionEnabled.Key)
+	defer params.Reset(params.DataCoordCfg.StorageFormatCompactionEnabled.Key)
+
+	coll := &collectionInfo{ID: 100, Schema: newTestSchema()}
+	s.handler.EXPECT().GetCollection(mock.Anything, coll.ID).Return(coll, nil)
+	for _, test := range []struct {
+		name     string
+		segments map[UniqueID]*SegmentInfo
+	}{
+		{name: "empty"},
+		{name: "up to date", segments: map[UniqueID]*SegmentInfo{
+			101: newStorageVersionPolicyTestSegment(coll.ID, 101, storage.StorageV3, "parquet"),
+		}},
+	} {
+		s.Run(test.name, func() {
+			s.setPolicyMeta(coll.ID, coll, test.segments)
+			s.policy.currentCount = 1
+			views, err := s.policy.triggerOneCollection(context.Background(), coll.ID, 10)
+			s.NoError(err)
+			s.Empty(views)
+			s.Equal(1, s.policy.currentCount)
+			s.mockAlloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
+		})
+	}
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerExhaustedBudgetSkipsCollectionEnumeration() {
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "3600")
+	params.Save(params.DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "2")
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("3.0.0"))
+	s.policy.currentCount = 2
+	s.policy.lastPeriod = time.Now()
+
+	enumerations := 0
+	collectionsMock := mockey.Mock((*meta).GetCollections).To(func(*meta) []*collectionInfo {
+		enumerations++
+		return nil
+	}).Build()
+	defer collectionsMock.UnPatch()
+
+	events, err := s.policy.Trigger(context.Background())
+	s.NoError(err)
+	s.Contains(events, TriggerTypeStorageVersionUpgrade)
+	s.Empty(events[TriggerTypeStorageVersionUpgrade])
+	s.Zero(enumerations)
+	s.Equal(2, s.policy.currentCount)
+	s.mockAlloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
+	s.handler.AssertNotCalled(s.T(), "GetCollection", mock.Anything, mock.Anything)
+
+	// The existing rate window still replenishes the budget and resumes scans.
+	s.policy.lastPeriod = time.Now().Add(-2 * time.Hour)
+	_, err = s.policy.Trigger(context.Background())
+	s.NoError(err)
+	s.Equal(1, enumerations)
+	s.Zero(s.policy.currentCount)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTextCollectionDoesNotDowngradeOrAllocateID() {
+	params := paramtable.Get()
+	params.Save(params.CommonCfg.UseLoonFFI.Key, "false")
+	params.Save(params.DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionEnabled.Key)
+
+	coll := &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text}},
+	}}
+	s.handler.EXPECT().GetCollection(mock.Anything, coll.ID).Return(coll, nil).Once()
+	s.setPolicyMeta(coll.ID, coll, map[UniqueID]*SegmentInfo{
+		101: newStorageVersionPolicyTestSegment(coll.ID, 101, storage.StorageV3, "parquet"),
+	})
+
+	views, err := s.policy.triggerOneCollection(context.Background(), coll.ID, 10)
+	s.NoError(err)
+	s.Empty(views)
+	s.Zero(s.policy.currentCount)
+	s.mockAlloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
 }
 
 func (s *StorageVersionUpgradePolicySuite) TestTriggerWithSegments() {
@@ -391,7 +480,6 @@ func (s *StorageVersionUpgradePolicySuite) TestFormatRefreshRespectsSegmentFilte
 		Schema: newTestSchema(),
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
 
 	segments := map[UniqueID]*SegmentInfo{
 		101: newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV3, "parquet"),
@@ -493,7 +581,6 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithCompactingSegment() {
 		Schema: newTestSchema(),
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
 
 	// Create a compacting segment (should NOT be upgraded)
 	segments := make(map[UniqueID]*SegmentInfo)
@@ -546,7 +633,6 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithImportingSegment() {
 		Schema: newTestSchema(),
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
 
 	// Create an importing segment (should NOT be upgraded)
 	segments := make(map[UniqueID]*SegmentInfo)
@@ -647,6 +733,14 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerRateLimiting() {
 	views, err := s.policy.triggerOneCollection(ctx, collID, 2)
 	s.NoError(err)
 	s.Equal(2, len(views))
+	s.Equal(2, s.policy.currentCount)
+	s.mockAlloc.AssertNumberOfCalls(s.T(), "AllocID", 1)
+
+	views, err = s.policy.triggerOneCollection(ctx, collID, 2)
+	s.NoError(err)
+	s.Empty(views)
+	s.Equal(2, s.policy.currentCount)
+	s.mockAlloc.AssertNumberOfCalls(s.T(), "AllocID", 1)
 }
 
 func (s *StorageVersionUpgradePolicySuite) TestTriggerIntervalReset() {
@@ -726,25 +820,35 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerGetCollectionError() {
 func (s *StorageVersionUpgradePolicySuite) TestTriggerAllocIDError() {
 	ctx := context.Background()
 	collID := int64(100)
+	params := paramtable.Get()
+	params.Save(params.CommonCfg.UseLoonFFI.Key, "true")
+	params.Save(params.DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionEnabled.Key)
 
 	coll := &collectionInfo{
 		ID:     collID,
 		Schema: newTestSchema(),
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(0), context.DeadlineExceeded)
-
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
-	s.policy.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: collections,
-	}
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(0), context.DeadlineExceeded).Once()
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil).Once()
+	s.setPolicyMeta(collID, coll, map[UniqueID]*SegmentInfo{
+		101: newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV2, "parquet"),
+	})
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
-	s.Error(err)
+	s.ErrorIs(err, context.DeadlineExceeded)
 	s.Nil(views)
+	s.Zero(s.policy.currentCount)
+
+	// Failed ID allocation must leave the candidate and task budget intact.
+	views, err = s.policy.triggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Require().Len(views, 1)
+	s.EqualValues(101, views[0].GetSegmentsView()[0].ID)
+	s.EqualValues(1000, views[0].GetTriggerID())
+	s.Equal(1, s.policy.currentCount)
 }
 
 func (s *StorageVersionUpgradePolicySuite) TestTriggerMultipleCollections() {
@@ -906,7 +1010,6 @@ func (s *StorageVersionUpgradePolicySuite) TestDroppedSegmentFiltered() {
 		Schema: newTestSchema(),
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
 
 	// Create a dropped segment (should NOT be upgraded)
 	segments := make(map[UniqueID]*SegmentInfo)
@@ -958,7 +1061,6 @@ func (s *StorageVersionUpgradePolicySuite) TestGrowingSegmentFiltered() {
 		Schema: newTestSchema(),
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
-	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
 
 	// Create a growing segment (should NOT be upgraded - not flushed)
 	segments := make(map[UniqueID]*SegmentInfo)

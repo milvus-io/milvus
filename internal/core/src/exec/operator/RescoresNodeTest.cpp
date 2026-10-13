@@ -27,8 +27,6 @@
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
@@ -38,7 +36,7 @@
 #include "segcore/Types.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "test_utils/DataGen.h"
-#include "test_utils/cachinglayer_test_utils.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -66,14 +64,16 @@ TEST(Rescorer, Normal) {
 
     //3. load index
     auto vector_data = raw_data.get_col<float>(vec_fid);
-    auto indexing = GenVecIndexing(
-        N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
-    load_index_info.field_id = vec_fid.get();
-    load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
-    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    auto load_index_info = milvus::test::consumer::MakeLoadIndexInfo(
+        milvus::test::consumer::BuildVectorReader<float>(
+            DataType::VECTOR_FLOAT,
+            knowhere::IndexEnum::INDEX_HNSW,
+            knowhere::metric::L2,
+            dim,
+            N,
+            vector_data.data()),
+        DataType::VECTOR_FLOAT,
+        vec_fid.get());
     segment->LoadIndex(load_index_info);
 
     // no result after search
