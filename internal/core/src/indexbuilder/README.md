@@ -103,6 +103,13 @@ nullable field is filled with null, and a non-nullable field without a default i
 Decoding more rows than `expected_rows`, or failing to read or decode a listed file, fails the build
 and is not counted toward the missing prefix.
 
+V1 and StorageV2 inputs order binlogs by numeric log ID, using the complete
+filename as an `int64_t`; malformed filenames fail with `DataFormatBroken`.
+StorageV2 normalizes each column group's list at the shared storage reader,
+so the primary field, optional scalar fields, and text/JSON stats readers use
+the same row order. Manifest inputs use the order recorded in their manifest
+and do not apply the binlog filename rule.
+
 The prefix must reach the materializer before any source row. The row count of V1 binlogs is known
 only after decoding: the first pass streams the rows assuming no prefix and counts the decoded
 rows; if the count is short, that materializer is discarded, a new materializer is filled with the
