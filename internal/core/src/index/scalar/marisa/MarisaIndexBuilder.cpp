@@ -21,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <marisa.h>
@@ -90,8 +91,9 @@ BuildCsr(const marisa::Trie& trie,
 
 }  // namespace
 
-MarisaIndexBuilder::MarisaIndexBuilder(DataType value_type)
-    : value_type_(value_type) {
+MarisaIndexBuilder::MarisaIndexBuilder(DataType value_type,
+                                       std::string local_dir)
+    : value_type_(value_type), local_dir_(std::move(local_dir)) {
     AssertInfo(IsStringDataType(value_type_),
                "marisa builder requires STRING, VARCHAR, or TEXT");
 }
@@ -158,7 +160,8 @@ MarisaIndexBuilder::Build(const ScalarBuildInput<std::string_view>& input) && {
                                                  std::move(str_ids),
                                                  std::move(csr_index),
                                                  std::move(csr_offsets),
-                                                 value_type_);
+                                                 value_type_,
+                                                 std::move(local_dir_));
 }
 
 namespace {
@@ -170,7 +173,10 @@ const bool kMarisaBuilderRegistered = [] {
                 ThrowInfo(DataTypeInvalid,
                           "marisa indexes support row-domain strings only");
             }
-            return std::make_unique<MarisaIndexBuilder>(ParseValueType(params));
+            return std::make_unique<MarisaIndexBuilder>(
+                ParseValueType(params),
+                GetValueFromConfigOrFallback<std::string>(
+                    params, "local_dir", {}));
         });
     return true;
 }();
