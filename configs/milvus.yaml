@@ -630,6 +630,8 @@ queryCoord:
   checkIndexInterval: 10000
   channelTaskTimeout: 120000 # 2 minutes
   segmentTaskTimeout: 300000 # 5 minutes
+  loadReportSyncTimeout: 10000 # Startup report synchronization wait (ms); unreported nodes remain excluded.
+  balanceMaxPendingLoads: 8 # Maximum outstanding segment loads per target node for balance and recovery.
   distPullInterval: 500
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available

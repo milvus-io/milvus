@@ -147,6 +147,13 @@ func (ex *Executor) GetNonChannelTaskCap() int32 {
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
 func (ex *Executor) Execute(task Task, step int) bool {
+	// Recheck the actual target immediately before admission. A report may have
+	// expired or failed since the planner took its resource snapshot.
+	if ex.nodeMgr != nil && task.Actions()[step].Type() != ActionTypeReduce {
+		if node := ex.nodeMgr.Get(task.Actions()[step].Node()); node == nil || !node.LoadAdmissionReady() {
+			return false
+		}
+	}
 	exist := !ex.executingTasks.Insert(task.Index())
 	if exist {
 		return false

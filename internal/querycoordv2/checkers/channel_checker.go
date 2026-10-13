@@ -96,6 +96,13 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 	if !c.IsActive() {
 		return nil
 	}
+	if !c.nodeMgr.LoadReportSyncReady() {
+		return nil
+	}
+	ctx = assign.WithPlanningLedgerFactory(ctx, func() *assign.PlanningLedger {
+		return assign.NewPlanningLedger(c.nodeMgr, c.dist, c.scheduler, Params.QueryCoordCfg.BalanceMaxPendingLoads.GetAsInt())
+	})
+	defer assign.ReleasePlanningLedger(ctx)
 
 	collectionIDs := c.meta.GetAll(ctx)
 	tasks := make([]task.Task, 0)
@@ -132,7 +139,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 			// version the cache keys on. A stock binary keeps master's answer:
 			// the unplaced shape does not hold the cache open, so a replica
 			// waiting for a node there is cached like any other empty diff.
-			if versionCacheMayUpdate(hasTask, unplaced) {
+			if versionCacheMayUpdate(hasTask, unplaced) && !unplaced {
 				c.updateVersionCache(cid, currentTargetVersion, currentDistVersion)
 			}
 		}
@@ -355,7 +362,9 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	// a channel whose real watch time (L0/growing backlog, seek distance)
 	// consistently exceeds ChannelTaskTimeout never converges: killed and
 	// rebuilt with the same budget every check tick, no backoff or retry cap.
-	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
+	tasks := balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
+	reconcileChannelPlans(ctx, plans, tasks)
+	return tasks
 }
 
 // nodesGroupKey returns an order-insensitive key of a node set.

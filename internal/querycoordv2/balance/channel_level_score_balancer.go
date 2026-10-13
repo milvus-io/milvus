@@ -210,7 +210,7 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlanForOutboundNodes(ctx context.C
 // It identifies segments on nodes with higher-than-average scores and moves them to nodes
 // with lower scores, using the score-based assign policy.
 func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, channelName string, onlineNodes []int64) []assign.SegmentAssignPlan {
-	nodeItemsMap := b.assignPolicy.ConvertToNodeItemsBySegment(replica.GetCollectionID(), onlineNodes)
+	nodeItemsMap := assign.ConvertSegmentNodeItems(ctx, b.assignPolicy, replica.GetCollectionID(), onlineNodes)
 	for _, item := range nodeItemsMap {
 		br.AddNodeItem(item)
 	}

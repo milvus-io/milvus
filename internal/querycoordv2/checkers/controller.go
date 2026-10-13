@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -49,8 +50,9 @@ type CheckerController struct {
 	scheduler task.Scheduler
 	checkers  map[utils.CheckerType]Checker
 
-	wg       sync.WaitGroup
-	stopOnce sync.Once
+	wg         sync.WaitGroup
+	stopOnce   sync.Once
+	planningMu sync.Mutex
 }
 
 func NewCheckerController(
@@ -86,6 +88,7 @@ func NewCheckerController(
 		scheduler:      scheduler,
 		checkers:       checkers,
 		broker:         broker,
+		nodeMgr:        nodeMgr,
 	}
 }
 
@@ -175,15 +178,24 @@ func (controller *CheckerController) Check() {
 
 // check is the real implementation of Check
 func (controller *CheckerController) check(ctx context.Context, checkType utils.CheckerType) {
+	// Checkers run on independent timers, but planning and admission must observe
+	// each other's accepted work before taking the next resource snapshot.
+	controller.planningMu.Lock()
+	defer controller.planningMu.Unlock()
+	if controller.nodeMgr != nil && !controller.nodeMgr.LoadReportSyncReady() {
+		return
+	}
 	checker := controller.checkers[checkType]
 	tasks := checker.Check(ctx)
 
-	for _, task := range tasks {
-		err := controller.scheduler.Add(task)
+	for _, work := range tasks {
+		err := controller.scheduler.Add(work)
 		if err != nil {
-			task.Cancel(err)
+			assign.UndoTask(work.Context(), work)
+			work.Cancel(err)
 			continue
 		}
+		assign.CommitTask(work.Context(), work)
 	}
 }
 

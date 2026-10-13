@@ -23,6 +23,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
@@ -44,6 +45,7 @@ func createMockPriorityQueue() *assign.PriorityQueue {
 
 // Helper function to create a test BalanceChecker
 func createTestBalanceChecker() *BalanceChecker {
+	paramtable.Init()
 	metaInstance := &meta.Meta{
 		CollectionManager: meta.NewCollectionManager(nil),
 		ReplicaManager:    meta.NewReplicaManager(nil, nil),
@@ -90,7 +92,7 @@ func TestBalanceChecker_LoadBalanceConfig(t *testing.T) {
 	checker := createTestBalanceChecker()
 
 	// Mock paramtable.Get function
-	mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+	mockParamGet := mockey.Mock(paramtable.Get).Return(paramtable.Get()).Build()
 	defer mockParamGet.UnPatch()
 
 	// Mock various param item methods
@@ -420,7 +422,9 @@ func TestBalanceChecker_GetReplicaForNormalBalance(t *testing.T) {
 func TestBalanceChecker_GenerateBalanceTasksFromReplicas_EmptyReplicas(t *testing.T) {
 	checker := createTestBalanceChecker()
 	ctx := context.Background()
-	config := balanceConfig{}
+	config := balanceConfig{
+		channelBatchSize: 1,
+		segmentBatchSize: 5}
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 
 	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, []int64{}, config, false)
@@ -433,6 +437,8 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 	checker := createTestBalanceChecker()
 	ctx := context.Background()
 	config := balanceConfig{
+		segmentBatchSize:   1,
+		channelBatchSize:   1,
 		segmentTaskTimeout: 30 * time.Second,
 		channelTaskTimeout: 30 * time.Second,
 	}
@@ -504,7 +510,9 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NilReplica(t *testing.T) {
 	checker := createTestBalanceChecker()
 	ctx := context.Background()
-	config := balanceConfig{}
+	config := balanceConfig{
+		channelBatchSize: 1,
+		segmentBatchSize: 5}
 	replicaIDs := []int64{101}
 
 	// Mock ReplicaManager.Get to return nil
@@ -526,6 +534,8 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_StoppingBalanceHighPrio
 	checker := createTestBalanceChecker()
 	ctx := context.Background()
 	config := balanceConfig{
+		segmentBatchSize:   1,
+		channelBatchSize:   1,
 		segmentTaskTimeout: 30 * time.Second,
 		channelTaskTimeout: 30 * time.Second,
 	}
@@ -585,6 +595,8 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NormalBalanceLowPriorit
 	checker := createTestBalanceChecker()
 	ctx := context.Background()
 	config := balanceConfig{
+		channelBatchSize:   1,
+		segmentBatchSize:   5,
 		segmentTaskTimeout: 30 * time.Second,
 		channelTaskTimeout: 30 * time.Second,
 	}
@@ -648,8 +660,10 @@ func TestBalanceChecker_SubmitTasks(t *testing.T) {
 	checker := createTestBalanceChecker()
 
 	// Create mock tasks
-	segmentTask := &task.SegmentTask{}
-	channelTask := &task.ChannelTask{}
+	segmentTask, err := task.NewSegmentTask(context.Background(), time.Minute, utils.BalanceChecker, 1, meta.NilReplica, commonpb.LoadPriority_LOW, task.NewSegmentAction(2, task.ActionTypeGrow, "ch", 1))
+	require.NoError(t, err)
+	channelTask, err := task.NewChannelTask(context.Background(), time.Minute, utils.BalanceChecker, 1, meta.NilReplica, task.NewChannelAction(2, task.ActionTypeGrow, "ch"))
+	require.NoError(t, err)
 	segmentTasks := []task.Task{segmentTask}
 	channelTasks := []task.Task{channelTask}
 
@@ -689,7 +703,7 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 		defer mockIsActive.UnPatch()
 
 		// Mock paramtable to enable stopping balance
-		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		mockParamGet := mockey.Mock(paramtable.Get).Return(paramtable.Get()).Build()
 		defer mockParamGet.UnPatch()
 
 		// First call returns true for EnableStoppingBalance
@@ -740,7 +754,7 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 		defer mockIsActive.UnPatch()
 
 		// Mock paramtable
-		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		mockParamGet := mockey.Mock(paramtable.Get).Return(paramtable.Get()).Build()
 		defer mockParamGet.UnPatch()
 
 		// First call returns false for EnableStoppingBalance, so we skip to normal balance check
@@ -794,7 +808,7 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 		defer mockIsActive.UnPatch()
 
 		// Mock paramtable for enabling stopping balance
-		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		mockParamGet := mockey.Mock(paramtable.Get).Return(paramtable.Get()).Build()
 		defer mockParamGet.UnPatch()
 
 		mockStoppingBalanceEnabled := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
@@ -846,7 +860,7 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 		defer mockIsActive.UnPatch()
 
 		// Mock paramtable - stopping balance enabled, auto balance enabled
-		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		mockParamGet := mockey.Mock(paramtable.Get).Return(paramtable.Get()).Build()
 		defer mockParamGet.UnPatch()
 
 		// Return true for both EnableStoppingBalance and AutoBalance
@@ -912,7 +926,7 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		defer mockIsActive.UnPatch()
 
 		// Mock paramtable - stopping balance disabled, auto balance enabled
-		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		mockParamGet := mockey.Mock(paramtable.Get).Return(paramtable.Get()).Build()
 		defer mockParamGet.UnPatch()
 
 		// return false for stopping balance enabled, true for auto balance enabled
@@ -969,7 +983,7 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		defer mockIsActive.UnPatch()
 
 		// Mock paramtable - stopping balance disabled, auto balance enabled
-		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		mockParamGet := mockey.Mock(paramtable.Get).Return(paramtable.Get()).Build()
 		defer mockParamGet.UnPatch()
 
 		// return false for stopping balance enabled, true for auto balance enabled
@@ -1023,7 +1037,7 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		defer mockIsActive.UnPatch()
 
 		// Mock paramtable - stopping balance disabled, auto balance also disabled
-		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		mockParamGet := mockey.Mock(paramtable.Get).Return(paramtable.Get()).Build()
 		defer mockParamGet.UnPatch()
 
 		// return false for both stopping balance and auto balance
@@ -1112,7 +1126,7 @@ func TestBalanceChecker_ProcessBalanceQueue_Success(t *testing.T) {
 	defer mockGenerateTasks.UnPatch()
 
 	// mock submit tasks
-	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
+	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return(1, 1).Build()
 	defer mockSubmitTasks.UnPatch()
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
@@ -1205,7 +1219,7 @@ func TestBalanceChecker_ProcessBalanceQueue_BatchSizeLimit(t *testing.T) {
 	defer mockGenerateTasks.UnPatch()
 
 	// mock submit tasks
-	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
+	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return(1, 1).Build()
 	defer mockSubmitTasks.UnPatch()
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
@@ -1254,7 +1268,7 @@ func TestBalanceChecker_ProcessBalanceQueue_MultiCollectionDisabled(t *testing.T
 	defer mockGenerateTasks.UnPatch()
 
 	// mock submit tasks
-	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
+	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return(1, 0).Build()
 	defer mockSubmitTasks.UnPatch()
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()

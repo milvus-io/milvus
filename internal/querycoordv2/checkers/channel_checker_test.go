@@ -93,6 +93,8 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 	distManager := meta.NewDistributionManager(suite.nodeMgr)
 
 	scheduler := task.NewMockScheduler(suite.T())
+	scheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
+	scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	// Initialize global assign policy factory before creating checker
 	assign.InitGlobalAssignPolicyFactory(scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)

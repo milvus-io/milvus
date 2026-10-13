@@ -91,7 +91,7 @@ func (f *commonSegmentNodeFilter) FilterNodes(ctx context.Context, nodes []int64
 	}
 	return lo.Filter(nodes, func(node int64, _ int) bool {
 		info := f.nodeManager.Get(node)
-		return info != nil && info.GetState() == session.NodeStateNormal && !f.nodeManager.IsResourceExhausted(node)
+		return info != nil && info.GetState() == session.NodeStateNormal && info.LoadAdmissionReady() && !f.nodeManager.IsResourceExhausted(node)
 	})
 }
 
@@ -117,7 +117,7 @@ func (f *commonChannelNodeFilter) FilterNodes(ctx context.Context, nodes []int64
 
 	return lo.Filter(nodes, func(node int64, _ int) bool {
 		info := f.nodeManager.Get(node)
-		return info != nil && info.GetState() == session.NodeStateNormal && !f.nodeManager.IsResourceExhausted(node)
+		return info != nil && info.GetState() == session.NodeStateNormal && info.LoadAdmissionReady() && !f.nodeManager.IsResourceExhausted(node)
 	})
 }
 

@@ -119,6 +119,11 @@ func (p *RowCountBasedAssignPolicy) AssignSegment(
 
 	// Convert nodes to node items with row count scores
 	nodeItems := p.convertToNodeItemsBySegment(collectionID, nodes)
+	if ledger := PlanningLedgerFromContext(ctx); ledger != nil {
+		for nodeID, item := range nodeItems {
+			item.CurrentScore = float64(ledger.Rows(nodeID, -1))
+		}
+	}
 	if len(nodeItems) == 0 {
 		return nil
 	}
@@ -139,11 +144,18 @@ func (p *RowCountBasedAssignPolicy) AssignSegment(
 	// Assign segments using priority queue
 	for _, s := range segments {
 		// Pick the node with the least row count
-		ni := queue.Pop().(*NodeItem)
+		ni := popPlanningSegmentTarget(ctx, &queue, s)
+		if ni == nil {
+			continue
+		}
 		plan := SegmentAssignPlan{
 			From:    -1,
 			To:      ni.NodeID,
 			Segment: s,
+		}
+		if ledger := PlanningLedgerFromContext(ctx); ledger != nil && !ledger.ReserveSegment(plan) {
+			queue.Push(ni)
+			continue
 		}
 		plans = append(plans, plan)
 		if len(plans) >= balanceBatchSize {
@@ -175,6 +187,11 @@ func (p *RowCountBasedAssignPolicy) AssignChannel(
 
 	// Convert nodes to node items with channel count scores
 	nodeItems := p.convertToNodeItemsByChannel(filteredNodes)
+	if ledger := PlanningLedgerFromContext(ctx); ledger != nil {
+		for nodeID, item := range nodeItems {
+			item.CurrentScore = float64(ledger.ChannelScore(nodeID, -1, 1))
+		}
+	}
 	if len(nodeItems) == 0 {
 		return nil
 	}
@@ -194,6 +211,7 @@ func (p *RowCountBasedAssignPolicy) AssignChannel(
 			nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
 			if item, ok := nodeItems[nodeID]; ok {
 				ni = item
+				queue.Remove(ni)
 			}
 		}
 
@@ -206,6 +224,10 @@ func (p *RowCountBasedAssignPolicy) AssignChannel(
 			From:    -1,
 			To:      ni.NodeID,
 			Channel: c,
+		}
+		if ledger := PlanningLedgerFromContext(ctx); ledger != nil && !ledger.ReserveChannel(plan) {
+			queue.Push(ni)
+			continue
 		}
 		plans = append(plans, plan)
 

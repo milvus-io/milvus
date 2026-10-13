@@ -97,8 +97,10 @@ func newCollectionBalanceItem(collectionID int64, rowCount int, sortOrder string
 		priority = -rowCount
 	}
 
+	base := &assign.BaseItem{}
+	base.SetPriority(priority)
 	return &collectionBalanceItem{
-		BaseItem:        &assign.BaseItem{},
+		BaseItem:        base,
 		collectionID:    collectionID,
 		rowCount:        rowCount,
 		sortOrder:       sortOrder,
@@ -112,6 +114,7 @@ func (c *collectionBalanceItem) getPriority() int {
 
 func (c *collectionBalanceItem) setPriority(priority int) {
 	c.balancePriority = priority
+	c.BaseItem.SetPriority(priority)
 }
 
 // BalanceChecker checks the cluster distribution and generates balance tasks.
@@ -141,6 +144,8 @@ type BalanceChecker struct {
 	// autoBalanceTs records the timestamp of the last auto balance operation
 	// to ensure balance operations don't happen too frequently
 	autoBalanceTs time.Time
+	epochSequence uint64
+	epochs        map[string]*balanceEpoch
 }
 
 func NewBalanceChecker(meta *meta.Meta,
@@ -354,12 +359,36 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 		if replica == nil {
 			continue
 		}
+		if b.epochBlocks(replica.GetResourceGroup()) {
+			continue
+		}
+		if !isStoppingBalance && b.hasPendingRecovery(replica) {
+			continue
+		}
 		sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
 		segmentPlans = append(segmentPlans, sPlans...)
 		channelPlans = append(channelPlans, cPlans...)
 		if len(segmentPlans) != 0 || len(channelPlans) != 0 {
 			balance.PrintNewBalancePlans(replica.GetCollectionID(), replica.GetID(), sPlans, cPlans)
 		}
+	}
+	// A batch limit applies to the entire checker epoch, including every source
+	// and replica. Roll back reservations for plans which will not be admitted.
+	if len(segmentPlans) > config.segmentBatchSize {
+		if ledger := assign.PlanningLedgerFromContext(ctx); ledger != nil {
+			for _, plan := range segmentPlans[max(0, config.segmentBatchSize):] {
+				ledger.UndoSegment(plan)
+			}
+		}
+		segmentPlans = segmentPlans[:max(0, config.segmentBatchSize)]
+	}
+	if len(channelPlans) > config.channelBatchSize {
+		if ledger := assign.PlanningLedgerFromContext(ctx); ledger != nil {
+			for _, plan := range channelPlans[max(0, config.channelBatchSize):] {
+				ledger.UndoChannel(plan)
+			}
+		}
+		channelPlans = channelPlans[:max(0, config.channelBatchSize)]
 	}
 
 	// Set LoadPriority based on balance type:
@@ -394,6 +423,8 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 		}
 	}
 
+	reconcileSegmentPlans(ctx, segmentPlans, segmentTasks)
+	reconcileChannelPlans(ctx, channelPlans, channelTasks)
 	return segmentTasks, channelTasks
 }
 
@@ -459,10 +490,13 @@ func (b *BalanceChecker) processBalanceQueue(
 			continue
 		}
 
-		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance)
-		generatedSegmentTaskNum += len(newSegmentTasks)
-		generatedChannelTaskNum += len(newChannelTasks)
-		b.submitTasks(newSegmentTasks, newChannelTasks)
+		remainingConfig := config
+		remainingConfig.segmentBatchSize -= generatedSegmentTaskNum
+		remainingConfig.channelBatchSize -= generatedChannelTaskNum
+		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, remainingConfig, isStoppingBalance)
+		acceptedSegments, acceptedChannels := b.submitTasks(newSegmentTasks, newChannelTasks)
+		generatedSegmentTaskNum += acceptedSegments
+		generatedChannelTaskNum += acceptedChannels
 	}
 	return generatedSegmentTaskNum, generatedChannelTaskNum
 }
@@ -470,14 +504,25 @@ func (b *BalanceChecker) processBalanceQueue(
 // submitTasks submits the generated balance tasks to the scheduler for execution.
 // This method handles the final step of the balance process by adding all
 // generated tasks to the task scheduler, which will execute them asynchronously.
-func (b *BalanceChecker) submitTasks(segmentTasks, channelTasks []task.Task) {
-	for _, task := range segmentTasks {
-		b.scheduler.Add(task)
+func (b *BalanceChecker) submitTasks(segmentTasks, channelTasks []task.Task) (int, int) {
+	acceptedSegments, acceptedChannels := 0, 0
+	for _, group := range [][]task.Task{segmentTasks, channelTasks} {
+		for _, t := range group {
+			if err := b.scheduler.Add(t); err != nil {
+				assign.UndoTask(t.Context(), t)
+				t.Cancel(err)
+				continue
+			}
+			assign.CommitTask(t.Context(), t)
+			b.trackEpochWork(t)
+			if _, channel := t.(*task.ChannelTask); channel {
+				acceptedChannels++
+			} else {
+				acceptedSegments++
+			}
+		}
 	}
-
-	for _, task := range channelTasks {
-		b.scheduler.Add(task)
-	}
+	return acceptedSegments, acceptedChannels
 }
 
 // Check is the main entry point for balance operations.
@@ -511,6 +556,15 @@ func (b *BalanceChecker) submitTasks(segmentTasks, channelTasks []task.Task) {
 // The method tracks execution time and logs warnings for slow operations
 // to help identify performance bottlenecks in large clusters.
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
+	if !b.nodeManager.LoadReportSyncReady() {
+		return nil
+	}
+	b.epochSequence++
+	b.advanceEpochs(time.Now())
+	ctx = assign.WithPlanningLedgerFactory(ctx, func() *assign.PlanningLedger {
+		return assign.NewPlanningLedger(b.nodeManager, b.dist, b.scheduler, paramtable.Get().QueryCoordCfg.BalanceMaxPendingLoads.GetAsInt())
+	})
+	defer assign.ReleasePlanningLedger(ctx)
 	// Performance monitoring: track execution time
 	start := time.Now()
 	defer func() {

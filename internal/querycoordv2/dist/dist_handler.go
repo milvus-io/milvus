@@ -58,6 +58,7 @@ type distHandler struct {
 	dist         *meta.DistributionManager
 	target       meta.TargetManagerInterface
 	mu           sync.Mutex
+	reportMu     sync.Mutex // orders periodic and startup RPCs together with applying their reports
 	stopOnce     sync.Once
 	lastUpdateTs int64
 
@@ -138,6 +139,8 @@ func (dh *distHandler) startDispatchLoop(ctx context.Context) {
 }
 
 func (dh *distHandler) pullDist(ctx context.Context, failures *int) {
+	dh.reportMu.Lock()
+	defer dh.reportMu.Unlock()
 	tr := timerecord.NewTimeRecorder("")
 	resp, err := dh.getDistribution(ctx)
 	d1 := tr.RecordSpan()
@@ -159,6 +162,8 @@ func (dh *distHandler) pullDist(ctx context.Context, failures *int) {
 }
 
 func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetDataDistributionResponse) {
+	dh.mu.Lock()
+	defer dh.mu.Unlock()
 	node := dh.nodeManager.Get(resp.GetNodeID())
 	if node == nil {
 		return
@@ -193,6 +198,9 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 		dh.updateSegmentsDistribution(ctx, resp)
 		dh.updateChannelsDistribution(ctx, resp)
 	}
+	// Loading state changes independently of the segment distribution. Make
+	// admission ready only after applying the initial full distribution.
+	node.UpdateLoadReport(resp.GetLoadResourceReport(), resp.GetLoadResourceReportSupported(), !resp.GetIsDelta(), now)
 }
 
 func (dh *distHandler) SetNotifyFunc(notifyFunc NotifyDelegatorChanges) {

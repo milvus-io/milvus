@@ -26,14 +26,16 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type diskUsageFetcher struct {
-	ctx   context.Context
-	path  string
-	usage *atomic.Int64
-	err   *atomic.Error
+	ctx     context.Context
+	path    string
+	usage   *atomic.Int64
+	err     *atomic.Error
+	sampled atomic.Bool
 }
 
 func NewDiskUsageFetcher(ctx context.Context) *diskUsageFetcher {
@@ -49,6 +51,18 @@ func (d *diskUsageFetcher) GetDiskUsage() (int64, error) {
 	return d.usage.Load(), d.err.Load()
 }
 
+// GetDiskUsageIfSampled preserves the legacy getter but prevents resource
+// reports from treating its initial zero value as a successful measurement.
+func (d *diskUsageFetcher) GetDiskUsageIfSampled() (int64, error) {
+	if !d.sampled.Load() {
+		if _, err := d.GetDiskUsage(); err != nil {
+			return 0, err
+		}
+		return 0, merr.WrapErrServiceUnavailableMsg("local disk usage has not been sampled")
+	}
+	return d.GetDiskUsage()
+}
+
 func (d *diskUsageFetcher) fetch() {
 	diskUsage, err := segcore.GetLocalUsedSize(d.path)
 	if err != nil {
@@ -58,6 +72,7 @@ func (d *diskUsageFetcher) fetch() {
 	}
 	d.usage.Store(diskUsage)
 	d.err.Store(nil)
+	d.sampled.Store(true)
 	metrics.QueryNodeDiskUsedSize.WithLabelValues(paramtable.GetStringNodeID()).Set(float64(diskUsage) / 1024 / 1024)
 	// in MB
 	mlog.RatedInfo(d.ctx, rate.Limit(300), "querynode disk usage", mlog.Int64("size", diskUsage), mlog.FieldNodeID(paramtable.GetNodeID()))

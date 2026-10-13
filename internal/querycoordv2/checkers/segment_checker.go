@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -59,7 +60,8 @@ type SegmentChecker struct {
 	assignPolicy assign.AssignPolicy
 
 	// version cache for fast skip when nothing changed
-	versionCache map[int64]*collectionVersionCache
+	versionCache  map[int64]*collectionVersionCache
+	deferredLoads map[int64]bool
 }
 
 func NewSegmentChecker(
@@ -69,8 +71,8 @@ func NewSegmentChecker(
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 ) *SegmentChecker {
-	// Create RoundRobin assign policy in constructor to maximize loading speed
-	// Note: RoundRobin may break short-term balance but prioritizes loading speed
+	// The policy uses shared projected load for recovery when a planning ledger
+	// is present; legacy callers retain the existing assignment behavior.
 	assignPolicy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeRoundRobin)
 
 	return &SegmentChecker{
@@ -104,6 +106,14 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	if !c.IsActive() {
 		return nil
 	}
+	if !c.nodeMgr.LoadReportSyncReady() {
+		return nil
+	}
+	c.deferredLoads = make(map[int64]bool)
+	ctx = assign.WithPlanningLedgerFactory(ctx, func() *assign.PlanningLedger {
+		return assign.NewPlanningLedger(c.nodeMgr, c.dist, c.scheduler, Params.QueryCoordCfg.BalanceMaxPendingLoads.GetAsInt())
+	})
+	defer assign.ReleasePlanningLedger(ctx)
 
 	collectionIDs := c.meta.GetAll(ctx)
 	for _, cid := range collectionIDs {
@@ -127,14 +137,17 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 				for _, t := range tasks {
 					hasTask = true
 					if err := c.scheduler.Add(t); err != nil {
+						assign.UndoTask(ctx, t)
 						t.Cancel(err)
+					} else {
+						assign.CommitTask(ctx, t)
 					}
 				}
 			}
 
 			// Only update version cache if no tasks were generated
 			// If tasks were generated, we need to re-check next time
-			if !hasTask {
+			if !hasTask && !c.deferredLoads[cid] {
 				c.updateVersionCache(cid, currentTargetVersion, currentSegmentDistVersion, currentChannelDistVersion)
 			}
 		}
@@ -515,7 +528,13 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		return s.GetInsertChannel()
 	})
 
-	plans := make([]assign.SegmentAssignPlan, 0)
+	type recoveryGroup struct {
+		nodes    []int64
+		segments []*meta.Segment
+		largest  int64
+		priority commonpb.LoadPriority
+	}
+	groups := make(map[string]*recoveryGroup)
 	for shard, segments := range shardSegments {
 		// if channel is not subscribed yet, skip load segments
 		leader := c.dist.ChannelDistManager.GetShardLeader(shard, replica)
@@ -529,18 +548,46 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		if len(rwNodes) == 0 {
 			rwNodes = replica.GetRWNodes()
 		}
-
-		segmentInfos := lo.Map(segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {
-			return &meta.Segment{
-				SegmentInfo: s,
+		// Channel-exclusive node lists belong to the immutable replica snapshot.
+		// Sort a copy rather than mutating metadata shared with other readers.
+		rwNodes = append([]int64(nil), rwNodes...)
+		sort.Slice(rwNodes, func(i, j int) bool { return rwNodes[i] < rwNodes[j] })
+		for _, segment := range segments {
+			priority := priorityMap[segment.GetID()]
+			key := fmt.Sprint(rwNodes, ":", priority)
+			group := groups[key]
+			if group == nil {
+				group = &recoveryGroup{nodes: rwNodes, priority: priority}
+				groups[key] = group
 			}
-		})
-		shardPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
-		for i := range shardPlans {
-			shardPlans[i].Replica = replica
-			shardPlans[i].LoadPriority = priorityMap[shardPlans[i].Segment.GetID()]
+			group.segments = append(group.segments, &meta.Segment{SegmentInfo: segment})
+			group.largest = max(group.largest, segment.GetNumOfRows())
 		}
-		plans = append(plans, shardPlans...)
+	}
+	orderedGroups := lo.Values(groups)
+	sort.Slice(orderedGroups, func(i, j int) bool {
+		if orderedGroups[i].priority != orderedGroups[j].priority {
+			return recoveryPriorityRank(orderedGroups[i].priority) < recoveryPriorityRank(orderedGroups[j].priority)
+		}
+		if orderedGroups[i].largest != orderedGroups[j].largest {
+			return orderedGroups[i].largest > orderedGroups[j].largest
+		}
+		return fmt.Sprint(orderedGroups[i].nodes) < fmt.Sprint(orderedGroups[j].nodes)
+	})
+	plans := make([]assign.SegmentAssignPlan, 0)
+	for _, group := range orderedGroups {
+		groupPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), group.segments, group.nodes, true)
+		for i := range groupPlans {
+			groupPlans[i].Replica = replica
+			groupPlans[i].LoadPriority = priorityMap[groupPlans[i].Segment.GetID()]
+		}
+		plans = append(plans, groupPlans...)
+	}
+	if len(plans) < len(segments) {
+		if c.deferredLoads == nil {
+			c.deferredLoads = make(map[int64]bool)
+		}
+		c.deferredLoads[replica.GetCollectionID()] = true
 	}
 
 	// TODO: this assumes a single segment always finishes loading within
@@ -550,7 +597,15 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	// the same budget on the next check tick -- it never converges. Needs
 	// either backoff/a retry cap on repeated DeadlineExceeded rebuilds, or a
 	// no-progress timeout instead of a flat per-task wall-clock budget.
-	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
+	tasks := balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
+	reconcileSegmentPlans(ctx, plans, tasks)
+	if len(tasks) < len(plans) {
+		if c.deferredLoads == nil {
+			c.deferredLoads = make(map[int64]bool)
+		}
+		c.deferredLoads[replica.GetCollectionID()] = true
+	}
+	return tasks
 }
 
 func (c *SegmentChecker) createSegmentReopenTasks(ctx context.Context, segments []*meta.Segment, replica *meta.Replica) []task.Task {
@@ -618,4 +673,16 @@ func (c *SegmentChecker) getTraceCtx(ctx context.Context, collectionID int64) co
 	}
 
 	return trace.ContextWithSpan(ctx, coll.LoadSpan)
+}
+
+// Preserve request load priority before optimizing placement within a class.
+func recoveryPriorityRank(priority commonpb.LoadPriority) int {
+	switch priority {
+	case commonpb.LoadPriority_HIGH:
+		return 0
+	case commonpb.LoadPriority_LOW:
+		return 1
+	default:
+		return 2
+	}
 }

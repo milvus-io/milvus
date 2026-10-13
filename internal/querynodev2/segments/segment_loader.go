@@ -29,6 +29,7 @@ import (
 	"io"
 	"math"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -98,6 +99,12 @@ type Loader interface {
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
 	) error
+}
+
+// LoadResourceReporter is optional so loaders without resource telemetry remain
+// compatible. A nil report must be treated as unknown, not as an idle node.
+type LoadResourceReporter interface {
+	GetLoadResourceReport(ctx context.Context) (*querypb.QueryNodeLoadResourceReport, error)
 }
 
 type requestResourceResult struct {
@@ -176,6 +183,9 @@ const (
 type loadResult struct {
 	status *atomic.Int32
 	cond   *sync.Cond
+	// Protected by segmentLoader.mut; retained until unregister, not notifyLoadFinish.
+	resourceInfo *querypb.LoadingSegmentInfo
+	loadInfo     *querypb.SegmentLoadInfo
 }
 
 func newLoadResult() *loadResult {
@@ -198,7 +208,7 @@ type segmentLoader struct {
 	// The channel will be closed as the segment loaded
 	loadingSegments *typeutil.ConcurrentMap[int64, *loadResult]
 
-	mut                       sync.Mutex // guards committedResource
+	mut                       sync.Mutex // guards committedResource and loading resource metadata
 	committedResource         LoadResource
 	committedLogicalResource  LoadResource
 	committedResourceNotifier *syncutil.VersionedNotifier
@@ -207,9 +217,56 @@ type segmentLoader struct {
 }
 
 var _ Loader = (*segmentLoader)(nil)
+var _ LoadResourceReporter = (*segmentLoader)(nil)
 
 func (loader *segmentLoader) GetLocalDiskUsage() (int64, error) {
 	return loader.duf.GetDiskUsage()
+}
+
+// GetLoadResourceReport reports full reservations separately from physical
+// usage. Their sum deliberately overestimates usage already materialized by a
+// load, rather than claiming that reservations are all additional RSS.
+func (loader *segmentLoader) GetLoadResourceReport(ctx context.Context) (*querypb.QueryNodeLoadResourceReport, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	diskUsage, err := loader.duf.GetDiskUsageIfSampled()
+	if err != nil {
+		return nil, merr.Wrap(err, "get loading resource disk usage")
+	}
+	if diskUsage < 0 {
+		return nil, merr.WrapErrServiceInternalMsg("negative local disk usage")
+	}
+	memoryUsage := hardware.GetUsedMemoryCount()
+	if memoryUsage == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("loading resource memory usage unavailable")
+	}
+
+	loader.mut.Lock()
+	defer loader.mut.Unlock()
+	report := &querypb.QueryNodeLoadResourceReport{
+		MemoryUsageBytes:      memoryUsage,
+		DiskUsageBytes:        uint64(diskUsage),
+		LoadingMemoryBytes:    loader.committedResource.MemorySize,
+		LoadingDiskBytes:      loader.committedResource.DiskSize,
+		TieredEvictionEnabled: paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+	}
+	loader.loadingSegments.Range(func(_ int64, result *loadResult) bool {
+		if info := result.resourceInfo; info != nil {
+			report.LoadingSegments = append(report.LoadingSegments, &querypb.LoadingSegmentInfo{
+				SegmentId:            info.GetSegmentId(),
+				CollectionId:         info.GetCollectionId(),
+				NumRows:              info.GetNumRows(),
+				EstimatedMemoryBytes: info.GetEstimatedMemoryBytes(),
+				EstimatedDiskBytes:   info.GetEstimatedDiskBytes(),
+			})
+		}
+		return true
+	})
+	sort.Slice(report.LoadingSegments, func(i, j int) bool {
+		return report.LoadingSegments[i].GetSegmentId() < report.LoadingSegments[j].GetSegmentId()
+	})
+	return report, nil
 }
 
 func (loader *segmentLoader) Load(ctx context.Context,
@@ -429,12 +486,22 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 		// Only active loaded segments should be skipped here. SegmentManager.Exist()
 		// also reports detached/on-releasing segments, which are no longer active
 		// and must be allowed to load again.
+		loader.mut.Lock()
 		isLoaded := loader.manager.Segment.GetWithType(segment.GetSegmentID(), segmentType) != nil
 		isLoading := loader.loadingSegments.Contain(segment.GetSegmentID())
 		if !isLoaded && !isLoading {
 			infos = append(infos, segment)
-			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
+			result := newLoadResult()
+			result.loadInfo = segment
+			result.resourceInfo = &querypb.LoadingSegmentInfo{
+				SegmentId:    segment.GetSegmentID(),
+				CollectionId: segment.GetCollectionID(),
+				NumRows:      segment.GetNumOfRows(),
+			}
+			loader.loadingSegments.Insert(segment.GetSegmentID(), result)
+			loader.mut.Unlock()
 		} else {
+			loader.mut.Unlock()
 			mlog.Info(context.TODO(), "skip loaded/loading segment",
 				mlog.Int64("segmentID", segment.GetSegmentID()),
 				mlog.Bool("isLoaded", isLoaded),
@@ -458,6 +525,8 @@ func configureUseTakeForOutput(loadInfo *querypb.SegmentLoadInfo, schema *schema
 }
 
 func (loader *segmentLoader) unregister(segments ...*querypb.SegmentLoadInfo) {
+	loader.mut.Lock()
+	defer loader.mut.Unlock()
 	for i := range segments {
 		result, ok := loader.loadingSegments.GetAndRemove(segments[i].GetSegmentID())
 		if ok {
@@ -1800,6 +1869,15 @@ func (loader *segmentLoader) estimateSegmentLoadingResourceUsage(ctx context.Con
 				mlog.Err(err))
 			return nil, 0, err
 		}
+		loader.mut.Lock()
+		// Other operations (e.g. delta-log loads) may estimate resources for
+		// the same segment. Only the request that owns this prepare entry can
+		// update its estimate.
+		if result, ok := loader.loadingSegments.Get(loadInfo.GetSegmentID()); ok && result.loadInfo == loadInfo && result.resourceInfo != nil {
+			result.resourceInfo.EstimatedMemoryBytes = loadingUsage.MemorySize
+			result.resourceInfo.EstimatedDiskBytes = loadingUsage.DiskSize
+		}
+		loader.mut.Unlock()
 
 		logger.Debug(ctx, "segment resource for loading",
 			mlog.Int64("segmentID", loadInfo.GetSegmentID()),

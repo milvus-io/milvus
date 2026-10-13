@@ -573,6 +573,7 @@ type taskScheduler struct {
 	tasks        *ConcurrentMap[UniqueID, struct{}]
 	segmentTasks *ConcurrentMap[replicaSegmentIndex, Task]
 	channelTasks *ConcurrentMap[replicaChannelIndex, Task]
+	admittedAt   *ConcurrentMap[int64, time.Time]
 	processQueue *nodeTaskQueue
 	waitQueue    *taskQueue
 
@@ -610,6 +611,7 @@ func NewScheduler(ctx context.Context,
 		tasks:            NewConcurrentMap[UniqueID, struct{}](),
 		segmentTasks:     NewConcurrentMap[replicaSegmentIndex, Task](),
 		channelTasks:     NewConcurrentMap[replicaChannelIndex, Task](),
+		admittedAt:       NewConcurrentMap[int64, time.Time](),
 		processQueue:     newNodeTaskQueue(),
 		waitQueue:        newTaskQueue(),
 		taskStats:        expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
@@ -670,6 +672,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	}
 
 	task.SetID(scheduler.idAllocator())
+	scheduler.admittedAt.Insert(task.ID(), time.Now())
 	scheduler.waitQueue.Add(task)
 	scheduler.tasks.Insert(task.ID(), struct{}{})
 	scheduler.incExecutingTaskDelta(task)
@@ -1025,6 +1028,9 @@ func (scheduler *taskScheduler) GetTasksJSON() string {
 // 2. step up the task's actions, set status to succeeded if all actions finished
 // 3. execute the current action of task
 func (scheduler *taskScheduler) schedule(node int64) {
+	if scheduler.nodeMgr != nil && !scheduler.nodeMgr.LoadReportSyncReady() {
+		return
+	}
 	if scheduler.tasks.Len() == 0 {
 		scheduler.updateTaskMetrics()
 		return
@@ -1210,6 +1216,9 @@ func (scheduler *taskScheduler) process(task Task) bool {
 func (scheduler *taskScheduler) check(task Task, checkDistExist bool) error {
 	err := task.Context().Err()
 	if err == nil {
+		err = scheduler.queueWaitError(task, time.Now())
+	}
+	if err == nil {
 		err = scheduler.checkStale(task, checkDistExist)
 	}
 
@@ -1287,6 +1296,9 @@ func (scheduler *taskScheduler) remove(task Task) {
 		task.Cancel(nil)
 	}
 	_, ok := scheduler.tasks.GetAndRemove(task.ID())
+	if scheduler.admittedAt != nil {
+		scheduler.admittedAt.GetAndRemove(task.ID())
+	}
 	scheduler.waitQueue.Remove(task)
 	scheduler.processQueue.Remove(task)
 	if ok {

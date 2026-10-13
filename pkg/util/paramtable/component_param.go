@@ -3639,6 +3639,7 @@ type queryCoordConfig struct {
 	DistributionRequestTimeout  ParamItem `refreshable:"true"`
 	HeartBeatWarningLag         ParamItem `refreshable:"true"`
 	EnableDataDistributionDelta ParamItem `refreshable:"true"`
+	LoadReportSyncTimeout       ParamItem `refreshable:"true"`
 
 	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
@@ -3678,6 +3679,7 @@ type queryCoordConfig struct {
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
 	BalanceChannelBatchSize            ParamItem `refreshable:"true"`
 	EnableBalanceOnMultipleCollections ParamItem `refreshable:"true"`
+	BalanceMaxPendingLoads             ParamItem `refreshable:"true"`
 
 	// query node task parallelism factor
 	QueryNodeTaskParallelismFactor ParamItem `refreshable:"true"`
@@ -4007,6 +4009,14 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.SegmentTaskTimeout.Init(base.mgr)
+	p.LoadReportSyncTimeout = ParamItem{
+		Key:          "queryCoord.loadReportSyncTimeout",
+		Version:      "3.0.0",
+		DefaultValue: "10000",
+		Doc:          "Startup wait in milliseconds for full QueryNode distribution and loading reports; unsynchronized nodes remain excluded after the wait.",
+		Export:       true,
+	}
+	p.LoadReportSyncTimeout.Init(base.mgr)
 
 	p.DistPullInterval = ParamItem{
 		Key:          "queryCoord.distPullInterval",
@@ -4337,6 +4347,14 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.BalanceSegmentBatchSize.Init(base.mgr)
+	p.BalanceMaxPendingLoads = ParamItem{
+		Key:          "queryCoord.balanceMaxPendingLoads",
+		Version:      "3.0.0",
+		DefaultValue: "8",
+		Doc:          "Maximum outstanding segment loads per target node during balance and recovery planning. Values below one use one slot.",
+		Export:       true,
+	}
+	p.BalanceMaxPendingLoads.Init(base.mgr)
 
 	p.BalanceChannelBatchSize = ParamItem{
 		Key:          "queryCoord.balanceChannelBatchSize",

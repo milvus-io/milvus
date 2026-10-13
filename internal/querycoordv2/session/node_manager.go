@@ -45,14 +45,19 @@ type Manager interface {
 }
 
 type NodeManager struct {
-	mu        sync.RWMutex
-	nodes     map[int64]*NodeInfo
-	startOnce sync.Once
+	mu                sync.RWMutex
+	nodes             map[int64]*NodeInfo
+	startOnce         sync.Once
+	reportSyncStarted time.Time
+	reportSyncTimeout time.Duration
 }
 
 func (m *NodeManager) Add(node *NodeInfo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !m.reportSyncStarted.IsZero() {
+		node.RequireLoadReport()
+	}
 	m.nodes[node.ID()] = node
 	metrics.QueryCoordNumQueryNodes.WithLabelValues().Set(float64(len(m.nodes)))
 }
@@ -147,6 +152,7 @@ type NodeInfo struct {
 	// with a penalty duration during which it won't receive new loading tasks.
 	// Zero value means no active penalty.
 	resourceExhaustionExpireAt time.Time
+	loadReportState
 }
 
 func (n *NodeInfo) ID() int64 {

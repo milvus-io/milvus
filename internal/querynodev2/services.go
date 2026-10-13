@@ -1302,14 +1302,31 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	}
 	defer node.lifetime.Done()
 
+	// Loading changes independently from segment/channel distribution. Collect
+	// it before either the unchanged-distribution or the full/delta response.
+	var loadResourceReport *querypb.QueryNodeLoadResourceReport
+	reporter, loadResourceReportSupported := node.loader.(segments.LoadResourceReporter)
+	if loadResourceReportSupported {
+		var err error
+		loadResourceReport, err = reporter.GetLoadResourceReport(ctx)
+		if err != nil {
+			log.RatedWarn(ctx, 1.0, "loading resource report unavailable", mlog.Err(err))
+			loadResourceReport = nil
+		}
+	}
+
 	node.distDeltaTracker.mu.Lock()
 	lastModifyTs := node.getDistributionModifyTS()
 	if !hasDataDistributionChange(req, lastModifyTs) {
 		node.distDeltaTracker.mu.Unlock()
 		resp := &querypb.GetDataDistributionResponse{
-			Status:       merr.Success(),
-			NodeID:       node.GetNodeID(),
-			LastModifyTs: lastModifyTs,
+			Status:                      merr.Success(),
+			NodeID:                      node.GetNodeID(),
+			LastModifyTs:                lastModifyTs,
+			MemCapacityInMB:             float64(hardware.GetMemoryCount() / 1024 / 1024),
+			CpuNum:                      int64(hardware.GetCPUNum()),
+			LoadResourceReport:          loadResourceReport,
+			LoadResourceReportSupported: loadResourceReportSupported,
 		}
 		return resp, nil
 	}
@@ -1443,19 +1460,21 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	node.distDeltaTracker.mu.Unlock()
 
 	resp := &querypb.GetDataDistributionResponse{
-		Status:              merr.Success(),
-		NodeID:              node.GetNodeID(),
-		Segments:            segmentVersionInfos,
-		Channels:            channelVersionInfos,
-		LeaderViews:         leaderViews,
-		LastModifyTs:        lastModifyTs,
-		MemCapacityInMB:     float64(hardware.GetMemoryCount() / 1024 / 1024),
-		CpuNum:              int64(hardware.GetCPUNum()),
-		IsDelta:             !fullReport,
-		RemovedSegmentIds:   removedSegmentIDs,
-		RemovedChannelNames: removedChannelNames,
-		TotalSegmentCount:   int64(totalSegmentCount),
-		TotalChannelCount:   int64(totalChannelCount),
+		Status:                      merr.Success(),
+		NodeID:                      node.GetNodeID(),
+		Segments:                    segmentVersionInfos,
+		Channels:                    channelVersionInfos,
+		LeaderViews:                 leaderViews,
+		LastModifyTs:                lastModifyTs,
+		MemCapacityInMB:             float64(hardware.GetMemoryCount() / 1024 / 1024),
+		CpuNum:                      int64(hardware.GetCPUNum()),
+		IsDelta:                     !fullReport,
+		RemovedSegmentIds:           removedSegmentIDs,
+		RemovedChannelNames:         removedChannelNames,
+		TotalSegmentCount:           int64(totalSegmentCount),
+		TotalChannelCount:           int64(totalChannelCount),
+		LoadResourceReport:          loadResourceReport,
+		LoadResourceReportSupported: loadResourceReportSupported,
 	}
 	return resp, nil
 }
