@@ -172,6 +172,20 @@ func TestExpr_TupleTerm(t *testing.T) {
 		assertInvalidExpr(t, helper, `[JSONField["x"], Int64Field] in [[1, 2]]`)
 	})
 
+	// Regression for a review finding: typeutil.IsPrimitiveType includes
+	// TIMESTAMPTZ, but castValue's TIMESTAMPTZ branch is an unconditional
+	// passthrough (real timestamp literals are validated and converted
+	// through a completely separate ISO-string grammar path, never through
+	// castValue). Without this explicit rejection, a TIMESTAMPTZ tuple
+	// column would silently accept any value kind -- bool, array, a plain
+	// (non-ISO) string -- parse successfully, and only fail much later, at
+	// execution time, with a type assertion error deep in segcore.
+	t.Run("TIMESTAMPTZ column is rejected in v1 (castValue cannot validate it)", func(t *testing.T) {
+		assertInvalidExpr(t, helper, `[TimestamptzField, Int64Field] in [["2026-10-13T00:00:00Z", 1]]`)
+		assertInvalidExpr(t, helper, `[TimestamptzField, Int64Field] in [[true, 1]]`)
+		assertInvalidExpr(t, helper, `[TimestamptzField, Int64Field] in [[[1], 1]]`)
+	})
+
 	t.Run("empty tuple list lowers to the same constant-false node as `false and expr`", func(t *testing.T) {
 		expr, err := ParseExpr(helper, `[Int64Field, VarCharField] in []`, nil)
 		require.NoError(t, err)

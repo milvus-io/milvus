@@ -205,7 +205,25 @@ All in `internal/parser/planparserv2/`:
   wraps the finished lowered tree; the prefix-NOT grammar-precedence trap;
   every arity/distinctness/type-cast/JSON-path/non-primitive rejection path;
   delete-expression eligibility.
-- No C++ test needed for v1 -- there is no new C++ code. The lowered form's
-  runtime correctness (including the NULL semantics discussed above) is
-  exercised by the engine's existing `AND`/`OR`/`UnaryRangeExpr` test
-  coverage, which this feature does not modify.
+- **Revised per PR review**: "no new C++ code" is true, but it does not mean
+  "no new C++ test needed." Each primitive (`AND`, `OR`, `UnaryRangeExpr`) is
+  individually well-tested in isolation, but the specific *composition* this
+  feature introduces -- an OR over several multi-column AND branches, each
+  potentially touching a NULL column in a different tuple -- is new, and the
+  NULL-semantics claims above were originally verified only by reading
+  `ConjunctExpr.cpp`'s logic, not by running it. Three-valued-logic
+  propagation is notoriously easy to get subtly wrong by hand-tracing,
+  including by the person making the claim.
+  `internal/core/src/exec/expression/TupleTermLoweringExprTest.cpp` closes
+  this gap: it builds the exact lowered IR tree directly (bypassing the Go
+  parser and plan-proto text), runs it against a real nullable growing
+  segment, and asserts the specific truth-table claims above end to end --
+  including the sharp case that distinguishes genuine ambiguity from a
+  definite answer that merely involves a NULL column
+  (`(NULL, 3)` against `[[1,1],[2,2]]` is definite `FALSE` for `IN`/`TRUE`
+  for `NOT IN`, not `UNKNOWN`), and a multi-tuple case showing that adding a
+  tuple can turn a definite `FALSE` into a genuine `UNKNOWN`.
+  The empty-tuple-list case is not included in that C++ test: it folds to a
+  pre-existing constant-`AlwaysTrueExpr`/`NOT` evaluation path (already
+  covered structurally by the Go-level parser test), not the new AND/OR
+  composition this file is about.

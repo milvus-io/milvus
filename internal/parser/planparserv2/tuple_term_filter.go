@@ -104,6 +104,26 @@ func (v *ParserVisitor) buildTupleTermExpr(ctx *parser.TermContext, arrayCtx *pa
 				"tuple 'in' only supports top-level scalar fields, but field '%s' has type %s",
 				ce.GetText(), columnInfo.GetDataType().String())
 		}
+		// typeutil.IsPrimitiveType includes TIMESTAMPTZ, but castValue's
+		// TIMESTAMPTZ branch is an unconditional passthrough: real timestamp
+		// literals never reach castValue at all (they go through a dedicated
+		// ISO-string grammar path that calls
+		// timestamptz.ValidateAndReturnUnixMicroTz with the query's timezone
+		// -- see the TimestamptzCompareForward/Reverse rules in Plan.g4).
+		// Routed through castValue instead, as every tuple value is here, a
+		// TIMESTAMPTZ column would silently accept a bool/string/array
+		// literal with no validation, producing a plan whose equality node
+		// carries the wrong GenericValue kind -- segcore's TIMESTAMPTZ
+		// execution path requires kInt64Val and would fail a type assertion
+		// at evaluation time, not at parse time. Reject it explicitly here,
+		// the same way JSON/ARRAY columns are already excluded; proper
+		// support needs the same ISO-string validation/conversion ordinary
+		// timestamp comparisons use, which is out of scope for this v1.
+		if typeutil.IsTimestamptzType(columnInfo.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg(
+				"tuple 'in' does not yet support TIMESTAMPTZ fields, but field '%s' has that type",
+				ce.GetText())
+		}
 		if prev, dup := seenFieldIDs[columnInfo.GetFieldId()]; dup {
 			return merr.WrapErrParameterInvalidMsg(
 				"tuple 'in' left-hand side columns must be distinct, but '%s' and '%s' refer to the same field",
