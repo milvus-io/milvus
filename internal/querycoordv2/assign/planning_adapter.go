@@ -277,6 +277,21 @@ func planningChannelIdentity(plan ChannelAssignPlan) planningChannelKey {
 	return planningChannelKey{collection: plan.Channel.GetCollectionID(), from: from, to: plan.To, channel: plan.Channel.GetChannelName()}
 }
 
+// Filter before WAL preference and round-robin selection: recovery bypasses the
+// legacy node filter, but a target rejected by this snapshot must not hide other
+// ready candidates. Use the same readiness decision as ReserveChannel.
+func (l *PlanningLedger) readyChannelTargets(candidates []int64) []int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	nodes := make([]int64, 0, len(candidates))
+	for _, node := range candidates {
+		if l.nodes[node].Ready {
+			nodes = append(nodes, node)
+		}
+	}
+	return nodes
+}
+
 func (l *PlanningLedger) ReserveChannel(plan ChannelAssignPlan) bool {
 	key := planningChannelIdentity(plan)
 	l.mu.Lock()
@@ -284,8 +299,14 @@ func (l *PlanningLedger) ReserveChannel(plan ChannelAssignPlan) bool {
 	if key.from == key.to || !l.nodes[key.to].Ready {
 		return false
 	}
+	if _, exists := l.channels[key]; exists {
+		return false
+	}
 	for existing := range l.channels {
-		if existing.collection == key.collection && existing.channel == key.channel && existing.from == key.from {
+		// Missing channels have no source. Their copies in different replicas
+		// must be allowed on distinct targets; only a real source identifies a
+		// Move that must not be proposed to a second destination.
+		if key.from > 0 && existing.collection == key.collection && existing.channel == key.channel && existing.from == key.from {
 			return false
 		}
 	}

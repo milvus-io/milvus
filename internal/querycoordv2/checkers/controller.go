@@ -178,10 +178,15 @@ func (controller *CheckerController) Check() {
 
 // check is the real implementation of Check
 func (controller *CheckerController) check(ctx context.Context, checkType utils.CheckerType) {
-	// Checkers run on independent timers, but planning and admission must observe
-	// each other's accepted work before taking the next resource snapshot.
-	controller.planningMu.Lock()
-	defer controller.planningMu.Unlock()
+	// Placement checkers must observe each other's accepted work before taking
+	// the next resource snapshot, so hold the lock through scheduler admission.
+	// Index reopens and leader-view updates do not reserve placement in this
+	// ledger; their metadata RPCs must not block segment/channel recovery.
+	switch checkType {
+	case utils.SegmentChecker, utils.ChannelChecker, utils.BalanceChecker:
+		controller.planningMu.Lock()
+		defer controller.planningMu.Unlock()
+	}
 	if controller.nodeMgr != nil && !controller.nodeMgr.LoadReportSyncReady() {
 		return
 	}

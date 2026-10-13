@@ -129,3 +129,47 @@ func TestPlanningAdapterExistingCandidateLoadPreventsAlternateTarget(t *testing.
 	require.Nil(t, popPlanningSegmentTarget(WithPlanningLedger(context.Background(), ledger), &queue, segment))
 	require.Equal(t, 2, queue.Len(), "existing loading work must not be retargeted to another empty node")
 }
+
+func TestPlanningAdapterChannelRecoveryReservationsAndMoveRollback(t *testing.T) {
+	ledger := NewPlanningLedgerState(map[int64]PlanningNode{
+		29: ledgerTestNode(10, 1000), 31: ledgerTestNode(0, 1000), 32: ledgerTestNode(0, 1000),
+	}, nil, nil, nil, 8)
+	ctx := WithPlanningLedger(context.Background(), ledger)
+	channel := &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "recovery"}}
+	first := ChannelAssignPlan{From: -1, To: 31, Channel: channel}
+	second := ChannelAssignPlan{From: -1, To: 32, Channel: channel}
+	require.True(t, ledger.ReserveChannel(first))
+	require.True(t, ledger.ReserveChannel(second), "different replicas need separate copies of the same missing channel")
+	require.False(t, ledger.ReserveChannel(first), "the same destination still has only one reservation")
+
+	firstTask, err := task.NewChannelTask(ctx, time.Minute, task.WrapIDSource(0), 1, nil,
+		task.NewChannelAction(31, task.ActionTypeGrow, "recovery"))
+	require.NoError(t, err)
+	defer firstTask.Cancel(nil)
+	secondTask, err := task.NewChannelTask(ctx, time.Minute, task.WrapIDSource(0), 1, nil,
+		task.NewChannelAction(32, task.ActionTypeGrow, "recovery"))
+	require.NoError(t, err)
+	defer secondTask.Cancel(nil)
+	UndoTask(ctx, firstTask)
+	require.EqualValues(t, 0, ledger.ChannelScore(31, -1, 1))
+	require.EqualValues(t, 1, ledger.ChannelScore(32, -1, 1), "one replica's rejection must retain the other reservation")
+	CommitTask(ctx, secondTask)
+	UndoTask(ctx, secondTask)
+	require.False(t, ledger.ReserveChannel(second), "accepted work must remain reserved")
+	require.True(t, ledger.ReserveChannel(first), "rejected work can be planned again")
+
+	move := ChannelAssignPlan{From: -1, To: 31, Channel: &meta.DmChannel{
+		Node: 29, VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "move"},
+		View: &meta.LeaderView{NumOfGrowingRows: 10},
+	}}
+	alternate := move
+	alternate.To = 32
+	require.True(t, ledger.ReserveChannel(move))
+	require.False(t, ledger.ReserveChannel(alternate), "a real source cannot move the same channel to two targets")
+	require.True(t, ledger.UndoChannel(move))
+	require.EqualValues(t, 10, ledger.Rows(29, -1))
+	require.True(t, ledger.ReserveChannel(alternate))
+	ledger.CommitChannel(alternate)
+	require.False(t, ledger.UndoChannel(alternate))
+	require.False(t, ledger.ReserveChannel(move), "a committed Move must retain its source claim")
+}

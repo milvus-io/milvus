@@ -139,6 +139,13 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 	if len(nodes) == 0 {
 		return nil
 	}
+	ledger := PlanningLedgerFromContext(ctx)
+	if ledger != nil {
+		nodes = ledger.readyChannelTargets(nodes)
+	}
+	if len(nodes) == 0 {
+		return nil
+	}
 
 	// Handle WAL-based assignment if streaming service is enabled
 	plans := make([]ChannelAssignPlan, 0)
@@ -146,7 +153,7 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 	if streamingutil.IsStreamingServiceEnabled() {
 		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(channels, nodes)
 	}
-	if ledger := PlanningLedgerFromContext(ctx); ledger != nil {
+	if ledger != nil {
 		reserved := plans[:0]
 		for _, plan := range plans {
 			if ledger.ReserveChannel(plan) {

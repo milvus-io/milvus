@@ -90,6 +90,10 @@ invocation. Normal balance and stopping-node balance use the same per-RG gate.
 A rejection by the scheduler does not become epoch work. Succeeded, failed, or
 individually canceled tasks are terminal; remaining siblings continue naturally.
 
+Collections deferred by an older RG epoch retain their place in the balance
+queue for a later invocation. Do not repeatedly pop a deferred collection within
+the same invocation; replicas in other RGs can still make progress.
+
 ```mermaid
 stateDiagram-v2
   [*] --> Eligible
@@ -121,10 +125,14 @@ slow task contexts retain only a small released holder. Channel plans are fixed
 before returning to the controller, whose planning lock covers all subsequent
 acceptance, so their ledger need not remain alive during execution.
 
-Serialize checker planning and scheduler acceptance, so subsequent invocations
-observe accepted work. Freeze the baseline once per invocation and retain
-successful provisional reservations for that invocation; do not refresh the
-baseline with newly accepted scheduler deltas and count those plans again.
+Serialize SegmentChecker, ChannelChecker, and BalanceChecker planning through
+scheduler acceptance, so subsequent invocations observe accepted work. Index
+and leader checks run independently: index metadata I/O and routing updates must
+not hold this planning lock. Their existing Reopen/update admission remains
+outside the new Grow reservation contract. Freeze the baseline once per
+invocation and retain successful provisional reservations for that invocation;
+do not refresh the baseline with newly accepted scheduler deltas and count those
+plans again.
 
 The baseline combines actual sealed/growing distribution, accepted local Grow
 tasks, and QN-reported loads. Merge the same `(node, collection, segment)` using
@@ -143,6 +151,11 @@ not claim that every administrative API or reopen operation participates in the
 same Grow reservation contract. ChannelChecker and balance channel plans share
 projected channel/row accounting and readiness, while the eight-slot limit applies
 to segment Grow admission, not an exact byte budget for channel subscription.
+Missing-channel recovery must allow the same channel on distinct replica
+destinations while rejecting duplicate reservations for the same destination.
+Candidate readiness applies before channel placement, including forced recovery
+and WAL-preferred placement, so an unready preferred node does not hide an
+eligible alternative.
 Queued Grow actions and QN-reported loading entries occupy these slots. Reopen
 and update tasks not yet dispatched retain the existing executor/native admission
 controls; they are not new Grow reservations. Dispatch-time readiness and bounded
@@ -292,6 +305,13 @@ coordinator restart during an active cold load.
 - Admit a balance epoch containing successful, failing, queued, and slow tasks;
   verify individual terminal handling, finite queue waiting, and no sibling or
   whole-epoch cancellation.
+- Keep a balance epoch active across checks; verify deferred collections retain
+  their queue position and eligible replicas in other RGs continue to progress.
+- Recover the same missing channel in multiple replicas, including an unready
+  lowest-load or WAL-preferred node; verify independent replica placement on
+  eligible nodes.
+- Block index or leader checking while recovery runs; verify it proceeds, while
+  Segment/Channel/Balance planning remains serialized through scheduler admission.
 - Recover multiple failed nodes across many shards, including identical and
   overlapping RW sets, heterogeneous capacities, loaded old workers, and new
   empty workers; verify shared predictions, finite eight-slot admission and
@@ -320,6 +340,14 @@ build on an isolated development host ran the complete assign, session, dist,
 task, balance, and checkers Go packages. QN report/disk and protobuf tests and
 focused Go race checks passed. Tests used `-tags dynamic,test`,
 `-gcflags="all=-N -l"`, and `-count=1`.
+
+The follow-up coordinator fixes also passed the complete assign, checkers, and
+balance packages. Their regression tests exercise independent channel recovery
+across replicas, report readiness and WAL fallback, planning-lock scope, and
+collection queue progress across epochs and RGs.
+Each of the four regression groups failed on the previous production code with
+the same test sources, then passed with the fixes. Focused Go race checks for
+these regressions also passed.
 
 This does not establish whole-QN/C++ suite coverage, production deployment,
 strict cross-restart fencing, or measured recovery performance. The system test

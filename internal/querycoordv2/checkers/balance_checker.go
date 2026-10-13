@@ -84,6 +84,10 @@ type collectionBalanceItem struct {
 	collectionID int64
 	rowCount     int
 	sortOrder    string
+
+	// Replicas already considered in this queue round do not consume the check
+	// budget again while their siblings wait. A new round clears this set.
+	checkedReplicas map[int64]struct{}
 }
 
 // The priority is determined by the BalanceTriggerOrder configuration:
@@ -469,13 +473,60 @@ func (b *BalanceChecker) processBalanceQueue(
 	if pq == nil || pq.Len() == 0 {
 		pq = constructQueueFunc(ctx)
 	}
+	// Restore deferred items after this invocation, allowing other RGs to make
+	// progress without repeatedly popping the same blocked collection.
+	deferred := make([]*collectionBalanceItem, 0)
+	defer func() {
+		for _, item := range deferred {
+			pq.Push(item)
+		}
+	}()
+	seen := make(map[int64]struct{})
+	refreshed := false
 
 	generatedSegmentTaskNum := 0
 	generatedChannelTaskNum := 0
 	for generatedSegmentTaskNum < config.segmentBatchSize &&
 		generatedChannelTaskNum < config.channelBatchSize &&
-		checkCollectionCount < config.maxCheckCollectionCount &&
-		pq.Len() > 0 {
+		checkCollectionCount < config.maxCheckCollectionCount {
+		if pq.Len() == 0 {
+			if refreshed || len(deferred) == 0 {
+				break
+			}
+			refreshed = true
+			for _, item := range deferred {
+				item.checkedReplicas = nil
+			}
+			pq = constructQueueFunc(ctx)
+			// New-round work must not displace the old deferred collections in
+			// blocked RGs. Keep only currently eligible replicas in fresh items.
+			var fresh []*collectionBalanceItem
+			for pq.Len() > 0 {
+				item := pq.Pop().(*collectionBalanceItem)
+				if _, visited := seen[item.collectionID]; visited {
+					continue
+				}
+				eligible := false
+				item.checkedReplicas = make(map[int64]struct{})
+				for _, rid := range getReplicasFunc(ctx, item.collectionID) {
+					replica := b.meta.Get(ctx, rid)
+					if replica != nil && b.epochBlocks(replica.GetResourceGroup()) {
+						item.checkedReplicas[rid] = struct{}{}
+					} else {
+						eligible = true
+					}
+				}
+				if eligible {
+					fresh = append(fresh, item)
+				}
+			}
+			for _, item := range fresh {
+				pq.Push(item)
+			}
+			if pq.Len() == 0 {
+				break
+			}
+		}
 		// Break if balanceOnMultipleCollections is disabled and we already have tasks
 		if !config.balanceOnMultipleCollections && (generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0) {
 			mlog.Debug(ctx, "Balance on multiple collections disabled, stopping after first collection")
@@ -483,10 +534,36 @@ func (b *BalanceChecker) processBalanceQueue(
 		}
 
 		item := pq.Pop().(*collectionBalanceItem)
+		seen[item.collectionID] = struct{}{}
 		checkCollectionCount++
 
 		replicasToBalance := getReplicasFunc(ctx, item.collectionID)
+		if item.checkedReplicas == nil {
+			item.checkedReplicas = make(map[int64]struct{})
+		}
+		var ready, blocked []int64
+		for _, rid := range replicasToBalance {
+			if _, checked := item.checkedReplicas[rid]; checked {
+				continue
+			}
+			replica := b.meta.Get(ctx, rid)
+			if replica != nil && b.epochBlocks(replica.GetResourceGroup()) {
+				blocked = append(blocked, rid)
+			} else {
+				ready = append(ready, rid)
+				item.checkedReplicas[rid] = struct{}{}
+			}
+		}
+		if len(blocked) > 0 {
+			deferred = append(deferred, item)
+		}
+		replicasToBalance = ready
 		if len(replicasToBalance) == 0 {
+			if len(blocked) > 0 {
+				// An epoch gate did not invoke the balancer. Preserve the check
+				// budget for other RGs, even when its configured limit is one.
+				checkCollectionCount--
+			}
 			continue
 		}
 
