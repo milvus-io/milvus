@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
@@ -1433,5 +1435,371 @@ func testInt32FieldData(fieldID int64, values []int32) *schemapb.FieldData {
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}},
 		}},
+	}
+}
+
+// Parent metrics must include rows belonging to children that child Size drops;
+// neither top_hits nor child truncation defines the parent's metric window.
+func TestSearchAggregationThreeLevelPrefixAndPruningContract(t *testing.T) {
+	t.Parallel()
+	metrics := map[string]MetricSpec{"sum": {Op: "sum", FieldID: 104, FieldType: schemapb.DataType_Int64}}
+	ctx := newTestAggregationContext(t, 1, []LevelContext{
+		{
+			OwnFieldIDs: []int64{101}, Size: 1, Metrics: metrics,
+			Order:   []OrderCriterion{{Key: "sum", Dir: "desc"}},
+			TopHits: &TopHitsConfig{Size: 1, Sort: []SortCriterion{{FieldID: 104, Dir: "asc"}}},
+		},
+		{
+			OwnFieldIDs: []int64{102}, Size: 1, Metrics: metrics,
+			Order:   []OrderCriterion{{Key: "sum", Dir: "desc"}},
+			TopHits: &TopHitsConfig{Size: 2, Sort: []SortCriterion{{FieldID: 104, Dir: "desc"}}},
+		},
+		{
+			OwnFieldIDs: []int64{103}, Size: 1, Metrics: metrics,
+			Order: []OrderCriterion{{Key: "sum", Dir: "desc"}},
+		},
+	}, []int64{104}, nil)
+	data := &schemapb.SearchResultData{
+		NumQueries: 1, Topks: []int64{8},
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6, 7, 8}}}},
+		Scores:     []float32{.9, .8, .7, .6, .5, .4, .3, .2},
+		FieldsData: []*schemapb.FieldData{testLongFieldData(104, []int64{10, 20, 30, 40, 50, 60, 70, 80})},
+		GroupByFieldValues: []*schemapb.FieldData{
+			testStringFieldData(101, []string{"a", "a", "a", "a", "b", "b", "b", "a"}),
+			testStringFieldData(102, []string{"x", "x", "x", "y", "x", "x", "y", "x"}),
+			testStringFieldData(103, []string{"p", "p", "q", "p", "p", "q", "p", "q"}),
+		},
+	}
+	before := proto.Clone(data)
+	computer := NewSearchAggregationComputer(data, ctx, metric.IP)
+	for run := 0; run < 2; run++ {
+		result, err := computer.Compute(context.Background())
+		require.NoError(t, err)
+		require.Len(t, result, 1)
+		require.Len(t, result[0], 1)
+		parent := result[0][0]
+		require.Equal(t, "a", parent.Key[101], "equal sums preserve first-seen bucket order")
+		require.Equal(t, int64(5), parent.Count)
+		require.Equal(t, int64(180), parent.Metrics["sum"])
+		require.Len(t, parent.Hits, 1)
+		require.Equal(t, int64(1), parent.Hits[0].PK)
+		require.Len(t, parent.SubAggBuckets, 1)
+		child := parent.SubAggBuckets[0]
+		require.Equal(t, "x", child.Key[102])
+		require.Equal(t, int64(4), child.Count)
+		require.Equal(t, int64(140), child.Metrics["sum"], "b/x must not merge into a/x")
+		require.Len(t, child.Hits, 2)
+		require.Equal(t, int64(8), child.Hits[0].PK)
+		require.Equal(t, int64(3), child.Hits[1].PK)
+		require.Len(t, child.SubAggBuckets, 1)
+		leaf := child.SubAggBuckets[0]
+		require.Equal(t, "q", leaf.Key[103])
+		require.Equal(t, int64(2), leaf.Count)
+		require.Equal(t, int64(110), leaf.Metrics["sum"])
+		require.Empty(t, leaf.Hits)
+		require.Empty(t, leaf.SubAggBuckets)
+	}
+	require.True(t, proto.Equal(before, data), "aggregation must not mutate source columns or scores")
+	ctx.Levels[0].Size = 2
+	result, err := NewSearchAggregationComputer(data, ctx, metric.IP).Compute(context.Background())
+	require.NoError(t, err)
+	require.Len(t, result[0], 2)
+	b := result[0][1]
+	require.Equal(t, "b", b.Key[101])
+	require.Equal(t, int64(180), b.Metrics["sum"])
+	require.Len(t, b.SubAggBuckets, 1)
+	require.Equal(t, "x", b.SubAggBuckets[0].Key[102])
+	require.Equal(t, int64(110), b.SubAggBuckets[0].Metrics["sum"], "b/x has its own prefix scope")
+}
+
+// Changing top_hits.size must only truncate the ranked hits; it cannot change
+// bucket counts or the relative order of the retained rows.
+func TestSearchAggregationTopHitsIsPrefixOfFullRanking(t *testing.T) {
+	t.Parallel()
+	const n = 64
+	ids, prices, markers := make([]int64, n), make([]int64, n), make([]int64, n)
+	scores, groups, valid := make([]float32, n), make([]string, n), make([]bool, n)
+	for i := range ids {
+		ids[i], prices[i], markers[i] = int64(i/2), int64(i%4), int64(i)
+		scores[i], groups[i], valid[i] = float32(i%3), "a", i%5 != 0
+	}
+	price := testLongFieldData(102, prices)
+	price.GetScalars().ValidData = valid
+	data := &schemapb.SearchResultData{
+		NumQueries: 1, Topks: []int64{n}, Scores: scores,
+		Ids:                &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+		FieldsData:         []*schemapb.FieldData{price, testLongFieldData(103, markers)},
+		GroupByFieldValues: []*schemapb.FieldData{testStringFieldData(101, groups)},
+	}
+	for _, metricType := range []string{metric.IP, metric.L2} {
+		for _, nullFirst := range []bool{false, true} {
+			for _, nanSource := range []string{"none", "score", "float", "double"} {
+				data.Scores[7] = 1
+				data.FieldsData[0] = price
+				switch nanSource {
+				case "score":
+					data.Scores[7] = float32(math.NaN())
+				case "float":
+					values := make([]float32, n)
+					for i, value := range prices {
+						values[i] = float32(value)
+					}
+					values[7] = float32(math.NaN())
+					data.FieldsData[0] = &schemapb.FieldData{
+						FieldId: 102, Type: schemapb.DataType_Float,
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+							ValidData: valid,
+							Data:      &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: values}},
+						}},
+					}
+				case "double":
+					values := make([]float64, n)
+					for i, value := range prices {
+						values[i] = float64(value)
+					}
+					values[7] = math.NaN()
+					data.FieldsData[0] = &schemapb.FieldData{
+						FieldId: 102, Type: schemapb.DataType_Double,
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+							ValidData: valid,
+							Data:      &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: values}},
+						}},
+					}
+				}
+				compute := func(size int64) *AggBucketResult {
+					ctx := newTestAggregationContext(t, 1, []LevelContext{{
+						OwnFieldIDs: []int64{101}, Size: 1,
+						TopHits: &TopHitsConfig{Size: size, Sort: []SortCriterion{{FieldID: 102, Dir: "desc", NullFirst: nullFirst}}},
+					}}, []int64{103}, nil)
+					result, err := NewSearchAggregationComputer(data, ctx, metricType).Compute(context.Background())
+					require.NoError(t, err)
+					require.Len(t, result[0], 1)
+					require.Equal(t, int64(n), result[0][0].Count)
+					return result[0][0]
+				}
+				full := compute(n)
+				for _, size := range []int64{1, 3, 8, 16, n - 1} {
+					partial := compute(size)
+					require.Len(t, partial.Hits, int(size))
+					for i, hit := range partial.Hits {
+						require.Equal(t, full.Hits[i].PK, hit.PK)
+						require.Equal(t, full.Hits[i].Fields, hit.Fields, "identical score/PK ties preserve original row order")
+						if math.IsNaN(float64(full.Hits[i].Score)) {
+							require.True(t, math.IsNaN(float64(hit.Score)))
+						} else {
+							require.Equal(t, full.Hits[i].Score, hit.Score)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestSearchAggregationEmptyQueriesPreserveOffsets(t *testing.T) {
+	t.Parallel()
+	ctx := newTestAggregationContext(t, 5, []LevelContext{{
+		OwnFieldIDs: []int64{101}, Size: 2, TopHits: &TopHitsConfig{Size: 1},
+		Metrics: map[string]MetricSpec{"sum": {Op: "sum", FieldID: 102, FieldType: schemapb.DataType_Int64}},
+	}}, nil, nil)
+	data := &schemapb.SearchResultData{
+		NumQueries: 5, Topks: []int64{0, 2, 0, 1, 0},
+		Ids:                &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11, 12, 21}}}},
+		Scores:             []float32{.9, .8, .7},
+		FieldsData:         []*schemapb.FieldData{testLongFieldData(102, []int64{10, 20, 90})},
+		GroupByFieldValues: []*schemapb.FieldData{testStringFieldData(101, []string{"a", "a", "a"})},
+	}
+	result, err := NewSearchAggregationComputer(data, ctx, metric.IP).Compute(context.Background())
+	require.NoError(t, err)
+	require.Len(t, result, 5)
+	for _, qi := range []int{0, 2, 4} {
+		require.Empty(t, result[qi])
+	}
+	require.Len(t, result[1], 1)
+	require.Equal(t, int64(2), result[1][0].Count)
+	require.Equal(t, int64(30), result[1][0].Metrics["sum"])
+	require.Equal(t, int64(11), result[1][0].Hits[0].PK)
+	require.Len(t, result[3], 1)
+	require.Equal(t, int64(1), result[3][0].Count)
+	require.Equal(t, int64(90), result[3][0].Metrics["sum"])
+	require.Equal(t, int64(21), result[3][0].Hits[0].PK)
+}
+
+func TestSearchAggregationNullableVectorAndSharedMetricSource(t *testing.T) {
+	t.Parallel()
+	metrics := make(map[string]MetricSpec)
+	for _, op := range []string{"sum", "avg", "min", "max", "count"} {
+		metrics[op] = MetricSpec{Op: op, FieldID: 102, FieldType: schemapb.DataType_Int64}
+	}
+	metrics["all"] = MetricSpec{Op: "count", FieldID: CountAllFieldID, FieldType: schemapb.DataType_None}
+	ctx := newTestAggregationContext(t, 1, []LevelContext{{
+		OwnFieldIDs: []int64{101}, Size: 1, Metrics: metrics, TopHits: &TopHitsConfig{Size: 5},
+	}}, []int64{103}, nil)
+	price := testLongFieldData(102, []int64{10, 0, 30, 40, 0})
+	price.GetScalars().ValidData = []bool{true, false, true, true, false}
+	vector := &schemapb.FieldData{
+		FieldId: 103, Type: schemapb.DataType_FloatVector,
+		Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+			Dim: 2, ValidData: []bool{false, true, false, true, true},
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{2, 20, 4, 40, 5, 50}}},
+		}},
+	}
+	data := &schemapb.SearchResultData{
+		NumQueries: 1, Topks: []int64{5},
+		Ids:                &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5}}}},
+		Scores:             []float32{5, 1, 4, 2, 3},
+		FieldsData:         []*schemapb.FieldData{price, vector},
+		GroupByFieldValues: []*schemapb.FieldData{testStringFieldData(101, []string{"a", "a", "a", "a", "a"})},
+	}
+	before := proto.Clone(data)
+	computer := NewSearchAggregationComputer(data, ctx, metric.L2)
+	for run := 0; run < 2; run++ {
+		result, err := computer.Compute(context.Background())
+		require.NoError(t, err)
+		bucket := result[0][0]
+		require.Equal(t, int64(5), bucket.Count)
+		require.Equal(t, int64(80), bucket.Metrics["sum"])
+		require.Equal(t, float64(80)/3, bucket.Metrics["avg"])
+		require.Equal(t, int64(10), bucket.Metrics["min"])
+		require.Equal(t, int64(40), bucket.Metrics["max"])
+		require.Equal(t, int64(3), bucket.Metrics["count"])
+		require.Equal(t, int64(5), bucket.Metrics["all"])
+		require.Len(t, bucket.Hits, 5)
+		for i, pk := range []int64{2, 4, 5, 3, 1} {
+			require.Equal(t, pk, bucket.Hits[i].PK)
+			require.Len(t, bucket.Hits[i].Fields, 1, "metric-only fields must not leak into output")
+		}
+		require.Equal(t, []float32{2, 20}, bucket.Hits[0].Fields[103])
+		require.Equal(t, []float32{4, 40}, bucket.Hits[1].Fields[103])
+		require.Equal(t, []float32{5, 50}, bucket.Hits[2].Fields[103])
+		require.Nil(t, bucket.Hits[3].Fields[103])
+		require.Nil(t, bucket.Hits[4].Fields[103])
+	}
+	require.True(t, proto.Equal(before, data))
+}
+
+func TestSearchAggregationTopHitsTruncationKeepsStringPKTies(t *testing.T) {
+	t.Parallel()
+	data := &schemapb.SearchResultData{
+		NumQueries: 1, Topks: []int64{6},
+		Ids:                &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"b", "a", "z", "c", "e", "d"}}}},
+		Scores:             []float32{.9, .9, .99, .8, .6, .7},
+		FieldsData:         []*schemapb.FieldData{testLongFieldData(102, []int64{5, 5, 3, 5, 7, 7})},
+		GroupByFieldValues: []*schemapb.FieldData{testStringFieldData(101, []string{"a", "a", "a", "a", "a", "a"})},
+	}
+	for _, size := range []int64{1, 3, 6, 10} {
+		ctx := newTestAggregationContext(t, 1, []LevelContext{{
+			OwnFieldIDs: []int64{101}, Size: 1,
+			TopHits: &TopHitsConfig{Size: size, Sort: []SortCriterion{{FieldID: 102, Dir: "desc"}}},
+		}}, nil, nil)
+		result, err := NewSearchAggregationComputer(data, ctx, metric.IP).Compute(context.Background())
+		require.NoError(t, err)
+		want := []string{"d", "e", "a", "b", "c", "z"}
+		hits := result[0][0].Hits
+		require.Len(t, hits, min(int(size), len(want)))
+		for i, hit := range hits {
+			require.Equal(t, want[i], hit.PK)
+		}
+		require.Equal(t, int64(6), result[0][0].Count)
+	}
+}
+
+// Inspect live references instead of relying on GC timing or large allocations.
+func TestSearchAggregationRowsBucketCacheLifetime(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size int64
+		fail bool
+	}{
+		{name: "siblings", size: 2},
+		{name: "pruned_parent", size: 1},
+		{name: "metric_error_and_retry", size: 2, fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := newTestAggregationContext(t, 5, []LevelContext{
+				{OwnFieldIDs: []int64{101}, Size: tc.size, Order: []OrderCriterion{{Key: "_key", Dir: "asc"}}},
+				{
+					OwnFieldIDs: []int64{102}, Size: 1, Order: []OrderCriterion{{Key: "_key", Dir: "asc"}},
+					Metrics: map[string]MetricSpec{"sum": {Op: "sum", FieldID: 104, FieldType: schemapb.DataType_Int64}},
+					TopHits: &TopHitsConfig{Size: 2},
+				},
+			}, nil, nil)
+			data := &schemapb.SearchResultData{
+				Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1, 2, 3, 4, 5}}}},
+				Scores:     []float32{6, 5, 4, 3, 2, 1},
+				FieldsData: []*schemapb.FieldData{testLongFieldData(104, []int64{1, 2, 3, 4, 5, 6})},
+			}
+			selected := &ReducedRows{
+				Sources: []*schemapb.SearchResultData{data}, Topks: []int64{0, 4, 0, 2, 0},
+				Rows:     []reduce.RowRef{{RowIdx: 0}, {RowIdx: 1}, {RowIdx: 2}, {RowIdx: 3}, {RowIdx: 4}, {RowIdx: 5}},
+				GroupIDs: []int{0, 1, 2, 0, 3, 4}, GroupFieldIDs: []int64{101, 102},
+				GroupKeys: [][]any{{"a", "x"}, {"b", "x"}, {"a", "y"}, {"a", "x"}, {"a", "y"}},
+			}
+			computer := NewSearchAggregationComputerFromRows(selected, ctx, metric.IP)
+			for run := 0; run < 2; run++ {
+				fail := tc.fail && run == 0
+				var caches [][]*bucketState
+				var visited []int
+				assertCleared := func() {
+					for _, cache := range caches {
+						for _, bucket := range cache {
+							require.Nil(t, bucket, "completed computation must release all bucket references")
+						}
+					}
+				}
+				computer.accessors[0][104].iter = func(row int) any {
+					visited = append(visited, row)
+					groups := 3
+					if row >= 4 {
+						groups = 2
+					}
+					for _, cache := range computer.groupBuckets {
+						require.Len(t, cache, groups, "cache must be sized for this query, not the request")
+					}
+					if row == 0 || row == 4 {
+						assertCleared() // Previous query's arrays must no longer retain states.
+						caches = append(caches, computer.groupBuckets...)
+					}
+					if row == 1 {
+						// The a subtree completed before b, including its pruned y bucket.
+						require.Nil(t, computer.groupBuckets[1][0])
+						require.Nil(t, computer.groupBuckets[1][2])
+					}
+					if fail && row == 3 {
+						return "invalid numeric metric input"
+					}
+					return int64(row + 1)
+				}
+				result, err := computer.Compute(context.Background())
+				assertCleared()
+				require.Nil(t, computer.groupBuckets, "query index arrays must also be released")
+				if fail {
+					require.ErrorContains(t, err, "type mismatch")
+					continue
+				}
+				require.NoError(t, err)
+				require.Len(t, result, 5)
+				for _, qi := range []int{0, 2, 4} {
+					require.Empty(t, result[qi])
+				}
+				require.Len(t, result[1], int(tc.size))
+				require.Equal(t, int64(3), result[1][0].Count)
+				require.Len(t, result[1][0].SubAggBuckets, 1)
+				child := result[1][0].SubAggBuckets[0]
+				require.Equal(t, "x", child.Key[102])
+				require.Equal(t, int64(2), child.Count)
+				require.Equal(t, int64(5), child.Metrics["sum"])
+				require.Len(t, child.Hits, 2)
+				require.Len(t, result[3], 1)
+				require.Equal(t, int64(2), result[3][0].Count)
+				require.Equal(t, int64(5), result[3][0].SubAggBuckets[0].Metrics["sum"])
+				if tc.size == 1 {
+					require.NotContains(t, visited, 1, "pruned parents must not compute children")
+				} else {
+					require.Contains(t, visited, 1)
+					require.Equal(t, int64(2), result[1][1].SubAggBuckets[0].Metrics["sum"])
+				}
+			}
+		})
 	}
 }

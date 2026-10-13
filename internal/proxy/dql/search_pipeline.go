@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -212,6 +213,16 @@ func (op *searchReduceOperator) run(ctx context.Context, span trace.Span, inputs
 	defer sp.End()
 	toReduceResults := inputs[0].([]*internalpb.SearchResults)
 	metricType := getMetricType(toReduceResults)
+	if op.isSearchAggregation {
+		info := reduce.NewReduceSearchResultInfo(op.nq, op.topK).WithOffset(op.offset).WithSearchAggregation(true).
+			WithGroupSize(op.queryInfos[0].GetGroupSize()).
+			WithGroupByFieldIdsFromProto(op.queryInfos[0].GetGroupByFieldId(), op.queryInfos[0].GetGroupByFieldIds())
+		rows, err := reduceSearchAggregationRows(op.traceCtx, toReduceResults, op.nq, op.topK, info.EffectiveOffset(), info.GetGroupSize(), info.GetGroupByFieldIds(), metricType, op.primaryFieldSchema.GetDataType(), op.collectionID, op.partitionIDs)
+		if err != nil {
+			return nil, err
+		}
+		return []any{rows, []string{metricType}}, nil
+	}
 	result, err := reduceResults(
 		op.traceCtx, toReduceResults, op.nq, op.topK, op.offset,
 		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.isSearchAggregation, op.collectionID, op.partitionIDs)
@@ -698,20 +709,18 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	if len(inputs) < 2 {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator: missing inputs (pipeline wire)")
 	}
-	reducedList, ok := inputs[0].([]*milvuspb.SearchResults)
+	rows, ok := inputs[0].(*search_agg.ReducedRows)
 	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("aggregateOperator: expected []*milvuspb.SearchResults, got %T (pipeline wire)", inputs[0])
+		return nil, merr.WrapErrServiceInternalMsg("aggregateOperator: expected *search_agg.ReducedRows, got %T (pipeline wire)", inputs[0])
 	}
-	// Upstream searchReduceOp has already done cross-shard composite-key reduce
-	// and produced a single *milvuspb.SearchResults wrapping one SearchResultData.
-	if len(reducedList) == 0 || reducedList[0] == nil || reducedList[0].GetResults() == nil {
+	if rows == nil {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator received empty reduced results")
 	}
 	metrics, ok := inputs[1].([]string)
 	if !ok || len(metrics) != 1 {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator: expected one search metric (pipeline wire)")
 	}
-	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx, metrics[0])
+	computer := search_agg.NewSearchAggregationComputerFromRows(rows, op.aggCtx, metrics[0])
 	nqAggResults, err := computer.Compute(ctx)
 	if err != nil {
 		return nil, err
@@ -722,12 +731,17 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 		fieldIDToName[f.GetFieldID()] = f.GetName()
 	}
 
+	outputFieldIDs := make([]int64, 0, len(op.aggCtx.UserOutputFieldIDs))
+	for id := range op.aggCtx.UserOutputFieldIDs {
+		outputFieldIDs = append(outputFieldIDs, id)
+	}
+	sort.Slice(outputFieldIDs, func(i, j int) bool { return outputFieldIDs[i] < outputFieldIDs[j] })
 	aggBuckets := make([]*schemapb.AggBucket, 0)
 	aggTopks := make([]int64, 0, len(nqAggResults))
 	for _, buckets := range nqAggResults {
 		roundAggHitScores(buckets, op.roundDecimal)
 		aggTopks = append(aggTopks, int64(len(buckets)))
-		aggBuckets = append(aggBuckets, serializeAggBuckets(buckets, fieldIDToName, op.aggCtx.Levels, 0)...)
+		aggBuckets = append(aggBuckets, serializeAggBuckets(buckets, fieldIDToName, op.aggCtx.Levels, 0, outputFieldIDs)...)
 	}
 
 	result := &milvuspb.SearchResults{
@@ -737,13 +751,13 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 			Topks:          make([]int64, op.aggCtx.NQ),
 			AggBuckets:     aggBuckets,
 			AggTopks:       aggTopks,
-			AllSearchCount: aggregatedAllSearchCount(reducedList),
+			AllSearchCount: rows.AllSearchCount,
 		},
 	}
 	return []any{result}, nil
 }
 
-func serializeAggBuckets(buckets []*search_agg.AggBucketResult, fieldIDToName map[int64]string, levels []search_agg.LevelContext, levelIdx int) []*schemapb.AggBucket {
+func serializeAggBuckets(buckets []*search_agg.AggBucketResult, fieldIDToName map[int64]string, levels []search_agg.LevelContext, levelIdx int, outputFieldIDs []int64) []*schemapb.AggBucket {
 	if len(buckets) == 0 {
 		return nil
 	}
@@ -752,12 +766,12 @@ func serializeAggBuckets(buckets []*search_agg.AggBucketResult, fieldIDToName ma
 		if bucket == nil {
 			continue
 		}
-		serialized = append(serialized, serializeAggBucket(bucket, fieldIDToName, levels, levelIdx))
+		serialized = append(serialized, serializeAggBucket(bucket, fieldIDToName, levels, levelIdx, outputFieldIDs))
 	}
 	return serialized
 }
 
-func serializeAggBucket(bucket *search_agg.AggBucketResult, fieldIDToName map[int64]string, levels []search_agg.LevelContext, levelIdx int) *schemapb.AggBucket {
+func serializeAggBucket(bucket *search_agg.AggBucketResult, fieldIDToName map[int64]string, levels []search_agg.LevelContext, levelIdx int, outputFieldIDs []int64) *schemapb.AggBucket {
 	if bucket == nil {
 		return nil
 	}
@@ -770,8 +784,8 @@ func serializeAggBucket(bucket *search_agg.AggBucketResult, fieldIDToName map[in
 		Key:       serializeBucketKey(bucket.Key, fieldIDToName, fieldOrder),
 		Count:     bucket.Count,
 		Metrics:   serializeAggMetrics(bucket.Metrics),
-		Hits:      serializeAggHits(bucket.Hits, fieldIDToName),
-		SubGroups: serializeAggBuckets(bucket.SubAggBuckets, fieldIDToName, levels, levelIdx+1),
+		Hits:      serializeAggHits(bucket.Hits, fieldIDToName, outputFieldIDs),
+		SubGroups: serializeAggBuckets(bucket.SubAggBuckets, fieldIDToName, levels, levelIdx+1, outputFieldIDs),
 	}
 	return result
 }
@@ -881,7 +895,7 @@ func serializeBucketKey(key map[int64]interface{}, fieldIDToName map[int64]strin
 	return entries
 }
 
-func serializeAggHits(hits []*search_agg.HitResult, fieldIDToName map[int64]string) []*schemapb.AggHit {
+func serializeAggHits(hits []*search_agg.HitResult, fieldIDToName map[int64]string, outputFieldIDs []int64) []*schemapb.AggHit {
 	if len(hits) == 0 {
 		return nil
 	}
@@ -897,21 +911,16 @@ func serializeAggHits(hits []*search_agg.HitResult, fieldIDToName map[int64]stri
 		case string:
 			aggHit.Pk = &schemapb.AggHit_StrPk{StrPk: pk}
 		}
-		aggHit.Fields = serializeAggHitFields(hit.Fields, fieldIDToName)
+		aggHit.Fields = serializeAggHitFields(hit.Fields, fieldIDToName, outputFieldIDs)
 		serialized = append(serialized, aggHit)
 	}
 	return serialized
 }
 
-func serializeAggHitFields(fields map[int64]interface{}, fieldIDToName map[int64]string) []*schemapb.AggHitField {
+func serializeAggHitFields(fields map[int64]interface{}, fieldIDToName map[int64]string, fieldIDs []int64) []*schemapb.AggHitField {
 	if len(fields) == 0 {
 		return nil
 	}
-	fieldIDs := make([]int64, 0, len(fields))
-	for fieldID := range fields {
-		fieldIDs = append(fieldIDs, fieldID)
-	}
-	sort.Slice(fieldIDs, func(i, j int) bool { return fieldIDs[i] < fieldIDs[j] })
 
 	serialized := make([]*schemapb.AggHitField, 0, len(fieldIDs))
 	for _, fieldID := range fieldIDs {
@@ -3052,8 +3061,8 @@ var searchWithAggPipe = &pipelineDef{
 	name: "searchWithAgg",
 	nodes: []*nodeDef{
 		{
-			// searchReduceOp performs cross-shard composite-key group reduce
-			// (reduceSearchResultDataWithMultiGroupBy) before hierarchy compute.
+			// searchReduceOp retains selected source rows and composite groups
+			// before hierarchical aggregation.
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
 			outputs: []string{"reduced", "metrics"},
