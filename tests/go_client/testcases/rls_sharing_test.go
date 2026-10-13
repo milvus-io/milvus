@@ -1043,11 +1043,22 @@ func prepareRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, enab
 			row.NullFields = []string{"tenant", "spaces", "access"}
 			rows[id] = row
 		}
-		checkRLSMixedSegments(ctx, t, mc, name)
+		// Schema changes flush growing segments; all original rows are now sealed.
+		segments, err := mc.GetService().GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{CollectionName: name})
+		common.CheckErr(t, err, true)
+		require.Zero(t, segments.GetStatus().GetCode())
+		var counts []int64
+		for _, segment := range segments.GetInfos() {
+			require.Equal(t, commonpb.SegmentState_Sealed, segment.GetState())
+			counts = append(counts, segment.GetNumRows())
+		}
+		require.ElementsMatch(t, []int64{3000, 500, 500}, counts)
 	}
 	checkRLSSpaceStored(ctx, t, mc, name, rows)
 	sealed := maps.Clone(rows)
-	maps.DeleteFunc(sealed, func(id int64, _ rlsSpaceRow) bool { return id > 3500 })
+	if !legacy {
+		maps.DeleteFunc(sealed, func(id int64, _ rlsSpaceRow) bool { return id > 3500 })
+	}
 	params := index.NewCustomAnnParam()
 	params.WithExtraParam("nprobe", 64)
 	result, err := mc.Search(ctx, client.NewSearchOption(name, 4000, []entity.Vector{entity.FloatVector(rows[1].Vector)}).WithAnnParam(params).WithIgnoreGrowing(true).WithOutputFields("*").WithSkipRLS(true))
