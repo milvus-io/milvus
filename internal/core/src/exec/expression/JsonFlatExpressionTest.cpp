@@ -24,6 +24,8 @@
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "test_utils/GenExprProto.h"
+#include "exec/expression/IndexPathSelection.h"
+#include "index/Families.h"
 
 namespace milvus::test {
 
@@ -789,4 +791,29 @@ TEST_F(JsonFlatExpressionTest, RootExistsRejectsMissingAndNullValues) {
     EXPECT_FALSE(final[14]);
     EXPECT_FALSE(final[15]);
 }
+TEST(JsonFlatPrefixSelectionTest, LongerRootBreaksEqualScoreTie) {
+    const FieldId field_id(100);
+    exec::ExprIndexRequirement requirement{
+        .field_id = field_id,
+        .reader = exec::RequiredReader::Predicate,
+        .value_type = DataType::INT64,
+        .is_json_field = true,
+        .json_path = "/profile/age",
+        .accepts_candidates = true};
+    segcore::IndexCapabilityEntry broad{
+        .key = {field_id, segcore::IndexIdentity::PreBuiltIndex(10)},
+        .json_path = "",
+        .family = index::families::kJsonFlat,
+        .value_type = DataType::JSON,
+        .caps = {.json_paths = true, .exact = true}};
+    auto narrow = broad;
+    narrow.key.identity = segcore::IndexIdentity::PreBuiltIndex(20);
+    narrow.json_path = "/profile";
+    const auto decision = exec::DetermineExecPath(
+        requirement, segcore::FieldIndexCapability(field_id, {broad, narrow}));
+    EXPECT_EQ(decision.path, exec::ExprExecPath::ScalarIndex);
+    ASSERT_TRUE(decision.key.has_value());
+    EXPECT_TRUE(decision.key->identity == narrow.key.identity);
+}
+
 }  // namespace milvus::test
