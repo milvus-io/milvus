@@ -41,11 +41,11 @@ class PinnedValueLookup final {
                       DataType data_type,
                       int64_t active_count) {
         const auto capabilities = segment->IndexCapability(field_id);
-        const auto decision = DetermineExecPath(
-            {.field_id = field_id,
-             .reader = RequiredReader::ValueLookup,
-             .value_type = data_type},
-            capabilities);
+        const auto decision =
+            DetermineExecPath({.field_id = field_id,
+                               .reader = RequiredReader::ValueLookup,
+                               .value_type = data_type},
+                              capabilities);
         if (!decision.key.has_value()) {
             return;
         }
@@ -62,8 +62,7 @@ class PinnedValueLookup final {
                 return;
             }
             reader = &growing_pin_.Reader();
-            covered_end_ =
-                std::min(active_count, growing_pin_.CoveredRowEnd());
+            covered_end_ = std::min(active_count, growing_pin_.CoveredRowEnd());
         } else {
             root_pin_ = segment->PinIndex(op_ctx, *decision.key);
             if (!root_pin_) {

@@ -74,8 +74,7 @@ class SourceBuildTest : public ::testing::Test {
         auto* schema = info.mutable_field_schema();
         schema->set_fieldid(100);
         schema->set_name("values");
-        schema->set_data_type(
-            static_cast<proto::schema::DataType>(field_type));
+        schema->set_data_type(static_cast<proto::schema::DataType>(field_type));
         schema->set_element_type(
             static_cast<proto::schema::DataType>(element_type));
         schema->set_nullable(nullable);
@@ -89,15 +88,16 @@ class SourceBuildTest : public ::testing::Test {
             auto* param = info.add_index_params();
             param->set_key(key);
             param->set_value(value.is_string() ? value.get<std::string>()
-                                             : value.dump());
+                                               : value.dump());
         }
         info.add_insert_files(directory_->Path() + "/insert/1");
         auto* config = info.mutable_storage_config();
         config->set_storage_type("local");
         config->set_root_path(directory_->Path());
-        auto prepared = AdaptBuildIndexInfo(
-            info, IsVectorDataType(field_type) ? BuildPurpose::VectorIndex
-                                              : BuildPurpose::ScalarIndex);
+        auto prepared = AdaptBuildIndexInfo(info,
+                                            IsVectorDataType(field_type)
+                                                ? BuildPurpose::VectorIndex
+                                                : BuildPurpose::ScalarIndex);
         prepared.request.staging_parent = directory_->Path();
         // Loaders require schema-derived runtime values, independently of the
         // private normalization performed inside BuildSession.

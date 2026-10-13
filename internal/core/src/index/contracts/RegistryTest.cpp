@@ -169,8 +169,7 @@ struct LoaderFailureProbe : IndexLoader {
 };
 
 IndexLoadRequest
-ProbeLoadRequest(TestArtifactSource& source,
-                 Config params = Config::object()) {
+ProbeLoadRequest(TestArtifactSource& source, Config params = Config::object()) {
     storage::LoadOptions options;
     options.params = std::move(params);
     return {OpenedIndexSource{LegacyIndexSource{
@@ -275,8 +274,8 @@ TEST(RegistryTest, SameFamilyCanBuildDifferentInputShapesIndependently) {
         family, {{"marker", 11}});
     auto second = BuilderRegistry<ScalarBuildInput<int64_t>>::Instance().Create(
         family, {{"marker", 12}});
-    auto floating = BuilderRegistry<ScalarBuildInput<float>>::Instance().Create(
-        family, {});
+    auto floating =
+        BuilderRegistry<ScalarBuildInput<float>>::Instance().Create(family, {});
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
     ASSERT_NE(floating, nullptr);
@@ -286,10 +285,12 @@ TEST(RegistryTest, SameFamilyCanBuildDifferentInputShapesIndependently) {
     auto first_artifact = std::move(*first).Build({});
     auto second_artifact = std::move(*second).Build({});
     auto float_artifact = std::move(*floating).Build({});
-    const auto* first_value = dynamic_cast<EmptyArtifact*>(first_artifact.get());
+    const auto* first_value =
+        dynamic_cast<EmptyArtifact*>(first_artifact.get());
     const auto* second_value =
         dynamic_cast<EmptyArtifact*>(second_artifact.get());
-    const auto* float_value = dynamic_cast<EmptyArtifact*>(float_artifact.get());
+    const auto* float_value =
+        dynamic_cast<EmptyArtifact*>(float_artifact.get());
     ASSERT_NE(first_value, nullptr);
     ASSERT_NE(second_value, nullptr);
     ASSERT_NE(float_value, nullptr);
@@ -379,8 +380,7 @@ TEST(RegistryTest, LoaderDeriveAndCreateDispatchIndependently) {
 }
 
 TEST(RegistryTest, AsyncOpenedSourceRunsOnLoadingExecutor) {
-    const LoaderEntry entry{&LoaderProbeA::DeriveCaps,
-                            &LoaderProbeA::Create};
+    const LoaderEntry entry{&LoaderProbeA::DeriveCaps, &LoaderProbeA::Create};
     TestArtifactData artifact;
     TestArtifactSource source(artifact);
     storage::LoadOptions options;
@@ -400,8 +400,8 @@ TEST(RegistryTest, LoaderEntryRequiresBothFunctions) {
     EXPECT_FALSE(LoaderEntry{});
     EXPECT_FALSE((LoaderEntry{&LoaderProbeA::DeriveCaps, nullptr}));
     EXPECT_FALSE((LoaderEntry{nullptr, &LoaderProbeA::Create}));
-    EXPECT_TRUE((LoaderEntry{&LoaderProbeA::DeriveCaps,
-                             &LoaderProbeA::Create}));
+    EXPECT_TRUE(
+        (LoaderEntry{&LoaderProbeA::DeriveCaps, &LoaderProbeA::Create}));
 
     TestArtifactData artifact;
     TestArtifactSource source(artifact);
@@ -414,13 +414,13 @@ TEST(RegistryTest, LoaderEntryRequiresBothFunctions) {
 TEST(RegistryTest, DuplicateLoaderRegistrationKeepsOriginalEntry) {
     auto& registry = LoaderRegistry::Instance();
     registry.Register<LoaderFailureProbe>();
-    const auto original = registry.Lookup(
-        std::string(LoaderFailureProbe::kFamily));
+    const auto original =
+        registry.Lookup(std::string(LoaderFailureProbe::kFamily));
     ASSERT_TRUE(original);
     ExpectSegcoreError(ErrorCode::UnexpectedError,
                        [&] { registry.Register<LoaderFailureProbe>(); });
-    const auto retained = registry.Lookup(
-        std::string(LoaderFailureProbe::kFamily));
+    const auto retained =
+        registry.Lookup(std::string(LoaderFailureProbe::kFamily));
     ASSERT_TRUE(retained);
     EXPECT_EQ(retained.create, original.create);
     EXPECT_EQ(retained.derive_caps, original.derive_caps);
@@ -437,8 +437,8 @@ TEST(RegistryTest, LoaderCreationAndLoadFailuresPreserveErrorCode) {
                                   ? ErrorCode::UnexpectedError
                                   : ErrorCode::DataFormatBroken;
         ExpectSegcoreError(expected, [&] {
-            static_cast<void>(entry.Load(
-                ProbeLoadRequest(source, {{"mode", mode}})));
+            static_cast<void>(
+                entry.Load(ProbeLoadRequest(source, {{"mode", mode}})));
         });
     }
 }

@@ -456,12 +456,10 @@ ScalarIndexLoadResourceWithOverhead(
     }
     request.has_raw_data =
         CanUseIndexRawDataForField(field_type, request.has_raw_data);
-    request.final_memory_cost =
-        SaturatingAdd(request.final_memory_cost,
-                      kScalarIndexFixedResidentBytes);
+    request.final_memory_cost = SaturatingAdd(request.final_memory_cost,
+                                              kScalarIndexFixedResidentBytes);
     request.max_memory_cost =
-        SaturatingAdd(request.max_memory_cost,
-                      kScalarIndexFixedResidentBytes);
+        SaturatingAdd(request.max_memory_cost, kScalarIndexFixedResidentBytes);
     return request;
 }
 

@@ -1411,8 +1411,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     auto arith_type = expr_->arith_op_type_;
 
     auto execute_sub_batch =
-        [op_type,
-         arith_type]<FilterType filter_type = FilterType::sequential>(
+        [ op_type,
+          arith_type ]<FilterType filter_type = FilterType::sequential>(
             const index::IScalarValueReader<T>* index_ptr,
             size_t sub_batch_size,
             HighPrecisionType value,

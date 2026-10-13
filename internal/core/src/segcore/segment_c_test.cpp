@@ -1230,12 +1230,11 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     search_info.search_params_ = generate_search_conf(
         IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::metric::L2);
     SearchResult result_on_index;
-    vec_index->Search(
-        query_dataset,
-        MakeVectorSearchParams(search_info),
-        milvus::BitsetView{},
-        nullptr,
-        result_on_index);
+    vec_index->Search(query_dataset,
+                      MakeVectorSearchParams(search_info),
+                      milvus::BitsetView{},
+                      nullptr,
+                      result_on_index);
     EXPECT_EQ(result_on_index.distances_.size(), num_queries * TOPK);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -1252,8 +1251,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = MakeLoadIndexInfo(
-        std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info =
+        MakeLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -1404,12 +1403,11 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Search(
-        query_dataset,
-        MakeVectorSearchParams(search_info),
-        milvus::BitsetView{},
-        nullptr,
-        result_on_index);
+    vec_index->Search(query_dataset,
+                      MakeVectorSearchParams(search_info),
+                      milvus::BitsetView{},
+                      nullptr,
+                      result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1418,8 +1416,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto load_index_info = MakeLoadIndexInfo(
-        std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info =
+        MakeLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     // load vec index
@@ -1655,8 +1653,8 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
     auto age8_col = raw_data.get_col<int8_t>(i8_fid);
     auto age8_index = BuildScalarReader<int8_t>(
         i8_fid, DataType::INT8, index::ASCENDING_SORT, N, age8_col.data());
-    load_index_info = MakeLoadIndexInfo(
-        std::move(age8_index), DataType::INT8, i8_fid.get());
+    load_index_info =
+        MakeLoadIndexInfo(std::move(age8_index), DataType::INT8, i8_fid.get());
     // Derive raw-value availability from the index parameters instead of
     // retaining the helper's zero-cost placeholder resource request.
     load_index_info.load_resource_request.reset();
@@ -1691,8 +1689,11 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
 
     // load index for float field
     auto age_float_col = raw_data.get_col<float>(float_fid);
-    auto age_float_index = BuildScalarReader<float>(
-        float_fid, DataType::FLOAT, index::ASCENDING_SORT, N, age_float_col.data());
+    auto age_float_index = BuildScalarReader<float>(float_fid,
+                                                    DataType::FLOAT,
+                                                    index::ASCENDING_SORT,
+                                                    N,
+                                                    age_float_col.data());
     load_index_info = MakeLoadIndexInfo(
         std::move(age_float_index), DataType::FLOAT, float_fid.get());
     load_index_info.load_resource_request.reset();
@@ -1700,8 +1701,11 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
 
     // load index for double field
     auto age_double_col = raw_data.get_col<double>(double_fid);
-    auto age_double_index = BuildScalarReader<double>(
-        double_fid, DataType::DOUBLE, index::ASCENDING_SORT, N, age_double_col.data());
+    auto age_double_index = BuildScalarReader<double>(double_fid,
+                                                      DataType::DOUBLE,
+                                                      index::ASCENDING_SORT,
+                                                      N,
+                                                      age_double_col.data());
     load_index_info = MakeLoadIndexInfo(
         std::move(age_double_index), DataType::DOUBLE, double_fid.get());
     load_index_info.load_resource_request.reset();
@@ -1808,8 +1812,11 @@ TEST(
         value += 1;
     }
 
-    auto age32_index = BuildScalarReader<int32_t>(
-        i32_fid, DataType::INT32, index::ASCENDING_SORT, N, age32_index_col.data());
+    auto age32_index = BuildScalarReader<int32_t>(i32_fid,
+                                                  DataType::INT32,
+                                                  index::ASCENDING_SORT,
+                                                  N,
+                                                  age32_index_col.data());
     auto load_index_info = MakeLoadIndexInfo(
         std::move(age32_index), DataType::INT32, i32_fid.get());
     segment->LoadIndex(load_index_info);

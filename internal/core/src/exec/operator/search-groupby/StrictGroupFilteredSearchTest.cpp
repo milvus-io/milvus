@@ -225,8 +225,9 @@ class FailingIteratorReader final : public index::IVectorReader {
               milvus::OpContext*) const override {
         received = params;
         if (unsupported_status) {
-            return knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>::Err(
-                knowhere::Status::not_implemented, "iterator unsupported");
+            return knowhere::
+                expected<std::vector<knowhere::IndexNode::IteratorPtr>>::Err(
+                    knowhere::Status::not_implemented, "iterator unsupported");
         }
         throw SegcoreError(error, "injected backend preparation failure");
     }
@@ -277,11 +278,15 @@ class FailingIteratorReader final : public index::IVectorReader {
         return reader_->IsRowValid(offset);
     }
     void
-    ApplyValidDataByRange(int64_t offset, int64_t count, TargetBitmapView out) const override {
+    ApplyValidDataByRange(int64_t offset,
+                          int64_t count,
+                          TargetBitmapView out) const override {
         reader_->ApplyValidDataByRange(offset, count, out);
     }
     void
-    ApplyValidDataByOffsets(const int64_t* offsets, int64_t count, TargetBitmapView out) const override {
+    ApplyValidDataByOffsets(const int64_t* offsets,
+                            int64_t count,
+                            TargetBitmapView out) const override {
         reader_->ApplyValidDataByOffsets(offsets, count, out);
     }
     knowhere::expected<knowhere::DataSetPtr>
@@ -717,8 +722,12 @@ TEST(StrictGroupPhase1Test, SkipRefineAllPathsAndEligibility) {
 TEST(StrictGroupPhase1Test, BackendReceivesRefinementOverride) {
     const std::array<float, 4> values{};
     auto opened = test::consumer::BuildVectorReader<float>(
-        DataType::VECTOR_FLOAT, knowhere::IndexEnum::INDEX_FAISS_IDMAP,
-        knowhere::metric::L2, values.size(), 1, values.data());
+        DataType::VECTOR_FLOAT,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        values.size(),
+        1,
+        values.data());
     FailingIteratorReader reader(std::move(opened.reader));
     reader.error = ErrorCode::Unsupported;
     SearchInfo info;
@@ -745,7 +754,9 @@ TEST(StrictGroupPhase1Test, BackendReceivesRefinementOverride) {
         auto ordinary = query::StrictGroupSearchInfo(info, 2);
         auto growing = interim.GetSearchConf(ordinary);
         EXPECT_EQ(growing.search_params_.value("skip_refine", false), skip);
-        EXPECT_EQ(reader.PrepareSearchParams(ProjectVectorSearchParams(ordinary))["skip_refine"], skip);
+        EXPECT_EQ(reader.PrepareSearchParams(
+                      ProjectVectorSearchParams(ordinary))["skip_refine"],
+                  skip);
     }
 }
 

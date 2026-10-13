@@ -1109,7 +1109,8 @@ ReverseDataFromIndex(const index::IIndexReaderBase* index,
         valid_data.resize(count);
     }
 
-    auto gather = [&]<typename Input, typename Output = index::owned_t<Input>>() {
+    auto gather = [&]<typename Input,
+                      typename Output = index::owned_t<Input>>() {
         auto* reader =
             dynamic_cast<const index::IScalarValueReader<Input>*>(index);
         AssertInfo(reader != nullptr,
@@ -1117,9 +1118,7 @@ ReverseDataFromIndex(const index::IIndexReaderBase* index,
                    field_meta.get_id().get());
         std::vector<Output> values(count);
         reader->Gather(
-            seg_offsets,
-            count,
-            [&](int64_t i, const Input* value, bool valid) {
+            seg_offsets, count, [&](int64_t i, const Input* value, bool valid) {
                 if (nullable) {
                     valid_data[i] = valid;
                 }
@@ -1438,8 +1437,8 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
 
     load_index_info->cache_index =
         milvus::cachinglayer::Manager::GetInstance()
-            .CreateCacheSlot<index::IIndexReaderBase>(
-            std::move(translator), op_ctx);
+            .CreateCacheSlot<index::IIndexReaderBase>(std::move(translator),
+                                                      op_ctx);
 }
 
 FieldDataPtr

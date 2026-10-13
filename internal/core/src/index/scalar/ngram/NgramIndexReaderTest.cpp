@@ -204,6 +204,5 @@ TEST(NgramFfiBoundaryTest, ShortLiteralAtRustBoundaryThrows) {
     EXPECT_FALSE(wrapper.ngram_tokenize({"订单"}, 2, 3).empty());
 }
 
-
 }  // namespace
 }  // namespace milvus::index::test

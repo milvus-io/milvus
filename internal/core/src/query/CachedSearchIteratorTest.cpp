@@ -112,10 +112,7 @@ class CachedSearchIteratorTest
         switch (constructor_type) {
             case ConstructorType::VectorIndex:
                 return std::make_unique<CachedSearchIterator>(
-                    *index_hnsw_,
-                    knowhere_query_dataset_,
-                    search_info,
-                    bitset);
+                    *index_hnsw_, knowhere_query_dataset_, search_info, bitset);
 
             case ConstructorType::VectorBase: {
                 // The snapshot only has to outlive the constructor: it walks
@@ -310,15 +307,18 @@ class CachedSearchIteratorTest
         if (metric_type == knowhere::metric::L2) {
             metric_type_ = knowhere::metric::L2;
             search_dataset_.metric_type = knowhere::metric::L2;
-            index_hnsw_ = dynamic_cast<const IVectorReader*>(index_hnsw_l2_.get());
+            index_hnsw_ =
+                dynamic_cast<const IVectorReader*>(index_hnsw_l2_.get());
         } else if (metric_type == knowhere::metric::IP) {
             metric_type_ = knowhere::metric::IP;
             search_dataset_.metric_type = knowhere::metric::IP;
-            index_hnsw_ = dynamic_cast<const IVectorReader*>(index_hnsw_ip_.get());
+            index_hnsw_ =
+                dynamic_cast<const IVectorReader*>(index_hnsw_ip_.get());
         } else if (metric_type == knowhere::metric::COSINE) {
             metric_type_ = knowhere::metric::COSINE;
             search_dataset_.metric_type = knowhere::metric::COSINE;
-            index_hnsw_ = dynamic_cast<const IVectorReader*>(index_hnsw_cos_.get());
+            index_hnsw_ =
+                dynamic_cast<const IVectorReader*>(index_hnsw_cos_.get());
         } else {
             FAIL() << "Unsupported metric type: " << metric_type;
         }
@@ -691,10 +691,7 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
     SearchInfo search_info = GetDefaultNormalSearchInfo();
     if (std::get<0>(GetParam()) == ConstructorType::VectorIndex) {
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
-                         *index_hnsw_,
-                         nullptr,
-                         search_info,
-                         nullptr),
+                         *index_hnsw_, nullptr, search_info, nullptr),
                      SegcoreError);
 
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(

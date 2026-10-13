@@ -262,8 +262,10 @@ TEST(ScalarIndexV3AsyncTest, JsonPathsValuesAndNulls) {
 // round trips above cannot detect a loader that falls back to per-entry ReadAt.
 TEST(ScalarIndexV3AsyncTest, NativeDirectEntryReadsByFamily) {
     milvus::test::ScopedLoadTransientBudget budget(0);
-    for (const auto* name : {"InvertedVarchar", "MarisaVarchar",
-                             "NgramVarcharMin2Max4Heap", "SpatialRTreeHeap",
+    for (const auto* name : {"InvertedVarchar",
+                             "MarisaVarchar",
+                             "NgramVarcharMin2Max4Heap",
+                             "SpatialRTreeHeap",
                              "FmIndexVarchar"}) {
         const auto& backend =
             ScalarReaderBackends().Get<std::string_view>(name);
@@ -271,15 +273,14 @@ TEST(ScalarIndexV3AsyncTest, NativeDirectEntryReadsByFamily) {
         const bool ngram = backend.Family() == families::kNgram;
         std::vector<std::string> values{"alpha", "beta", "alphabet", "ignored"};
         if (spatial) {
-            values = {
-                Geometry(GetThreadLocalGEOSContext(), "POINT(0 0)")
-                    .to_wkb_string(),
-                Geometry(GetThreadLocalGEOSContext(), "POINT(1 1)")
-                    .to_wkb_string(),
-                Geometry(GetThreadLocalGEOSContext(), "POINT(2 2)")
-                    .to_wkb_string(),
-                Geometry(GetThreadLocalGEOSContext(), "POINT(3 3)")
-                    .to_wkb_string()};
+            values = {Geometry(GetThreadLocalGEOSContext(), "POINT(0 0)")
+                          .to_wkb_string(),
+                      Geometry(GetThreadLocalGEOSContext(), "POINT(1 1)")
+                          .to_wkb_string(),
+                      Geometry(GetThreadLocalGEOSContext(), "POINT(2 2)")
+                          .to_wkb_string(),
+                      Geometry(GetThreadLocalGEOSContext(), "POINT(3 3)")
+                          .to_wkb_string()};
         }
         ScalarTestData<std::string_view> data(std::move(values));
         data.validity.reset(3);
@@ -304,10 +305,11 @@ TEST(ScalarIndexV3AsyncTest, NativeDirectEntryReadsByFamily) {
             options.params = backend.LoadParams({.row_count = 4});
             options.enable_mmap = mmap;
             options.mmap_dir_path = staging->Path();
-            auto reader = LoaderRegistry::Instance()
-                              .Lookup(backend.Family())
-                              .Load({OpenedIndexSource{PackedIndexSource{source}},
-                                     options});
+            auto reader =
+                LoaderRegistry::Instance()
+                    .Lookup(backend.Family())
+                    .Load({OpenedIndexSource{PackedIndexSource{source}},
+                           options});
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->Count(), 4);
             EXPECT_FALSE(remote->DirectReadCalls().empty());
@@ -321,10 +323,10 @@ TEST(ScalarIndexV3AsyncTest, NativeDirectEntryReadsByFamily) {
                     dynamic_cast<const ISpatialReader*>(reader.get());
                 ASSERT_NE(spatial_reader, nullptr);
                 Geometry point(GetThreadLocalGEOSContext(), "POINT(1 1)");
-                ExpectHits(spatial_reader->Candidates(SpatialOp::Intersects,
-                                                      point),
-                           4,
-                           {1});
+                ExpectHits(
+                    spatial_reader->Candidates(SpatialOp::Intersects, point),
+                    4,
+                    {1});
             } else if (ngram) {
                 const auto* candidate_reader =
                     dynamic_cast<const INgramReader*>(reader.get());
@@ -337,9 +339,10 @@ TEST(ScalarIndexV3AsyncTest, NativeDirectEntryReadsByFamily) {
                 const auto* pattern =
                     dynamic_cast<const IPatternMatchReader*>(reader.get());
                 ASSERT_NE(pattern, nullptr);
-                ExpectHits(pattern->PatternMatch("alph", PatternOp::PrefixMatch),
-                           4,
-                           {0, 2});
+                ExpectHits(
+                    pattern->PatternMatch("alph", PatternOp::PrefixMatch),
+                    4,
+                    {0, 2});
             }
             reader.reset();
             EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
@@ -372,10 +375,10 @@ TEST(ScalarIndexV3AsyncTest, BitmapUsesBufferedPlannedReads) {
         options.params = backend.LoadParams({.row_count = 7});
         options.enable_mmap = mmap;
         options.mmap_dir_path = staging->Path();
-        auto reader = LoaderRegistry::Instance()
-                          .Lookup(backend.Family())
-                          .Load({OpenedIndexSource{PackedIndexSource{source}},
-                                 options});
+        auto reader =
+            LoaderRegistry::Instance()
+                .Lookup(backend.Family())
+                .Load({OpenedIndexSource{PackedIndexSource{source}}, options});
         ASSERT_NE(reader, nullptr);
         EXPECT_GT(remote->AsyncReadCalls(), 0);
         EXPECT_EQ(remote->ReadAtCalls(), previous_read_at);
@@ -454,9 +457,8 @@ TEST(ScalarIndexV3AsyncTest, InvertedCancelledDirectReadCanRetry) {
         const auto* pattern =
             dynamic_cast<const IPatternMatchReader*>(reader.get());
         ASSERT_NE(pattern, nullptr);
-        ExpectHits(pattern->PatternMatch("alph", PatternOp::PrefixMatch),
-                   4,
-                   {0, 2});
+        ExpectHits(
+            pattern->PatternMatch("alph", PatternOp::PrefixMatch), 4, {0, 2});
         reader.reset();
         loader.reset();
         EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
@@ -465,12 +467,11 @@ TEST(ScalarIndexV3AsyncTest, InvertedCancelledDirectReadCanRetry) {
 
 TEST(ScalarIndexV3AsyncTest, FmPackedNullBitmapHandlesWordAndTailBoundaries) {
     constexpr std::string_view bitmap_entry = "fm_index_null_bitmap";
-    for (const size_t rows : {size_t{8}, size_t{9}, size_t{63},
-                              size_t{64}, size_t{65}}) {
+    for (const size_t rows :
+         {size_t{8}, size_t{9}, size_t{63}, size_t{64}, size_t{65}}) {
         ScalarTestData<std::string_view> data(
             std::vector<std::string>(rows, "value"));
-        for (size_t row = 0; row < rows; row += 3)
-            data.validity.reset(row);
+        for (size_t row = 0; row < rows; row += 3) data.validity.reset(row);
         const ScalarTestInput<std::string_view> input(data);
         const auto& build_backend =
             ScalarReaderBackends().Get<std::string_view>("FmIndexVarchar");
@@ -484,8 +485,7 @@ TEST(ScalarIndexV3AsyncTest, FmPackedNullBitmapHandlesWordAndTailBoundaries) {
             SCOPED_TRACE(mmap);
             const auto& backend = ScalarReaderBackends().Get<std::string_view>(
                 mmap ? "FmIndexVarcharMmap" : "FmIndexVarchar");
-            auto reader =
-                OpenV3(backend, persisted, {.row_count = rows}, true);
+            auto reader = OpenV3(backend, persisted, {.row_count = rows}, true);
             ASSERT_NE(reader, nullptr);
             const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
             ASSERT_NE(nulls, nullptr);
@@ -496,11 +496,10 @@ TEST(ScalarIndexV3AsyncTest, FmPackedNullBitmapHandlesWordAndTailBoundaries) {
             EXPECT_EQ(nulls->IsNotNull().count(), rows - (rows + 2) / 3);
             if (rows % 8 != 0) {
                 auto corrupted = persisted;
-                corrupted.entries.at(std::string(bitmap_entry)).back() |=
-                    0x80;
+                corrupted.entries.at(std::string(bitmap_entry)).back() |= 0x80;
                 ExpectPackedLoadError(DataFormatBroken, [&] {
-                    static_cast<void>(OpenV3(
-                        backend, corrupted, {.row_count = rows}, true));
+                    static_cast<void>(
+                        OpenV3(backend, corrupted, {.row_count = rows}, true));
                 });
             }
         }

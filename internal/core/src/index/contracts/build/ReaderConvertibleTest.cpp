@@ -141,7 +141,8 @@ class ConvertibleTrackingArtifact final : public storage::Artifact,
 void
 ExpectConsumeError(storage::ArtifactPtr artifact, ErrorCode expected) {
     try {
-        static_cast<void>(IReaderConvertible::FromArtifact(std::move(artifact)));
+        static_cast<void>(
+            IReaderConvertible::FromArtifact(std::move(artifact)));
         FAIL() << "artifact conversion expected an error";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), expected);

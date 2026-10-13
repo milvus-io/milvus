@@ -63,35 +63,69 @@ struct Profile {
 const std::vector<Profile>&
 Profiles() {
     static const std::vector<Profile> profiles{
-        {"FloatIdMap", knowhere::IndexEnum::INDEX_FAISS_IDMAP, "L2",
-         DataType::VECTOR_FLOAT, kDim, {}, {}},
-        {"FloatIVFPQ", knowhere::IndexEnum::INDEX_FAISS_IVFPQ, "L2",
-         DataType::VECTOR_FLOAT, kDim,
-         {{knowhere::indexparam::NLIST, 16}, {knowhere::indexparam::M, 4},
+        {"FloatIdMap",
+         knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+         "L2",
+         DataType::VECTOR_FLOAT,
+         kDim,
+         {},
+         {}},
+        {"FloatIVFPQ",
+         knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
+         "L2",
+         DataType::VECTOR_FLOAT,
+         kDim,
+         {{knowhere::indexparam::NLIST, 16},
+          {knowhere::indexparam::M, 4},
           {knowhere::indexparam::NBITS, 8}},
          {{knowhere::indexparam::NPROBE, 4}}},
-        {"FloatIVFFlat", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, "L2",
-         DataType::VECTOR_FLOAT, kDim,
+        {"FloatIVFFlat",
+         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+         "L2",
+         DataType::VECTOR_FLOAT,
+         kDim,
          {{knowhere::indexparam::NLIST, 16}},
          {{knowhere::indexparam::NPROBE, 4}}},
-        {"FloatIVFSQ8", knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, "L2",
-         DataType::VECTOR_FLOAT, kDim,
+        {"FloatIVFSQ8",
+         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+         "L2",
+         DataType::VECTOR_FLOAT,
+         kDim,
          {{knowhere::indexparam::NLIST, 16}},
          {{knowhere::indexparam::NPROBE, 4}}},
-        {"BinaryIVFFlat", knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-         "JACCARD", DataType::VECTOR_BINARY, kBinaryDim,
+        {"BinaryIVFFlat",
+         knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+         "JACCARD",
+         DataType::VECTOR_BINARY,
+         kBinaryDim,
          {{knowhere::indexparam::NLIST, 16}},
          {{knowhere::indexparam::NPROBE, 4}}},
-        {"BinaryIdMap", knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
-         "JACCARD", DataType::VECTOR_BINARY, kBinaryDim, {}, {}},
-        {"SparseInverted", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-         "IP", DataType::VECTOR_SPARSE_U32_F32, kSparseDim,
-         {{knowhere::indexparam::DROP_RATIO_BUILD, 0.0}}, {}},
-        {"SparseWand", knowhere::IndexEnum::INDEX_SPARSE_WAND,
-         "IP", DataType::VECTOR_SPARSE_U32_F32, kSparseDim,
-         {{knowhere::indexparam::DROP_RATIO_BUILD, 0.0}}, {}},
-        {"FloatHNSW", knowhere::IndexEnum::INDEX_HNSW, "L2",
-         DataType::VECTOR_FLOAT, kDim,
+        {"BinaryIdMap",
+         knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+         "JACCARD",
+         DataType::VECTOR_BINARY,
+         kBinaryDim,
+         {},
+         {}},
+        {"SparseInverted",
+         knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+         "IP",
+         DataType::VECTOR_SPARSE_U32_F32,
+         kSparseDim,
+         {{knowhere::indexparam::DROP_RATIO_BUILD, 0.0}},
+         {}},
+        {"SparseWand",
+         knowhere::IndexEnum::INDEX_SPARSE_WAND,
+         "IP",
+         DataType::VECTOR_SPARSE_U32_F32,
+         kSparseDim,
+         {{knowhere::indexparam::DROP_RATIO_BUILD, 0.0}},
+         {}},
+        {"FloatHNSW",
+         knowhere::IndexEnum::INDEX_HNSW,
+         "L2",
+         DataType::VECTOR_FLOAT,
+         kDim,
          {{knowhere::indexparam::M, 16},
           {knowhere::indexparam::EFCONSTRUCTION, 200}},
          {{knowhere::indexparam::EF, 128}}},
@@ -209,7 +243,8 @@ CheckQuery(const Profile& profile,
     EXPECT_EQ(reader.Metric(), profile.metric);
     EXPECT_EQ(reader.KnowhereIndexType(), profile.type);
     SearchResult result;
-    reader.Search(query, SearchParams(profile, range), BitsetView{}, nullptr, result);
+    reader.Search(
+        query, SearchParams(profile, range), BitsetView{}, nullptr, result);
     EXPECT_EQ(result.total_nq_, 1);
     EXPECT_EQ(result.unity_topK_, 4);
     ASSERT_EQ(result.seg_offsets_.size(), 4);
@@ -252,17 +287,16 @@ TEST_P(VectorFamilyTest, QueryAndRangeAfterArtifactLoad) {
                                                    .physical_rows = kRows,
                                                    .dim = kBinaryDim},
                             persisted);
-        query = GenDataset(1, kBinaryDim,
-                           binary.data() + 100 * kBinaryDim / 8);
+        query = GenDataset(1, kBinaryDim, binary.data() + 100 * kBinaryDim / 8);
     } else {
         sparse = SparseData();
-        base = BuildAndLoad(adapted,
-                            VectorBuildInput<sparse_u32_f32>{
-                                .physical_values = sparse,
-                                .logical_rows = kRows,
-                                .physical_rows = kRows,
-                                .dim = kSparseDim},
-                            persisted);
+        base = BuildAndLoad(
+            adapted,
+            VectorBuildInput<sparse_u32_f32>{.physical_values = sparse,
+                                             .logical_rows = kRows,
+                                             .physical_rows = kRows,
+                                             .dim = kSparseDim},
+            persisted);
         query = GenDataset(1, kSparseDim, sparse.data() + 100);
         query->SetIsSparse(true);
     }
@@ -282,9 +316,8 @@ TEST_P(VectorFamilyTest, MmapCapabilityAndQuery) {
     const auto& profile = GetParam();
     // The HNSW mmap path only exercised native file mapping with a large
     // payload in the legacy suite; retain that threshold here.
-    const int64_t rows = profile.type == knowhere::IndexEnum::INDEX_HNSW
-                             ? 270000
-                             : kRows;
+    const int64_t rows =
+        profile.type == knowhere::IndexEnum::INDEX_HNSW ? 270000 : kRows;
     auto adapted = Adapt(profile, rows);
     TestArtifactData persisted;
     const bool native_mmap = KnowhereMmapSupported(profile.type);
@@ -312,18 +345,17 @@ TEST_P(VectorFamilyTest, MmapCapabilityAndQuery) {
                                                    .dim = kBinaryDim},
                             persisted,
                             native_mmap);
-        query = GenDataset(1, kBinaryDim,
-                           binary.data() + 100 * kBinaryDim / 8);
+        query = GenDataset(1, kBinaryDim, binary.data() + 100 * kBinaryDim / 8);
     } else {
         sparse = SparseData();
-        base = BuildAndLoad(adapted,
-                            VectorBuildInput<sparse_u32_f32>{
-                                .physical_values = sparse,
-                                .logical_rows = kRows,
-                                .physical_rows = kRows,
-                                .dim = kSparseDim},
-                            persisted,
-                            native_mmap);
+        base = BuildAndLoad(
+            adapted,
+            VectorBuildInput<sparse_u32_f32>{.physical_values = sparse,
+                                             .logical_rows = kRows,
+                                             .physical_rows = kRows,
+                                             .dim = kSparseDim},
+            persisted,
+            native_mmap);
         query = GenDataset(1, kSparseDim, sparse.data() + 100);
         query->SetIsSparse(true);
     }
@@ -363,13 +395,13 @@ TEST_P(VectorFamilyTest, RawVectorCapabilityAndLogicalIds) {
                             persisted);
     } else {
         sparse = SparseData();
-        base = BuildAndLoad(adapted,
-                            VectorBuildInput<sparse_u32_f32>{
-                                .physical_values = sparse,
-                                .logical_rows = kRows,
-                                .physical_rows = kRows,
-                                .dim = kSparseDim},
-                            persisted);
+        base = BuildAndLoad(
+            adapted,
+            VectorBuildInput<sparse_u32_f32>{.physical_values = sparse,
+                                             .logical_rows = kRows,
+                                             .physical_rows = kRows,
+                                             .dim = kSparseDim},
+            persisted);
     }
     ASSERT_NE(base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(base.get());
@@ -379,7 +411,8 @@ TEST_P(VectorFamilyTest, RawVectorCapabilityAndLogicalIds) {
     const auto id_dataset = GenIdsDataset(ids.size(), ids.data());
     if (!reader->HasRawData()) {
         if (profile.field == DataType::VECTOR_SPARSE_U32_F32) {
-            EXPECT_ANY_THROW(static_cast<void>(reader->GetSparseVector(id_dataset)));
+            EXPECT_ANY_THROW(
+                static_cast<void>(reader->GetSparseVector(id_dataset)));
         } else {
             EXPECT_ANY_THROW(static_cast<void>(reader->GetVector(id_dataset)));
         }
@@ -404,30 +437,33 @@ TEST_P(VectorFamilyTest, RawVectorCapabilityAndLogicalIds) {
         for (size_t i = 0; i < ids.size(); ++i) {
             const auto* expected =
                 profile.field == DataType::VECTOR_BINARY
-                    ? static_cast<const void*>(binary.data() + ids[i] * row_bytes)
+                    ? static_cast<const void*>(binary.data() +
+                                               ids[i] * row_bytes)
                     : static_cast<const void*>(dense.data() + ids[i] * kDim);
-            EXPECT_EQ(std::memcmp(got.data() + i * row_bytes,
-                                  expected,
-                                  row_bytes),
-                      0);
+            EXPECT_EQ(
+                std::memcmp(got.data() + i * row_bytes, expected, row_bytes),
+                0);
         }
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    LegacyVectorFamilies,
-    VectorFamilyTest,
-    ::testing::ValuesIn(Profiles()),
-    [](const ::testing::TestParamInfo<Profile>& info) {
-        return std::string(info.param.name);
-    });
+INSTANTIATE_TEST_SUITE_P(LegacyVectorFamilies,
+                         VectorFamilyTest,
+                         ::testing::ValuesIn(Profiles()),
+                         [](const ::testing::TestParamInfo<Profile>& info) {
+                             return std::string(info.param.name);
+                         });
 
 TEST(VectorFamilyEdgeTest, SparseExplicitAndImplicitEmptyRows) {
     for (const auto& type : {knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
                              knowhere::IndexEnum::INDEX_SPARSE_WAND}) {
-        Profile profile{"SparseEmpty", type, "IP",
-                        DataType::VECTOR_SPARSE_U32_F32, 3,
-                        {{knowhere::indexparam::DROP_RATIO_BUILD, 0.0}}, {}};
+        Profile profile{"SparseEmpty",
+                        type,
+                        "IP",
+                        DataType::VECTOR_SPARSE_U32_F32,
+                        3,
+                        {{knowhere::indexparam::DROP_RATIO_BUILD, 0.0}},
+                        {}};
         auto adapted = Adapt(profile);
         adapted.params[INDEX_NUM_ROWS_KEY] = 3;
         std::array<SparseRow, 3> rows{SparseRow(2), SparseRow(0), SparseRow(1)};
@@ -450,7 +486,8 @@ TEST(VectorFamilyEdgeTest, SparseExplicitAndImplicitEmptyRows) {
             continue;
         }
         const std::array<int64_t, 3> ids{1, 2, 0};
-        auto got = reader->GetSparseVector(GenIdsDataset(ids.size(), ids.data()));
+        auto got =
+            reader->GetSparseVector(GenIdsDataset(ids.size(), ids.data()));
         ASSERT_NE(got, nullptr);
         EXPECT_EQ(got[0].size(), 0);
         EXPECT_EQ(got[1].size(), rows[2].size());
@@ -466,8 +503,11 @@ TEST(VectorFamilyEdgeTest, SparseExplicitAndImplicitEmptyRows) {
 
 TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
     auto values = FloatData();
-    Profile profile{"InterimIVFPQ", knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
-                    "L2", DataType::VECTOR_FLOAT, kDim,
+    Profile profile{"InterimIVFPQ",
+                    knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
+                    "L2",
+                    DataType::VECTOR_FLOAT,
+                    kDim,
                     {{knowhere::indexparam::NLIST, 16},
                      {knowhere::indexparam::M, 4},
                      {knowhere::indexparam::NBITS, 8}},
@@ -477,13 +517,13 @@ TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
         std::span<const float>(values.data(), 256 * kDim),
         std::span<const float>(values.data() + 256 * kDim, 256 * kDim),
     };
-    VectorMemBuilder<float> builder(DataType::NONE,
-                                    profile.type,
-                                    profile.metric,
-                                    knowhere::Version::GetCurrentVersion()
-                                        .VersionNumber(),
-                                    kDim,
-                                    adapted.params);
+    VectorMemBuilder<float> builder(
+        DataType::NONE,
+        profile.type,
+        profile.metric,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        kDim,
+        adapted.params);
     auto artifact = std::move(builder).Build(InterimVectorBuildInput<float>{
         .physical_chunks = chunks,
         .logical_rows = kRows,
@@ -525,8 +565,11 @@ TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
 
 TEST(VectorFamilyEdgeTest, IVFFlatCCIteratorYieldsOffsetsAndDistances) {
     auto values = FloatData();
-    Profile profile{"IVFFlatCC", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
-                    "L2", DataType::VECTOR_FLOAT, kDim,
+    Profile profile{"IVFFlatCC",
+                    knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
+                    "L2",
+                    DataType::VECTOR_FLOAT,
+                    kDim,
                     {{knowhere::indexparam::NLIST, 16}},
                     {{knowhere::indexparam::NPROBE, 4}}};
     auto adapted = Adapt(profile);

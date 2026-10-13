@@ -277,7 +277,8 @@ TEST(VectorReaderContractTest, EmbeddingListRetrievalKeepsTerminalOffset) {
         GenIdsDataset(1, &missing_id), vectors->Metric())));
 }
 
-TEST(VectorReaderContractTest, EmptyValidEmbeddingListsHaveLogicalIdsWithoutVectors) {
+TEST(VectorReaderContractTest,
+     EmptyValidEmbeddingListsHaveLogicalIdsWithoutVectors) {
     const std::array<bool, 3> valid{true, false, true};
     const std::array<size_t, 3> offsets{0, 0, 0};
     const std::vector<float> values;

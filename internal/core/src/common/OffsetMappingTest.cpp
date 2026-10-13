@@ -144,8 +144,8 @@ ExpectIdSnapshotValues(const knowhere::IdArray& ids,
 
 void
 ExpectIdMapValues(const knowhere::IdMap& id_map,
-                   const std::vector<int64_t>& expected_l2p,
-                   const std::vector<int32_t>& expected_p2l) {
+                  const std::vector<int64_t>& expected_l2p,
+                  const std::vector<int32_t>& expected_p2l) {
     EXPECT_EQ(id_map.type(), knowhere::IdMap::Type::SEALED);
     EXPECT_EQ(id_map.OutCount(), expected_l2p.size());
     EXPECT_EQ(id_map.InCount(), expected_p2l.size());
@@ -325,13 +325,12 @@ TEST(IdMapValidDataHelpers, ValidDataHelpersPreserveSnapshotValues) {
                 knowhere::IdMapData::FromValidBitmap(bitmap.data(), 5));
             EXPECT_TRUE(id_map.InToOutIds().empty());
             id_map.FinalizeVectorIds();
-            ExpectIdMapValues(
-                id_map, expected_out_to_in, expected_in_to_out);
+            ExpectIdMapValues(id_map, expected_out_to_in, expected_in_to_out);
             ids_snapshot = id_map.InToOutIds();
             valid_snapshot = id_map.ValidBitmap();
             if (enable_mmap) {
-                ExpectMmapBlockFiles(mmap_root,
-                                     {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
+                ExpectMmapBlockFiles(
+                    mmap_root, {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
             }
         }
         // The value snapshots retain their buffers after the IdMap is gone.

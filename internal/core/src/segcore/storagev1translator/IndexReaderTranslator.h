@@ -34,7 +34,8 @@ class IndexLoadContext {
         ctx.runtime_load_priority = configured_priority;
         if (parent_ != nullptr) {
             ctx.cancellation_token = parent_->cancellation_token;
-            ctx.runtime_load_priority = parent_->runtime_load_priority.value_or(configured_priority);
+            ctx.runtime_load_priority =
+                parent_->runtime_load_priority.value_or(configured_priority);
             ctx.coload_fields = parent_->coload_fields;
             ctx.pinned_segment_state = parent_->pinned_segment_state;
             ctx.pinned_state_owner = parent_->pinned_state_owner;

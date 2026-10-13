@@ -263,7 +263,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     }
     const auto& offset_mapping = vec_ptr->get_offset_mapping();
     const bool is_element_level_search =
-        data_type == DataType::VECTOR_ARRAY && info.struct_element_offsets_ != nullptr;
+        data_type == DataType::VECTOR_ARRAY &&
+        info.struct_element_offsets_ != nullptr;
     search_result.element_level_ = is_element_level_search;
     const auto has_offset_mapping =
         offset_mapping.IsEnabled() && !is_element_level_search;
@@ -335,7 +336,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                          search_bitset,
                                          iter_data_type);
         cached_iter.NextBatch(info, search_result);
-        FinalizeVectorSearchOffsets(search_result, info.struct_element_offsets_.get());
+        FinalizeVectorSearchOffsets(search_result,
+                                    info.struct_element_offsets_.get());
         // The iterator is consumed and destroyed above, so nothing borrows
         // the chunks past this point today. Pin the generation anyway: the
         // brute-force branch below has to, and a future change that lets
@@ -480,7 +482,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         // element-level and row-level remapping are mutually exclusive.
         if (info.struct_element_offsets_ != nullptr) {
             auto [seg_offsets, elem_indicies] =
-                final_qr.convert_to_element_offsets(info.struct_element_offsets_.get());
+                final_qr.convert_to_element_offsets(
+                    info.struct_element_offsets_.get());
             search_result.seg_offsets_ = std::move(seg_offsets);
             search_result.element_indices_ = std::move(elem_indicies);
             search_result.element_level_ = true;

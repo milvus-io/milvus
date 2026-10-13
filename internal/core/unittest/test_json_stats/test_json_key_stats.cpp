@@ -444,10 +444,11 @@ BuildMaterializeSnapshot(const std::vector<JsonStatsRowRange>& row_ranges,
         std::make_shared<storage::DiskFileManagerImpl>(test_index.context);
     BsonInvertedIndex loaded_bson_index(load_disk_file_manager);
     std::vector<std::string> bson_files;
-    for (const auto& file : bson_stats.Files()) { bson_files.push_back(file.file_name); }
-    loaded_bson_index.LoadIndex(bson_files,
-                                milvus::proto::common::LoadPriority::HIGH,
-                                false);
+    for (const auto& file : bson_stats.Files()) {
+        bson_files.push_back(file.file_name);
+    }
+    loaded_bson_index.LoadIndex(
+        bson_files, milvus::proto::common::LoadPriority::HIGH, false);
     for (const auto& path : shared_paths) {
         loaded_bson_index.TermQuery(
             path,

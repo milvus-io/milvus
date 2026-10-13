@@ -48,10 +48,10 @@ namespace {
 IIndexReaderBasePtr
 BuildTantivyStringReader(const std::vector<std::string>& data) {
     const Config params{{FIELD_ID, 101},
-                         {"field_type", static_cast<int>(DataType::VARCHAR)},
-                         {"value_type", static_cast<int>(DataType::VARCHAR)},
-                         {"nested", false},
-                         {SCALAR_INDEX_ENGINE_VERSION, 3}};
+                        {"field_type", static_cast<int>(DataType::VARCHAR)},
+                        {"value_type", static_cast<int>(DataType::VARCHAR)},
+                        {"nested", false},
+                        {SCALAR_INDEX_ENGINE_VERSION, 3}};
     auto output = arrow::io::BufferOutputStream::Create().ValueOrDie();
     {
         std::vector<std::string_view> values;
@@ -78,7 +78,8 @@ BuildTantivyStringReader(const std::vector<std::string>& data) {
     storage::LoadOptions options;
     options.params = params;
     const auto loader = LoaderRegistry::Instance().Lookup(families::kInverted);
-    AssertInfo(static_cast<bool>(loader), "inverted benchmark loader is missing");
+    AssertInfo(static_cast<bool>(loader),
+               "inverted benchmark loader is missing");
     return loader.Load(
         {OpenedIndexSource{PackedIndexSource{
              std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
@@ -90,7 +91,7 @@ GenerateBenchStrings(size_t count, size_t average_length, unsigned seed = 42) {
     std::mt19937 rng(seed);
     std::uniform_int_distribution<int> char_dist('a', 'z');
     std::uniform_int_distribution<size_t> length_dist(average_length / 2,
-                                                     average_length * 3 / 2);
+                                                      average_length * 3 / 2);
     std::vector<std::string> result;
     result.reserve(count);
     for (size_t i = 0; i < count; ++i) {
@@ -122,11 +123,10 @@ TimeBench(Fn&& fn, int warmup = 3, int iterations = 10) {
     for (int i = 0; i < iterations; ++i) {
         total += fn();
     }
-    const double microseconds =
-        std::chrono::duration<double, std::micro>(
-            std::chrono::steady_clock::now() - start)
-            .count() /
-        iterations;
+    const double microseconds = std::chrono::duration<double, std::micro>(
+                                    std::chrono::steady_clock::now() - start)
+                                    .count() /
+                                iterations;
     static_cast<void>(observed);
     return {microseconds, total / iterations};
 }
@@ -155,7 +155,8 @@ TEST(IndexBenchmark, TantivyVsBruteForce) {
     const auto reader = BuildTantivyStringReader(data);
     ASSERT_NE(reader, nullptr);
     ASSERT_EQ(reader->Count(), data.size());
-    const auto* tantivy = dynamic_cast<const IPatternMatchReader*>(reader.get());
+    const auto* tantivy =
+        dynamic_cast<const IPatternMatchReader*>(reader.get());
     ASSERT_NE(tantivy, nullptr);
     const std::vector<std::pair<std::string, std::string>> patterns{
         {"prefix: abc%", "abc%"},

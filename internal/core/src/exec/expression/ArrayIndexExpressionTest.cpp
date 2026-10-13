@@ -96,7 +96,8 @@ ArrayElement(size_t key) {
 template <typename T>
 class ArrayIndexExpressionTest : public ::testing::Test {
  public:
-    void SetUp() override {
+    void
+    SetUp() override {
         schema_ = std::make_shared<Schema>();
         array_id_ = schema_->AddDebugArrayField(
             "array", index::CppDataType<T>(), false);
@@ -114,11 +115,17 @@ class ArrayIndexExpressionTest : public ::testing::Test {
         seg_ = CreateSealedSegment(schema_);
         auto raw_info = raw_files_.Prepare(array_id_, {field});
         seg_->LoadFieldData(raw_info);
-        auto opened = test::expr_index::BuildIndex(
-            array_id_, DataType::ARRAY, index::INVERTED_INDEX_TYPE, {field},
-            Config::object(), index::CppDataType<T>());
-        test::expr_index::InstallIndex(*seg_, array_id_, DataType::ARRAY,
-                                       std::move(opened), index::CppDataType<T>());
+        auto opened = test::expr_index::BuildIndex(array_id_,
+                                                   DataType::ARRAY,
+                                                   index::INVERTED_INDEX_TYPE,
+                                                   {field},
+                                                   Config::object(),
+                                                   index::CppDataType<T>());
+        test::expr_index::InstallIndex(*seg_,
+                                       array_id_,
+                                       DataType::ARRAY,
+                                       std::move(opened),
+                                       index::CppDataType<T>());
     }
 
     SchemaPtr schema_;
@@ -353,15 +360,19 @@ TEST(ArrayIndexExpressionRegression,
     const uint8_t parents = 0x0B;
     auto field = ArrayField(arrays, true, &parents);
     auto schema = std::make_shared<Schema>();
-    const auto field_id = schema->AddDebugArrayField(
-        "structA[array]", DataType::INT64, true);
+    const auto field_id =
+        schema->AddDebugArrayField("structA[array]", DataType::INT64, true);
     test::expr_index::RawFieldFiles raw_files;
     auto segment = CreateSealedSegment(schema);
     auto raw_info = raw_files.Prepare(field_id, {field});
     segment->LoadFieldData(raw_info);
-    auto opened = test::expr_index::BuildIndex(
-        field_id, DataType::ARRAY, index::INVERTED_INDEX_TYPE, {field},
-        Config::object(), DataType::INT64, true);
+    auto opened = test::expr_index::BuildIndex(field_id,
+                                               DataType::ARRAY,
+                                               index::INVERTED_INDEX_TYPE,
+                                               {field},
+                                               Config::object(),
+                                               DataType::INT64,
+                                               true);
     ASSERT_EQ(opened.reader->CoordDomain(), index::Domain::Element);
     ASSERT_EQ(opened.reader->Count(), 3);
     const auto* null_reader =
@@ -384,8 +395,11 @@ TEST(ArrayIndexExpressionRegression,
     EXPECT_TRUE(not_in[1]);
     EXPECT_TRUE(not_in[2]);
 
-    test::expr_index::InstallIndex(*segment, field_id, DataType::ARRAY,
-                                   std::move(opened), DataType::INT64);
+    test::expr_index::InstallIndex(*segment,
+                                   field_id,
+                                   DataType::ARRAY,
+                                   std::move(opened),
+                                   DataType::INT64);
     proto::plan::GenericValue ten;
     ten.set_int64_val(10);
     proto::plan::GenericValue thirty;
@@ -397,10 +411,11 @@ TEST(ArrayIndexExpressionRegression,
         std::vector<proto::plan::GenericValue>{ten, thirty});
     EXPECT_TRUE(test::CanExprExecuteAllAtOnce(
         expression, segment.get(), arrays.size()));
-    auto evaluated = test::EvalExprInBatches(
-        expression, segment.get(), arrays.size());
+    auto evaluated =
+        test::EvalExprInBatches(expression, segment.get(), arrays.size());
     TargetBitmapView values(evaluated.result->GetRawData(), arrays.size());
-    TargetBitmapView validity(evaluated.result->GetValidRawData(), arrays.size());
+    TargetBitmapView validity(evaluated.result->GetValidRawData(),
+                              arrays.size());
     const std::vector<bool> expected = {true, false, false, true, false};
     for (size_t row = 0; row < arrays.size(); ++row) {
         EXPECT_EQ(validity[row], (parents & (1u << row)) != 0) << "row=" << row;
@@ -473,11 +488,17 @@ TEST(ArrayIndexExpressionRegression,
         EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
             logical_expr, raw_segment.get(), row_count));
 
-        auto opened = test::expr_index::BuildIndex(
-            array_fid, DataType::ARRAY, index::INVERTED_INDEX_TYPE, {field},
-            Config::object(), DataType::INT64, nested_index);
-        test::expr_index::InstallIndex(*indexed_segment, array_fid,
-                                       DataType::ARRAY, std::move(opened),
+        auto opened = test::expr_index::BuildIndex(array_fid,
+                                                   DataType::ARRAY,
+                                                   index::INVERTED_INDEX_TYPE,
+                                                   {field},
+                                                   Config::object(),
+                                                   DataType::INT64,
+                                                   nested_index);
+        test::expr_index::InstallIndex(*indexed_segment,
+                                       array_fid,
+                                       DataType::ARRAY,
+                                       std::move(opened),
                                        DataType::INT64);
 
         EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(

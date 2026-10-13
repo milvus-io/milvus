@@ -435,14 +435,14 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
         return res;
     }
 
-    auto execute_sub_batch = [lower_inclusive, upper_inclusive](
-                                 const index::IScalarPredicateReader<ReaderType>*
-                                     reader,
-                                 HighPrecisionType val1,
-                                 HighPrecisionType val2) {
-        BinaryRangeIndexFunc<T> func;
-        return func(reader, val1, val2, lower_inclusive, upper_inclusive);
-    };
+    auto execute_sub_batch =
+        [lower_inclusive, upper_inclusive](
+            const index::IScalarPredicateReader<ReaderType>* reader,
+            HighPrecisionType val1,
+            HighPrecisionType val2) {
+            BinaryRangeIndexFunc<T> func;
+            return func(reader, val1, val2, lower_inclusive, upper_inclusive);
+        };
     if (input != nullptr) {
         if (PinnedJsonIndexIsFlat()) {
             return ProcessIndexChunksAndGatherByOffsets<T>(
@@ -1235,7 +1235,6 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
     if (exec_path_ != ExprExecPath::ScalarIndex) {
         return;
     }
-
 }
 
 void

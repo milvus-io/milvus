@@ -34,7 +34,8 @@ class TextPublicationFixture {
     TextPublicationFixture()
         : root(LocalDirectory::CreateOwned(
               std::filesystem::temp_directory_path().string(),
-              "text-publication-XXXXXX", "text publication test")) {
+              "text-publication-XXXXXX",
+              "text publication test")) {
     }
 
     ArtifactStats
@@ -65,12 +66,14 @@ class TextPublicationFixture {
         info.mutable_storage_config()->set_root_path(root->Path() + "/remote");
         const auto source = root->Path() + "/insert/1";
         info.add_insert_files(source);
-        auto prepared = indexbuilder::AdaptBuildIndexInfo(info, indexbuilder::BuildPurpose::TextIndex);
+        auto prepared = indexbuilder::AdaptBuildIndexInfo(
+            info, indexbuilder::BuildPurpose::TextIndex);
         context = prepared.file_manager_context;
         prepared.request.staging_parent = root->Path() + "/build";
         const std::vector<std::string> values{"alpha", "", "beta"};
         constexpr uint8_t validity = 0b00000101;
-        auto data = CreateFieldData(DataType::VARCHAR, DataType::NONE, true, 1, values.size());
+        auto data = CreateFieldData(
+            DataType::VARCHAR, DataType::NONE, true, 1, values.size());
         data->FillFieldData(values.data(), &validity, values.size(), 0);
         auto payload_reader = std::make_shared<PayloadReader>(data);
         InsertData insert(payload_reader);
@@ -78,7 +81,8 @@ class TextPublicationFixture {
         insert.SetTimestamps(0, 100);
         auto bytes = insert.Serialize(Remote);
         context.chunkManagerPtr->Write(source, bytes.data(), bytes.size());
-        indexbuilder::BuildSession session(std::move(prepared.request), context);
+        indexbuilder::BuildSession session(std::move(prepared.request),
+                                           context);
         session.BuildFromSource();
         return session.Publish();
     }

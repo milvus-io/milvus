@@ -35,9 +35,8 @@ RunWithIsolatedExpressionCache(const std::function<void()>& test_case) {
     // Re-execution isolates its singleton, configuration, entries and metrics
     // from the parent test process, including fatal assertion exits.
     const auto previous_style = ::testing::FLAGS_gtest_death_test_style;
-    auto restore_style = folly::makeGuard([&] {
-        ::testing::FLAGS_gtest_death_test_style = previous_style;
-    });
+    auto restore_style = folly::makeGuard(
+        [&] { ::testing::FLAGS_gtest_death_test_style = previous_style; });
     ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     ASSERT_EXIT(
         {
@@ -134,7 +133,8 @@ TEST(TextMatchCacheTest, ExprResCacheFilterBitsDoesNotDuplicateTextMatchEntry) {
         query_context->set_enable_expr_cache(true);
         query_context->set_enable_sub_expr_cache_write(false);
 
-        auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+        auto row =
+            ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
         ASSERT_NE(row, nullptr);
         ASSERT_EQ(mgr.GetEntryCount(), 1);
 
@@ -245,7 +245,8 @@ TEST(TextMatchCacheTest, ExprResCacheFilterBitsIncludesEntityTTLPhysicalTime) {
 
         auto schema = std::make_shared<Schema>();
         auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-        auto ttl_fid = schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ);
+        auto ttl_fid =
+            schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ);
         schema->set_primary_field_id(pk_fid);
         schema->set_ttl_field_id(ttl_fid);
 
@@ -266,13 +267,13 @@ TEST(TextMatchCacheTest, ExprResCacheFilterBitsIncludesEntityTTLPhysicalTime) {
         auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                            always_true_expr);
 
-        auto before_expire =
-            ExecuteFilterBitsWithFullCache(plan, seg.get(), N, MAX_TIMESTAMP, 100);
+        auto before_expire = ExecuteFilterBitsWithFullCache(
+            plan, seg.get(), N, MAX_TIMESTAMP, 100);
         ASSERT_TRUE(before_expire[0]);
         ASSERT_TRUE(before_expire[1]);
 
-        auto after_expire =
-            ExecuteFilterBitsWithFullCache(plan, seg.get(), N, MAX_TIMESTAMP, 200);
+        auto after_expire = ExecuteFilterBitsWithFullCache(
+            plan, seg.get(), N, MAX_TIMESTAMP, 200);
         ASSERT_FALSE(after_expire[0]);
         ASSERT_TRUE(after_expire[1]);
     });
@@ -280,69 +281,70 @@ TEST(TextMatchCacheTest, ExprResCacheFilterBitsIncludesEntityTTLPhysicalTime) {
 
 TEST(TextMatchCacheTest, ExprResCacheGrowingTextBypassesReadAndWrite) {
     RunWithIsolatedExpressionCache([] {
-    using milvus::exec::ExprResCacheManager;
-    auto& mgr = ExprResCacheManager::Instance();
-    auto reset_cache = folly::makeGuard([&]() {
+        using milvus::exec::ExprResCacheManager;
+        auto& mgr = ExprResCacheManager::Instance();
+        auto reset_cache = folly::makeGuard([&]() {
+            mgr.Clear();
+            EXPECT_TRUE(mgr.SetConfig(milvus::exec::CacheConfig{}));
+            ExprResCacheManager::SetEnabled(false);
+        });
+        milvus::exec::CacheConfig config;
+        config.mode = milvus::exec::CacheMode::Memory;
+        config.mem_enable_growing = true;
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = 0;
+        ASSERT_TRUE(mgr.SetConfig(config));
         mgr.Clear();
-        EXPECT_TRUE(mgr.SetConfig(milvus::exec::CacheConfig{}));
-        ExprResCacheManager::SetEnabled(false);
-    });
-    milvus::exec::CacheConfig config;
-    config.mode = milvus::exec::CacheMode::Memory;
-    config.mem_enable_growing = true;
-    config.admission_threshold = 1;
-    config.mem_min_eval_duration_us = 0;
-    ASSERT_TRUE(mgr.SetConfig(config));
-    mgr.Clear();
-    ExprResCacheManager::SetEnabled(true);
+        ExprResCacheManager::SetEnabled(true);
 
-    auto schema = GenTestSchema();
-    constexpr int64_t N = 2;
-    auto raw_data = DataGen(schema, N);
-    auto* strings = raw_data.raw_->mutable_fields_data()
-                        ->at(1)
-                        .mutable_scalars()
-                        ->mutable_string_data();
-    strings->set_data(0, "football basketball");
-    strings->set_data(1, "swimming football");
-    auto seg = CreateGrowingSegment(schema, empty_index_meta);
-    auto offset = seg->PreInsert(N);
-    seg->Insert(offset,
-                N,
-                raw_data.row_ids_.data(),
-                raw_data.timestamps_.data(),
-                raw_data.owner);
-    auto pin = seg->PinGrowingIndex(FieldId(101));
-    ASSERT_TRUE(pin);
-    ASSERT_EQ(TextReader(pin.Reader()).MatchQuery("football", 1).count(), N);
+        auto schema = GenTestSchema();
+        constexpr int64_t N = 2;
+        auto raw_data = DataGen(schema, N);
+        auto* strings = raw_data.raw_->mutable_fields_data()
+                            ->at(1)
+                            .mutable_scalars()
+                            ->mutable_string_data();
+        strings->set_data(0, "football basketball");
+        strings->set_data(1, "swimming football");
+        auto seg = CreateGrowingSegment(schema, empty_index_meta);
+        auto offset = seg->PreInsert(N);
+        seg->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.owner);
+        auto pin = seg->PinGrowingIndex(FieldId(101));
+        ASSERT_TRUE(pin);
+        ASSERT_EQ(TextReader(pin.Reader()).MatchQuery("football", 1).count(),
+                  N);
 
-    for (auto op :
-         {OpType::TextMatch, OpType::PhraseMatch, OpType::TextMatchFuzzy}) {
-        SCOPED_TRACE(proto::plan::OpType_Name(op));
-        auto expr = GetMatchExpr(schema, "football", op);
-        auto result = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        EXPECT_EQ(result.count(), N);
-        EXPECT_EQ(mgr.GetEntryCount(), 0);
-        mgr.Clear();
+        for (auto op :
+             {OpType::TextMatch, OpType::PhraseMatch, OpType::TextMatchFuzzy}) {
+            SCOPED_TRACE(proto::plan::OpType_Name(op));
+            auto expr = GetMatchExpr(schema, "football", op);
+            auto result = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            EXPECT_EQ(result.count(), N);
+            EXPECT_EQ(mgr.GetEntryCount(), 0);
+            mgr.Clear();
 
-        // Simulate a result cached before the index became visible, with the
-        // same active_count. Explicit commit/reload above avoids a timed race.
-        ExprResCacheManager::Key key{seg->get_segment_id(),
-                                     expr->filter()->ToString()};
-        ExprResCacheManager::Value stale;
-        stale.result = std::make_shared<TargetBitmap>(N);
-        stale.valid_result = std::make_shared<TargetBitmap>(N, true);
-        stale.active_count = N;
-        mgr.Put(key, stale);
-        ASSERT_EQ(mgr.GetEntryCount(), 1);
+            // Simulate a result cached before the index became visible, with the
+            // same active_count. Explicit commit/reload above avoids a timed race.
+            ExprResCacheManager::Key key{seg->get_segment_id(),
+                                         expr->filter()->ToString()};
+            ExprResCacheManager::Value stale;
+            stale.result = std::make_shared<TargetBitmap>(N);
+            stale.valid_result = std::make_shared<TargetBitmap>(N, true);
+            stale.active_count = N;
+            mgr.Put(key, stale);
+            ASSERT_EQ(mgr.GetEntryCount(), 1);
 
-        result = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        EXPECT_EQ(result.count(), N);
-        ExprResCacheManager::Value still_cached;
-        still_cached.active_count = N;
-        ASSERT_TRUE(mgr.Get(key, still_cached));
-        EXPECT_EQ(still_cached.result->count(), 0);
-        mgr.Clear();
-    }
+            result = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            EXPECT_EQ(result.count(), N);
+            ExprResCacheManager::Value still_cached;
+            still_cached.active_count = N;
+            ASSERT_TRUE(mgr.Get(key, still_cached));
+            EXPECT_EQ(still_cached.result->count(), 0);
+            mgr.Clear();
+        }
     });
 }

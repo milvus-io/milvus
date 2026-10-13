@@ -371,7 +371,8 @@ TEST(GrowingIndexContractTest, RTreeUsesValidityForEmptyPayload) {
         Geometry(GetThreadLocalGEOSContext(), "POINT(1 1)").to_wkb_string();
     const std::array<std::string_view, 3> values{point, "", ""};
     const std::array<bool, 3> valid{true, true, false};
-    owner.Append(0, ScalarBatch<std::string_view>{3, values.data(), valid.data()});
+    owner.Append(0,
+                 ScalarBatch<std::string_view>{3, values.data(), valid.data()});
     owner.Flush();
 
     auto pin = owner.PinSnapshot();
@@ -410,9 +411,8 @@ TEST(GrowingIndexContractTest, RTreeConcurrentAppendAndPinnedQueryProgress) {
     std::atomic<int64_t> progress{0};
     std::atomic<int64_t> observed_queries{0};
     std::thread reader([&] {
-        const Geometry query(
-            GetThreadLocalGEOSContext(),
-            "POLYGON((-1 -1,2 -1,2 2,-1 2,-1 -1))");
+        const Geometry query(GetThreadLocalGEOSContext(),
+                             "POLYGON((-1 -1,2 -1,2 2,-1 2,-1 -1))");
         while (!stop.load(std::memory_order_relaxed)) {
             auto pin = owner.PinSnapshot();
             if (!pin) {
@@ -436,8 +436,7 @@ TEST(GrowingIndexContractTest, RTreeConcurrentAppendAndPinnedQueryProgress) {
         for (int64_t row = 1; row <= kRows; ++row) {
             const std::string_view value = point;
             const bool valid = row % 7 != 0;
-            owner.Append(row,
-                         ScalarBatch<std::string_view>{1, &value, &valid});
+            owner.Append(row, ScalarBatch<std::string_view>{1, &value, &valid});
             progress.store(row, std::memory_order_relaxed);
         }
         owner.Flush();

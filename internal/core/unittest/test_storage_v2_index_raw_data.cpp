@@ -87,8 +87,8 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     int64_t n_batch = 3;
     int64_t dim = 128;
     // Write data to storage v2
-    auto paths = std::vector<std::string>{path_ + "/0/19530",
-                                          path_ + "/1/19531"};
+    auto paths =
+        std::vector<std::string>{path_ + "/0/19530", path_ + "/1/19531"};
     ASSERT_TRUE(fs_->CreateDir(path_ + "/0").ok());
     ASSERT_TRUE(fs_->CreateDir(path_ + "/1").ok());
     auto column_groups = std::vector<std::vector<int>>{
@@ -132,8 +132,8 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         request.params = std::move(adapted.params);
         request.value_type = adapted.value_type;
         request.field_id = field_id;
-        request.source = indexbuilder::StorageV2BuildSource{
-            {{paths[0]}, {paths[1]}}};
+        request.source =
+            indexbuilder::StorageV2BuildSource{{{paths[0]}, {paths[1]}}};
         request.expected_rows = per_batch * n_batch;
         request.staging_parent = path_;
         return request;
@@ -240,10 +240,8 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
             storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_);
 
         indexbuilder::BuildSession session(
-            make_build_request(int32_field,
-                               DataType::INT32,
-                               index::ASCENDING_SORT,
-                               config),
+            make_build_request(
+                int32_field, DataType::INT32, index::ASCENDING_SORT, config),
             ctx);
         session.BuildFromSource();
     }
@@ -279,10 +277,8 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
             storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_);
 
         indexbuilder::BuildSession session(
-            make_build_request(varchar_field,
-                               DataType::VARCHAR,
-                               index::MARISA_TRIE,
-                               config),
+            make_build_request(
+                varchar_field, DataType::VARCHAR, index::MARISA_TRIE, config),
             ctx);
         session.BuildFromSource();
     }
@@ -322,11 +318,8 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
 
         try {
             indexbuilder::BuildSession session(
-                make_build_request(vec_field,
-                                   DataType::VECTOR_FLOAT,
-                                   index_type,
-                                   config,
-                                   6),
+                make_build_request(
+                    vec_field, DataType::VECTOR_FLOAT, index_type, config, 6),
                 ctx);
             session.BuildFromSource();
         } catch (const std::exception& e) {

@@ -29,8 +29,8 @@ namespace {
 int64_t
 CheckedBatchEnd(int64_t row_begin, size_t row_count) {
     if (row_begin < 0 ||
-        row_count > static_cast<size_t>(
-                        std::numeric_limits<int64_t>::max() - row_begin)) {
+        row_count > static_cast<size_t>(std::numeric_limits<int64_t>::max() -
+                                        row_begin)) {
         ThrowInfo(UnexpectedError,
                   "growing R-Tree row range [{}, {} rows) overflows int64",
                   row_begin,
@@ -83,11 +83,11 @@ ValidateAcceptedBatch(int64_t row_begin,
                values[value_index].second < static_cast<int64_t>(offset)) {
             ++value_index;
         }
-        AssertInfo(value_index == values.size() ||
-                       values[value_index].second !=
-                           static_cast<int64_t>(offset),
-                   "growing R-Tree row {} is both indexed and null",
-                   offset);
+        AssertInfo(
+            value_index == values.size() ||
+                values[value_index].second != static_cast<int64_t>(offset),
+            "growing R-Tree row {} is both indexed and null",
+            offset);
         previous_null = offset;
         first_null = false;
     }
@@ -95,8 +95,7 @@ ValidateAcceptedBatch(int64_t row_begin,
 
 }  // namespace
 
-RTreeGrowingSpatialIndex::RTreeGrowingSpatialIndex(
-    int64_t publish_window_rows)
+RTreeGrowingSpatialIndex::RTreeGrowingSpatialIndex(int64_t publish_window_rows)
     : publish_window_rows_(publish_window_rows) {
     if (publish_window_rows_ <= 0) {
         ThrowInfo(ConfigInvalid,

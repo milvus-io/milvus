@@ -426,13 +426,13 @@ TEST(ScalarIndexV3ResourceTest, RTreeReservesHeapInsteadOfResidentFiles) {
                 EXPECT_GE(resources.request.final_memory_cost,
                           state->MemoryUsage());
                 if (rows == 0) {
-                    const auto direct = ScalarIndexLoadResource(
-                        DataType::GEOMETRY,
-                        0,
-                        size,
-                        V3Params(RTREE_INDEX_TYPE),
-                        mmap,
-                        rows);
+                    const auto direct =
+                        ScalarIndexLoadResource(DataType::GEOMETRY,
+                                                0,
+                                                size,
+                                                V3Params(RTREE_INDEX_TYPE),
+                                                mmap,
+                                                rows);
                     EXPECT_EQ(resources.request.final_memory_cost,
                               direct.final_memory_cost);
                 }
@@ -508,23 +508,20 @@ TEST(ScalarIndexV3ResourceTest, TantivyValidityCrossesWordBoundaryOnce) {
         for (const auto* family : {INVERTED_INDEX_TYPE, NGRAM_INDEX_TYPE}) {
             SCOPED_TRACE(family);
             SCOPED_TRACE(mmap);
-            const auto previous = ScalarIndexLoadResource(
-                DataType::VARCHAR,
-                0,
-                index_bytes,
-                V3Params(family),
-                mmap,
-                rows - 1);
-            const auto actual = ScalarIndexLoadResource(
-                DataType::VARCHAR,
-                0,
-                index_bytes,
-                V3Params(family),
-                mmap,
-                rows);
+            const auto previous = ScalarIndexLoadResource(DataType::VARCHAR,
+                                                          0,
+                                                          index_bytes,
+                                                          V3Params(family),
+                                                          mmap,
+                                                          rows - 1);
+            const auto actual = ScalarIndexLoadResource(DataType::VARCHAR,
+                                                        0,
+                                                        index_bytes,
+                                                        V3Params(family),
+                                                        mmap,
+                                                        rows);
             EXPECT_EQ(actual.final_memory_cost,
-                      (mmap ? validity_bytes
-                            : index_bytes + validity_bytes) +
+                      (mmap ? validity_bytes : index_bytes + validity_bytes) +
                           kScalarIndexFixedResidentBytes);
             EXPECT_EQ(actual.final_disk_cost, mmap ? index_bytes : 0);
             EXPECT_EQ(actual.final_memory_cost - previous.final_memory_cost,
@@ -541,12 +538,8 @@ TEST(ScalarIndexV3ResourceTest, BitmapFrozenScratchIsBoundedForRunPayloads) {
     milvus::test::ScopedLoadTransientBudget budget(1);
     constexpr uint64_t mib = 1024 * 1024;
     auto estimate = [](uint64_t bytes, int64_t rows) {
-        return ScalarIndexLoadResource(DataType::INT32,
-                                       0,
-                                       bytes,
-                                       V3Params(BITMAP_INDEX_TYPE),
-                                       true,
-                                       rows);
+        return ScalarIndexLoadResource(
+            DataType::INT32, 0, bytes, V3Params(BITMAP_INDEX_TYPE), true, rows);
     };
     const auto small = estimate(64 * mib, 1000000);
     const auto large = estimate(256 * mib, 1000000);
@@ -558,8 +551,7 @@ TEST(ScalarIndexV3ResourceTest, BitmapFrozenScratchIsBoundedForRunPayloads) {
     roaring::Roaring posting;
     posting.addRange(0, rows);
     posting.runOptimize();
-    for (uint32_t row = 0; row < rows; row += 2)
-        posting.remove(row);
+    for (uint32_t row = 0; row < rows; row += 2) posting.remove(row);
     const auto frozen_bytes = posting.getFrozenSizeInBytes();
     ASSERT_GT(frozen_bytes, rows / 8);
     constexpr uint64_t index_bytes = 64 * mib;

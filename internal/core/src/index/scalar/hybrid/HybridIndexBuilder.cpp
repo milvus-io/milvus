@@ -104,11 +104,10 @@ ParseElementType(const BuildParams& params) {
                        ? DataType::NONE
                        : ParseDataTypeValue(params.at("array_element_type"),
                                             "array_element_type");
-    auto legacy = !params.contains("element_type") ||
-                          params.at("element_type").is_null()
-                      ? DataType::NONE
-                      : ParseDataTypeValue(params.at("element_type"),
-                                           "element_type");
+    auto legacy =
+        !params.contains("element_type") || params.at("element_type").is_null()
+            ? DataType::NONE
+            : ParseDataTypeValue(params.at("element_type"), "element_type");
     if (current == DataType::NONE) {
         current = legacy;
     } else if (legacy != DataType::NONE && current != legacy &&
@@ -353,9 +352,8 @@ class CardinalityProbe<ArrayView> {
             case DataType::STRING:
             case DataType::VARCHAR:
             case DataType::TEXT:
-                std::get<std::set<std::string>>(values_).insert(
-                    std::string(
-                        array.get_data_unchecked<std::string_view>(offset)));
+                std::get<std::set<std::string>>(values_).insert(std::string(
+                    array.get_data_unchecked<std::string_view>(offset)));
                 return;
             default:
                 ThrowInfo(DataTypeInvalid,
@@ -418,8 +416,9 @@ ParseHybridBuildParams(const BuildParams& params) {
                               "type");
                 }
             } else {
-                ThrowInfo(DataTypeInvalid,
-                          "ordinary HYBRID ARRAY requires an ArrayView builder");
+                ThrowInfo(
+                    DataTypeInvalid,
+                    "ordinary HYBRID ARRAY requires an ArrayView builder");
             }
         }
     } else {

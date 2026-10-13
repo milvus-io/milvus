@@ -315,8 +315,10 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     storage::LoadOptions options;
     options.enable_mmap = index_load_info_.enable_mmap;
     options.estimated_bytes = index_load_info_.index_size;
-    IndexLoadContext load_ctx(ctx,
-        index::GetValueFromConfig<int32_t>(config_, "load_priority").value_or(0));
+    IndexLoadContext load_ctx(
+        ctx,
+        index::GetValueFromConfig<int32_t>(config_, "load_priority")
+            .value_or(0));
     options.op_ctx = &load_ctx.ctx;
     // Loaders stage local files under localStorage even without mmap.
     const auto base_path =
@@ -352,7 +354,8 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     AssertInfo(static_cast<bool>(loader_entry),
                "no index loader is registered for family {}",
                Family());
-    LOG_DEBUG("load index family {} with configs: {}", Family(), config_.dump());
+    LOG_DEBUG(
+        "load index family {} with configs: {}", Family(), config_.dump());
     index::IIndexReaderBasePtr reader;
     if (packed_v3) {
         AssertInfo(index_load_info_.index_files.size() == 1,

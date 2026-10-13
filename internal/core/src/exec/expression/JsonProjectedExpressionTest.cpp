@@ -68,10 +68,13 @@ TEST(JsonProjectedExpressionTest, ContainsUsesIndexAndExactRawFallback) {
     auto raw_info = raw_files.Prepare(json_fid, {json_field});
     segment->LoadFieldData(raw_info);
     auto opened = test::expr_index::BuildIndex(
-        json_fid, DataType::JSON, index::INVERTED_INDEX_TYPE, {json_field},
+        json_fid,
+        DataType::JSON,
+        index::INVERTED_INDEX_TYPE,
+        {json_field},
         {{JSON_PATH, json_path}, {JSON_CAST_TYPE, "ARRAY_DOUBLE"}});
-    test::expr_index::InstallIndex(*segment, json_fid, DataType::JSON,
-                                   std::move(opened));
+    test::expr_index::InstallIndex(
+        *segment, json_fid, DataType::JSON, std::move(opened));
 
     std::vector<std::tuple<proto::plan::GenericValue, std::vector<int64_t>>>
         test_cases;
@@ -170,12 +173,15 @@ TEST(JsonProjectedExpressionTest, StringToDoubleCastReachesExpression) {
     auto raw_info = raw_files.Prepare(json_fid, {json_field});
     segment->LoadFieldData(raw_info);
     auto opened = test::expr_index::BuildIndex(
-        json_fid, DataType::JSON, index::INVERTED_INDEX_TYPE, {json_field},
+        json_fid,
+        DataType::JSON,
+        index::INVERTED_INDEX_TYPE,
+        {json_field},
         {{JSON_PATH, json_path},
          {JSON_CAST_TYPE, "DOUBLE"},
          {JSON_CAST_FUNCTION, "STRING_TO_DOUBLE"}});
-    test::expr_index::InstallIndex(*segment, json_fid, DataType::JSON,
-                                   std::move(opened));
+    test::expr_index::InstallIndex(
+        *segment, json_fid, DataType::JSON, std::move(opened));
 
     std::vector<std::tuple<proto::plan::GenericValue, std::vector<int64_t>>>
         test_cases;

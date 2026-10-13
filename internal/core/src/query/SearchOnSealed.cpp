@@ -127,16 +127,14 @@ SearchOnSealedIndex(const Schema& schema,
     // Nullable row mapping lives inside the reader's knowhere IdMap (#50524),
     // so the plan's logical bitset and the result offsets both stay in
     // logical row space here.
-    const bool is_element_level_search = search_info.struct_element_offsets_ != nullptr;
+    const bool is_element_level_search =
+        search_info.struct_element_offsets_ != nullptr;
     search_result.element_level_ = is_element_level_search;
     BitsetView search_bitset = bitset;
 
     if (search_info.iterator_v2_info_.has_value()) {
-        CachedSearchIterator cached_iter(reader,
-                                         dataset,
-                                         search_info,
-                                         search_bitset,
-                                         op_context);
+        CachedSearchIterator cached_iter(
+            reader, dataset, search_info, search_bitset, op_context);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     search_info.struct_element_offsets_.get());

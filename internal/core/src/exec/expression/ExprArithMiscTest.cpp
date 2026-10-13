@@ -430,8 +430,8 @@ TEST(Expr, TestNotPreservesNulls) {
         BitsetTypeView positive_bits(positive->GetRawData(), N);
         auto negated = std::make_shared<expr::LogicalUnaryExpr>(
             expr::LogicalUnaryExpr::OpType::LogicalNot, expr);
-        auto plan =
-            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, negated);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           negated);
         final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N);
 
@@ -661,9 +661,19 @@ TEST_P(ExprTest, TestGrowingSegmentExpressionBatches) {
     auto plan_node =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
 
-    std::vector<int64_t> test_batch_size = {
-        1, 128, 250, 333, 1000, 8192, 10240, 20480, 30720, 40960,
-        102400, 204800, 307200};
+    std::vector<int64_t> test_batch_size = {1,
+                                            128,
+                                            250,
+                                            333,
+                                            1000,
+                                            8192,
+                                            10240,
+                                            20480,
+                                            30720,
+                                            40960,
+                                            102400,
+                                            204800,
+                                            307200};
 
     for (const auto& batch_size : test_batch_size) {
         test::ExprBatchSizeGuard batch_guard(batch_size);
@@ -892,9 +902,10 @@ TEST(Expr, TestNullPredicatesAcrossScalarTypes) {
             for (const bool nullable : {true, false}) {
                 SCOPED_TRACE(::testing::Message()
                              << "type=" << static_cast<int>(data_type)
-                             << " nullable=" << nullable << " is_null=" << is_null);
-                const auto field_id = nullable ? nullable_id
-                                               : fids_not_nullable.at(data_type);
+                             << " nullable=" << nullable
+                             << " is_null=" << is_null);
+                const auto field_id =
+                    nullable ? nullable_id : fids_not_nullable.at(data_type);
                 auto logical = std::make_shared<expr::NullExpr>(
                     expr::ColumnInfo(field_id, data_type, {}, nullable), op);
                 auto plan = std::make_shared<plan::FilterBitsNode>(

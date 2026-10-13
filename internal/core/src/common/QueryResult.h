@@ -379,7 +379,8 @@ struct SearchResult {
 
     // Other iterator backing owners. Keep every lifetime anchor before the
     // iterator fields for reverse-order destruction.
-    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{nullptr};
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{
+        nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
 
     // first fill data during search, and then update data after reducing search results

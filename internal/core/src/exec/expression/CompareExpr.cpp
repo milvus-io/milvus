@@ -54,17 +54,14 @@ PhyCompareFilterExpr::GatherValues(
                    "cached value reader does not match data type {}",
                    data_type);
         selected->Gather(
-            offsets,
-            count,
-            [&](int64_t i, const T* value, bool valid) {
+            offsets, count, [&](int64_t i, const T* value, bool valid) {
                 AssertInfo(i >= 0 && i < count,
                            "value gather output {} exceeds batch size {}",
                            i,
                            count);
                 const auto pos = static_cast<size_t>(i);
-                AssertInfo(seen[pos] == 0,
-                           "value gather produced output {} twice",
-                           i);
+                AssertInfo(
+                    seen[pos] == 0, "value gather produced output {} twice", i);
                 seen[pos] = 1;
                 if (!valid) {
                     return;
@@ -351,13 +348,9 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                           chunk_id * segment_chunk_reader_.SizePerChunk()
                     : segment_chunk_reader_.SizePerChunk();
             auto left = segment_chunk_reader_.GetChunkDataAccessor(
-                expr_->left_data_type_,
-                expr_->left_field_id_,
-                chunk_id);
+                expr_->left_data_type_, expr_->left_field_id_, chunk_id);
             auto right = segment_chunk_reader_.GetChunkDataAccessor(
-                expr_->right_data_type_,
-                expr_->right_field_id_,
-                chunk_id);
+                expr_->right_data_type_, expr_->right_field_id_, chunk_id);
 
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;
@@ -388,12 +381,11 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
 
 template <typename OpType>
 VectorPtr
-PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op,
-                                                 EvalCtx& context) {
+PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
     auto* input = context.get_offset_input();
-    const auto real_batch_size =
-        input != nullptr ? static_cast<int64_t>(input->size())
-                         : GetNextBatchSize();
+    const auto real_batch_size = input != nullptr
+                                     ? static_cast<int64_t>(input->size())
+                                     : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -431,13 +423,13 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op,
     int64_t cached_right_chunk_id = -1;
     segcore::ChunkDataAccessor left_accessor;
     segcore::ChunkDataAccessor right_accessor;
-    const auto read_raw = [&](FieldId field_id,
-                              DataType data_type,
-                              int64_t raw_chunk_count,
-                              int64_t offset,
-                              int64_t& cached_chunk_id,
-                              segcore::ChunkDataAccessor& accessor)
-        -> segcore::data_access_type {
+    const auto read_raw =
+        [&](FieldId field_id,
+            DataType data_type,
+            int64_t raw_chunk_count,
+            int64_t offset,
+            int64_t& cached_chunk_id,
+            segcore::ChunkDataAccessor& accessor) -> segcore::data_access_type {
         const auto [chunk_id, chunk_offset] = [&]() {
             if (segment_chunk_reader_.segment_->type() ==
                 SegmentType::Growing) {
@@ -496,10 +488,10 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op,
             valid[static_cast<size_t>(i)] = false;
             continue;
         }
-        bits[static_cast<size_t>(i)] = boost::apply_visitor(
-            milvus::query::Relational<decltype(op)>{},
-            left->value(),
-            right->value());
+        bits[static_cast<size_t>(i)] =
+            boost::apply_visitor(milvus::query::Relational<decltype(op)>{},
+                                 left->value(),
+                                 right->value());
     }
     // The sequential cursor (current_data_global_pos_) is advanced once per
     // Eval by the caller, so this path must not move it again.

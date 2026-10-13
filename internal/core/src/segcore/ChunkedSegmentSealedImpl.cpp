@@ -542,20 +542,19 @@ make_persisted_index_entry(LoadIndexInfo& info) {
                "loaded index for field {} has no resolved family",
                info.field_id);
 
-    IndexCapabilityEntry meta{IndexKey{FieldId(info.field_id),
-                                       IndexIdentity::PreBuiltIndex(
-                                           info.index_id)}};
+    IndexCapabilityEntry meta{IndexKey{
+        FieldId(info.field_id), IndexIdentity::PreBuiltIndex(info.index_id)}};
     meta.family = info.index_family;
     meta.value_type = info.index_value_type;
     meta.caps = info.index_caps;
     if (info.field_type == DataType::JSON) {
         const auto path = info.index_params.find(JSON_PATH);
         const auto cast = info.index_params.find(JSON_CAST_TYPE);
-        AssertInfo(path != info.index_params.end() &&
-                       cast != info.index_params.end(),
-                   "loaded JSON index for field {} lacks normalized path or "
-                   "cast metadata",
-                   info.field_id);
+        AssertInfo(
+            path != info.index_params.end() && cast != info.index_params.end(),
+            "loaded JSON index for field {} lacks normalized path or "
+            "cast metadata",
+            info.field_id);
         meta.json_path = path->second;
         // index_params hold the persisted cast. family and value_type above
         // come from the adapted load config, so register the cast that config
@@ -568,8 +567,7 @@ make_persisted_index_entry(LoadIndexInfo& info) {
                                                    : "",
             JsonCastType::FromString(cast->second));
     }
-    return IndexInventory::Entry{std::move(meta),
-                                 std::move(info.cache_index)};
+    return IndexInventory::Entry{std::move(meta), std::move(info.cache_index)};
 }
 
 // Installs an already completed local artifact into the ordinary one-cell
@@ -826,10 +824,9 @@ ChunkedSegmentSealedImpl::init_storage_v2_timestamp_index(
         translator =
             std::make_unique<storagev2translator::TimestampIndexTranslator>(
                 id_, column, num_rows, warmup_policy);
-    auto slot =
-        Manager::GetInstance()
-            .CreateCacheSlot<storagev2translator::TimestampIndexCell>(
-                std::move(translator));
+    auto slot = Manager::GetInstance()
+                    .CreateCacheSlot<storagev2translator::TimestampIndexCell>(
+                        std::move(translator));
     auto cell_holder = SemiInlineGet(slot->PinCells(nullptr, {0}));
     auto* cell = cell_holder->get_cell_of(0);
     AssertInfo(
@@ -899,10 +896,9 @@ ChunkedSegmentSealedImpl::BuildPkIndexSlot(
     std::unique_ptr<cachinglayer::Translator<storagev2translator::PkIndexCell>>
         translator = std::make_unique<storagev2translator::PkIndexTranslator>(
             id_, column, data_type, is_sorted_by_pk_);
-    auto slot =
-        Manager::GetInstance()
-            .CreateCacheSlot<storagev2translator::PkIndexCell>(
-                std::move(translator));
+    auto slot = Manager::GetInstance()
+                    .CreateCacheSlot<storagev2translator::PkIndexCell>(
+                        std::move(translator));
     if (eager) {
         auto cell_holder =
             cachinglayer::SemiInlineGet(slot->PinCells(op_ctx, {0}));
@@ -1022,15 +1018,15 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
     if (info.load_resource_request.has_value()) {
         request = *info.load_resource_request;
     } else {
-        request = milvus::index::VecIndexLoadResource(
-            field_meta.get_data_type(),
-            info.element_type,
-            info.index_engine_version,
-            info.index_size,
-            info.index_params,
-            info.enable_mmap,
-            info.num_rows,
-            info.dim);
+        request =
+            milvus::index::VecIndexLoadResource(field_meta.get_data_type(),
+                                                info.element_type,
+                                                info.index_engine_version,
+                                                info.index_size,
+                                                info.index_params,
+                                                info.enable_mmap,
+                                                info.num_rows,
+                                                info.dim);
     }
     request.has_raw_data = milvus::index::CanUseIndexRawDataForField(
         field_meta.get_data_type(), request.has_raw_data);
@@ -1220,13 +1216,13 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
     if (info.load_resource_request.has_value()) {
         request = *info.load_resource_request;
     } else {
-        request = milvus::index::ScalarIndexLoadResource(
-            field_meta.get_data_type(),
-            info.index_engine_version,
-            info.index_size,
-            info.index_params,
-            info.enable_mmap,
-            target_runtime->row_count);
+        request =
+            milvus::index::ScalarIndexLoadResource(field_meta.get_data_type(),
+                                                   info.index_engine_version,
+                                                   info.index_size,
+                                                   info.index_params,
+                                                   info.enable_mmap,
+                                                   target_runtime->row_count);
     }
 
     request.has_raw_data = milvus::index::CanUseIndexRawDataForField(
@@ -1638,9 +1634,8 @@ ChunkedSegmentSealedImpl::PinVectorIndex(
     milvus::OpContext* op_ctx,
     FieldId field_id) const {
     auto key = GetVectorIndexKey(runtime, field_id);
-    return key.has_value()
-               ? runtime->indexes.PinIndex(op_ctx, *key)
-               : IndexPin{};
+    return key.has_value() ? runtime->indexes.PinIndex(op_ctx, *key)
+                           : IndexPin{};
 }
 
 std::vector<IndexInventory::RootSlot>
@@ -1648,9 +1643,7 @@ ChunkedSegmentSealedImpl::EraseJsonIndexesAtPath(RuntimeResourceState& runtime,
                                                  FieldId field_id,
                                                  std::string_view nested_path) {
     return erase_index_entries(
-        runtime.indexes,
-        field_id,
-        [&](const IndexCapabilityEntry& entry) {
+        runtime.indexes, field_id, [&](const IndexCapabilityEntry& entry) {
             return entry.json_cast_type.data_type() !=
                        JsonCastType::DataType::UNKNOWN &&
                    entry.json_path == nested_path;
@@ -1692,10 +1685,9 @@ ChunkedSegmentSealedImpl::AllocateLocalIndexKey(RuntimeResourceState& runtime,
     AssertInfo(runtime.next_local_index_registration_id !=
                    std::numeric_limits<uint64_t>::max(),
                "local index registration id exhausted for segment");
-    return IndexKey{
-        field_id,
-        IndexIdentity::SegmentLocal(
-            runtime.next_local_index_registration_id++)};
+    return IndexKey{field_id,
+                    IndexIdentity::SegmentLocal(
+                        runtime.next_local_index_registration_id++)};
 }
 
 std::shared_ptr<ChunkedSegmentSealedImpl::PublishedSegmentState>
@@ -1784,11 +1776,9 @@ ChunkedSegmentSealedImpl::NormalizePublishedState(
                     is_vector_entry(entry) || is_text_entry(entry)) {
                     continue;
                 }
-                const bool is_json_entry =
-                    entry.json_cast_type.data_type() !=
-                    JsonCastType::DataType::UNKNOWN;
-                if (is_json_entry &&
-                    entry.family != index::families::kNgram) {
+                const bool is_json_entry = entry.json_cast_type.data_type() !=
+                                           JsonCastType::DataType::UNKNOWN;
+                if (is_json_entry && entry.family != index::families::kNgram) {
                     continue;
                 }
                 set_bit(state.index_ready_bitset, field_id, true);
@@ -3970,7 +3960,8 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByRange(
     if (IsOrdinaryVectorDataType(field_meta.get_data_type())) {
         auto vector_pin = PinVectorIndex(snapshot->runtime, op_ctx, field_id);
         if (vector_pin) {
-            const auto* vec_index = dynamic_cast<const index::IVectorReader*>(vector_pin.get());
+            const auto* vec_index =
+                dynamic_cast<const index::IVectorReader*>(vector_pin.get());
             AssertInfo(vec_index != nullptr, "invalid vector reader");
             if (vec_index->HasValidData()) {
                 vec_index->ApplyValidDataByRange(
@@ -4025,7 +4016,8 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
     if (IsOrdinaryVectorDataType(field_meta.get_data_type())) {
         auto vector_pin = PinVectorIndex(snapshot->runtime, op_ctx, field_id);
         if (vector_pin) {
-            const auto* vec_index = dynamic_cast<const index::IVectorReader*>(vector_pin.get());
+            const auto* vec_index =
+                dynamic_cast<const index::IVectorReader*>(vector_pin.get());
             AssertInfo(vec_index != nullptr, "invalid vector reader");
             if (vec_index->HasValidData()) {
                 vec_index->ApplyValidDataByOffsets(
@@ -4494,8 +4486,8 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
                           "nullable vector index has raw data but no valid "
                           "data, and field data is unavailable");
             }
-            filter_result = FilterVectorValidOffsetsFromIndex(
-                *reader, ids, count);
+            filter_result =
+                FilterVectorValidOffsetsFromIndex(*reader, ids, count);
             ids_ds = GenIdsDataset(filter_result.valid_count,
                                    filter_result.valid_offsets.data());
             valid_count = filter_result.valid_count;
@@ -4567,8 +4559,8 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
                       "nullable vector index has raw data but no valid "
                       "data, and field data is unavailable");
         }
-        filter_result = FilterVectorValidOffsetsFromIndex(
-            *reader, seg_offsets, count);
+        filter_result =
+            FilterVectorValidOffsetsFromIndex(*reader, seg_offsets, count);
         valid_count = filter_result.valid_count;
         valid_data = filter_result.valid_data.get();
         valid_offsets = filter_result.valid_offsets.data();
@@ -4791,12 +4783,9 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
         target = owned_runtime.get();
     }
     auto retired = erase_index_entries(
-        target->indexes,
-        field_id,
-        [](const IndexCapabilityEntry& entry) {
-            return !is_text_entry(entry) &&
-                   entry.json_cast_type.data_type() ==
-                       JsonCastType::DataType::UNKNOWN;
+        target->indexes, field_id, [](const IndexCapabilityEntry& entry) {
+            return !is_text_entry(entry) && entry.json_cast_type.data_type() ==
+                                                JsonCastType::DataType::UNKNOWN;
         });
     target->vec_binlog_config.erase(field_id);
     if (committer != nullptr) {
@@ -6157,10 +6146,9 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                         }
                         entries.push_back({offset, true, encoded_refs.size()});
                         encoded_ref_storage.emplace_back(value);
-                        encoded_refs.push_back(
-                            MakeTextLobEncodedRef(
-                                encoded_ref_storage.back().data(),
-                                encoded_ref_storage.back().size()));
+                        encoded_refs.push_back(MakeTextLobEncodedRef(
+                            encoded_ref_storage.back().data(),
+                            encoded_ref_storage.back().size()));
                         if (encoded_refs.size() >=
                                 kTextLobIndexBuildBatchSize ||
                             entries.size() >= kTextLobIndexBuildBatchSize) {
@@ -6224,9 +6212,9 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                        "index are found");
             auto root_pin =
                 target_runtime->indexes.PinIndex(op_ctx, *value_key);
-            auto* value_reader =
-                dynamic_cast<const index::IScalarValueReader<std::string_view>*>(
-                    root_pin.get());
+            auto* value_reader = dynamic_cast<
+                const index::IScalarValueReader<std::string_view>*>(
+                root_pin.get());
             AssertInfo(value_reader != nullptr,
                        "failed to create text index, field index cannot be "
                        "converted to a string value reader");
@@ -6320,10 +6308,10 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
         .analyzer_params = field_meta.get_analyzer_params(),
         .tantivy_index_version = index::TANTIVY_INDEX_LATEST_VERSION,
         .unique_id = unique_id,
-        .local_dir = cfg.GetScalarIndexEnableMmap() ? cfg.GetMmapPath()
-                                                    : std::string{}};
-    auto artifact = std::move(index::TextIndexBuilder(std::move(params)))
-                        .Build(source);
+        .local_dir =
+            cfg.GetScalarIndexEnableMmap() ? cfg.GetMmapPath() : std::string{}};
+    auto artifact =
+        std::move(index::TextIndexBuilder(std::move(params))).Build(source);
     auto reader = index::IReaderConvertible::FromArtifact(std::move(artifact));
     auto caps = reader->Caps();
     auto value_type = reader->ValueType();
@@ -7025,8 +7013,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_from_state(
 
     if (!IsVectorDataType(field_meta.get_data_type())) {
         // === Scalar field ===
-        if (!use_field_data &&
-            IndexHasRawDataFromState(*snapshot, field_id) &&
+        if (!use_field_data && IndexHasRawDataFromState(*snapshot, field_id) &&
             snapshot->runtime != nullptr) {
             // Select and pin from the same published runtime generation. Text
             // match and JSON-path indexes can coexist with the ordinary scalar
@@ -7046,13 +7033,11 @@ ChunkedSegmentSealedImpl::bulk_subscript_from_state(
                 }
             }
             if (value_key.has_value()) {
-                auto root_pin = snapshot->runtime->indexes.PinIndex(
-                    op_ctx, *value_key);
+                auto root_pin =
+                    snapshot->runtime->indexes.PinIndex(op_ctx, *value_key);
                 if (root_pin) {
-                    return ReverseDataFromIndex(root_pin.get(),
-                                                seg_offsets,
-                                                count,
-                                                field_meta);
+                    return ReverseDataFromIndex(
+                        root_pin.get(), seg_offsets, count, field_meta);
                 }
             }
         }
@@ -7171,13 +7156,12 @@ ChunkedSegmentSealedImpl::HasJsonIndex(FieldId field_id) const {
         return false;
     }
     auto capability = runtime->indexes.Capability(field_id);
-    return std::any_of(
-        capability.entries().begin(),
-        capability.entries().end(),
-        [](const IndexCapabilityEntry& entry) {
-            return entry.json_cast_type.data_type() !=
-                   JsonCastType::DataType::UNKNOWN;
-        });
+    return std::any_of(capability.entries().begin(),
+                       capability.entries().end(),
+                       [](const IndexCapabilityEntry& entry) {
+                           return entry.json_cast_type.data_type() !=
+                                  JsonCastType::DataType::UNKNOWN;
+                       });
 }
 
 bool
@@ -7216,11 +7200,13 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
 
     if (IsVectorDataType(field_meta.get_data_type())) {
         if (get_bit(snapshot->index_ready_bitset, fieldID)) {
-            AssertInfo(RuntimeVectorIndexReady(snapshot->runtime.get(), fieldID),
-                       "vector index is not ready");
+            AssertInfo(
+                RuntimeVectorIndexReady(snapshot->runtime.get(), fieldID),
+                "vector index is not ready");
         } else if (get_bit(snapshot->binlog_index_bitset, fieldID)) {
-            AssertInfo(RuntimeVectorIndexReady(snapshot->runtime.get(), fieldID),
-                       "interim index is not ready");
+            AssertInfo(
+                RuntimeVectorIndexReady(snapshot->runtime.get(), fieldID),
+                "interim index is not ready");
         }
     }
     return HasRawDataFromState(*snapshot, fieldID);
@@ -7723,18 +7709,19 @@ ChunkedSegmentSealedImpl::generate_interim_index(
         if (enable_binlog_index()) {
             const auto index_version =
                 segcore_config_.get_interim_index_version();
-            auto translator = std::make_unique<
-                milvus::segcore::storagev1translator::
-                    InterimSealedIndexTranslator>(vec_data,
-                                                  id_,
-                                                  field_id.get(),
-                                                  interim_index_type,
-                                                  index_metric,
-                                                  index_version,
-                                                  build_config,
-                                                  dim,
-                                                  is_sparse,
-                                                  field_meta.get_data_type());
+            auto translator =
+                std::make_unique<milvus::segcore::storagev1translator::
+                                     InterimSealedIndexTranslator>(
+                    vec_data,
+                    id_,
+                    field_id.get(),
+                    interim_index_type,
+                    index_metric,
+                    index_version,
+                    build_config,
+                    dim,
+                    is_sparse,
+                    field_meta.get_data_type());
             auto family = translator->Family();
             auto value_type = translator->ValueType();
             auto caps = translator->Caps();
@@ -7798,8 +7785,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                 meta.family = std::move(family);
                 meta.value_type = value_type;
                 meta.caps = caps;
-                if (auto replaced = next_runtime->indexes.Register(
-                        IndexInventory::Entry{
+                if (auto replaced =
+                        next_runtime->indexes.Register(IndexInventory::Entry{
                             std::move(meta),
                             std::move(interim_index_cache_slot)});
                     replaced != nullptr) {
@@ -8374,11 +8361,8 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
             }
             committer.Commit([&](RuntimeResourceState& runtime,
                                  PublishedSegmentState& staged_state) {
-                DropIndex(field_id,
-                          schema_snapshot,
-                          &runtime,
-                          nullptr,
-                          &committer);
+                DropIndex(
+                    field_id, schema_snapshot, &runtime, nullptr, &committer);
                 DropIndexFromState(staged_state, field_id);
             });
         }
@@ -8447,8 +8431,7 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
                          PublishedSegmentState&) {
         for (const auto& entry : runtime.indexes.Entries()) {
             if (is_text_entry(entry) &&
-                !field_exists_in_schema(schema_snapshot,
-                                        entry.key.field_id)) {
+                !field_exists_in_schema(schema_snapshot, entry.key.field_id)) {
                 committer.RetireCacheIndexingLocked(
                     runtime.indexes.Drop(entry.key));
             }
@@ -9458,8 +9441,7 @@ ChunkedSegmentSealedImpl::LoadBatchTextIndexes(
                            "text index for field {} already exists, "
                            "refusing to reload",
                            field_id.get());
-                auto replaced =
-                    runtime.indexes.Register(std::move(text_index));
+                auto replaced = runtime.indexes.Register(std::move(text_index));
                 AssertInfo(replaced == nullptr,
                            "text index key unexpectedly replaced another "
                            "generation");

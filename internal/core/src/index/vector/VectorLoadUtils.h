@@ -142,7 +142,8 @@ ParseNormalizedLoadMetadata(const Config& params, LoadBackend backend) {
                   "vector loader requires normalized field_type");
     }
     result.field_type = *field_type;
-    const auto configured_value = ReadNullableDataTypeParam(params, "value_type");
+    const auto configured_value =
+        ReadNullableDataTypeParam(params, "value_type");
     const auto configured_element = vector_params::ReadAliasedDataType(
         params, {"element_type", "array_element_type"}, "element type");
 

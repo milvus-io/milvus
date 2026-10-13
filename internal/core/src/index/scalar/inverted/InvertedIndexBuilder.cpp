@@ -229,10 +229,9 @@ ParseBuildParams(const Config& params,
                   configured_tantivy);
     }
     result.tantivy_index_version =
-        configured_tantivy != 0
-            ? static_cast<uint32_t>(configured_tantivy)
-            : engine_version <= 1 ? TANTIVY_INDEX_MINIMUM_VERSION
-                                  : TANTIVY_INDEX_LATEST_VERSION;
+        configured_tantivy != 0 ? static_cast<uint32_t>(configured_tantivy)
+        : engine_version <= 1   ? TANTIVY_INDEX_MINIMUM_VERSION
+                                : TANTIVY_INDEX_LATEST_VERSION;
     result.single_segment = engine_version == 0;
     if (result.tantivy_index_version != TANTIVY_INDEX_MINIMUM_VERSION &&
         result.tantivy_index_version != TANTIVY_INDEX_LATEST_VERSION) {
@@ -509,9 +508,8 @@ InvertedIndexBuilder<T>::Build(const ScalarBuildInput<T>& input) && {
     auto engine = std::exchange(engine_, nullptr);
     auto directory = std::move(directory_);
     auto null_offsets = std::move(null_offsets_);
-    return FinishBuilder(std::move(directory),
-                         std::move(engine),
-                         std::move(null_offsets));
+    return FinishBuilder(
+        std::move(directory), std::move(engine), std::move(null_offsets));
 }
 
 InvertedArrayIndexBuilder::InvertedArrayIndexBuilder(InvertedBuildParams params)
@@ -584,9 +582,8 @@ InvertedArrayIndexBuilder::Build(const ScalarBuildInput<ArrayView>& input) && {
     auto engine = std::exchange(engine_, nullptr);
     auto directory = std::move(directory_);
     auto null_offsets = std::move(null_offsets_);
-    return FinishBuilder(std::move(directory),
-                         std::move(engine),
-                         std::move(null_offsets));
+    return FinishBuilder(
+        std::move(directory), std::move(engine), std::move(null_offsets));
 }
 
 namespace {

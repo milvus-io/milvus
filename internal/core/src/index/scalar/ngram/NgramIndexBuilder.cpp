@@ -53,8 +53,7 @@ ValidateRowDomain(const Config& params) {
 template <typename T>
 NgramBuildParams
 ParseBuildParams(const Config& params) {
-    constexpr bool json_projection =
-        std::is_same_v<T, JsonProjectedString>;
+    constexpr bool json_projection = std::is_same_v<T, JsonProjectedString>;
     if (!params.is_object()) {
         ThrowInfo(DataTypeInvalid, "NGRAM build parameters must be an object");
     }
@@ -194,9 +193,8 @@ class NgramBuilderCore {
 
         const auto avg_row_size =
             valid_rows_ == 0 ? 0 : total_bytes_ / valid_rows_;
-        return std::make_unique<NgramIndexArtifact>(std::move(directory),
-                                                    std::move(null_offsets),
-                                                    avg_row_size);
+        return std::make_unique<NgramIndexArtifact>(
+            std::move(directory), std::move(null_offsets), avg_row_size);
     }
 
  private:

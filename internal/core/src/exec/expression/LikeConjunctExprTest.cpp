@@ -216,12 +216,12 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
 
             storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
 
-            auto adapted = index::AdaptIndexType({
-                .index_type = index::NGRAM_INDEX_TYPE,
-                .field_type = DataType::VARCHAR,
-                .params = {{index::MIN_GRAM, 2},
-                           {index::MAX_GRAM, 4},
-                           {index::SCALAR_INDEX_ENGINE_VERSION, 3}}});
+            auto adapted = index::AdaptIndexType(
+                {.index_type = index::NGRAM_INDEX_TYPE,
+                 .field_type = DataType::VARCHAR,
+                 .params = {{index::MIN_GRAM, 2},
+                            {index::MAX_GRAM, 4},
+                            {index::SCALAR_INDEX_ENGINE_VERSION, 3}}});
             indexbuilder::BuildRequest request{
                 .family = adapted.family,
                 .params = std::move(adapted.params),
@@ -359,8 +359,8 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
         EXPECT_EQ(values[row], row == 0 || row == 2 || row == 6)
             << "row " << row;
     }
-    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
-        and_expr, segment.get(), nb));
+    EXPECT_TRUE(
+        milvus::test::CanExprExecuteAllAtOnce(and_expr, segment.get(), nb));
 
     // Create RetrievePlan
     auto plan = std::make_unique<query::RetrievePlan>(schema);
