@@ -14,60 +14,63 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-type flushAllTask struct {
+type FlushTask struct {
 	baseTask
 	Condition
-	*milvuspb.FlushAllRequest
+	*milvuspb.FlushRequest
 	ctx      context.Context
 	mixCoord types.MixCoordClient
-	result   *milvuspb.FlushAllResponse
+	result   *milvuspb.FlushResponse
+
+	chMgr channelmgr.ChannelsMgr
 }
 
-func (t *flushAllTask) TraceCtx() context.Context {
+func (t *FlushTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *flushAllTask) ID() UniqueID {
+func (t *FlushTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *flushAllTask) SetID(uid UniqueID) {
+func (t *FlushTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *flushAllTask) Name() string {
-	return FlushAllTaskName
+func (t *FlushTask) Name() string {
+	return FlushTaskName
 }
 
-func (t *flushAllTask) Type() commonpb.MsgType {
+func (t *FlushTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *flushAllTask) BeginTs() Timestamp {
+func (t *FlushTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *flushAllTask) EndTs() Timestamp {
+func (t *FlushTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *flushAllTask) SetTs(ts Timestamp) {
+func (t *FlushTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *flushAllTask) OnEnqueue() error {
+func (t *FlushTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -76,10 +79,10 @@ func (t *flushAllTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *flushAllTask) PreExecute(ctx context.Context) error {
+func (t *FlushTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *flushAllTask) PostExecute(ctx context.Context) error {
+func (t *FlushTask) PostExecute(ctx context.Context) error {
 	return nil
 }

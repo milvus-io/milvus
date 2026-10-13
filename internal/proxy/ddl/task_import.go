@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
@@ -33,15 +34,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type importTask struct {
+type ImportTask struct {
 	baseTask
 	Condition
 	req      *internalpb.ImportRequest
 	ctx      context.Context
-	node     *Proxy
+	node     taskmodel.TaskNode
 	mixCoord types.MixCoordClient
 
 	msgID        UniqueID
@@ -56,43 +58,43 @@ type importTask struct {
 	resp         *internalpb.ImportResponse
 }
 
-func (it *importTask) TraceCtx() context.Context {
+func (it *ImportTask) TraceCtx() context.Context {
 	return it.ctx
 }
 
-func (it *importTask) ID() UniqueID {
+func (it *ImportTask) ID() UniqueID {
 	return it.msgID
 }
 
-func (it *importTask) SetID(uid UniqueID) {
+func (it *ImportTask) SetID(uid UniqueID) {
 	it.msgID = uid
 }
 
-func (it *importTask) Name() string {
+func (it *ImportTask) Name() string {
 	return "ImportTask"
 }
 
-func (it *importTask) Type() commonpb.MsgType {
+func (it *ImportTask) Type() commonpb.MsgType {
 	return commonpb.MsgType_Import
 }
 
-func (it *importTask) BeginTs() Timestamp {
+func (it *ImportTask) BeginTs() Timestamp {
 	return it.taskTS
 }
 
-func (it *importTask) EndTs() Timestamp {
+func (it *ImportTask) EndTs() Timestamp {
 	return it.taskTS
 }
 
-func (it *importTask) SetTs(ts Timestamp) {
+func (it *ImportTask) SetTs(ts Timestamp) {
 	it.taskTS = ts
 }
 
-func (it *importTask) OnEnqueue() error {
+func (it *ImportTask) OnEnqueue() error {
 	return nil
 }
 
-func (it *importTask) PreExecute(ctx context.Context) error {
+func (it *ImportTask) PreExecute(ctx context.Context) error {
 	req := it.req
 	node := it.node
 
@@ -130,11 +132,11 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	rlsEnabled := colInfo.RlsEnabled
 	// Keep this before skip authorization: an old DataCoord cannot re-check a
 	// concurrent rls.force transition before it creates the import job.
-	if rlsEnabled && !Params.ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
+	if rlsEnabled && !paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
 		return merr.WrapErrServiceUnavailable("RLS import enforcement is unavailable until the cluster upgrade completes")
 	}
 	if rlsEnabled && requestedSkipRLS {
-		rlsEnabled, err = resolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, requestedSkipRLS,
+		rlsEnabled, err = node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, requestedSkipRLS,
 			canonicalDBName, canonicalCollectionName, "import")
 		if err != nil {
 			return err
@@ -155,7 +157,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 
-	channels, err := node.chMgr.GetVChannels(collectionID)
+	channels, err := node.ChMgr().GetVChannels(collectionID)
 	if err != nil {
 		return err
 	}
@@ -169,7 +171,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	// Import privilege that authorized this RPC does not cover that, so require
 	// a cluster-level privilege on top.
 	if isBackup || isL0Import {
-		if err := CheckClusterPrivilege(ctx, req,
+		if err := node.CheckClusterPrivilege(ctx, req,
 			milvuspb.MilvusService_Import_FullMethodName,
 			commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()); err != nil {
 			return err
@@ -204,7 +206,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		// the collection needs to be in an unloaded state,
 		// and then all L0 and L1 segments should be loaded at once.
 		// We will remove this restriction after querynode supported to load L0 segments dynamically.
-		loaded, err := isCollectionLoaded(ctx, node.mixCoord, collectionID)
+		loaded, err := isCollectionLoaded(ctx, node.MixCoord(), collectionID)
 		if err != nil {
 			return err
 		}
@@ -226,7 +228,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 			}
 		} else {
 			if req.GetPartitionName() == "" {
-				req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+				req.PartitionName = paramtable.Get().CommonCfg.DefaultPartitionName.GetValue()
 			}
 			partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
 			if err != nil {
@@ -242,9 +244,9 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	if len(req.Files) == 0 {
 		return merr.WrapErrParameterInvalidMsg("import request is empty")
 	}
-	if len(req.Files) > Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
+	if len(req.Files) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
 		return merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
-			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))
+			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))
 	}
 	if !isBackup && !isL0Import {
 		// check file type
@@ -259,17 +261,17 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *importTask) SetChannels() error {
+func (it *ImportTask) SetChannels() error {
 	// import task only send message by broadcast, which didn't affect the time tick rule at proxy.
 	// so we don't need to set channels here.
 	return nil
 }
 
-func (it *importTask) GetChannels() []pChan {
+func (it *ImportTask) GetChannels() []pChan {
 	return nil
 }
 
-func (it *importTask) Execute(ctx context.Context) error {
+func (it *ImportTask) Execute(ctx context.Context) error {
 	// Call DataCoord's Import method directly instead of broadcasting
 	// DataCoord will handle validation, broadcasting, and job creation
 
@@ -321,6 +323,6 @@ func GetImportFiles(internals []*internalpb.ImportFile) []*msgpb.ImportFile {
 	})
 }
 
-func (it *importTask) PostExecute(ctx context.Context) error {
+func (it *ImportTask) PostExecute(ctx context.Context) error {
 	return nil
 }

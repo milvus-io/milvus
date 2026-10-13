@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -71,7 +71,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	cache, err := initMetaCache(ctx, queryCoord)
 	assert.NoError(t, err)
 
-	gist := &getIndexStateTask{
+	gist := &GetIndexStateTask{
 		baseTask: baseTask{MetaCache: cache},
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
 			Base:           &commonpb.MsgBase{},
@@ -109,7 +109,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
-	dit := dropIndexTask{
+	dit := DropIndexTask{
 		baseTask: baseTask{MetaCache: mockCache},
 		ctx:      ctx,
 		DropIndexRequest: &milvuspb.DropIndexRequest{
@@ -222,7 +222,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("int64"),
 	).Return(&collectionInfo{}, nil)
-	cit := createIndexTask{
+	cit := CreateIndexTask{
 		baseTask: baseTask{MetaCache: mockCache},
 		ctx:      ctx,
 		req: &milvuspb.CreateIndexRequest{
@@ -244,7 +244,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 }
 
 func Test_sparse_parseIndexParams(t *testing.T) {
-	cit := &createIndexTask{
+	cit := &CreateIndexTask{
 		Condition: nil,
 		req: &milvuspb.CreateIndexRequest{
 			Base:           nil,
@@ -257,7 +257,7 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 					Value: "SPARSE_INVERTED_INDEX",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "IP",
 				},
 				{
@@ -282,7 +282,7 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 			DataType:     schemapb.DataType_SparseFloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "IP",
 				},
 			},
@@ -300,7 +300,7 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 					Value: "SPARSE_INVERTED_INDEX",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "IP",
 				},
 				{
@@ -314,11 +314,11 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 }
 
 func Test_deduplicate_parseIndexParams(t *testing.T) {
-	createTestIndexTask := func() *createIndexTask {
-		return &createIndexTask{
+	createTestIndexTask := func() *CreateIndexTask {
+		return &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
-					{Key: MetricTypeKey, Value: "MHJACCARD"},
+					{Key: common.MetricTypeKey, Value: "MHJACCARD"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
@@ -326,7 +326,7 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 				Name:     "FieldID",
 				DataType: schemapb.DataType_BinaryVector,
 				TypeParams: []*commonpb.KeyValuePair{
-					{Key: MetricTypeKey, Value: "MHJACCARD"},
+					{Key: common.MetricTypeKey, Value: "MHJACCARD"},
 					{Key: DimKey, Value: "128"},
 				},
 			},
@@ -336,8 +336,8 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 	t.Run("disable autoindex", func(t *testing.T) {
 		cit1 := createTestIndexTask()
 		paramtable.Init()
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
-		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
 
 		err := cit1.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
@@ -349,7 +349,7 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 					Value: "MINHASH_LSH",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "MHJACCARD",
 				},
 			}, cit1.newIndexParams)
@@ -365,8 +365,8 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 	t.Run("enable autoindex", func(t *testing.T) {
 		cit1 := createTestIndexTask()
 		paramtable.Init()
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
-		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
 
 		err := cit1.parseIndexParams(context.TODO())
 		assert.Error(t, err)
@@ -375,10 +375,10 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 	t.Run("disable autoindex", func(t *testing.T) {
 		cit1 := createTestIndexTask()
 		paramtable.Init()
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
-		Params.Save(Params.AutoIndexConfig.EnableDeduplicateIndex.Key, "true")
-		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
-		defer Params.Reset(Params.AutoIndexConfig.EnableDeduplicateIndex.Key)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.EnableDeduplicateIndex.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.EnableDeduplicateIndex.Key)
 
 		err := cit1.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
@@ -389,7 +389,7 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 					Value: "MINHASH_LSH",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "MHJACCARD",
 				},
 			}, cit1.newIndexParams)
@@ -405,15 +405,15 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 
 func Test_parseIndexParamsAllowsParsableParamsWithinSize(t *testing.T) {
 	paramtable.Init()
-	Params.Save(Params.ProxyCfg.MaxIndexParamsSize.Key, strconv.Itoa(100*1024))
-	defer Params.Reset(Params.ProxyCfg.MaxIndexParamsSize.Key)
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxIndexParamsSize.Key, strconv.Itoa(100*1024))
+	defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxIndexParamsSize.Key)
 
 	params, err := json.Marshal(map[string]any{
 		"custom_param": strings.Repeat("A", 1024),
 	})
 	assert.NoError(t, err)
 
-	cit := &createIndexTask{
+	cit := &CreateIndexTask{
 		req: &milvuspb.CreateIndexRequest{
 			ExtraParams: []*commonpb.KeyValuePair{
 				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
@@ -434,15 +434,15 @@ func Test_parseIndexParamsAllowsParsableParamsWithinSize(t *testing.T) {
 
 func Test_parseIndexParamsRejectsConfiguredMaxIndexParamsSize(t *testing.T) {
 	paramtable.Init()
-	Params.Save(Params.ProxyCfg.MaxIndexParamsSize.Key, "64")
-	defer Params.Reset(Params.ProxyCfg.MaxIndexParamsSize.Key)
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxIndexParamsSize.Key, "64")
+	defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxIndexParamsSize.Key)
 
 	params, err := json.Marshal(map[string]any{
 		"custom_param": strings.Repeat("A", 128),
 	})
 	assert.NoError(t, err)
 
-	cit := &createIndexTask{
+	cit := &CreateIndexTask{
 		req: &milvuspb.CreateIndexRequest{
 			ExtraParams: []*commonpb.KeyValuePair{
 				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
@@ -468,7 +468,7 @@ func Test_parseIndexParamsRejectsOversizedParams(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	cit := &createIndexTask{
+	cit := &CreateIndexTask{
 		req: &milvuspb.CreateIndexRequest{
 			ExtraParams: []*commonpb.KeyValuePair{
 				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
@@ -488,7 +488,7 @@ func Test_parseIndexParamsRejectsOversizedParams(t *testing.T) {
 }
 
 func Test_parseIndexParamsRejectsOversizedRawParams(t *testing.T) {
-	cit := &createIndexTask{
+	cit := &CreateIndexTask{
 		req: &milvuspb.CreateIndexRequest{
 			ExtraParams: []*commonpb.KeyValuePair{
 				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
@@ -509,14 +509,14 @@ func Test_parseIndexParamsRejectsOversizedRawParams(t *testing.T) {
 
 func Test_parseIndexParamsRejectsFinalIndexParamsOverLimit(t *testing.T) {
 	paramtable.Init()
-	Params.Save(Params.ProxyCfg.MaxIndexParamsSize.Key, "128")
-	Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
-	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE", "large_config": "`+strings.Repeat("A", 128)+`"}`)
-	defer Params.Reset(Params.ProxyCfg.MaxIndexParamsSize.Key)
-	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
-	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxIndexParamsSize.Key, "128")
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "false")
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IndexParams.Key, `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE", "large_config": "`+strings.Repeat("A", 128)+`"}`)
+	defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxIndexParamsSize.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.IndexParams.Key)
 
-	cit := &createIndexTask{
+	cit := &CreateIndexTask{
 		req: &milvuspb.CreateIndexRequest{
 			ExtraParams: []*commonpb.KeyValuePair{
 				{Key: common.MetricTypeKey, Value: "L2"},
@@ -538,7 +538,7 @@ func Test_parseIndexParamsRejectsFinalIndexParamsOverLimit(t *testing.T) {
 }
 
 func Test_parseIndexParams(t *testing.T) {
-	cit := &createIndexTask{
+	cit := &CreateIndexTask{
 		Condition: nil,
 		req: &milvuspb.CreateIndexRequest{
 			Base:           nil,
@@ -551,7 +551,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "HNSW",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "IP",
 				},
 				{
@@ -584,7 +584,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "128",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "L2",
 				},
 			},
@@ -602,7 +602,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "HNSW",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "IP",
 				},
 				{
@@ -623,7 +623,7 @@ func Test_parseIndexParams(t *testing.T) {
 			}, cit.newTypeParams)
 	})
 
-	cit2 := &createIndexTask{
+	cit2 := &CreateIndexTask{
 		Condition: nil,
 		req: &milvuspb.CreateIndexRequest{
 			Base:           nil,
@@ -636,7 +636,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "IVF_FLAT",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "L2",
 				},
 				{
@@ -669,14 +669,14 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "128",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "L2",
 				},
 			},
 		},
 	}
 	t.Run("parse index params 2", func(t *testing.T) {
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
 		indexParams := map[string]any{
 			common.IndexTypeKey: "HNSW",
 			"M":                 10,
@@ -684,7 +684,7 @@ func Test_parseIndexParams(t *testing.T) {
 		}
 		indexParamsStr, err := json.Marshal(indexParams)
 		assert.NoError(t, err)
-		Params.Save(Params.AutoIndexConfig.IndexParams.Key, string(indexParamsStr))
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IndexParams.Key, string(indexParamsStr))
 		err = cit2.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 
@@ -695,7 +695,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "HNSW",
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: "L2",
 				},
 				{
@@ -720,7 +720,7 @@ func Test_parseIndexParams(t *testing.T) {
 			}, cit2.newTypeParams)
 	})
 	t.Run("create index on json field", func(t *testing.T) {
-		cit3 := &createIndexTask{
+		cit3 := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				Base:           nil,
@@ -733,7 +733,7 @@ func Test_parseIndexParams(t *testing.T) {
 						Value: "HNSW",
 					},
 					{
-						Key:   MetricTypeKey,
+						Key:   common.MetricTypeKey,
 						Value: "IP",
 					},
 					{
@@ -767,7 +767,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create index on VarChar field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
@@ -805,7 +805,7 @@ func Test_parseIndexParams(t *testing.T) {
 			"default scalar index": {},
 		} {
 			t.Run(name, func(t *testing.T) {
-				cit := &createIndexTask{
+				cit := &CreateIndexTask{
 					req: &milvuspb.CreateIndexRequest{
 						ExtraParams: extraParams,
 						IndexName:   "",
@@ -825,7 +825,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create index on VarChar field without index type", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{},
 				IndexName:   "",
@@ -849,12 +849,12 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create index on Arithmetic field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.IndexTypeKey,
-						Value: DefaultArithmeticIndexType,
+						Value: indexparamcheck.IndexINVERTED,
 					},
 				},
 				IndexName: "",
@@ -871,7 +871,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create index on Arithmetic field without index type", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{},
 				IndexName:   "",
@@ -896,7 +896,7 @@ func Test_parseIndexParams(t *testing.T) {
 
 	// Compatible with the old version <= 2.3.0
 	t.Run("create marisa-trie index on VarChar field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
@@ -919,7 +919,7 @@ func Test_parseIndexParams(t *testing.T) {
 
 	// Compatible with the old version <= 2.3.0
 	t.Run("create Asceneding index on Arithmetic field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
@@ -941,7 +941,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create unsupported index on Arithmetic field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
@@ -963,7 +963,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create index on array field", func(t *testing.T) {
-		cit3 := &createIndexTask{
+		cit3 := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				Base:           nil,
@@ -999,7 +999,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("pass vector index type on scalar field", func(t *testing.T) {
-		cit4 := &createIndexTask{
+		cit4 := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				Base:           nil,
@@ -1012,7 +1012,7 @@ func Test_parseIndexParams(t *testing.T) {
 						Value: "HNSW",
 					},
 					{
-						Key:   MetricTypeKey,
+						Key:   common.MetricTypeKey,
 						Value: "IP",
 					},
 					{
@@ -1044,7 +1044,7 @@ func Test_parseIndexParams(t *testing.T) {
 		err := cit4.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 
-		cit5 := &createIndexTask{
+		cit5 := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				Base:           nil,
@@ -1057,7 +1057,7 @@ func Test_parseIndexParams(t *testing.T) {
 						Value: "HNSW",
 					},
 					{
-						Key:   MetricTypeKey,
+						Key:   common.MetricTypeKey,
 						Value: "IP",
 					},
 					{
@@ -1091,10 +1091,10 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("enable scalar auto index", func(t *testing.T) {
-		err := Params.Save(Params.AutoIndexConfig.ScalarAutoIndexEnable.Key, "true")
+		err := paramtable.Get().Save(paramtable.Get().AutoIndexConfig.ScalarAutoIndexEnable.Key, "true")
 		assert.NoError(t, err)
 
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1126,7 +1126,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create auto index on numeric field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1158,7 +1158,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create auto index on varchar field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1190,7 +1190,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create auto index on json field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1216,10 +1216,10 @@ func Test_parseIndexParams(t *testing.T) {
 
 	t.Run("create auto index and mmap enable", func(t *testing.T) {
 		paramtable.Init()
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
-		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
 
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1248,12 +1248,12 @@ func Test_parseIndexParams(t *testing.T) {
 
 	t.Run("verify merge params with yaml", func(t *testing.T) {
 		paramtable.Init()
-		Params.Save("knowhere.HNSW.build.M", "3000")
-		Params.Save("knowhere.HNSW.build.efConstruction", "120")
-		defer Params.Reset("knowhere.HNSW.build.M")
-		defer Params.Reset("knowhere.HNSW.build.efConstruction")
+		paramtable.Get().Save("knowhere.HNSW.build.M", "3000")
+		paramtable.Get().Save("knowhere.HNSW.build.efConstruction", "120")
+		defer paramtable.Get().Reset("knowhere.HNSW.build.M")
+		defer paramtable.Get().Reset("knowhere.HNSW.build.efConstruction")
 
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1284,7 +1284,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("check_duplicated_extraparam", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1318,9 +1318,9 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create index with json field", func(t *testing.T) {
-		Params.Save(Params.AutoIndexConfig.ScalarAutoIndexEnable.Key, "false")
-		defer Params.Reset(Params.AutoIndexConfig.ScalarAutoIndexEnable.Key)
-		cit = &createIndexTask{
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.ScalarAutoIndexEnable.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.ScalarAutoIndexEnable.Key)
+		cit = &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1349,7 +1349,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, jsonPath, "FieldJSON")
 
-		cit = &createIndexTask{
+		cit = &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1379,7 +1379,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, jsonPath, "DynamicField")
 
-		cit = &createIndexTask{
+		cit = &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1412,7 +1412,7 @@ func Test_parseIndexParams(t *testing.T) {
 
 func Test_checkEmbeddingListIndex(t *testing.T) {
 	t.Run("check embedding list index", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1443,7 +1443,7 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 	})
 
 	t.Run("metric type wrong", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1480,7 +1480,7 @@ func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
 	// This means indexes like IVF_PQ that don't have the EMB_LIST flag
 	// should still work with ArrayOfVector + COSINE.
 	t.Run("ArrayOfVector with COSINE should accept IVF_FLAT", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
@@ -1503,7 +1503,7 @@ func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
 	})
 
 	t.Run("ArrayOfVector with MaxSimCosine should accept HNSW", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "HNSW"},
@@ -1525,7 +1525,7 @@ func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
 	})
 
 	t.Run("ArrayOfVector with float element should reject MaxSimHamming", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "HNSW_SQ"},
@@ -1548,7 +1548,7 @@ func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
 	})
 
 	t.Run("ArrayOfVector with binary element should accept MaxSimHamming", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "HNSW"},
@@ -1572,7 +1572,7 @@ func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
 
 func Test_ngram_parseIndexParams(t *testing.T) {
 	t.Run("valid ngram index params", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
@@ -1594,7 +1594,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("ngram on non varchar field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
@@ -1610,7 +1610,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("ngram missing params", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
@@ -1626,7 +1626,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("ngram non-integer params", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
@@ -1642,7 +1642,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("ngram invalid range", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
@@ -1660,7 +1660,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 
 func Test_fmindex_parseIndexParams(t *testing.T) {
 	t.Run("varchar autoindex follows configured scalar policy", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: AutoIndexName},
@@ -1674,11 +1674,11 @@ func Test_fmindex_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		resolvedType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, cit.newIndexParams)
 		assert.NoError(t, err)
-		assert.Equal(t, Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue(), resolvedType)
+		assert.Equal(t, paramtable.Get().AutoIndexConfig.ScalarVarcharIndexType.GetValue(), resolvedType)
 	})
 
 	t.Run("valid fmindex index params without sample rate", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "FMINDEX"},
@@ -1697,7 +1697,7 @@ func Test_fmindex_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("valid fmindex index params with sample rate", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "FMINDEX"},
@@ -1713,7 +1713,7 @@ func Test_fmindex_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("fmindex on non varchar field", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "FMINDEX"},
@@ -1730,7 +1730,7 @@ func Test_fmindex_parseIndexParams(t *testing.T) {
 
 	t.Run("fmindex on json field rejected", func(t *testing.T) {
 		// FMINDEX is VARCHAR-only in this release; JSON is a follow-up.
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "FMINDEX"},
@@ -1746,7 +1746,7 @@ func Test_fmindex_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("fmindex non-integer sample rate", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "FMINDEX"},
@@ -1762,7 +1762,7 @@ func Test_fmindex_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("fmindex sample rate out of range", func(t *testing.T) {
-		cit := &createIndexTask{
+		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "FMINDEX"},
@@ -1789,15 +1789,15 @@ func Test_wrapUserIndexParams(t *testing.T) {
 
 func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 	paramtable.Init()
-	Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
-	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-	Params.Save(Params.AutoIndexConfig.SparseIndexParams.Key, `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
-	Params.Save(Params.AutoIndexConfig.BinaryIndexParams.Key, `{"nlist": 1024, "index_type": "BIN_IVF_FLAT"}`)
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.SparseIndexParams.Key, `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.BinaryIndexParams.Key, `{"nlist": 1024, "index_type": "BIN_IVF_FLAT"}`)
 
-	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
-	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-	defer Params.Reset(Params.AutoIndexConfig.SparseIndexParams.Key)
-	defer Params.Reset(Params.AutoIndexConfig.BinaryIndexParams.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.IndexParams.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.SparseIndexParams.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.BinaryIndexParams.Key)
 
 	floatFieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_FloatVector,
@@ -1819,7 +1819,7 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 	}
 
 	t.Run("case 1, float vector parameters", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: floatFieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1839,7 +1839,7 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 	})
 
 	t.Run("case 2, sparse vector parameters", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: sparseFloatFieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1858,7 +1858,7 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 	})
 
 	t.Run("case 3, binary vector parameters", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: binaryFieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1881,14 +1881,14 @@ func Test_parseIndexParams_LargeTopKQueryMode(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("cloud autoindex with large_topk query mode selects IVF_FLAT", func(t *testing.T) {
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
-		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
-		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
-		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.IndexParams.Key)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.LargeTopKIndexParams.Key)
 
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
 				DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
@@ -1916,14 +1916,14 @@ func Test_parseIndexParams_LargeTopKQueryMode(t *testing.T) {
 	})
 
 	t.Run("cloud autoindex without large_topk uses default HNSW", func(t *testing.T) {
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
-		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
-		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
-		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.IndexParams.Key)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.LargeTopKIndexParams.Key)
 
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
 				DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
@@ -1950,14 +1950,14 @@ func Test_parseIndexParams_LargeTopKQueryMode(t *testing.T) {
 	})
 
 	t.Run("non-cloud autoindex with large_topk query mode uses default HNSW", func(t *testing.T) {
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
-		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
-		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
-		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
-		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "false")
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.IndexParams.Key)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.LargeTopKIndexParams.Key)
 
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
 				DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
@@ -1985,14 +1985,14 @@ func Test_parseIndexParams_LargeTopKQueryMode(t *testing.T) {
 	})
 
 	t.Run("no query_mode property uses default", func(t *testing.T) {
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
-		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
-		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
-		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.IndexParams.Key)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.LargeTopKIndexParams.Key)
 
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
 				DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
@@ -2021,18 +2021,18 @@ func Test_parseIndexParams_LargeTopKQueryMode(t *testing.T) {
 func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	paramtable.Init()
 
-	Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
-	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
-	Params.Save(Params.AutoIndexConfig.BinaryIndexParams.Key, `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD"}`)
-	Params.Save(Params.AutoIndexConfig.SparseIndexParams.Key, `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`)
-	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
-	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-	defer Params.Reset(Params.AutoIndexConfig.BinaryIndexParams.Key)
-	defer Params.Reset(Params.AutoIndexConfig.SparseIndexParams.Key)
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "false")
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.BinaryIndexParams.Key, `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD"}`)
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.SparseIndexParams.Key, `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.IndexParams.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.BinaryIndexParams.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.SparseIndexParams.Key)
 
-	autoIndexConfig := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
-	autoIndexConfigBinary := Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
-	autoIndexConfigSparse := Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
+	autoIndexConfig := paramtable.Get().AutoIndexConfig.IndexParams.GetAsJSONMap()
+	autoIndexConfigBinary := paramtable.Get().AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
+	autoIndexConfigSparse := paramtable.Get().AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
 	fieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{
@@ -2052,7 +2052,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	}
 
 	t.Run("case 1, empty parameters binary", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: fieldSchemaBinary,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: make([]*commonpb.KeyValuePair, 0),
@@ -2068,7 +2068,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	})
 
 	t.Run("case 1, empty parameters sparse", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: fieldSchemaSparse,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: make([]*commonpb.KeyValuePair, 0),
@@ -2084,7 +2084,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	})
 
 	t.Run("case 1, empty parameters float vector", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: fieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: make([]*commonpb.KeyValuePair, 0),
@@ -2100,7 +2100,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	})
 
 	t.Run("case 2, only metric type passed", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: fieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -2118,7 +2118,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	})
 
 	t.Run("case 3, AutoIndex & metric_type passed", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: fieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -2136,7 +2136,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	})
 
 	t.Run("case 4, duplicate and useless parameters passed", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: fieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -2149,7 +2149,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	})
 
 	t.Run("case 5, duplicate and useless parameters passed", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: fieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -2163,7 +2163,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	})
 
 	t.Run("case 6, autoindex & duplicate", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: fieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -2217,7 +2217,7 @@ func Test_parseIndexParams_AutoIndexBM25FunctionOutput(t *testing.T) {
 	bm25Function := &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25}
 
 	t.Run("empty params resolve with BM25 metric forced", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema:    sparseOutputField,
 			functionSchema: bm25Function,
 			req: &milvuspb.CreateIndexRequest{
@@ -2237,7 +2237,7 @@ func Test_parseIndexParams_AutoIndexBM25FunctionOutput(t *testing.T) {
 	})
 
 	t.Run("AUTOINDEX without metric resolves with BM25 metric forced", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema:    sparseOutputField,
 			functionSchema: bm25Function,
 			req: &milvuspb.CreateIndexRequest{
@@ -2255,7 +2255,7 @@ func Test_parseIndexParams_AutoIndexBM25FunctionOutput(t *testing.T) {
 	})
 
 	t.Run("user-specified BM25 metric unchanged", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema:    sparseOutputField,
 			functionSchema: bm25Function,
 			req: &milvuspb.CreateIndexRequest{
@@ -2275,10 +2275,10 @@ func Test_parseIndexParams_AutoIndexBM25FunctionOutput(t *testing.T) {
 	})
 
 	t.Run("cloud mode forces metric in build params but keeps raw user params", func(t *testing.T) {
-		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
-		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
 
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema:    sparseOutputField,
 			functionSchema: bm25Function,
 			req: &milvuspb.CreateIndexRequest{
@@ -2396,18 +2396,18 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 
 func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
 	paramtable.Init()
-	Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
-	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-	Params.Save(Params.AutoIndexConfig.SparseIndexParams.Key, `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
-	Params.Save(Params.AutoIndexConfig.IntVectorIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT"}`)
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.SparseIndexParams.Key, `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.IntVectorIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT"}`)
 
-	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
-	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-	defer Params.Reset(Params.AutoIndexConfig.SparseIndexParams.Key)
-	defer Params.Reset(Params.AutoIndexConfig.IntVectorIndexParams.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.IndexParams.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.SparseIndexParams.Key)
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.IntVectorIndexParams.Key)
 
 	t.Run("ArrayOfVector with FloatVector element uses dense float autoindex", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
 				DataType:    schemapb.DataType_ArrayOfVector,
 				ElementType: schemapb.DataType_FloatVector,
@@ -2433,7 +2433,7 @@ func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
 	})
 
 	t.Run("ArrayOfVector with SparseFloatVector element is not supported", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
 				DataType:    schemapb.DataType_ArrayOfVector,
 				ElementType: schemapb.DataType_SparseFloatVector,
@@ -2452,7 +2452,7 @@ func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
 	})
 
 	t.Run("ArrayOfVector with Int8Vector element is not supported", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
 				DataType:    schemapb.DataType_ArrayOfVector,
 				ElementType: schemapb.DataType_Int8Vector,
@@ -2465,13 +2465,17 @@ func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
 					{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
 				},
 			},
+			// The cgo-backed check rejects Int8Vector elements for HNSW.
+			checkVecIndexWithDataType: func(_ string, _ schemapb.DataType, elementType schemapb.DataType) bool {
+				return elementType != schemapb.DataType_Int8Vector
+			},
 		}
 		err := task.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 
 	t.Run("ArrayOfVector without user metric maps config metric to EmbList", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
 				DataType:    schemapb.DataType_ArrayOfVector,
 				ElementType: schemapb.DataType_FloatVector,
@@ -2496,7 +2500,7 @@ func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
 	})
 
 	t.Run("ArrayOfVector sparse without user metric is not supported", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
 				DataType:    schemapb.DataType_ArrayOfVector,
 				ElementType: schemapb.DataType_SparseFloatVector,
