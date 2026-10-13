@@ -9,6 +9,9 @@ Unit-test coverage does not measure those server processes. This design provides
 an opt-in Linux/GCC CPU build and a local snapshot protocol. It does not change
 normal server builds or add an HTTP/RPC endpoint. Rust, third-party coverage,
 crash recovery, GPU/Clang builds, and CI report hosting are outside this change.
+Compiler optimization remains controlled by the normal build mode; optimization
+and inlining can merge or remove C++ source lines, so coverage reflects the
+instrumented binary rather than a guarantee about every original source line.
 
 ## Build contract
 

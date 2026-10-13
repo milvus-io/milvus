@@ -62,6 +62,16 @@ func start(ctx context.Context, root string, dump func()) error {
 			return err
 		}
 	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	ready, err := os.OpenFile(filepath.Join(root, "ready"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return merr.Wrap(err, "coverage output is already owned; use a fresh directory")
+	}
+	defer ready.Close()
+	// Claim ownership before touching another process's counters or metadata.
+	// An initialization failure leaves an empty marker, never a ready process.
 	for _, dir := range []string{"requests", "runs", "cpp", "go"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			return err
@@ -80,10 +90,6 @@ func start(ctx context.Context, root string, dump func()) error {
 	// Verify actual Go instrumentation before publishing the ready marker.
 	if err := c.writeMeta(filepath.Join(root, "go")); err != nil {
 		return merr.Wrap(err, "server was not built with Go coverage")
-	}
-	ready, err := os.OpenFile(filepath.Join(root, "ready"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return merr.Wrap(err, "coverage output is already owned; use a fresh directory")
 	}
 	_, writeErr := ready.WriteString(strconv.Itoa(os.Getpid()))
 	if err := errors.Join(writeErr, ready.Close()); err != nil {

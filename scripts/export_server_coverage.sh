@@ -40,13 +40,13 @@ if [[ ! -s "$metadata/build-info.txt" || ! -d "$metadata/gcno" ]]; then
     echo 'Build metadata is missing; package it from the same build as the server' >&2
     exit 1
 fi
-"$tools/coverage-covdata" textfmt -i="$run/go" -o="$run/go.out"
+env -u LD_PRELOAD "$tools/coverage-covdata" textfmt -i="$run/go" -o="$run/go.out"
 cp -a "$metadata/gcno/." "$run/cpp/"
 cp "$metadata/build-info.txt" "$run/build-info.txt"
 while IFS= read -r -d '' notes; do
     (
         cd "$(dirname "$notes")"
-        "$tools/coverage-gcov" --json-format "$(basename "$notes")" >&2
+        env -u LD_PRELOAD "$tools/coverage-gcov" --json-format "$(basename "$notes")" >&2
     )
 done < <(find "$run/cpp" -type f -name '*.gcno' -print0)
 tar -C "$run" -czf - .
