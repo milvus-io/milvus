@@ -298,6 +298,10 @@ func (t *clusteringCompactionTask) init() error {
 		}
 	}
 
+	if pkField == nil {
+		return merr.WrapErrServiceInternalMsg("no primary key field found")
+	}
+
 	for _, function := range t.plan.Schema.Functions {
 		if function.GetType() == schemapb.FunctionType_BM25 {
 			t.bm25FieldIds = append(t.bm25FieldIds, function.GetOutputFieldIds()[0])
@@ -729,11 +733,15 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
-		pkColumn := r.Column(t.primaryKeyField.GetFieldID())
+		pkColumn, _ := storage.TryRecordColumn(r, t.primaryKeyField.GetFieldID())
 		ts, exists := storage.TryRecordColumn(r, common.TimeStampField)
 		tsColumn, ok := ts.(*array.Int64)
 		if !exists || !ok {
 			return merr.WrapErrServiceInternalMsg("timestamp field is not an int64 column in clustering compaction record")
+		}
+		var clusteringKeyColumn arrow.Array
+		if !t.isVectorClusteringKey {
+			clusteringKeyColumn, _ = storage.TryRecordColumn(r, t.clusteringKeyField.GetFieldID())
 		}
 		for row := 0; row < r.Len(); row++ {
 			select {
@@ -753,7 +761,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			if t.isVectorClusteringKey {
 				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
 			} else {
-				key, err := clusteringScalarValue(r.Column(t.clusteringKeyField.FieldID), t.clusteringKeyField, row)
+				key, err := clusteringScalarValue(clusteringKeyColumn, t.clusteringKeyField, row)
 				if err != nil {
 					return err
 				}
@@ -1163,6 +1171,9 @@ func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 }
 
 func clusteringScalarValue(column arrow.Array, field *schemapb.FieldSchema, row int) (any, error) {
+	if column == nil {
+		return nil, merr.WrapErrServiceInternalMsg("missing clustering scalar column for field %d", field.GetFieldID())
+	}
 	if column.IsNull(row) {
 		if field.GetDefaultValue() != nil {
 			return storage.GetDefaultValue(field), nil
