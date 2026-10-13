@@ -10,7 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 ARG MILVUS_BASE_IMAGE_REPO="milvusdb/milvus-base"
 ARG MILVUS_BASE_IMAGE_TAG="gpu-20230822-34f9067"
-FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 FROM ${MILVUS_BASE_IMAGE_REPO}:${MILVUS_BASE_IMAGE_TAG}
 
 ARG MILVUS_RUNTIME_USER=milvus:milvus

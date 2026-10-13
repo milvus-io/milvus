@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 
 FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
 
