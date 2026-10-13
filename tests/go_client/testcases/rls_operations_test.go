@@ -739,6 +739,11 @@ func TestRLSPolicyTypeReplacement(t *testing.T) {
 				require.NoError(t, mc.UpdateRowPolicy(ctx, client.NewUpdateRowPolicyOption(name, "owner", kind, actions...).WithUsingExpr(expr).WithCheckExpr(expr)))
 				policies, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
 				require.NoError(t, err)
+				count := 1
+				if withBase {
+					count++
+				}
+				require.Len(t, policies, count)
 				for _, policy := range policies {
 					if policy.GetPolicyName() == "owner" {
 						require.Equal(t, kind, policy.GetPolicyType())
@@ -777,6 +782,25 @@ func TestRLSPolicyTypeReplacement(t *testing.T) {
 						require.NoError(t, err)
 					}
 				}
+				// CHECK accepts alice, but USING must still reject an existing bob row after restriction.
+				_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsColumns([]int64{2}, []string{"alice"})...).WithRLSPrincipal("alice"))
+				if kind == milvuspb.RowPolicyType_RowPolicyTypePermissive && withBase {
+					require.NoError(t, err)
+				} else {
+					require.ErrorContains(t, err, "RLS")
+				}
+				stored, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id == 2").WithOutputFields("owner").WithSkipRLS(true).WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				require.Equal(t, 1, stored.ResultCount)
+				owner, err := stored.GetColumn("owner").GetAsString(0)
+				require.NoError(t, err)
+				if kind == milvuspb.RowPolicyType_RowPolicyTypePermissive && withBase {
+					require.Equal(t, "alice", owner)
+				} else {
+					require.Equal(t, "bob", owner)
+				}
+				_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsColumns([]int64{2}, []string{"bob"})...).WithSkipRLS(true))
+				require.NoError(t, err)
 			}
 		})
 	}
