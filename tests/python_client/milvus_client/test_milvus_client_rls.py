@@ -273,6 +273,8 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
             client.update_row_policy(name, "owner", kind, actions, expr, expr, timeout=30)
             policies = client.list_row_policies(name, timeout=30)
             assert len(policies) == (2 if with_base else 1)
+            policy = next(policy for policy in policies if policy["policy_name"] == "owner")
+            assert policy["policy_type"] == f"RowPolicyType{kind.capitalize()}"
             if kind == "permissive":
                 visible = rows if with_base else rows[::2]
             else:
@@ -300,6 +302,22 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                         )
                         self._check_rows(client, name, rows, skip_rls=True)
                     self.delete(client, name, ids=[10], skip_rls=True)
+            # CHECK accepts alice; USING must still reject the existing bob row after restriction.
+            candidate = {**rows[1], "owner": "alice"}
+            if kind == "permissive" and with_base:
+                self.upsert(client, name, [candidate], rls_principal="alice")
+                self._check_rows(client, name, [rows[0], candidate, *rows[2:]], skip_rls=True)
+            else:
+                self.upsert(
+                    client,
+                    name,
+                    [candidate],
+                    rls_principal="alice",
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_msg: "RLS"},
+                )
+                self._check_rows(client, name, rows, skip_rls=True)
+            self.upsert(client, name, [rows[1]], skip_rls=True)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rls_concurrent_policy_creation(self, rls_client):
