@@ -1,5 +1,7 @@
 # Index contracts
 
+接口行为测试的 case 与边界矩阵见 [TESTING.md](TESTING.md)。
+
 本目录定义索引的查询、构建、加载和 growing 发布接口。持久化边界见
 [`storage/artifact/`](../../storage/artifact/)，growing 实现约束见
 [`index/growing/README.md`](../growing/README.md)。`query/`、`build/`、`growing/`

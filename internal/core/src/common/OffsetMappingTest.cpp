@@ -17,14 +17,14 @@
 #include <cstdint>
 #include <filesystem>
 #include <initializer_list>
-#include <memory>
 #include <string>
 #include <vector>
 
 #include "common/GrowingOffsetMapping.h"
 #include "common/OffsetMapping.h"
 #include "common/SealedOffsetMapping.h"
-#include "index/VectorIndexValidDataUtils.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
+#include "knowhere/id_map.h"
 
 namespace milvus {
 
@@ -133,99 +133,35 @@ ExpectFilterValidLogicalOffsets(const SealedOffsetMapping& mapping) {
     EXPECT_EQ(filtered_offsets, (std::vector<int64_t>{0, 1}));
 }
 
-class TestVectorIndex : public index::VectorIndex {
- public:
-    TestVectorIndex() : index::VectorIndex("TEST", knowhere::metric::L2) {
+void
+ExpectIdSnapshotValues(const knowhere::IdArray& ids,
+                       const std::vector<int32_t>& expected) {
+    ASSERT_EQ(ids.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(ids[i], expected[i]) << "physical offset: " << i;
     }
+}
 
-    BinarySet
-    Serialize(const Config& config) override {
-        (void)config;
-        return {};
+void
+ExpectIdMapValues(const knowhere::IdMap& id_map,
+                   const std::vector<int64_t>& expected_l2p,
+                   const std::vector<int32_t>& expected_p2l) {
+    EXPECT_EQ(id_map.type(), knowhere::IdMap::Type::SEALED);
+    EXPECT_EQ(id_map.OutCount(), expected_l2p.size());
+    EXPECT_EQ(id_map.InCount(), expected_p2l.size());
+    // InToOutIds returns an owning value, including for mmap-backed arrays.
+    const auto ids = id_map.InToOutIds();
+    ExpectIdSnapshotValues(ids, expected_p2l);
+    for (size_t i = 0; i < expected_l2p.size(); ++i) {
+        EXPECT_EQ(id_map.MapOutToIn(i), expected_l2p[i])
+            << "logical offset: " << i;
+        EXPECT_EQ(id_map.IsValidOutId(i), expected_l2p[i] >= 0);
     }
-
-    void
-    Load(const BinarySet& binary_set, const Config& config) override {
-        (void)binary_set;
-        (void)config;
+    for (size_t i = 0; i < expected_p2l.size(); ++i) {
+        EXPECT_EQ(id_map.MapInToOut(i), expected_p2l[i])
+            << "physical offset: " << i;
     }
-
-    void
-    Load(milvus::tracer::TraceContext ctx, const Config& config) override {
-        (void)ctx;
-        (void)config;
-    }
-
-    void
-    BuildWithDataset(const DatasetPtr& dataset, const Config& config) override {
-        (void)dataset;
-        (void)config;
-    }
-
-    void
-    Build(const Config& config) override {
-        (void)config;
-    }
-
-    int64_t
-    Count() override {
-        return 0;
-    }
-
-    index::IndexStatsPtr
-    Upload(const Config& config) override {
-        (void)config;
-        return nullptr;
-    }
-
-    void
-    Query(const DatasetPtr dataset,
-          const SearchInfo& search_info,
-          const BitsetView& bitset,
-          milvus::OpContext* op_context,
-          SearchResult& search_result) const override {
-        (void)dataset;
-        (void)search_info;
-        (void)bitset;
-        (void)op_context;
-        (void)search_result;
-    }
-
-    const bool
-    HasRawData() const override {
-        return false;
-    }
-
-    bool
-    IsIndexRefineEnabled() const override {
-        return false;
-    }
-
-    std::vector<uint8_t>
-    GetVector(const DatasetPtr dataset) const override {
-        (void)dataset;
-        return {};
-    }
-
-    std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
-    GetSparseVector(const DatasetPtr dataset) const override {
-        (void)dataset;
-        return nullptr;
-    }
-
-    knowhere::IdMap&
-    GetIdMap() override {
-        return id_map_;
-    }
-
-    const knowhere::IdMap&
-    GetIdMap() const override {
-        return id_map_;
-    }
-
- private:
-    knowhere::IdMap id_map_;
-};
+}
 }  // namespace
 
 // ---------- Default (disabled) state ----------
@@ -370,79 +306,80 @@ TEST(IdMapValidDataHelpers, ConfigureMmapUsesOnlyIdMappingConfigKeys) {
 
 TEST(IdMapValidDataHelpers, ValidDataHelpersPreserveSnapshotValues) {
     const std::vector<uint8_t> bitmap{0b00001101};
+    const std::vector<int64_t> expected_out_to_in{0, -1, 1, 2, -1};
     const std::vector<int32_t> expected_in_to_out{0, 2, 3};
 
-    {
-        TestVectorIndex vector_index;
-        vector_index.SetIdMapType(knowhere::IdMap::Type::SEALED);
-        vector_index.GetIdMap().AddFromData(
-            knowhere::IdMapData::FromValidBitmap(bitmap.data(), 5));
-        vector_index.GetIdMap().FinalizeVectorIds();
-        const auto& id_map = vector_index.GetIdMap();
-        ASSERT_EQ(id_map.OutCount(), 5);
-        ASSERT_EQ(id_map.InToOutIds().size(), expected_in_to_out.size());
-        for (size_t i = 0; i < expected_in_to_out.size(); ++i) {
-            EXPECT_EQ(id_map.InToOutIds()[i], expected_in_to_out[i]);
-        }
-    }
-
-    {
+    for (const bool enable_mmap : {false, true}) {
+        SCOPED_TRACE(enable_mmap);
         const auto mmap_root = MakeMmapRoot("bitmap_helper");
-        TestVectorIndex vector_index;
-        vector_index.SetIdMapType(knowhere::IdMap::Type::SEALED);
-        vector_index.GetIdMap().ConfigureMmap(
-            knowhere::IdMapMmapOptions{true, true, mmap_root.string()});
-        vector_index.GetIdMap().AddFromData(
-            knowhere::IdMapData::FromValidBitmap(bitmap.data(), 5));
-        vector_index.GetIdMap().FinalizeVectorIds();
-        const auto& id_map = vector_index.GetIdMap();
-        ASSERT_EQ(id_map.OutCount(), 5);
-        ASSERT_EQ(id_map.InToOutIds().size(), expected_in_to_out.size());
-        for (size_t i = 0; i < expected_in_to_out.size(); ++i) {
-            EXPECT_EQ(id_map.InToOutIds()[i], expected_in_to_out[i]);
+        knowhere::IdArray ids_snapshot;
+        knowhere::BitmapArray valid_snapshot;
+        {
+            knowhere::IdMap id_map;
+            id_map.SetType(knowhere::IdMap::Type::SEALED);
+            if (enable_mmap) {
+                id_map.ConfigureMmap(
+                    knowhere::IdMapMmapOptions{true, true, mmap_root.string()});
+            }
+            id_map.AddFromData(
+                knowhere::IdMapData::FromValidBitmap(bitmap.data(), 5));
+            EXPECT_TRUE(id_map.InToOutIds().empty());
+            id_map.FinalizeVectorIds();
+            ExpectIdMapValues(
+                id_map, expected_out_to_in, expected_in_to_out);
+            ids_snapshot = id_map.InToOutIds();
+            valid_snapshot = id_map.ValidBitmap();
+            if (enable_mmap) {
+                ExpectMmapBlockFiles(mmap_root,
+                                     {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
+            }
         }
-        ExpectMmapBlockFiles(mmap_root,
-                             {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
+        // The value snapshots retain their buffers after the IdMap is gone.
+        ExpectIdSnapshotValues(ids_snapshot, expected_in_to_out);
+        ASSERT_EQ(valid_snapshot.size(), expected_out_to_in.size());
+        for (size_t i = 0; i < expected_out_to_in.size(); ++i) {
+            EXPECT_EQ((valid_snapshot[i / 8] >> (i % 8)) & 1,
+                      expected_out_to_in[i] >= 0);
+        }
     }
 }
 
 TEST(IdMapValidDataHelpers, LoadIdMapDataFromBinarySetRestoresIdMapData) {
     const std::array<bool, 5> valid{{true, false, true, true, false}};
-    knowhere::IdMap source_id_map;
-    source_id_map.SetType(knowhere::IdMap::Type::SEALED);
-    source_id_map.AddFromData(
-        knowhere::IdMapData::FromValidData(valid.data(), valid.size()));
-
+    const std::vector<int64_t> expected_out_to_in{0, -1, 1, 2, -1};
+    const std::vector<int32_t> expected_in_to_out{0, 2, 3};
     BinarySet binary_set;
-    index::AppendValidDataToBinarySet(source_id_map, binary_set);
-
     {
-        TestVectorIndex vector_index;
-        ASSERT_TRUE(index::RestoreIdMapFromBinarySet(binary_set,
-                                                     vector_index.GetIdMap())
-                        .has_valid_data);
-        vector_index.GetIdMap().FinalizeVectorIds();
-        const auto& id_map = vector_index.GetIdMap();
-        ASSERT_EQ(id_map.OutCount(), 5);
-        ASSERT_EQ(id_map.InToOutIds().size(), 3);
-        EXPECT_EQ(id_map.MapInToOut(2), 3);
+        knowhere::IdMap source_id_map;
+        source_id_map.SetType(knowhere::IdMap::Type::SEALED);
+        source_id_map.AddFromData(
+            knowhere::IdMapData::FromValidData(valid.data(), valid.size()));
+        index::AppendValidDataToBinarySet(source_id_map, binary_set);
     }
 
-    {
+    for (const bool enable_mmap : {false, true}) {
+        SCOPED_TRACE(enable_mmap);
         const auto mmap_root = MakeMmapRoot("binary_set_helper");
-        TestVectorIndex vector_index;
-        vector_index.SetIdMapType(knowhere::IdMap::Type::SEALED);
-        vector_index.GetIdMap().ConfigureMmap(
-            knowhere::IdMapMmapOptions{true, true, mmap_root.string()});
-        ASSERT_TRUE(index::RestoreIdMapFromBinarySet(binary_set,
-                                                     vector_index.GetIdMap())
-                        .has_valid_data);
-        vector_index.GetIdMap().FinalizeVectorIds();
-        const auto& id_map = vector_index.GetIdMap();
-        ASSERT_EQ(id_map.InToOutIds().size(), 3);
-        EXPECT_EQ(id_map.MapInToOut(2), 3);
-        ExpectMmapBlockFiles(mmap_root,
-                             {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
+        knowhere::IdMap id_map;
+        if (enable_mmap) {
+            id_map.SetType(knowhere::IdMap::Type::SEALED);
+            id_map.ConfigureMmap(
+                knowhere::IdMapMmapOptions{true, true, mmap_root.string()});
+        } else {
+            EXPECT_EQ(id_map.type(), knowhere::IdMap::Type::DISABLED);
+        }
+        const auto restored =
+            index::RestoreIdMapFromBinarySet(binary_set, id_map);
+        ASSERT_TRUE(restored.has_valid_data);
+        EXPECT_FALSE(restored.IsAllNullNullable());
+        EXPECT_EQ(id_map.OutCount(), valid.size());
+        EXPECT_TRUE(id_map.InToOutIds().empty());
+        id_map.FinalizeVectorIds();
+        ExpectIdMapValues(id_map, expected_out_to_in, expected_in_to_out);
+        if (enable_mmap) {
+            ExpectMmapBlockFiles(mmap_root,
+                                 {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
+        }
     }
 }
 

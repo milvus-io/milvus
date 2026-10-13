@@ -56,6 +56,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/TextLobSpillover.h"
 #include "segcore/memory_planner.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
@@ -275,8 +276,8 @@ TEST_F(TestGrowingStorageV2, LoadFieldDataWithAddedTextFieldBackfillsEmpty) {
     segment_impl->FillAbsentFields();
 
     // The added TEXT column must be backfilled rather than left uninitialized:
-    // every old row reads back as null (validity false) and the raw column
-    // holds empty values.
+    // every old row reads back as null (validity false). The raw column holds
+    // spillover references whose decoded values are empty.
     auto* text_column = dynamic_cast<const ConcurrentVector<std::string>*>(
         segment_impl->get_insert_record().get_data_base(text_fid));
     ASSERT_NE(text_column, nullptr);
@@ -285,13 +286,12 @@ TEST_F(TestGrowingStorageV2, LoadFieldDataWithAddedTextFieldBackfillsEmpty) {
     ASSERT_NE(valid_data, nullptr);
     for (int64_t i = 0; i < 3000; ++i) {
         EXPECT_FALSE(valid_data->is_valid(i)) << "row " << i << " not null";
-        EXPECT_TRUE(text_column->view_element(i).empty())
-            << "row " << i << " TEXT value is not empty";
+        EXPECT_EQ(TextLobRef::Decode(text_column->view_element(i)).size, 0)
+            << "row " << i << " TEXT payload is not empty";
     }
 
     // Exercise the query read path: backfilled rows must retrieve as null with
-    // an empty value, not be misread as LOB references (the loaded region
-    // [0, text_loaded_row_count_) is normally decoded via the LOB reader).
+    // an empty value after decoding the local spillover reference.
     std::vector<int64_t> offsets(3000);
     std::iota(offsets.begin(), offsets.end(), 0);
     auto out = segment->bulk_subscript(nullptr, text_fid, offsets.data(), 3000);
@@ -447,11 +447,20 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     // Write data to storage v2
     auto paths = std::vector<std::string>{path_ + "/19530.parquet",
                                           path_ + "/19531.parquet"};
-    auto column_groups = std::vector<std::vector<int>>{
-        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, {15}};
     auto writer_memory = 16 * 1024 * 1024;
     auto storage_config = milvus_storage::StorageConfig();
     auto arrow_schema = schema->ConvertToArrowSchema();
+    // Keep the vector in its own group while including every scalar column,
+    // even when the shared all-types schema gains another type.
+    std::vector<std::vector<int>> column_groups(2);
+    for (int i = 0; i < arrow_schema->num_fields(); ++i) {
+        const auto field_id = std::stoll(
+            arrow_schema->field(i)->metadata()
+                ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                .ValueOrDie());
+        column_groups[field_id == vec.get() ? 1 : 0].push_back(i);
+    }
+    ASSERT_EQ(column_groups[1].size(), 1);
     auto result = milvus_storage::PackedRecordBatchWriter::Make(
         fs_,
         paths,
@@ -463,8 +472,12 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     EXPECT_TRUE(result.ok());
     auto writer = result.ValueOrDie();
     int64_t total_rows = 0;
+    std::vector<float> expected_vectors;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
+        const auto vectors = dataset.get_col<float>(vec);
+        expected_vectors.insert(
+            expected_vectors.end(), vectors.begin(), vectors.end());
         auto record_batch =
             ConvertToArrowRecordBatch(dataset, dim, arrow_schema);
         total_rows += record_batch->num_rows();
@@ -495,4 +508,16 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     };
     load_info.storage_version = 2;
     segment->LoadFieldData(load_info);
+    ASSERT_EQ(segment->get_row_count(), total_rows);
+    for (const auto& [field_id, field_meta] : schema->get_fields()) {
+        EXPECT_TRUE(segment->HasFieldData(field_id)) << field_id.get();
+    }
+    std::vector<int64_t> offsets(total_rows);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    auto vectors =
+        segment->bulk_subscript(nullptr, vec, offsets.data(), total_rows);
+    const auto& values = vectors->vectors().float_vector().data();
+    EXPECT_EQ(vectors->vectors().dim(), dim);
+    EXPECT_EQ(std::vector<float>(values.begin(), values.end()),
+              expected_vectors);
 }

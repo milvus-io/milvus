@@ -18,11 +18,10 @@
 #include "common/QueryResult.h"
 #include "common/Utils.h"
 #include "query/Utils.h"
-#include "index/Index.h"
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "knowhere/comp/index_param.h"
 #include "query/CachedSearchIterator.h"
-#include "index/VectorIndex.h"
-#include "index/IndexFactory.h"
 #include "knowhere/dataset.h"
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
@@ -30,6 +29,7 @@
 #include "mmap/ChunkedColumn.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -89,9 +89,11 @@ class CachedSearchIteratorTest
     static int64_t nq_;
     static FixedVector<float> base_dataset_;
     static FixedVector<float> query_dataset_;
-    static IndexBasePtr index_hnsw_l2_;
-    static IndexBasePtr index_hnsw_ip_;
-    static IndexBasePtr index_hnsw_cos_;
+    // Reader owners outlive every iterator: knowhere iterators borrow their
+    // index's row-id mapping even after CachedSearchIterator construction.
+    static IIndexReaderBasePtr index_hnsw_l2_;
+    static IIndexReaderBasePtr index_hnsw_ip_;
+    static IIndexReaderBasePtr index_hnsw_cos_;
     static knowhere::DataSetPtr knowhere_query_dataset_;
     static dataset::SearchDataset search_dataset_;
     static std::unique_ptr<ConcurrentVector<milvus::FloatVector>> vector_base_;
@@ -100,7 +102,7 @@ class CachedSearchIteratorTest
     static std::shared_ptr<Schema> schema_;
     static FieldId fakevec_id_;
 
-    IndexBase* index_hnsw_ = nullptr;
+    const IVectorReader* index_hnsw_ = nullptr;
     MetricType metric_type_ = kMetricType;
 
     std::unique_ptr<CachedSearchIterator>
@@ -110,7 +112,7 @@ class CachedSearchIteratorTest
         switch (constructor_type) {
             case ConstructorType::VectorIndex:
                 return std::make_unique<CachedSearchIterator>(
-                    dynamic_cast<const VectorIndex&>(*index_hnsw_),
+                    *index_hnsw_,
                     knowhere_query_dataset_,
                     search_info,
                     bitset);
@@ -185,42 +187,27 @@ class CachedSearchIteratorTest
 
     static void
     BuildIndex() {
-        auto dataset = knowhere::GenDataSet(nb_, dim_, base_dataset_.data());
-
         for (const auto& metric_type : kMetricTypes) {
-            milvus::index::CreateIndexInfo create_index_info;
-            create_index_info.field_type = data_type_;
-            create_index_info.metric_type = metric_type;
-            create_index_info.index_engine_version =
-                knowhere::Version::GetCurrentVersion().VersionNumber();
             auto build_conf = knowhere::Json{
-                {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                 {knowhere::meta::DIM, std::to_string(dim_)},
                 {knowhere::indexparam::M, std::to_string(kHnswM)},
                 {knowhere::indexparam::EFCONSTRUCTION,
                  std::to_string(kHnswEfConstruction)}};
-            create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+            auto opened = milvus::test::consumer::BuildVectorReader<float>(
+                data_type_,
+                knowhere::IndexEnum::INDEX_HNSW,
+                metric_type,
+                dim_,
+                nb_,
+                base_dataset_.data(),
+                std::move(build_conf));
+            ASSERT_EQ(opened.reader->Count(), nb_);
             if (metric_type == knowhere::metric::L2) {
-                index_hnsw_l2_ =
-                    milvus::index::IndexFactory::GetInstance().CreateIndex(
-                        create_index_info,
-                        milvus::storage::FileManagerContext());
-                index_hnsw_l2_->BuildWithDataset(dataset, build_conf);
-                ASSERT_EQ(index_hnsw_l2_->Count(), nb_);
+                index_hnsw_l2_ = std::move(opened.reader);
             } else if (metric_type == knowhere::metric::IP) {
-                index_hnsw_ip_ =
-                    milvus::index::IndexFactory::GetInstance().CreateIndex(
-                        create_index_info,
-                        milvus::storage::FileManagerContext());
-                index_hnsw_ip_->BuildWithDataset(dataset, build_conf);
-                ASSERT_EQ(index_hnsw_ip_->Count(), nb_);
+                index_hnsw_ip_ = std::move(opened.reader);
             } else if (metric_type == knowhere::metric::COSINE) {
-                index_hnsw_cos_ =
-                    milvus::index::IndexFactory::GetInstance().CreateIndex(
-                        create_index_info,
-                        milvus::storage::FileManagerContext());
-                index_hnsw_cos_->BuildWithDataset(dataset, build_conf);
-                ASSERT_EQ(index_hnsw_cos_->Count(), nb_);
+                index_hnsw_cos_ = std::move(opened.reader);
             } else {
                 FAIL() << "Unsupported metric type: " << metric_type;
             }
@@ -323,18 +310,19 @@ class CachedSearchIteratorTest
         if (metric_type == knowhere::metric::L2) {
             metric_type_ = knowhere::metric::L2;
             search_dataset_.metric_type = knowhere::metric::L2;
-            index_hnsw_ = index_hnsw_l2_.get();
+            index_hnsw_ = dynamic_cast<const IVectorReader*>(index_hnsw_l2_.get());
         } else if (metric_type == knowhere::metric::IP) {
             metric_type_ = knowhere::metric::IP;
             search_dataset_.metric_type = knowhere::metric::IP;
-            index_hnsw_ = index_hnsw_ip_.get();
+            index_hnsw_ = dynamic_cast<const IVectorReader*>(index_hnsw_ip_.get());
         } else if (metric_type == knowhere::metric::COSINE) {
             metric_type_ = knowhere::metric::COSINE;
             search_dataset_.metric_type = knowhere::metric::COSINE;
-            index_hnsw_ = index_hnsw_cos_.get();
+            index_hnsw_ = dynamic_cast<const IVectorReader*>(index_hnsw_cos_.get());
         } else {
             FAIL() << "Unsupported metric type: " << metric_type;
         }
+        ASSERT_NE(index_hnsw_, nullptr);
     }
 
     void
@@ -347,9 +335,9 @@ DataType CachedSearchIteratorTest::data_type_ = DataType::VECTOR_FLOAT;
 int64_t CachedSearchIteratorTest::dim_ = kDim;
 int64_t CachedSearchIteratorTest::nb_ = kNumVectors;
 int64_t CachedSearchIteratorTest::nq_ = kNumQueries;
-IndexBasePtr CachedSearchIteratorTest::index_hnsw_l2_ = nullptr;
-IndexBasePtr CachedSearchIteratorTest::index_hnsw_ip_ = nullptr;
-IndexBasePtr CachedSearchIteratorTest::index_hnsw_cos_ = nullptr;
+IIndexReaderBasePtr CachedSearchIteratorTest::index_hnsw_l2_ = nullptr;
+IIndexReaderBasePtr CachedSearchIteratorTest::index_hnsw_ip_ = nullptr;
+IIndexReaderBasePtr CachedSearchIteratorTest::index_hnsw_cos_ = nullptr;
 knowhere::DataSetPtr CachedSearchIteratorTest::knowhere_query_dataset_ =
     nullptr;
 dataset::SearchDataset CachedSearchIteratorTest::search_dataset_;
@@ -703,14 +691,14 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
     SearchInfo search_info = GetDefaultNormalSearchInfo();
     if (std::get<0>(GetParam()) == ConstructorType::VectorIndex) {
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
-                         dynamic_cast<const VectorIndex&>(*index_hnsw_),
+                         *index_hnsw_,
                          nullptr,
                          search_info,
                          nullptr),
                      SegcoreError);
 
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
-                         dynamic_cast<const VectorIndex&>(*index_hnsw_),
+                         *index_hnsw_,
                          std::make_shared<knowhere::DataSet>(),
                          search_info,
                          nullptr),

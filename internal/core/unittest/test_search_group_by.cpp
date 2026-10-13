@@ -39,9 +39,8 @@
 #include "common/protobuf_utils.h"
 #include "common/type_c.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/ScalarIndexSort.h"
-#include "index/VectorIndex.h"
+#include "index/Families.h"
+#include "index/contracts/query/IIndexReaderBase.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
@@ -57,6 +56,7 @@
 #include "segcore/segment_c.h"
 #include "storage/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -127,8 +127,10 @@ TEST(GroupBY, SealedIndex) {
     auto vector_data = raw_data.get_col<float>(vec_fid);
     auto indexing = GenVecIndexing(
         N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -555,7 +557,7 @@ TEST(GroupBY, ElementLevelKeepsElementIndices) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing, nullptr);
@@ -630,7 +632,7 @@ TEST(GroupBY, SearchGroupByNodeKeepsElementIndices) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing, nullptr);
@@ -737,7 +739,7 @@ TEST(GroupBY, GrowingRawData) {
                                      rows_per_batch,
                                      data_set.row_ids_.data(),
                                      data_set.timestamps_.data(),
-                                     data_set.raw_);
+                                     data_set.SharedRaw());
     }
 
     //2. Search group by
@@ -792,7 +794,7 @@ TEST(GroupBY, GrowingRawData) {
     }
 }
 
-TEST(GroupBY, GrowingIndex) {
+TEST(GroupBY, IGrowingIndex) {
     //0. set up growing segment
     int dim = 128;
     uint64_t seed = 512;
@@ -838,7 +840,7 @@ TEST(GroupBY, GrowingIndex) {
                                      rows_per_batch,
                                      data_set.row_ids_.data(),
                                      data_set.timestamps_.data(),
-                                     data_set.raw_);
+                                     data_set.SharedRaw());
     }
 
     //2. Search group by int32
@@ -929,8 +931,10 @@ TEST(GroupBY, SealedIndexOnlyNullableGroupBy) {
     auto vector_data = raw_data.get_col<float>(vec_fid);
     auto indexing = GenVecIndexing(
         N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo vec_info;
+    LoadIndexInfo vec_info{};
     vec_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        vec_info, *indexing, milvus::index::families::kVectorMem);
     vec_info.index_params = GenIndexParams(indexing.get());
     vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params[METRICS_TYPE] = knowhere::metric::L2;
@@ -939,12 +943,18 @@ TEST(GroupBY, SealedIndexOnlyNullableGroupBy) {
     // scalar index on the (data-excluded) nullable group-by field -> index-only
     auto null_col = raw_data.get_col<int64_t>(i64_null_fid);
     auto null_valid = raw_data.get_col_valid(i64_null_fid);
-    auto scalar_index = milvus::index::CreateScalarIndexSort<int64_t>();
-    scalar_index->Build(N, null_col.data(), null_valid.data());
-    LoadIndexInfo scalar_info;
+    auto scalar_index = BuildTestScalarIndex<int64_t>(
+        milvus::index::families::kSort,
+        N,
+        null_col.data(),
+        null_valid.data());
+    LoadIndexInfo scalar_info{};
     scalar_info.field_id = i64_null_fid.get();
     scalar_info.field_type = DataType::INT64;
-    scalar_info.index_params = GenIndexParams(scalar_index.get());
+    SetTestIndexMetadata(
+        scalar_info, *scalar_index, milvus::index::families::kSort);
+    scalar_info.index_params =
+        GenIndexParams(scalar_index.get(), milvus::index::families::kSort);
     scalar_info.cache_index =
         CreateTestCacheIndex("test", std::move(scalar_index));
     segment->LoadIndex(scalar_info);

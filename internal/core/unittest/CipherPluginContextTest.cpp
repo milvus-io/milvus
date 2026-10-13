@@ -73,6 +73,9 @@ BuildIndexInfoWithPluginContext() {
     proto::indexcgo::BuildIndexInfo build_index_info;
     build_index_info.mutable_field_schema()->set_data_type(
         proto::schema::DataType::Int64);
+    auto index_type = build_index_info.add_index_params();
+    index_type->set_key("index_type");
+    index_type->set_value("STL_SORT");
 
     auto storage_config = build_index_info.mutable_storage_config();
     storage_config->set_root_path(TestLocalPath);
@@ -122,8 +125,13 @@ TEST(CipherPluginContextTest, IndexApisUseContextWhenPresent) {
     ExpectMissingCipherPlugin(CreateIndex(&index, data, serialized.size()));
     EXPECT_EQ(index, nullptr);
 
+    std::unique_ptr<::ProtoLayout, decltype(&ReleaseProtoLayout)> result(
+        CreateProtoLayout(), ReleaseProtoLayout);
+    ASSERT_NE(result, nullptr);
     ExpectMissingCipherPlugin(
-        BuildJsonKeyIndex(nullptr, data, serialized.size()));
+        BuildJsonKeyIndex(result.get(), data, serialized.size()));
+    EXPECT_EQ(result->blob, nullptr);
+    EXPECT_EQ(result->size, 0);
 }
 
 TEST(CipherPluginContextTest, RegistersPluginAndReturnsOnlyIdentifiers) {

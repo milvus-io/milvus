@@ -37,10 +37,9 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/IndexInfo.h"
-#include "index/IndexStats.h"
+#include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
-#include "index/NgramInvertedIndex.h"
+#include "indexbuilder/BuildSession.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
@@ -217,21 +216,31 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
 
             storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
 
-            Config config;
-            config[milvus::index::INDEX_TYPE] =
-                milvus::index::INVERTED_INDEX_TYPE;
-            config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
-
-            auto ngram_params = index::NgramParams{
-                .loading_index = false,
-                .min_gram = 2,
-                .max_gram = 4,
-            };
-            auto index =
-                std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
-            index->Build(config);
-            auto create_index_result = index->UploadUnified({});
-            auto index_files = create_index_result->GetIndexFiles();
+            auto adapted = index::AdaptIndexType({
+                .index_type = index::NGRAM_INDEX_TYPE,
+                .field_type = DataType::VARCHAR,
+                .params = {{index::MIN_GRAM, 2},
+                           {index::MAX_GRAM, 4},
+                           {index::SCALAR_INDEX_ENGINE_VERSION, 3}}});
+            indexbuilder::BuildRequest request{
+                .family = adapted.family,
+                .params = std::move(adapted.params),
+                .value_type = adapted.value_type,
+                .field_id = field_id,
+                .source = indexbuilder::V1BinlogBuildSource{{log_path}},
+                .expected_rows = static_cast<int64_t>(data.size()),
+                .staging_parent = TestLocalPath,
+                .output = {.generation = storage::Generation::V3,
+                           .packed_file_name = index::PackedScalarIndexFileName(
+                               adapted.artifact_type)}};
+            indexbuilder::BuildSession session(std::move(request), ctx);
+            session.BuildFromSource();
+            const auto publication = session.Publish();
+            std::vector<std::string> index_files;
+            index_files.reserve(publication.Files().size());
+            for (const auto& file : publication.Files()) {
+                index_files.push_back(file.file_name);
+            }
 
             std::map<std::string, std::string> index_params{
                 {milvus::index::INDEX_TYPE, milvus::index::NGRAM_INDEX_TYPE},
@@ -254,7 +263,8 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             load_index_info.index_params = index_params;
             load_index_info.index_files = index_files;
             load_index_info.schema = field_meta.field_schema;
-            load_index_info.index_size = 1024 * 1024;
+            load_index_info.index_size = publication.MemSize();
+            load_index_info.num_rows = data.size();
 
             uint8_t trace_id[16] = {0};
             uint8_t span_id[8] = {0};
@@ -265,7 +275,8 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             };
             auto cload_index_info =
                 static_cast<CLoadIndexInfo>(&load_index_info);
-            AppendIndexV2(trace, cload_index_info);
+            const auto status = AppendIndexV2(trace, cload_index_info);
+            ASSERT_EQ(status.error_code, Success) << status.error_msg;
             segment->LoadIndex(load_index_info);
         };
 
@@ -337,6 +348,19 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
         milvus::expr::LogicalBinaryExpr::OpType::And,
         and_expr_2,
         expr_content_query);
+
+    // Exercise ordinary batches as well as Retrieve's all-at-once path.
+    auto batched = milvus::test::EvalExprInBatches(and_expr, segment.get(), nb);
+    EXPECT_EQ(batched.batch_sizes, (std::vector<int64_t>{3, 3, 2}));
+    TargetBitmapView values(batched.result->GetRawData(), nb);
+    TargetBitmapView validity(batched.result->GetValidRawData(), nb);
+    for (size_t row = 0; row < nb; ++row) {
+        EXPECT_TRUE(validity[row]) << "row " << row;
+        EXPECT_EQ(values[row], row == 0 || row == 2 || row == 6)
+            << "row " << row;
+    }
+    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+        and_expr, segment.get(), nb));
 
     // Create RetrievePlan
     auto plan = std::make_unique<query::RetrievePlan>(schema);
