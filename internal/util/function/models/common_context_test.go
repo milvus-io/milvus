@@ -18,7 +18,6 @@ package models
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +25,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 )
 
 func TestPostRequestCanceledContext(t *testing.T) {
