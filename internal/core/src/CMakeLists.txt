@@ -212,6 +212,10 @@ if (ENABLE_GCP_NATIVE)
     set(LINK_TARGETS ${LINK_TARGETS} gcp-native-storage)
 endif()
 
+if (BUILD_SERVER_COVERAGE)
+    target_sources(milvus_core PRIVATE coverage/coverage.cpp)
+endif()
+
 target_link_libraries(milvus_core ${LINK_TARGETS})
 
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")
