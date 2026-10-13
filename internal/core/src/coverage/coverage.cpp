@@ -14,8 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-extern "C" void __gcov_dump(void);
-extern "C" void __gcov_reset(void);
+extern "C" void
+__gcov_dump(void);
+extern "C" void
+__gcov_reset(void);
 
 extern "C" __attribute__((visibility("default"))) void
 MilvusDumpCoverage() {
