@@ -143,8 +143,8 @@ class TestVectorArrayStorageV2 : public testing::Test {
 
         // Prepare paths and column groups
         std::vector<std::string> paths = {
-            TestLocalPath + "test_data/0/10000.parquet",
-            TestLocalPath + "test_data/101/10001.parquet"};
+            TestLocalPath + "test_data/0/10000",
+            TestLocalPath + "test_data/101/10001"};
 
         // Create directories for the parquet files
         for (const auto& path : paths) {
@@ -398,7 +398,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
 
     // Get the storage v2 parquet file paths that were already written in SetUp
     std::vector<std::string> paths = {TestLocalPath +
-                                      "test_data/101/10001.parquet"};
+                                      "test_data/101/10001"};
 
     Config config;
     config[knowhere::meta::METRIC_TYPE] = knowhere::metric::MAX_SIM;
@@ -470,7 +470,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
 
     // Get the storage v2 parquet file paths that were already written in SetUp
     std::vector<std::string> paths = {TestLocalPath +
-                                      "test_data/101/10001.parquet"};
+                                      "test_data/101/10001"};
 
     Config config;
     config[knowhere::meta::METRIC_TYPE] = knowhere::metric::MAX_SIM_IP;
@@ -545,7 +545,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
     ASSERT_TRUE(segment_->HasFieldData(vector_array_field_id));
 
     std::vector<std::string> paths = {TestLocalPath +
-                                      "test_data/101/10001.parquet"};
+                                      "test_data/101/10001"};
 
     const std::vector<std::string> strategies = {
         knowhere::meta::EMB_LIST_STRATEGY_MUVERA,

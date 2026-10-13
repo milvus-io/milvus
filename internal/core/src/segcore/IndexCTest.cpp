@@ -59,7 +59,7 @@ TEST(CreateIndexTest, StorageV2) {
     auto* segment_insert_files =
         build_index_info->mutable_segment_insert_files();
     auto* field_insert_files = segment_insert_files->add_field_insert_files();
-    field_insert_files->add_file_paths("test_segment_file_path");
+    field_insert_files->add_file_paths("test_segment_file_path/1");
 
     auto* storage_config = build_index_info->mutable_storage_config();
     storage_config->set_storage_type("remote");
@@ -125,7 +125,7 @@ TEST(VectorMemIndexTest, StorageV2) {
     auto* segment_insert_files =
         build_index_info->mutable_segment_insert_files();
     auto* field_insert_files = segment_insert_files->add_field_insert_files();
-    field_insert_files->add_file_paths("test_segment_file_path");
+    field_insert_files->add_file_paths("test_segment_file_path/1");
 
     auto* storage_config = build_index_info->mutable_storage_config();
     storage_config->set_storage_type("local");
