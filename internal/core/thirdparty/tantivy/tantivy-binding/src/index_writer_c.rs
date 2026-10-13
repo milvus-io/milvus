@@ -141,7 +141,7 @@ pub extern "C" fn tantivy_create_snapshot_reader_from_writer(
     let reader = unsafe { (*writer).create_snapshot_reader(set_bitset) };
     match reader {
         Ok(r) => RustResult::from_ptr(create_binding(r)),
-        Err(e) => RustResult::from_error(e.to_string()),
+        Err(e) => RustResult::from_binding_error(&e),
     }
 }
 
@@ -775,5 +775,80 @@ pub extern "C" fn tantivy_index_add_array_keywords_by_single_segment_writer(
         let ptrs = convert_to_rust_slice!(array, len);
         let lens = convert_to_rust_slice!(str_lens, len);
         (*real).add_array_keywords_with_len(ptrs, lens, None).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{array::free_rust_result, error::TantivyBindingErrorCode, util::set_bitset};
+    use std::path::Path;
+
+    struct WriterBinding(*mut c_void);
+
+    impl WriterBinding {
+        fn new(path: &Path, version: TantivyIndexVersion) -> Self {
+            let writer = IndexWriterWrapper::new(
+                "values",
+                TantivyDataType::I64,
+                path.to_str().unwrap().to_string(),
+                1,
+                15_000_000,
+                version,
+                true,
+                false,
+            )
+            .unwrap();
+            Self(create_binding(writer))
+        }
+    }
+
+    impl Drop for WriterBinding {
+        fn drop(&mut self) {
+            tantivy_free_index_writer(self.0);
+        }
+    }
+
+    #[test]
+    fn snapshot_corrupt_metadata_preserves_data_corruption() {
+        let directory = tempfile::tempdir().unwrap();
+        let writer = WriterBinding::new(directory.path(), TantivyIndexVersion::V7);
+        let metadata = directory.path().join("meta.json");
+        let original = std::fs::read(&metadata).unwrap();
+        std::fs::write(&metadata, b"{").unwrap();
+        let result = tantivy_create_snapshot_reader_from_writer(writer.0, set_bitset);
+        let success = result.success;
+        let code = result.error_code;
+        free_rust_result(result);
+        std::fs::write(&metadata, original).unwrap();
+        assert!(!success);
+        assert_eq!(code, TantivyBindingErrorCode::DataCorruption);
+    }
+
+    #[test]
+    fn rollback_missing_metadata_preserves_io_and_catches_panic() {
+        for version in [TantivyIndexVersion::V5, TantivyIndexVersion::V7] {
+            let directory = tempfile::tempdir().unwrap();
+            let writer = WriterBinding::new(directory.path(), version);
+            let metadata = directory.path().join("meta.json");
+            let backup = directory.path().join("meta.saved");
+            std::fs::rename(&metadata, &backup).unwrap();
+            let result = tantivy_rollback_index(writer.0);
+            let success = result.success;
+            let code = result.error_code;
+            free_rust_result(result);
+            std::fs::rename(&backup, &metadata).unwrap();
+            assert!(!success);
+            assert_eq!(code, TantivyBindingErrorCode::Io);
+
+            // The first failed reconstruction took the writer's directory
+            // lock. Repeating rollback reaches a real dependency panic.
+            let panic_result = tantivy_rollback_index(writer.0);
+            let panic_success = panic_result.success;
+            let panic_code = panic_result.error_code;
+            free_rust_result(panic_result);
+            assert!(!panic_success);
+            assert_eq!(panic_code, TantivyBindingErrorCode::Internal);
+        }
     }
 }
