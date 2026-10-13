@@ -413,6 +413,11 @@ func emptySearchResultData(nq, topK int64) *schemapb.SearchResultData {
 }
 
 func (t *SearchTask) Merge(other *SearchTask) bool {
+	// Placeholders and per-query hints must never be merged independently.
+	if len(t.req.GetClusteringSearchHints()) != 0 || len(other.req.GetClusteringSearchHints()) != 0 {
+		return false
+	}
+
 	var (
 		nq        = t.nq
 		topk      = t.topk

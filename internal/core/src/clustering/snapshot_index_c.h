@@ -32,7 +32,8 @@ SearchSnapshotIndex(CLoadIndexInfo index,
                     int64_t nq,
                     int64_t topk,
                     const char* search_params,
-                    int64_t* labels);
+                    int64_t* labels,
+                    float* distances);
 #ifdef __cplusplus
 }
 #endif

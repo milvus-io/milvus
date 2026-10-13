@@ -183,7 +183,7 @@ func (s *ClusteringCompactionTaskSuite) TestVectorPlannerFeedsMapping() {
 	for i, v := range centroids.Centroids[0].GetFloatVector().Data {
 		binary.LittleEndian.PutUint32(query[4*i:], math.Float32bits(v))
 	}
-	labels, err := native.Search(context.Background(), query, 1, 1)
+	labels, _, err := native.Search(context.Background(), query, 1, 1)
 	s.Require().NoError(err)
 	s.Equal([]int64{0}, labels)
 	// Entire selected group disappears after deletes; retain all other groups.

@@ -501,7 +501,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     query_context->set_read_snapshot(segment->CaptureReadSnapshot());
 
     auto search_info = node.search_info_;
-    search_info.clustering_ranges = clustering_ranges_;
+    search_info.clustering_search_hints = clustering_search_hints_;
     query_context->set_search_info(search_info);
     query_context->set_placeholder_group(placeholder_group_);
     if (enable_expr_cache_) {

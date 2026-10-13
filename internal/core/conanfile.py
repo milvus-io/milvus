@@ -39,6 +39,7 @@ class MilvusConan(ConanFile):
         "geos/3.12.0#a923af6dc4c18f87a7dfa960118f3166",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
         "libavrocpp/1.12.1.1@milvus/dev#b4854183542196740ec9a004fdfff7ec",
+        "metis/5.2.1#85cfe7ee0dfc0cba7c0334e92efcbbc6",
     )
 
     default_options = {
@@ -94,6 +95,7 @@ class MilvusConan(ConanFile):
         "xz_utils/*:shared": True,
         "openblas/*:use_openmp": True,
         "opentelemetry-cpp/*:with_stl": True,
+        "metis/*:with_64bit_types": True,
     }
 
     def configure(self):

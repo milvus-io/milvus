@@ -153,17 +153,18 @@ class SegmentInterface {
     Contain(const PkType& pk) const = 0;
 
     virtual std::unique_ptr<SearchResult>
-    Search(const query::Plan* Plan,
-           const query::PlaceholderGroup* placeholder_group,
-           Timestamp timestamp,
-           const folly::CancellationToken& cancel_token,
-           int32_t consistency_level,
-           Timestamp collection_ttl,
-           int64_t entity_ttl_physical_time_us = 0,
-           bool filter_only = false,
-           bool enable_expr_cache = false,
-           milvus::tracer::SpanPtr trace_span = nullptr,
-           ClusteringRowRangesPtr clustering_ranges = nullptr) const = 0;
+    Search(
+        const query::Plan* Plan,
+        const query::PlaceholderGroup* placeholder_group,
+        Timestamp timestamp,
+        const folly::CancellationToken& cancel_token,
+        int32_t consistency_level,
+        Timestamp collection_ttl,
+        int64_t entity_ttl_physical_time_us = 0,
+        bool filter_only = false,
+        bool enable_expr_cache = false,
+        milvus::tracer::SpanPtr trace_span = nullptr,
+        ClusteringSearchHintsPtr clustering_search_hints = nullptr) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -589,7 +590,8 @@ class SegmentInternalInterface : public SegmentInterface {
            bool filter_only = false,
            bool enable_expr_cache = false,
            milvus::tracer::SpanPtr trace_span = nullptr,
-           ClusteringRowRangesPtr clustering_ranges = nullptr) const override;
+           ClusteringSearchHintsPtr clustering_search_hints =
+               nullptr) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
