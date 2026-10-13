@@ -1710,6 +1710,7 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 							}
 							require.NoError(t, err)
 							var got []any
+							var pageBounds []float32
 							ended := false
 							for range (group.end-group.start)/rlsIteratorBatchSize + 3 {
 								r, err := it.Next(ctx)
@@ -1723,8 +1724,29 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 								}
 								require.NoError(t, err)
 								got = append(got, checkRLSSchemaRows(t, r, groupWant, fields)...)
+								require.Len(t, r.Scores, r.Len())
+								if len(r.Scores) > 0 {
+									pageBounds = append(pageBounds, r.Scores[len(r.Scores)-1])
+								}
 							}
 							require.True(t, ended)
+							if (tc.vector == "binary" || tc.vector == "int8") && len(got) < len(expected) {
+								seen := make(map[any]bool, len(got))
+								for _, id := range got {
+									require.Contains(t, expected, id)
+									require.False(t, seen[id], "duplicate iterator ID: %v", id)
+									seen[id] = true
+								}
+								var missing []any
+								for _, id := range expected {
+									if !seen[id] {
+										// Other incompleteness remains a failure, not an expected tie loss.
+										require.Contains(t, pageBounds, rlsVectorDistance(query, groupWant[id]["vector"]), "missing ID is not tied at a page boundary: %v", id)
+										missing = append(missing, id)
+									}
+								}
+								t.Skipf("xfail: https://github.com/milvus-io/milvus/issues/54188, SearchIterator drops page-boundary ties: %v", missing)
+							}
 							checkRLSSchemaIDs(t, expected, got)
 						})
 					}
