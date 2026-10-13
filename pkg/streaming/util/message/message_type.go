@@ -107,6 +107,8 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeCreateIndex:         {},
 	MessageTypeAlterIndex:          {},
 	MessageTypeDropIndex:           {},
+	MessageTypeAlterRLSMetadata:    {},
+	MessageTypeDropRLSMetadata:     {},
 	MessageTypeFlushAll: {
 		ExclusiveRequired: true,
 	},

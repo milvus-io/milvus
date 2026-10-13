@@ -20,6 +20,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -33,9 +34,12 @@ const (
 )
 
 var (
-	once         sync.Once
-	params       ComponentParam
-	runtimeParam = runtimeConfig{
+	once               sync.Once
+	initialized        atomic.Bool
+	params             ComponentParam
+	fastPBEnabledState atomic.Bool
+	fastPBUpdateMu     sync.Mutex
+	runtimeParam       = runtimeConfig{
 		components: typeutil.ConcurrentSet[string]{},
 	}
 	hookParams   hookConfig
@@ -56,6 +60,7 @@ func Init() {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		initialized.Store(true)
 	})
 }
 
@@ -65,7 +70,36 @@ func InitWithBaseTable(baseTable *BaseTable) {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		initialized.Store(true)
 	})
+}
+
+// GetIfInitialized returns fully initialized parameters without triggering Init.
+// Code used during initialization may safely take its default path when nil.
+func GetIfInitialized() *ComponentParam {
+	if !initialized.Load() {
+		return nil
+	}
+	return &params
+}
+
+// FastPBEnabled returns the lock-free snapshot of common.enableFastPB. Before
+// paramtable finishes initialization, fast protobuf decoding remains enabled.
+func FastPBEnabled() bool {
+	if GetIfInitialized() == nil {
+		return true
+	}
+	return fastPBEnabledState.Load()
+}
+
+func updateFastPBEnabled() {
+	// Serialize the read and publication so concurrent refreshes cannot publish
+	// an older snapshot after a newer one. RPC decoding only reads the atomic.
+	fastPBUpdateMu.Lock()
+	defer fastPBUpdateMu.Unlock()
+	// Exact-key handlers run before typed-cache eviction. Read the uncached
+	// effective value, including runtime overrides and the default after DELETE.
+	fastPBEnabledState.Store(getAsBool(params.CommonCfg.EnableFastPB.GetValue()))
 }
 
 func Get() *ComponentParam {

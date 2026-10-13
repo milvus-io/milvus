@@ -1,6 +1,7 @@
 package rewriter
 
 import (
+	"cmp"
 	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -559,27 +560,9 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 		if len(g.idxs) <= 1 {
 			continue
 		}
-		// compute intersection; start from first set
-		inter := make([]*planpb.GenericValue, 0, len(g.values[0]))
-	outer:
-		for _, v := range g.values[0] {
-			// check in every other set
-			ok := true
-			for i := 1; i < len(g.values); i++ {
-				found := false
-				for _, w := range g.values[i] {
-					if equalsGeneric(v, w) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					continue outer
-				}
-			}
-			if ok {
-				inter = append(inter, v)
-			}
+		inter, ok := intersectSortedTermValues(g.values)
+		if !ok {
+			continue
 		}
 		if len(inter) == 0 && !canFoldPredicateToBoolConstant(g.col) {
 			continue
@@ -599,6 +582,76 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 		}
 	}
 	return out
+}
+
+// intersectSortedTermValues intersects normalized TermExpr value lists without
+// mutating them. Unsupported values fall back to the original conjunction.
+func intersectSortedTermValues(valueSets [][]*planpb.GenericValue) ([]*planpb.GenericValue, bool) {
+	if len(valueSets) == 0 || len(valueSets[0]) == 0 {
+		return nil, false
+	}
+	kind := valueCaseWithNil(valueSets[0][0])
+	switch kind {
+	case "bool", "int64", "string":
+	case "float":
+		for _, values := range valueSets {
+			for _, value := range values {
+				if math.IsNaN(value.GetFloatVal()) {
+					return nil, false
+				}
+			}
+		}
+	default:
+		return nil, false
+	}
+	for _, values := range valueSets {
+		if len(values) == 0 || !canBuildTermExpr(values...) || valueCaseWithNil(values[0]) != kind {
+			return nil, false
+		}
+	}
+
+	intersection := valueSets[0]
+	for _, values := range valueSets[1:] {
+		result := make([]*planpb.GenericValue, 0, min(len(intersection), len(values)))
+		for i, j := 0, 0; i < len(intersection) && j < len(values); {
+			switch compareSortedTermValue(kind, intersection[i], values[j]) {
+			case -1:
+				i++
+			case 1:
+				j++
+			default:
+				result = append(result, intersection[i])
+				i++
+				j++
+			}
+		}
+		intersection = result
+		if len(intersection) == 0 {
+			break
+		}
+	}
+	return intersection, true
+}
+
+func compareSortedTermValue(kind string, left, right *planpb.GenericValue) int {
+	switch kind {
+	case "bool":
+		if left.GetBoolVal() == right.GetBoolVal() {
+			return 0
+		}
+		if !left.GetBoolVal() {
+			return -1
+		}
+		return 1
+	case "int64":
+		return cmp.Compare(left.GetInt64Val(), right.GetInt64Val())
+	case "float":
+		return cmp.Compare(left.GetFloatVal(), right.GetFloatVal())
+	case "string":
+		return cmp.Compare(left.GetStringVal(), right.GetStringVal())
+	default:
+		return 0
+	}
 }
 
 // AND: (a IN S) AND (a != d) -> remove d from S; empty -> false

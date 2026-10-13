@@ -1170,8 +1170,6 @@ func TestExpr_Invalid(t *testing.T) {
 		`1 | 2`,
 		// -------------------- cannot be independent ----------------------
 		`BoolField`,
-		`true`,
-		`false`,
 		`Int64Field > 100 and BoolField`,
 		`Int64Field < 100 or false`, // maybe this can be optimized.
 		`!BoolField`,
@@ -2617,9 +2615,8 @@ func TestExpr_GISFunctionsInvalidParameterTypes(t *testing.T) {
 // are parsed by the proxy expression parser.
 //
 // Key behavior:
-//   - Standalone "true"/"false" are parsed into ValueExpr(BoolVal) with nodeDependent=true
-//   - Because nodeDependent=true, canBeExecuted() returns false
-//   - Therefore ParseExpr rejects them with "predicate is not a boolean expression"
+//   - Standalone "true" is converted to AlwaysTrueExpr
+//   - Standalone "false" is converted to AlwaysFalseExpr (UnaryExpr(Not, AlwaysTrueExpr))
 //   - But combined expressions like "BoolField == true" or "1==1" work fine
 //   - After rewriting, "1==1" becomes AlwaysTrueExpr, "1==2" becomes AlwaysFalseExpr
 func TestExpr_BooleanLiteral(t *testing.T) {
@@ -2627,26 +2624,25 @@ func TestExpr_BooleanLiteral(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
 
-	// Case 1: standalone "true" / "false" should fail ParseExpr
-	// because VisitBoolean sets nodeDependent=true, and canBeExecuted requires nodeDependent=false
-	standaloneBoolExprs := []string{
-		"true",
-		"false",
-		"True",
-		"False",
-		"TRUE",
-		"FALSE",
-	}
-	for _, exprStr := range standaloneBoolExprs {
+	// Case 1: standalone "true" variants become AlwaysTrueExpr.
+	for _, exprStr := range []string{"true", "True", "TRUE"} {
 		expr, err := ParseExpr(helper, exprStr, nil)
-		assert.Error(t, err, "standalone %q should fail", exprStr)
-		assert.Nil(t, expr, "standalone %q should return nil expr", exprStr)
-		assert.Contains(t, err.Error(), "predicate is not a boolean expression",
-			"standalone %q error message mismatch", exprStr)
+		require.NoError(t, err, "standalone %q should succeed", exprStr)
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"standalone %q should become AlwaysTrueExpr", exprStr)
 	}
 
-	// Case 2: verify that handleExpr (internal) does parse them into ValueExpr with Bool
-	// This shows the ANTLR + visitor layer works, but the outer canBeExecuted gate blocks it
+	// Case 1b: standalone "false" variants become AlwaysFalseExpr.
+	for _, exprStr := range []string{"false", "False", "FALSE"} {
+		expr, err := ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, "standalone %q should succeed", exprStr)
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "standalone %q should be AlwaysFalseExpr", exprStr)
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	}
+
+	// Case 2: verify that handleExpr (internal) parses them into ValueExpr with Bool.
 	for _, exprStr := range []string{"true", "false"} {
 		ret := handleExpr(helper, exprStr)
 		ewt, ok := ret.(*ExprWithType)

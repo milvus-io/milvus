@@ -157,6 +157,7 @@ func newTestScalarClusteringKeySchema() *schemapb.CollectionSchema {
 }
 
 type mockMixCoord struct {
+	rootcoordpb.UnimplementedRootCoordServer
 	state commonpb.StateCode
 	cnt   atomic.Int64
 }
@@ -172,6 +173,10 @@ func (m *mockMixCoord) DescribeDatabase(ctx context.Context, in *rootcoordpb.Des
 		DbName:           "default",
 		CreatedTimestamp: 1,
 	}, nil
+}
+
+func (m *mockMixCoord) GetRLSMetadata(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return &rootcoordpb.GetRLSMetadataResponse{Status: merr.Success()}, nil
 }
 
 func (m *mockMixCoord) Close() error {

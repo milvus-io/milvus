@@ -33,6 +33,9 @@ func Test_expireCacheConfig_apply(t *testing.T) {
 	assert.Equal(t, commonpb.MsgType_Undefined, req.GetBase().GetMsgType())
 	opt := proxyutil.SetMsgType(commonpb.MsgType_DropCollection)
 	opt(&c)
+	propertyOpt := proxyutil.SetMsgProperty("principal", "alice")
+	propertyOpt(&c)
 	c.Apply(req)
 	assert.Equal(t, commonpb.MsgType_DropCollection, req.GetBase().GetMsgType())
+	assert.Equal(t, "alice", req.GetBase().GetProperties()["principal"])
 }

@@ -93,7 +93,7 @@ func TestDropDatabaseTask(t *testing.T) {
 	cache.On("RemoveDatabase",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
-	).Maybe()
+	).Return(nil).Maybe()
 	globalMetaCache = cache
 
 	t.Run("ok", func(t *testing.T) {

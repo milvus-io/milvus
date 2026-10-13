@@ -51,6 +51,8 @@ var (
 type columnBasedDataOption struct {
 	collName      string
 	partitionName string
+	rlsPrincipal  string
+	skipRLS       bool
 	columns       []column.Column
 	partialUpdate bool
 
@@ -379,6 +381,16 @@ func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBas
 	return opt
 }
 
+func (opt *columnBasedDataOption) WithRLSPrincipal(principal string) *columnBasedDataOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *columnBasedDataOption) WithSkipRLS(skip bool) *columnBasedDataOption {
+	opt.skipRLS = skip
+	return opt
+}
+
 func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnBasedDataOption {
 	opt.partialUpdate = partialUpdate
 	return opt
@@ -452,6 +464,8 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 	return &milvuspb.InsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
+		RlsPrincipal:    opt.rlsPrincipal,
+		SkipRls:         opt.skipRLS,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -477,6 +491,8 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 	return &milvuspb.UpsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
+		RlsPrincipal:    opt.rlsPrincipal,
+		SkipRls:         opt.skipRLS,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -509,6 +525,16 @@ func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
 	}
 }
 
+func (opt *rowBasedDataOption) WithRLSPrincipal(principal string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithRLSPrincipal(principal)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithSkipRLS(skip bool) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithSkipRLS(skip)
+	return opt
+}
+
 func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
 	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
 	if err != nil {
@@ -522,6 +548,8 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 	return &milvuspb.InsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
+		RlsPrincipal:   opt.rlsPrincipal,
+		SkipRls:        opt.skipRLS,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 	}, nil
@@ -545,6 +573,8 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 	return &milvuspb.UpsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
+		RlsPrincipal:   opt.rlsPrincipal,
+		SkipRls:        opt.skipRLS,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 		PartialUpdate:  partialUpdate,
@@ -586,6 +616,8 @@ type DeleteOption interface {
 type deleteOption struct {
 	collectionName string
 	partitionName  string
+	rlsPrincipal   string
+	skipRLS        bool
 	expr           string
 }
 
@@ -593,6 +625,8 @@ func (opt *deleteOption) Request() *milvuspb.DeleteRequest {
 	return &milvuspb.DeleteRequest{
 		CollectionName: opt.collectionName,
 		PartitionName:  opt.partitionName,
+		RlsPrincipal:   opt.rlsPrincipal,
+		SkipRls:        opt.skipRLS,
 		Expr:           opt.expr,
 	}
 }
@@ -614,6 +648,16 @@ func (opt *deleteOption) WithStringIDs(fieldName string, ids []string) *deleteOp
 
 func (opt *deleteOption) WithPartition(partitionName string) *deleteOption {
 	opt.partitionName = partitionName
+	return opt
+}
+
+func (opt *deleteOption) WithRLSPrincipal(principal string) *deleteOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *deleteOption) WithSkipRLS(skip bool) *deleteOption {
+	opt.skipRLS = skip
 	return opt
 }
 

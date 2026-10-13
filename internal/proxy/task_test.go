@@ -30,6 +30,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
@@ -4811,6 +4812,8 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	qc := NewMixCoordMock()
 	InitMetaCache(context.Background(), qc)
 	collectionName := "test_alter_collection_check_loaded"
+	marshaledSchema, err := proto.Marshal(&schemapb.CollectionSchema{Name: collectionName})
+	require.NoError(t, err)
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
@@ -4819,7 +4822,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 		},
 		DbName:         dbName,
 		CollectionName: collectionName,
-		Schema:         nil,
+		Schema:         marshaledSchema,
 		ShardsNum:      1,
 	}
 	qc.CreateCollection(context.Background(), createColReq)
@@ -5362,6 +5365,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		schema:      &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "test"}},
 		replicateID: "local-mac-1",
 	}, nil).Maybe()
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(1, nil).Maybe()
