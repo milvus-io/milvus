@@ -29,11 +29,9 @@
 #include "storage/FileManager.h"
 #include "cachinglayer/LoadingOverhead.h"
 
-namespace milvus::storage {
-class AsyncIndexEntryReader;
-}
-
 namespace milvus::index {
+
+struct PackedIndexSource;
 
 // Admission reserve for resident scalar reader metadata, charged once per index.
 inline constexpr uint64_t kScalarIndexFixedResidentBytes = 2 * 1024;
@@ -78,7 +76,7 @@ ScalarIndexFileLoadResource(
 
 /**
  * @brief Estimate packed scalar loading resources from inspected metadata.
- * @param reader Borrowed directory and metadata; this calculation performs no I/O.
+ * @param source Borrowed directory and metadata; this calculation performs no I/O.
  * @param use_async_load Pinned loading mode used by the caller.
  */
 ScalarIndexLoadResources
@@ -89,7 +87,7 @@ PackedScalarIndexLoadResource(
     bool mmap_enable,
     int64_t num_rows,
     const std::vector<std::string>& index_files,
-    const storage::AsyncIndexEntryReader& reader,
+    const PackedIndexSource& source,
     bool use_async_load);
 
 // Add envelope/decode scratch for the entries actually prepared by async

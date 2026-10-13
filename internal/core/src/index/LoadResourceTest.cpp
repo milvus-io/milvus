@@ -109,18 +109,29 @@ class RecordingOpenFileSystem : public arrow::fs::LocalFileSystem {
     arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenInputFile(const std::string& path) override {
         ++sync_opens;
-        return fs_->OpenInputFile(path);
+        return OpenTrackedFile(path);
     }
     arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenInputFileAsync(const std::string& path) override {
         ++async_opens;
         return arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>::
-            MakeFinished(fs_->OpenInputFile(path));
+            MakeFinished(OpenTrackedFile(path));
     }
     int sync_opens{0};
     int async_opens{0};
+    std::shared_ptr<milvus::test::AsyncTrackingRandomAccessFile> input;
 
  private:
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenTrackedFile(const std::string& path) {
+        ARROW_ASSIGN_OR_RAISE(auto file, fs_->OpenInputFile(path));
+        ARROW_ASSIGN_OR_RAISE(const auto size, file->GetSize());
+        ARROW_ASSIGN_OR_RAISE(auto bytes, file->ReadAt(0, size));
+        input = std::make_shared<milvus::test::AsyncTrackingRandomAccessFile>(
+            std::vector<uint8_t>(bytes->data(), bytes->data() + bytes->size()));
+        return input;
+    }
+
     std::shared_ptr<arrow::fs::FileSystem> fs_;
 };
 }  // namespace
@@ -277,25 +288,74 @@ TEST(LegacyHybridResourceEstimate, FallsBackWhenChildTypeIsUnavailable) {
     }
 }
 
-TEST(ScalarIndexV3ResourceTest, ResourceInspectionSelectsStreamOpenMode) {
+TEST(ScalarIndexV3ResourceTest,
+     ResourceInspectionSelectsStreamOpenAndReadMode) {
     ResourceFixture fixture;
     // Inspection needs real directory bytes, but must never initialize an engine.
     const auto path = fixture.WritePacked({{"index_data", {1, 2, 3}}});
     const auto size = fixture.Size(path);
     auto fs = std::make_shared<RecordingOpenFileSystem>(fixture.context.fs);
     fixture.context.fs = fs;
-    for (const bool async : {false, true}) {
-        fixture.context.use_async_load = async;
-        fs->sync_opens = fs->async_opens = 0;
-        static_cast<void>(ScalarIndexFileLoadResource(DataType::INT32,
-                                                      size,
-                                                      V3Params(ASCENDING_SORT),
-                                                      false,
-                                                      4,
-                                                      {path},
-                                                      fixture.context));
-        EXPECT_EQ(fs->sync_opens, async ? 0 : 1);
-        EXPECT_EQ(fs->async_opens, async ? 1 : 0);
+    const auto old_enabled =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto restore = folly::makeGuard([&] {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    for (const bool enabled : {false, true}) {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+        for (const auto pinned : {std::optional<bool>{},
+                                  std::optional<bool>{false},
+                                  std::optional<bool>{true}}) {
+            fixture.context.use_async_load = pinned;
+            const bool async = pinned.value_or(enabled);
+            SCOPED_TRACE(::testing::Message()
+                         << "global=" << enabled << ", pinned="
+                         << (pinned ? (*pinned ? "async" : "sync") : "unset"));
+            fs->sync_opens = fs->async_opens = 0;
+            static_cast<void>(
+                ScalarIndexFileLoadResource(DataType::INT32,
+                                            size,
+                                            V3Params(ASCENDING_SORT),
+                                            false,
+                                            4,
+                                            {path},
+                                            fixture.context));
+            EXPECT_EQ(fs->sync_opens, async ? 0 : 1);
+            EXPECT_EQ(fs->async_opens, async ? 1 : 0);
+            ASSERT_NE(fs->input, nullptr);
+            EXPECT_EQ(fs->input->ReadAtCalls() == 0, async);
+            EXPECT_EQ(fs->input->AsyncReadCalls() > 0, async);
+        }
+    }
+}
+
+TEST(ScalarIndexV3ResourceTest,
+     ResourceInspectionRejectsTruncatedFilesInBothModes) {
+    ResourceFixture fixture;
+    for (const auto size :
+         {size_t{0},
+          storage::MILVUS_V3_MAGIC_SIZE - 1,
+          storage::MILVUS_V3_MAGIC_SIZE + storage::MILVUS_V3_FOOTER_SIZE - 1}) {
+        const auto path = fixture.WritePacked({{"index_data", {1, 2, 3}}});
+        std::filesystem::resize_file(path, size);
+        for (const bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "size=" << size << ", async=" << async);
+            fixture.context.use_async_load = async;
+            try {
+                static_cast<void>(
+                    ScalarIndexFileLoadResource(DataType::INT32,
+                                                size,
+                                                V3Params(ASCENDING_SORT),
+                                                false,
+                                                4,
+                                                {path},
+                                                fixture.context));
+                FAIL() << "expected truncated packed index to be rejected";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+            }
+        }
     }
 }
 
@@ -768,6 +828,9 @@ TEST(ScalarIndexV3ResourceTest, BitmapTranslatorKeepsRequestLocalOverhead) {
         EXPECT_GT(transient.memory_bytes, 0);
         EXPECT_EQ(fs->sync_opens, use_async ? 0 : 1);
         EXPECT_EQ(fs->async_opens, use_async ? 1 : 0);
+        ASSERT_NE(fs->input, nullptr);
+        EXPECT_EQ(fs->input->ReadAtCalls() == 0, use_async);
+        EXPECT_EQ(fs->input->AsyncReadCalls() > 0, use_async);
     }
 }
 }  // namespace milvus::index

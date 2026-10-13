@@ -182,17 +182,17 @@ SealedIndexTranslator::SealedIndexTranslator(
     metadata_options.params = config_;
     metadata_options.estimated_bytes = index_load_info_.index_size;
     auto resolved_family = adapted.family;
-    std::unique_ptr<storage::AsyncIndexEntryReader> packed_source;
+    std::optional<index::PackedIndexSource> packed_source;
     if (packed_v3) {
         packed_source = index::InspectPackedIndexFile(
             index_load_info_.index_files, file_manager_context_);
         resolved_family = index::ResolvePackedLoadFamily(
-            adapted.family, packed_source->IndexMeta(), config_);
+            adapted.family, packed_source->Metadata(), config_);
         if (adapted.family != index::families::kJsonFlat) {
             config_ = index::AnnotateJsonProjectionCompleteness(
                 std::move(config_),
                 packed_source->Directory(),
-                packed_source->IndexMeta());
+                packed_source->Metadata());
         }
     } else {
         auto source = MakeRemoteSource(adapted.family,

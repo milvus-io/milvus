@@ -780,7 +780,7 @@ ScalarIndexFileLoadResource(
                                          mmap_enable,
                                          num_rows,
                                          index_files,
-                                         *reader,
+                                         reader,
                                          use_async_load);
 }
 
@@ -792,14 +792,14 @@ PackedScalarIndexLoadResource(
     bool mmap_enable,
     int64_t num_rows,
     const std::vector<std::string>& index_files,
-    const storage::AsyncIndexEntryReader& reader,
+    const PackedIndexSource& source,
     bool use_async_load) {
     const auto version =
         GetValueFromConfig<int32_t>(ParseConfigFromIndexParams(index_params),
                                     SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
-    const auto& directory = reader.Directory();
-    const auto& metadata = reader.IndexMeta();
+    const auto& directory = source.Directory();
+    const auto& metadata = source.Metadata();
     auto resolved_params = index_params;
     if (resolved_params.at("index_type") == HYBRID_INDEX_TYPE) {
         auto config = ParseConfigFromIndexParams(index_params);

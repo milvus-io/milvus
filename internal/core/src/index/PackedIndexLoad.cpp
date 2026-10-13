@@ -48,7 +48,7 @@ FinishPackedLoad(PackedFinishFn finish,
 }
 
 // Read only directory/metadata for family selection; the caller owns the blocking boundary.
-folly::coro::Task<std::unique_ptr<storage::AsyncIndexEntryReader>>
+folly::coro::Task<PackedIndexSource>
 InspectPackedScalarIndex(const std::vector<std::string>& files,
                          const storage::FileManagerContext& context,
                          storage::ArtifactStorageNamespace storage_namespace,
@@ -67,16 +67,23 @@ InspectPackedScalarIndex(const std::vector<std::string>& files,
         input = manager.OpenInputStream(files.front(), is_index_file);
     }
     AssertInfo(input != nullptr, "Failed to open packed scalar index");
-    co_return co_await storage::AsyncIndexEntryReader::Open(
+    if (!use_async_load) {
+        co_return PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
+            storage::IndexEntryReader::Open(
+                input, input->Size(), context.fieldDataMeta.collection_id))};
+    }
+    auto reader = co_await storage::AsyncIndexEntryReader::Open(
         std::move(input),
         context.fieldDataMeta.collection_id,
         proto::common::LoadPriority::HIGH,
         {});
+    co_return PackedIndexSource{
+        std::shared_ptr<storage::AsyncIndexEntryReader>(std::move(reader))};
 }
 
 }  // namespace
 
-std::unique_ptr<storage::AsyncIndexEntryReader>
+PackedIndexSource
 InspectPackedIndexFile(const std::vector<std::string>& files,
                        const storage::FileManagerContext& context,
                        storage::ArtifactStorageNamespace storage_namespace) {
