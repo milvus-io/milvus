@@ -35,13 +35,19 @@ import (
 
 // Evaluate the original plan independently with the executor's literal
 // precision. 0/1/2 represent FALSE/UNKNOWN/TRUE, including outer NOT on NULL.
-func evalFloatRewritePlan(t *testing.T, e *planpb.Expr, row *float64, narrow bool) int {
+func evalFloatRewritePlan(t *testing.T, e *planpb.Expr, row *float64) int {
 	t.Helper()
-	number := func(v *planpb.GenericValue) float64 {
+	number := func(v *planpb.GenericValue, col *planpb.ColumnInfo, unary bool) float64 {
 		n := v.GetFloatVal()
 		if _, ok := v.GetVal().(*planpb.GenericValue_Int64Val); ok {
 			n = float64(v.GetInt64Val())
 		}
+		// Scalar and element-level FLOAT predicates narrow every operator.
+		// Fixed ARRAY<FLOAT> indices narrow UnaryRange only; Term and
+		// BinaryRange dispatch to double-valued array executors.
+		_, floatLiteral := v.GetVal().(*planpb.GenericValue_FloatVal)
+		narrow := col.GetDataType() == schemapb.DataType_Float ||
+			(col.GetDataType() == schemapb.DataType_Array && col.GetElementType() == schemapb.DataType_Float && (col.GetIsElementLevel() || (unary && floatLiteral)))
 		if narrow {
 			return float64(float32(n))
 		}
@@ -60,10 +66,10 @@ func evalFloatRewritePlan(t *testing.T, e *planpb.Expr, row *float64, narrow boo
 	case *planpb.Expr_AlwaysTrueExpr:
 		return 2
 	case *planpb.Expr_UnaryExpr:
-		return 2 - evalFloatRewritePlan(t, n.UnaryExpr.GetChild(), row, narrow)
+		return 2 - evalFloatRewritePlan(t, n.UnaryExpr.GetChild(), row)
 	case *planpb.Expr_BinaryExpr:
-		l := evalFloatRewritePlan(t, n.BinaryExpr.GetLeft(), row, narrow)
-		r := evalFloatRewritePlan(t, n.BinaryExpr.GetRight(), row, narrow)
+		l := evalFloatRewritePlan(t, n.BinaryExpr.GetLeft(), row)
+		r := evalFloatRewritePlan(t, n.BinaryExpr.GetRight(), row)
 		if n.BinaryExpr.GetOp() == planpb.BinaryExpr_LogicalAnd {
 			return min(l, r)
 		}
@@ -73,7 +79,7 @@ func evalFloatRewritePlan(t *testing.T, e *planpb.Expr, row *float64, narrow boo
 			return 1
 		}
 		for _, v := range n.TermExpr.GetValues() {
-			if *row == number(v) {
+			if *row == number(v, n.TermExpr.GetColumnInfo(), false) {
 				return 2
 			}
 		}
@@ -82,7 +88,7 @@ func evalFloatRewritePlan(t *testing.T, e *planpb.Expr, row *float64, narrow boo
 		if row == nil {
 			return 1
 		}
-		v := number(n.UnaryRangeExpr.GetValue())
+		v := number(n.UnaryRangeExpr.GetValue(), n.UnaryRangeExpr.GetColumnInfo(), true)
 		switch n.UnaryRangeExpr.GetOp() {
 		case planpb.OpType_Equal:
 			return truth(*row == v)
@@ -102,7 +108,7 @@ func evalFloatRewritePlan(t *testing.T, e *planpb.Expr, row *float64, narrow boo
 			return 1
 		}
 		r := n.BinaryRangeExpr
-		l, u := number(r.GetLowerValue()), number(r.GetUpperValue())
+		l, u := number(r.GetLowerValue(), r.GetColumnInfo(), false), number(r.GetUpperValue(), r.GetColumnInfo(), false)
 		return truth((*row > l || (*row == l && r.GetLowerInclusive())) && (*row < u || (*row == u && r.GetUpperInclusive())))
 	}
 	t.Fatalf("unsupported float oracle plan %s", e)
@@ -111,15 +117,13 @@ func evalFloatRewritePlan(t *testing.T, e *planpb.Expr, row *float64, narrow boo
 
 func TestRewriteFloat32AlgebraPreservesExecutorSemantics(t *testing.T) {
 	columns := []struct {
-		name   string
-		col    *planpb.ColumnInfo
-		narrow bool
+		name string
+		col  *planpb.ColumnInfo
 	}{
-		{"scalar_float", &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Float}, true},
-		{"element_float", &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float, IsElementLevel: true}, true},
-		{"fixed_array_index", &planpb.ColumnInfo{FieldId: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float, NestedPath: []string{"0"}}, false},
-		{"double", &planpb.ColumnInfo{FieldId: 103, DataType: schemapb.DataType_Double}, false},
-		{"json", &planpb.ColumnInfo{FieldId: 104, DataType: schemapb.DataType_JSON, NestedPath: []string{"n"}}, false},
+		{"scalar_float", &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Float}},
+		{"element_float", &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float, IsElementLevel: true}},
+		{"double", &planpb.ColumnInfo{FieldId: 103, DataType: schemapb.DataType_Double}},
+		{"json", &planpb.ColumnInfo{FieldId: 104, DataType: schemapb.DataType_JSON, NestedPath: []string{"n"}}},
 	}
 	for _, column := range columns {
 		for _, nullable := range []bool{false, true} {
@@ -159,19 +163,34 @@ func TestRewriteFloat32AlgebraPreservesExecutorSemantics(t *testing.T) {
 						rewritten := rewriter.RewriteExprWithConfig(proto.Clone(tc.expr).(*planpb.Expr), optimize)
 						rows := []float64{math.Copysign(0, -1), 0, 2, 3, 16777216, 16777218, 16777220, math.Inf(1), math.NaN()}
 						for _, r := range rows {
-							require.Equal(t, evalFloatRewritePlan(t, original, &r, column.narrow), evalFloatRewritePlan(t, rewritten, &r, column.narrow), "row %v; plan %s", r, rewritten)
+							require.Equal(t, evalFloatRewritePlan(t, original, &r), evalFloatRewritePlan(t, rewritten, &r), "row %v; plan %s", r, rewritten)
 						}
 						if nullable {
-							require.Equal(t, evalFloatRewritePlan(t, original, nil, column.narrow), evalFloatRewritePlan(t, rewritten, nil, column.narrow))
+							require.Equal(t, evalFloatRewritePlan(t, original, nil), evalFloatRewritePlan(t, rewritten, nil))
 							original = &planpb.Expr{Expr: &planpb.Expr_UnaryExpr{UnaryExpr: &planpb.UnaryExpr{Op: planpb.UnaryExpr_Not, Child: original}}}
 							rewritten = rewriter.RewriteExprWithConfig(&planpb.Expr{Expr: &planpb.Expr_UnaryExpr{UnaryExpr: &planpb.UnaryExpr{Op: planpb.UnaryExpr_Not, Child: rewritten}}}, optimize)
-							require.Equal(t, evalFloatRewritePlan(t, original, nil, column.narrow), evalFloatRewritePlan(t, rewritten, nil, column.narrow))
+							require.Equal(t, evalFloatRewritePlan(t, original, nil), evalFloatRewritePlan(t, rewritten, nil))
 						}
 					})
 				}
 			}
 		}
 	}
+}
+
+// Fixed ARRAY<FLOAT> access has mixed operator precision, so it cannot use a
+// single column-level precision flag or serve as an equivalence control for
+// scalar FLOAT rewrites.
+func TestFixedArrayFloatOperatorPrecision(t *testing.T) {
+	col := &planpb.ColumnInfo{FieldId: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float, NestedPath: []string{"0"}}
+	row := float64(16777216)
+	unary := edgeTestUnaryRange(col, planpb.OpType_GreaterEqual, edgeTestFloatValue(16777217))
+	term := edgeTestTerm(col, edgeTestFloatValue(16777217))
+	binary := edgeTestBinaryRange(col, edgeTestFloatValue(16777217), edgeTestFloatValue(16777220))
+	require.Equal(t, 2, evalFloatRewritePlan(t, unary, &row), "UnaryRange narrows 16777217 to 16777216")
+	require.Equal(t, 0, evalFloatRewritePlan(t, term, &row), "Term retains the double literal")
+	require.Equal(t, 0, evalFloatRewritePlan(t, binary, &row), "BinaryRange retains the double bounds")
+
 }
 
 func TestRewriteFloat32ParsedAndTemplateFilters(t *testing.T) {
@@ -193,7 +212,7 @@ func TestRewriteFloat32ParsedAndTemplateFilters(t *testing.T) {
 				e, err := parser.ParseExpr(helper, tc.filter, tc.values)
 				require.NoError(t, err)
 				row := float64(16777216)
-				require.Equal(t, tc.want, evalFloatRewritePlan(t, e, &row, true), "optimize=%t %s", optimize, tc.filter)
+				require.Equal(t, tc.want, evalFloatRewritePlan(t, e, &row), "optimize=%t %s", optimize, tc.filter)
 			}
 		}()
 	}

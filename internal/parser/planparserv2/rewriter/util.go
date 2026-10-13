@@ -43,8 +43,9 @@ func effectiveDataType(c *planpb.ColumnInfo) schemapb.DataType {
 	return dt
 }
 
-// Fixed ARRAY indices use double literals; scalar and element-level FLOAT
-// executors narrow them to float32 before comparing.
+// Scalar and element-level FLOAT executors narrow literals for all operators.
+// Fixed ARRAY<FLOAT> indices are excluded: UnaryRange narrows to float32, but
+// Term and BinaryRange use double, so their algebra needs an operator-aware policy.
 func usesFloat32Comparisons(col *planpb.ColumnInfo) bool {
 	return col.GetDataType() == schemapb.DataType_Float ||
 		(col.GetIsElementLevel() && effectiveDataType(col) == schemapb.DataType_Float)

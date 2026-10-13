@@ -46,7 +46,9 @@ func resolveEffectiveType(col *planpb.ColumnInfo) (schemapb.DataType, bool) {
 	if dt == schemapb.DataType_Array {
 		et := col.GetElementType()
 		if isSupportedScalarForRange(et) {
-			// Fixed ARRAY indices compare floating literals as double in segcore.
+			// Retain the existing fixed-array rewrite policy here. BinaryRange
+			// uses double bounds, while UnaryRange narrows FLOAT bounds; one
+			// column-level type cannot establish equivalence for both operators.
 			if et == schemapb.DataType_Float && !col.GetIsElementLevel() {
 				return schemapb.DataType_Double, true
 			}
