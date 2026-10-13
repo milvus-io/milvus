@@ -18,15 +18,18 @@
 
 #include <gtest/gtest.h>
 
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "index/Meta.h"
-#include "index/scalar/text/TextIndexLoader.h"
+#include "index/contracts/build/IReaderConvertible.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ITextMatchReader.h"
+#include "index/scalar/text/TextIndexBuilder.h"
+#include "index/scalar/text/TextIndexLoader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
 #include "tantivy-wrapper.h"
@@ -89,6 +92,60 @@ TEST(TextIndexArtifactTest, RamArtifactExplicitlyRejectsSerialization) {
                        [&] { artifact->Serialize(sink); });
     EXPECT_TRUE(persisted.entries.empty());
     EXPECT_TRUE(persisted.metadata.empty());
+}
+
+TEST(TextIndexArtifactTest, SingleRowSourcePreservesManyNullOffsets) {
+    constexpr size_t rows = 8192;
+    for (const bool all_null : {false, true}) {
+        SCOPED_TRACE(all_null);
+        const TextIndexBuildSource source{
+            .row_count = rows,
+            .produce = [&](const TextIndexBuildSource::ConsumeBatch& consume) {
+                for (size_t row = 0; row < rows; ++row) {
+                    const bool valid =
+                        !all_null &&
+                        (row == 0 || row == rows / 2 || row == rows - 1);
+                    const std::string_view value =
+                        row == rows - 1 ? "tailtoken" : "needle";
+                    consume(ScalarBuildBatch<std::string_view>{
+                        std::span<const std::string_view>(&value, 1),
+                        ValidityView::FromExpanded(&valid)});
+                }
+            }};
+        TextIndexBuildParams params{
+            .field_name = "body",
+            .unique_id = "many_null_rows",
+        };
+        auto artifact =
+            std::move(TextIndexBuilder(std::move(params))).Build(source);
+        auto reader = IReaderConvertible::FromArtifact(std::move(artifact));
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->Count(), rows);
+        const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+        const auto* text = dynamic_cast<const ITextMatchReader*>(reader.get());
+        ASSERT_NE(nulls, nullptr);
+        ASSERT_NE(text, nullptr);
+        const auto is_null = nulls->IsNull();
+        const auto is_not_null = nulls->IsNotNull();
+        const auto needle = text->MatchQuery("needle", 1);
+        const auto tail = text->MatchQuery("tailtoken", 1);
+        ASSERT_EQ(is_null.size(), rows);
+        ASSERT_EQ(is_not_null.size(), rows);
+        ASSERT_EQ(needle.size(), rows);
+        ASSERT_EQ(tail.size(), rows);
+        EXPECT_EQ(is_null.count(), all_null ? rows : rows - 3);
+        EXPECT_EQ(needle.count(), all_null ? 0 : 2);
+        EXPECT_EQ(tail.count(), all_null ? 0 : 1);
+        for (size_t row = 0; row < rows; ++row) {
+            const bool valid =
+                !all_null && (row == 0 || row == rows / 2 || row == rows - 1);
+            EXPECT_EQ(is_null[row], !valid) << row;
+            EXPECT_EQ(is_not_null[row], valid) << row;
+            EXPECT_EQ(needle[row], valid && (row == 0 || row == rows / 2))
+                << row;
+            EXPECT_EQ(tail[row], valid && row == rows - 1) << row;
+        }
+    }
 }
 
 TEST(TextIndexArtifactTest, V3PublishesFileInventoryAndNullState) {
