@@ -929,7 +929,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`common.arrow.cpuThreadPoolMaxCapacity when > 0. 0 uses CPU cores and ignores the cap. ` +
 			`Must be finite and nonnegative. Takes effect only at startup; requires a restart.`,
 		Forbidden: true,
-		Export:    true,
+		Export:    false,
 	}
 	p.ArrowCPUThreadPoolCoefficient.Init(base.mgr)
 
@@ -941,20 +941,20 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`0 disables the cap. Has no effect when common.arrow.cpuThreadPoolCoefficient is 0. ` +
 			`Must be a nonnegative int32. Takes effect only at startup; requires a restart.`,
 		Forbidden: true,
-		Export:    true,
+		Export:    false,
 	}
 	p.ArrowCPUThreadPoolMaxCapacity.Init(base.mgr)
 
 	p.ArrowIOThreadPoolCoefficient = ParamItem{
 		Key:          "common.arrow.ioThreadPoolCoefficient",
 		Version:      "3.0.0",
-		DefaultValue: "0",
+		DefaultValue: "1",
 		Doc: `Coefficient for the process-wide Arrow IO pool and shared storage Tokio blocking-thread limit. ` +
 			`Threads = max(1, CPU cores x coefficient), truncated to an integer and capped by ` +
 			`common.arrow.ioThreadPoolMaxCapacity when > 0. 0 uses 8 threads and ignores the cap. ` +
 			`Must be finite and nonnegative. Takes effect only at startup; requires a restart.`,
 		Forbidden: true,
-		Export:    true,
+		Export:    false,
 	}
 	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
 
@@ -966,7 +966,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`0 disables the cap. Has no effect when common.arrow.ioThreadPoolCoefficient is 0. ` +
 			`Must be a nonnegative int32. Takes effect only at startup; requires a restart.`,
 		Forbidden: true,
-		Export:    true,
+		Export:    false,
 	}
 	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
 
@@ -8929,7 +8929,7 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 			"records are still delivered in order. A chunk being read also fetches all byte ranges of its current round at once " +
 			"rather than one at a time; how far adjacent ranges are coalesced is left as configured (common.arrow.reader.*), so " +
 			"a sort issues the requests every other reader issues, only together. The requests actually in flight are capped by " +
-			"arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient, 8 threads by default). " +
+			"arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient, one thread per CPU core by default). " +
 			"Memory: a sort holds its whole decoded input regardless, so decoding chunks ahead adds nothing to its peak. Each " +
 			"chunk being read additionally holds the raw bytes of its current round, released when the round is replaced or the " +
 			"chunk is closed, so the read phase of one sort task adds up to this value times " +

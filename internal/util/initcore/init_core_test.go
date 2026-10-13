@@ -45,6 +45,7 @@ func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
 		want                           int
 		wantErr                        bool
 	}{
+		{name: "default", coefficient: "", maxCapacity: "0", want: hardware.GetCPUNum()},
 		{name: "negative", coefficient: "-1", maxCapacity: "1", wantErr: true},
 		{name: "negative_fraction", coefficient: "-0.5", maxCapacity: "1", wantErr: true},
 		{name: "nan", coefficient: "NaN", maxCapacity: "0", wantErr: true},
@@ -59,7 +60,11 @@ func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
 		{name: "positive_minimum", coefficient: "0.000001", maxCapacity: "0", want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, tc.coefficient))
+			if tc.coefficient == "" {
+				pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
+			} else {
+				assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, tc.coefficient))
+			}
 			assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, tc.maxCapacity))
 			got, err := ResolveArrowIOThreadPoolCapacity()
 			if tc.wantErr {
