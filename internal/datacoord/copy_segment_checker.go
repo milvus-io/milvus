@@ -85,6 +85,7 @@ type CopySegmentChecker interface {
 // This runs as a background service in DataCoord, checking all copy segment jobs
 // periodically and progressing them through their state machine.
 type copySegmentChecker struct {
+	compactions        CompactionInspector
 	collectionRestorer RestoreCollectionManager
 	ctx                context.Context     // Context for lifecycle management
 	meta               *meta               // Segment metadata for state updates
@@ -556,6 +557,13 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 //   - totalRows: Total row count across all copied segments
 func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
+	if job.(*copySegmentJob).GetCreatesCollection() {
+		ready, err := c.materializeRestoreDeletes(job)
+		if err != nil || !ready {
+			log.Warn(c.ctx, "waiting for restored delete materialization", mlog.Err(err))
+			return
+		}
+	}
 
 	// Step 1: Collect all target segment IDs from task ID mappings
 	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
@@ -571,6 +579,21 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	if len(targetSegmentIDs) > 0 {
 		for _, segID := range targetSegmentIDs {
 			segment := c.meta.GetSegment(c.ctx, segID)
+			if job.(*copySegmentJob).GetCreatesCollection() {
+				// L0 inputs have been retired by the materialization transaction.
+				// Never resurrect them while publishing the restored L1 bases.
+				if segment == nil {
+					flushFailures++
+					continue
+				}
+				if segment.GetLevel() == datapb.SegmentLevel_L0 {
+					continue // Retain the retirement proof until Job completion is durable.
+				}
+				if err := c.meta.UpdateSegmentsInfo(c.ctx, UpdateIsImporting(segID, false)); err != nil {
+					flushFailures++
+				}
+				continue
+			}
 			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
 				op := UpdateStatusOperator(segID, commonpb.SegmentState_Flushed)
 				if err := c.meta.UpdateSegmentsInfo(c.ctx, op); err != nil {
@@ -762,6 +785,17 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 	if job.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted &&
 		job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
 		return
+	}
+	if job.(*copySegmentJob).GetCreatesCollection() {
+		for _, mapping := range job.GetIdMappings() {
+			segment := c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId())
+			if segment != nil && segment.GetIsImporting() && segment.GetCompacted() {
+				if err := c.meta.UpdateSegmentsInfo(c.ctx, UpdateIsImporting(segment.GetID(), false)); err != nil {
+					mlog.Warn(c.ctx, "retrying restored L0 retirement cleanup", mlog.Err(err))
+					return
+				}
+			}
+		}
 	}
 
 	cleanupTime := tsoutil.PhysicalTime(job.GetCleanupTs())

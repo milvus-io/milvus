@@ -3154,54 +3154,42 @@ func Test_initGarbageCollection(t *testing.T) {
 }
 
 func TestLoadCollectionFromRootCoord(t *testing.T) {
-	broker := broker.NewMockBroker(t)
-	s := &Server{
-		broker: broker,
-		meta:   &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+	for _, tc := range []struct {
+		name          string
+		describeErr   error
+		partitionsErr error
+	}{
+		{name: "missing", describeErr: merr.ErrCollectionNotFound},
+		{name: "describe unavailable", describeErr: merr.ErrServiceUnavailable},
+		{name: "partition metadata unavailable", partitionsErr: merr.ErrServiceUnavailable},
+		{name: "restoring collection is internally loadable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockey.PatchConvey(tc.name, t, func() {
+				b := &broker.MockBroker{}
+				public := mockey.Mock((*broker.MockBroker).HasCollection).Return(false, nil).Build()
+				mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{
+					CollectionID: 1, VirtualChannelNames: []string{"target"},
+				}, tc.describeErr).Build()
+				mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).Return([]int64{2000}, tc.partitionsErr).Build()
+				s := &Server{broker: b, meta: &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}}
+				err := s.loadCollectionFromRootCoord(t.Context(), 1)
+				switch {
+				case tc.describeErr != nil:
+					assert.ErrorIs(t, err, tc.describeErr)
+				case tc.partitionsErr != nil:
+					assert.ErrorIs(t, err, tc.partitionsErr)
+				default:
+					assert.NoError(t, err)
+					coll, ok := s.meta.collections.Get(1)
+					assert.True(t, ok)
+					assert.Equal(t, []int64{2000}, coll.Partitions)
+					assert.Equal(t, []string{"target"}, coll.VChannelNames)
+				}
+				assert.Zero(t, public.Times(), "public visibility must not gate internal metadata loading")
+			})
+		})
 	}
-
-	t.Run("has collection fail with error", func(t *testing.T) {
-		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).
-			Return(false, errors.New("has collection error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err, "has collection error")
-	})
-
-	t.Run("has collection with not found", func(t *testing.T) {
-		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, merr.ErrCollectionNotFound))
-	})
-
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
-
-	t.Run("describeCollectionInternal fail", func(t *testing.T) {
-		broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("describeCollectionInternal error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err, "describeCollectionInternal error")
-	})
-
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionID: 1,
-	}, nil).Twice()
-
-	t.Run("ShowPartitionsInternal fail", func(t *testing.T) {
-		broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("ShowPartitionsInternal error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err, "ShowPartitionsInternal error")
-	})
-
-	broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil).Once()
-	t.Run("ok", func(t *testing.T) {
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, s.meta.collections.Len())
-		_, ok := s.meta.collections.Get(1)
-		assert.True(t, ok)
-	})
 }
 
 func TestUpdateAutoBalanceConfigLoop(t *testing.T) {

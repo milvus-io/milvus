@@ -398,6 +398,8 @@ func (s *Server) initDataCoord() (initErr error) {
 	)
 	snapshotManager.collectionRestorer = s.restoreCollectionManager
 	s.copySegmentChecker.(*copySegmentChecker).collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).compactions = s.compactionInspector
+	s.compactionInspector.(*compactionInspector).restoreJobs = s.copySegmentMeta
 	s.snapshotManager = snapshotManager
 	snapshotExportMeta, err := newSnapshotExportMeta(s.ctx, s.meta.catalog)
 	if err != nil {
@@ -1257,14 +1259,8 @@ func (s *Server) registerMetricsRequest() {
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
-	has, err := s.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	if !has {
-		return merr.WrapErrCollectionNotFound(collectionID)
-	}
-
+	// Internal metadata loading must include a Restoring collection. Public
+	// HasCollection hides it until its copy job publishes the restored data.
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return err

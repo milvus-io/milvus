@@ -1109,6 +1109,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			return nil
 		}
 		defer locks.Unlock(task.GetTaskId())
+		if current := copyMeta.GetTask(ctx, task.GetTaskId()); current != nil && current.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
+			return nil // A duplicate copy result must not overwrite materialized deletes.
+		}
 		// Even a late result rejected below owns files that need durable cleanup.
 		// Re-arming an already cleaned task is safe because prefix deletion is idempotent.
 		if err := copyMeta.UpdateTask(ctx, task.GetTaskId(), updateCopyTaskCleanup(true)); err != nil {
@@ -1144,6 +1147,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
+			if job := copyMeta.GetJob(ctx, task.GetJobId()); job != nil && job.(*copySegmentJob).GetCreatesCollection() {
+				op3 = UpdateIsImporting(result.GetSegmentId(), true)
+			}
 			operators := []UpdateOperator{op1, op2, op3}
 			// A copy target is a freshly created, exclusively owned segment and the
 			// worker returns a complete manifest pointer - including the copied

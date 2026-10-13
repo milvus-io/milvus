@@ -2773,5 +2773,6 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 1, len(snapshotData.Segments), "segment with commit_ts=5000 must appear at snapshotTs=6000")
 		assert.Equal(t, int64(999), snapshotData.Segments[0].SegmentId)
+		assert.Equal(t, uint64(5000), snapshotData.Segments[0].GetCommitTimestamp())
 	})
 }

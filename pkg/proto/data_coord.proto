@@ -1494,6 +1494,8 @@ message CopySegmentJob {
   // The RestoreSnapshot broadcast also creates this target collection.
   bool creates_collection = 24;
   map<string, string> channel_mapping = 25; // Source -> target channels for idempotent segment registration.
+  // Stable plan identities for restore-owned L0 materialization, keyed by channel/partition.
+  map<string, int64> restore_compaction_plans = 26;
 }
 
 message ImportJob {
@@ -1665,6 +1667,11 @@ message CompactionTask{
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
   uint64 create_ts = 30;
+  // Nonzero only for L0 materialization before a restored collection is published.
+  int64 restore_job_id = 31;
+  repeated int64 restore_target_segments = 32;
+  // Retained through task cleanup so the restore owner can prove completion.
+  bool restore_completed = 33;
 }
 
 message PartitionStatsInfo {
