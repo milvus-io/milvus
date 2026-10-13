@@ -14,8 +14,9 @@ message Manifest {
   string vchannel = 2;
   // Increases by 1 on every committed edit.
   int64 version = 3;
-  // The highest pchannel term (PChannelInfo.term) seen by this manifest.
-  int64 pchannel_term = 4;
+  // The pchannel term (PChannelInfo.term) of the last flush that changed
+  // this manifest. It is 0 before the first flush.
+  int64 last_flush_term = 4;
   schema.DataType pk_data_type = 5;
   // The SSTs hold the effects of all WAL messages with a time tick at or
   // below this value.
@@ -46,25 +47,32 @@ message ManifestPointer {
   string body_key = 2;
 }
 
-message ClaimManifestRequest {
-  int64 collection_id = 1;
-  string vchannel = 2;
-  int64 pchannel_term = 3;
-  schema.DataType pk_data_type = 4;
+// PChannelClaim is the etcd value of the claim record of one pchannel.
+message PChannelClaim {
+  // The pchannel term (PChannelInfo.term) of the current owner.
+  int64 pchannel_term = 1;
 }
 
-message ClaimManifestResponse {
+message ClaimPChannelRequest {
+  string pchannel = 1;
+  int64 pchannel_term = 2;
+}
+
+message ClaimPChannelResponse {
   common.Status status = 1;
-  Manifest manifest = 2;
 }
 
 message CommitFlushRequest {
   int64 collection_id = 1;
+  // The pchannel of the flush is the pchannel of this vchannel name.
   string vchannel = 2;
   int64 pchannel_term = 3;
   // Newest first.
   repeated SSTRef add_ssts = 4;
   uint64 checkpoint_time_tick = 5;
+  // Used when the flush creates the first version of the manifest. It must
+  // equal the pk_data_type of an existing manifest.
+  schema.DataType pk_data_type = 6;
 }
 
 message CommitFlushResponse {
@@ -73,19 +81,35 @@ message CommitFlushResponse {
   Manifest manifest = 2;
 }
 
-message GetManifestRequest {
+// ManifestTarget names the manifest of one vchannel.
+message ManifestTarget {
   int64 collection_id = 1;
   string vchannel = 2;
 }
 
-message GetManifestResponse {
+message GetRecoveryManifestsRequest {
+  // At most 10000 targets, without duplicates.
+  repeated ManifestTarget targets = 1;
+}
+
+// ManifestPointerEntry is the result for one ManifestTarget.
+message ManifestPointerEntry {
+  // The result of this target. found and pointer are set only on success.
   common.Status status = 1;
   bool found = 2;
-  Manifest manifest = 3;
+  ManifestPointer pointer = 3;
+}
+
+message GetRecoveryManifestsResponse {
+  common.Status status = 1;
+  // One entry per target, in the order of the targets.
+  repeated ManifestPointerEntry entries = 2;
 }
 
 service PKIndexCoordService {
-  rpc ClaimManifest(ClaimManifestRequest) returns (ClaimManifestResponse) {}
+  rpc ClaimPChannel(ClaimPChannelRequest) returns (ClaimPChannelResponse) {}
   rpc CommitFlush(CommitFlushRequest) returns (CommitFlushResponse) {}
-  rpc GetManifest(GetManifestRequest) returns (GetManifestResponse) {}
+  // Returns the manifest pointer of each vchannel; the caller reads the body
+  // from object storage.
+  rpc GetRecoveryManifests(GetRecoveryManifestsRequest) returns (GetRecoveryManifestsResponse) {}
 }

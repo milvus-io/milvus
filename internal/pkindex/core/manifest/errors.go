@@ -19,12 +19,15 @@ package manifest
 import "github.com/cockroachdb/errors"
 
 var (
-	// ErrFenced reports an edit from a pchannel term below the manifest term.
-	ErrFenced = errors.New("pchannel term is below the manifest term")
-	// ErrNotClaimed reports an edit on a vchannel that has no manifest.
-	ErrNotClaimed = errors.New("manifest is not claimed")
-	// ErrCheckpointRegressed reports a flush from a pchannel term above the
-	// manifest term whose checkpoint is not after the manifest checkpoint.
+	// ErrFenced reports a claim or a flush from a pchannel term below the
+	// term of the pchannel claim record.
+	ErrFenced = errors.New("pchannel term is below the claimed term")
+	// ErrNotClaimed reports a flush from a pchannel term that is not the term
+	// of the pchannel claim record because the claim record is missing or
+	// lower, and a compaction on a vchannel that has no manifest.
+	ErrNotClaimed = errors.New("pchannel or manifest is not claimed")
+	// ErrCheckpointRegressed reports a flush whose checkpoint is not after
+	// the manifest checkpoint and whose term is not the last flush term.
 	ErrCheckpointRegressed = errors.New("checkpoint time tick does not move forward")
 	// ErrDuplicateSST reports an edit that adds an SST ID the manifest already
 	// has, or that lists the same SST ID twice.

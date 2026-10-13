@@ -22,61 +22,49 @@ func (_m *MockClient) EXPECT() *MockClient_Expecter {
 	return &MockClient_Expecter{mock: &_m.Mock}
 }
 
-// ClaimManifest provides a mock function with given fields: ctx, req
-func (_m *MockClient) ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifestRequest) (*pkindexpb.Manifest, error) {
+// ClaimPChannel provides a mock function with given fields: ctx, req
+func (_m *MockClient) ClaimPChannel(ctx context.Context, req *pkindexpb.ClaimPChannelRequest) error {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ClaimManifest")
+		panic("no return value specified for ClaimPChannel")
 	}
 
-	var r0 *pkindexpb.Manifest
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *pkindexpb.ClaimManifestRequest) (*pkindexpb.Manifest, error)); ok {
-		return rf(ctx, req)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *pkindexpb.ClaimManifestRequest) *pkindexpb.Manifest); ok {
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *pkindexpb.ClaimPChannelRequest) error); ok {
 		r0 = rf(ctx, req)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*pkindexpb.Manifest)
-		}
+		r0 = ret.Error(0)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *pkindexpb.ClaimManifestRequest) error); ok {
-		r1 = rf(ctx, req)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
-// MockClient_ClaimManifest_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClaimManifest'
-type MockClient_ClaimManifest_Call struct {
+// MockClient_ClaimPChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClaimPChannel'
+type MockClient_ClaimPChannel_Call struct {
 	*mock.Call
 }
 
-// ClaimManifest is a helper method to define mock.On call
+// ClaimPChannel is a helper method to define mock.On call
 //   - ctx context.Context
-//   - req *pkindexpb.ClaimManifestRequest
-func (_e *MockClient_Expecter) ClaimManifest(ctx interface{}, req interface{}) *MockClient_ClaimManifest_Call {
-	return &MockClient_ClaimManifest_Call{Call: _e.mock.On("ClaimManifest", ctx, req)}
+//   - req *pkindexpb.ClaimPChannelRequest
+func (_e *MockClient_Expecter) ClaimPChannel(ctx interface{}, req interface{}) *MockClient_ClaimPChannel_Call {
+	return &MockClient_ClaimPChannel_Call{Call: _e.mock.On("ClaimPChannel", ctx, req)}
 }
 
-func (_c *MockClient_ClaimManifest_Call) Run(run func(ctx context.Context, req *pkindexpb.ClaimManifestRequest)) *MockClient_ClaimManifest_Call {
+func (_c *MockClient_ClaimPChannel_Call) Run(run func(ctx context.Context, req *pkindexpb.ClaimPChannelRequest)) *MockClient_ClaimPChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*pkindexpb.ClaimManifestRequest))
+		run(args[0].(context.Context), args[1].(*pkindexpb.ClaimPChannelRequest))
 	})
 	return _c
 }
 
-func (_c *MockClient_ClaimManifest_Call) Return(_a0 *pkindexpb.Manifest, _a1 error) *MockClient_ClaimManifest_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockClient_ClaimPChannel_Call) Return(_a0 error) *MockClient_ClaimPChannel_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockClient_ClaimManifest_Call) RunAndReturn(run func(context.Context, *pkindexpb.ClaimManifestRequest) (*pkindexpb.Manifest, error)) *MockClient_ClaimManifest_Call {
+func (_c *MockClient_ClaimPChannel_Call) RunAndReturn(run func(context.Context, *pkindexpb.ClaimPChannelRequest) error) *MockClient_ClaimPChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -172,68 +160,61 @@ func (_c *MockClient_CommitFlush_Call) RunAndReturn(run func(context.Context, *p
 	return _c
 }
 
-// GetManifest provides a mock function with given fields: ctx, req
-func (_m *MockClient) GetManifest(ctx context.Context, req *pkindexpb.GetManifestRequest) (*pkindexpb.Manifest, bool, error) {
+// GetRecoveryManifests provides a mock function with given fields: ctx, req
+func (_m *MockClient) GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error) {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetManifest")
+		panic("no return value specified for GetRecoveryManifests")
 	}
 
-	var r0 *pkindexpb.Manifest
-	var r1 bool
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, *pkindexpb.GetManifestRequest) (*pkindexpb.Manifest, bool, error)); ok {
+	var r0 []*pkindexpb.ManifestPointerEntry
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error)); ok {
 		return rf(ctx, req)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *pkindexpb.GetManifestRequest) *pkindexpb.Manifest); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *pkindexpb.GetRecoveryManifestsRequest) []*pkindexpb.ManifestPointerEntry); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*pkindexpb.Manifest)
+			r0 = ret.Get(0).([]*pkindexpb.ManifestPointerEntry)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *pkindexpb.GetManifestRequest) bool); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *pkindexpb.GetRecoveryManifestsRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
-		r1 = ret.Get(1).(bool)
+		r1 = ret.Error(1)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, *pkindexpb.GetManifestRequest) error); ok {
-		r2 = rf(ctx, req)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
-// MockClient_GetManifest_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetManifest'
-type MockClient_GetManifest_Call struct {
+// MockClient_GetRecoveryManifests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRecoveryManifests'
+type MockClient_GetRecoveryManifests_Call struct {
 	*mock.Call
 }
 
-// GetManifest is a helper method to define mock.On call
+// GetRecoveryManifests is a helper method to define mock.On call
 //   - ctx context.Context
-//   - req *pkindexpb.GetManifestRequest
-func (_e *MockClient_Expecter) GetManifest(ctx interface{}, req interface{}) *MockClient_GetManifest_Call {
-	return &MockClient_GetManifest_Call{Call: _e.mock.On("GetManifest", ctx, req)}
+//   - req *pkindexpb.GetRecoveryManifestsRequest
+func (_e *MockClient_Expecter) GetRecoveryManifests(ctx interface{}, req interface{}) *MockClient_GetRecoveryManifests_Call {
+	return &MockClient_GetRecoveryManifests_Call{Call: _e.mock.On("GetRecoveryManifests", ctx, req)}
 }
 
-func (_c *MockClient_GetManifest_Call) Run(run func(ctx context.Context, req *pkindexpb.GetManifestRequest)) *MockClient_GetManifest_Call {
+func (_c *MockClient_GetRecoveryManifests_Call) Run(run func(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest)) *MockClient_GetRecoveryManifests_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*pkindexpb.GetManifestRequest))
+		run(args[0].(context.Context), args[1].(*pkindexpb.GetRecoveryManifestsRequest))
 	})
 	return _c
 }
 
-func (_c *MockClient_GetManifest_Call) Return(_a0 *pkindexpb.Manifest, _a1 bool, _a2 error) *MockClient_GetManifest_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *MockClient_GetRecoveryManifests_Call) Return(_a0 []*pkindexpb.ManifestPointerEntry, _a1 error) *MockClient_GetRecoveryManifests_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockClient_GetManifest_Call) RunAndReturn(run func(context.Context, *pkindexpb.GetManifestRequest) (*pkindexpb.Manifest, bool, error)) *MockClient_GetManifest_Call {
+func (_c *MockClient_GetRecoveryManifests_Call) RunAndReturn(run func(context.Context, *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error)) *MockClient_GetRecoveryManifests_Call {
 	_c.Call.Return(run)
 	return _c
 }

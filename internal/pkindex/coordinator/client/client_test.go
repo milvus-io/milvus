@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -43,18 +44,19 @@ func (s *fakeService) GetService(context.Context) (pkindexpb.PKIndexCoordService
 	return s.svc, s.err
 }
 
-// fakeCoordClient returns the configured status with a fixed manifest.
+// fakeCoordClient returns the configured status with a fixed manifest and one
+// pointer entry.
 type fakeCoordClient struct {
 	pkindexpb.PKIndexCoordServiceClient
 	status *commonpb.Status
 	err    error
 }
 
-func (f *fakeCoordClient) ClaimManifest(context.Context, *pkindexpb.ClaimManifestRequest, ...grpc.CallOption) (*pkindexpb.ClaimManifestResponse, error) {
+func (f *fakeCoordClient) ClaimPChannel(context.Context, *pkindexpb.ClaimPChannelRequest, ...grpc.CallOption) (*pkindexpb.ClaimPChannelResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &pkindexpb.ClaimManifestResponse{Status: f.status, Manifest: &pkindexpb.Manifest{}}, nil
+	return &pkindexpb.ClaimPChannelResponse{Status: f.status}, nil
 }
 
 func (f *fakeCoordClient) CommitFlush(context.Context, *pkindexpb.CommitFlushRequest, ...grpc.CallOption) (*pkindexpb.CommitFlushResponse, error) {
@@ -64,11 +66,13 @@ func (f *fakeCoordClient) CommitFlush(context.Context, *pkindexpb.CommitFlushReq
 	return &pkindexpb.CommitFlushResponse{Status: f.status, Manifest: &pkindexpb.Manifest{}}, nil
 }
 
-func (f *fakeCoordClient) GetManifest(context.Context, *pkindexpb.GetManifestRequest, ...grpc.CallOption) (*pkindexpb.GetManifestResponse, error) {
+func (f *fakeCoordClient) GetRecoveryManifests(context.Context, *pkindexpb.GetRecoveryManifestsRequest, ...grpc.CallOption) (*pkindexpb.GetRecoveryManifestsResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &pkindexpb.GetManifestResponse{Status: f.status, Manifest: &pkindexpb.Manifest{}, Found: true}, nil
+	return &pkindexpb.GetRecoveryManifestsResponse{Status: f.status, Entries: []*pkindexpb.ManifestPointerEntry{
+		{Status: merr.Success(), Found: true, Pointer: &pkindexpb.ManifestPointer{Version: 1, BodyKey: "b"}},
+	}}, nil
 }
 
 func newTestClient(f *fakeCoordClient) *client {
@@ -79,18 +83,16 @@ func TestClientSuccess(t *testing.T) {
 	c := newTestClient(&fakeCoordClient{status: merr.Success()})
 	ctx := context.Background()
 
-	m, err := c.ClaimManifest(ctx, &pkindexpb.ClaimManifestRequest{})
+	assert.NoError(t, c.ClaimPChannel(ctx, &pkindexpb.ClaimPChannelRequest{}))
+
+	m, err := c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 
-	m, err = c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
+	entries, err := c.GetRecoveryManifests(ctx, &pkindexpb.GetRecoveryManifestsRequest{})
 	assert.NoError(t, err)
-	assert.NotNil(t, m)
-
-	m, found, err := c.GetManifest(ctx, &pkindexpb.GetManifestRequest{})
-	assert.NoError(t, err)
-	assert.NotNil(t, m)
-	assert.True(t, found)
+	require.Len(t, entries, 1)
+	assert.True(t, entries[0].GetFound())
 }
 
 func TestClientErrorStatus(t *testing.T) {
@@ -106,34 +108,31 @@ func TestClientErrorStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newTestClient(&fakeCoordClient{status: merr.Status(tc.err)})
 
-			m, err := c.ClaimManifest(ctx, &pkindexpb.ClaimManifestRequest{})
+			assert.ErrorIs(t, c.ClaimPChannel(ctx, &pkindexpb.ClaimPChannelRequest{}), tc.err)
+
+			m, err := c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
 			assert.ErrorIs(t, err, tc.err)
 			assert.Nil(t, m)
 
-			m, err = c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
+			entries, err := c.GetRecoveryManifests(ctx, &pkindexpb.GetRecoveryManifestsRequest{})
 			assert.ErrorIs(t, err, tc.err)
-			assert.Nil(t, m)
-
-			m, found, err := c.GetManifest(ctx, &pkindexpb.GetManifestRequest{})
-			assert.ErrorIs(t, err, tc.err)
-			assert.Nil(t, m)
-			assert.False(t, found)
+			assert.Nil(t, entries)
 		})
 	}
 }
 
 func TestClientTransportError(t *testing.T) {
 	c := newTestClient(&fakeCoordClient{err: merr.ErrServiceUnavailable})
-	_, err := c.ClaimManifest(context.Background(), &pkindexpb.ClaimManifestRequest{})
+	err := c.ClaimPChannel(context.Background(), &pkindexpb.ClaimPChannelRequest{})
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
 
 // callAll calls the three methods and returns their errors.
 func callAll(c *client) []error {
 	ctx := context.Background()
-	_, e1 := c.ClaimManifest(ctx, &pkindexpb.ClaimManifestRequest{})
+	e1 := c.ClaimPChannel(ctx, &pkindexpb.ClaimPChannelRequest{})
 	_, e2 := c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
-	_, _, e3 := c.GetManifest(ctx, &pkindexpb.GetManifestRequest{})
+	_, e3 := c.GetRecoveryManifests(ctx, &pkindexpb.GetRecoveryManifestsRequest{})
 	return []error{e1, e2, e3}
 }
 
