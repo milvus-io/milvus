@@ -1,0 +1,328 @@
+/*
+ * Licensed to the LF AI & Data foundation under one
+ * or more contributor license agreements. See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership. The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ddl
+
+import (
+	"context"
+
+	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+type ImportTask struct {
+	baseTask
+	Condition
+	req      *internalpb.ImportRequest
+	ctx      context.Context
+	node     taskmodel.TaskNode
+	mixCoord types.MixCoordClient
+
+	msgID        UniqueID
+	taskTS       Timestamp
+	vchannels    []string
+	pchannels    []string
+	partitionIDs []int64
+	collectionID UniqueID
+	schema       *schemaInfo
+	rlsPrincipal string
+	skipRLS      bool // set only after the request-scoped bypass is authorized
+	resp         *internalpb.ImportResponse
+}
+
+func (it *ImportTask) TraceCtx() context.Context {
+	return it.ctx
+}
+
+func (it *ImportTask) ID() UniqueID {
+	return it.msgID
+}
+
+func (it *ImportTask) SetID(uid UniqueID) {
+	it.msgID = uid
+}
+
+func (it *ImportTask) Name() string {
+	return "ImportTask"
+}
+
+func (it *ImportTask) Type() commonpb.MsgType {
+	return commonpb.MsgType_Import
+}
+
+func (it *ImportTask) BeginTs() Timestamp {
+	return it.taskTS
+}
+
+func (it *ImportTask) EndTs() Timestamp {
+	return it.taskTS
+}
+
+func (it *ImportTask) SetTs(ts Timestamp) {
+	it.taskTS = ts
+}
+
+func (it *ImportTask) OnEnqueue() error {
+	return nil
+}
+
+func (it *ImportTask) PreExecute(ctx context.Context) error {
+	req := it.req
+	node := it.node
+
+	// Before any option is read, including the isBackup/isL0Import decision that
+	// selects the privilege gate below. Datacoord re-checks this; refusing here
+	// too keeps the rejection at the API boundary where the caller can see it.
+	if err := importutilv2.ValidateNoDuplicateKeys(req.GetOptions()); err != nil {
+		return err
+	}
+	rlsPrincipal, requestedSkipRLS, err := importutilv2.GetRLSOptions(req.GetOptions())
+	if err != nil {
+		return err
+	}
+
+	collectionID, err := it.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	it.collectionID = collectionID
+	colInfo, err := it.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), collectionID)
+	if err != nil {
+		return err
+	}
+	if colInfo == nil || colInfo.Schema == nil || colInfo.Schema.CollectionSchema == nil {
+		return merr.WrapErrImportSysFailed("collection schema is unavailable")
+	}
+	canonicalDBName := colInfo.DBName
+	if canonicalDBName == "" {
+		canonicalDBName = req.GetDbName()
+	}
+	canonicalCollectionName := colInfo.Schema.GetName()
+	req.DbName = canonicalDBName
+	req.CollectionName = canonicalCollectionName
+
+	rlsEnabled := colInfo.RlsEnabled
+	// Keep this before skip authorization: an old DataCoord cannot re-check a
+	// concurrent rls.force transition before it creates the import job.
+	if rlsEnabled && !paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
+		return merr.WrapErrServiceUnavailable("RLS import enforcement is unavailable until the cluster upgrade completes")
+	}
+	if rlsEnabled && requestedSkipRLS {
+		rlsEnabled, err = node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, requestedSkipRLS,
+			canonicalDBName, canonicalCollectionName, "import")
+		if err != nil {
+			return err
+		}
+		it.skipRLS = !rlsEnabled
+	}
+	it.rlsPrincipal, _, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, rlsPrincipal, "import")
+	if err != nil {
+		return err
+	}
+
+	schema := colInfo.Schema
+	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
+		return merr.WrapErrImportSysFailed("collection schema has no fields")
+	}
+	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
+		return err
+	}
+	it.schema = schema
+
+	channels, err := node.ChMgr().GetVChannels(collectionID)
+	if err != nil {
+		return err
+	}
+	it.vchannels = channels
+
+	isBackup := importutilv2.IsBackup(req.GetOptions())
+	isL0Import := importutilv2.IsL0Import(req.GetOptions())
+
+	// A binlog or L0 import reads Milvus's own internal storage layout, which
+	// lies outside the target collection's namespace. The collection-level
+	// Import privilege that authorized this RPC does not cover that, so require
+	// a cluster-level privilege on top.
+	if isBackup || isL0Import {
+		if err := node.CheckClusterPrivilege(ctx, req,
+			milvuspb.MilvusService_Import_FullMethodName,
+			commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()); err != nil {
+			return err
+		}
+	}
+
+	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
+
+	var partitionIDs []int64
+	if isBackup {
+		if req.GetPartitionName() == "" {
+			return merr.WrapErrParameterMissingMsg("partition not specified")
+		}
+		// Currently, Backup tool call import must with a partition name, each time restore a partition
+		partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
+		if err != nil {
+			return err
+		}
+		partitionIDs = []UniqueID{partitionID}
+	} else if isL0Import {
+		if req.GetPartitionName() == "" {
+			partitionIDs = []UniqueID{common.AllPartitionsID}
+		} else {
+			partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
+			if err != nil {
+				return err
+			}
+			partitionIDs = []UniqueID{partitionID}
+		}
+		// Currently, querynodes first load L0 segments and then load L1 segments.
+		// Therefore, to ensure the deletes from L0 import take effect,
+		// the collection needs to be in an unloaded state,
+		// and then all L0 and L1 segments should be loaded at once.
+		// We will remove this restriction after querynode supported to load L0 segments dynamically.
+		loaded, err := isCollectionLoaded(ctx, node.MixCoord(), collectionID)
+		if err != nil {
+			return err
+		}
+		if loaded {
+			return merr.WrapErrImportFailed("for l0 import, collection cannot be loaded, please release it first")
+		}
+	} else {
+		if hasPartitionKey {
+			if req.GetPartitionName() != "" {
+				return merr.WrapErrImportFailed("not allow to set partition name for collection with partition key")
+			}
+			partitions, err := it.GetMetaCache().GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
+			if err != nil {
+				return err
+			}
+			_, partitionIDs, err = typeutil.RearrangePartitionsForPartitionKey(partitions)
+			if err != nil {
+				return err
+			}
+		} else {
+			if req.GetPartitionName() == "" {
+				req.PartitionName = paramtable.Get().CommonCfg.DefaultPartitionName.GetValue()
+			}
+			partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
+			if err != nil {
+				return err
+			}
+			partitionIDs = []UniqueID{partitionID}
+		}
+	}
+
+	req.Files = lo.Filter(req.GetFiles(), func(file *internalpb.ImportFile, _ int) bool {
+		return len(file.GetPaths()) > 0
+	})
+	if len(req.Files) == 0 {
+		return merr.WrapErrParameterInvalidMsg("import request is empty")
+	}
+	if len(req.Files) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
+		return merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
+			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))
+	}
+	if !isBackup && !isL0Import {
+		// check file type
+		for _, file := range req.GetFiles() {
+			_, err = importutilv2.GetFileType(file)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	it.partitionIDs = partitionIDs
+	return nil
+}
+
+func (it *ImportTask) SetChannels() error {
+	// import task only send message by broadcast, which didn't affect the time tick rule at proxy.
+	// so we don't need to set channels here.
+	return nil
+}
+
+func (it *ImportTask) GetChannels() []pChan {
+	return nil
+}
+
+func (it *ImportTask) Execute(ctx context.Context) error {
+	// Call DataCoord's Import method directly instead of broadcasting
+	// DataCoord will handle validation, broadcasting, and job creation
+
+	// Get database ID from database name
+	dbInfo, err := it.GetMetaCache().GetDatabaseInfo(ctx, it.req.GetDbName())
+	if err != nil {
+		mlog.Warn(ctx, "failed to get database info", mlog.FieldDbName(it.req.GetDbName()), mlog.Err(err))
+		return err
+	}
+
+	importReq := &internalpb.ImportRequestInternal{
+		DbID:           dbInfo.DBID,
+		CollectionID:   it.collectionID,
+		CollectionName: it.req.GetCollectionName(),
+		PartitionIDs:   it.partitionIDs,
+		ChannelNames:   it.vchannels,
+		Schema:         it.schema.CollectionSchema,
+		Files:          it.req.GetFiles(),
+		Options:        it.req.GetOptions(),
+		DataTimestamp:  0, // DO NOT set - used to differentiate proxy call from ack callback
+		JobID:          0, // Let DataCoord allocate
+		RlsPrincipal:   it.rlsPrincipal,
+		SkipRls:        it.skipRLS,
+	}
+
+	resp, err := it.mixCoord.ImportV2(ctx, importReq)
+	if err != nil {
+		mlog.Warn(ctx, "import request to datacoord failed", mlog.Err(err))
+		return err
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		err = merr.Error(resp.GetStatus())
+		mlog.Warn(ctx, "import request rejected by datacoord", mlog.Err(err))
+		return err
+	}
+	mlog.Info(ctx, "import request sent to datacoord successfully",
+		mlog.String("jobID", resp.GetJobID()),
+	)
+	it.resp.JobID = resp.GetJobID()
+	return nil
+}
+
+func GetImportFiles(internals []*internalpb.ImportFile) []*msgpb.ImportFile {
+	return lo.Map(internals, func(internal *internalpb.ImportFile, _ int) *msgpb.ImportFile {
+		return &msgpb.ImportFile{
+			Id:    internal.GetId(),
+			Paths: internal.GetPaths(),
+		}
+	})
+}
+
+func (it *ImportTask) PostExecute(ctx context.Context) error {
+	return nil
+}

@@ -30,7 +30,6 @@
 #include "common/protobuf_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "gtest/gtest.h"
-#include "index/NgramInvertedIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "query/Utils.h"
 #include "segcore/AckResponder.h"

@@ -66,12 +66,8 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/IndexFactory.h"
-#include "index/IndexInfo.h"
-#include "index/JsonFlatIndex.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/Meta.h"
-#include "index/ScalarIndex.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -103,6 +99,7 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
+using namespace milvus::test::consumer;
 using namespace milvus::segcore::storagev1translator;
 
 namespace {
@@ -210,96 +207,6 @@ LazyManifestTestGroupPattern(const SchemaPtr& schema) {
     return user_fields.empty() ? other_groups.substr(1)
                                : user_fields + other_groups;
 }
-
-class RawLookupOnlyIndex : public index::ScalarIndex<int64_t> {
- public:
-    RawLookupOnlyIndex() : index::ScalarIndex<int64_t>("raw_lookup_only") {
-    }
-
-    index::ScalarIndexType
-    GetIndexType() const override {
-        return index::ScalarIndexType::STLSORT;
-    }
-
-    void
-    Build(size_t, const int64_t*, const bool* = nullptr) override {
-    }
-
-    const TargetBitmap
-    In(size_t, const int64_t*) override {
-        return {};
-    }
-
-    const TargetBitmap
-    NotIn(size_t, const int64_t*) override {
-        return {};
-    }
-
-    const TargetBitmap
-    IsNull() override {
-        return {};
-    }
-
-    TargetBitmap
-    IsNotNull() override {
-        return {};
-    }
-
-    const TargetBitmap
-    Range(const int64_t&, OpType) override {
-        return {};
-    }
-
-    const TargetBitmap
-    Range(const int64_t&, bool, const int64_t&, bool) override {
-        return {};
-    }
-
-    std::optional<int64_t>
-    Reverse_Lookup(size_t offset) const override {
-        last_lookup_offset = offset;
-        return static_cast<int64_t>(offset);
-    }
-
-    void
-    Build(const Config& = {}) override {
-    }
-
-    BinarySet
-    Serialize(const Config& = {}) override {
-        return {};
-    }
-
-    void
-    Load(const BinarySet&, const Config& = {}) override {
-    }
-
-    void
-    Load(milvus::tracer::TraceContext, const Config& = {}) override {
-    }
-
-    int64_t
-    Count() override {
-        return 0;
-    }
-
-    int64_t
-    Size() override {
-        return 0;
-    }
-
-    index::IndexStatsPtr
-    Upload(const Config& = {}) override {
-        return nullptr;
-    }
-
-    const bool
-    HasRawData() const override {
-        return true;
-    }
-
-    mutable size_t last_lookup_offset = 0;
-};
 
 class StorageV2CellTargetGuard {
  public:
@@ -688,78 +595,27 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     void
     LoadInt64ScalarIndex(const std::string& index_type) {
         auto fid = fields.at("int64");
-        auto file_manager_ctx = storage::FileManagerContext();
-        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-            milvus::proto::schema::Int64);
-        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
-        file_manager_ctx.fieldDataMeta.field_id = fid.get();
-        milvus::storage::IndexMeta index_meta;
-        index_meta.field_id = fid.get();
-        index_meta.build_id = 1000 + fid.get();
-        index_meta.index_version = 2000 + fid.get();
-        file_manager_ctx.indexMeta = index_meta;
-
-        index::CreateIndexInfo create_index_info;
-        create_index_info.field_type = milvus::DataType::INT64;
-        create_index_info.index_type = index_type;
-        auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
-            create_index_info, file_manager_ctx);
-
         std::vector<int64_t> data(RowCount());
         std::iota(data.begin(), data.end(), 0);
-        index->BuildWithRawDataForUT(data.size(), data.data());
-
-        segcore::LoadIndexInfo load_index_info;
-        load_index_info.index_params = GenIndexParams(index.get());
-        load_index_info.cache_index =
-            CreateTestCacheIndex("int64_scalar_index", std::move(index));
-        load_index_info.field_id = fid.get();
+        auto opened = BuildScalarReader<int64_t>(
+            fid, DataType::INT64, index_type, data.size(), data.data());
+        auto load_index_info =
+            MakeLoadIndexInfo(std::move(opened), DataType::INT64, fid.get());
         segment->LoadIndex(load_index_info);
     }
 
     void
     LoadString1ScalarIndex(const std::string& index_type) {
         auto fid = fields.at("string1");
-        auto file_manager_ctx = storage::FileManagerContext();
-        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-            milvus::proto::schema::VarChar);
-        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
-        file_manager_ctx.fieldDataMeta.field_id = fid.get();
-        milvus::storage::IndexMeta index_meta;
-        index_meta.field_id = fid.get();
-        index_meta.build_id = 1000 + fid.get();
-        index_meta.index_version = 2000 + fid.get();
-        file_manager_ctx.indexMeta = index_meta;
-
-        index::CreateIndexInfo create_index_info;
-        create_index_info.field_type = milvus::DataType::VARCHAR;
-        create_index_info.index_type = index_type;
-        auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
-            create_index_info, file_manager_ctx);
-
         std::vector<std::string> data;
         data.reserve(RowCount());
         for (int64_t i = 0; i < RowCount(); ++i) {
             data.push_back("test" + std::to_string(i));
         }
-        if (index_type == index::MARISA_TRIE) {
-            // MARISA inherits the protobuf-based string UT builder; the
-            // inverted index overload accepts std::string objects directly.
-            proto::schema::StringArray values;
-            for (const auto& value : data) {
-                values.add_data(value);
-            }
-            const auto serialized = values.SerializeAsString();
-            index->BuildWithRawDataForUT(serialized.size(), serialized.data());
-        } else {
-            index->BuildWithRawDataForUT(data.size(), data.data());
-        }
-
-        segcore::LoadIndexInfo load_index_info;
-        load_index_info.index_params = GenIndexParams(index.get());
-        load_index_info.cache_index =
-            CreateTestCacheIndex("string1_scalar_index", std::move(index));
-        load_index_info.field_id = fid.get();
+        auto opened = BuildScalarReader<std::string>(
+            fid, DataType::VARCHAR, index_type, data.size(), data.data());
+        auto load_index_info =
+            MakeLoadIndexInfo(std::move(opened), DataType::VARCHAR, fid.get());
         segment->LoadIndex(load_index_info);
     }
 
@@ -793,6 +649,18 @@ class TestLazyManifest : public TestChunkSegmentStorageV2 {
 };
 
 INSTANTIATE_TEST_SUITE_P(TestLazyManifest, TestLazyManifest, testing::Bool());
+
+IndexInventory::RootSlot
+LazyTestIndexSlot(const IndexInventory& inventory, FieldId field) {
+    const auto capability = inventory.Capability(field);
+    for (const auto& entry : capability.entries()) {
+        if (entry.family == index::families::kVectorMem) {
+            auto copy = inventory;
+            return copy.Drop(entry.key);
+        }
+    }
+    return nullptr;
+}
 
 TEST_P(TestLazyManifest, LazyManifestPreparesInterimIndex) {
     LazyColumnGroupGuard lazy_group_guard(true);
@@ -873,16 +741,19 @@ TEST_P(TestLazyManifest, LazyManifestPreparesInterimIndex) {
             ASSERT_TRUE(column->IsLazy());
             if (num_rows == 1) {
                 EXPECT_FALSE(column->IsMaterialized());
-                EXPECT_EQ(snapshot->runtime->vector_indexings.count(vec), 0);
+                EXPECT_EQ((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
+                           nullptr),
+                          0);
                 EXPECT_FALSE(snapshot->binlog_index_bitset[vec.get() -
                                                            START_USER_FIELDID]);
                 continue;
             }
 
-            ASSERT_TRUE(snapshot->runtime->vector_indexings.count(vec));
+            ASSERT_TRUE((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
+                         nullptr));
             EXPECT_TRUE(
                 snapshot->binlog_index_bitset[vec.get() - START_USER_FIELDID]);
-            auto slot = snapshot->runtime->vector_indexings.at(vec)->indexing_;
+            auto slot = LazyTestIndexSlot(snapshot->runtime->indexes, vec);
             ASSERT_NE(slot, nullptr);
             if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
                 EXPECT_FALSE(column->IsMaterialized());
@@ -2378,33 +2249,19 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
 
     // test with inverted index
     auto fid = fields.at("int64");
-    auto file_manager_ctx = storage::FileManagerContext();
-    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-        milvus::proto::schema::Int64);
-    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
-    file_manager_ctx.fieldDataMeta.field_id = fid.get();
-    milvus::storage::IndexMeta index_meta;
-    index_meta.field_id = fid.get();
-    index_meta.build_id = rand();
-    index_meta.index_version = rand();
-    file_manager_ctx.indexMeta = index_meta;
-    index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = milvus::DataType::INT64;
-    create_index_info.index_type = index::INVERTED_INDEX_TYPE;
-    auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
-        create_index_info, file_manager_ctx);
     std::vector<int64_t> data(test_data_count * chunk_num);
     auto pw = segment->chunk_data<int64_t>(nullptr, fid, 0);
     auto d = pw.get();
     std::copy(
         d.data(), d.data() + test_data_count, data.begin() + test_data_count);
 
-    index->BuildWithRawDataForUT(data.size(), data.data());
-    segcore::LoadIndexInfo load_index_info;
-    load_index_info.index_params = GenIndexParams(index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test_index", std::move(index));
-    load_index_info.field_id = fid.get();
+    auto opened = BuildScalarReader<int64_t>(fid,
+                                             DataType::INT64,
+                                             index::INVERTED_INDEX_TYPE,
+                                             data.size(),
+                                             data.data());
+    auto load_index_info =
+        MakeLoadIndexInfo(std::move(opened), DataType::INT64, fid.get());
     segment->LoadIndex(load_index_info);
 
     expr = std::make_shared<expr::CompareExpr>(
@@ -2546,9 +2403,17 @@ TEST(TestChunkSegmentStorageV2Regression,
     ASSERT_TRUE(fs->DeleteDir(root).ok());
 }
 
-TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexRawData) {
+TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexValueLookup) {
     LoadInt64ScalarIndex(index::ASCENDING_SORT);
-    ASSERT_TRUE(segment->HasRawData(fields.at("int64").get()));
+    const auto field_id = fields.at("int64");
+    const auto capabilities = segment->IndexCapability(field_id);
+    ASSERT_EQ(capabilities.entries().size(), 1);
+    ASSERT_TRUE(capabilities.entries().front().caps.value_lookup);
+    // Scalar values use the value-reader contract, independently of
+    // HasRawData. Remove the column so the assertions exercise index lookup.
+    segment->DropFieldData(field_id);
+    ASSERT_FALSE(segment->HasFieldData(field_id));
+    ASSERT_EQ(segment->num_chunk_data(field_id), 0);
 
     auto query_config = std::make_shared<exec::QueryConfig>(
         std::unordered_map<std::string, std::string>{
@@ -2665,57 +2530,17 @@ TEST_P(TestChunkSegmentStorageV2,
 }
 
 TEST_P(TestChunkSegmentStorageV2,
-       TestStringTakeAccessorRetainsIndexReverseLookup) {
-    LoadString1ScalarIndex(index::MARISA_TRIE);
-    ASSERT_TRUE(segment->HasRawData(fields.at("string1").get()));
-    auto pins = segment->PinIndex(nullptr, fields.at("string1"));
-    ASSERT_EQ(pins.size(), 1);
-    SegmentChunkReader reader(nullptr, segment.get(), RowCount());
-    const std::vector<int32_t> offsets{10007, 7, 10007, 0};
-    auto accessor = reader.GetStringDataAccessorByOffsets(
-        fields.at("string1"),
-        OffsetView::From(offsets.data(), offsets.size()),
-        {pins.data(), pins.size()});
-    for (int64_t i = 0; i < offsets.size(); ++i) {
-        auto value = accessor(i);
-        ASSERT_TRUE(value.has_value());
-        // Index values deliberately differ from raw values in this fixture.
-        EXPECT_EQ(segcore::get_from_variant<std::string>(value),
-                  "test" + std::to_string(offsets[i]));
-    }
-}
-
-TEST_P(TestChunkSegmentStorageV2,
        TestChunkDataAccessorFallsBackWhenPinnedIndexViewIsEmpty) {
     SegmentChunkReader reader(nullptr, segment.get(), RowCount());
 
+    // The scalar-index fast path is gone from SegmentChunkReader, so the raw
+    // column is the only source; this pins that it still resolves.
     auto accessor = reader.GetChunkDataAccessor(
-        milvus::DataType::INT64, fields.at("int64"), 0, {});
+        milvus::DataType::INT64, fields.at("int64"), 0);
 
     auto value = accessor(7);
     ASSERT_TRUE(value.has_value());
     ASSERT_EQ(7, segcore::get_from_variant<int64_t>(value));
-}
-
-TEST_P(TestChunkSegmentStorageV2,
-       TestChunkDataAccessorUsesGlobalOffsetForFieldLevelScalarIndex) {
-    auto raw_lookup_index = std::make_unique<RawLookupOnlyIndex>();
-    std::vector<PinWrapper<const index::IndexBase*>> pinned_indexes;
-    pinned_indexes.emplace_back(raw_lookup_index.get());
-
-    SegmentChunkReader reader(nullptr, segment.get(), RowCount());
-    auto accessor = reader.GetChunkDataAccessor(
-        milvus::DataType::INT64,
-        fields.at("int64"),
-        1,
-        {pinned_indexes.data(), pinned_indexes.size()});
-
-    auto expected_offset =
-        segment->num_rows_until_chunk(fields.at("int64"), 1) + 7;
-    auto value = accessor(7);
-    ASSERT_TRUE(value.has_value());
-    ASSERT_EQ(expected_offset, segcore::get_from_variant<int64_t>(value));
-    ASSERT_EQ(expected_offset, raw_lookup_index->last_lookup_offset);
 }
 
 TEST_P(TestChunkSegmentStorageV2,
@@ -2727,7 +2552,7 @@ TEST_P(TestChunkSegmentStorageV2,
 
     SegmentChunkReader reader(nullptr, segment.get(), RowCount());
     EXPECT_THROW(reader.GetChunkDataAccessor(
-                     milvus::DataType::VARCHAR, fields.at("string1"), 0, {}),
+                     milvus::DataType::VARCHAR, fields.at("string1"), 0),
                  SegcoreError);
 }
 

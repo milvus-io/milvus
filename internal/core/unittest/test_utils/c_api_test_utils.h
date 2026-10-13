@@ -19,13 +19,15 @@
 #include <boost/format.hpp>
 #include <chrono>
 #include <iostream>
+#include <stdexcept>
 #include <unordered_set>
 
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "common/VectorTrait.h"
-#include "index/Index.h"
-#include "index/IndexFactory.h"
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/query/IVectorReader.h"
+#include "index/vector/VectorTypeUtils.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/Collection.h"
@@ -412,50 +414,65 @@ get_default_index_meta() {
     return conf.c_str();
 }
 
-[[maybe_unused]] IndexBasePtr
+[[maybe_unused]] index::IIndexReaderBasePtr
 generate_index(void* raw_data,
                DataType field_type,
                MetricType metric_type,
                IndexType index_type,
                int64_t dim,
                int64_t N) {
-    auto engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-    CreateIndexInfo create_index_info{
-        field_type, index_type, metric_type, engine_version};
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
-
-    auto database = knowhere::GenDataSet(N, dim, raw_data);
     auto build_config = generate_build_conf(index_type, metric_type);
-    indexing->BuildWithDataset(database, build_config);
-
-    auto vec_indexing = dynamic_cast<VectorIndex*>(indexing.get());
-    EXPECT_EQ(vec_indexing->Count(), N);
-    EXPECT_EQ(vec_indexing->GetDim(), dim);
-
+    auto indexing = index::DispatchPhysicalVectorDataType(
+        field_type,
+        [&]<typename T>() {
+            using Value = typename index::VectorBuildInput<T>::value_type;
+            return BuildTestVectorIndex<T>(N,
+                                           dim,
+                                           static_cast<const Value*>(raw_data),
+                                           index_type,
+                                           metric_type,
+                                           build_config);
+        },
+        []() -> index::IIndexReaderBasePtr {
+            throw std::logic_error("generate_index requires a vector field");
+        });
+    auto vector = dynamic_cast<const index::IVectorReader*>(indexing.get());
+    EXPECT_EQ(indexing->Count(), N);
+    EXPECT_NE(vector, nullptr);
+    if (vector != nullptr && field_type != DataType::VECTOR_SPARSE_U32_F32) {
+        EXPECT_EQ(vector->Dim(), dim);
+    }
     return indexing;
 }
 
-// Helper function to create LoadIndexInfo for tests using C++ API directly
+// Capture the reader metadata before transferring ownership into the cache.
 inline milvus::segcore::LoadIndexInfo
-CreateTestLoadIndexInfo(IndexBasePtr indexing,
+CreateTestLoadIndexInfo(index::IIndexReaderBasePtr indexing,
                         DataType field_type,
-                        int64_t field_id = 100) {
-    milvus::segcore::LoadIndexInfo load_index_info;
-    load_index_info.field_id = field_id;
-    load_index_info.field_type = field_type;
-    load_index_info.index_engine_version =
+                        int64_t field_id = 100,
+                        std::string family = index::families::kSort) {
+    milvus::segcore::LoadIndexInfo info{};
+    info.field_id = field_id;
+    info.field_type = field_type;
+    info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
-    load_index_info.index_params = GenIndexParams(indexing.get());
-    if (auto vec_index =
-            dynamic_cast<const milvus::index::VectorIndex*>(indexing.get())) {
-        load_index_info.index_params["metric_type"] =
-            vec_index->GetMetricType();
+    info.index_params = GenIndexParams(indexing.get(), family);
+    if (auto vector =
+            dynamic_cast<const index::IVectorReader*>(indexing.get())) {
+        family = index::AdaptIndexType(
+                     {.index_type = vector->KnowhereIndexType(),
+                      .field_type = field_type,
+                      .element_type = field_type == DataType::VECTOR_ARRAY
+                                          ? indexing->ValueType()
+                                          : DataType::NONE,
+                      .index_engine_version = info.index_engine_version,
+                      .params = {{index::METRIC_TYPE, vector->Metric()},
+                                 {DIM_KEY, vector->Dim()}}})
+                     .family;
     }
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
-    return load_index_info;
+    SetTestIndexMetadata(info, *indexing, family);
+    info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    return info;
 }
 
 }  // namespace
