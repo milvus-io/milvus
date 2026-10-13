@@ -25,6 +25,7 @@ import (
 func TestLayoutKeys(t *testing.T) {
 	l := Layout{RootPath: "files"}
 	assert.Equal(t, "pkindex-meta/manifest/7/by-dev-dml_0_7v0", PointerKey(7, "by-dev-dml_0_7v0"))
+	assert.Equal(t, "pkindex-meta/claim/by-dev-dml_0", ClaimKey("by-dev-dml_0"))
 	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst", l.SSTBasePath(7, "by-dev-dml_0_7v0"))
 	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst/42.sst", SSTKey("files/pk_index/7/by-dev-dml_0_7v0/sst", 42))
 	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/manifest/3-abc.pb", l.ManifestBodyKey(7, "by-dev-dml_0_7v0", 3, "abc"))

@@ -19,18 +19,20 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	PKIndexCoordService_ClaimManifest_FullMethodName = "/milvus.proto.pkindex.PKIndexCoordService/ClaimManifest"
-	PKIndexCoordService_CommitFlush_FullMethodName   = "/milvus.proto.pkindex.PKIndexCoordService/CommitFlush"
-	PKIndexCoordService_GetManifest_FullMethodName   = "/milvus.proto.pkindex.PKIndexCoordService/GetManifest"
+	PKIndexCoordService_ClaimPChannel_FullMethodName        = "/milvus.proto.pkindex.PKIndexCoordService/ClaimPChannel"
+	PKIndexCoordService_CommitFlush_FullMethodName          = "/milvus.proto.pkindex.PKIndexCoordService/CommitFlush"
+	PKIndexCoordService_GetRecoveryManifests_FullMethodName = "/milvus.proto.pkindex.PKIndexCoordService/GetRecoveryManifests"
 )
 
 // PKIndexCoordServiceClient is the client API for PKIndexCoordService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type PKIndexCoordServiceClient interface {
-	ClaimManifest(ctx context.Context, in *ClaimManifestRequest, opts ...grpc.CallOption) (*ClaimManifestResponse, error)
+	ClaimPChannel(ctx context.Context, in *ClaimPChannelRequest, opts ...grpc.CallOption) (*ClaimPChannelResponse, error)
 	CommitFlush(ctx context.Context, in *CommitFlushRequest, opts ...grpc.CallOption) (*CommitFlushResponse, error)
-	GetManifest(ctx context.Context, in *GetManifestRequest, opts ...grpc.CallOption) (*GetManifestResponse, error)
+	// Returns the manifest pointer of each vchannel; the caller reads the body
+	// from object storage.
+	GetRecoveryManifests(ctx context.Context, in *GetRecoveryManifestsRequest, opts ...grpc.CallOption) (*GetRecoveryManifestsResponse, error)
 }
 
 type pKIndexCoordServiceClient struct {
@@ -41,9 +43,9 @@ func NewPKIndexCoordServiceClient(cc grpc.ClientConnInterface) PKIndexCoordServi
 	return &pKIndexCoordServiceClient{cc}
 }
 
-func (c *pKIndexCoordServiceClient) ClaimManifest(ctx context.Context, in *ClaimManifestRequest, opts ...grpc.CallOption) (*ClaimManifestResponse, error) {
-	out := new(ClaimManifestResponse)
-	err := c.cc.Invoke(ctx, PKIndexCoordService_ClaimManifest_FullMethodName, in, out, opts...)
+func (c *pKIndexCoordServiceClient) ClaimPChannel(ctx context.Context, in *ClaimPChannelRequest, opts ...grpc.CallOption) (*ClaimPChannelResponse, error) {
+	out := new(ClaimPChannelResponse)
+	err := c.cc.Invoke(ctx, PKIndexCoordService_ClaimPChannel_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -59,9 +61,9 @@ func (c *pKIndexCoordServiceClient) CommitFlush(ctx context.Context, in *CommitF
 	return out, nil
 }
 
-func (c *pKIndexCoordServiceClient) GetManifest(ctx context.Context, in *GetManifestRequest, opts ...grpc.CallOption) (*GetManifestResponse, error) {
-	out := new(GetManifestResponse)
-	err := c.cc.Invoke(ctx, PKIndexCoordService_GetManifest_FullMethodName, in, out, opts...)
+func (c *pKIndexCoordServiceClient) GetRecoveryManifests(ctx context.Context, in *GetRecoveryManifestsRequest, opts ...grpc.CallOption) (*GetRecoveryManifestsResponse, error) {
+	out := new(GetRecoveryManifestsResponse)
+	err := c.cc.Invoke(ctx, PKIndexCoordService_GetRecoveryManifests_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -72,23 +74,25 @@ func (c *pKIndexCoordServiceClient) GetManifest(ctx context.Context, in *GetMani
 // All implementations should embed UnimplementedPKIndexCoordServiceServer
 // for forward compatibility
 type PKIndexCoordServiceServer interface {
-	ClaimManifest(context.Context, *ClaimManifestRequest) (*ClaimManifestResponse, error)
+	ClaimPChannel(context.Context, *ClaimPChannelRequest) (*ClaimPChannelResponse, error)
 	CommitFlush(context.Context, *CommitFlushRequest) (*CommitFlushResponse, error)
-	GetManifest(context.Context, *GetManifestRequest) (*GetManifestResponse, error)
+	// Returns the manifest pointer of each vchannel; the caller reads the body
+	// from object storage.
+	GetRecoveryManifests(context.Context, *GetRecoveryManifestsRequest) (*GetRecoveryManifestsResponse, error)
 }
 
 // UnimplementedPKIndexCoordServiceServer should be embedded to have forward compatible implementations.
 type UnimplementedPKIndexCoordServiceServer struct {
 }
 
-func (UnimplementedPKIndexCoordServiceServer) ClaimManifest(context.Context, *ClaimManifestRequest) (*ClaimManifestResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ClaimManifest not implemented")
+func (UnimplementedPKIndexCoordServiceServer) ClaimPChannel(context.Context, *ClaimPChannelRequest) (*ClaimPChannelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClaimPChannel not implemented")
 }
 func (UnimplementedPKIndexCoordServiceServer) CommitFlush(context.Context, *CommitFlushRequest) (*CommitFlushResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CommitFlush not implemented")
 }
-func (UnimplementedPKIndexCoordServiceServer) GetManifest(context.Context, *GetManifestRequest) (*GetManifestResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetManifest not implemented")
+func (UnimplementedPKIndexCoordServiceServer) GetRecoveryManifests(context.Context, *GetRecoveryManifestsRequest) (*GetRecoveryManifestsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRecoveryManifests not implemented")
 }
 
 // UnsafePKIndexCoordServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -102,20 +106,20 @@ func RegisterPKIndexCoordServiceServer(s grpc.ServiceRegistrar, srv PKIndexCoord
 	s.RegisterService(&PKIndexCoordService_ServiceDesc, srv)
 }
 
-func _PKIndexCoordService_ClaimManifest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ClaimManifestRequest)
+func _PKIndexCoordService_ClaimPChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClaimPChannelRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PKIndexCoordServiceServer).ClaimManifest(ctx, in)
+		return srv.(PKIndexCoordServiceServer).ClaimPChannel(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: PKIndexCoordService_ClaimManifest_FullMethodName,
+		FullMethod: PKIndexCoordService_ClaimPChannel_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PKIndexCoordServiceServer).ClaimManifest(ctx, req.(*ClaimManifestRequest))
+		return srv.(PKIndexCoordServiceServer).ClaimPChannel(ctx, req.(*ClaimPChannelRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -138,20 +142,20 @@ func _PKIndexCoordService_CommitFlush_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
-func _PKIndexCoordService_GetManifest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetManifestRequest)
+func _PKIndexCoordService_GetRecoveryManifests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRecoveryManifestsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PKIndexCoordServiceServer).GetManifest(ctx, in)
+		return srv.(PKIndexCoordServiceServer).GetRecoveryManifests(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: PKIndexCoordService_GetManifest_FullMethodName,
+		FullMethod: PKIndexCoordService_GetRecoveryManifests_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PKIndexCoordServiceServer).GetManifest(ctx, req.(*GetManifestRequest))
+		return srv.(PKIndexCoordServiceServer).GetRecoveryManifests(ctx, req.(*GetRecoveryManifestsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -164,16 +168,16 @@ var PKIndexCoordService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*PKIndexCoordServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "ClaimManifest",
-			Handler:    _PKIndexCoordService_ClaimManifest_Handler,
+			MethodName: "ClaimPChannel",
+			Handler:    _PKIndexCoordService_ClaimPChannel_Handler,
 		},
 		{
 			MethodName: "CommitFlush",
 			Handler:    _PKIndexCoordService_CommitFlush_Handler,
 		},
 		{
-			MethodName: "GetManifest",
-			Handler:    _PKIndexCoordService_GetManifest_Handler,
+			MethodName: "GetRecoveryManifests",
+			Handler:    _PKIndexCoordService_GetRecoveryManifests_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

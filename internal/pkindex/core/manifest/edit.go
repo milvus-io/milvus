@@ -24,110 +24,117 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 )
 
-// Claim is the edit that records the owner of a vchannel.
-type Claim struct {
-	CollectionID int64
-	VChannel     string
-	PChannelTerm int64
-	PKDataType   schemapb.DataType
-	// SSTBasePath is used only when the claim creates the first version.
-	SSTBasePath string
-}
-
-// Flush is the edit that adds newly uploaded SSTs and moves the checkpoint forward.
+// Flush is the edit that adds newly uploaded SSTs and moves the checkpoint
+// forward. CollectionID, VChannel, SSTBasePath and PKDataType describe the
+// first version when the vchannel has no manifest.
 type Flush struct {
+	CollectionID       int64
+	VChannel           string
+	SSTBasePath        string
+	PKDataType         schemapb.DataType
 	PChannelTerm       int64
 	AddSSTs            []*pkindexpb.SSTRef // newest first
 	CheckpointTimeTick uint64
 }
 
-// Compact is the edit that replaces a contiguous run of SSTs with merged SSTs.
-type Compact struct {
+// Compaction is the edit that replaces a contiguous run of SSTs with merged SSTs.
+type Compaction struct {
 	Inputs  []int64
 	Outputs []*pkindexpb.SSTRef // newest first
 }
 
-// ApplyClaim applies a claim to cur, which is nil when the vchannel has no
-// manifest. It returns the first version when cur is nil, cur and false when
-// the claim term equals the manifest term, and a new version with the raised
-// term and true when the claim term is higher. It returns ErrFenced when the
-// claim term is below the manifest term, and then ErrSchemaMismatch when the
-// primary key data type differs from cur. It does not change cur.
-func ApplyClaim(cur *pkindexpb.Manifest, c Claim) (*pkindexpb.Manifest, bool, error) {
-	if cur == nil {
-		return &pkindexpb.Manifest{
-			CollectionId: c.CollectionID,
-			Vchannel:     c.VChannel,
-			Version:      1,
-			PchannelTerm: c.PChannelTerm,
-			PkDataType:   c.PKDataType,
-			SstBasePath:  c.SSTBasePath,
-		}, true, nil
+// ApplyPChannelClaim applies a claim of a pchannel for term to cur, which is
+// nil when the pchannel has no claim record. It returns a new record and true
+// when cur is nil or term is above the recorded term, and cur and false when
+// term equals the recorded term. It returns ErrFenced when term is below the
+// recorded term. It does not change cur.
+func ApplyPChannelClaim(cur *pkindexpb.PChannelClaim, pchannel string, term int64) (*pkindexpb.PChannelClaim, bool, error) {
+	if cur != nil && term < cur.GetPchannelTerm() {
+		return nil, false, errors.Wrapf(ErrFenced, "pchannel %s: claim term %d, request term %d", pchannel, cur.GetPchannelTerm(), term)
 	}
-	if c.PChannelTerm < cur.GetPchannelTerm() {
-		return nil, false, errors.Wrapf(ErrFenced, "vchannel %s: manifest term %d, claim term %d", cur.GetVchannel(), cur.GetPchannelTerm(), c.PChannelTerm)
-	}
-	if c.PKDataType != cur.GetPkDataType() {
-		return nil, false, errors.Wrapf(ErrSchemaMismatch, "vchannel %s: manifest %s, claim %s", cur.GetVchannel(), cur.GetPkDataType(), c.PKDataType)
-	}
-	if c.PChannelTerm == cur.GetPchannelTerm() {
+	if cur != nil && term == cur.GetPchannelTerm() {
 		return cur, false, nil
 	}
-	next := nextVersion(cur)
-	next.PchannelTerm = c.PChannelTerm
-	return next, true, nil
+	return &pkindexpb.PChannelClaim{PchannelTerm: term}, true, nil
 }
 
-// ApplyFlush applies a flush to cur. It returns a new version and true when
-// the checkpoint moves forward: the new SSTs go in front of the SST list, the
-// checkpoint is raised, and a higher term is recorded. A flush with no SSTs
-// only moves the checkpoint. When the checkpoint does not move forward and the
-// term equals the manifest term, the flush is an applied retry and ApplyFlush
-// returns cur and false; it does not look at the SSTs of the flush. It returns
-// ErrNotClaimed when cur is nil, ErrFenced when the flush term is below the
-// manifest term, ErrCheckpointRegressed when the checkpoint does not move
-// forward and the term is above the manifest term, and ErrDuplicateSST when
-// the checkpoint moves forward and an SST is already in cur or is listed twice
-// in the flush. It does not change cur.
+// CheckFlushTerm checks the term of a flush on pchannel against the claim
+// record cur, which is nil when the pchannel has no claim record. It returns
+// ErrFenced when the flush term is below the recorded term, and ErrNotClaimed
+// when cur is nil or the flush term is above the recorded term.
+func CheckFlushTerm(cur *pkindexpb.PChannelClaim, pchannel string, term int64) error {
+	switch {
+	case cur == nil:
+		return errors.Wrapf(ErrNotClaimed, "pchannel %s: no claim record, flush term %d", pchannel, term)
+	case term < cur.GetPchannelTerm():
+		return errors.Wrapf(ErrFenced, "pchannel %s: claim term %d, flush term %d", pchannel, cur.GetPchannelTerm(), term)
+	case term > cur.GetPchannelTerm():
+		return errors.Wrapf(ErrNotClaimed, "pchannel %s: claim term %d, flush term %d", pchannel, cur.GetPchannelTerm(), term)
+	}
+	return nil
+}
+
+// ApplyFlush applies a flush to cur, which is nil when the vchannel has no
+// manifest; then the flush applies to an empty manifest of version 0 that
+// takes the collection, vchannel, SST base path and primary key data type
+// from the flush. It returns a new version and true when the checkpoint
+// moves forward: the new SSTs go in front of the SST list, the checkpoint is
+// raised, and the flush term becomes the last flush term. A flush with no
+// SSTs only moves the checkpoint. When the checkpoint does not move forward
+// and the flush term equals the last flush term, the flush is an applied
+// retry and ApplyFlush returns cur and false; it does not look at the SSTs of
+// the flush. It returns ErrSchemaMismatch when the primary key data type
+// differs from cur, ErrCheckpointRegressed when the checkpoint does not move
+// forward and the flush term differs from the last flush term, and
+// ErrDuplicateSST when the checkpoint moves forward and an SST is already in
+// cur or is listed twice in the flush. It does not check the flush term
+// against the claim record. It does not change cur.
 func ApplyFlush(cur *pkindexpb.Manifest, f Flush) (*pkindexpb.Manifest, bool, error) {
-	if cur == nil {
-		return nil, false, ErrNotClaimed
+	base := cur
+	if base == nil {
+		base = &pkindexpb.Manifest{
+			CollectionId: f.CollectionID,
+			Vchannel:     f.VChannel,
+			PkDataType:   f.PKDataType,
+			SstBasePath:  f.SSTBasePath,
+		}
 	}
-	if f.PChannelTerm < cur.GetPchannelTerm() {
-		return nil, false, errors.Wrapf(ErrFenced, "vchannel %s: manifest term %d, flush term %d", cur.GetVchannel(), cur.GetPchannelTerm(), f.PChannelTerm)
+	if f.PKDataType != base.GetPkDataType() {
+		return nil, false, errors.Wrapf(ErrSchemaMismatch, "vchannel %s: manifest %s, flush %s", base.GetVchannel(), base.GetPkDataType(), f.PKDataType)
 	}
-	if f.CheckpointTimeTick <= cur.GetCheckpointTimeTick() {
-		if f.PChannelTerm > cur.GetPchannelTerm() {
-			return nil, false, errors.Wrapf(ErrCheckpointRegressed, "vchannel %s: manifest %d, flush %d", cur.GetVchannel(), cur.GetCheckpointTimeTick(), f.CheckpointTimeTick)
+	if f.CheckpointTimeTick <= base.GetCheckpointTimeTick() {
+		if f.PChannelTerm != base.GetLastFlushTerm() {
+			return nil, false, errors.Wrapf(ErrCheckpointRegressed, "vchannel %s: manifest %d at term %d, flush %d at term %d",
+				base.GetVchannel(), base.GetCheckpointTimeTick(), base.GetLastFlushTerm(), f.CheckpointTimeTick, f.PChannelTerm)
 		}
 		return cur, false, nil
 	}
-	if err := checkNewSSTs(cur.GetVchannel(), idSet(cur.GetSsts()), f.AddSSTs); err != nil {
+	if err := checkNewSSTs(base.GetVchannel(), idSet(base.GetSsts()), f.AddSSTs); err != nil {
 		return nil, false, err
 	}
-	next := nextVersion(cur)
-	next.PchannelTerm = f.PChannelTerm
+	next := nextVersion(base)
+	next.LastFlushTerm = f.PChannelTerm
 	next.CheckpointTimeTick = f.CheckpointTimeTick
 	next.Ssts = append(cloneSSTs(f.AddSSTs), next.GetSsts()...)
 	return next, true, nil
 }
 
-// ApplyCompact applies a compaction to cur. When the inputs are a non-empty
+// ApplyCompaction applies a compaction to cur. When the inputs are a non-empty
 // contiguous run of the SST list of cur, in the same order, it returns a new
 // version and true, in which the outputs replace the inputs at the position of
-// the inputs; the checkpoint and the term do not change. When the inputs are
+// the inputs; the checkpoint and the last flush term do not change. When the inputs are
 // not empty, no input is in the SST list of cur and all outputs are in it, the
-// compaction is an applied retry and ApplyCompact returns cur and false. It
+// compaction is an applied retry and ApplyCompaction returns cur and false. It
 // returns ErrNotClaimed when cur is nil, ErrStaleEdit in all other cases where
 // the inputs are not such a run, and ErrDuplicateSST when an output ID is
 // already in the SST list of cur or is listed twice in the outputs. It does
 // not change cur.
-func ApplyCompact(cur *pkindexpb.Manifest, c Compact) (*pkindexpb.Manifest, bool, error) {
+func ApplyCompaction(cur *pkindexpb.Manifest, c Compaction) (*pkindexpb.Manifest, bool, error) {
 	if cur == nil {
 		return nil, false, ErrNotClaimed
 	}
 	list := cur.GetSsts()
-	if isAppliedCompact(idSet(list), c) {
+	if isAppliedCompaction(idSet(list), c) {
 		return cur, false, nil
 	}
 	start := -1
@@ -157,9 +164,9 @@ func ApplyCompact(cur *pkindexpb.Manifest, c Compact) (*pkindexpb.Manifest, bool
 	return next, true, nil
 }
 
-// isAppliedCompact reports whether the inputs of c are not empty, no input is
+// isAppliedCompaction reports whether the inputs of c are not empty, no input is
 // in present, and all outputs of c are in present.
-func isAppliedCompact(present map[int64]struct{}, c Compact) bool {
+func isAppliedCompaction(present map[int64]struct{}, c Compaction) bool {
 	if len(c.Inputs) == 0 {
 		return false
 	}

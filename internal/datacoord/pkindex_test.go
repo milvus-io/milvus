@@ -56,24 +56,44 @@ func TestPKIndexMetaKVPointers(t *testing.T) {
 	_, found, err := p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.False(t, found)
+	var values []string
+	var founds []bool
 
-	require.NoError(t, p.Create(ctx, key, "a"))
-	assert.Error(t, p.Create(ctx, key, "b"))
+	require.NoError(t, p.Save(ctx, map[string]string{key: "a"}, manifest.KeyAbsent(key)))
+	assert.Error(t, p.Save(ctx, map[string]string{key: "b"}, manifest.KeyAbsent(key)))
 	v, found, err := p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "a", v)
 
-	assert.Error(t, p.Swap(ctx, key, "x", "c"))
-	require.NoError(t, p.Swap(ctx, key, "a", "c"))
+	assert.Error(t, p.Save(ctx, map[string]string{key: "c"}, manifest.ValueIs(key, "x")))
+	require.NoError(t, p.Save(ctx, map[string]string{key: "c"}, manifest.ValueIs(key, "a")))
 	v, _, err = p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.Equal(t, "c", v)
 
+	// a write under a condition on a second key: it fails when that key does
+	// not hold the value, and writes both keys in one transaction otherwise
+	claim := manifest.ClaimKey("ch")
+	require.NoError(t, p.Save(ctx, map[string]string{claim: "t1"}, manifest.KeyAbsent(claim)))
+	assert.Error(t, p.Save(ctx, map[string]string{key: "d", claim: "t2"}, manifest.ValueIs(key, "c"), manifest.ValueIs(claim, "t2")))
+	v, _, err = p.Load(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, "c", v)
+	require.NoError(t, p.Save(ctx, map[string]string{key: "d", claim: "t1"}, manifest.ValueIs(key, "c"), manifest.ValueIs(claim, "t1")))
+	v, _, err = p.Load(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, "d", v)
+
+	values, founds, err = p.MultiLoad(ctx, []string{key, manifest.PointerKey(1, "missing_v0"), claim})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"d", "", "t1"}, values)
+	assert.Equal(t, []bool{true, false, true}, founds)
+
 	keys, values, err := p.List(ctx, manifest.PointerPrefix)
 	require.NoError(t, err)
 	assert.Equal(t, []string{key}, keys)
-	assert.Equal(t, []string{"c"}, values)
+	assert.Equal(t, []string{"d"}, values, "the claim record is not under the pointer prefix")
 	collectionID, vchannel, ok := manifest.ParsePointerKey(keys[0])
 	assert.True(t, ok)
 	assert.Equal(t, int64(1), collectionID)
@@ -138,7 +158,9 @@ func TestInitPKIndexInvalidGCConfig(t *testing.T) {
 	s.initPKIndex(storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())))
 	assert.Nil(t, s.pkindexGC)
 
-	resp, err := s.pkindexService.GetManifest(context.Background(), &pkindexpb.GetManifestRequest{CollectionId: 1, Vchannel: "v"})
+	resp, err := s.pkindexService.GetRecoveryManifests(context.Background(), &pkindexpb.GetRecoveryManifestsRequest{
+		Targets: []*pkindexpb.ManifestTarget{{CollectionId: 1, Vchannel: "v"}},
+	})
 	require.NoError(t, err)
 	assert.NotEqual(t, merr.Code(merr.ErrServiceNotReady), resp.GetStatus().GetCode())
 }
