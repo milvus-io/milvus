@@ -722,3 +722,192 @@ func TestRLSUpsertUsesOneTagSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), number)
 }
+
+func TestRLSPolicyTypeReplacement(t *testing.T) {
+	for _, withBase := range []bool{false, true} {
+		t.Run(fmt.Sprintf("base_%t", withBase), func(t *testing.T) {
+			ctx := hp.CreateContext(t, 3*time.Minute)
+			mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+			name := prepareRLSCollection(ctx, t, mc, "", false)
+			actions := []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Query, milvuspb.RowPolicyAction_Search, milvuspb.RowPolicyAction_Insert, milvuspb.RowPolicyAction_Upsert}
+			if withBase {
+				createRLSPolicy(ctx, t, mc, name, "base", "true", "true", actions...)
+			}
+			expr := "owner == 'alice'"
+			createRLSPolicy(ctx, t, mc, name, "owner", expr, expr, actions...)
+			for _, kind := range []milvuspb.RowPolicyType{milvuspb.RowPolicyType_RowPolicyTypePermissive, milvuspb.RowPolicyType_RowPolicyTypeRestrictive, milvuspb.RowPolicyType_RowPolicyTypePermissive} {
+				require.NoError(t, mc.UpdateRowPolicy(ctx, client.NewUpdateRowPolicyOption(name, "owner", kind, actions...).WithUsingExpr(expr).WithCheckExpr(expr)))
+				policies, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+				require.NoError(t, err)
+				for _, policy := range policies {
+					if policy.GetPolicyName() == "owner" {
+						require.Equal(t, kind, policy.GetPolicyType())
+					}
+				}
+				var expected []int64
+				if kind == milvuspb.RowPolicyType_RowPolicyTypePermissive {
+					expected = []int64{1, 3}
+					if withBase {
+						expected = []int64{1, 2, 3, 4}
+					}
+				} else if withBase {
+					expected = []int64{1, 3}
+				}
+				queryRLS(ctx, t, mc, name, "alice", false, expected...)
+				results, err := mc.Search(ctx, client.NewSearchOption(name, 4, []entity.Vector{entity.FloatVector{0, 1, 2, 3}}).WithRLSPrincipal("alice").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				checkRLSIDs(t, results[0].IDs, expected...)
+				for _, owner := range []string{"alice", "bob"} {
+					allowed := (kind == milvuspb.RowPolicyType_RowPolicyTypePermissive && (withBase || owner == "alice")) || (kind == milvuspb.RowPolicyType_RowPolicyTypeRestrictive && withBase && owner == "alice")
+					for _, operation := range []string{"insert", "upsert"} {
+						option := client.NewColumnBasedInsertOption(name, rlsColumns([]int64{10}, []string{owner})...).WithRLSPrincipal("alice")
+						if operation == "insert" {
+							_, err = mc.Insert(ctx, option)
+						} else {
+							_, err = mc.Upsert(ctx, option)
+						}
+						if allowed {
+							require.NoError(t, err)
+							queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4, 10)
+						} else {
+							require.ErrorContains(t, err, "RLS")
+							queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4)
+						}
+						_, err = mc.Delete(ctx, client.NewDeleteOption(name).WithInt64IDs("id", []int64{10}).WithSkipRLS(true))
+						require.NoError(t, err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRLSConcurrentPolicyCreation(t *testing.T) {
+	ctx := hp.CreateContext(t, 3*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+	name := prepareRLSCollection(ctx, t, mc, "", false)
+	start := make(chan struct{})
+	results := make([]error, 8)
+	var workers sync.WaitGroup
+	for i := range results {
+		workers.Go(func() {
+			<-start
+			expr := fmt.Sprintf("owner == '%s'", []string{"alice", "bob"}[i%2])
+			results[i] = mc.CreateRowPolicy(ctx, client.NewCreateRowPolicyOption(name, "owner", milvuspb.RowPolicyType_RowPolicyTypePermissive, milvuspb.RowPolicyAction_Query).WithUsingExpr(expr).WithDescription(fmt.Sprintf("writer_%d", i)))
+		})
+	}
+	close(start)
+	workers.Wait()
+	winner := -1
+	for i, err := range results {
+		if err == nil {
+			require.Equal(t, -1, winner, "only one same-name creation may succeed")
+			winner = i
+		} else {
+			require.ErrorContains(t, err, "already exists")
+		}
+	}
+	require.NotEqual(t, -1, winner)
+	policies, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	require.Equal(t, fmt.Sprintf("writer_%d", winner), policies[0].GetDescription())
+	require.Equal(t, fmt.Sprintf("owner == '%s'", []string{"alice", "bob"}[winner%2]), policies[0].GetUsingExpr())
+	if winner%2 == 0 {
+		queryRLS(ctx, t, mc, name, "alice", false, 1, 3)
+	} else {
+		queryRLS(ctx, t, mc, name, "alice", false, 2, 4)
+	}
+}
+
+func TestRLSUpsertUsesOnePolicySnapshot(t *testing.T) {
+	ctx := hp.CreateContext(t, 3*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+	name := prepareRLSCollection(ctx, t, mc, "", false)
+	createRLSPolicy(ctx, t, mc, name, "writer", "owner == 'alice'", "owner == 'alice'", milvuspb.RowPolicyAction_Upsert)
+	start := make(chan struct{})
+	policyErrors, writeErrors := make(chan error, 20), make(chan error, 20)
+	var workers sync.WaitGroup
+	workers.Go(func() {
+		<-start
+		for i := range 20 {
+			expr := fmt.Sprintf("owner == '%s'", []string{"bob", "alice"}[i%2])
+			policyErrors <- mc.UpdateRowPolicy(ctx, client.NewUpdateRowPolicyOption(name, "writer", milvuspb.RowPolicyType_RowPolicyTypePermissive, milvuspb.RowPolicyAction_Upsert).WithUsingExpr(expr).WithCheckExpr(expr))
+		}
+	})
+	workers.Go(func() {
+		<-start
+		for range 20 {
+			_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsColumns([]int64{1}, []string{"bob"})...).WithRLSPrincipal("alice"))
+			writeErrors <- err
+		}
+	})
+	close(start)
+	workers.Wait()
+	close(policyErrors)
+	close(writeErrors)
+	for err := range policyErrors {
+		require.NoError(t, err)
+	}
+	for err := range writeErrors {
+		require.ErrorContains(t, err, "RLS")
+	}
+	queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4)
+	result, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id == 1").WithOutputFields("owner").WithSkipRLS(true).WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Equal(t, 1, result.ResultCount)
+	owner, err := result.GetColumn("owner").GetAsString(0)
+	require.NoError(t, err)
+	require.Equal(t, "alice", owner)
+	policies, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	require.Equal(t, "owner == 'alice'", policies[0].GetUsingExpr())
+	require.Equal(t, "owner == 'alice'", policies[0].GetCheckExpr())
+}
+
+func TestRLSPolicyExactLengthLimits(t *testing.T) {
+	ctx := hp.CreateContext(t, 3*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+	name := prepareRLSCollection(ctx, t, mc, "", false)
+	actions := []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Query, milvuspb.RowPolicyAction_Insert}
+	// Default limits are byte counts, including internal expression whitespace.
+	description := strings.Repeat("租", 341) + "x"
+	for i, owner := range []string{"alice", "bob"} {
+		predicate := "owner == '" + owner + "'"
+		expr := "owner" + strings.Repeat(" ", 4096-len(predicate)+1) + "== '" + owner + "'"
+		require.Len(t, expr, 4096)
+		require.Len(t, description, 1024)
+		if i == 0 {
+			require.NoError(t, mc.CreateRowPolicy(ctx, client.NewCreateRowPolicyOption(name, "boundary", milvuspb.RowPolicyType_RowPolicyTypePermissive, actions...).WithUsingExpr(expr).WithCheckExpr(expr).WithDescription(description)))
+		} else {
+			require.NoError(t, mc.UpdateRowPolicy(ctx, client.NewUpdateRowPolicyOption(name, "boundary", milvuspb.RowPolicyType_RowPolicyTypePermissive, actions...).WithUsingExpr(expr).WithCheckExpr(expr).WithDescription(description)))
+		}
+		policies, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+		require.NoError(t, err)
+		require.Len(t, policies, 1)
+		require.Equal(t, expr, policies[0].GetUsingExpr())
+		require.Equal(t, expr, policies[0].GetCheckExpr())
+		require.Equal(t, description, policies[0].GetDescription())
+		if owner == "alice" {
+			queryRLS(ctx, t, mc, name, "alice", false, 1, 3)
+		} else {
+			queryRLS(ctx, t, mc, name, "alice", false, 2, 4)
+		}
+		_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(name, rlsColumns([]int64{10}, []string{owner})...).WithRLSPrincipal("alice"))
+		require.NoError(t, err)
+		queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4, 10)
+		_, err = mc.Delete(ctx, client.NewDeleteOption(name).WithInt64IDs("id", []int64{10}).WithSkipRLS(true))
+		require.NoError(t, err)
+	}
+	require.NoError(t, mc.DropRowPolicy(ctx, client.NewDropRowPolicyOption(name, "boundary")))
+	// Four permissive predicates add 22 bytes of parentheses and OR separators.
+	for i, size := range []int{4096, 4096, 4096, 4074} {
+		expr := "owner" + strings.Repeat(" ", size-len("owner == 'alice'")+1) + "== 'alice'"
+		createRLSPolicy(ctx, t, mc, name, fmt.Sprintf("rule_%d", i), expr, expr, actions...)
+	}
+	queryRLS(ctx, t, mc, name, "alice", false, 1, 3)
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(name, rlsColumns([]int64{10}, []string{"alice"})...).WithRLSPrincipal("alice"))
+	require.NoError(t, err)
+	queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4, 10)
+}
