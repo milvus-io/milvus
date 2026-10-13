@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // This file implements the meta-layer of SegmentChangeGroup, the atomic
@@ -396,6 +397,32 @@ func (m *meta) HasStagedSegment(ctx context.Context, collectionID, segmentID int
 	}
 	group := m.segmentChangeGroups[groupID]
 	return group != nil && (collectionID <= 0 || group.CollectionID == collectionID)
+}
+
+// aliveStagedMembers returns the set of segments currently staged by an ALIVE
+// (STAGED/READY) group of collectionID (collectionID <= 0 returns members of
+// every collection). The legacy view paths use it to exclude staged members
+// from every read surface — including ones that do not filter IsInvisible
+// (e.g. getEarliestSegmentDMLPos, design R10) — without per-segment locking.
+// Staged members are invisible by construction, but a view that only filters
+// IsImporting would otherwise leak their DML position / partition into the
+// read set.
+func (m *meta) aliveStagedMembers(ctx context.Context, collectionID int64) typeutil.UniqueSet {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	members := typeutil.NewUniqueSet()
+	for _, g := range m.segmentChangeGroups {
+		if collectionID > 0 && g.CollectionID != collectionID {
+			continue
+		}
+		if g.State != model.SegmentChangeStateStaged && g.State != model.SegmentChangeStateReady {
+			continue
+		}
+		for _, id := range g.NewSegmentIDs {
+			members.Insert(id)
+		}
+	}
+	return members
 }
 
 // GetSegmentChangeGroupByReferencedSegment returns the ALIVE group that
