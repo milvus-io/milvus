@@ -61,7 +61,7 @@ test -f "$work/unpacked/go.out"
 test -f "$work/unpacked/cpp/build/core.gcda"
 test -f "$work/unpacked/cpp/build/core.gcov.json.gz"
 test -f "$MILVUS_COVERAGE_DIR/runs/$id/done.json"
-if "$work/bin/coverage-export" "$id" "$work/metadata" > "$work/duplicate.out" 2> "$work/error"; then
+if "$work/bin/coverage-export" "$id" "$work/metadata" > "$work/duplicate.out" 2> "$work/stderr.log"; then
     echo 'Accepted a reused snapshot ID' >&2; exit 1
 fi
 
@@ -76,7 +76,7 @@ for scenario in error missing_metadata decoder_failure; do
     export FAIL_COVDATA=
     if [[ "$scenario" == decoder_failure ]]; then export FAIL_COVDATA=1; fi
     respond "$id" "$scenario" & responder=$!
-    if "$work/bin/coverage-export" "$id" "$metadata" > "$work/$scenario.out" 2> "$work/error"; then
+    if "$work/bin/coverage-export" "$id" "$metadata" > "$work/$scenario.out" 2> "$work/stderr.log"; then
         echo "Accepted $scenario" >&2; exit 1
     fi
     wait "$responder"
@@ -84,7 +84,7 @@ for scenario in error missing_metadata decoder_failure; do
     test -d "$MILVUS_COVERAGE_DIR/runs/$id"
 done
 
-if "$work/bin/coverage-export" ../escape "$work/metadata" > "$work/invalid.out" 2> "$work/error"; then
+if "$work/bin/coverage-export" ../escape "$work/metadata" > "$work/invalid.out" 2> "$work/stderr.log"; then
     echo 'Accepted an invalid snapshot ID' >&2; exit 1
 fi
 test ! -s "$work/invalid.out"
