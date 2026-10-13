@@ -44,7 +44,7 @@ func TestIsRetriableWatchErr(t *testing.T) {
 		{"user empty", rpctypes.ErrUserEmpty, true},
 		{"auth old revision", rpctypes.ErrAuthOldRevision, true},
 		// A raw gRPC Unauthenticated that was not mapped back to an etcd
-		// sentinel is deliberately NOT retriable: we match sentinels only.
+		// error is deliberately NOT retriable: only known etcd errors qualify.
 		{"unmapped raw grpc unauthenticated", status.Error(codes.Unauthenticated, "some unmapped error"), false},
 		// CancelReason transport shape: the etcd server cancels the watch with
 		// CancelReason = ErrGRPC*.Error() (the full "rpc error: ..." string) and

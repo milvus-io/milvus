@@ -63,16 +63,11 @@ import (
 //     errors to EtcdError. clientv3's isHaltErr does not recognize their gRPC
 //     status and can terminate the watch instead of reconnecting it.
 //
-// Genuine authorization failures (permission denied, bad credentials) carry
-// different codes (PermissionDenied, InvalidArgument, FailedPrecondition) and
-// are deliberately NOT retriable. We match the etcd sentinels via errors.Is
-// rather than the raw gRPC Unauthenticated code: clientv3 maps watch errors
-// back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
-// source of Unauthenticated, so matching the sentinel is both sufficient and
-// narrower than trusting the code.
+// Genuine authorization failures (permission denied, bad credentials) are
+// deliberately NOT retriable. Match known etcd errors, including the
+// CancelReason transport forms below, rather than all Unauthenticated errors.
 //
-// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
-// genuinely persistent failure does not loop forever.
+// Callers must back off between recovery attempts and honor context cancellation.
 func IsRetriableWatchErr(err error) bool {
 	if err == nil {
 		return false
