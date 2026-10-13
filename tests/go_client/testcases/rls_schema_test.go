@@ -46,7 +46,12 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
-const rlsSchemaBinaryDim = 64
+const (
+	rlsSchemaBinaryDim = 64
+	// Keep mixed-segment iterator settings aligned with the Python RLS suite.
+	rlsIteratorBatchSize = 127
+	rlsHNSWEF            = 4096
+)
 
 // The oracle is application-owned row data; it is never populated from a server read.
 type rlsSchemaRow map[string]any
@@ -1487,17 +1492,6 @@ func rlsPartitionValues(t *testing.T, field string) []any {
 }
 
 func rlsRandomVectorColumn(tc rlsSchemaCase, count int) column.Column {
-	if tc.vector == "int8" {
-		// The shared generator has no INT8 variant; quantize its random FP32 values.
-		values := make([][]int8, count)
-		for i := range values {
-			values[i] = make([]int8, tc.vectorDim())
-			for d, v := range common.GenFloatVector(tc.vectorDim()) {
-				values[i][d] = int8(v*254 - 127)
-			}
-		}
-		return column.NewColumnInt8Vector("vector", tc.vectorDim(), values)
-	}
 	return hp.GenColumnData(count, tc.vectorColumn().Type(), *hp.TNewDataOption().TWithDim(tc.vectorDim()).TWithFieldName("vector"))
 }
 
@@ -1638,7 +1632,7 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 					}
 					params := index.NewCustomAnnParam()
 					params.WithExtraParam("nprobe", 64)
-					params.WithExtraParam("ef", 256)
+					params.WithExtraParam("ef", rlsHNSWEF)
 					checkTopK := func(t *testing.T, result client.ResultSet, query entity.Vector, rrf bool) {
 						t.Helper()
 						got := checkRLSSchemaRows(t, result, groupWant, fields)
@@ -1715,7 +1709,7 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 									}
 								}
 							}
-							it, err := mc.SearchIterator(ctx, client.NewSearchIteratorOption(name, query).WithANNSField("vector").WithFilter(filter).WithTemplateParam("ids", requested).WithAnnParam(params).WithIgnoreGrowing(ignoreGrowing).WithBatchSize(127).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+							it, err := mc.SearchIterator(ctx, client.NewSearchIteratorOption(name, query).WithANNSField("vector").WithFilter(filter).WithTemplateParam("ids", requested).WithAnnParam(params).WithIgnoreGrowing(ignoreGrowing).WithBatchSize(rlsIteratorBatchSize).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 							if tc.vector == "binary" && err != nil && len(expected) > 0 {
 								require.ErrorContains(t, err, "index not supported")
 								return
@@ -1723,7 +1717,7 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 							require.NoError(t, err)
 							var got []any
 							ended := false
-							for range (group.end-group.start)/127 + 3 {
+							for range (group.end-group.start)/rlsIteratorBatchSize + 3 {
 								r, err := it.Next(ctx)
 								if errors.Is(err, io.EOF) {
 									ended = true
@@ -2051,7 +2045,7 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 	fields := []string{"id", "owner", "vector", "i64", "text", "f64"}
 	params := index.NewCustomAnnParam()
 	params.WithExtraParam("nprobe", 64)
-	params.WithExtraParam("ef", 256)
+	params.WithExtraParam("ef", rlsHNSWEF)
 	for _, value := range values {
 		clusterValues := []any{nil}
 		if tc.partitionKey != "" && tc.clusteringKey != "" {
@@ -2176,11 +2170,11 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 									}
 								}
 							}
-							it, err := mc.SearchIterator(ctx, client.NewSearchIteratorOption(name, query).WithANNSField("vector").WithAnnParam(params).WithFilter(filter).WithTemplateParam("key", value).WithBatchSize(127).WithIgnoreGrowing(ignoreGrowing).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+							it, err := mc.SearchIterator(ctx, client.NewSearchIteratorOption(name, query).WithANNSField("vector").WithAnnParam(params).WithFilter(filter).WithTemplateParam("key", value).WithBatchSize(rlsIteratorBatchSize).WithIgnoreGrowing(ignoreGrowing).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 							require.NoError(t, err)
 							var got []any
 							ended := false
-							for range len(all)/127 + 3 {
+							for range len(all)/rlsIteratorBatchSize + 3 {
 								r, err := it.Next(ctx)
 								if errors.Is(err, io.EOF) {
 									ended = true
