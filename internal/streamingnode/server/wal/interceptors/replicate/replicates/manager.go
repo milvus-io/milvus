@@ -8,10 +8,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
-type replicateAckerImpl func(err error)
+// ReplicateAckerOutcome describes the transaction state after an append.
+type ReplicateAckerOutcome uint8
+
+const (
+	ReplicateAckerOutcomeNone ReplicateAckerOutcome = iota
+	ReplicateAckerOutcomeAbortPending
+	ReplicateAckerOutcomeAborted
+)
+
+type replicateAckerImpl func(err error, outcome ReplicateAckerOutcome)
 
 func (r replicateAckerImpl) Ack(err error) {
-	r(err)
+	r(err, ReplicateAckerOutcomeNone)
+}
+
+func (r replicateAckerImpl) AckWithOutcome(err error, outcome ReplicateAckerOutcome) {
+	r(err, outcome)
+}
+
+// ReplicateAckerWithOutcome is the explicit outcome extension implemented by
+// the production acker. It keeps the legacy Ack method available to callers
+// that only need the append error.
+type ReplicateAckerWithOutcome interface {
+	ReplicateAcker
+	AckWithOutcome(error, ReplicateAckerOutcome)
+}
+
+// AckReplicateMessage reports an append result and its transaction outcome.
+// Test doubles that implement only ReplicateAcker retain the legacy behavior.
+func AckReplicateMessage(acker ReplicateAcker, err error, outcome ReplicateAckerOutcome) {
+	if ackerWithOutcome, ok := acker.(ReplicateAckerWithOutcome); ok {
+		ackerWithOutcome.AckWithOutcome(err, outcome)
+		return
+	}
+	acker.Ack(err)
 }
 
 // ReplicateAcker is a guard for replicate message.

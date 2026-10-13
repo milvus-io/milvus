@@ -1,28 +1,10 @@
 package replicates
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-var (
-	errTxnAborted      = errors.New("replicated transaction durably aborted")
-	errTxnAbortPending = errors.New("replicated transaction rollback pending")
-)
-
-// MarkTxnAbortPending tells the acker to block commits until rollback succeeds.
-func MarkTxnAbortPending(err error) error {
-	return errors.Mark(err, errTxnAbortPending)
-}
-
-// MarkTxnAborted tells the acker that the local rollback is durable.
-// It preserves the original append error and code.
-func MarkTxnAborted(err error) error {
-	return errors.Mark(err, errTxnAborted)
-}
 
 // newReplicateTxnHelper creates a new replicate txn helper.
 func newReplicateTxnHelper() *replicateTxnHelper {
@@ -48,6 +30,12 @@ func (s *replicateTxnHelper) CurrentTxn() *message.TxnContext {
 func (s *replicateTxnHelper) StartBegin(txn *message.TxnContext, replicateHeader *message.ReplicateHeader) error {
 	if s.currentTxn != nil {
 		if s.currentTxn.TxnID == txn.TxnID {
+			if s.aborting {
+				s.currentTxn = nil
+				s.messageIDs = nil
+				s.aborting = false
+				return nil
+			}
 			return status.NewIgnoreOperation("txn message is already in progress, txnID: %d", s.currentTxn.TxnID)
 		}
 		return status.NewReplicateViolation("begin txn violation, txnID: %d, incoming: %d", s.currentTxn.TxnID, txn.TxnID)
@@ -67,6 +55,9 @@ func (s *replicateTxnHelper) AddNewMessage(txn *message.TxnContext, replicateHea
 	}
 	if s.currentTxn.TxnID != txn.TxnID {
 		return status.NewReplicateViolation("add new txn message with different txn, current: %d, incoming: %d", s.currentTxn.TxnID, txn.TxnID)
+	}
+	if s.aborting {
+		return status.NewReplicateViolation("txn rollback is pending, replay from BeginTxn, txnID: %d", txn.TxnID)
 	}
 	if s.messageIDs.Contain(replicateHeader.MessageID.Marshal()) {
 		return status.NewIgnoreOperation("txn message is already in progress, txnID: %d, messageID: %d", s.currentTxn.TxnID, replicateHeader.MessageID)

@@ -45,7 +45,7 @@ After sending queued confirmations, the Proxy returns the receive-loop error. St
 
 ## Recovery
 
-On WAL open, `RecoverReplicateManager` loads the `ReplicateConfig` and `ReplicateCheckpoint` from the [RecoveryStorage](../wal/recovery-storage.md) snapshot. For SECONDARY clusters, it also recovers in-progress transaction state from the `TxnBuffer` (uncommitted replicated transactions), so that the secondary can continue receiving body/commit messages for the interrupted transaction.
+On WAL open, `RecoverReplicateManager` loads the `ReplicateConfig` and `ReplicateCheckpoint` from the [RecoveryStorage](../wal/recovery-storage.md) snapshot. For SECONDARY clusters, it restores the in-progress transaction identity from the `TxnBuffer` but marks it as requiring replay from `BeginTxn`. This prevents an interrupted transaction from committing after restart; replaying `BeginTxn` resets the buffered bodies before new body/commit messages are accepted.
 
 ## Topology Changes
 

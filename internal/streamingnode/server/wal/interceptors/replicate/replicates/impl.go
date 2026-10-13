@@ -203,7 +203,7 @@ func (impl *replicatesManagerImpl) startReplicateTxnMessage(_ context.Context, m
 		if err := impl.secondaryState.StartBegin(txn, rh); err != nil {
 			return nil, err
 		}
-		return replicateAckerImpl(func(err error) {
+		return replicateAckerImpl(func(err error, _ ReplicateAckerOutcome) {
 			if err == nil {
 				impl.secondaryState.BeginDone(txn)
 			}
@@ -214,7 +214,7 @@ func (impl *replicatesManagerImpl) startReplicateTxnMessage(_ context.Context, m
 			return nil, err
 		}
 		// only update the checkpoint when the txn is committed.
-		return replicateAckerImpl(func(err error) {
+		return replicateAckerImpl(func(err error, _ ReplicateAckerOutcome) {
 			if err == nil {
 				impl.secondaryState.CommitDone(txn)
 				impl.secondaryState.PushForwardCheckpoint(rh.TimeTick, rh.LastConfirmedMessageID)
@@ -227,12 +227,12 @@ func (impl *replicatesManagerImpl) startReplicateTxnMessage(_ context.Context, m
 		if err := impl.secondaryState.AddNewMessage(txn, rh); err != nil {
 			return nil, err
 		}
-		return replicateAckerImpl(func(err error) {
+		return replicateAckerImpl(func(err error, outcome ReplicateAckerOutcome) {
 			if err == nil {
 				impl.secondaryState.AddNewMessageDone(rh)
-			} else if errors.Is(err, errTxnAborted) {
+			} else if outcome == ReplicateAckerOutcomeAborted {
 				impl.secondaryState.AbortDone()
-			} else if errors.Is(err, errTxnAbortPending) {
+			} else if outcome == ReplicateAckerOutcomeAbortPending {
 				impl.secondaryState.aborting = true
 			}
 			impl.mu.Unlock()
@@ -248,7 +248,7 @@ func (impl *replicatesManagerImpl) startReplicateNonTxnMessage(_ context.Context
 			impl.secondaryState.CurrentTxn().TxnID,
 		)
 	}
-	return replicateAckerImpl(func(err error) {
+	return replicateAckerImpl(func(err error, _ ReplicateAckerOutcome) {
 		if err == nil {
 			impl.secondaryState.PushForwardCheckpoint(rh.TimeTick, rh.LastConfirmedMessageID)
 		}

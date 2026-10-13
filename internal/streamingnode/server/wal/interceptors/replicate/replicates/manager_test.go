@@ -316,19 +316,19 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
 
-	committed := false
+	accepted := make([]message.MessageType, 0, 3)
 	for _, msg := range newReplicateTxnMessage("test1", "test2", 2) {
 		g, err := rm.BeginReplicateMessage(context.Background(), msg)
-		if msg.MessageType() == message.MessageTypeCommitTxn && !committed {
-			assert.NoError(t, err)
-			assert.NotNil(t, g)
-			g.Ack(nil)
-			committed = true
-		} else {
-			assert.True(t, status.AsStreamingError(err).IsIgnoredOperation())
-			assert.Nil(t, g)
-		}
+		assert.NoError(t, err)
+		assert.NotNil(t, g)
+		accepted = append(accepted, msg.MessageType())
+		g.Ack(nil)
 	}
+	assert.Equal(t, []message.MessageType{
+		message.MessageTypeBeginTxn,
+		message.MessageTypeCreateDatabase,
+		message.MessageTypeCommitTxn,
+	}, accepted)
 }
 
 func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *testing.T) {
@@ -359,19 +359,15 @@ func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *t
 	require.NoError(t, err)
 
 	firstReplay := newReplicateTxnMessage("test1", "test2", 2)
-	for _, msg := range firstReplay {
+	for i, msg := range firstReplay {
 		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
-		if msg.MessageType() == message.MessageTypeCommitTxn && acker != nil {
+		if i == 0 {
 			require.NoError(t, appendErr)
-			acker.Ack(status.NewTransactionExpired("recovered transaction"))
+			acker.Ack(status.NewTransactionExpired("replay interrupted"))
 			continue
 		}
 		require.Nil(t, acker)
-		if msg.MessageType() == message.MessageTypeCommitTxn {
-			require.True(t, status.AsStreamingError(appendErr).IsReplicateViolation())
-		} else {
-			require.True(t, status.AsStreamingError(appendErr).IsIgnoredOperation())
-		}
+		require.True(t, status.AsStreamingError(appendErr).IsReplicateViolation())
 	}
 	checkpoint, err := rm.GetReplicateCheckpoint()
 	require.NoError(t, err)

@@ -43,6 +43,9 @@ func recoverSecondaryState(param *ReplicateManagerRecoverParam) (*secondaryState
 			}
 			txnHelper.AddNewMessageDone(msg.ReplicateHeader())
 		}
+		// Recovery cannot tell whether the append failed before the crash.
+		// Require BeginTxn on replay so a pending abort can never commit.
+		txnHelper.aborting = true
 	}
 	return &secondaryState{
 		checkpoint:         checkpoint,

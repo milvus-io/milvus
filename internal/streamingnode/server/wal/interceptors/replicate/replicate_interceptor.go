@@ -69,7 +69,8 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 	}
 
 	var ackErr error
-	defer func() { acker.Ack(ackErr) }()
+	ackOutcome := replicates.ReplicateAckerOutcomeNone
+	defer func() { replicates.AckReplicateMessage(acker, ackErr, ackOutcome) }()
 	msgID, err = appendOp(ctx, msg)
 	ackErr = err
 	if err == nil || msg.TxnContext() == nil ||
@@ -82,7 +83,7 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 	// Hold the manager lock while appending the rollback; clear transaction state
 	// only after it is durable, or recovery would restore the failed transaction.
 	// Omit the replicate header to leave the source checkpoint unchanged.
-	ackErr = replicates.MarkTxnAbortPending(err)
+	ackOutcome = replicates.ReplicateAckerOutcomeAbortPending
 	if impl.txnManager != nil {
 		if session, sessionErr := impl.txnManager.GetSessionOfTxn(msg.TxnContext().TxnID); sessionErr == nil {
 			// Block body/commit writes before timestamp allocation, which can fail.
@@ -101,7 +102,7 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 	if _, rollbackErr := appendOp(ctx, rollback); rollbackErr != nil {
 		return nil, errors.CombineErrors(err, rollbackErr)
 	}
-	ackErr = replicates.MarkTxnAborted(err)
+	ackOutcome = replicates.ReplicateAckerOutcomeAborted
 	return nil, err
 }
 
