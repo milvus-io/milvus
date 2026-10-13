@@ -557,6 +557,71 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
         self._check_rows(client, name, rows, skip_rls=True)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("mode", ["auto_id", "default_owner", "partition_key", "clustering_key"])
+    def test_rls_schema_write_variants(self, rls_client, mode):
+        """
+        target: RLS checks after default materialization and with generated/key fields
+        method: insert an authorized row, reject a different owner and partially update its payload
+        expected: generated PK/default values are visible and denied writes preserve the authorized row
+        """
+        client = rls_client
+        name = cf.gen_unique_str("rls_schema")
+        schema = self.create_schema(client, auto_id=mode == "auto_id", enable_dynamic_field=False)[0]
+        self.add_field(schema, "id", DataType.INT64, is_primary=True, auto_id=mode == "auto_id")
+        owner_options = {
+            "auto_id": {},
+            "default_owner": {"default_value": "alice"},
+            "partition_key": {"is_partition_key": True},
+            "clustering_key": {"is_clustering_key": True},
+        }[mode]
+        self.add_field(schema, "owner", DataType.VARCHAR, **owner_options)
+        self.add_field(schema, "note", DataType.VARCHAR)
+        self.add_field(schema, "vector", DataType.FLOAT_VECTOR, dim=4)
+        self.create_collection(
+            client, name, schema=schema, properties={"rls.enabled": True}, consistency_level="Strong"
+        )
+        client.create_row_policy(name, "owner", "permissive", ALL_ACTIONS, OWNER, OWNER, timeout=30)
+        row = {"owner": "alice", "note": "initial", "vector": [1.0, 2.0, 3.0, 4.0]}
+        if mode != "auto_id":
+            row["id"] = 1
+        if mode == "default_owner":
+            row.pop("owner")
+        inserted = self.insert(client, name, [row], rls_principal="alice")[0]
+        pk = inserted["ids"][0]
+        params = self.prepare_index_params(client)[0]
+        params.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, name, params)
+        self.load_collection(client, name)
+        rejected = {**row, "owner": "bob"}
+        if mode != "auto_id":
+            rejected["id"] = 2
+        self.insert(
+            client,
+            name,
+            [rejected],
+            rls_principal="alice",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_msg: "RLS"},
+        )
+        if mode != "auto_id":
+            self.upsert(
+                client,
+                name,
+                [{"id": pk, "owner": "bob"}],
+                partial_update=True,
+                rls_principal="alice",
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_msg: "RLS"},
+            )
+            self.upsert(client, name, [{"id": pk, "note": "updated"}], partial_update=True, rls_principal="alice")
+        expected = [{"id": pk, "owner": "alice", "note": "initial" if mode == "auto_id" else "updated"}]
+        for context in [{"skip_rls": True}, {"rls_principal": "alice"}]:
+            assert (
+                self.query(client, name, filter="id >= 0", output_fields=["id", "owner", "note"], **context)[0]
+                == expected
+            )
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("granted", ALL_ACTIONS)
     def test_rls_independent_action_grants(self, rls_client, granted):
         """
