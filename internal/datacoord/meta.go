@@ -123,8 +123,7 @@ type meta struct {
 	externalCollectionRefreshMeta *externalCollectionRefreshMeta
 	broker                        broker.Broker
 	// Snapshot Meta
-	snapshotMeta   *snapshotMeta
-	quotaMetricsMu sync.Mutex
+	snapshotMeta *snapshotMeta
 
 	// segmentChangeGroups is the in-memory table of SegmentChangeGroup, keyed by
 	// groupID and guarded by segMu (the group record composes into the same
@@ -650,11 +649,6 @@ func getBinlogFileCount(s *datapb.SegmentInfo) int {
 
 func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	aggregateCollectionMetrics := metrics.IsCollectionLevelMetricsAggregateMode()
-	if aggregateCollectionMetrics {
-		m.quotaMetricsMu.Lock()
-		defer m.quotaMetricsMu.Unlock()
-	}
-
 	info := &metricsinfo.DataCoordQuotaMetrics{}
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
