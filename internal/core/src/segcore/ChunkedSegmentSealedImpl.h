@@ -485,12 +485,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr) const;
 
     // Result-fill reads through a request-pinned snapshot instead of
-    // re-capturing the published state per field at this layer. Inner column /
-    // index helpers called below (get_raw_data, PinIndex, HasFieldData, ...)
-    // still self-capture; migrating them is a Phase 4 follow-up. Public for
-    // cross-class access via dynamic_cast from SegmentInterface (same pattern
-    // as TryTakeForRetrieve); the virtual bulk_subscript keeps its frozen
-    // signature and delegates to these with a fresh capture.
+    // re-capturing the published state per field at this layer. The whole
+    // per-field chain (index routing via HasFieldDataFromState /
+    // IndexHasRawDataFromState / the runtime IndexInventory and column fill
+    // via get_raw_data_from_state / get_vector_from_state /
+    // get_emb_list_from_state) reads the same pinned snapshot end to end.
+    // Public for cross-class access via dynamic_cast from SegmentInterface
+    // (same pattern as TryTakeForRetrieve); the virtual bulk_subscript keeps
+    // its frozen signature and delegates to these with a fresh capture.
     std::unique_ptr<DataArray>
     bulk_subscript_from_state(
         const std::shared_ptr<const PublishedSegmentState>& snapshot,
@@ -1303,11 +1305,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t count,
         google::protobuf::RepeatedPtrField<T>* dst);
 
-    // TEXT column handling for StorageV2 (LOB reference resolution)
+    // TEXT column handling for StorageV2 (LOB reference resolution). Reads the
+    // text_lob_paths map from the passed runtime so callers that already hold a
+    // pinned snapshot avoid re-capturing the published state.
     void
     bulk_subscript_text_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
+        const std::shared_ptr<const RuntimeResourceState>& runtime,
         const ChunkedColumnInterface* column,
         const int64_t* seg_offsets,
         int64_t count,
@@ -1327,6 +1332,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  const FieldMeta& field_meta,
                  const int64_t* seg_offsets,
                  int64_t count) const;
+
+    // State-parameterized twins of get_raw_data / get_vector / get_emb_list
+    // (Phase 4): the per-field fill chain reads one pinned snapshot end to
+    // end. The public entry points below keep their frozen signatures and
+    // delegate with a fresh capture.
+    std::unique_ptr<DataArray>
+    get_raw_data_from_state(const PublishedSegmentState& snapshot,
+                            milvus::OpContext* op_ctx,
+                            FieldId field_id,
+                            const FieldMeta& field_meta,
+                            const int64_t* seg_offsets,
+                            int64_t count) const;
+
+    std::unique_ptr<DataArray>
+    get_vector_from_state(const PublishedSegmentState& snapshot,
+                          milvus::OpContext* op_ctx,
+                          FieldId field_id,
+                          const int64_t* ids,
+                          int64_t count) const;
+
+    std::unique_ptr<DataArray>
+    get_emb_list_from_state(const PublishedSegmentState& snapshot,
+                            milvus::OpContext* op_ctx,
+                            FieldId field_id,
+                            const FieldMeta& field_meta,
+                            const int64_t* seg_offsets,
+                            int64_t count) const;
 
     struct ValidResult {
         int64_t valid_count = 0;
@@ -1803,6 +1835,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     IndexHasRawDataFromState(const PublishedSegmentState& state,
                              FieldId field_id) const;
 
+    // State-parameterized twins of the public result-fill helpers below
+    // (Phase 4): the per-field fill chain reads one pinned snapshot end to end
+    // instead of re-capturing the published state per helper. Public entry
+    // points keep their frozen signatures and delegate with a fresh capture.
+    bool
+    HasFieldDataFromState(const PublishedSegmentState& state,
+                          FieldId field_id) const;
+
     void
     RecordDefaultFieldsFilledLocked(const std::vector<FieldId>& field_ids);
 
@@ -2179,9 +2219,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_replace = false,
         StagedStateCommitter* committer = nullptr);
 
-    std::shared_ptr<ChunkedColumnInterface>
+    // Pure function of the published runtime state: never touches this.
+    // Static so callers that already hold a snapshot (SealedReadSnapshot,
+    // bulk_subscript_from_state) can look a column up without a fresh capture.
+    static std::shared_ptr<ChunkedColumnInterface>
     get_column(const std::shared_ptr<const RuntimeResourceState>& runtime,
-               FieldId field_id) const {
+               FieldId field_id) {
         if (runtime == nullptr) {
             return nullptr;
         }
@@ -2190,6 +2233,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             return it->second;
         }
         return nullptr;
+    }
+
+    // Zero-refcount borrowed twin of get_column for the per-chunk hot loop.
+    // Returns a pointer owned by the published runtime state; callers must not
+    // retain it past the request (same rule as
+    // SegmentReadSnapshot::GetColumn).
+    static const ChunkedColumnInterface*
+    BorrowColumn(const std::shared_ptr<const RuntimeResourceState>& runtime,
+                 FieldId field_id) {
+        if (runtime == nullptr) {
+            return nullptr;
+        }
+        auto it = runtime->fields.find(field_id);
+        return it == runtime->fields.end() ? nullptr : it->second.get();
     }
 
     std::shared_ptr<ChunkedColumnInterface>
