@@ -251,18 +251,32 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 }
 
 // OverwriteBroadcastHeader overwrites the broadcast header of the message.
-func (m *messageImpl) OverwriteBroadcastHeader(id uint64, rks ...ResourceKey) BroadcastMutableMessage {
+func (m *messageImpl) OverwriteBroadcastHeader(header *BroadcastHeader) BroadcastMutableMessage {
 	bh := m.broadcastHeader()
 	if bh == nil {
 		panic("there's a bug in the message codes, broadcast header lost in properties of broadcast message")
 	}
-	bh.BroadcastId = id
-	bh.ResourceKeys = newProtoFromResourceKey(rks...)
+	bh.BroadcastId = header.BroadcastID
+	bh.ResourceKeys = newProtoFromResourceKey(header.ResourceKeys.Collect()...)
+	bh.Vchannels = header.VChannels
+	bh.AckSyncUp = header.AckSyncUp
+	bh.Txn = header.Txn
 	bhVal, err := EncodeProto(bh)
 	if err != nil {
 		panic("should not happen on broadcast header proto")
 	}
 	m.properties.Set(messageBroadcastHeader, bhVal)
+	return m
+}
+
+// OverwriteBroadcastAdmissionKey overwrites the admission identity in place.
+// An empty key clears the identity.
+func (m *messageImpl) OverwriteBroadcastAdmissionKey(key string) BroadcastMutableMessage {
+	if key == "" {
+		m.properties.Delete(broadcastAdmissionKey)
+	} else {
+		m.properties.Set(broadcastAdmissionKey, key)
+	}
 	return m
 }
 

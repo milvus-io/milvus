@@ -191,7 +191,7 @@ func buildTestBroadcastMessageForTrace(t *testing.T) message.BroadcastMutableMes
 	if err != nil {
 		t.Fatalf("failed to build broadcast message: %v", err)
 	}
-	return msg.OverwriteBroadcastHeader(0)
+	return msg.WithBroadcastID(0)
 }
 
 func buildTestLockGuards(keys ...message.ResourceKey) *lockGuards {

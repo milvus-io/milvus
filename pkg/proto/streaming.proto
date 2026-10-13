@@ -93,6 +93,7 @@ enum BroadcastTaskState {
     BROADCAST_TASK_STATE_DONE = 2;             // task has been broadcasted and acknowledged, the resource lock is released, and the persisted task can be cleared.
     BROADCAST_TASK_STATE_WAIT_ACK = 3 [deprecated = true];         // task has been broadcasted, waiting for ack, the resource lock is still acquired by some vchannels.
     BROADCAST_TASK_STATE_REPLICATED = 4;       // task is replicated from the source cluster, the resource lock isn't acquired, so the execution order should be protected by the order of broadcastID.
+    BROADCAST_TASK_STATE_TXN_INFLIGHT = 6; // Begin callback persisted; resources held until Commit.
     BROADCAST_TASK_STATE_TOMBSTONE = 5;        // task is tombstone, it's used to mark the task is already acked, but for idempotency and deduplication, it will be kept in recovery stroage for a while.
 }
 

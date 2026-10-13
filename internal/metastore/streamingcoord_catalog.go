@@ -37,11 +37,11 @@ type StreamingCoordCataLog interface {
 	// Used to recovery the broadcast tasks.
 	ListBroadcastTask(ctx context.Context) ([]*streamingpb.BroadcastTask, error)
 
-	// SaveBroadcastTask save the broadcast task to metastore.
-	// Make the task recoverable after restart.
-	// When broadcast task is done, it will be removed from metastore.
-	// Only return error if the ctx is canceled, otherwise it will retry until success.
-	SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error
+	// SaveBroadcastTasks atomically saves tasks under their existing BroadcastID keys.
+	// DONE tasks are removed in the same transaction. The batch must fit one backend
+	// transaction: implementations must not split it into independently committed batches.
+	// Writes retry until success or context cancellation.
+	SaveBroadcastTasks(ctx context.Context, tasks map[uint64]*streamingpb.BroadcastTask) error
 
 	// SaveReplicateConfiguration saves the replicate configuration to metastore.
 	// Only return error if the ctx is canceled, otherwise it will retry until success.

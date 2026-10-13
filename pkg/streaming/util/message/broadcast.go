@@ -19,6 +19,7 @@ func newBroadcastHeaderFromProto(proto *messagespb.BroadcastHeader) *BroadcastHe
 		VChannels:    proto.GetVchannels(),
 		ResourceKeys: rks,
 		AckSyncUp:    proto.GetAckSyncUp(),
+		Txn:          proto.GetTxn(),
 	}
 }
 
@@ -27,6 +28,7 @@ type BroadcastHeader struct {
 	VChannels    []string
 	ResourceKeys typeutil.Set[ResourceKey]
 	AckSyncUp    bool
+	Txn          *messagespb.BroadcastTxnContext
 }
 
 // BroadcastResult is the result of broadcast operation.

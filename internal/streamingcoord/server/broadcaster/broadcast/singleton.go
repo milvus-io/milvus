@@ -94,3 +94,28 @@ func Release() {
 	}
 	singleton.Get().Close()
 }
+
+// StartTxnBroadcastWithResourceKey starts a transaction, or returns the original Begin result.
+func StartTxnBroadcastWithResourceKey(ctx context.Context, keys ...message.ResourceKey) (broadcaster.TxnBroadcaster, *broadcaster.TxnBroadcastResult, error) {
+	manager, err := singleton.GetWithContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+		return nil, nil, merr.Wrap(err, "wait for WAL based DDL")
+	}
+	return manager.StartTxnBroadcastWithResourceKey(ctx, keys...)
+}
+
+// RecoverTxnBroadcast recovers a handle; it does not acquire business resource locks.
+func RecoverTxnBroadcast(ctx context.Context, txnID uint64) (broadcaster.TxnBroadcaster, error) {
+	manager, err := singleton.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return manager.RecoverTxnBroadcast(ctx, txnID)
+}

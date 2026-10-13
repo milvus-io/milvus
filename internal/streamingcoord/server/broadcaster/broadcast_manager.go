@@ -2,10 +2,13 @@ package broadcaster
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"golang.org/x/sync/semaphore"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -17,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -27,12 +31,32 @@ func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newBroadcastTaskManager(tasks), nil
+	tasks, groups, err := splitBroadcastTasks(tasks)
+	if err != nil {
+		return nil, err
+	}
+	primary := true
+	if len(groups) > 0 {
+		config, err := resource.Resource().StreamingCatalog().GetReplicateConfiguration(ctx)
+		if err != nil {
+			return nil, err
+		}
+		helper, err := replicateutil.NewConfigHelper(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), config.GetReplicateConfiguration())
+		if err != nil {
+			return nil, err
+		}
+		primary = helper == nil || helper.GetCurrentCluster().Role() == replicateutil.RolePrimary
+	}
+	return recoverBroadcastTaskManager(tasks, primary, groups...), nil
 }
 
 // newBroadcastTaskManager creates a new broadcast task manager with recovery info.
 // return the manager, the pending broadcast tasks and the pending ack callback tasks.
-func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
+func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask, groups ...[]*streamingpb.BroadcastTask) *broadcastTaskManager {
+	return recoverBroadcastTaskManager(protos, true, groups...)
+}
+
+func recoverBroadcastTaskManager(protos []*streamingpb.BroadcastTask, primary bool, groups ...[]*streamingpb.BroadcastTask) *broadcastTaskManager {
 	logger := resource.Resource().Logger().With(mlog.FieldComponent("broadcaster"))
 	metrics := newBroadcasterMetrics()
 	rkLocker := newResourceKeyLocker()
@@ -44,6 +68,36 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		t.SetLogger(logger)
 		recoveryTasks = append(recoveryTasks, t)
 	}
+	var promoting *broadcastTask
+	for _, task := range recoveryTasks {
+		if task.IsForcePromoteMessage() && (task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING || task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK) {
+			promoting = task
+		}
+	}
+	txns := make(map[uint64]*broadcastTxn, len(groups))
+	for _, meta := range groups {
+		g := &broadcastTxn{op: make(chan struct{}, 1)}
+		if txnHeader(meta[0]).Txn.GetSequence() == 0 {
+			g.begin = proto.Clone(meta[0]).(*streamingpb.BroadcastTask)
+			g.beginID = txnHeader(meta[0]).BroadcastID
+		}
+		for _, member := range meta {
+			t := newBroadcastTaskFromProto(proto.Clone(member).(*streamingpb.BroadcastTask), metrics, ackScheduler)
+			t.SetLogger(logger)
+			t.txn = g
+			g.tasks = append(g.tasks, t)
+			recoveryTasks = append(recoveryTasks, t)
+		}
+		g.id = g.tasks[0].Header().Txn.GetTxnId()
+		if primary && promoting == nil && (g.begin == nil || g.begin.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE) {
+			var err error
+			g.guards, err = rkLocker.FastLock(g.tasks[0].Header().ResourceKeys.Collect()...)
+			if err != nil {
+				panic(err)
+			}
+		}
+		txns[g.id] = g
+	}
 	tasks := make(map[uint64]*broadcastTask, len(recoveryTasks))
 	pendingTasks := make([]*pendingBroadcastTask, 0, len(recoveryTasks))
 	pendingAckCallbackTasks := make([]*broadcastTask, 0, len(recoveryTasks))
@@ -52,11 +106,13 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 	for _, task := range recoveryTasks {
 		switch task.task.State {
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK:
-			guards, err := rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
-			if err != nil {
-				panic(err)
+			if task.txn == nil {
+				guards, err := rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
+				if err != nil {
+					panic(err)
+				}
+				task.WithResourceKeyLockGuards(guards)
 			}
-			task.WithResourceKeyLockGuards(guards)
 
 			if newPending := newPendingBroadcastTask(task); newPending != nil {
 				// if there's some pending messages that is not appended, it should be continued to be appended.
@@ -73,23 +129,42 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 				pendingAckCallbackTasks = append(pendingAckCallbackTasks, task)
 			}
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE:
-			tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
+			if task.txn == nil || task.Header().Txn.GetKind() == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT {
+				tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
+			}
 		}
 		tasks[task.Header().BroadcastID] = task
 		// Rebuild the idempotency index across EVERY state, tombstones included:
 		// a tombstoned task is exactly what a late retry must still hit.
-		idxOfKeys.Add(task.IdempotencyScope(), task.Header().BroadcastID)
+		if task.txn == nil || task.Header().Txn.GetKind() == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BEGIN {
+			idxOfKeys.Add(task.IdempotencyScope(), task.Header().BroadcastID)
+		}
 	}
 
+	txnCtx, txnCancel := context.WithCancel(context.Background()) // #nosec G118 -- Close invokes the retained txnCancel.
 	m := &broadcastTaskManager{
-		lifetime:           typeutil.NewLifetime(),
-		mu:                 &sync.Mutex{},
-		tasks:              tasks,
+		admission: semaphore.NewWeighted(math.MaxInt64),
+		lifetime:  typeutil.NewLifetime(),
+		mu:        &sync.Mutex{},
+		tasks:     tasks,
+		txns:      txns,
+		txnCtx:    txnCtx, txnCancel: txnCancel,
 		idempotencyIndex:   idxOfKeys,
 		resourceKeyLocker:  rkLocker,
 		metrics:            metrics,
 		broadcastScheduler: newBroadcasterScheduler(pendingTasks, logger),
 		ackScheduler:       ackScheduler,
+	}
+
+	for _, group := range txns {
+		group.manager = m
+	}
+
+	if promoting != nil {
+		if err := m.admission.Acquire(context.Background(), math.MaxInt64); err != nil {
+			panic(err)
+		}
+		promoting.guards.afterUnlock = func() { m.admission.Release(math.MaxInt64) }
 	}
 
 	// Set the broadcast task manager reference for accessing incomplete tasks.
@@ -105,8 +180,13 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 type broadcastTaskManager struct {
 	mlog.Binder
 
+	admission          *semaphore.Weighted // protects promotion ownership handoff, not transaction execution
 	lifetime           *typeutil.Lifetime
 	mu                 *sync.Mutex
+	txns               map[uint64]*broadcastTxn
+	txnWG              sync.WaitGroup
+	txnCtx             context.Context
+	txnCancel          context.CancelFunc
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
 	idempotencyIndex   *idempotencyIndex         // map the idempotency key to the broadcastID that owns it
 	resourceKeyLocker  *resourceKeyLocker
@@ -128,6 +208,15 @@ func (bm *broadcastTaskManager) WithUnreplicableResourceKeys(ctx context.Context
 
 // withResourceKeys acquires the resource keys, then checks the cluster with checkCluster.
 func (bm *broadcastTaskManager) withResourceKeys(ctx context.Context, checkCluster func(context.Context) error, unreplicable bool, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	if err := bm.admission.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	defer bm.admission.Release(1)
+	for _, key := range resourceKeys {
+		if key.Domain == messagespb.ResourceDomain_ResourceDomainIdempotency {
+			return nil, merr.WrapErrParameterInvalidMsg("admission ResourceKeys require StartTxnBroadcastWithResourceKey")
+		}
+	}
 	// Resolved before any lock is taken: it blocks until the first assignment
 	// arrives, and it panics when the streaming client is closing.
 	controlChannel := streaming.WAL().ControlChannel()
@@ -162,6 +251,9 @@ func (bm *broadcastTaskManager) withResourceKeys(ctx context.Context, checkClust
 // and verifies the cluster is secondary. Returns error if the cluster is primary.
 // This is used for force promote operations that should only be executed on secondary clusters.
 func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error) {
+	if err := bm.checkClusterRoleSecondary(ctx); err != nil {
+		return nil, err
+	}
 	// Resolved before any lock is taken, see WithResourceKeys.
 	controlChannel := streaming.WAL().ControlChannel()
 
@@ -170,10 +262,14 @@ func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Cont
 		return nil, merr.Wrapf(err, "allocate new id failed")
 	}
 
+	if err := bm.admission.Acquire(ctx, math.MaxInt64); err != nil {
+		return nil, err
+	}
 	startLockInstant := time.Now()
 	// Acquire an exclusive cluster resource key to block all other broadcasts
 	resourceKeys := []message.ResourceKey{message.NewExclusiveClusterResourceKey()}
 	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
+	guards.afterUnlock = func() { bm.admission.Release(math.MaxInt64) }
 
 	// Check if the cluster is secondary
 	if err := bm.checkClusterRoleSecondary(ctx); err != nil {
@@ -316,6 +412,13 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	}
 	defer bm.lifetime.Done()
 
+	if msg.BroadcastHeader().Txn != nil {
+		task, err := bm.getOrCreateTxnTask(msg)
+		if err != nil || task == nil {
+			return err
+		}
+		return task.Ack(ctx, msg)
+	}
 	t, ok := bm.getOrCreateBroadcastTask(msg)
 	if !ok {
 		bm.Logger().Debug(ctx,
@@ -339,6 +442,9 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 		bm.Logger().Debug(ctx, "task is not found, ignored the drop tombstone request", mlog.FieldBroadcastID(broadcastID))
 		return nil
 	}
+	if t.txn != nil {
+		return t.txn.drop(ctx)
+	}
 	if err := t.DropTombstone(ctx); err != nil {
 		return err
 	}
@@ -349,10 +455,35 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 // Close closes the broadcast task manager.
 func (bm *broadcastTaskManager) Close() {
 	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
+	if bm.txnCancel != nil {
+		bm.txnCancel()
+	}
 	bm.lifetime.Wait()
 
 	bm.broadcastScheduler.Close()
+	bm.txnWG.Wait()
 	bm.ackScheduler.Close()
+	// Admission has stopped. Release local guards so blocked Start callers can
+	// wake and unwind. Persisted groups restore ownership on the next recovery.
+	for _, group := range bm.txns {
+		group.mu.Lock()
+		if group.guards != nil {
+			group.guards.Unlock()
+			group.guards = nil
+		}
+		group.mu.Unlock()
+	}
+	for _, task := range bm.tasks {
+		promoting := task.IsForcePromoteMessage()
+		task.mu.Lock()
+		if task.guards != nil {
+			if promoting && task.guards.afterUnlock != nil {
+				task.guards.afterUnlock = func() { bm.admission.Release(math.MaxInt64) }
+			}
+			task.guards.Unlock()
+		}
+		task.mu.Unlock()
+	}
 }
 
 // getOrAddBroadcastTask resolves the idempotency scope and registers the task in
@@ -420,7 +551,7 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	bh := msg.BroadcastHeader()
 	t, ok := bm.tasks[msg.BroadcastHeader().BroadcastID]
 	if ok {
-		return t, t.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+		return t, t.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE && t.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TXN_INFLIGHT
 	}
 	if msg.ReplicateHeader() == nil {
 		bm.Logger().Warn(context.TODO(), "try to recover task from the wal from non-replicate message, ignore it")
@@ -454,8 +585,8 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	delete(bm.tasks, broadcastID)
 }
 
-// getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.
-// Tasks in PENDING or REPLICATED state with pending messages are considered incomplete.
+// getIncompleteBroadcastTasks includes tasks whose callbacks have not finished,
+// even if every channel has ACKed. Promotion must drain those callbacks too.
 func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
@@ -464,11 +595,8 @@ func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 	for _, task := range bm.tasks {
 		state := task.State()
 		if state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
-			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
-			continue
-		}
-		msgs := task.PendingBroadcastMessages()
-		if len(msgs) == 0 {
+			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED &&
+			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK {
 			continue
 		}
 		result = append(result, task)

@@ -177,7 +177,7 @@ func (w *walController) setupMockWAL(t *testing.T) {
 	streaming.SetWALForTest(mw)
 }
 
-// catalogRecord records a single SaveBroadcastTask call.
+// catalogRecord records one task in a SaveBroadcastTasks call.
 type catalogRecord struct {
 	BroadcastID uint64
 	State       streamingpb.BroadcastTaskState
@@ -250,19 +250,21 @@ func setupForcePromoteTest(
 		catalog:    catalog,
 	}
 
-	catalog.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, broadcastID uint64, bt *streamingpb.BroadcastTask) error {
+	catalog.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, tasks map[uint64]*streamingpb.BroadcastTask) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			env.catalogRecordsMu.Lock()
-			env.catalogRecords = append(env.catalogRecords, catalogRecord{
-				BroadcastID: broadcastID,
-				State:       bt.State,
-			})
-			env.catalogRecordsMu.Unlock()
-			if bt.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
-				tombstoned.Insert(broadcastID)
+			defer env.catalogRecordsMu.Unlock()
+			for broadcastID, bt := range tasks {
+				env.catalogRecords = append(env.catalogRecords, catalogRecord{
+					BroadcastID: broadcastID,
+					State:       bt.State,
+				})
+				if bt.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+					tombstoned.Insert(broadcastID)
+				}
 			}
 			return nil
 		}).Maybe()

@@ -138,13 +138,13 @@ func TestCatalog(t *testing.T) {
 	assert.Len(t, metas, 2)
 
 	// BroadcastTask test
-	err = catalog.SaveBroadcastTask(context.Background(), 1, &streamingpb.BroadcastTask{
+	err = catalog.SaveBroadcastTasks(context.Background(), map[uint64]*streamingpb.BroadcastTask{1: {
 		State: streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
-	})
+	}})
 	assert.NoError(t, err)
-	err = catalog.SaveBroadcastTask(context.Background(), 2, &streamingpb.BroadcastTask{
+	err = catalog.SaveBroadcastTasks(context.Background(), map[uint64]*streamingpb.BroadcastTask{2: {
 		State: streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
-	})
+	}})
 	assert.NoError(t, err)
 
 	tasks, err := catalog.ListBroadcastTask(context.Background())
@@ -154,9 +154,9 @@ func TestCatalog(t *testing.T) {
 		assert.Equal(t, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, task.State)
 	}
 
-	err = catalog.SaveBroadcastTask(context.Background(), 1, &streamingpb.BroadcastTask{
+	err = catalog.SaveBroadcastTasks(context.Background(), map[uint64]*streamingpb.BroadcastTask{1: {
 		State: streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE,
-	})
+	}})
 	assert.NoError(t, err)
 	tasks, err = catalog.ListBroadcastTask(context.Background())
 	assert.NoError(t, err)

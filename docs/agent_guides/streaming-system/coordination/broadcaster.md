@@ -30,15 +30,98 @@ Both halves of the name-vs-identity problem an earlier design had are closed by 
 
 There is no unscoped key: `WithIdempotencyKey` takes an `IdempotencyKey`, which only the scoped constructors produce, so a caller cannot ship a key that silently deduplicates cluster-wide by omission. Choosing `NewClusterScopedIdempotencyKey` is a decision that reads as one.
 
-**What the caller now owes, in exchange:** the scope axis and the lock axis are no longer the same thing. The serialization guarantee above holds only if the exclusive lock the broadcast takes actually covers the object the key is scoped to. Import satisfies this (collection scope, `ExclusiveCollectionName` on that collection); an adopter that scopes to one object while locking another gets no serialization, and two concurrent same-key requests can both miss. This is a documented obligation, not an enforced one.
+**Caller obligations:** choose the correct identity scope and the resource locks needed for business validation. Deduplication itself does not depend on those locks: lookup and registration share `broadcastTaskManager.mu`. A rename or different lock key therefore cannot allow two same-key requests to register simultaneously.
 
-The broadcaster runs no admission check of its own, so **everything a caller validates runs before the lookup**. A caller enforcing a limit that its own original request is still counted against will therefore reject that request's retry, and the retry cannot recover the original `broadcastID` -- import's `dataCoord.import.maxImportJobNum` is exactly such a limit. The contract for a client is to retry the same key once the limit frees up; minting a fresh key on the rejection is what duplicates the work.
+The ordinary broadcast path runs no lock-before-build admission check of its own, so **everything a caller validates runs before the lookup**. A caller enforcing a limit that its own original request is still counted against will therefore reject that request's retry, and the retry cannot recover the original `broadcastID` -- import's `dataCoord.import.maxImportJobNum` is exactly such a limit. The contract for a client is to retry the same key once the limit frees up; minting a fresh key on the rejection is what duplicates the work.
 
 **The one case that rule does not cover is a failed original.** The duplicate branch resolves a key to the original ID without consulting that job's state, so if the original ended `Failed`, every retry under the same key returns that same failed ID for the rest of the window and the client never makes progress. That is ordinary idempotency semantics -- the key names an attempt that did happen -- but it is the one situation where a fresh key is the correct move rather than the duplicating one. A client that generalizes the rule above will spin instead. `ImportV2` logs the original job's state on every dedup hit so an operator can tell a key stuck this way from one waiting on a healthy job.
 
 The index lives and dies with the task entry, so **the idempotency window a client observes equals the tombstone retention**: `maxLifetime` or `maxCount`, whichever comes first. The count bound is hard — a busy cluster can evict tombstones well before `maxLifetime`, ending the window early. Any subsystem that advertises this guarantee (currently BulkImport) must keep its own retention at least as long as `maxLifetime`, or an in-window retry can resolve to an ID its own metadata has already GC'd. Matching the two exactly is not enough: `tombstoneScheduler.Initialize` stamps every recovered tombstone with `time.Now()`, so a tombstone's age is measured from the last StreamingCoord start and each restart extends its remaining life, while the subsystem's own retention keeps counting from the original event. Leave margin.
 
 Replicated tasks are indexed too: the query path is unreachable on a secondary (`WithResourceKeys` rejects non-primary clusters), and indexing there lets a promoted secondary honor pre-failover keys.
+
+## Explicit Broadcast Transactions (API only)
+
+`broadcast.StartTxnBroadcastWithResourceKey(ctx, keys...)` returns either a locked
+`TxnBroadcaster` or the original Begin's `TxnBroadcastResult`. Supply at most one
+`message.NewIdempotencyResourceKey(operation, scopedClientKey)`. Start acquires
+that key's X lock first, checks the index, and acquires business keys only on a
+miss. The complete identity includes the operation, so the final MessageType can
+still be chosen under the business locks. Ordinary broadcast APIs reject this
+new key domain and transaction headers; their existing `_ik` behavior is unchanged.
+
+The new admission identity is persisted in `_bik`, separate from legacy `_ik`.
+It is not a business ResourceKey in the durable header. Admission X remains held
+through initial durable registration, then releases; duplicates wait only for
+Begin's callback, without requesting business locks or waiting for Commit.
+Business integrations must explicitly handle migration from old `_ik` scopes.
+
+Construct Begin under the returned locks. Read `header := msg.BroadcastHeader()`,
+set `header.Txn = &messagespb.BroadcastTxnContext{TxnId: id}`, and call
+`msg.OverwriteBroadcastHeader(header)`. This single method replaces all known
+header fields in place, including Txn; `BroadcastBegin` fills Kind/Sequence.
+Admission identity remains a separate `_bik` property set through
+`OverwriteBroadcastAdmissionKey`. Preparation copies properties once to isolate
+background tasks from caller changes. `RecoverTxnBroadcast(ctx, id)` returns a
+handle to the same unfinished internal controller without acquiring resources.
+A durable Begin tombstone rejects recovery before GC as well as after restart.
+`BroadcastBody` and `BroadcastCommit` fill its TxnID and serialize across handles.
+All members must use the same ResourceKeys (including Shared/Exclusive modes)
+and VChannel set as Begin. Omitted member ResourceKeys are inherited; explicitly
+supplied keys must match. Channel comparison ignores order and includes the
+automatically added CChannel. Admission validates this before deduplication;
+replicated ACKs and recovery enforce the same durable invariant.
+Bodies can use `_ik` for group-local retries. The first terminal is selected once;
+concurrent Commit calls wait for that original result without comparing messages.
+After durable completion, existing handles reject Body/Commit as well. There is
+no separate cleanup option. The business still chooses commit or rollback messages.
+
+Each member waits for its ACK policy and callback. Begin becomes `TXN_INFLIGHT`
+and retains business locks. Body completes without releasing them. Commit saves
+Begin and Commit as TOMBSTONE in one catalog KV transaction, then releases resources.
+Request cancellation only stops waiting after admission. Close before Begin
+releases both admission and business locks; after admission it closes the handle.
+
+Each message uses the original `BroadcastTask` key, indexed by BroadcastID.
+All task persistence uses `SaveBroadcastTasks`: ordinary updates pass one task,
+terminal completion passes Begin and Commit, and whole-group GC passes all members.
+Each call uses a single `MultiSaveAndRemove` that must never be split into batches. Recovery reads `ListBroadcastTask`, groups transaction
+members by Header.TxnID and orders them by Sequence, then restores one set of
+business locks per open group on the primary. Secondary replay has no such long locks. Open groups never enter GC; a closed group
+occupies one retention unit, and all its task keys are deleted atomically.
+An old handle cannot recreate a GC'd group. Persistence uses the same single
+active coordinator and reliable write lifecycle as ordinary broadcast tasks;
+there is no separate group record or revision/CAS protocol.
+
+Primary operation supports configured replicas. Replicated ACKs reconstruct the
+same transaction from its existing task records without acquiring primary business
+locks. The existing CChannel admission order is retained; a member's callback also
+waits for its predecessor's durable completion, including when resources are Shared.
+Data-channel ACKs may arrive before Begin and are persisted without executing the
+member early. Waiting conflicting callbacks cannot be bypassed by later readers.
+
+Normal switchover's Cluster X waits for open source transactions to complete.
+Force promotion fences replication and supplements missing channel copies of known
+members through the existing broadcast scheduler. It drains callbacks (not just ACKs),
+then transfers open transactions' business locks before opening public admission.
+A cancellable admission gate covers the transfer from Cluster X to the groups;
+recovery reinstates the gate for an unfinished local promotion. A wholly missing
+member prevents promotion from opening admission; no Begin or terminal is fabricated.
+Commit/rollback remains a business decision. TxnID must remain unique across the
+replication topology, including promotion, and must not be reused.
+
+All members must be replicable business messages; unreplicable messages and
+replication configuration changes cannot be transaction members. No Import or other
+business path uses this API yet. Upgrade both coordinators before enabling callers;
+old coordinators do not understand TXN_INFLIGHT or atomic group GC.
+
+Transactions are bounded: at most 64 members including Begin and Commit, each
+message at most 256 KiB and 128 channels including CChannel. A member slot is reserved for Commit so the whole group stays within one atomic
+GC transaction. Each task is saved independently; there is no aggregate snapshot
+byte limit or rewrite. Begin/Body payloads are retained until group GC. Resource
+lock acquisition retains the existing blocking behavior without context-aware
+interruption; callers must Close unused handles. New transaction IDs must never
+be reused.
 
 ## Import Completion
 
@@ -58,7 +141,7 @@ See [Import commit ownership](../../../design-docs/design_docs/wal/broadcast_ack
 
 Each ResourceKey has: **Domain** (resource type), **Key** (entity identifier), **Shared** (read vs exclusive). Every broadcast automatically acquires SharedCluster.
 
-Domains: `Cluster`, `DBName`, `CollectionName`, `Privilege`, `SnapshotName`.
+Domains: `Cluster`, `DBName`, `CollectionName`, `Privilege`, `SnapshotName`, and transaction-only admission `Idempotency` (processed separately, first).
 
 See [Message Semantic Docs](../message/message.md) for per-message ResourceKey usage.
 
