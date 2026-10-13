@@ -197,13 +197,23 @@ updates. After a QueryNode process restart the in-memory revisions are lost, so
 new subscriptions start from revision zero and QueryCoord returns full current
 snapshots.
 
-DataCoord invalidates these snapshots only after the corresponding segment
-index metadata is durable. A finished segment index, text-index stats, and
-current-format JSON key stats notify the exact segment. CreateIndex
+DataCoord invalidates these snapshots only after the corresponding SegmentMeta
+or index metadata is durable and visible in memory. Manifest publication,
+including schema-bump, L0 materialization and backfill, notifies the affected
+segments through the shared metadata commit paths. Notifications run outside
+the segment metadata and Manifest commit locks. A failed commit does not
+notify; a replay may notify again, and snapshot content revisions deduplicate
+unchanged results. New subscriptions and reconnects read the committed snapshot,
+so a Coordinator restart between publication and notification cannot lose it.
+
+A finished segment index, text-index stats, and current-format JSON key stats
+also notify the exact segment. CreateIndex
 acknowledgement itself does not notify: each segment is refreshed when its own
-index reaches Finished. These events do not change DataView, QueryView, or
-LoadConfig; a newly loaded segment obtains the latest complete snapshot from
-its initial subscription.
+index reaches Finished. Index readiness alone does not change DataView,
+QueryView, or LoadConfig. Manifest changes additionally use the existing
+DataView publication path where needed; publishing a DataView does not replace
+the SegmentLoadInfo notification. A newly loaded segment obtains the latest
+complete snapshot from its initial subscription.
 
 This boundary keeps task execution self-contained: a load/update task never
 performs a metadata lookup. It operates only on the immutable snapshot captured

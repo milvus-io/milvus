@@ -2181,15 +2181,27 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
+	manifestUpdates, err := m.updateSegmentsInfo(ctx, operators...)
+	if err != nil {
+		return err
+	}
+	m.notifyQueryViewSegmentUpdates(manifestUpdates)
+	return nil
+}
+
+// updateSegmentsInfo returns committed Manifest changes for the caller to notify
+// after releasing any manifest locks it owns.
+func (m *meta) updateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) ([]*SegmentInfo, error) {
+	var manifestUpdates []*SegmentInfo
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 
 	updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if updatePack == nil {
-		return nil
+		return nil, nil
 	}
 
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
@@ -2198,16 +2210,19 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	if err := m.catalog.AlterSegments(ctx, segments, increments...); err != nil {
 		mlog.Error(ctx, "meta update: update flush segments info - failed to store flush segment info into Etcd",
 			mlog.Err(err))
-		return err
+		return nil, err
 	}
 	// Apply metric mutation after a successful meta update.
 	updatePack.metricMutation.commit()
 	// update memory status
 	for id, s := range updatePack.segments {
+		if previous := m.segments.GetSegment(id); previous == nil || previous.GetManifestPath() != s.GetManifestPath() {
+			manifestUpdates = append(manifestUpdates, s)
+		}
 		m.segments.SetSegment(id, s)
 	}
 	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
-	return nil
+	return manifestUpdates, nil
 }
 
 // UpdateSegmentsInfoAndDataView persists SegmentMeta and its DataView before
@@ -2217,6 +2232,8 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 // even without SegmentMeta mutations; (false, nil) means both are absent.
 // Catalog retries overwrite the same actions until success or cancellation.
 func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
+	var manifestUpdates []*SegmentInfo
+	defer func() { m.notifyQueryViewSegmentUpdates(manifestUpdates) }()
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 
@@ -2269,6 +2286,9 @@ func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 		updatePack.metricMutation.commit()
 		// update memory status
 		for id, s := range updatePack.segments {
+			if previous := m.segments.GetSegment(id); previous == nil || previous.GetManifestPath() != s.GetManifestPath() {
+				manifestUpdates = append(manifestUpdates, s)
+			}
 			m.segments.SetSegment(id, s)
 		}
 	}
@@ -3150,6 +3170,11 @@ func (m *meta) appliedCompactionResultLocked(
 }
 
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) (newSegments []*SegmentInfo, metricMutation *segMetricMutation, retErr error) {
+	defer func() {
+		if retErr == nil && t.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction {
+			m.notifyQueryViewSegmentUpdates(newSegments)
+		}
+	}()
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	if appliedSegments, applied, appliedErr := m.appliedCompactionResultLocked(t, result); applied {
