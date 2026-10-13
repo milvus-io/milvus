@@ -19,7 +19,6 @@ package pkindex
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,20 +37,14 @@ import (
 )
 
 // The suite writes the same primary keys twice and checks what a reader sees.
-// The streaming node deduplicates them only if its binary carries a primary key
-// index engine, which today is compiled under the "test" build tag. The cluster
-// spawns bin/milvus, and the usual build of that binary has no engine. The suite
-// therefore runs only when the environment variable below is set, and the binary
-// must be built with the "test" tag first, for example:
+// It turns on streaming.pkindex.enabled, so the streaming node deduplicates them.
 //
-//	go build -tags "dynamic,sonic,with_jemalloc,test" -o bin/milvus ./cmd/main.go
-//
-// TODO: remove the gate once a primary key index engine is part of the normal build.
+// TODO: the change that connects the index to the manifest service sets a
+// small handover size here and checks that a handover runs.
 const (
-	dedupBinaryEnv = "MILVUS_PKINDEX_TEST_BINARY"
-	dedupDim       = 8
-	dedupTagField  = "tag"
-	dedupPKField   = integration.Int64Field
+	dedupDim      = 8
+	dedupTagField = "tag"
+	dedupPKField  = integration.Int64Field
 )
 
 type WriteDedupSuite struct {
@@ -64,9 +57,6 @@ func (s *WriteDedupSuite) SetupSuite() {
 }
 
 func TestWriteDedup(t *testing.T) {
-	if os.Getenv(dedupBinaryEnv) == "" {
-		t.Skipf("set %s=1 and build bin/milvus with the \"test\" build tag to run this suite", dedupBinaryEnv)
-	}
 	suite.Run(t, new(WriteDedupSuite))
 }
 
