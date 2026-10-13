@@ -403,7 +403,8 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
     const auto staging_parent = LocalStagingParent();
     BuildOutputSpec output;
     output.generation =
-        !vector_field && info.current_scalar_index_version() >= 3
+        !vector_field && (info.current_scalar_index_version() >= 3 ||
+                          adapted.family == index::families::kFmIndex)
             ? storage::Generation::V3
             : storage::Generation::V1V2;
     output.storage_namespace = adapted.family == index::families::kText
