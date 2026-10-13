@@ -155,11 +155,15 @@ func (t *QueryTask) Request() *milvuspb.QueryRequest {
 }
 
 // SetSkipRuntimeRLS prevents an internal query from resolving a second policy.
+//
+//go:noinline
 func (t *QueryTask) SetSkipRuntimeRLS(skip bool) {
 	t.skipRuntimeRLS = skip
 }
 
 // SetPreserveRawFields keeps internal query results suitable for local policy evaluation.
+//
+//go:noinline
 func (t *QueryTask) SetPreserveRawFields(preserve bool) {
 	t.preserveRawFields = preserve
 }
@@ -766,7 +770,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		mlog.Strings("partitionNames", t.request.GetPartitionNames()),
 		mlog.String("requestType", t.getQueryLabel()))
 
-	if err := validateCollectionName(collectionName); err != nil {
+	if err := ValidateCollectionName(collectionName); err != nil {
 		log.Warn(ctx, "Invalid collectionName.")
 		return err
 	}
@@ -817,7 +821,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 
 	schema := colInfo.Schema
 	t.schema = schema
-	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
+	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
 	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
@@ -838,7 +842,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 
 	for _, tag := range t.request.PartitionNames {
-		if err := validatePartitionTag(tag, false); err != nil {
+		if err := ValidatePartitionTag(tag, false); err != nil {
 			log.Warn(ctx, "invalid partition name", mlog.String("partition name", tag))
 			return err
 		}
@@ -896,7 +900,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		t.resolvedTimezoneStr = t.queryParams.timezone
 		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", t.resolvedTimezoneStr))
 	} else {
-		t.resolvedTimezoneStr = getColTimezone(colInfo)
+		t.resolvedTimezoneStr = GetColTimezone(colInfo)
 		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", t.resolvedTimezoneStr))
 	}
 
@@ -933,8 +937,8 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	// convert partition names only when requery is false
 	if !t.reQuery {
 		partitionNames := t.request.GetPartitionNames()
-		if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
-			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, t.request.Namespace)
+		if NamespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
+			hashedPartitionNames, err := AssignNamespacePartitionKey(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, t.request.Namespace)
 			if err != nil {
 				return err
 			}
@@ -946,7 +950,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, partitionKeys)
+			hashedPartitionNames, err := AssignPartitionKeys(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, partitionKeys)
 			if err != nil {
 				return err
 			}
@@ -964,7 +968,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
 	}
-	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+	t.plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 	t.SerializedExprPlan, _, err = MarshalPlanWithMembershipFilterSizeLimit(t.plan, 0)
 	if err != nil {
@@ -990,7 +994,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.ConsistencyLevel
-		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+		guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
 		// Compatibility logic, parse guarantee timestamp
@@ -998,7 +1002,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 			guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
 		} else {
 			// parse from guarantee timestamp and user input consistency level
-			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+			guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 		}
 	}
 
@@ -1054,13 +1058,13 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
-	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
+	if NamespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
 		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
 		if err != nil {
 			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 			return err
 		}
-		channelName, ok, err := namespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
+		channelName, ok, err := NamespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
 		if err != nil {
 			return err
 		}

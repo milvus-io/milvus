@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package dml
 
 import (
 	"context"
@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -194,12 +195,12 @@ func newRLSOperationTestFieldsData() []*schemapb.FieldData {
 
 func newRLSOperationSearchParams() []*commonpb.KeyValuePair {
 	return []*commonpb.KeyValuePair{
-		{Key: AnnsFieldKey, Value: "vector"},
-		{Key: TopKKey, Value: "10"},
+		{Key: dql.AnnsFieldKey, Value: "vector"},
+		{Key: dql.TopKKey, Value: "10"},
 		{Key: common.MetricTypeKey, Value: "L2"},
-		{Key: ParamsKey, Value: `{"nprobe": 10}`},
-		{Key: RoundDecimalKey, Value: "-1"},
-		{Key: IgnoreGrowingKey, Value: "false"},
+		{Key: dql.ParamsKey, Value: `{"nprobe": 10}`},
+		{Key: dql.RoundDecimalKey, Value: "-1"},
+		{Key: dql.IgnoreGrowingKey, Value: "false"},
 	}
 }
 
@@ -243,7 +244,7 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
 			UsingExpr:  "value == 10",
 		}})
-		task := NewQueryTask(ctx, &Proxy{metaCache: cache}, &milvuspb.QueryRequest{
+		task := dql.NewQueryTask(ctx, &mockTaskNode{metaCache: cache}, &milvuspb.QueryRequest{
 			DbName:         "default",
 			CollectionName: aliasName,
 			Expr:           "id > 0",
@@ -265,7 +266,7 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 		}})
 		placeholderGroup, err := proto.Marshal(constructPlaceholderGroup(1, 2))
 		require.NoError(t, err)
-		task := NewSearchTask(ctx, &Proxy{metaCache: cache}, nil, &milvuspb.SearchRequest{
+		task := dql.NewSearchTask(ctx, &mockTaskNode{metaCache: cache}, nil, &milvuspb.SearchRequest{
 			DbName:         "default",
 			CollectionName: aliasName,
 			Nq:             1,
@@ -291,8 +292,9 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionInsert},
 			CheckExpr:  "value == 10",
 		}})
-		task := &insertTask{
+		task := &InsertTask{
 			baseTask:  baseTask{MetaCache: cache},
+			node:      &mockTaskNode{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			insertMsg: &BaseInsertTask{InsertRequest: &msgpb.InsertRequest{
@@ -326,7 +328,8 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 		}})
 		chMgr := channelmgr.NewMockChannelsMgr(t)
 		chMgr.EXPECT().GetVChannels(collectionID).Return([]string{"vchan1"}, nil)
-		runner := &deleteRunner{
+		runner := &DeleteRunner{
+			node:      &mockTaskNode{metaCache: cache},
 			metaCache: cache,
 			chMgr:     chMgr,
 			req: &milvuspb.DeleteRequest{
@@ -348,10 +351,10 @@ func TestQueryTaskRLSEnforcement(t *testing.T) {
 	ctx := context.Background()
 	schema := newRLSOperationTestSchema(collectionName)
 	cache := installRLSOperationTestCache(t, collectionID, schema)
-	node := &Proxy{metaCache: cache}
+	node := &mockTaskNode{metaCache: cache}
 
-	newTask := func(t *testing.T, principalName string) *queryTask {
-		task := NewQueryTask(ctx, node, &milvuspb.QueryRequest{
+	newTask := func(t *testing.T, principalName string) *dql.QueryTask {
+		task := dql.NewQueryTask(ctx, node, &milvuspb.QueryRequest{
 			CollectionName: collectionName,
 			Expr:           "id > 0",
 			RlsPrincipal:   principalName,
@@ -408,8 +411,8 @@ func TestSearchTaskRLSEnforcementRequiresPrincipal(t *testing.T) {
 	const collectionName = "rls_search_collection"
 	ctx := context.Background()
 	cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(collectionName))
-	node := &Proxy{metaCache: cache}
-	task := NewSearchTask(ctx, node, nil, &milvuspb.SearchRequest{
+	node := &mockTaskNode{metaCache: cache}
+	task := dql.NewSearchTask(ctx, node, nil, &milvuspb.SearchRequest{
 		CollectionName: collectionName,
 		Nq:             1,
 		Dsl:            "id > 0",
@@ -428,7 +431,8 @@ func TestDeleteRunnerRLSEnforcementRequiresPrincipal(t *testing.T) {
 	ctx := context.Background()
 	cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(collectionName))
 
-	runner := &deleteRunner{
+	runner := &DeleteRunner{
+		node:      &mockTaskNode{metaCache: cache},
 		metaCache: cache,
 		req: &milvuspb.DeleteRequest{
 			DbName:         "default",
@@ -448,9 +452,10 @@ func TestInsertTaskRLSEnforcement(t *testing.T) {
 	schema := newRLSOperationTestSchema(collectionName)
 	cache := installRLSOperationTestCache(t, collectionID, schema)
 
-	newTask := func(t *testing.T, principalName string) *insertTask {
-		task := &insertTask{
+	newTask := func(t *testing.T, principalName string) *InsertTask {
+		task := &InsertTask{
 			baseTask:  baseTask{MetaCache: cache},
+			node:      &mockTaskNode{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			insertMsg: &BaseInsertTask{
@@ -550,7 +555,7 @@ func TestUpsertTaskRLSEnforcementRequiresPrincipal(t *testing.T) {
 }
 
 func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
-	newTask := func(collectionID int64) *upsertTask {
+	newTask := func(collectionID int64) *UpsertTask {
 		task := createTestUpdateTask()
 		task.collectionID = collectionID
 		task.rlsEnabled = true
@@ -566,7 +571,7 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		}
 		return task
 	}
-	resolvePredicates := func(task *upsertTask) {
+	resolvePredicates := func(task *UpsertTask) {
 		var err error
 		task.rlsUsingPredicate, task.rlsCheckPredicate, err = rls.ResolveUpsertPredicates(
 			context.Background(), task.collectionID, task.req.GetRlsPrincipal(), task.schema.SchemaHelper,
@@ -655,7 +660,7 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		}})
 		resolvePredicates(task)
 		readCalls := 0
-		mockey.Mock(retrieveByPKs).To(func(context.Context, *upsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		mockey.Mock(retrieveByPKs).To(func(context.Context, *UpsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			readCalls++
 			return nil, segcore.StorageCost{}, nil
 		}).Build()
@@ -712,7 +717,7 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		}})
 		resolvePredicates(task)
 		readCalls := 0
-		mockey.Mock(retrieveByPKs).To(func(context.Context, *upsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		mockey.Mock(retrieveByPKs).To(func(context.Context, *UpsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			readCalls++
 			return nil, segcore.StorageCost{}, nil
 		}).Build()
@@ -735,7 +740,7 @@ func TestUpsertPinsUsingAndCheckToOneSnapshot(t *testing.T) {
 		ctx := context.Background()
 		schema := newRLSOperationTestSchema("rls_upsert_snapshot")
 		fields := newRLSOperationTestFieldsData()
-		task := &upsertTask{
+		task := &UpsertTask{
 			Condition:    NewTaskCondition(ctx),
 			ctx:          ctx,
 			collectionID: collectionID,
@@ -775,7 +780,7 @@ func TestUpsertPinsUsingAndCheckToOneSnapshot(t *testing.T) {
 			ctx, collectionID, task.req.GetRlsPrincipal(), task.schema.SchemaHelper,
 		)
 		require.NoError(t, err)
-		mockey.Mock(retrieveByPKs).To(func(context.Context, *upsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		mockey.Mock(retrieveByPKs).To(func(context.Context, *UpsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			rls.InvalidatePolicies(collectionID, 0)
 			coord := mocks.NewMockMixCoordClient(t)
 			coord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).Return(&rootcoordpb.GetRLSMetadataResponse{
@@ -807,9 +812,9 @@ func TestUpsertPinsUsingAndCheckToOneSnapshot(t *testing.T) {
 
 func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 	paramtable.Init()
-	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "false")
 	t.Cleanup(func() {
-		Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key)
 	})
 
 	t.Run("query", func(t *testing.T) {
@@ -819,8 +824,8 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		ctx := context.Background()
 		schema := newRLSOperationTestSchema(canonicalName)
 		cache := installRLSOperationTestCache(t, collectionID, schema, true)
-		node := &Proxy{metaCache: cache}
-		task := NewQueryTask(ctx, node, &milvuspb.QueryRequest{
+		node := &mockTaskNode{metaCache: cache}
+		task := dql.NewQueryTask(ctx, node, &milvuspb.QueryRequest{
 			DbName:         "default",
 			CollectionName: aliasName,
 			Expr:           "id > 0",
@@ -842,8 +847,8 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		const aliasName = "rls_force_search_alias"
 		ctx := context.Background()
 		cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(canonicalName), true)
-		node := &Proxy{metaCache: cache}
-		task := NewSearchTask(ctx, node, nil, &milvuspb.SearchRequest{
+		node := &mockTaskNode{metaCache: cache}
+		task := dql.NewSearchTask(ctx, node, nil, &milvuspb.SearchRequest{
 			DbName:         "default",
 			CollectionName: aliasName,
 			Nq:             1,
@@ -866,7 +871,7 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		const aliasName = "rls_force_delete_alias"
 		ctx := context.Background()
 		cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(canonicalName), true)
-		runner := &deleteRunner{metaCache: cache, req: &milvuspb.DeleteRequest{
+		runner := &DeleteRunner{node: &mockTaskNode{metaCache: cache}, metaCache: cache, req: &milvuspb.DeleteRequest{
 			DbName:         "default",
 			CollectionName: aliasName,
 			Expr:           "id == 1",
@@ -885,8 +890,9 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		const aliasName = "rls_force_insert_alias"
 		ctx := context.Background()
 		cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(canonicalName), true)
-		task := &insertTask{
+		task := &InsertTask{
 			baseTask:  baseTask{MetaCache: cache},
+			node:      &mockTaskNode{metaCache: cache},
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			insertMsg: &BaseInsertTask{InsertRequest: &msgpb.InsertRequest{

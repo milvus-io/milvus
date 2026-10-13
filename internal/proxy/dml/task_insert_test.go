@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -86,7 +86,8 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(int64(100), nil)
 	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{Schema: schema}, nil)
-	task := &insertTask{
+	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil).Maybe()
+	task := &InsertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
@@ -109,7 +110,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	var err error
 
 	// passed NumRows is less than 0
-	case1 := insertTask{
+	case1 := InsertTask{
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
@@ -140,7 +141,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 
 	numRows := 20
 	dim := 128
-	case2 := insertTask{
+	case2 := InsertTask{
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
@@ -363,7 +364,7 @@ func TestInsertTask(t *testing.T) {
 		).Return(collectionID, nil)
 		chMgr := channelmgr.NewMockChannelsMgr(t)
 		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
-		it := insertTask{
+		it := InsertTask{
 			baseTask: baseTask{MetaCache: cache},
 			ctx:      context.Background(),
 			insertMsg: &msgstream.InsertMsg{
@@ -384,9 +385,9 @@ func TestInsertTask(t *testing.T) {
 func TestMaxInsertSize(t *testing.T) {
 	t.Run("test MaxInsertSize", func(t *testing.T) {
 		paramtable.Init()
-		Params.Save(Params.QuotaConfig.MaxInsertSize.Key, "1")
-		defer Params.Reset(Params.QuotaConfig.MaxInsertSize.Key)
-		it := insertTask{
+		paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxInsertSize.Key, "1")
+		defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.MaxInsertSize.Key)
+		it := InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -404,8 +405,8 @@ func TestMaxInsertSize(t *testing.T) {
 func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 	paramtable.Init()
 	// run auto-id path with field count check; allow user to pass PK
-	Params.Save(Params.ProxyCfg.SkipAutoIDCheck.Key, "false")
-	defer Params.Reset(Params.ProxyCfg.SkipAutoIDCheck.Key)
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.SkipAutoIDCheck.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.SkipAutoIDCheck.Key)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -449,7 +450,7 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		},
 	}
 
-	task := insertTask{
+	task := InsertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
@@ -578,7 +579,7 @@ func TestInsertTask_Function(t *testing.T) {
 	idAllocator.Start()
 	defer idAllocator.Close()
 	assert.NoError(t, err)
-	task := insertTask{
+	task := InsertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
@@ -632,7 +633,7 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("schema ts mismatch", func(t *testing.T) {
-		it := insertTask{
+		it := InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -712,7 +713,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 			CreatedUtcTimestamp: 10002,
 		}, nil).Maybe()
 		namespace := "test"
-		it := insertTask{
+		it := InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -731,7 +732,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 		assert.Equal(t, int64(101), it.insertMsg.FieldsData[0].FieldId)
 
 		// namespace data is not set
-		it = insertTask{
+		it = InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -760,7 +761,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 			CreatedTimestamp:    10001,
 			CreatedUtcTimestamp: 10002,
 		}, nil).Maybe()
-		it := insertTask{
+		it := InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -778,7 +779,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 
 		// namespace data is set
 		namespace := "test"
-		it = insertTask{
+		it = InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{

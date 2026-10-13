@@ -284,6 +284,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 	t.DbID = 0 // todo
 	t.CollectionID = collID
 	log := mlog.With(mlog.Int64("collID", collID), mlog.String("collName", collectionName))
+
 	collectionInfo, err2 := t.GetMetaCache().GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn(ctx, "Proxy::SearchTask::PreExecute failed to GetCollectionInfo from cache",
@@ -291,7 +292,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 		return err2
 	}
 	t.schema = collectionInfo.Schema
-	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
+	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
 	t.largeTopKEnabled = collectionInfo.QueryMode == common.QueryModeLargeTopK
@@ -396,7 +397,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 		}
 		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", timezone))
 	} else {
-		timezone = getColTimezone(collectionInfo)
+		timezone = GetColTimezone(collectionInfo)
 		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", timezone))
 	}
 	t.resolvedTimezoneStr = timezone
@@ -425,7 +426,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.ConsistencyLevel
-		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+		guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
 		// Compatibility logic, parse guarantee timestamp
@@ -433,7 +434,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 			guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
 		} else {
 			// parse from guarantee timestamp and user input consistency level
-			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+			guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 		}
 	}
 
@@ -830,7 +831,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			plan.DynamicFields = t.userDynamicFields
 		}
 		t.retainRerankDynamicFields(plan)
-		plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+		plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 		plan.QuerynodeFunctionChains = querynodeFunctionChains
 
 		accountRLSPlan := t.rlsPredicate != nil && !rewriter.IsAlwaysTrueExpr(t.rlsPredicate)
@@ -1174,7 +1175,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 	t.retainRerankDynamicFields(plan)
-	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+	plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 	plan.QuerynodeFunctionChains = querynodeFunctionChains
 
 	// Propagate agg-path overrides into queryInfo BEFORE plan serialization so
@@ -1307,7 +1308,7 @@ func (t *SearchTask) retainRerankDynamicFields(plan *planpb.PlanNode) {
 func (t *SearchTask) skipRequeryByNamespacePartitionMode() bool {
 	return t.schema != nil &&
 		t.schema.CollectionSchema != nil &&
-		namespacePartitionModeEnabled(t.schema.CollectionSchema)
+		NamespacePartitionModeEnabled(t.schema.CollectionSchema)
 }
 
 // convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.
@@ -1411,8 +1412,8 @@ func (t *SearchTask) resolveRLSUsingPredicate(operation string, isIterator bool)
 }
 
 func (t *SearchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
-	if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
-		hashedPartitionNames, err := assignNamespacePartitionKey(t.ctx, t.GetMetaCache(), t.request.GetDbName(), t.collectionName, t.schema.CollectionSchema, t.request.Namespace)
+	if NamespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
+		hashedPartitionNames, err := AssignNamespacePartitionKey(t.ctx, t.GetMetaCache(), t.request.GetDbName(), t.collectionName, t.schema.CollectionSchema, t.request.Namespace)
 		if err != nil {
 			mlog.Warn(t.ctx, "failed to assign namespace partition key", mlog.Err(err))
 			return nil, err
@@ -1434,7 +1435,7 @@ func (t *SearchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 		return nil, err
 	}
 	partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-	hashedPartitionNames, err := assignPartitionKeys(t.ctx, t.GetMetaCache(), t.request.GetDbName(), t.collectionName, t.schema.CollectionSchema, partitionKeys)
+	hashedPartitionNames, err := AssignPartitionKeys(t.ctx, t.GetMetaCache(), t.request.GetDbName(), t.collectionName, t.schema.CollectionSchema, partitionKeys)
 	if err != nil {
 		mlog.Warn(t.ctx, "failed to assign partition keys", mlog.Err(err))
 		return nil, err
@@ -1461,13 +1462,13 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
-	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
+	if NamespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
 		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
 		if err != nil {
 			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 			return err
 		}
-		channelName, ok, err := namespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
+		channelName, ok, err := NamespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
 		if err != nil {
 			return err
 		}

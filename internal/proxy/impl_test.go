@@ -2658,14 +2658,6 @@ func TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity(t *
 
 		var capturedNamespace *string
 		var capturedDBName string
-		var setSkipRuntimeRLS func(*queryTask, bool)
-		skipRuntimeRLSPatch := mockey.Mock((*queryTask).SetSkipRuntimeRLS).
-			To(func(task *queryTask, skip bool) {
-				require.True(t, skip)
-				setSkipRuntimeRLS(task, skip)
-			}).Origin(&setSkipRuntimeRLS).Build()
-		defer skipRuntimeRLSPatch.UnPatch()
-
 		var attachPredicateToRequeryPlan func(*planpb.PlanNode, *planpb.Expr) error
 		attachPredicatePatch := mockey.Mock(rls.AttachPredicateToRequeryPlan).
 			To(func(plan *planpb.PlanNode, predicate *planpb.Expr) error {
@@ -2735,7 +2727,6 @@ func TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity(t *
 		require.NotNil(t, predicate)
 		require.NotNil(t, capturedNamespace)
 		assert.Equal(t, namespace, *capturedNamespace)
-		assert.Equal(t, 1, skipRuntimeRLSPatch.Times())
 		assert.Equal(t, 1, attachPredicatePatch.Times())
 		assert.Equal(t, canonicalDBName, capturedDBName)
 		assert.Equal(t, schema.GetName(), capturedCollectionName)
