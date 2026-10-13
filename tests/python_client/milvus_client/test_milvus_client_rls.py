@@ -561,8 +561,8 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
     def test_rls_schema_write_variants(self, rls_client, mode):
         """
         target: RLS checks after default materialization and with generated/key fields
-        method: insert an authorized row, reject a different owner and partially update its payload
-        expected: generated PK/default values are visible and denied writes preserve the authorized row
+        method: insert an authorized row, reject a different owner and exercise partial updates
+        expected: generated/default values are visible; partition-key USING upserts reject without mutation
         """
         client = rls_client
         name = cf.gen_unique_str("rls_schema")
@@ -613,8 +613,24 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                 check_task=CheckTasks.err_res,
                 check_items={ct.err_msg: "RLS"},
             )
-            self.upsert(client, name, [{"id": pk, "note": "updated"}], partial_update=True, rls_principal="alice")
-        expected = [{"id": pk, "owner": "alice", "note": "initial" if mode == "auto_id" else "updated"}]
+            if mode == "partition_key":
+                # Existing-row USING checks do not support partition-key collections.
+                self.upsert(
+                    client,
+                    name,
+                    [{"id": pk, "owner": "alice", "note": "updated"}],
+                    partial_update=True,
+                    rls_principal="alice",
+                    check_task=CheckTasks.err_res,
+                    check_items={
+                        ct.err_msg: "RLS upsert with a USING predicate is not supported for partition-key collections"
+                    },
+                )
+            else:
+                self.upsert(client, name, [{"id": pk, "note": "updated"}], partial_update=True, rls_principal="alice")
+        expected = [
+            {"id": pk, "owner": "alice", "note": "initial" if mode in ["auto_id", "partition_key"] else "updated"}
+        ]
         for context in [{"skip_rls": True}, {"rls_principal": "alice"}]:
             assert (
                 self.query(client, name, filter="id >= 0", output_fields=["id", "owner", "note"], **context)[0]
