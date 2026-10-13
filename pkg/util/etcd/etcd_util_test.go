@@ -44,8 +44,42 @@ func TestIsRetriableWatchErr(t *testing.T) {
 		{"user empty", rpctypes.ErrUserEmpty, true},
 		{"auth old revision", rpctypes.ErrAuthOldRevision, true},
 		// A raw gRPC Unauthenticated that was not mapped back to an etcd
-		// sentinel is deliberately NOT retriable: we match sentinels only.
+		// error is deliberately NOT retriable: only known etcd errors qualify.
 		{"unmapped raw grpc unauthenticated", status.Error(codes.Unauthenticated, "some unmapped error"), false},
+		// CancelReason transport shape: the etcd server cancels the watch with
+		// CancelReason = ErrGRPC*.Error() (the full "rpc error: ..." string) and
+		// clientv3 rebuilds it as a plain error (watch.go: v3rpc.Error(
+		// errors.New(resp.CancelReason))), so errors.Is no longer matches the
+		// sentinel. These must still be classified as retriable.
+		{
+			"cancel-reason shaped invalid auth token",
+			rpctypes.Error(errors.New(rpctypes.ErrGRPCInvalidAuthToken.Error())),
+			true,
+		},
+		{
+			"cancel-reason shaped user empty",
+			rpctypes.Error(errors.New(rpctypes.ErrGRPCUserEmpty.Error())),
+			true,
+		},
+		{
+			"cancel-reason shaped auth old revision",
+			rpctypes.Error(errors.New(rpctypes.ErrGRPCAuthOldRevision.Error())),
+			true,
+		},
+		// Substream cancellation nests the cancel reason inside a
+		// FailedPrecondition status (clientv3 WatchResponse.Err()).
+		{
+			"substream-nested invalid auth token",
+			rpctypes.Error(status.Error(codes.FailedPrecondition, rpctypes.ErrGRPCInvalidAuthToken.Error())),
+			true,
+		},
+		// A permission-denied cancel reason keeps the same transport shape but
+		// must remain non-retriable.
+		{
+			"cancel-reason shaped permission denied",
+			rpctypes.Error(errors.New(rpctypes.ErrGRPCPermissionDenied.Error())),
+			false,
+		},
 		{"wrapped invalid auth token", errors.Wrap(rpctypes.ErrInvalidAuthToken, "watch failed"), true},
 		{"permission denied", rpctypes.ErrPermissionDenied, false},
 		{"lease not found", rpctypes.ErrLeaseNotFound, false},
