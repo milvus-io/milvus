@@ -298,10 +298,18 @@ KmeansClustering::CentroidsToPB(const T* centroids,
             stats.add_centroids();
         vector_field->set_dim(dim);
         const auto* centroid = centroids + i * dim;
-        auto* float_array = vector_field->mutable_float_vector();
-        for (int64_t j = 0; j < dim; j++) {
-            AssertInfo(std::isfinite(centroid[j]), "non-finite centroid value");
-            float_array->add_data(centroid[j]);
+        for (int64_t j = 0; j < dim; ++j) {
+            AssertInfo(std::isfinite(static_cast<float>(centroid[j])),
+                       "non-finite centroid value");
+        }
+        if constexpr (std::is_same_v<T, float>) {
+            auto* values = vector_field->mutable_float_vector();
+            for (int64_t j = 0; j < dim; ++j) values->add_data(centroid[j]);
+        } else if constexpr (std::is_same_v<T, knowhere::fp16>) {
+            vector_field->set_float16_vector(centroid, dim * sizeof(T));
+        } else {
+            static_assert(std::is_same_v<T, knowhere::bf16>);
+            vector_field->set_bfloat16_vector(centroid, dim * sizeof(T));
         }
     }
     return stats;
@@ -537,8 +545,7 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
     std::map<int64_t, std::string> manifest_paths(
         config.manifest_paths().begin(), config.manifest_paths().end());
 
-    // Share the current manifest reader's field shape. PR2 executes FP32 only;
-    // scalar and half-vector execution are separate follow-ups.
+    // Share the manifest reader and preserve the configured vector element width.
     Config base_config;
     base_config[STORAGE_VERSION_KEY] = int64_t(STORAGE_V3);
     base_config[DATA_TYPE_KEY] =
@@ -758,6 +765,106 @@ KmeansClustering::SampleTrainData<float>(
 
 template void
 KmeansClustering::Run<float>(
+    const milvus::proto::clustering::AnalyzeInfo& config);
+template void
+KmeansClustering::StreamingAssignandUpload<knowhere::fp16>(
+    knowhere::Cluster<knowhere::ClusterNode>& cluster_node,
+    const milvus::proto::clustering::AnalyzeInfo& config,
+    const milvus::proto::clustering::ClusteringCentroidsStats& centroid_stats,
+    const std::vector<int64_t>& segment_ids,
+    const std::map<int64_t, std::vector<std::string>>& insert_files,
+    const std::map<int64_t, int64_t>& num_rows,
+    const std::map<int64_t, std::string>& manifest_paths,
+    const Config& base_config,
+    const knowhere::Json& cluster_config,
+    const int64_t dim,
+    const knowhere::fp16* full_training_data,
+    const int64_t num_clusters);
+
+template void
+KmeansClustering::FetchDataFiles<knowhere::fp16>(
+    uint8_t* buf,
+    const int64_t expected_rows,
+    const int64_t row_offset,
+    const std::vector<std::string>& files,
+    const int64_t dim,
+    int64_t& offset);
+
+template void
+KmeansClustering::FetchSegmentViaManifest<knowhere::fp16>(
+    uint8_t* buf,
+    const int64_t expected_rows,
+    const int64_t row_offset,
+    const std::string& manifest_path,
+    const Config& base_config,
+    const int64_t dim,
+    int64_t& offset);
+
+template void
+KmeansClustering::SampleTrainData<knowhere::fp16>(
+    const std::vector<int64_t>& segment_ids,
+    const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
+    const std::map<int64_t, int64_t>& segment_num_rows,
+    const std::map<int64_t, std::string>& manifest_paths,
+    const Config& base_config,
+    const int64_t expected_train_size,
+    const int64_t dim,
+    const bool random_sample,
+    std::mt19937_64& rng,
+    uint8_t* buf);
+
+template void
+KmeansClustering::Run<knowhere::fp16>(
+    const milvus::proto::clustering::AnalyzeInfo& config);
+template void
+KmeansClustering::StreamingAssignandUpload<knowhere::bf16>(
+    knowhere::Cluster<knowhere::ClusterNode>& cluster_node,
+    const milvus::proto::clustering::AnalyzeInfo& config,
+    const milvus::proto::clustering::ClusteringCentroidsStats& centroid_stats,
+    const std::vector<int64_t>& segment_ids,
+    const std::map<int64_t, std::vector<std::string>>& insert_files,
+    const std::map<int64_t, int64_t>& num_rows,
+    const std::map<int64_t, std::string>& manifest_paths,
+    const Config& base_config,
+    const knowhere::Json& cluster_config,
+    const int64_t dim,
+    const knowhere::bf16* full_training_data,
+    const int64_t num_clusters);
+
+template void
+KmeansClustering::FetchDataFiles<knowhere::bf16>(
+    uint8_t* buf,
+    const int64_t expected_rows,
+    const int64_t row_offset,
+    const std::vector<std::string>& files,
+    const int64_t dim,
+    int64_t& offset);
+
+template void
+KmeansClustering::FetchSegmentViaManifest<knowhere::bf16>(
+    uint8_t* buf,
+    const int64_t expected_rows,
+    const int64_t row_offset,
+    const std::string& manifest_path,
+    const Config& base_config,
+    const int64_t dim,
+    int64_t& offset);
+
+template void
+KmeansClustering::SampleTrainData<knowhere::bf16>(
+    const std::vector<int64_t>& segment_ids,
+    const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
+    const std::map<int64_t, int64_t>& segment_num_rows,
+    const std::map<int64_t, std::string>& manifest_paths,
+    const Config& base_config,
+    const int64_t expected_train_size,
+    const int64_t dim,
+    const bool random_sample,
+    std::mt19937_64& rng,
+    uint8_t* buf);
+
+template void
+KmeansClustering::Run<knowhere::bf16>(
     const milvus::proto::clustering::AnalyzeInfo& config);
 
 }  // namespace milvus::clustering

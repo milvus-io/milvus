@@ -37,7 +37,7 @@ func TestAnalyzeAppliesPluginContext(t *testing.T) {
 	}
 
 	_, err := Analyze(context.Background(), info, nil)
-	require.ErrorContains(t, err, "invalid data type")
+	require.ErrorContains(t, err, "invalid clustering field type")
 
 	_, err = Analyze(context.Background(), info, &indexcgopb.StoragePluginContext{
 		EncryptionZoneId: 17,
@@ -45,4 +45,22 @@ func TestAnalyzeAppliesPluginContext(t *testing.T) {
 		EncryptionKey:    "unsafe-key",
 	})
 	require.ErrorContains(t, err, "failed to get cipher plugin")
+}
+
+func TestAnalyzeHalfInsufficientTrainingBudget(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			info := &clusteringpb.AnalyzeInfo{
+				FieldSchema: &schemapb.FieldSchema{FieldID: 101, DataType: dtype}, Dim: 128,
+				ClusterType: "CARDINAL_KMEANS", NumClusters: 4096,
+				// 4095 whole half-vector rows fit; training cannot reach K.
+				TrainSize: 4096*128*2 - 1, MinClusterRatio: 0.01, MaxClusterRatio: 10, MaxClusterSize: 1 << 30,
+				NumRows: map[int64]int64{1: 4096}, InsertFiles: map[int64]*clusteringpb.InsertFiles{1: {}},
+				StorageConfig: &clusteringpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+			}
+			result, err := Analyze(context.Background(), info, nil)
+			require.Nil(t, result)
+			require.ErrorContains(t, err, "sample data num less than num clusters")
+		})
+	}
 }

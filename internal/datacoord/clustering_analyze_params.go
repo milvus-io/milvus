@@ -21,19 +21,19 @@ import (
 	"maps"
 	"math"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/clustercompaction"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Resolve K once, using raw vector bytes per centroid rather than segment size.
-func clusteringAnalyzeK(rows, dim, chunkBytes, minK, maxK int64) (int64, error) {
-	if rows < 0 || dim <= 0 || dim > math.MaxInt64/4 || chunkBytes <= 0 || minK <= 0 || maxK < minK || maxK > math.MaxUint32 {
+func clusteringAnalyzeK(rows, dim, elementBytes, chunkBytes, minK, maxK int64) (int64, error) {
+	if (elementBytes != 2 && elementBytes != 4) || rows < 0 || dim <= 0 || dim > math.MaxInt64/elementBytes || chunkBytes <= 0 || minK <= 0 || maxK < minK || maxK > math.MaxUint32 {
 		return 0, merr.WrapErrServiceInternalMsg("invalid clustering analyze shape or centroid limits")
 	}
-	rowBytes := dim * 4
+	rowBytes := dim * elementBytes
 	if rows > math.MaxInt64/rowBytes {
 		return 0, merr.WrapErrServiceInternalMsg("clustering analyze input size overflows int64")
 	}
@@ -48,8 +48,8 @@ func clusteringAnalyzeK(rows, dim, chunkBytes, minK, maxK int64) (int64, error) 
 func (t *clusteringCompactionTask) newAnalyzeTask() (*indexpb.AnalyzeTask, error) {
 	plan := t.GetTaskProto()
 	field := plan.GetClusteringKeyField()
-	if field.GetDataType() != schemapb.DataType_FloatVector {
-		return nil, merr.WrapErrServiceInternalMsg("clustering analyze currently requires FloatVector")
+	if clustercompaction.VectorElementBytes(field.GetDataType()) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("clustering analyze requires a dense floating vector")
 	}
 	dim, err := storage.GetDimFromParams(field.GetTypeParams())
 	if err != nil {
@@ -70,7 +70,7 @@ func (t *clusteringCompactionTask) newAnalyzeTask() (*indexpb.AnalyzeTask, error
 		rows += segment.GetNumOfRows()
 	}
 	p := paramtable.Get()
-	k, err := clusteringAnalyzeK(rows, int64(dim), p.DataCoordCfg.ClusteringCompactionChunkSizePerCentroid.GetAsSize(),
+	k, err := clusteringAnalyzeK(rows, int64(dim), clustercompaction.VectorElementBytes(field.GetDataType()), p.DataCoordCfg.ClusteringCompactionChunkSizePerCentroid.GetAsSize(),
 		p.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64(), p.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64())
 	if err != nil {
 		return nil, err

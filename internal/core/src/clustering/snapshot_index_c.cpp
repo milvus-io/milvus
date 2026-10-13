@@ -54,9 +54,11 @@ BuildSnapshotIndex(ProtoLayoutInterface result,
                        build.current_index_version() > 0,
                    "invalid snapshot index ownership");
         auto type = static_cast<DataType>(build.field_schema().data_type());
-        AssertInfo(type == DataType::VECTOR_FLOAT,
+        AssertInfo(type == DataType::VECTOR_FLOAT ||
+                       type == DataType::VECTOR_FLOAT16 ||
+                       type == DataType::VECTOR_BFLOAT16,
                    "unsupported snapshot index field type");
-        auto dataset = clustering::BuildCentroidDataset(centroids);
+        auto dataset = clustering::BuildCentroidDataset(centroids, type);
         AssertInfo(dataset->GetDim() == build.dim() &&
                        dataset->GetRows() == build.num_rows(),
                    "snapshot index shape differs from cluster table");
@@ -120,21 +122,36 @@ BuildSnapshotIndex(ProtoLayoutInterface result,
             materializer.FinishPrimary();
             artifact = std::move(materializer).Build();
         } else {
-            using Input = index::VectorBuildInput<float>;
-            auto builder = index::BuilderRegistry<Input>::Instance().Create(
-                adapted.family, adapted.params);
-            AssertInfo(builder && builder->InputSpec().side_inputs.empty(),
-                       "unsupported snapshot index builder or side fields");
-            Input input{
-                .physical_values = {static_cast<const float*>(
-                                        dataset->GetTensor()),
-                                    static_cast<size_t>(build.num_rows()) *
-                                        build.dim()},
-                .logical_rows = build.num_rows(),
-                .physical_rows = build.num_rows(),
-                .dim = build.dim(),
+            const auto build_typed = [&]<typename T>() {
+                using Input = index::VectorBuildInput<T>;
+                auto builder = index::BuilderRegistry<Input>::Instance().Create(
+                    adapted.family, adapted.params);
+                AssertInfo(builder && builder->InputSpec().side_inputs.empty(),
+                           "unsupported snapshot index builder or side fields");
+                Input input{
+                    .physical_values = {static_cast<const T*>(
+                                            dataset->GetTensor()),
+                                        static_cast<size_t>(build.num_rows()) *
+                                            build.dim()},
+                    .logical_rows = build.num_rows(),
+                    .physical_rows = build.num_rows(),
+                    .dim = build.dim(),
+                };
+                return std::move(*builder).Build(input);
             };
-            artifact = std::move(*builder).Build(input);
+            switch (type) {
+                case DataType::VECTOR_FLOAT:
+                    artifact = build_typed.template operator()<float>();
+                    break;
+                case DataType::VECTOR_FLOAT16:
+                    artifact = build_typed.template operator()<float16>();
+                    break;
+                case DataType::VECTOR_BFLOAT16:
+                    artifact = build_typed.template operator()<bfloat16>();
+                    break;
+                default:
+                    ThrowInfo(Unsupported, "unsupported snapshot vector type");
+            }
         }
         storage::V1DiskSink sink(files);
         artifact->Serialize(sink);
@@ -171,13 +188,18 @@ SearchSnapshotIndex(CLoadIndexInfo handle,
                        info->cache_index && queries && labels && nq > 0 &&
                        topk > 0 && topk <= info->num_rows && info->dim > 0,
                    "invalid snapshot index query");
-        AssertInfo(info->field_type == DataType::VECTOR_FLOAT,
+        AssertInfo(info->field_type == DataType::VECTOR_FLOAT ||
+                       info->field_type == DataType::VECTOR_FLOAT16 ||
+                       info->field_type == DataType::VECTOR_BFLOAT16,
                    "unsupported snapshot query type");
+        const auto element_bytes = info->field_type == DataType::VECTOR_FLOAT
+                                       ? sizeof(float)
+                                       : sizeof(knowhere::fp16);
         AssertInfo(
             static_cast<uint64_t>(nq) <= std::numeric_limits<uint64_t>::max() /
-                                             info->dim / sizeof(float) &&
+                                             info->dim / element_bytes &&
                 query_bytes ==
-                    static_cast<uint64_t>(nq) * info->dim * sizeof(float),
+                    static_cast<uint64_t>(nq) * info->dim * element_bytes,
             "snapshot query shape differs");
         auto accessor =
             SemiInlineGet(info->cache_index->PinCells(nullptr, {0}));

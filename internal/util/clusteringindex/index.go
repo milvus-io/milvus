@@ -167,7 +167,11 @@ func (idx *Index) Search(ctx context.Context, vectors []byte, nq, topk int64) ([
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if idx.ptr == nil || nq <= 0 || topk <= 0 || topk > idx.rows || nq > math.MaxInt/topk || idx.dim <= 0 || nq > math.MaxInt/idx.dim/4 || len(vectors) != int(nq*idx.dim*4) {
+	width := clustercompaction.VectorElementBytes(idx.fieldType)
+	if width == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported snapshot index vector type")
+	}
+	if idx.ptr == nil || nq <= 0 || topk <= 0 || topk > idx.rows || nq > math.MaxInt/topk || idx.dim <= 0 || nq > math.MaxInt/idx.dim/width || len(vectors) != int(nq*idx.dim*width) {
 		return nil, merr.WrapErrParameterInvalidMsg("invalid snapshot index query")
 	}
 	params := make(map[string]any, len(idx.params))

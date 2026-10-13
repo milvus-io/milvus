@@ -20,11 +20,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func mergeCentroids(values ...float32) *clusteringpb.ClusteringCentroidsStats {
@@ -33,6 +35,49 @@ func mergeCentroids(values ...float32) *clusteringpb.ClusteringCentroidsStats {
 		result.Centroids = append(result.Centroids, &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{value, value}}}})
 	}
 	return result
+}
+
+func TestClusteringHalfSnapshotMerge(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			base := clusteringSnapshotFixture()
+			base.Version = 7
+			base.ClusteringStats.DataType = dtype
+			base.ClusteringStats.NumClusters = 2
+			base.ClusteringStats.Groups = []*clusteringpb.ClusteringGroup{{SegmentIds: []int64{10}}, {SegmentIds: []int64{20}}}
+			base.SegmentStats = map[int64]SegmentStats{
+				10: {NumRows: 2, ClusteringRanges: []*clusteringpb.ClusteringRange{{ClusterOffset: 0, RowCount: 2}}},
+				20: {NumRows: 2, ClusteringRanges: []*clusteringpb.ClusteringRange{{ClusterOffset: 1, RowCount: 2}}},
+			}
+			field := &schemapb.FieldSchema{FieldID: 100, DataType: dtype, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}}
+			old, next := mergeCentroids(10, 20), mergeCentroids(30)
+			for _, table := range []*clusteringpb.ClusteringCentroidsStats{old, next} {
+				for _, c := range table.Centroids {
+					b, err := typeutil.ConvertFloat32ToFP16BF16Bytes(c.GetFloatVector().Data, dtype)
+					require.NoError(t, err)
+					if dtype == schemapb.DataType_Float16Vector {
+						c.Data = &schemapb.VectorField_Float16Vector{Float16Vector: b}
+					} else {
+						c.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: b}
+					}
+				}
+			}
+			draft, err := MergeClusteringSnapshot(base, old, []int64{10}, map[int64]SegmentStats{30: {NumRows: 2, ClusteringRanges: []*clusteringpb.ClusteringRange{{ClusterOffset: 0, RowCount: 2}}}}, []*clusteringpb.ClusteringGroup{{SegmentIds: []int64{30}}}, next, field, 8)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(old.Centroids[1], draft.Centroids.Centroids[0]))
+			require.True(t, proto.Equal(next.Centroids[0], draft.Centroids.Centroids[1]))
+			require.NotSame(t, old.Centroids[1], draft.Centroids.Centroids[0])
+			final, err := draft.Finalize("8.clusters", base.ClusteringStats.ClusteringIndex)
+			require.NoError(t, err)
+			blob, err := SerializePartitionStatsSnapshot(final)
+			require.NoError(t, err)
+			restored, err := DeserializePartitionsStatsSnapshot(blob)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(final.ClusteringStats, restored.ClusteringStats))
+			require.Equal(t, uint32(0), restored.SegmentStats[20].ClusteringRanges[0].ClusterOffset)
+			require.Equal(t, uint32(1), restored.SegmentStats[30].ClusteringRanges[0].ClusterOffset)
+		})
+	}
 }
 
 func TestClusteringSnapshotMergeWholeGroups(t *testing.T) {

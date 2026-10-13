@@ -228,10 +228,10 @@ func (ps *PartitionStatsSnapshot) validateClusteringLayout() error {
 // Keep type admission separate from the common index and physical-range rules.
 // Scalar mapping must supply its typed cluster descriptions and sorted ranges
 // before scalar snapshots can be admitted. Existing scalar FieldStats are
-// unaffected. Half-precision vector admission belongs to PR5.
+// unaffected. Dense floating vectors share the snapshot layout contract.
 func validateClusteringField(clustering *clusteringpb.PartitionClusteringStats) error {
 	switch clustering.DataType {
-	case schemapb.DataType_FloatVector:
+	case schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		if clustering.Dim <= 0 {
 			return merr.WrapErrDataIntegrityMsg("invalid clustering vector dimension")
 		}

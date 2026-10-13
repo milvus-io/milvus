@@ -7317,8 +7317,11 @@ func TestIsClusteringKeyType(t *testing.T) {
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Text))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Timestamptz))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_BinaryVector))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_Float16Vector))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_BFloat16Vector))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_Int8Vector))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_SparseFloatVector))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_ArrayOfVector))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_Float16Vector))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_BFloat16Vector))
 }
 
 func TestAppendFieldDataNullableVectorWithSchemaWithoutValidData(t *testing.T) {

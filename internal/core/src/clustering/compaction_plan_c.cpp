@@ -152,6 +152,22 @@ BuildClusteringCompactionPlan(CClusteringCompactionPlan* result,
                     counts,
                     params);
                 break;
+            case DataType::VECTOR_FLOAT16:
+                plan = BuildTypedCompactionPlan<knowhere::fp16>(
+                    cluster_type,
+                    milvus::clustering::BuildCentroidDataset(
+                        centroids, DataType::VECTOR_FLOAT16),
+                    counts,
+                    params);
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                plan = BuildTypedCompactionPlan<knowhere::bf16>(
+                    cluster_type,
+                    milvus::clustering::BuildCentroidDataset(
+                        centroids, DataType::VECTOR_BFLOAT16),
+                    counts,
+                    params);
+                break;
             default:
                 ThrowInfo(DataTypeInvalid,
                           "invalid clustering compaction field type {}",

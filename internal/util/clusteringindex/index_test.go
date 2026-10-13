@@ -32,9 +32,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSnapshotIndexBuildLoadSearch(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		t.Run(dtype.String(), func(t *testing.T) { testSnapshotIndex(t, dtype) })
+	}
+}
+
+func testSnapshotIndex(t *testing.T, dtype schemapb.DataType) {
 	ctx := context.Background()
 	paramtable.Init()
 	params := paramtable.Get()
@@ -45,7 +52,7 @@ func TestSnapshotIndexBuildLoadSearch(t *testing.T) {
 	require.NoError(t, initcore.InitRemoteChunkManager(params))
 	require.NoError(t, initcore.InitRemoteArrowFileSystem(params))
 	initcore.InitTieredStorage(params)
-	field := &schemapb.FieldSchema{FieldID: 100, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}}
+	field := &schemapb.FieldSchema{FieldID: 100, Name: "vector", DataType: dtype, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}}
 	centroids := &clusteringpb.ClusteringCentroidsStats{}
 	for i := 0; i < 256; i++ {
 		centroids.Centroids = append(centroids.Centroids, &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{float32(i), float32(i % 17), 1, 2}}}})
@@ -56,9 +63,28 @@ func TestSnapshotIndexBuildLoadSearch(t *testing.T) {
 			binary.LittleEndian.PutUint32(query[(j*4+i)*4:], math.Float32bits(v))
 		}
 	}
+	if dtype != schemapb.DataType_FloatVector {
+		values := make([]float32, len(query)/4)
+		for i := range values {
+			values[i] = math.Float32frombits(binary.LittleEndian.Uint32(query[i*4:]))
+		}
+		var err error
+		query, err = typeutil.ConvertFloat32ToFP16BF16Bytes(values, dtype)
+		require.NoError(t, err)
+		for _, c := range centroids.Centroids {
+			values := c.GetFloatVector().Data
+			raw, err := typeutil.ConvertFloat32ToFP16BF16Bytes(values, dtype)
+			require.NoError(t, err)
+			if dtype == schemapb.DataType_Float16Vector {
+				c.Data = &schemapb.VectorField_Float16Vector{Float16Vector: raw}
+			} else {
+				c.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: raw}
+			}
+		}
+	}
 	for n, typ := range []string{"FLAT", "HNSW"} {
 		t.Run(typ, func(t *testing.T) {
-			version := int64(100 + n)
+			version := int64(dtype)*1000 + int64(n)
 			indexParams := []*commonpb.KeyValuePair{{Key: "index_type", Value: typ}, {Key: "metric_type", Value: "L2"}, {Key: "M", Value: "8"}, {Key: "efConstruction", Value: "64"}, {Key: "ef", Value: "256"}, {Key: "warmup", Value: "sync"}}
 			if typ == "HNSW" {
 				indexParams = append(indexParams, &commonpb.KeyValuePair{Key: "mmap.enabled", Value: "true"})
