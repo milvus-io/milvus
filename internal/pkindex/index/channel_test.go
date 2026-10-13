@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -473,4 +474,34 @@ func TestAddOfAnExistingIndexReportsNotCreated(t *testing.T) {
 	assert.False(t, created, "a caller that rolls back must not remove the Index in use")
 	assert.Same(t, idx, ch.Get("v0"))
 	assert.EqualValues(t, 10, segmentOf(t, idx, 1))
+}
+
+func TestDropRemovesTheLocalFiles(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	ch := env.channel(0)
+	idx := env.add(ch, "v0")
+	insert(t, idx, 10, 1)
+	ch.Tick(10)
+	ch.step(farFuture)
+	require.DirExists(t, idx.committedDir)
+
+	require.NoError(t, ch.Drop(context.Background(), "v0"))
+	assert.Nil(t, ch.Get("v0"))
+	assert.NoDirExists(t, filepath.Join(env.root, "v0"))
+	require.NoError(t, ch.Drop(context.Background(), "v0"), "a drop of a vchannel with no Index is a no-op")
+
+	idx = env.add(ch, "v0")
+	assert.Zero(t, segmentOf(t, idx, 1), "the old key is gone")
+	assert.Empty(t, env.fatalList())
+}
+
+func TestDropOfAClosedChannelFails(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	ch := env.channel(0)
+	env.add(ch, "v0")
+	ch.Close()
+
+	err := ch.Drop(context.Background(), "v0")
+	require.ErrorIs(t, err, engine.ErrClosed)
+	assert.DirExists(t, filepath.Join(env.root, "v0"))
 }

@@ -74,6 +74,7 @@ func TestMain(m *testing.M) {
 type testIndexEnv struct {
 	mgr       *index.Manager
 	committer *indextest.Committer
+	root      string
 
 	mu     sync.Mutex
 	fatals []error
@@ -86,7 +87,7 @@ func newTestIndexEnv(t *testing.T) *testIndexEnv {
 // newTestIndexEnvAt creates the env with root as the local root directory.
 func newTestIndexEnvAt(t *testing.T, root string) *testIndexEnv {
 	env := indextest.NewEnv(t, root)
-	return &testIndexEnv{mgr: env.Manager, committer: env.Committer}
+	return &testIndexEnv{mgr: env.Manager, committer: env.Committer, root: root}
 }
 
 // openChannel opens the index Channel of the test pchannel.
@@ -1244,7 +1245,8 @@ func TestVChannelWithoutTargetPassesThrough(t *testing.T) {
 // ===== collection lifecycle =====
 
 func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
-	i, engines := newEmptyTestInterceptor(t, newTestIndexEnv(t), nil)
+	env := newTestIndexEnv(t)
+	i, engines := newEmptyTestInterceptor(t, env, nil)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(false)), f.append)
@@ -1261,6 +1263,7 @@ func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, i.registry.get(testVChannel))
 	require.Nil(t, i.ch.Get(testVChannel), "a dropped collection closes its index")
+	require.NoDirExists(t, filepath.Join(env.root, testVChannel), "a dropped collection removes the local files of its index")
 
 	before := len(f.types)
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 2), f.append)
@@ -1269,12 +1272,9 @@ func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
 }
 
 // TestCreateCollectionAfterDropBuildsAFreshIndex checks that a new create
-// opens a new Index. A drop keeps the local files of the index, so a new
-// collection of the same vchannel name would see the old keys. That can not
-// happen, because a vchannel name embeds the id of its collection.
-// TODO: check that the new index is empty once a drop removes the local files.
+// opens a new, empty Index.
 func TestCreateCollectionAfterDropBuildsAFreshIndex(t *testing.T) {
-	i, _ := newEmptyTestInterceptor(t, newTestIndexEnv(t), nil)
+	i, engines := newEmptyTestInterceptor(t, newTestIndexEnv(t), nil)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(false)), f.append)
@@ -1294,6 +1294,8 @@ func TestCreateCollectionAfterDropBuildsAFreshIndex(t *testing.T) {
 	require.NotNil(t, second)
 	require.NotSame(t, first, second)
 	require.Same(t, second, i.registry.get(testVChannel).idx)
+	_, ok := engines.of(t, testVChannel).segmentOf(t, 1)
+	require.False(t, ok, "the new index does not see the keys of the dropped collection")
 
 	f2 := newFakeAppender()
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 2), f2.append)
@@ -1324,7 +1326,8 @@ func TestCreateCollectionRejectedWhenTheIndexCanNotBeCreated(t *testing.T) {
 }
 
 func TestCreateCollectionAppendFailureRemovesTheTarget(t *testing.T) {
-	i, _ := newEmptyTestInterceptor(t, newTestIndexEnv(t), nil)
+	env := newTestIndexEnv(t)
+	i, _ := newEmptyTestInterceptor(t, env, nil)
 
 	appendErr := errors.New("wal is closed")
 	_, err := i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(false)),
@@ -1332,6 +1335,7 @@ func TestCreateCollectionAppendFailureRemovesTheTarget(t *testing.T) {
 	require.ErrorIs(t, err, appendErr)
 	require.Nil(t, i.registry.get(testVChannel))
 	require.Nil(t, i.ch.Get(testVChannel), "the index of a collection that was not created is closed")
+	require.NoDirExists(t, filepath.Join(env.root, testVChannel), "a retry of the create opens an index with no leftover")
 }
 
 func TestDuplicateCreateCollectionAppendFailureKeepsTheTarget(t *testing.T) {

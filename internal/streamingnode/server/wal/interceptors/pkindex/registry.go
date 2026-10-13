@@ -130,9 +130,13 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	return created, nil
 }
 
-// remove drops the target of a vchannel and closes its index. It keeps the
-// local files of the index.
-func (r *registry) remove(ctx context.Context, vchannel string) {
+// drop removes the target of a vchannel, closes its index and removes the
+// local files of the index. A failed removal leaves the files on disk and is
+// only logged, because the caller can not undo its append.
+//
+// TODO: files that a failed removal or a crash leaves stay on disk. A sweep at
+// the WAL open removes the directories of the vchannels that it does not open.
+func (r *registry) drop(ctx context.Context, vchannel string) {
 	r.mu.Lock()
 	_, ok := r.targets[vchannel]
 	delete(r.targets, vchannel)
@@ -140,7 +144,10 @@ func (r *registry) remove(ctx context.Context, vchannel string) {
 	if !ok {
 		return
 	}
-	r.ch.Remove(ctx, vchannel)
+	if err := r.ch.Drop(ctx, vchannel); err != nil {
+		mlog.Warn(ctx, "failed to remove the local files of the primary key index",
+			mlog.FieldVChannel(vchannel), mlog.Err(err))
+	}
 }
 
 // close drops every target and closes the Channel.

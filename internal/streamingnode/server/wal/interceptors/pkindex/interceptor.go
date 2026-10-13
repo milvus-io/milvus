@@ -125,7 +125,7 @@ func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg mess
 		// A duplicate CreateCollection finds the target of the existing collection
 		// in use, so only a target that this call created is removed.
 		if created {
-			i.registry.remove(ctx, msg.VChannel())
+			i.registry.drop(ctx, msg.VChannel())
 		}
 		return id, err
 	}
@@ -140,7 +140,7 @@ func (i *appendInterceptor) appendDropCollection(ctx context.Context, msg messag
 	if funcutil.IsControlChannel(msg.VChannel()) {
 		return id, nil
 	}
-	i.registry.remove(ctx, msg.VChannel())
+	i.registry.drop(ctx, msg.VChannel())
 	return id, nil
 }
 

@@ -120,7 +120,7 @@ type Index struct {
 func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID int64, pkDataType schemapb.DataType) (*Index, error) {
 	cfg := c.m.cfg
 	params := cfg.Params()
-	dir := filepath.Join(cfg.Root, vchannel)
+	dir := indexDir(cfg.Root, vchannel)
 	// engine.Destroy removes the engine dir, so the committed tables live outside it
 	engineDir := filepath.Join(dir, "engine")
 	committedDir := filepath.Join(dir, "committed")
@@ -171,6 +171,12 @@ func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID in
 	}
 	idx.decider = snpkindex.NewDecider(a, params.LockStripes)
 	return idx, nil
+}
+
+// indexDir is the local directory of the Index of a vchannel. It holds the
+// engine directory and the committed directory.
+func indexDir(root, vchannel string) string {
+	return filepath.Join(root, vchannel)
 }
 
 // hasLeftover reports whether any of dirs exists and is not empty.

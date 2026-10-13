@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
@@ -124,7 +125,31 @@ func (c *Channel) Remove(ctx context.Context, vchannel string) {
 	defer c.lifetime.Done()
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
+	c.closeIndex(ctx, vchannel)
+}
 
+// Drop closes the Index of a vchannel like Remove, then removes the local
+// directory of the vchannel. It removes the directory also when no Index is
+// open. No open of the vchannel wipes the files later, because a vchannel name
+// embeds the id of its collection.
+func (c *Channel) Drop(ctx context.Context, vchannel string) error {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return errChannelClosed(c.info.Name)
+	}
+	defer c.lifetime.Done()
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	c.closeIndex(ctx, vchannel)
+	dir := indexDir(c.m.cfg.Root, vchannel)
+	if err := os.RemoveAll(dir); err != nil {
+		return pkindex.MarkIO(err, "remove dir %s", dir)
+	}
+	return nil
+}
+
+// closeIndex detaches and closes the Index of a vchannel, if it is open. The
+// caller holds opMu.
+func (c *Channel) closeIndex(ctx context.Context, vchannel string) {
 	c.mu.Lock()
 	idx, ok := c.indexes[vchannel]
 	if ok {

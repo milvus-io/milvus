@@ -122,6 +122,11 @@ the index layer:
   metrics (`RecoveryTailBytes`). The tail triggers use it.
 - A `Decide` on a closed index returns the on-shutdown error of the streaming
   node.
+- DropCollection and the rollback of a failed CreateCollection call
+  `Channel.Drop`. It closes the index and removes `<root>/<vchannel>/`. A
+  vchannel name embeds the collection ID, so no later open of the vchannel
+  would remove the files. A failed removal is only logged, because the
+  append is done.
 
 ### Wiring into the streaming node
 
@@ -622,6 +627,10 @@ Common patterns:
   bound only matters with replay.
 - **Compaction and the view sync after it.** Nothing merges committed tables.
   Files in `committed/` that leave the committed set are not deleted.
+- **A sweep of orphan local directories.** When the removal at DropCollection
+  fails, or the node stops between the append and the removal, the directory
+  of the dropped vchannel stays on disk. A sweep at WAL open can remove the
+  directories of the vchannels that the WAL does not open.
 - **A trigger on node memory pressure.** It needs a node-level memory budget.
 - **A handover before a vchannel closes.** Recovery replays from the global
   checkpoint of the pchannel anyway. The need depends on the measured recovery
@@ -665,6 +674,9 @@ Unit tests cover these cases:
 - Duplicate CreateCollection: an `Add` of an `Index` that exists reports
   that it created nothing, so the rollback after a failed append does not
   remove the `Index` in use.
+- Drop: DropCollection and the rollback of a failed CreateCollection remove
+  the local directory, and a new create of the vchannel sees none of the old
+  keys. A drop on a closed `Channel` fails and keeps the files.
 - Table store: remote failures are `ErrUnavailable`, local disk failures
   (also a write of the local chunk manager) are `ErrIO`, and a missing object
   is `ErrCorrupted`.
