@@ -52,11 +52,17 @@ func (s *OperatorRegistryTestSuite) TestRegisterOperatorNilFactory() {
 
 func (s *OperatorRegistryTestSuite) TestGetOperatorFactoryRegistered() {
 	// Built-in contextual and stateless operators are registered uniformly.
-	for _, opType := range []string{types.OpTypeMerge, types.OpTypeMap, types.OpTypeFilter, types.OpTypeSort} {
+	for _, opType := range []string{types.OpTypeMerge, types.OpTypeMap, types.OpTypeSort} {
 		factory, ok := GetOperatorFactory(opType)
 		s.True(ok, opType)
 		s.NotNil(factory, opType)
 	}
+}
+
+func (s *OperatorRegistryTestSuite) TestFilterOperatorNotRegistered() {
+	factory, ok := GetOperatorFactory(types.OpTypeFilter)
+	s.False(ok)
+	s.Nil(factory)
 }
 
 func (s *OperatorRegistryTestSuite) TestGetOperatorFactoryNotRegistered() {
