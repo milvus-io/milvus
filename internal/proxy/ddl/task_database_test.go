@@ -1,4 +1,4 @@
-package proxy
+package ddl
 
 import (
 	"context"
@@ -26,7 +26,7 @@ func TestCreateDatabaseTask(t *testing.T) {
 	defer rc.Close()
 
 	ctx := context.Background()
-	task := &createDatabaseTask{
+	task := &CreateDatabaseTask{
 		Condition: NewTaskCondition(ctx),
 		CreateDatabaseRequest: &milvuspb.CreateDatabaseRequest{
 			Base: &commonpb.MsgBase{
@@ -78,7 +78,7 @@ func TestDropDatabaseTask(t *testing.T) {
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 	).Maybe()
-	task := &dropDatabaseTask{
+	task := &DropDatabaseTask{
 		baseTask: baseTask{
 			MetaCache: cache,
 		},
@@ -127,7 +127,7 @@ func TestListDatabaseTask(t *testing.T) {
 	defer rc.Close()
 
 	ctx := GetContext(context.Background(), "root:123456")
-	task := &listDatabaseTask{
+	task := &ListDatabaseTask{
 		Condition: NewTaskCondition(ctx),
 		ListDatabasesRequest: &milvuspb.ListDatabasesRequest{
 			Base: &commonpb.MsgBase{
@@ -172,7 +172,7 @@ func TestAlterDatabase(t *testing.T) {
 	rc := mocks.NewMockMixCoordClient(t)
 
 	rc.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-	task := &alterDatabaseTask{
+	task := &AlterDatabaseTask{
 		AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
 			Base:       &commonpb.MsgBase{},
 			DbName:     "test_alter_database",
@@ -186,7 +186,7 @@ func TestAlterDatabase(t *testing.T) {
 	err = task.Execute(context.Background())
 	assert.Nil(t, err)
 
-	task1 := &alterDatabaseTask{
+	task1 := &AlterDatabaseTask{
 		AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
 			Base:       &commonpb.MsgBase{},
 			DbName:     "test_alter_database",
@@ -205,7 +205,7 @@ func TestDescribeDatabaseTask(t *testing.T) {
 	rc := mocks.NewMockMixCoordClient(t)
 
 	rc.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil)
-	task := &describeDatabaseTask{
+	task := &DescribeDatabaseTask{
 		DescribeDatabaseRequest: &milvuspb.DescribeDatabaseRequest{
 			Base:   &commonpb.MsgBase{},
 			DbName: "test_describe_database",

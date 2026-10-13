@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema)
 	return nil
 }
 
-type alterCollectionFunctionTask struct {
+type AlterCollectionFunctionTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionFunctionRequest
@@ -51,35 +51,35 @@ type alterCollectionFunctionTask struct {
 	result   *commonpb.Status
 }
 
-func (t *alterCollectionFunctionTask) TraceCtx() context.Context {
+func (t *AlterCollectionFunctionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *alterCollectionFunctionTask) ID() UniqueID {
+func (t *AlterCollectionFunctionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *alterCollectionFunctionTask) SetID(uid UniqueID) {
+func (t *AlterCollectionFunctionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *alterCollectionFunctionTask) Type() commonpb.MsgType {
+func (t *AlterCollectionFunctionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *alterCollectionFunctionTask) BeginTs() Timestamp {
+func (t *AlterCollectionFunctionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterCollectionFunctionTask) EndTs() Timestamp {
+func (t *AlterCollectionFunctionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterCollectionFunctionTask) SetTs(ts Timestamp) {
+func (t *AlterCollectionFunctionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *alterCollectionFunctionTask) OnEnqueue() error {
+func (t *AlterCollectionFunctionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -88,11 +88,11 @@ func (t *alterCollectionFunctionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *alterCollectionFunctionTask) Name() string {
-	return AlterCollectionFunctionTask
+func (t *AlterCollectionFunctionTask) Name() string {
+	return AlterCollectionFunctionTaskName
 }
 
-func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
+func (t *AlterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("function schema is empty")
 	}
@@ -141,7 +141,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterCollectionFunctionTask) Execute(ctx context.Context) error {
+func (t *AlterCollectionFunctionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.AlterCollectionFunction(ctx, t.AlterCollectionFunctionRequest)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
@@ -150,7 +150,7 @@ func (t *alterCollectionFunctionTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterCollectionFunctionTask) PostExecute(ctx context.Context) error {
+func (t *AlterCollectionFunctionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
