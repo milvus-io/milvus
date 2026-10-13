@@ -148,6 +148,11 @@ void
 TantivyGrowingTextIndex::PublishCommitted() {
     AssertInfo(committed_end_ > published_end_,
                "growing Tantivy text has no committed generation to publish");
+    // Append drains a pending committed publication before accepting new rows.
+    // Therefore accepted validity belongs to exactly this committed prefix.
+    AssertInfo(
+        accepted_end_ == committed_end_,
+        "growing Tantivy text cannot publish beyond its committed prefix");
     auto snapshot = writer_->create_snapshot_reader(SetBitsetGrowing);
     const auto count = static_cast<int64_t>(snapshot->count());
     AssertInfo(count == committed_end_,
@@ -155,20 +160,14 @@ TantivyGrowingTextIndex::PublishCommitted() {
                "committed row end {}",
                count,
                committed_end_);
-    const auto null_end = std::lower_bound(null_offsets_.begin(),
-                                           null_offsets_.end(),
-                                           static_cast<size_t>(committed_end_));
-    auto frozen_null_offsets = std::make_shared<const std::vector<size_t>>(
-        null_offsets_.begin(), null_end);
     const auto payload_bytes = TextIndexRamPayloadBytes(*snapshot);
-    auto reader =
-        std::make_unique<TextIndexReader>(nullptr,
-                                          std::move(snapshot),
-                                          std::move(frozen_null_offsets),
-                                          committed_end_,
-                                          value_type_,
-                                          /*file_backed=*/false,
-                                          payload_bytes);
+    auto reader = std::make_unique<TextIndexReader>(nullptr,
+                                                    std::move(snapshot),
+                                                    validity_.Freeze(),
+                                                    committed_end_,
+                                                    value_type_,
+                                                    /*file_backed=*/false,
+                                                    payload_bytes);
     PublishSnapshot(std::move(reader), committed_end_);
     published_end_ = committed_end_;
     commit_policy_.NoteCommitted();
@@ -259,15 +258,8 @@ TantivyGrowingTextIndex::Append(int64_t row_begin, const TextBatch& batch) {
     const auto new_null_count = static_cast<size_t>(std::count(
         owned.valid.begin(), owned.valid.end(), static_cast<uint8_t>(0)));
     uncommitted_.reserve(uncommitted_.size() + 1);
-    if (new_null_count != 0) {
-        const auto required = null_offsets_.size() + new_null_count;
-        if (required > null_offsets_.capacity()) {
-            const auto limit = static_cast<size_t>(kMaxTantivyDocuments);
-            auto grown = std::max<size_t>(null_offsets_.capacity(), 1);
-            grown = grown > limit / 2 ? limit : grown * 2;
-            null_offsets_.reserve(std::max(required, grown));
-        }
-    }
+    validity_.PrepareAppend(static_cast<size_t>(batch_end),
+                            new_null_count != 0);
     try {
         AddOwnedBatch(owned);
     } catch (...) {
@@ -277,11 +269,14 @@ TantivyGrowingTextIndex::Append(int64_t row_begin, const TextBatch& batch) {
         std::rethrow_exception(failure);
     }
 
+    // A failed engine write never clears NULL bits. Recovery replays only
+    // accepted batches; their already recorded validity remains unchanged.
     for (size_t i = 0; i < owned.valid.size(); ++i) {
         if (owned.valid[i] == 0) {
-            null_offsets_.push_back(static_cast<size_t>(row_begin) + i);
+            validity_.AppendNull(static_cast<size_t>(row_begin) + i);
         }
     }
+    validity_.FinishAppend(static_cast<size_t>(batch_end));
     uncommitted_.push_back(std::move(owned));
     accepted_end_ = batch_end;
     if (commit_policy_.ShouldCommit()) {
