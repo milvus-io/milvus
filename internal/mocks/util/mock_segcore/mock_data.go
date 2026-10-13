@@ -23,7 +23,6 @@ import (
 	"math"
 	"math/rand"
 	"path"
-	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -45,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -302,8 +302,7 @@ func GenTestBM25CollectionSchema(collectionName string) *schemapb.CollectionSche
 	return schema
 }
 
-// some tests do not yet support sparse float vector, see comments of
-// GenSparseFloatVecDataset in indexcgowrapper/dataset.go
+// Some tests do not yet support sparse float vectors.
 func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType, withSparse bool) *schemapb.CollectionSchema {
 	fieldRowID := genConstantFieldSchema(RowIDField)
 	fieldTimestamp := genConstantFieldSchema(timestampField)
@@ -859,142 +858,105 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 	cm storage.ChunkManager,
 	msgLength int,
 ) (*querypb.FieldIndexInfo, error) {
-	typeParams := funcutil.KeyValuePair2Map(indexInfo.GetTypeParams())
-	indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
-
-	index, err := indexcgowrapper.NewCgoIndex(fieldSchema.GetDataType(), typeParams, indexParams)
-	if err != nil {
-		return nil, err
-	}
-	defer index.Delete()
-
-	var dataset *indexcgowrapper.Dataset
-	switch fieldSchema.DataType {
-	case schemapb.DataType_BinaryVector:
-		dataset = indexcgowrapper.GenBinaryVecDataset(testutils.GenerateBinaryVectors(msgLength, DefaultDim))
-	case schemapb.DataType_FloatVector:
-		dataset = indexcgowrapper.GenFloatVecDataset(testutils.GenerateFloatVectors(msgLength, DefaultDim))
-	case schemapb.DataType_Float16Vector:
-		dataset = indexcgowrapper.GenFloat16VecDataset(testutils.GenerateFloat16Vectors(msgLength, DefaultDim))
-	case schemapb.DataType_BFloat16Vector:
-		dataset = indexcgowrapper.GenBFloat16VecDataset(testutils.GenerateBFloat16Vectors(msgLength, DefaultDim))
-	case schemapb.DataType_SparseFloatVector:
-		contents, dim := testutils.GenerateSparseFloatVectorsData(msgLength)
-		dataset = indexcgowrapper.GenSparseFloatVecDataset(&storage.SparseFloatVectorFieldData{
-			SparseFloatArray: schemapb.SparseFloatArray{
-				Contents: contents,
-				Dim:      dim,
-			},
-		})
-	}
-
-	err = index.Build(dataset)
-	if err != nil {
-		return nil, err
-	}
-
-	// save index to minio
-	binarySet, err := index.Serialize()
-	if err != nil {
-		return nil, err
-	}
-
-	// serialize index params
-	indexCodec := storage.NewIndexFileBinlogCodec()
-	serializedIndexBlobs, err := indexCodec.Serialize(
-		buildID,
-		0,
+	return buildAndUploadIndex(
 		collectionID,
 		partitionID,
 		segmentID,
-		fieldSchema.GetFieldID(),
-		indexParams,
+		buildID,
+		fieldSchema,
+		indexInfo.GetTypeParams(),
+		indexInfo.GetIndexParams(),
 		indexInfo.GetIndexName(),
 		indexInfo.GetIndexID(),
-		binarySet,
+		cm,
+		msgLength,
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	indexPaths := make([]string, 0)
-	for _, index := range serializedIndexBlobs {
-		indexPath := filepath.Join(cm.RootPath(), "index_files",
-			strconv.Itoa(int(segmentID)), index.Key)
-		indexPaths = append(indexPaths, indexPath)
-		err := cm.Write(context.Background(), indexPath, index.Value)
-		if err != nil {
-			return nil, err
-		}
-	}
-	indexVersion := segcore.GetIndexEngineInfo()
-
-	return &querypb.FieldIndexInfo{
-		FieldID:             fieldSchema.GetFieldID(),
-		IndexName:           indexInfo.GetIndexName(),
-		IndexParams:         indexInfo.GetIndexParams(),
-		IndexFilePaths:      indexPaths,
-		CurrentIndexVersion: indexVersion.CurrentIndexVersion,
-		IndexID:             indexInfo.GetIndexID(),
-	}, nil
 }
 
 func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLength int, indexType, metricType string, cm storage.ChunkManager) (*querypb.FieldIndexInfo, error) {
 	typeParams, indexParams := genIndexParams(indexType, metricType)
 	indexParams[common.LoadPriorityKey] = "HIGH"
-	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
+	fieldSchema := genVectorFieldSchema(SimpleFloatVecField)
+	fieldSchema.FieldID = fieldID
+	return buildAndUploadIndex(
+		collectionID,
+		partitionID,
+		segmentID,
+		0,
+		fieldSchema,
+		funcutil.Map2KeyValuePair(typeParams),
+		funcutil.Map2KeyValuePair(indexParams),
+		"querynode-test",
+		0,
+		cm,
+		msgLength,
+	)
+}
+
+func buildAndUploadIndex(
+	collectionID, partitionID, segmentID, buildID int64,
+	fieldSchema *schemapb.FieldSchema,
+	typeParams, indexParams []*commonpb.KeyValuePair,
+	indexName string,
+	indexID int64,
+	cm storage.ChunkManager,
+	msgLength int,
+) (*querypb.FieldIndexInfo, error) {
+	dim := int64(-1)
+	if fieldSchema.GetDataType() != schemapb.DataType_SparseFloatVector {
+		var err error
+		dim, err = typeutil.GetDim(fieldSchema)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	indexEngineInfo := segcore.GetIndexEngineInfo()
+	index, err := indexcgowrapper.CreateIndex(context.Background(), &indexcgopb.BuildIndexInfo{
+		BuildID:             buildID,
+		CollectionID:        collectionID,
+		PartitionID:         partitionID,
+		SegmentID:           segmentID,
+		IndexVersion:        0,
+		CurrentIndexVersion: indexEngineInfo.CurrentIndexVersion,
+		NumRows:             int64(msgLength),
+		Dim:                 dim,
+		InsertFiles: []string{path.Join(
+			cm.RootPath(),
+			"insert-log",
+			metautil.JoinIDPath(collectionID, partitionID, segmentID, fieldSchema.GetFieldID()),
+		)},
+		FieldSchema:   fieldSchema,
+		StorageConfig: genStorageConfig(cm.RootPath()),
+		IndexParams:   indexParams,
+		TypeParams:    typeParams,
+	})
 	if err != nil {
 		return nil, err
 	}
 	defer index.Delete()
 
-	err = index.Build(indexcgowrapper.GenFloatVecDataset(testutils.GenerateFloatVectors(msgLength, DefaultDim)))
+	stats, err := index.UpLoad()
 	if err != nil {
 		return nil, err
 	}
-
-	// save index to minio
-	binarySet, err := index.Serialize()
-	if err != nil {
-		return nil, err
+	indexPaths := make([]string, 0, len(stats.GetSerializedIndexInfos()))
+	var indexSize int64
+	for _, info := range stats.GetSerializedIndexInfos() {
+		indexPaths = append(indexPaths, info.GetFileName())
+		indexSize += info.GetFileSize()
 	}
-
-	// serialize index params
-	indexCodec := storage.NewIndexFileBinlogCodec()
-	serializedIndexBlobs, err := indexCodec.Serialize(
-		0,
-		0,
-		collectionID,
-		partitionID,
-		segmentID,
-		SimpleFloatVecField.ID,
-		indexParams,
-		"querynode-test",
-		0,
-		binarySet,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	indexPaths := make([]string, 0)
-	for _, index := range serializedIndexBlobs {
-		// indexPath := filepath.Join(defaultLocalStorage, strconv.Itoa(int(segmentID)), index.Key)
-		indexPath := filepath.Join(cm.RootPath(), "index_files",
-			strconv.Itoa(int(segmentID)), index.Key)
-		indexPaths = append(indexPaths, indexPath)
-		err := cm.Write(context.Background(), indexPath, index.Value)
-		if err != nil {
-			return nil, err
-		}
-	}
-	indexEngineInfo := segcore.GetIndexEngineInfo()
 
 	return &querypb.FieldIndexInfo{
-		FieldID:             fieldID,
-		IndexName:           "querynode-test",
-		IndexParams:         funcutil.Map2KeyValuePair(indexParams),
+		FieldID:             fieldSchema.GetFieldID(),
+		IndexName:           indexName,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		IndexParams:         indexParams,
 		IndexFilePaths:      indexPaths,
+		IndexSize:           indexSize,
+		IndexVersion:        0,
+		NumRows:             int64(msgLength),
 		CurrentIndexVersion: indexEngineInfo.CurrentIndexVersion,
 	}, nil
 }
@@ -1035,18 +997,26 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 	return typeParams, indexParams
 }
 
-func genStorageConfig() *indexpb.StorageConfig {
-	return &indexpb.StorageConfig{
-		Address:         paramtable.Get().MinioCfg.Address.GetValue(),
-		AccessKeyID:     paramtable.Get().MinioCfg.AccessKeyID.GetValue(),
-		SecretAccessKey: paramtable.Get().MinioCfg.SecretAccessKey.GetValue(),
-		BucketName:      paramtable.Get().MinioCfg.BucketName.GetValue(),
-		RootPath:        paramtable.Get().MinioCfg.RootPath.GetValue(),
-		IAMEndpoint:     paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
-		UseSSL:          paramtable.Get().MinioCfg.UseSSL.GetAsBool(),
-		SslCACert:       paramtable.Get().MinioCfg.SslCACert.GetValue(),
-		UseIAM:          paramtable.Get().MinioCfg.UseIAM.GetAsBool(),
-		StorageType:     paramtable.Get().CommonCfg.StorageType.GetValue(),
+func genStorageConfig(rootPath string) *indexcgopb.StorageConfig {
+	return &indexcgopb.StorageConfig{
+		Address:           paramtable.Get().MinioCfg.Address.GetValue(),
+		AccessKeyID:       paramtable.Get().MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey:   paramtable.Get().MinioCfg.SecretAccessKey.GetValue(),
+		BucketName:        paramtable.Get().MinioCfg.BucketName.GetValue(),
+		RootPath:          rootPath,
+		IAMEndpoint:       paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
+		UseSSL:            paramtable.Get().MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:         paramtable.Get().MinioCfg.SslCACert.GetValue(),
+		UseIAM:            paramtable.Get().MinioCfg.UseIAM.GetAsBool(),
+		StorageType:       paramtable.Get().CommonCfg.StorageType.GetValue(),
+		UseVirtualHost:    paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool(),
+		Region:            paramtable.Get().MinioCfg.Region.GetValue(),
+		CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
+		RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		MaxConnections:    uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
+		GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
+		SslTlsMinVersion:  paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
+		UseCrc32CChecksum: paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
 	}
 }
 

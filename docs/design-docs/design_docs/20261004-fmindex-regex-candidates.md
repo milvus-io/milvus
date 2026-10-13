@@ -1,6 +1,6 @@
 # FMIndex candidates for regex filtering
 
-Status: draft.
+Status: implementation ported to the Segcore index contracts; build and execution validation pending.
 Issue: [#53862](https://github.com/milvus-io/milvus/issues/53862).
 Related LIKE work: [#52683](https://github.com/milvus-io/milvus/issues/52683).
 Builds on the [FMIndex scalar index design](20260708-fm_index_scalar_index.md).
@@ -92,7 +92,7 @@ individually common atoms.
 
 TRUE declines routing. Zero estimated occurrences accepts immediately;
 otherwise routing uses this guard:
-`selected_occurrences * sa_sample_rate < fmindexCostRatio * TotalTokens`.
+`selected_occurrences * sa_sample_rate < cost_ratio * TotalTokens`.
 Occurrence counts upper-bound row counts and the sum prices every selected
 branch, even overlapping branches. The guard does not price preparation,
 bitmap operations or raw reads; performance measurements must guide tuning.
@@ -108,8 +108,18 @@ superset. Offset-input evaluation retains the raw path.
 
 Implementation: [analysis and selection](../../../internal/core/src/common/RegexLiteral.cpp),
 [condition contract](../../../internal/core/src/common/RegexQuery.h),
-[FMIndex routing](../../../internal/core/src/index/FMIndex.cpp),
+[FM reader routing](../../../internal/core/src/index/scalar/fmindex/FmIndexReader.cpp),
 [expression recheck](../../../internal/core/src/exec/expression/UnaryExpr.cpp).
+`FmIndexReader` implements `IIndexReaderBase`, `IPatternMatchReader` and
+`INullReader` in row coordinates; `PatternMatchIsExact` is false for both
+`Match` and `RegexMatch`. It exposes neither predicates nor value lookup.
+`FmIndexBuilder` creates `FmIndexArtifact`, and `FmIndexLoader` constructs the
+reader over shared `FmIndexStorage`. `ExecFMPatternCandidates` consumes the
+pattern/null contracts and performs the canonical recheck on retained sealed
+field data. Test backend `PatternPolicy(RegexMatch)` is `CandidatesAndRun`.
+The reader receives its cost ratio at construction (default 0.001); the current
+loader uses that default, so live `SegcoreConfig` updates are not reflected in
+an existing reader.
 
 ## Verification
 
@@ -122,13 +132,18 @@ selectivity and verify that Count chooses the literal that is rare on the
 current index. Assertions check that every regex match passes the extracted
 condition, allowing RE2 to factor the AST into equivalent trees.
 
-Native tests cover sealed-column reads, batches, multiple chunks, NULL handling,
-input bitmap intersection, NOT, offset fallback and invalid syntax. Dependency
+Reader tests live in `index/scalar/fmindex/FmIndexReaderTest.cpp` and run in
+`index_tests`. Native tests in `exec/expression/FmIndexExpressionTest.cpp` cover
+sealed-column reads, batches, multiple chunks, NULL handling, input bitmap
+intersection, NOT, offset fallback and invalid syntax. `RegexRequiredPrefixTest.cpp`
+is collected into `all_tests` by the source test glob in `unittest/CMakeLists.txt`.
+The reduced-recheck experiment asserts fewer sealed rows are read and verified
+for dense selective workloads, alongside parity after every sample. Dependency
 integration checks require the pinned RE2 package across Milvus, Arrow and gRPC.
 
 ### Native performance experiments
 
-`FMIndex.RegexSealedColumnExperiment` runs in the ordinary C++ test suite with
+`FmIndexExpressionTest.RegexSealedColumnExperiment` runs in the ordinary C++ test suite with
 1,000 rows, one warmup and three measured samples (median, microseconds),
 rotating mode order. It records preparation, Count, candidate lookup, bitset
 work, sealed-column reads, RE2 recheck and total time in gtest XML. Parity with
@@ -154,10 +169,14 @@ results are not cached, and build/load time is outside query timing.
 
 ```sh
 internal/core/output/unittest/all_tests \
-  --gtest_filter='RegexRequiredPrefix.*:FMIndex.*Regex*:FMIndex/FMIndexPatternExecutorTest.*' \
+  --gtest_filter='RegexRequiredPrefix.*:FmIndexExpressionTest.*Regex*:FmIndex/FmIndexPatternExpressionTest.*' \
   --gtest_output=xml:fm_regex_ci.xml
 
+internal/core/output/unittest/index_tests \
+  --gtest_filter='*FmIndexReaderTest*Regex*:*PatternMatch*' \
+  --gtest_output=xml:fm_regex_reader.xml
+
 internal/core/output/unittest/all_tests --gtest_also_run_disabled_tests \
-  --gtest_filter='FMIndex.DISABLED_RegexEndToEndBenchmark' \
+  --gtest_filter='FmIndexExpressionTest.DISABLED_RegexEndToEndBenchmark' \
   --gtest_output=xml:fm_regex_benchmark.xml
 ```

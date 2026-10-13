@@ -165,7 +165,7 @@ serialized-blob ÷ text, by average row length:
 mapping (≈0 heap); what is actually on the heap is (a) the rebuilt wavelet **rank
 directories** — this is the ONLY term `fm_block_bytes` shrinks (≈ wavelet_words ÷
 (fm_block_bytes/8)), NOT the blob — and (b) the null bitmap (1 bit/row, nullable
-fields only). Also, FMINDEX has no raw data of its own (`HasRawData()=false`), so
+fields only). Also, FMINDEX has no raw data of its own (`ReaderCaps::value_lookup=false`), so
 the raw `VARCHAR` column is still loaded for the scan / recheck fallback — budget
 for **text + blob**, not blob alone.
 
@@ -183,9 +183,9 @@ sample rate are tracked follow-ups.
   (`LIKE '%P%'`) — all lowered from `LIKE` by the existing planner, no parser
   or proto changes.
 - Cost-guarded execution: the index declines patterns where a scan is cheaper,
-  using its own O(|P|) count (`queryNode.fmindexCostRatio`, default 0.001).
+  using its own O(|P|) count (reader constructor `cost_ratio`, default 0.001).
 - General `Match` (`LIKE` with interior `%`/`_`): rarest literal fragment
-  produces candidates; `ExecFMMatch` rechecks those rows on sealed VARCHAR.
+  produces candidates; `ExecFMPatternCandidates` rechecks those rows on sealed VARCHAR.
 - **`RegexMatch` candidate pruning:** bounded RE2-derived Boolean conditions,
   Count-selected FM candidates and canonical RE2 recheck on sealed VARCHAR;
   see the [regex candidate design](20261004-fmindex-regex-candidates.md).
@@ -199,10 +199,9 @@ sample rate are tracked follow-ups.
 - **Equality (`Equal`/`NotEqual`, `IN`/`NOT IN`).** The library *can* answer
   these exactly (anchored prefix ∩ length filter), but a set of exact values is
   served better by the raw-data scan or an equality-oriented index (`INVERTED`),
-  so `ShouldUseOp` declines the whole equality family and the executor routes it
-  away from FMINDEX. The `In`/`NotIn` overrides exist only to satisfy the
-  `ScalarIndex` interface and intentionally throw `Unsupported`; the executor
-  must route the equality family to RawData before either method is reached.
+  so `FmIndexReader` does not expose `IScalarPredicateReader`. The executor
+  routes the equality family to raw data or a predicate reader. There are no
+  unused equality or range methods on the FM reader.
 - **`TEXT`, `JSON` string paths, `ARRAY<VARCHAR>`, struct sub-fields** — other
   data types. Rejected at `create_index` for now (VARCHAR-only checker).
 - **Occurrence enumeration / count API** (`(pk, offset)` lists, batched
@@ -212,7 +211,7 @@ sample rate are tracked follow-ups.
 
 - **Lexicographic range** (`>`, `<`, `BETWEEN` on strings) — needs forward
   navigation (ψ/select) the structure does not carry; stays with
-  `INVERTED`/`STL_SORT`/`TRIE`. `ShouldUseOp` returns `false` for range ops.
+  `INVERTED`/`STL_SORT`/`TRIE`. The FM reader has no scalar predicate capability.
 - **Growing segments** — the FM-index is build-once (global suffix order);
   growing segments keep the existing brute-force path, same as other scalar
   indexes.
@@ -270,10 +269,10 @@ proto, or planner changes**:
 | `PrefixMatch` | `LocatePrefixDocs(P)` | **yes** | exact | none |
 | `PostfixMatch` | `LocateSuffixDocs(P)` | **yes** | exact | none |
 | `InnerMatch` | `MatchingDocs(P)` | **yes** | exact | none |
-| `Equal` / `In` / `NotIn` | *(library can do `LocatePrefixDocs(P)` ∩ length filter, but…)* | **no** — `ShouldUseOp` declines the equality family; routed to scan / `INVERTED` | exact via fallback | n/a |
+| `Equal` / `In` / `NotIn` | *(library can do `LocatePrefixDocs(P)` ∩ length filter, but…)* | **no** — no predicate reader; routed to scan / `INVERTED` | exact via fallback | n/a |
 | `Match` | rarest literal fragment `VisitMatchingDocs`; VARCHAR `LikePatternMatcher` recheck | **yes** | exact after recheck | yes, sealed VARCHAR |
 | `RegexMatch` | Count-selected Boolean condition → FM candidate bitmaps | **yes, when the guard accepts** | candidate superset | canonical RE2 recheck |
-| `Range` (lexicographic) | — | **no** — `ShouldUseOp` = false → existing paths | — | n/a |
+| `Range` (lexicographic) | — | **no** — no predicate reader → existing paths | — | n/a |
 
 Exactness contract: for the three anchored pattern rows the bitmap returned by
 `PatternMatch()` is final — byte-identical to the brute-force scan by
@@ -291,7 +290,7 @@ result.
 - **Empty literals** (`LIKE '%'` / `LIKE '%%'`, lowered to an anchored op with
   an empty pattern): the index ACCELERATES, answering directly with all non-null
   rows via `IsNotNull()` (every string trivially contains the empty string);
-  `ShouldUseOp` returns true for an empty pattern **on the anchored ops**. Null
+  `ShouldUseForOp` returns true for an empty pattern **on the anchored ops**. Null
   rows stay excluded, so `NULL LIKE '%'` is not a match. `Match` is the
   exception: an empty pattern leaves phase 1 with no literal fragment to search
   for, so it declines exactly like the other empty-fragment patterns (`%`,
@@ -318,7 +317,7 @@ LIKE 'req-2026%GET%_500'
   phase 2:  LikePatternMatcher on those candidate rows only (sealed VARCHAR)
 ```
 
-`ShouldUseOp` uses a count-first guard on the rarest factor
+`ShouldUseForOp` uses a count-first guard on the rarest factor
 (`MatchGuardAccepts`). Locate cost is `occ × sa_sample_rate`. Phase 2 reads
 those candidate rows back from sealed VARCHAR via `ProcessDataByOffsets`
 (ascending offsets, views fetched per same-chunk run). Its candidate-byte cost
@@ -343,7 +342,7 @@ Regex candidate extraction uses the pinned Milvus RE2 package's public
 `RE2::RequiredLiterals()` API to derive a bounded Boolean condition from the
 compiled matcher's AST. It preserves AND/OR relationships and original byte
 spellings, and weakens unsupported or over-budget branches conservatively.
-`FMIndex` counts the retained literals on the current segment, selects the
+`FmIndexReader` counts the retained literals on the current segment, selects the
 lowest-cost child of each AND, evaluates the selected condition as candidate
 bitmaps, and rechecks candidate values with the canonical RE2 matcher.
 
@@ -367,19 +366,20 @@ Backward search makes the index **self-costing**: a substring count is exact
 and costs `O(|P|)` (~7 µs at 1 GiB) *before* any enumeration is attempted, via
 the library's `Count`/`CountPrefixDocs`/`CountSuffixDocs` (no suffix-array
 locate). The count-first guard lives INSIDE the single routing gate
-`ShouldUseOp(op, pattern)`: the executor's
+`FmIndexReader::ShouldUseForOp(op, pattern)`: the executor's
 `PhyUnaryRangeFilterExpr::DetermineExecPath` passes the concrete literal for
-the anchored pattern ops and for general `Match`, and FMINDEX's override runs the count and declines
+the anchored pattern ops, general `Match`, and `RegexMatch`; the reader counts
+and declines
 when enumeration would lose to a scan (the expr downgrades to the RawData
 path — both paths are exact, the gate only picks the cheaper executor). An
 empty pattern means "no literal information" and is judged on the op alone
-(accepted for the anchored ops, declined for `Match`):
+(accepted for anchored ops, declined for `Match` and `RegexMatch`):
 
 - Enumeration cost ≈ `occ × sa_sample_rate` LF steps (random access).
 - Scan cost ≈ segment text bytes (sequential) — proportional to the **total
   tokens (bytes)**, *not* to the row count.
 - Guard: accelerate iff `occ × sa_sample_rate < active_tokens ×
-  queryNode.fmindexCostRatio` (config, **default 0.001**). Normalizing by
+  cost_ratio` (reader constructor, **default 0.001**). Normalizing by
   tokens, not rows, makes the threshold **invariant to row length** (below).
   Degenerate patterns (`'%a%'`) fail immediately and scan, avoiding the cliff.
 
@@ -465,63 +465,48 @@ implementation.
 
 ## Architecture and Integration
 
-All integration points verified against master (branch state of 2026-07-14).
-`FMINDEX` inherits `ScalarIndex<std::string>` directly (not
-`InvertedIndexTantivy` — no tantivy involvement).
+The Segcore index framework separates build, persisted artifacts and query
+readers. Family code lives in `internal/core/src/index/scalar/fmindex/`; the
+vendored engine remains in `internal/core/src/index/fmindex/`.
 
 ### C++ core (`internal/core/src/index/`)
 
-- **Vendor the library**: `fm-index-lite/src/index/fmindex/*` →
-  `internal/core/src/index/fmindex/` (namespace `milvus::index::fmindex` is
-  already Milvus-shaped); `third_party/libsais` (Apache-2.0) vendored; NOTICE
-  attribution (Lance, libsais, qwt reference) carried over.
-- **`FMIndexWrapper : ScalarIndex<std::string>`** (new `FMIndex.h/.cpp`):
-  - `Build(n, values, valid_data)` / `BuildWithFieldData(field_datas)` —
-    collect row `string_view`s (NULL → empty), single `fmindex::Build`.
-  - `SupportPatternMatch() = true`; `PatternMatch(pattern, op)` switching per
-    the mapping table — the existing `UnaryIndexFuncForMatch`
-    (`exec/expression/UnaryExpr.h:631-686`) then routes
-    `PrefixMatch`/`PostfixMatch`/`InnerMatch`/`Match` automatically; the
-    `RegexMatch` leg (`UnaryExpr.h:713-738`) likewise.
-  - `ShouldUseOp(op, pattern)`: `true` for the three anchored pattern ops
-    (`PrefixMatch`/`PostfixMatch`/`InnerMatch`) and for general `Match`, gated
-    by the count-first cost guard when a literal is supplied (`Match` uses
-    `MatchGuardAccepts` on the rarest factor, locate-only), and for
-    `RegexMatch` when its selected condition passes the same guard; `false`
-    (fall back to the scan / another index) for the equality family and
-    `Range`. The default is `false`
-    so any unhandled op safely downgrades rather than routing into a method that
-    throws.
-  - `In`/`NotIn` are required `ScalarIndex` overrides, but the equality family is
-    declined by `ShouldUseOp`, so they are never routed to; they
-    `ThrowInfo(Unsupported)` (like `Range` and `Reverse_Lookup`) so an accidental
-    future route fails loudly rather than returning wrong rows.
-  - The count-first guard is folded into `ShouldUseOp(op, pattern)` above — there
-    is **no** separate `CanAccelerate` method; both `Match` and `RegexMatch`
-    consult it before candidate generation.
-  - `HasRawData() = false`; `Reverse_Lookup` unsupported. General `Match`
-    returns candidates from `PatternMatch`. `ExecFMMatch` rechecks them with
-    `ProcessDataByOffsets<std::string_view>` and `LikePatternMatcher` on the
-    sealed VARCHAR column. ISA is not materialized at load/build.
-  - `RegexMatch` returns candidate rows from the selected Boolean condition;
-    the expression layer performs the canonical RE2 recheck on sealed VARCHAR.
-- **Registration**: `ScalarIndexType::FMINDEX` (`ScalarIndex.h:39-49` +
-  To/FromString), `FMINDEX_INDEX_TYPE = "FMINDEX"` (`Meta.h`), param key
-  `fm_sa_sample_rate` (`Meta.h`), `std::optional<FMIndexParams>` in
-  `CreateIndexInfo` (`IndexInfo.h:30-45`), dispatch in
-  `IndexFactory::CreatePrimitiveScalarIndex<std::string>`
-  (`IndexFactory.cpp:768-777`, beside the `ngram_params` branch),
-  `IsMmapSupported()` list (`ScalarIndex.h:188-196`).
+- **Engine:** `fmindex::FMIndex` implements the compressed search structure;
+  `third_party/libsais` provides suffix-array construction.
+- **Build:** `FmIndexBuilder` implements
+  `IArtifactBuilder<ScalarBuildInput<std::string_view>>`. It collects row bytes
+  and validity, builds one engine, and returns `FmIndexArtifact`.
+- **Artifact:** `FmIndexArtifact` serializes the engine and null bitmap through
+  `storage::Artifact::Serialize`. It retains immutable `FmIndexStorage`.
+- **Query:** `FmIndexReader` implements `IIndexReaderBase`,
+  `IPatternMatchReader`, and `INullReader` in `Domain::Row`. It advertises
+  pattern matching, with neither scalar predicates nor value lookup.
+  `ShouldUseForOp` applies the count guard to anchored patterns, the rarest
+  LIKE fragment, or the Count-selected regex condition.
+  `PatternMatchIsExact` is true for anchored operations and false for `Match`
+  and `RegexMatch`, which require canonical expression recheck.
+- **Load:** `FmIndexLoader` handles packed/legacy sources through the loader
+  contract and creates `FmIndexStorage` with the engine, null bitmap and
+  optional owned mmap. `LoaderRegistry` registers the `fmindex` family;
+  `IndexTypeAdapter` maps the public `FMINDEX` type to it. Build registration
+  uses `BuilderRegistry<ScalarBuildInput<std::string_view>>`; parameters include `fm_sa_sample_rate`
+  and `fm_block_bytes` from `Meta.h`.
 
 ### Expression layer (`internal/core/src/exec/expression/`)
 
-- Exact ops: **zero changes** — `SupportPatternMatch()`/`PatternMatch()`
-  routing is already in place for any `ScalarIndex`.
-- `Match` two-phase: `ExecFMMatch` mirrors `ExecNgramMatch`. Phase 1 caches
-  `PatternMatch` candidates. Phase 2 groups sorted candidate offsets by chunk
-  via `ProcessDataByOffsets` and runs `LikePatternMatcher` on the views.
-- `RegexMatch` uses the FM candidate condition and the canonical RE2 matcher
-  for phase-2 verification on sealed VARCHAR.
+- Anchored exact operations consume `IPatternMatchReader` directly.
+- `PatternMatchIsCandidatesOnly` prevents candidate supersets from being
+  returned as final results. `CanUseFMPatternCandidates` requires the FM family,
+  a sealed segment, raw string chunks, no offset input and a null reader.
+- `ExecFMPatternCandidates` caches the segment candidate bitmap, intersects
+  each batch with the input bitmap, groups sorted candidate offsets by raw
+  chunk through `ProcessDataByOffsets`, and runs `LikePatternMatcher` or the
+  canonical `PartialRegexMatcher`. It returns validity separately, so logical
+  NOT applies to rechecked results and preserves NULL.
+- Offset evaluation and declined guards retain raw scanning. Regex syntax is
+  validated at physical-expression construction, even for zero candidates.
+  Mandatory scan-literal extraction and Volnitsky allocation are deferred until
+  `EnsureRegexScanCache` is needed by the raw path.
 
 ### Go layer (`internal/util/indexparamcheck/`)
 
@@ -535,10 +520,10 @@ All integration points verified against master (branch state of 2026-07-14).
 
 ### Serialization, mmap, caching
 
-- **V3 single-file format**: implement `WriteEntries(IndexEntryWriter*)` /
-  `LoadEntries(IndexEntryReader&, config)` (the `UploadUnified`/`LoadUnified`
-  path, `ScalarIndex.h:242-259`) writing the library's flat blob
-  (`SerializeToFile` streams; header + 8-byte-aligned payload sections).
+- **V3 single-file format**: `FmIndexArtifact::Serialize(IndexEntryWriter&)`
+  writes the library's flat blob and metadata; `FmIndexLoader` reads entries
+  through the loader source contract. `Serialize(FileSink&)` supports file
+  artifacts. The library streams header and 8-byte-aligned payload sections.
 - **mmap**: the blob is designed for `LoadView(base, size)` zero-copy — quad
   wavelet words, sampled bitmaps, sampled-SA values AND doc boundaries are all
   viewed in place (the samples through a narrow/wide-aware accessor, so the
@@ -595,8 +580,8 @@ are read through the Storage V3 LOB reader
 Answering "还有什么能加速的" explicitly. In this MEP's phases:
 
 1. **Equality / `IN` / `NOT IN`** — the structure *can* answer these
-   (anchored prefix ∩ length), but this PR **declines** them in `ShouldUseOp`
-   (equality is served better by the scan or an equality index), so they fall
+   (anchored prefix ∩ length), but the FM reader exposes no scalar predicates,
+   so equality queries fall
    back rather than route to FMINDEX. Listed as a library capability, not a
    shipped route.
 2. **Multi-`LIKE` conjunctions** — `CountBatch` scores every literal of every
@@ -671,7 +656,7 @@ Future work enabled by capabilities already in the library:
 |---|---|---|---|
 | `fm_sa_sample_rate` | 8 | [4, 256] | SA sampling: space vs. locate latency. No effect on `Count`. Default 8 is locate-tuned (~7-10× faster locate than 32, ~30% larger index); raise to 64+ for count-only workloads |
 | `mmap.enabled` | collection/field setting | — | zero-copy view load |
-| `queryNode.fmindexCostRatio` (config, **wired**: paramtable -> SegcoreSetFMIndexCostRatio -> SegcoreConfig, read by `FMIndex::ShouldUseOp`) | 0.001 | (0, 1] | guard: brute-scan instead of enumerate when `occ × sa_sample_rate ≥ active_tokens × this`. Normalized by tokens (bytes), **not rows**, so it is row-length invariant. Measured crossover: ~0.002 (repetitive/short rows) down to ~0.0008 (random text, cache-adversarial for LF walks) — default 0.001 takes the conservative end |
+| `FmIndexReader` constructor `cost_ratio` (loader currently uses the default; live `SegcoreConfig` updates are not wired to this reader) | 0.001 | finite, >= 0 | guard: brute-scan instead of enumerate when `occ × sa_sample_rate ≥ active_tokens × this`. Normalized by tokens (bytes), **not rows**, so it is row-length invariant. Measured crossover: ~0.002 (repetitive/short rows) down to ~0.0008 (random text, cache-adversarial for LF walks) — default 0.001 takes the conservative end |
 
 Reserved for future: `case_insensitive` (see above).
 
@@ -687,7 +672,7 @@ Reserved for future: `case_insensitive` (see above).
    step 2 (symbol-domain byte mode); token mode and alignment APIs are
    additive.
 2. **PR 2 — index wiring + exact ops (VARCHAR).** Vendor library; registration
-   plumbing (C++ enum/Meta/IndexInfo/IndexFactory, Go checker); V3
+   plumbing (C++ family registries/IndexTypeAdapter/Meta, Go checker); V3
    serialization + mmap; `PatternMatch` for
    `PrefixMatch`/`PostfixMatch`/`InnerMatch`; count-first guard. End-to-end:
    `LIKE 'P%'`, `LIKE '%P'`, `LIKE '%P%'` accelerated exactly, no recheck. The
@@ -782,8 +767,10 @@ otherwise.
    30-byte rows, >100 % at 10 KB rows where FM beats a scan ~900× even at 1 %
    match), while `occ / total_tokens` is stable (~0.0003) — a fixed row-ratio
    would wrongly decline FM on long-row `TEXT`/`VARCHAR`. **This PR ships the
-   guard**: the count-first check lives in `FMIndex::ShouldUseOp(op, pattern)`
-   and `queryNode.fmindexCostRatio` is wired paramtable → CGO → `SegcoreConfig`.
+   guard**: the count-first check lives in `FmIndexReader::ShouldUseForOp(op, pattern)`
+   using its constructor-injected ratio. `queryNode.fmindexCostRatio` still
+   reaches `SegcoreConfig`, but `FmIndexLoader` currently constructs the reader
+   with its default ratio; dynamic query configuration wiring is follow-up.
 4. **FMINDEX + NGRAM coexistence on one field** — keep one-scalar-index-per-
    field in v1 (users choose). After PR 3 the only capability NGRAM retains
    that FMINDEX lacks is JSON-path indexing (FMINDEX JSON is Future Work);
