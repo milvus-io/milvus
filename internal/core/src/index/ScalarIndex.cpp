@@ -238,7 +238,7 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
                index_files.value().size());
     const auto& packed_file = index_files.value()[0];
 
-    LOG_INFO("LoadUnified: loading packed index file: {}", packed_file);
+    LOG_DEBUG("LoadUnified: loading packed index file: {}", packed_file);
 
     // Open the file using the file manager
     auto input = file_manager_->OpenInputStream(packed_file, is_index_file_);
@@ -267,7 +267,7 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
 
     LoadEntries(*reader, config);
 
-    LOG_INFO("LoadUnified completed for index type: {}", index_type_);
+    LOG_DEBUG("LoadUnified completed for index type: {}", index_type_);
 }
 
 template class ScalarIndex<bool>;

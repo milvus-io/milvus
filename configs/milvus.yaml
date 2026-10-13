@@ -199,6 +199,7 @@ woodpecker:
       maxRetries: 3 # Maximum number of retries for segment append operations.
       maxBatchEntries: 1000 # Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.
       maxBatchBytes: 2000000 # Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.
+      sendTimeout: 2s # Timeout for opening an append stream and receiving buffered responses from one replica in service mode; excludes durability acknowledgement and total append latency. Requires restart. Non-positive duration values retain Woodpecker defaults.
     segmentRollingPolicy:
       maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
@@ -220,6 +221,7 @@ woodpecker:
       maxBatchSize: 16M # Maximum batch size for direct reads from object storage in service storage mode.
       maxFetchThreads: 4 # Maximum number of concurrent fetch threads used by Woodpecker direct reads from object storage.
     quorum:
+      selectNodesTimeout: 2s # Timeout for one SelectNodes call to one seed in service mode; expiry allows trying the next seed. Requires restart. Non-positive duration values retain Woodpecker defaults.
       # Quorum Buffer Pools: Define groups of nodes for different purposes
       # Example configuration below:
       #   - name: region1 # Name of the region pool
@@ -255,6 +257,17 @@ woodpecker:
         #     az: "az.*"
         #     resourceGroup: "rg.*"
         customPlacement: 
+    grpc:
+      dialTimeout: 1s # Minimum connection attempt timeout for the Woodpecker client dialing logstores. Independent of Milvus internal gRPC clients. Requires restart. Non-positive duration values retain Woodpecker defaults.
+      connectBackoff:
+        baseDelay: 100ms # Initial delay between failed connection attempts to a Woodpecker logstore; not an RPC retry delay. Requires restart. Non-positive duration values retain Woodpecker defaults.
+        multiplier: 1.6 # Growth multiplier for connection backoff; must be finite and at least 1. Requires restart.
+        jitter: 0.2 # Connection backoff jitter fraction, between 0 and 1. Requires restart.
+        maxDelay: 3s # Maximum connection backoff delay; must be at least baseDelay. Invalid backoff settings retain Woodpecker defaults as a group. Requires restart. Non-positive duration values retain Woodpecker defaults.
+    segmentRead:
+      activeTimeout: 3s # Timeout per replica read of an Active segment in service mode. A timed-out pass may retry with settledTimeout. Must not exceed settledTimeout; invalid pairs retain Woodpecker defaults. Requires restart. Non-positive duration values retain Woodpecker defaults.
+      settledTimeout: 20s # Timeout per replica read for other segments and embedded storage, and the longer retry pass for Active segments. Does not bound direct object-storage reads. Requires restart. Non-positive duration values retain Woodpecker defaults.
+    skipRangeRefreshInterval: 10s # Minimum interval between background refreshes of operator-declared skip ranges when stalled readers ask. Reads use the cached copy; reader report ticks also affect propagation. Not a maximum cache age. Requires restart. Values below 1s retain Woodpecker defaults; whole seconds are used.
   logstore:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
@@ -498,6 +511,23 @@ proxy:
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
+    # high-level restful api, restore the value handling of releases that predate the REST insert
+    # validation work. When true the server keeps the previous lenient behavior: a missing or null non-nullable field is
+    # stored as an empty value, out-of-range integers wrap instead of being rejected, numbers reach VarChar and JSON fields
+    # through their float64 rendering, and integers too large for the JSON engine become 0. This is a temporary escape hatch
+    # for clients that have not been corrected yet: every one of those behaviors silently changes what is stored.
+    compatibilityMode: false
+    # high-level restful api, the deepest nesting an expression template parameter may use. Converting a
+    # parameter walks its arrays and objects recursively, so the depth a caller may send has to be bounded; requests past the
+    # bound are rejected as invalid rather than served. Values above 1024 are read as 1024, since past that the recursion
+    # itself is the risk the setting exists to remove; values below 1 are read as 1.
+    maxExprParamsDepth: 100
+    # high-level restful api, return a JSON field as the document it holds rather than as a string.
+    # A JSON field reads back as "{\"a\":1}" by default, while the same value in the dynamic field reads back as {"a":1}.
+    # Turning this on removes that difference. Rows written before the insert path stopped storing non-JSON bytes may not
+    # hold a document; if any row in a response is such a row, every JSON field in that response falls back to the string
+    # form and a warning is logged, so a caller always sees one shape or the other and never a mixture.
+    nativeJSONResponse: false
     enablePprof: true # Whether to enable pprof middleware on the metrics port
     # high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
     # queue is full, before the request body is decoded. The scheduler rejects such a request with the same
@@ -1298,6 +1328,7 @@ common:
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
+  enableFastPB: true # Enable fast protobuf decoding for RPC and internal search results. Set false to use the official protobuf decoder.
   # Prefer IPv6 addresses when automatically selecting the local IP.
   # If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.
   preferIPv6: false

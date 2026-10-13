@@ -775,6 +775,18 @@ type WoodpeckerConfig struct {
 	DirectReadMaxBatchSize          ParamItem `refreshable:"false"`
 	DirectReadMaxFetchThreads       ParamItem `refreshable:"false"`
 
+	// Client operational bounds, captured when the Woodpecker client is built.
+	AppendSendTimeout           ParamItem `refreshable:"false"`
+	QuorumSelectNodesTimeout    ParamItem `refreshable:"false"`
+	ClientGRPCDialTimeout       ParamItem `refreshable:"false"`
+	ClientGRPCBackoffBaseDelay  ParamItem `refreshable:"false"`
+	ClientGRPCBackoffMultiplier ParamItem `refreshable:"false"`
+	ClientGRPCBackoffJitter     ParamItem `refreshable:"false"`
+	ClientGRPCBackoffMaxDelay   ParamItem `refreshable:"false"`
+	ClientReadActiveTimeout     ParamItem `refreshable:"false"`
+	ClientReadSettledTimeout    ParamItem `refreshable:"false"`
+	SkipRangeRefreshInterval    ParamItem `refreshable:"false"`
+
 	// quorum configuration
 	// Buffer pools for different regions
 	QuorumBufferPools ParamItem `refreshable:"true"`
@@ -956,6 +968,96 @@ overrun this by one segment. Raise it to trade the timeliness of the auditor's o
 		Export:       true,
 	}
 	p.DirectReadMaxFetchThreads.Init(base.mgr)
+
+	p.AppendSendTimeout = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.sendTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "2s",
+		Doc:          "Timeout for opening an append stream and receiving buffered responses from one replica in service mode; excludes durability acknowledgement and total append latency. Requires restart. Non-positive duration values retain Woodpecker defaults.",
+		Export:       true,
+	}
+	p.AppendSendTimeout.Init(base.mgr)
+
+	p.QuorumSelectNodesTimeout = ParamItem{
+		Key:          "woodpecker.client.quorum.selectNodesTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "2s",
+		Doc:          "Timeout for one SelectNodes call to one seed in service mode; expiry allows trying the next seed. Requires restart. Non-positive duration values retain Woodpecker defaults.",
+		Export:       true,
+	}
+	p.QuorumSelectNodesTimeout.Init(base.mgr)
+
+	p.ClientGRPCDialTimeout = ParamItem{
+		Key:          "woodpecker.client.grpc.dialTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "1s",
+		Doc:          "Minimum connection attempt timeout for the Woodpecker client dialing logstores. Independent of Milvus internal gRPC clients. Requires restart. Non-positive duration values retain Woodpecker defaults.",
+		Export:       true,
+	}
+	p.ClientGRPCDialTimeout.Init(base.mgr)
+
+	p.ClientGRPCBackoffBaseDelay = ParamItem{
+		Key:          "woodpecker.client.grpc.connectBackoff.baseDelay",
+		Version:      "3.0.2",
+		DefaultValue: "100ms",
+		Doc:          "Initial delay between failed connection attempts to a Woodpecker logstore; not an RPC retry delay. Requires restart. Non-positive duration values retain Woodpecker defaults.",
+		Export:       true,
+	}
+	p.ClientGRPCBackoffBaseDelay.Init(base.mgr)
+
+	p.ClientGRPCBackoffMultiplier = ParamItem{
+		Key:          "woodpecker.client.grpc.connectBackoff.multiplier",
+		Version:      "3.0.2",
+		DefaultValue: "1.6",
+		Doc:          "Growth multiplier for connection backoff; must be finite and at least 1. Requires restart.",
+		Export:       true,
+	}
+	p.ClientGRPCBackoffMultiplier.Init(base.mgr)
+
+	p.ClientGRPCBackoffJitter = ParamItem{
+		Key:          "woodpecker.client.grpc.connectBackoff.jitter",
+		Version:      "3.0.2",
+		DefaultValue: "0.2",
+		Doc:          "Connection backoff jitter fraction, between 0 and 1. Requires restart.",
+		Export:       true,
+	}
+	p.ClientGRPCBackoffJitter.Init(base.mgr)
+
+	p.ClientGRPCBackoffMaxDelay = ParamItem{
+		Key:          "woodpecker.client.grpc.connectBackoff.maxDelay",
+		Version:      "3.0.2",
+		DefaultValue: "3s",
+		Doc:          "Maximum connection backoff delay; must be at least baseDelay. Invalid backoff settings retain Woodpecker defaults as a group. Requires restart. Non-positive duration values retain Woodpecker defaults.",
+		Export:       true,
+	}
+	p.ClientGRPCBackoffMaxDelay.Init(base.mgr)
+
+	p.ClientReadActiveTimeout = ParamItem{
+		Key:          "woodpecker.client.segmentRead.activeTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "3s",
+		Doc:          "Timeout per replica read of an Active segment in service mode. A timed-out pass may retry with settledTimeout. Must not exceed settledTimeout; invalid pairs retain Woodpecker defaults. Requires restart. Non-positive duration values retain Woodpecker defaults.",
+		Export:       true,
+	}
+	p.ClientReadActiveTimeout.Init(base.mgr)
+
+	p.ClientReadSettledTimeout = ParamItem{
+		Key:          "woodpecker.client.segmentRead.settledTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "20s",
+		Doc:          "Timeout per replica read for other segments and embedded storage, and the longer retry pass for Active segments. Does not bound direct object-storage reads. Requires restart. Non-positive duration values retain Woodpecker defaults.",
+		Export:       true,
+	}
+	p.ClientReadSettledTimeout.Init(base.mgr)
+
+	p.SkipRangeRefreshInterval = ParamItem{
+		Key:          "woodpecker.client.skipRangeRefreshInterval",
+		Version:      "3.0.2",
+		DefaultValue: "10s",
+		Doc:          "Minimum interval between background refreshes of operator-declared skip ranges when stalled readers ask. Reads use the cached copy; reader report ticks also affect propagation. Not a maximum cache age. Requires restart. Values below 1s retain Woodpecker defaults; whole seconds are used.",
+		Export:       true,
+	}
+	p.SkipRangeRefreshInterval.Init(base.mgr)
 
 	// Buffer pools for different regions
 	p.QuorumBufferPools = ParamItem{
