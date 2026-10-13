@@ -132,14 +132,13 @@ JsonKeyStats::ShreddingReader::Get(milvus::OpContext* op_ctx, int64_t row_id) {
     }
 }
 
-std::unique_ptr<JsonKeyStats::ShreddingReader>
-JsonKeyStats::CreateShreddingReader(const std::string& pointer,
-                                    JSONType type,
-                                    int64_t segment_rows) const {
+bool
+JsonKeyStats::IsShreddingReaderSupported(const std::string& pointer,
+                                         JSONType type) {
     if (pointer.empty() || pointer.front() != '/' ||
         (type != JSONType::STRING && type != JSONType::BOOL &&
          type != JSONType::INT64)) {
-        return nullptr;
+        return false;
     }
     // A numeric component may address an array position in raw JSON. Stats
     // store arrays whole; do not infer object-only semantics from a column.
@@ -148,8 +147,18 @@ JsonKeyStats::CreateShreddingReader(const std::string& pointer,
             std::all_of(token.begin(), token.end(), [](unsigned char c) {
                 return c >= '0' && c <= '9';
             })) {
-            return nullptr;
+            return false;
         }
+    }
+    return true;
+}
+
+std::unique_ptr<JsonKeyStats::ShreddingReader>
+JsonKeyStats::CreateShreddingReader(const std::string& pointer,
+                                    JSONType type,
+                                    int64_t segment_rows) const {
+    if (!IsShreddingReaderSupported(pointer, type)) {
+        return nullptr;
     }
     auto fields = key_field_map_.find(pointer);
     if (fields == key_field_map_.end()) {

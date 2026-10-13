@@ -180,6 +180,11 @@ class JsonKeyStats {
         std::unordered_map<int64_t, PinWrapper<Chunk*>> pins_;
     };
 
+    // Checks path/type eligibility without loading stats. A supported path
+    // still needs a matching typed column before a reader can be created.
+    static bool
+    IsShreddingReaderSupported(const std::string& pointer, JSONType type);
+
     // Returns nullptr for unsupported paths/types or a path without a typed
     // column. Storage failures and inconsistent row counts propagate.
     std::unique_ptr<ShreddingReader>

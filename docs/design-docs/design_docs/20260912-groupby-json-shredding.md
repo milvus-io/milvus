@@ -31,6 +31,10 @@ error. Paths with a numeric component are rejected, as in the JSON stats
 filter path, because raw JSON may address an array position there while
 stats store arrays whole.
 
+The metadata-independent path/type check is shared with the group-by getter
+and runs before `GetJsonStats`. Unsupported paths therefore neither trigger
+deferred stats initialization nor fail because of an unused stats load.
+
 `ShreddingReader::Get(op_ctx, row_id)` returns an optional owning variant of
 bool, int64 or string. It resolves row_id using the selected column's own
 chunk geometry, caches one pin per touched chunk, checks row validity and
@@ -109,6 +113,8 @@ Regression coverage includes:
 - Build → upload → load → getter using real STRING, BOOL and INT64 columns,
   including INT64 limits, narrow integer casts and escaped pointer tokens.
 - The writer's empty-string representation followed by reader fallback.
+- Unsupported paths skip stats acquisition even when initialization would
+  fail; supported paths continue to propagate initialization failures.
 
 This design does not claim any measured production latency reduction.
 Query-time pins remain proportional to touched chunks, matching the raw

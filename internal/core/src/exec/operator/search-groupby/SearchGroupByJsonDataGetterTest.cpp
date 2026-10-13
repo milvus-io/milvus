@@ -122,12 +122,17 @@ class JsonColumnSegment : public segcore::ChunkedSegmentSealedImpl {
     }
 
     bool hide_column = false;
+    bool fail_json_stats_load = false;
     std::shared_ptr<index::JsonKeyStats> json_stats;
     mutable int json_stats_requests = 0;
 
     std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext*, FieldId) const override {
         ++json_stats_requests;
+        if (fail_json_stats_load) {
+            ThrowInfo(ErrorCode::FileReadFailed,
+                      "injected JSON stats initialization failure");
+        }
         return json_stats;
     }
 
@@ -538,6 +543,60 @@ TEST_P(GroupByJsonGetterTest, UnsupportedPathsStayRaw) {
     ASSERT_NE(reader, nullptr);
     EXPECT_THROW(reader->Get(nullptr, -1), SegcoreError);
     EXPECT_THROW(reader->Get(nullptr, 4200), SegcoreError);
+}
+
+TEST_P(GroupByJsonGetterTest, UnsupportedPathsDoNotFetchJsonStats) {
+    auto typed = InstallShreddedStrings();
+    segment_->fail_json_stats_load = true;
+
+    // The array's scalar elements are readable from raw JSON even when stats
+    // initialization would fail. Numeric components must bypass that load.
+    EXPECT_EQ(MakeGetter<int64_t>(DataType::INT64, false, "/value/0")->Get(6),
+              1);
+    EXPECT_EQ(
+        MakeGetter<std::string>(DataType::VARCHAR, false, "/value/1")->Get(6),
+        "x");
+    EXPECT_EQ(MakeGetter<bool>(DataType::BOOL, false, "/value/2")->Get(6),
+              false);
+    for (const auto& path : {"", "/0/value", "/items/0/category"}) {
+        EXPECT_EQ(
+            MakeGetter<std::string>(DataType::VARCHAR, false, path)->Get(6),
+            std::nullopt);
+    }
+    EXPECT_EQ(segment_->json_stats_requests, 0);
+    EXPECT_TRUE(typed->pinned_chunks.empty());
+    EXPECT_FALSE(stats_->pinned_chunks.empty());
+}
+
+TEST_P(GroupByJsonGetterTest, SupportedPathStatsLoadErrorsPropagate) {
+    auto typed = InstallShreddedStrings();
+    segment_->fail_json_stats_load = true;
+    try {
+        MakeGetter<std::string>(DataType::VARCHAR);
+        FAIL() << "expected injected JSON stats initialization failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FileReadFailed);
+    }
+    EXPECT_EQ(segment_->json_stats_requests, 1);
+    EXPECT_TRUE(stats_->pinned_chunks.empty());
+    EXPECT_TRUE(typed->pinned_chunks.empty());
+
+    segment_->fail_json_stats_load = false;
+    auto getter = MakeGetter<std::string>(DataType::VARCHAR);
+    EXPECT_EQ(getter->Get(1), expected_[1]);
+    EXPECT_EQ(segment_->json_stats_requests, 2);
+    EXPECT_TRUE(stats_->pinned_chunks.empty());
+    EXPECT_EQ(typed->pinned_chunks, (std::vector<int64_t>{0}));
+}
+
+TEST_P(GroupByJsonGetterTest, EligiblePathWithoutTypedColumnFallsBackToRaw) {
+    auto typed = InstallShreddedStrings();
+    auto getter =
+        MakeGetter<std::string>(DataType::VARCHAR, false, "/nested/a~1b/~0key");
+    EXPECT_EQ(getter->Get(11), "nested");
+    EXPECT_EQ(segment_->json_stats_requests, 1);
+    EXPECT_TRUE(typed->pinned_chunks.empty());
+    EXPECT_FALSE(stats_->pinned_chunks.empty());
 }
 
 TEST_P(GroupByJsonGetterTest, DisabledJsonStatsKeepRawReads) {

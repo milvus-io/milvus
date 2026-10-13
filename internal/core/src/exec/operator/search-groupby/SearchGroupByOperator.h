@@ -276,23 +276,24 @@ class SealedDataGetter : public DataGetter<OutputType> {
         this->specific_json_type_ = json_type.has_value();
         this->strict_cast_ = strict_cast;
         if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
-            // Honor the same JSON stats switch as filter expressions. When it
-            // is off, do not even fetch stats, which could initialize them.
+            constexpr auto type = std::is_same_v<OutputType, std::string>
+                                      ? index::JSONType::STRING
+                                  : std::is_same_v<OutputType, bool>
+                                      ? index::JSONType::BOOL
+                                  : std::is_same_v<OutputType, int8_t> ||
+                                          std::is_same_v<OutputType, int16_t> ||
+                                          std::is_same_v<OutputType, int32_t> ||
+                                          std::is_same_v<OutputType, int64_t>
+                                      ? index::JSONType::INT64
+                                      : index::JSONType::UNKNOWN;
+            // Honor the query switch and reject unsupported paths/types before
+            // fetching stats, which could trigger deferred initialization.
             if (use_json_stats && from_data_ && json_path.has_value() &&
-                json_type.has_value()) {
+                json_type.has_value() &&
+                index::JsonKeyStats::IsShreddingReaderSupported(
+                    json_path.value(), type)) {
                 auto stats = segment_.GetJsonStats(op_ctx_, field_id_);
                 if (stats != nullptr) {
-                    constexpr auto type =
-                        std::is_same_v<OutputType, std::string>
-                            ? index::JSONType::STRING
-                        : std::is_same_v<OutputType, bool>
-                            ? index::JSONType::BOOL
-                        : std::is_same_v<OutputType, int8_t> ||
-                                std::is_same_v<OutputType, int16_t> ||
-                                std::is_same_v<OutputType, int32_t> ||
-                                std::is_same_v<OutputType, int64_t>
-                            ? index::JSONType::INT64
-                            : index::JSONType::UNKNOWN;
                     shredding_reader_ = stats->CreateShreddingReader(
                         json_path.value(),
                         type,
