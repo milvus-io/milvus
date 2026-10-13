@@ -29,6 +29,7 @@
 #include "fmt/core.h"
 #include "folly/ScopeGuard.h"
 #include "glog/logging.h"
+#include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"

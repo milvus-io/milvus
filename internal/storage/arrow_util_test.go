@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -255,6 +256,160 @@ func TestGenerateEmptyArray(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRecordBuilderPreservesTextRepresentation(t *testing.T) {
+	for _, dataType := range []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.Binary} {
+		t.Run(dataType.Name(), func(t *testing.T) {
+			field := &schemapb.FieldSchema{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text, Nullable: true}
+			rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+			defer rb.Release()
+			for batch := 0; batch < 2; batch++ {
+				for _, value := range []string{"decoded text", "second record"} {
+					input := array.NewBuilder(memory.DefaultAllocator, dataType)
+					switch input := input.(type) {
+					case *array.StringBuilder:
+						input.Append(value)
+					case *array.BinaryBuilder:
+						input.Append([]byte(value))
+					}
+					input.AppendNull()
+					column := input.NewArray()
+					input.Release()
+					record := NewSimpleArrowRecord(array.NewRecord(
+						arrow.NewSchema([]arrow.Field{{Name: field.Name, Type: dataType, Nullable: true}}, nil),
+						[]arrow.Array{column}, 2), map[FieldID]int{field.FieldID: 0})
+					column.Release()
+					err := rb.Append(record, 0, record.Len())
+					record.Release()
+					require.NoError(t, err)
+				}
+				output := rb.Build()
+				column := output.Column(field.FieldID)
+				assert.Equal(t, dataType, column.DataType())
+				assert.Equal(t, 4, column.Len())
+				assert.True(t, column.IsNull(1))
+				assert.True(t, column.IsNull(3))
+				switch column := column.(type) {
+				case *array.String:
+					assert.Equal(t, "decoded text", column.Value(0))
+					assert.Equal(t, "second record", column.Value(2))
+				case *array.Binary:
+					assert.Equal(t, []byte("decoded text"), column.Value(0))
+					assert.Equal(t, []byte("second record"), column.Value(2))
+				}
+				output.Release()
+			}
+		})
+	}
+}
+
+func TestRecordBuilderTextNullsAcrossRepresentations(t *testing.T) {
+	field := &schemapb.FieldSchema{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text, Nullable: true}
+	rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+	defer rb.Release()
+	for _, dataType := range []arrow.DataType{arrow.BinaryTypes.Binary, arrow.BinaryTypes.String, arrow.BinaryTypes.Binary} {
+		input := array.NewBuilder(memory.DefaultAllocator, dataType)
+		if input, ok := input.(*array.StringBuilder); ok {
+			input.Append("decoded")
+		}
+		input.AppendNull()
+		column := input.NewArray()
+		input.Release()
+		record := NewSimpleArrowRecord(array.NewRecord(
+			arrow.NewSchema([]arrow.Field{{Name: field.Name, Type: dataType, Nullable: true}}, nil),
+			[]arrow.Array{column}, int64(column.Len())), map[FieldID]int{field.FieldID: 0})
+		column.Release()
+		err := rb.Append(record, 0, record.Len())
+		record.Release()
+		require.NoError(t, err)
+	}
+	output := rb.Build()
+	defer output.Release()
+	values := output.Column(field.FieldID).(*array.String)
+	require.Equal(t, 4, values.Len())
+	require.Equal(t, 3, values.NullN())
+	require.Equal(t, "decoded", values.Value(1))
+	for _, row := range []int{0, 2, 3} {
+		require.True(t, values.IsNull(row))
+	}
+}
+
+func TestRecordBuilderFillsNullableInt64Defaults(t *testing.T) {
+	const defaultValue int64 = 1_700_000_000_000_000
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_Timestamptz} {
+		t.Run(dataType.String(), func(t *testing.T) {
+			for _, withDefault := range []bool{false, true} {
+				field := &schemapb.FieldSchema{FieldID: 100, Name: "value", DataType: dataType, Nullable: true}
+				if withDefault {
+					field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: defaultValue}}
+					if dataType == schemapb.DataType_Timestamptz {
+						field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: defaultValue}}
+					}
+				}
+				rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+				defer rb.Release()
+				for batch := 0; batch < 2; batch++ {
+					input := array.NewInt64Builder(memory.DefaultAllocator)
+					input.AppendNull()
+					input.Append(0)
+					input.Append(123)
+					column := input.NewArray()
+					input.Release()
+					record := NewSimpleArrowRecord(array.NewRecord(
+						arrow.NewSchema([]arrow.Field{{Name: field.Name, Type: column.DataType(), Nullable: true}}, nil),
+						[]arrow.Array{column}, 3), map[FieldID]int{field.FieldID: 0})
+					column.Release()
+					err := rb.Append(record, 0, record.Len())
+					record.Release()
+					require.NoError(t, err)
+					output := rb.Build()
+					values := output.Column(field.FieldID).(*array.Int64)
+					assert.Equal(t, !withDefault, values.IsNull(0))
+					if withDefault {
+						assert.Equal(t, defaultValue, values.Value(0))
+					}
+					assert.EqualValues(t, 0, values.Value(1))
+					assert.EqualValues(t, 123, values.Value(2))
+					output.Release()
+				}
+			}
+		})
+	}
+}
+
+func TestRecordBuilderFillsNullableDoubleDefault(t *testing.T) {
+	for _, withDefault := range []bool{false, true} {
+		field := &schemapb.FieldSchema{FieldID: 100, Name: "double", DataType: schemapb.DataType_Double, Nullable: true}
+		if withDefault {
+			field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_DoubleData{DoubleData: 3.5}}
+		}
+		rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+		for batch := 0; batch < 2; batch++ {
+			input := array.NewFloat64Builder(memory.DefaultAllocator)
+			input.AppendNull()
+			input.Append(0)
+			input.Append(1.25)
+			column := input.NewArray()
+			input.Release()
+			record := NewSimpleArrowRecord(array.NewRecord(
+				arrow.NewSchema([]arrow.Field{{Name: field.Name, Type: column.DataType(), Nullable: true}}, nil),
+				[]arrow.Array{column}, 3), map[FieldID]int{field.FieldID: 0})
+			column.Release()
+			require.NoError(t, rb.Append(record, 0, record.Len()))
+			record.Release()
+			output := rb.Build()
+			values := output.Column(field.FieldID).(*array.Float64)
+			assert.Equal(t, !withDefault, values.IsNull(0))
+			if withDefault {
+				assert.Equal(t, 3.5, values.Value(0))
+			}
+			assert.Equal(t, float64(0), values.Value(1))
+			assert.Equal(t, 1.25, values.Value(2))
+			output.Release()
+		}
+		rb.Release()
 	}
 }
 
@@ -599,4 +754,58 @@ func TestRecordBuilderBuildReleasesCreatorRefs(t *testing.T) {
 		rec.Release()
 	}()
 	alloc.AssertSize(t, 0)
+}
+
+func TestRecordBuilderAccountsForNullBuffers(t *testing.T) {
+	fields := make([]*schemapb.FieldSchema, 243)
+	arrowFields := make([]arrow.Field, len(fields))
+	field2Col := make(map[FieldID]int, len(fields))
+	for i := range fields {
+		fields[i] = &schemapb.FieldSchema{FieldID: int64(i), Name: fmt.Sprint(i), DataType: schemapb.DataType_Double, Nullable: true}
+		arrowFields[i] = arrow.Field{Name: fields[i].Name, Type: arrow.PrimitiveTypes.Float64, Nullable: true}
+		if i < 3 {
+			fields[i].DataType = schemapb.DataType_Int64
+			arrowFields[i].Type = arrow.PrimitiveTypes.Int64
+		}
+		field2Col[int64(i)] = i
+	}
+	input := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema(arrowFields, nil))
+	for i := range fields {
+		if i < 3 {
+			for row := range 4096 {
+				input.Field(i).(*array.Int64Builder).Append(int64(row))
+			}
+		} else {
+			input.Field(i).AppendNulls(4096)
+		}
+	}
+	source := NewSimpleArrowRecord(input.NewRecord(), field2Col)
+	input.Release()
+	defer source.Release()
+
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	original := memory.DefaultAllocator
+	memory.DefaultAllocator = checked
+	rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: fields})
+	memory.DefaultAllocator = original
+	defer func() { rb.Release(); checked.AssertSize(t, 0) }()
+	require.NoError(t, rb.Append(source, 0, source.Len()))
+	require.EqualValues(t, checked.CurrentAlloc(), rb.GetMemorySize(), "batching must include null slots, validity buffers and capacity growth")
+	first := rb.Build()
+	defer func() {
+		if first != nil {
+			first.Release()
+		}
+	}()
+	require.Zero(t, rb.GetMemorySize(), "transferred records are no longer pending builder memory")
+	retained := checked.CurrentAlloc()
+	require.NoError(t, rb.Append(source, 0, source.Len()))
+	require.EqualValues(t, checked.CurrentAlloc()-retained, rb.GetMemorySize())
+	first.Release()
+	first = nil
+	require.EqualValues(t, checked.CurrentAlloc(), rb.GetMemorySize(), "late releases must not change the next batch's counter")
+	second := rb.Build()
+	require.Zero(t, rb.GetMemorySize())
+	second.Release()
+	checked.AssertSize(t, 0)
 }

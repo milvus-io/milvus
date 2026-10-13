@@ -35,7 +35,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -56,10 +56,11 @@
 #include "folly/CancellationToken.h"
 #include "folly/FBVector.h"
 #include "geos_c.h"
-#include "index/Index.h"
-#include "index/NgramInvertedIndex.h"
+#include "index/contracts/growing/IGrowingIndex.h"
+#include "index/contracts/query/IIndexReaderBase.h"
 #include "index/SkipIndex.h"
-#include "index/TextMatchIndex.h"
+#include "segcore/indexing/FieldIndexCapability.h"
+#include "segcore/indexing/IndexPin.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "pb/plan.pb.h"
 #include "pb/segcore.pb.h"
@@ -267,42 +268,20 @@ class SegmentInterface {
     virtual void
     CreateTextIndex(FieldId field_id, milvus::OpContext* op_ctx = nullptr) = 0;
 
-    virtual PinWrapper<index::TextMatchIndex*>
-    GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
+    // Metadata-only lookup. Execution selects one exact entry before pinning;
+    // capabilities from separate entries must never be combined.
+    virtual FieldIndexCapability
+    IndexCapability(FieldId field_id) const = 0;
 
-    virtual std::vector<PinWrapper<const index::IndexBase*>>
-    PinJsonIndex(milvus::OpContext* op_ctx,
-                 FieldId field_id,
-                 const std::string& path,
-                 DataType data_type,
-                 bool any_type,
-                 bool is_array) const {
-        return {};
-    }
+    // Sealed index pinning. Missing keys return an empty pin; cache loading
+    // failures propagate. The reader remains uniquely owned by its cache cell.
+    virtual IndexPin
+    PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const = 0;
 
-    // Returns the nested path of the JsonFlatIndex that would match
-    // query_path for field_id, or empty string if no JsonFlatIndex covers
-    // this path. Reads segment-level JSON index metadata directly -- does
-    // NOT pin the index cell. Used by expression DetermineExecPath() to
-    // check path compatibility without triggering a tiered-storage cold
-    // fetch when the decision is going to be RawData anyway.
-    virtual std::string
-    GetJsonFlatIndexNestedPath(FieldId field_id,
-                               std::string_view query_path) const {
-        return "";
-    }
-
-    virtual std::vector<PinWrapper<const index::IndexBase*>>
-    PinIndex(milvus::OpContext* op_ctx,
-             FieldId field_id,
-             bool include_ngram) const {
-        return {};
-    };
-
-    std::vector<PinWrapper<const index::IndexBase*>>
-    PinIndex(milvus::OpContext* op_ctx, FieldId field_id) const {
-        return PinIndex(op_ctx, field_id, false);
-    }
+    // Growing publication is independent from sealed cache pinning. One pin
+    // binds an immutable reader generation to its contiguous covered row end.
+    virtual index::GrowingIndexSnapshotPin
+    PinGrowingIndex(FieldId field_id) const = 0;
 
     virtual void
     BulkGetJsonData(milvus::OpContext* op_ctx,
@@ -311,14 +290,10 @@ class SegmentInterface {
                     const int64_t* offsets,
                     int64_t count) const = 0;
 
-    virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
-
-    virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndexForJson(milvus::OpContext* op_ctx,
-                         FieldId field_id,
-                         const std::string& nested_path) const = 0;
-
+    // JSON shredding is a column layout accessed through JsonKeyStats, not a scalar
+    // predicate reader. TODO: use ordinary column interfaces for typed sub-columns
+    // and retain only segment-specific path/cast layout routing here. That requires
+    // sub-column integration beyond the current accessor.
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
@@ -397,10 +372,10 @@ class SegmentInterface {
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx) = 0;
 
-    // Get IArrayOffsets for element-level filtering on array fields
-    // Returns nullptr if the field doesn't have IArrayOffsets
-    virtual std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const = 0;
+    // Get the shared struct-element mapping for a struct sub-field.
+    // Returns nullptr if the field has no struct-element mapping.
+    virtual std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation
@@ -455,6 +430,14 @@ class SegmentInternalInterface : public SegmentInterface {
                         int64_t offset,
                         int64_t size,
                         TargetBitmapView valid_result) const = 0;
+
+    // Applies validity for a contiguous segment-level logical-row range.
+    virtual void
+    ApplyFieldValidDataByRange(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               int64_t logical_offset,
+                               int64_t count,
+                               TargetBitmapView valid_result) const = 0;
 
     // Offsets are segment-level row offsets. valid_result must have count bits.
     virtual void
@@ -652,11 +635,9 @@ class SegmentInternalInterface : public SegmentInterface {
         return true;
     }
 
-    // JSON indexes (JsonFlatIndex + JSON-cast scalar) live in a separate
-    // per-segment container from the scalar/vector/binlog index bitsets, so
-    // they are checked via this dedicated API rather than widening HasIndex().
-    // Default returns false for segment types that never build JSON indexes
-    // (e.g. growing segments); sealed segments override.
+    // Projects whether IndexCapability contains a JsonFlat or JSON-cast entry;
+    // it does not pin the reader. Default false covers segment types that do
+    // not install sealed JSON indexes, such as growing segments.
     virtual bool
     HasJsonIndex(FieldId field_id) const {
         return false;
@@ -694,17 +675,6 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
-
-    PinWrapper<index::TextMatchIndex*>
-    GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
-
-    PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
-
-    PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndexForJson(milvus::OpContext* op_ctx,
-                         FieldId field_id,
-                         const std::string& nested_path) const override;
 
     void
     SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override {
@@ -814,7 +784,7 @@ class SegmentInternalInterface : public SegmentInterface {
      *
      * @param limit Maximum number of elements to return
      * @param element_bitset Element-level bitset (size = total_element_count)
-     * @param array_offsets Mapping between element IDs and (doc_id, element_index)
+     * @param struct_element_offsets Mapping between element IDs and (doc_id, element_index)
      * @return tuple of:
      *   - vector of unique doc_offsets (no duplicates)
      *   - vector of element_indices per doc (element_indices[i] for doc_offsets[i])
@@ -825,7 +795,7 @@ class SegmentInternalInterface : public SegmentInterface {
         find_first_n_element(
             int64_t limit,
             const BitsetTypeView& element_bitset,
-            const IArrayOffsets* array_offsets,
+            const IStructElementOffsets* struct_element_offsets,
             const std::optional<QueryIteratorCursor>& cursor) const = 0;
 
     void
@@ -987,21 +957,29 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
         variable_fields_avg_size_;  // bytes;
 
-    // text-indexes used to do match.
-    std::unordered_map<
-        FieldId,
-        std::variant<std::unique_ptr<milvus::index::TextMatchIndex>,
-                     std::shared_ptr<milvus::index::TextMatchIndexHolder>,
-                     std::shared_ptr<milvus::cachinglayer::CacheSlot<
-                         milvus::index::TextMatchIndex>>>>
-        text_indexes_;
-
     std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
         json_stats_;
 
     // Assigned once per constructed object; never reused within a process.
     const uint64_t segment_instance_uid_ = NextSegmentInstanceUid();
 };
+
+// Shared result-fill dispatch: reads one output field through the
+// request-pinned sealed snapshot when the segment is a sealed segment that
+// owns it, otherwise falls back to the per-call segment path (growing /
+// non-pinned / not-loaded field). Centralizes the
+// dynamic_cast -> ToPublishedState -> field-exists -> bulk_subscript dispatch
+// so callers never name the segment's concrete published-state type.
+std::unique_ptr<milvus::DataArray>
+BulkSubscriptWithSnapshot(
+    const SegmentInternalInterface* segment,
+    const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const milvus::FieldMeta& field_meta,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>* dynamic_field_names = nullptr);
 
 }  // namespace milvus::segcore
 

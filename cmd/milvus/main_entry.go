@@ -17,6 +17,7 @@
 package milvus
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -53,6 +54,11 @@ func Main(args []string) {
 	streamingutil.SetStreamingServiceEnabled()
 
 	defer asan.LsanDoLeakCheck()
+	args, profileEnv, err := prepareNativeProfile(args, os.Environ())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	// execute command as a subprocess if the command contains "--run-with-subprocess"
 	if subArgs, runSubprocess := subprocessArgs(args); runSubprocess {
@@ -60,6 +66,7 @@ func Main(args []string) {
 
 		/* #nosec G204 */
 		cmd := exec.Command(subArgs[0], subArgs[1:]...) //nolint:gosec // args are from os.Args, not user input
+		cmd.Env = profileEnv
 
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

@@ -25,10 +25,12 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -223,6 +225,8 @@ func (s *SearchTaskSuite) TestCombinePlaceHolderGroups() {
 }
 
 func (s *SearchTaskSuite) TestMergeFilterOnly() {
+	serializedPlan, err := proto.Marshal(&planpb.PlanNode{})
+	s.Require().NoError(err)
 	s.Run("same_filter_only_can_merge", func() {
 		task1 := &SearchTask{
 			nq:   10,
@@ -234,7 +238,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -252,7 +256,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -277,7 +281,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -295,7 +299,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -320,7 +324,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -339,7 +343,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -363,7 +367,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -381,7 +385,7 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1, 2},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: serializedPlan,
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1, 2, 3},
@@ -394,6 +398,69 @@ func (s *SearchTaskSuite) TestMergeFilterOnly() {
 		s.True(merged, "tasks with same FilterOnly=false should merge")
 		s.Equal(int64(15), task1.nq)
 	})
+}
+
+func TestSearchTaskMergeFunctionChains(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		chains    []*schemapb.FunctionChain
+		malformed bool
+		wantMerge bool
+	}{
+		{name: "no chain", wantMerge: true},
+		{name: "L0", chains: []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageL0Rerank}}},
+		{name: "L1", chains: []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageL1Rerank}}},
+		{name: "malformed plan", malformed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			serializedPlan, err := proto.Marshal(&planpb.PlanNode{QuerynodeFunctionChains: tc.chains})
+			require.NoError(t, err)
+			if tc.malformed {
+				serializedPlan = []byte{0xff}
+			}
+			newTask := func() *SearchTask {
+				return &SearchTask{
+					nq: 1, topk: 10, groupSize: 1,
+					originNqs: []int64{1}, originTopks: []int64{10},
+					notifier: make(chan error, 1),
+					req: &querypb.SearchRequest{
+						Req: &internalpb.SearchRequest{
+							CollectionID: 1000, SerializedExprPlan: serializedPlan,
+						},
+						DmlChannels: []string{"channel1"},
+					},
+				}
+			}
+			first, second := newTask(), newTask()
+			require.Equal(t, tc.wantMerge, first.MergeWith(second))
+			if tc.wantMerge {
+				require.Equal(t, int64(2), first.nq)
+				require.Equal(t, []*SearchTask{second}, first.others)
+				require.True(t, second.merged)
+				return
+			}
+
+			for _, task := range []*SearchTask{first, second} {
+				require.Equal(t, int64(1), task.nq)
+				require.Equal(t, int64(10), task.topk)
+				require.Equal(t, int64(1), task.groupSize)
+				require.Equal(t, []int64{1}, task.originNqs)
+				require.Equal(t, []int64{10}, task.originTopks)
+				require.Empty(t, task.others)
+				require.False(t, task.merged)
+			}
+			// An execution failure must not notify the unrelated request.
+			first.Done(assert.AnError)
+			require.ErrorIs(t, first.Wait(), assert.AnError)
+			select {
+			case err := <-second.notifier:
+				t.Fatalf("unrelated request received completion: %v", err)
+			default:
+			}
+			second.Done(nil)
+			require.NoError(t, second.Wait())
+		})
+	}
 }
 
 func (s *SearchTaskSuite) TestSearchTaskMinNQ() {

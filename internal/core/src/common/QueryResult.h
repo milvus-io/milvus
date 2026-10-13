@@ -30,7 +30,7 @@
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "pb/schema.pb.h"
@@ -40,6 +40,11 @@ namespace milvus {
 
 namespace segcore {
 class SegmentReadLease;
+class SegmentReadSnapshot;
+}  // namespace segcore
+
+namespace index {
+class GrowingIndexSnapshotPin;
 }
 
 // scan cost in each search/query
@@ -351,9 +356,32 @@ struct SearchResult {
     // deleted. Growing search results leave this empty.
     std::shared_ptr<segcore::SegmentReadLease> read_lease_;
 
+    // Request-pinned sealed read snapshot, captured once while the read lease
+    // is held. Result fill / export reuse it at the fill layer (FillTargetEntry
+    // / bulk_subscript / take) instead of re-capturing the published state per
+    // output field. Deeper column/index helpers (get_raw_data, PinIndex,
+    // HasFieldData, ...) may still self-capture; migrating them is a Phase 4
+    // follow-up. Growing and non-pinned paths leave this empty.
+    std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_;
+
     // Pins resources whose iterators or offset mappings may outlive the
     // original search call independently from segment snapshot publication.
     std::vector<std::shared_ptr<void>> resource_pins_;
+
+    // Declared before iterator fields so C++ destroys the iterators before
+    // the bitmaps they borrow.
+    std::vector<TargetBitmapPtr> pinned_bitsets_{};
+
+    // Growing native iterators borrow the reader, engine and frozen offset
+    // mapping from one published generation. Keep that typed generation alive
+    // until after vector_iterators_ and element_iterators_ are destroyed.
+    std::shared_ptr<index::GrowingIndexSnapshotPin> growing_index_pin_;
+
+    // Other iterator backing owners. Keep every lifetime anchor before the
+    // iterator fields for reverse-order destruction.
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{
+        nullptr};
+    std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
 
     // first fill data during search, and then update data after reducing search results
     std::vector<float> distances_;
@@ -392,9 +420,6 @@ struct SearchResult {
     std::vector<int32_t> element_indices_;
     std::optional<std::vector<std::shared_ptr<VectorIterator>>>
         element_iterators_;
-    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
-    std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
-    std::vector<TargetBitmapPtr> pinned_bitsets_{};
     FilteredVectorSearchFn filtered_vector_search_fn_{};
     TargetBitmapPtr vector_search_base_filter_{};
     BitsetView vector_search_base_filter_view_{};

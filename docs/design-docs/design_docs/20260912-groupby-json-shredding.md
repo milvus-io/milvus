@@ -119,5 +119,5 @@ The stats writer and build path are unchanged.
 
 - [JSON storage design](20250308-json_storage.md)
 - [Scalar local format and Scan/Take contracts](20260305-local_format.md)
-- `internal/core/src/index/json_stats/JsonKeyStats.cpp`
+- `internal/core/src/segcore/json_stats/JsonKeyStats.cpp`
 - `internal/core/src/exec/operator/search-groupby/SearchGroupByOperator.h`

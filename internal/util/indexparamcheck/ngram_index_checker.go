@@ -39,6 +39,9 @@ func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, elementType s
 		if castType != "VARCHAR" {
 			return merr.WrapErrParameterInvalidMsg("JSON field with ngram index only supports VARCHAR cast type, got: %s", castType)
 		}
+		if err := checkJSONCastFunction(castType, params); err != nil {
+			return err
+		}
 	}
 
 	minGramStr, minGramExist := params[MinGramKey]

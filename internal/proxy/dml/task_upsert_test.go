@@ -5688,7 +5688,8 @@ func TestGenNullableFieldData_GeometryAndTimestamptz(t *testing.T) {
 		assert.Equal(t, int64(100), fieldData.FieldId)
 		assert.Equal(t, "timestamp_field", fieldData.FieldName)
 		assert.Len(t, typeutil.GetFieldDataValidData(fieldData), upsertIDSize)
-		assert.Len(t, fieldData.GetScalars().GetTimestamptzData().GetData(), upsertIDSize)
+		assert.Equal(t, schemapb.DataType_Timestamptz, fieldData.GetType())
+		assert.Equal(t, make([]string, upsertIDSize), fieldData.GetScalars().GetStringData().GetData())
 	})
 
 	t.Run("generate geometry nullable field", func(t *testing.T) {

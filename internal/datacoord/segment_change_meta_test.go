@@ -23,9 +23,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 func newTestGroup() *model.SegmentChangeGroup {
@@ -241,6 +243,141 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_Publish(t *testing.T) {
 	require.Equal(t, model.SegmentChangeStateCommitted, byID[1].State)
 	require.Empty(t, stagedIndex)
 	require.Empty(t, supersededIndex, "COMMITTED group releases its superseded references")
+}
+
+// TestMeta_UpdateSegmentsInfoAndChangeGroupsAndDataView_Publish verifies the
+// batch atomic publication write (PR-A): SegmentMeta operators + group COMMITTED
+// + a DataView snapshot (compact_version +1, members in / superseded out) all
+// land in ONE catalog txn and are observable on both the SegmentMeta side and
+// the DataView manager side.
+func TestMeta_UpdateSegmentsInfoAndChangeGroupsAndDataView_Publish(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	dataViewCatalog, ok := m.catalog.(dataview.Catalog)
+	require.True(t, ok, "kv catalog must implement the DataView Catalog interface")
+	dv := dataview.NewManager(dataViewCatalog, nil)
+	m.dataViewManager = dv
+	_, err = dv.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: 10, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	// Seeded meta: staged member 1001 (invisible), superseded 2001 (visible).
+	for _, seg := range []*SegmentInfo{
+		NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
+		}),
+		NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+		}),
+	} {
+		require.NoError(t, m.AddSegment(ctx, seg))
+	}
+
+	group := newTestGroup()
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+	ready := group.Clone()
+	ready.State = model.SegmentChangeStateReady
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
+
+	// Prepare the post-publish snapshot under the DataView Collection lock.
+	view, commitView, abortView, err := dv.PublishChange(ctx, dataview.ChangeGroupDataViewEvent{
+		CollectionID: 10,
+		NewSegments: []dataview.LoadableSegment{
+			{SegmentID: 1001, VChannel: "ch-1", PartitionID: 100, ManifestVersion: 5, RowNum: 42},
+		},
+		SupersededSegmentIDs: []int64{2001},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, view)
+
+	// Publish: member flip + commit_ts + superseded Dropped + group COMMITTED +
+	// the DataView snapshot, all in one catalog txn.
+	committed := ready.Clone()
+	committed.State = model.SegmentChangeStateCommitted
+	committed.CommitTS = 500
+	err = m.UpdateSegmentsInfoAndChangeGroupsAndDataView(ctx, view,
+		[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)},
+		SetSegmentIsInvisible(1001, false),
+		UpdateCommitTimestamp(1001, 500),
+		UpdateStatusOperator(2001, commonpb.SegmentState_Dropped),
+	)
+	require.NoError(t, err)
+	commitView()
+
+	// SegmentMeta side: member visible, superseded retired, group terminal.
+	member := m.GetSegment(ctx, 1001)
+	require.NotNil(t, member)
+	require.False(t, member.GetIsInvisible())
+	require.Equal(t, uint64(500), member.GetCommitTimestamp())
+	superseded := m.GetSegment(ctx, 2001)
+	require.NotNil(t, superseded)
+	require.Equal(t, commonpb.SegmentState_Dropped, superseded.GetState())
+	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(ctx, 10, 1).State)
+	require.False(t, m.HasStagedSegment(ctx, 10, 1001))
+
+	// DataView side: one snapshot with the member in, the parent out, and only
+	// compact_version advanced.
+	ref, err := dv.Latest(ctx, 10)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	latest := ref.DataView()
+	require.Equal(t, &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}, latest.GetDataVersion())
+	partition := latest.GetShards()[0].GetPartitions()[0]
+	require.Equal(t, []int64{1001}, partition.GetSegmentIds())
+	require.Equal(t, []int64{5}, partition.GetSegmentManifestVersions())
+	stats, ok := ref.Stats(1001)
+	require.True(t, ok, "published member carries its RowNum footprint")
+	require.Equal(t, int64(42), stats.RowNum)
+
+	// The snapshot is durably persisted: reload lists both the skeleton (1,0)
+	// and the published (1,1) version.
+	views, err := dataViewCatalog.ListAllDataViews(ctx)
+	require.NoError(t, err)
+	require.Len(t, views, 2)
+	require.NotNil(t, abortView)
+
+	// Reload group table from catalog: COMMITTED round-trips, indexes released.
+	byID, stagedIndex, supersededIndex, err := m.loadSegmentChangeGroups(ctx)
+	require.NoError(t, err)
+	require.Equal(t, model.SegmentChangeStateCommitted, byID[1].State)
+	require.Empty(t, stagedIndex)
+	require.Empty(t, supersededIndex)
+}
+
+// TestMeta_UpdateSegmentsInfoAndChangeGroupsAndDataView_DataViewOnly verifies
+// the write persists a DataView snapshot even when there are no segment
+// mutations and no group actions (a snapshot-only composite write).
+func TestMeta_UpdateSegmentsInfoAndChangeGroupsAndDataView_DataViewOnly(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	dataViewCatalog, ok := m.catalog.(dataview.Catalog)
+	require.True(t, ok)
+	view := &viewpb.DataViewOfCollection{
+		CollectionId: 10,
+		DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1},
+		Shards: []*viewpb.DataViewOfShard{{
+			Vchannel: "ch-1",
+			Partitions: []*viewpb.DataViewOfPartition{{
+				PartitionId:             100,
+				SegmentIds:              []int64{1001},
+				SegmentManifestVersions: []int64{0},
+			}},
+		}},
+	}
+	err = m.UpdateSegmentsInfoAndChangeGroupsAndDataView(ctx, view, nil)
+	require.NoError(t, err)
+
+	views, err := dataViewCatalog.ListAllDataViews(ctx)
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	require.Equal(t, int64(10), views[0].GetCollectionId())
+	require.Equal(t, int64(1), views[0].GetDataVersion().GetCompactVersion())
 }
 
 func TestMeta_UpdateSegmentsInfoAndChangeGroups_RejectsForeignActions(t *testing.T) {

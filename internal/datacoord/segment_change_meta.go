@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -26,7 +27,9 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 // This file implements the meta-layer of SegmentChangeGroup, the atomic
@@ -503,19 +506,39 @@ func (m *meta) DropSegmentChangeGroupsOfCollection(ctx context.Context, collecti
 // UpdateSegmentsInfoAndChangeGroups applies segment operators and composes the
 // given group actions into the SAME catalog txn, then applies the memory
 // effects of both. This is the composite write of the batch publication
-// protocol:
+// protocol (without a DataView snapshot):
 //
 //   - STAGED creation: create the staged members (IsInvisible=true,
 //     change_group_id) and SaveSegmentChangeGroup(STAGED) atomically;
 //   - READY→COMMITTED publish: flip members visible, retire superseded,
-//     SaveSegmentChangeGroup(COMMITTED), and (once PR #52537 lands) append a
-//     DataView snapshot action — all in one txn.
+//     SaveSegmentChangeGroup(COMMITTED).
 //
 // groupActions must only contain metastore.SaveSegmentChangeGroup /
 // DeleteSegmentChangeGroup actions; any other entry type is rejected. A stale
 // segment update (errIgnoredSegmentMetaOperation) skips the segment part but
 // still persists the group actions, keeping an idempotent replay convergent.
+//
+// This is the dataview-less form: UpdateSegmentsInfoAndChangeGroupsAndDataView
+// is the same write with an additional DataView snapshot action, used by the
+// batch atomic publication on dataview-enabled DataCoords.
 func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActions []metastore.UpdateAction, operators ...UpdateOperator) error {
+	return m.updateSegmentsInfoAndChangeGroups(ctx, nil, groupActions, operators...)
+}
+
+// UpdateSegmentsInfoAndChangeGroupsAndDataView is the batch atomic publication
+// write: SegmentMeta operators + group actions + a DataView snapshot all land
+// in the SAME catalog txn, so a group's members flip visible, its superseded
+// parents retire, the group record reaches COMMITTED, and the new DataView
+// snapshot (compact_version +1) become visible together — the view never
+// observes a half-published batch. The DataView action is commit-marked and
+// ordered with the terminal group actions, so on the over-limit fallback both
+// land in the final guarded txn after every member/superseded op. dataView may
+// be nil to commit SegmentMeta + groups alone (the dataview-less form).
+func (m *meta) UpdateSegmentsInfoAndChangeGroupsAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, groupActions []metastore.UpdateAction, operators ...UpdateOperator) error {
+	return m.updateSegmentsInfoAndChangeGroups(ctx, dataView, groupActions, operators...)
+}
+
+func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *viewpb.DataViewOfCollection, groupActions []metastore.UpdateAction, operators ...UpdateOperator) error {
 	for _, action := range groupActions {
 		if _, ok := action.Entry.(metastore.SegmentChangeGroupEntry); !ok {
 			return merr.WrapErrServiceInternalMsg(
@@ -637,7 +660,7 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 		}
 	}
 
-	if len(updatePack.segments) == 0 && len(groupActions) == 0 {
+	if len(updatePack.segments) == 0 && len(groupActions) == 0 && dataView == nil {
 		return nil
 	}
 
@@ -664,7 +687,7 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 				mlog.Err(err))
 			delete(updatePack.segments, updatePack.fromSaveBinlogPathSegmentID)
 			updatePack.fromSaveBinlogPathSegmentID = 0
-			if len(updatePack.segments) == 0 && len(groupActions) == 0 {
+			if len(updatePack.segments) == 0 && len(groupActions) == 0 && dataView == nil {
 				return nil
 			}
 		} else {
@@ -804,6 +827,16 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 		}
 		actions = append(actions, action)
 	}
+	// The DataView snapshot action is commit-marked (see kv_catalog.update.go)
+	// and belongs with the terminal group actions as the final visibility
+	// marker: on the over-limit fallback both land in the last guarded txn
+	// after every member/superseded op, so a visible snapshot implies the whole
+	// batch (SegmentMeta + group record) is committed. Order between the two
+	// commit-marked actions is irrelevant — the final txn applies them
+	// atomically.
+	if dataView != nil {
+		actions = append(actions, metastore.SaveDataView(dataView))
+	}
 	// Deletes are commit-marked removals; append them last for a deterministic
 	// recorded order.
 	for _, action := range groupActions {
@@ -813,7 +846,16 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 		actions = append(actions, action)
 	}
 
-	if err := m.catalog.Update(ctx, actions...); err != nil {
+	// The composite write must keep retrying: catalog.Update is an idempotent
+	// overwrite of the same actions, so an in-function retry converges to a
+	// durable COMMITTED group + visible members without replaying caller-side
+	// effects — same as the flush semantics (UpdateSegmentsInfoAndDataView).
+	// retry.Do short-circuits InputError-typed errors unless an explicit
+	// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
+	if err := retry.Do(ctx, func() error {
+		return m.catalog.Update(ctx, actions...)
+	}, retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
+		retry.RetryErr(func(error) bool { return true })); err != nil {
 		mlog.Error(ctx, "meta update: update segments info and segment change groups failed",
 			mlog.Int("segments", len(updatePack.segments)),
 			mlog.Int("groupActions", len(groupActions)),

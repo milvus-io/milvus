@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -40,7 +41,8 @@ func TestCurrentSplitForGrowingPackFillsNewSplitFormats(t *testing.T) {
 	}}
 	meta := &streamingpb.SegmentAssignmentMeta{StorageVersion: storage.StorageV3}
 
-	columnGroups := currentSplitForGrowingPack(schema, nil, meta)
+	columnGroups, err := currentSplitForGrowingPack(schema, nil, meta)
+	require.NoError(t, err)
 
 	require.NotEmpty(t, columnGroups)
 	for _, columnGroup := range columnGroups {
@@ -124,21 +126,21 @@ func TestCurrentSplitFromPersistedStorageRestoresFormat(t *testing.T) {
 	}}
 	persisted := &streamingpb.L1SegmentPersistedStorage{
 		Binlogs: []*streamingpb.L1SegmentBinLogs{{
-			FieldBinlog: []*datapb.FieldBinlog{{
-				FieldID:     101,
-				ChildFields: []int64{101},
-				Format:      "vortex",
-			}},
+			FieldBinlog: []*datapb.FieldBinlog{
+				{FieldID: 100, ChildFields: []int64{100}, Format: "parquet"},
+				{FieldID: 101, ChildFields: []int64{101}, Format: "vortex"},
+			},
 		}},
 	}
 
-	columnGroups := currentSplitFromPersistedStorage(schema, persisted)
+	columnGroups, err := currentSplitFromPersistedStorage(schema, persisted)
+	require.NoError(t, err)
 
-	require.Len(t, columnGroups, 1)
-	assert.Equal(t, int64(101), columnGroups[0].GroupID)
-	assert.Equal(t, []int64{101}, columnGroups[0].Fields)
-	assert.Equal(t, []int{1}, columnGroups[0].Columns)
-	assert.Equal(t, "vortex", columnGroups[0].Format)
+	require.Len(t, columnGroups, 2)
+	assert.Equal(t, int64(101), columnGroups[1].GroupID)
+	assert.Equal(t, []int64{101}, columnGroups[1].Fields)
+	assert.Equal(t, []int{1}, columnGroups[1].Columns)
+	assert.Equal(t, "vortex", columnGroups[1].Format)
 }
 
 func TestCurrentSplitFromPersistedStoragePreservesFormat(t *testing.T) {
@@ -148,13 +150,15 @@ func TestCurrentSplitFromPersistedStoragePreservesFormat(t *testing.T) {
 			{
 				FieldBinlog: []*datapb.FieldBinlog{
 					{FieldID: 0, ChildFields: []int64{100, 0, 1}, Format: "parquet"},
+					{FieldID: 101, ChildFields: []int64{101}, Format: "vortex"},
 				},
 			},
 		},
 	}
 
-	currentSplit := currentSplitFromPersistedStorage(schema, persistedStorage)
-	require.Len(t, currentSplit, 1)
+	currentSplit, err := currentSplitFromPersistedStorage(schema, persistedStorage)
+	require.NoError(t, err)
+	require.Len(t, currentSplit, 2)
 	require.Equal(t, int64(0), currentSplit[0].GroupID)
 	require.Equal(t, []int64{100, 0, 1}, currentSplit[0].Fields)
 	require.Equal(t, []int{2, 0, 1}, currentSplit[0].Columns)
@@ -169,7 +173,8 @@ func TestCurrentSplitForNewGrowingPackFillsFormats(t *testing.T) {
 		StorageVersion: storage.StorageV3,
 	}
 
-	currentSplit := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	currentSplit, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	require.NoError(t, err)
 	require.NotEmpty(t, currentSplit)
 	wantFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 	for _, columnGroup := range currentSplit {
@@ -189,14 +194,16 @@ func TestCurrentSplitForGrowingPackPreservesPersistedManifestFormat(t *testing.T
 				{
 					FieldBinlog: []*datapb.FieldBinlog{
 						{FieldID: 0, ChildFields: []int64{100, 0, 1}, Format: "vortex"},
+						{FieldID: 101, ChildFields: []int64{101}, Format: "vortex"},
 					},
 				},
 			},
 		},
 	}
 
-	currentSplit := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
-	require.Len(t, currentSplit, 1)
+	currentSplit, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	require.NoError(t, err)
+	require.Len(t, currentSplit, 2)
 	require.Equal(t, "vortex", currentSplit[0].Format)
 }
 
@@ -209,15 +216,144 @@ func TestCurrentSplitForGrowingPackDoesNotGuessPersistedV3Format(t *testing.T) {
 				{
 					FieldBinlog: []*datapb.FieldBinlog{
 						{FieldID: 0, ChildFields: []int64{100, 0, 1}},
+						{FieldID: 101, ChildFields: []int64{101}},
 					},
 				},
 			},
 		},
 	}
 
-	currentSplit := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
-	require.Len(t, currentSplit, 1)
+	currentSplit, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	require.NoError(t, err)
+	require.Len(t, currentSplit, 2)
 	require.Empty(t, currentSplit[0].Format)
+}
+
+func TestCurrentSplitFromPersistedStorageRejectsIncompatibleSchema(t *testing.T) {
+	schema := testGrowingPackSchema()
+	validGroups := []*datapb.FieldBinlog{
+		{FieldID: 0, ChildFields: []int64{100, 0, 1}, Format: "parquet"},
+		{FieldID: 101, ChildFields: []int64{101}, Format: "vortex"},
+	}
+	for _, testCase := range []struct {
+		name    string
+		schema  *schemapb.CollectionSchema
+		batches [][]*datapb.FieldBinlog
+		message string
+	}{
+		{
+			name:   "persisted field missing from encoding schema",
+			schema: schema,
+			batches: [][]*datapb.FieldBinlog{{
+				{FieldID: 0, ChildFields: []int64{100, 0, 1}, Format: "parquet"},
+				{FieldID: 101, ChildFields: []int64{101, 121}, Format: "vortex"},
+			}},
+			message: "field 121 absent from schema",
+		},
+		{
+			name:   "incompatible field in later binlog batch",
+			schema: schema,
+			batches: [][]*datapb.FieldBinlog{validGroups, {
+				{FieldID: 0, ChildFields: []int64{100, 0, 1}, Format: "parquet"},
+				{FieldID: 101, ChildFields: []int64{121}, Format: "vortex"},
+			}},
+			message: "field 121 absent from schema",
+		},
+		{
+			name:   "field duplicated across column groups",
+			schema: schema,
+			batches: [][]*datapb.FieldBinlog{{
+				{FieldID: 0, ChildFields: []int64{100, 0, 1, 101}, Format: "parquet"},
+				{FieldID: 101, ChildFields: []int64{101}, Format: "vortex"},
+			}},
+			message: "field 101 appears in multiple persisted column groups",
+		},
+		{
+			name:   "mixed grouped and legacy field binlogs",
+			schema: schema,
+			batches: [][]*datapb.FieldBinlog{{
+				{FieldID: 0, ChildFields: []int64{100, 0, 1}, Format: "parquet"},
+				{FieldID: 101},
+			}},
+			message: "persisted column group 101 has no child fields",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			persisted := &streamingpb.L1SegmentPersistedStorage{}
+			for _, fields := range testCase.batches {
+				persisted.Binlogs = append(persisted.Binlogs, &streamingpb.L1SegmentBinLogs{FieldBinlog: fields})
+			}
+			groups, err := currentSplitFromPersistedStorage(testCase.schema, persisted)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			require.Contains(t, err.Error(), testCase.message)
+			require.Nil(t, groups, "invalid field IDs must never default to column zero")
+		})
+	}
+}
+
+func TestCurrentSplitForGrowingPackHandlesLegacyFieldBinlogs(t *testing.T) {
+	for _, version := range []int64{storage.StorageV1, storage.StorageV2, storage.StorageV3} {
+		meta := &streamingpb.SegmentAssignmentMeta{
+			StorageVersion: version,
+			PersistedStorage: &streamingpb.L1SegmentPersistedStorage{
+				Binlogs: []*streamingpb.L1SegmentBinLogs{{FieldBinlog: []*datapb.FieldBinlog{
+					{FieldID: 0}, {FieldID: 1}, {FieldID: 100}, {FieldID: 101},
+				}}},
+			},
+		}
+		groups, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+		require.NoError(t, err)
+		if version == storage.StorageV1 {
+			require.Empty(t, groups, "StorageV1 writes per-field binlogs without column groups")
+			continue
+		}
+		require.NotEmpty(t, groups, "legacy binlogs without ChildFields must get a fresh split")
+		var fields []int64
+		for _, group := range groups {
+			fields = append(fields, group.Fields...)
+			require.NotEmpty(t, group.Format)
+		}
+		require.ElementsMatch(t, []int64{0, 1, 100, 101}, fields)
+	}
+}
+
+func TestGrowingColumnGroupsRejectIncorrectColumnMapping(t *testing.T) {
+	err := validateGrowingColumnGroups(testGrowingPackSchema(), []storagecommon.ColumnGroup{
+		{GroupID: 0, Fields: []int64{100, 0, 1}, Columns: []int{2, 0, 1}},
+		{GroupID: 101, Fields: []int64{101}, Columns: []int{0}},
+	})
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.Contains(t, err.Error(), "field 101 maps to column 0 instead of 3")
+}
+
+func TestFlushInsertBufferRejectsIncompatibleColumnGroupsBeforeWrite(t *testing.T) {
+	const (
+		collectionID = int64(1)
+		partitionID  = int64(2)
+		segmentID    = int64(3)
+		vchannel     = "v1"
+		timetick     = uint64(10)
+	)
+	schema := crashTestSchema()
+	insert := buildCrashTestInsertMessage(t, vchannel, collectionID, partitionID, segmentID, timetick, timetick)
+	pack := crashTestPack(collectionID, partitionID, segmentID, vchannel, timetick, schema, insert)
+	pack.Meta.StorageVersion = storage.StorageV2
+	pack.Meta.PersistedStorage.Binlogs = []*streamingpb.L1SegmentBinLogs{{FieldBinlog: []*datapb.FieldBinlog{
+		{FieldID: 0, ChildFields: []int64{100, 0, 1}, Format: "parquet"},
+		{FieldID: 101, ChildFields: []int64{101, 121}, Format: "parquet"},
+	}}}
+	writeCalls := 0
+	writer := &growingBulkPackWriter{writeFn: func(context.Context, *growingBulkWriteRequest) (*growingBulkWriteResult, error) {
+		writeCalls++
+		return &growingBulkWriteResult{}, nil
+	}}
+
+	result, err := writer.FlushInsertBuffer(context.Background(), pack)
+
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.False(t, retry.IsRecoverable(err), "incompatible persisted groups must not retry object writes")
+	require.Nil(t, result)
+	require.Zero(t, writeCalls, "schema validation must happen before any storage IO")
 }
 
 func TestFlushInsertBufferBuildsStorageV2ColumnGroups(t *testing.T) {

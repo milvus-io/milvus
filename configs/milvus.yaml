@@ -203,6 +203,7 @@ woodpecker:
       maxRetries: 3 # Maximum number of retries for segment append operations.
       maxBatchEntries: 1000 # Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.
       maxBatchBytes: 2000000 # Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.
+      sendTimeout: 2s # Timeout for opening an append stream and receiving buffered responses from one replica in service mode; excludes durability acknowledgement and total append latency. Requires restart. Non-positive duration values retain Woodpecker defaults.
     segmentRollingPolicy:
       maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
@@ -224,6 +225,7 @@ woodpecker:
       maxBatchSize: 16M # Maximum batch size for direct reads from object storage in service storage mode.
       maxFetchThreads: 4 # Maximum number of concurrent fetch threads used by Woodpecker direct reads from object storage.
     quorum:
+      selectNodesTimeout: 2s # Timeout for one SelectNodes call to one seed in service mode; expiry allows trying the next seed. Requires restart. Non-positive duration values retain Woodpecker defaults.
       # Quorum Buffer Pools: Define groups of nodes for different purposes
       # Example configuration below:
       #   - name: region1 # Name of the region pool
@@ -259,6 +261,17 @@ woodpecker:
         #     az: "az.*"
         #     resourceGroup: "rg.*"
         customPlacement: 
+    grpc:
+      dialTimeout: 1s # Minimum connection attempt timeout for the Woodpecker client dialing logstores. Independent of Milvus internal gRPC clients. Requires restart. Non-positive duration values retain Woodpecker defaults.
+      connectBackoff:
+        baseDelay: 100ms # Initial delay between failed connection attempts to a Woodpecker logstore; not an RPC retry delay. Requires restart. Non-positive duration values retain Woodpecker defaults.
+        multiplier: 1.6 # Growth multiplier for connection backoff; must be finite and at least 1. Requires restart.
+        jitter: 0.2 # Connection backoff jitter fraction, between 0 and 1. Requires restart.
+        maxDelay: 3s # Maximum connection backoff delay; must be at least baseDelay. Invalid backoff settings retain Woodpecker defaults as a group. Requires restart. Non-positive duration values retain Woodpecker defaults.
+    segmentRead:
+      activeTimeout: 3s # Timeout per replica read of an Active segment in service mode. A timed-out pass may retry with settledTimeout. Must not exceed settledTimeout; invalid pairs retain Woodpecker defaults. Requires restart. Non-positive duration values retain Woodpecker defaults.
+      settledTimeout: 20s # Timeout per replica read for other segments and embedded storage, and the longer retry pass for Active segments. Does not bound direct object-storage reads. Requires restart. Non-positive duration values retain Woodpecker defaults.
+    skipRangeRefreshInterval: 10s # Minimum interval between background refreshes of operator-declared skip ranges when stalled readers ask. Reads use the cached copy; reader report ticks also affect propagation. Not a maximum cache age. Requires restart. Values below 1s retain Woodpecker defaults; whole seconds are used.
   logstore:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
@@ -1297,6 +1310,13 @@ common:
       # Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
       # The default matches the milvus-storage default.
       maxRate: 5000
+    talon:
+      mode: 0 # Remote milvus-storage read routing: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      enableForExternalTable: false # Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.
+      smallReadThreshold: 524288 # Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.
+      coordinator:  # Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.
+      blockSize: 268435456 # Talon block size in bytes; must be greater than 0. Requires a restart.
+      maxIdlePerAddr: 256 # Maximum idle TCP connections per peer in each Talon pool. Must be greater than 0; does not limit active connections. Requires a restart.
     externalVector:
       # Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
       # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
@@ -1387,6 +1407,7 @@ common:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   nodeScheduler:
     maxConcurrencyRatio: 2 # Maximum number of tasks executed concurrently by the process-level node scheduler, expressed as a ratio of CPU cores. Must be greater than zero; 2 by default.
+  enableFastPB: true # Enable fast protobuf decoding for RPC requests, query results, and search results. Disable to use the standard protobuf decoder.
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
   enableDriverPrefetch: false # Indicates whether to enable query driver prefetch in segcore.
   enabledJSONShredding: true # Indicates sealedsegment whether to enable JSON key stats
@@ -1883,3 +1904,14 @@ function:
     local_resource_path: /var/lib/milvus/analyzer
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
     runner_concurrency: 8 # The concurrency for each function runner to tokenize text
+  pyUDF:
+    enabled: false # Whether to enable PyUDF in processes that use it. Enabling it on Proxy also requires common.fileResource.mode.proxy: sync. Restart is required after changing this value.
+    address: 127.0.0.1:19090 # Shared local IPv4 address and port of the PyUDF workers. Keep on loopback or a trusted, access-controlled network; the worker endpoint has no TLS or authentication. Restart is required after changing this value.
+    rpcTimeout: 30s # Deadline for one PyUDF Execute call, including serialization. Range: 5s to 300s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.
+    connectionPoolSize: 10 # Number of reused client connections; this does not limit concurrent RPCs. Restart is required after changing this value.
+    maxMessageBytes: 67108864 # Maximum serialized size of one PyUDF gRPC message in bytes. Restart is required after changing this value.
+    server:
+      workerCount: 1 # Number of Python worker processes sharing the configured address. Restart is required after changing this value.
+      grpcConcurrency: 10 # Per-worker gRPC executor threads. Restart is required after changing this value.
+      maxConcurrentRPCs: 100 # Maximum in-flight RPCs per Python worker, including requests waiting in the gRPC executor. Restart is required after changing this value.
+      shutdownTimeout: 30s # Python worker termination escalation deadline. Range: 5s to 60s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.
