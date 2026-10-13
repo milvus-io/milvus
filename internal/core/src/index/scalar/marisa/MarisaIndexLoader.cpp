@@ -236,28 +236,6 @@ OpenTrie(const std::string& path, bool mmap_enabled) {
     }
 }
 
-// Check the uint32 row domain and every key ID, allowing the historical null
-// sentinel.
-void
-ValidateStrIds(const int64_t* str_ids, size_t count, size_t num_keys) {
-    AssertInfo(count <= std::numeric_limits<uint32_t>::max(),
-               "marisa row count {} exceeds uint32_t CSR capacity",
-               count);
-    for (size_t row = 0; row < count; ++row) {
-        const auto key_id = str_ids[row];
-        if (key_id == static_cast<int64_t>(MARISA_NULL_KEY_ID)) {
-            continue;
-        }
-        if (key_id < 0 || static_cast<size_t>(key_id) >= num_keys) {
-            ThrowInfo(DataFormatBroken,
-                      "invalid marisa key id {} at row {} for {} keys",
-                      key_id,
-                      row,
-                      num_keys);
-        }
-    }
-}
-
 // Reconstruct key-to-row CSR from legacy row-to-key IDs, excluding null rows.
 void
 BuildCsr(const int64_t* str_ids,
@@ -268,12 +246,23 @@ BuildCsr(const int64_t* str_ids,
     AssertInfo(num_keys < std::numeric_limits<uint32_t>::max(),
                "marisa key count {} exceeds uint32_t CSR capacity",
                num_keys);
-    ValidateStrIds(str_ids, count, num_keys);
+    AssertInfo(count <= std::numeric_limits<uint32_t>::max(),
+               "marisa row count {} exceeds uint32_t CSR capacity",
+               count);
 
     csr_index = std::make_shared<std::vector<uint32_t>>(num_keys + 1, 0);
     for (size_t row = 0; row < count; ++row) {
         const auto key_id = str_ids[row];
         if (key_id != static_cast<int64_t>(MARISA_NULL_KEY_ID)) {
+            // Rebuilding indexes this key directly. Check its bounds during
+            // the required histogram pass, without a separate row-ID scan.
+            if (key_id < 0 || static_cast<size_t>(key_id) >= num_keys) {
+                ThrowInfo(DataFormatBroken,
+                          "invalid marisa key id {} at row {} for {} keys",
+                          key_id,
+                          row,
+                          num_keys);
+            }
             ++(*csr_index)[static_cast<size_t>(key_id) + 1];
         }
     }
@@ -288,75 +277,6 @@ BuildCsr(const int64_t* str_ids,
         if (key_id != static_cast<int64_t>(MARISA_NULL_KEY_ID)) {
             (*csr_offsets)[write_pos[static_cast<size_t>(key_id)]++] =
                 static_cast<uint32_t>(row);
-        }
-    }
-}
-
-// Cross-check CSR ranges, ordered row IDs and coverage against the row-to-key
-// mapping.
-void
-ValidateCsr(const int64_t* str_ids,
-            size_t count,
-            size_t num_keys,
-            const uint32_t* csr_index,
-            size_t csr_index_count,
-            const uint32_t* csr_offsets,
-            size_t csr_offsets_count) {
-    if (num_keys > std::numeric_limits<size_t>::max() / sizeof(uint32_t) - 1 ||
-        csr_index_count != num_keys + 1) {
-        ThrowInfo(DataFormatBroken,
-                  "invalid marisa CSR index length: expected {}, got {}",
-                  num_keys + 1,
-                  csr_index_count);
-    }
-    if (csr_index[0] != 0 || csr_index[num_keys] != csr_offsets_count) {
-        ThrowInfo(DataFormatBroken,
-                  "invalid marisa CSR bounds: first {}, last {}, offsets {}",
-                  csr_index[0],
-                  csr_index[num_keys],
-                  csr_offsets_count);
-    }
-
-    size_t valid_rows = 0;
-    for (size_t row = 0; row < count; ++row) {
-        if (str_ids[row] != static_cast<int64_t>(MARISA_NULL_KEY_ID)) {
-            ++valid_rows;
-        }
-    }
-    if (valid_rows != csr_offsets_count) {
-        ThrowInfo(DataFormatBroken,
-                  "marisa CSR offset count {} does not match {} valid rows",
-                  csr_offsets_count,
-                  valid_rows);
-    }
-
-    for (size_t key_id = 0; key_id < num_keys; ++key_id) {
-        const auto begin = csr_index[key_id];
-        const auto end = csr_index[key_id + 1];
-        if (begin > end || end > csr_offsets_count) {
-            ThrowInfo(DataFormatBroken,
-                      "invalid marisa CSR range [{}, {}) for key {}",
-                      begin,
-                      end,
-                      key_id);
-        }
-        uint32_t previous = 0;
-        bool first = true;
-        for (size_t i = begin; i < end; ++i) {
-            const auto row = csr_offsets[i];
-            if (row >= count || str_ids[row] != static_cast<int64_t>(key_id)) {
-                ThrowInfo(DataFormatBroken,
-                          "invalid marisa CSR row {} for key {}",
-                          row,
-                          key_id);
-            }
-            if (!first && row <= previous) {
-                ThrowInfo(DataFormatBroken,
-                          "marisa CSR rows for key {} are not increasing",
-                          key_id);
-            }
-            previous = row;
-            first = false;
         }
     }
 }
@@ -484,7 +404,6 @@ LoadState(bool use_async,
     if (!effective.enable_mmap) {
         auto str_ids = (co_await ReadEntryVector<int64_t>(
             use_async, opts, source, MARISA_STR_IDS, staging->Path()));
-        ValidateStrIds(str_ids->data(), str_ids->size(), num_keys);
 
         std::shared_ptr<std::vector<uint32_t>> csr_index;
         std::shared_ptr<std::vector<uint32_t>> csr_offsets;
@@ -527,7 +446,6 @@ LoadState(bool use_async,
     const auto* str_ids =
         reinterpret_cast<const int64_t*>(str_ids_mapping.Data());
     const auto str_ids_count = str_ids_bytes / sizeof(int64_t);
-    ValidateStrIds(str_ids, str_ids_count, num_keys);
 
     std::shared_ptr<std::vector<uint32_t>> csr_index_owner;
     std::shared_ptr<std::vector<uint32_t>> csr_offsets_owner;
@@ -825,7 +743,6 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
         result->str_ids = result->str_ids_owner->data();
     }
     result->str_ids_size = rows;
-    ValidateStrIds(result->str_ids, rows, keys);
     size_t csr_bytes = 0;
     if (state->csr.complete) {
         csr_bytes = state->csr.index_bytes + state->csr.offsets_bytes;
@@ -841,13 +758,14 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
             result->csr_index = result->csr_index_owner->data();
             result->csr_offsets = result->csr_offsets_owner->data();
         }
-        ValidateCsr(result->str_ids,
-                    rows,
-                    keys,
-                    result->csr_index,
-                    keys + 1,
-                    result->csr_offsets,
-                    state->csr.offsets_bytes / sizeof(uint32_t));
+        // Inspect only the endpoints; persisted row IDs, middle CSR entries,
+        // and postings remain untouched during finalization.
+        if (state->csr.offsets_bytes % sizeof(uint32_t) != 0 ||
+            result->csr_index[0] != 0 ||
+            result->csr_index[keys] !=
+                state->csr.offsets_bytes / sizeof(uint32_t)) {
+            ThrowInfo(DataFormatBroken, "invalid marisa CSR endpoints");
+        }
     } else {
         std::shared_ptr<std::vector<uint32_t>> csr_index;
         std::shared_ptr<std::vector<uint32_t>> csr_offsets;

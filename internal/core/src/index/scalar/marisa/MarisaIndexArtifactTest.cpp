@@ -42,6 +42,7 @@
 #include <fstream>
 #include <sys/stat.h>
 #include "index/Families.h"
+#include <unistd.h>
 
 namespace milvus::index::test {
 namespace {
@@ -289,10 +290,14 @@ TEST(MarisaIndexArtifactTest, RejectsTruncatedRowIds) {
     });
 }
 
-TEST(MarisaIndexArtifactTest, RejectsOutOfRangeRowId) {
+TEST(MarisaIndexArtifactTest, RejectsOutOfRangeRowIdWhileRebuilding) {
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>("MarisaVarcharNonNull");
     auto persisted = SerializedMarisa(backend.Name());
+    persisted.entries.erase(MARISA_CSR_INDEX);
+    persisted.entries.erase(MARISA_CSR_OFFSETS);
+    persisted.metadata.erase(std::string(kCsrFormatVersionMeta));
+    persisted.metadata.erase(std::string(kCsrNumKeysMeta));
     auto& ids = persisted.entries.at(MARISA_STR_IDS);
     ASSERT_GE(ids.size(), sizeof(int64_t));
     const auto invalid = std::numeric_limits<int64_t>::max();
@@ -396,20 +401,6 @@ TEST(MarisaIndexArtifactTest, RejectsTruncatedCsrOffsets) {
     auto& offsets = persisted.entries.at(MARISA_CSR_OFFSETS);
     ASSERT_FALSE(offsets.empty());
     offsets.pop_back();
-
-    ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
-        static_cast<void>(OpenV3(backend, persisted, {.row_count = 5}));
-    });
-}
-
-TEST(MarisaIndexArtifactTest, RejectsCsrOffsetForWrongRow) {
-    const auto& backend =
-        ScalarReaderBackends().Get<std::string_view>("MarisaVarcharNonNull");
-    auto persisted = SerializedMarisa(backend.Name());
-    auto& offsets = persisted.entries.at(MARISA_CSR_OFFSETS);
-    ASSERT_GE(offsets.size(), sizeof(uint32_t));
-    const uint32_t invalid = 100;
-    std::memcpy(offsets.data(), &invalid, sizeof(invalid));
 
     ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
         static_cast<void>(OpenV3(backend, persisted, {.row_count = 5}));
@@ -551,6 +542,114 @@ TEST(MarisaIndexArtifactTest, PackedTrieStagesAndReleasesItsUnlinkedName) {
         std::getline(replacement, contents);
         EXPECT_EQ(contents, "replacement");
     }
+}
+
+TEST(MarisaIndexArtifactTest, QueryRejectsInvalidIntermediateCsrRange) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("MarisaVarcharNonNull");
+    const auto original = SerializedMarisa(backend.Name());
+    ScalarTestData<std::string_view> values(
+        {"alpha", "beta", "beta", "gamma", "delta"});
+    const auto keys = original.metadata.at("csr_num_keys").get<size_t>();
+    const auto& ids = original.entries.at(MARISA_STR_IDS);
+    size_t key_id = 0;
+    std::string_view key;
+    // Read the generated IDs so the fixture does not assume MARISA's key
+    // ordering. Both edited entries must be strictly between the endpoints.
+    for (size_t row = 0; row < values.values.size(); ++row) {
+        if (!values.validity[row]) {
+            continue;
+        }
+        int64_t id;
+        std::memcpy(&id, ids.data() + row * sizeof(id), sizeof(id));
+        if (id > 0 && static_cast<size_t>(id) + 1 < keys) {
+            key_id = static_cast<size_t>(id);
+            key = values.values[row];
+            break;
+        }
+    }
+    ASSERT_GT(key_id, 0);
+    ASSERT_LT(key_id + 1, keys);
+    const uint32_t count =
+        original.entries.at(MARISA_CSR_OFFSETS).size() / sizeof(uint32_t);
+    auto data = original;
+    auto& index = data.entries.at(MARISA_CSR_INDEX);
+    const uint32_t begin = count;
+    const uint32_t end = 0;
+    std::memcpy(index.data() + key_id * sizeof(begin), &begin, sizeof(begin));
+    std::memcpy(index.data() + (key_id + 1) * sizeof(end), &end, sizeof(end));
+    auto reader = OpenV3(backend, data, {.row_count = 5});
+    const auto* predicate =
+        dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+            reader.get());
+    ASSERT_NE(predicate, nullptr);
+    ExpectSegcoreError(ErrorCode::DataFormatBroken,
+                       [&] { static_cast<void>(predicate->In(1, &key)); });
+}
+
+void
+ExpectUnvisitedMarisaMappings() {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("MarisaVarcharMmap");
+    const auto artifact = SerializedMarisa(backend.Name());
+    auto input = std::make_shared<storage::RemoteInputStream>(
+        std::make_shared<arrow::io::BufferReader>(
+            MakePackedArtifactBuffer(artifact)));
+    auto source = storage::IndexEntryReader::Open(input, input->Size());
+    auto staging = storage::LocalDirectory::CreateOwned(
+        std::filesystem::temp_directory_path().string(),
+        "marisa-csr-unread-XXXXXX",
+        "marisa lazy row-ID test");
+    storage::LoadOptions options;
+    options.enable_mmap = true;
+    options.mmap_dir_path = staging->Path();
+    options.params = backend.LoadParams({.row_count = 5});
+    auto plan = LoaderTestAccess::Plan<MarisaIndexLoader>(
+        source->Directory(), source->IndexMeta(), options);
+    const auto files = storage::CollectIndexFileTargets(plan.entries);
+    for (const auto& file : files) {
+        file->Prepare(storage::io::Priority::HIGH);
+    }
+    for (const auto& entry : plan.entries) {
+        const auto& bytes = artifact.entries.at(entry.name);
+        const auto& file = std::get<storage::FileEntryTarget>(entry.target);
+        file.staging->WriteAt(file.offset, bytes.data(), bytes.size());
+    }
+    for (const auto& file : files) {
+        file->Finish();
+    }
+    const auto& ids =
+        std::get<storage::FileEntryTarget>(plan.At(MARISA_STR_IDS).target);
+    ASSERT_EQ(::truncate(ids.staging->path.c_str(), 0), 0);
+    const auto& csr =
+        std::get<storage::FileEntryTarget>(plan.At(MARISA_CSR_OFFSETS).target);
+    ASSERT_GT(csr.offset, artifact.entries.at(MARISA_CSR_INDEX).size());
+    ASSERT_EQ(::truncate(csr.staging->path.c_str(),
+                         artifact.entries.at(MARISA_CSR_INDEX).size()),
+              0);
+    // mmap succeeds on Linux. Touching the truncated row-ID file or the CSR
+    // posting region would SIGBUS. Keep the CSR index, including its terminal
+    // entry, available for the loader's two endpoint checks and the reader's
+    // constant-time pointer check. Middle entries and postings need no scan.
+    auto reader = LoaderTestAccess::Finish<MarisaIndexLoader>(plan, options);
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->Count(), 5);
+}
+
+TEST(MarisaIndexArtifactDeathTest,
+     MmapFinalizationDoesNotTouchPersistedTables) {
+    if (static_cast<size_t>(::sysconf(_SC_PAGESIZE)) >
+        storage::FileWriter::ALIGNMENT_BYTES) {
+        GTEST_SKIP() << "CSR postings must start beyond the first mapped page";
+    }
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    EXPECT_EXIT(
+        {
+            ExpectUnvisitedMarisaMappings();
+            ::_exit(::testing::Test::HasFailure() ? 1 : 0);
+        },
+        ::testing::ExitedWithCode(0),
+        "");
 }
 
 }  // namespace
