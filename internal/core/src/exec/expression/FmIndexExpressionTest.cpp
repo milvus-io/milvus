@@ -827,28 +827,32 @@ TEST(FmIndexExpressionTest, RegexInteriorLiteralCandidatesAndFallback) {
 TEST(FmIndexExpressionTest, RegexGuardAndFallback) {
     std::vector<std::string> rows(1000, std::string(500, 'x'));
     rows[500] += "RARE123";
-    auto idx = MakeRawDataIndex(rows);
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, R"(RARE\d+)"));
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "ABSENT.*"));
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, ".*RARE"));
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "x.*RARE123"));
-    EXPECT_EQ(idx->PatternMatch("x.*RARE123", proto::plan::RegexMatch).count(),
-              1);
+    auto idx = BuildFmPatternReader(rows);
+    EXPECT_TRUE(
+        idx->ShouldUseForOp(index::PatternOp::RegexMatch, R"(RARE\d+)"));
+    EXPECT_TRUE(idx->ShouldUseForOp(index::PatternOp::RegexMatch, "ABSENT.*"));
+    EXPECT_TRUE(idx->ShouldUseForOp(index::PatternOp::RegexMatch, ".*RARE"));
+    EXPECT_TRUE(
+        idx->ShouldUseForOp(index::PatternOp::RegexMatch, "x.*RARE123"));
+    EXPECT_EQ(
+        idx->PatternMatch("x.*RARE123", index::PatternOp::RegexMatch).count(),
+        1);
     for (const std::string pattern : {"x+", ".*", "", "RARE|", "(?i)rare"}) {
-        EXPECT_FALSE(idx->ShouldUseOp(proto::plan::RegexMatch, pattern))
+        EXPECT_FALSE(idx->ShouldUseForOp(index::PatternOp::RegexMatch, pattern))
             << pattern;
     }
-    EXPECT_FALSE(
-        idx->ShouldUseOp(proto::plan::RegexMatch, std::string(4097, 'a')));
+    EXPECT_FALSE(idx->ShouldUseForOp(index::PatternOp::RegexMatch,
+                                     std::string(4097, 'a')));
 }
 
 TEST(FmIndexExpressionTest, RegexCandidatesKeepRarePrefixWhenInteriorIsCommon) {
     std::vector<std::string> rows(1000, std::string(500, 'x') + "COMMON");
     rows[500] = "RARE" + rows[500];
-    auto idx = MakeRawDataIndex(rows);
-    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "RARE.*COMMON"));
+    auto idx = BuildFmPatternReader(rows);
+    EXPECT_TRUE(
+        idx->ShouldUseForOp(index::PatternOp::RegexMatch, "RARE.*COMMON"));
     const auto candidates =
-        idx->PatternMatch("RARE.*COMMON", proto::plan::RegexMatch);
+        idx->PatternMatch("RARE.*COMMON", index::PatternOp::RegexMatch);
     EXPECT_EQ(candidates.count(), 1);
     EXPECT_TRUE(candidates[500]);
 }
@@ -858,16 +862,18 @@ TEST(FmIndexExpressionTest, RegexPreparationDoesNotCacheIndexStatistics) {
     first_rows[7] = "foo" + first_rows[7];
     std::vector<std::string> second_rows(1000, "foo" + std::string(500, 'x'));
     second_rows[9] += "bar";
-    auto first = MakeRawDataIndex(first_rows);
-    auto second = MakeRawDataIndex(second_rows);
+    auto first = BuildFmPatternReader(first_rows);
+    auto second = BuildFmPatternReader(second_rows);
     for (int repeat = 0; repeat < 2; ++repeat) {
-        EXPECT_TRUE(first->ShouldUseOp(proto::plan::RegexMatch, "foo.*bar"));
-        EXPECT_TRUE(second->ShouldUseOp(proto::plan::RegexMatch, "foo.*bar"));
+        EXPECT_TRUE(
+            first->ShouldUseForOp(index::PatternOp::RegexMatch, "foo.*bar"));
+        EXPECT_TRUE(
+            second->ShouldUseForOp(index::PatternOp::RegexMatch, "foo.*bar"));
         // The same cached requirements choose different rarest fragments.
         const auto first_candidates =
-            first->PatternMatch("foo.*bar", proto::plan::RegexMatch);
+            first->PatternMatch("foo.*bar", index::PatternOp::RegexMatch);
         const auto second_candidates =
-            second->PatternMatch("foo.*bar", proto::plan::RegexMatch);
+            second->PatternMatch("foo.*bar", index::PatternOp::RegexMatch);
         EXPECT_EQ(first_candidates.count(), 1);
         EXPECT_TRUE(first_candidates[7]);
         EXPECT_EQ(second_candidates.count(), 1);
@@ -880,15 +886,17 @@ TEST(FmIndexExpressionTest, RegexBooleanConditionsUseCurrentCounts) {
         1000, std::string(500, 'x') + "COMMON_LONG foo qux ERROR");
     rows[9] += "RARE bar timeout";
     rows[19] += "baz";
-    auto index = MakeRawDataIndex(rows);
+    auto index = BuildFmPatternReader(rows);
     for (const auto& [pattern, expected] :
          std::vector<std::pair<std::string, size_t>>{
              {".*COMMON_LONG.*RARE", 1},
              {"(ERROR|WARN).*timeout", 1},
              {"foo.*bar|baz.*qux", 2},
              {"foo.*ABSENT|baz.*qux", 1}}) {
-        EXPECT_TRUE(index->ShouldUseOp(proto::plan::RegexMatch, pattern));
-        auto candidates = index->PatternMatch(pattern, proto::plan::RegexMatch);
+        EXPECT_TRUE(
+            index->ShouldUseForOp(index::PatternOp::RegexMatch, pattern));
+        auto candidates =
+            index->PatternMatch(pattern, index::PatternOp::RegexMatch);
         EXPECT_EQ(candidates.count(), expected) << pattern;
         PartialRegexMatcher matcher(pattern);
         for (size_t i = 0; i < rows.size(); ++i) {
@@ -898,12 +906,13 @@ TEST(FmIndexExpressionTest, RegexBooleanConditionsUseCurrentCounts) {
     }
     for (const std::string pattern :
          {"a|timeout", "(?i:foo)|timeout", "(foo)?|timeout"}) {
-        EXPECT_FALSE(index->ShouldUseOp(proto::plan::RegexMatch, pattern));
-        EXPECT_EQ(index->PatternMatch(pattern, proto::plan::RegexMatch).count(),
-                  rows.size());
+        EXPECT_FALSE(
+            index->ShouldUseForOp(index::PatternOp::RegexMatch, pattern));
+        EXPECT_EQ(
+            index->PatternMatch(pattern, index::PatternOp::RegexMatch).count(),
+            rows.size());
     }
 }
-
 TEST(FmIndexExpressionTest,
      RegexBooleanConditionsAcrossChunksBatchesNullAndNot) {
     constexpr size_t n = 384;
