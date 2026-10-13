@@ -917,13 +917,14 @@ func TestRLSSharingACLPartialOperators(t *testing.T) {
 
 // These synthetic resources model tenant-scoped spaces without application identifiers.
 type rlsSpaceRow struct {
-	ID       int64     `milvus:"name:id"`
-	Tenant   string    `milvus:"name:tenant"`
-	Spaces   []string  `milvus:"name:spaces"`
-	Resource string    `milvus:"name:resource"`
-	Access   []string  `milvus:"name:access"`
-	Content  string    `milvus:"name:content"`
-	Vector   []float32 `milvus:"name:vector"`
+	NullFields []string  `milvus:"-"`
+	ID         int64     `milvus:"name:id"`
+	Tenant     string    `milvus:"name:tenant"`
+	Spaces     []string  `milvus:"name:spaces"`
+	Resource   string    `milvus:"name:resource"`
+	Access     []string  `milvus:"name:access"`
+	Content    string    `milvus:"name:content"`
+	Vector     []float32 `milvus:"name:vector"`
 }
 
 func configureRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, name string) {
@@ -951,7 +952,7 @@ func configureRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, na
 	}
 }
 
-func prepareRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, enabled bool) (string, map[int64]rlsSpaceRow) {
+func prepareRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, enabled, legacy bool) (string, map[int64]rlsSpaceRow) {
 	t.Helper()
 	threshold, err := hp.GetServerConfig("indexCoord.segment.minSegmentNumRowsToEnableIndex")
 	require.NoError(t, err)
@@ -964,11 +965,17 @@ func prepareRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, enab
 	schema := entity.NewSchema().WithName(name).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128))
-	for _, field := range []string{"tenant", "resource", "content"} {
+	for _, field := range []string{"resource", "content"} {
 		schema.WithField(entity.NewField().WithName(field).WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
 	}
+	permissionFields := []*entity.Field{entity.NewField().WithName("tenant").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128)}
 	for field, capacity := range map[string]int64{"spaces": 1, "access": 16} {
-		schema.WithField(entity.NewField().WithName(field).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeVarChar).WithMaxLength(128).WithMaxCapacity(capacity))
+		permissionFields = append(permissionFields, entity.NewField().WithName(field).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeVarChar).WithMaxLength(128).WithMaxCapacity(capacity))
+	}
+	if !legacy {
+		for _, field := range permissionFields {
+			schema.WithField(field)
+		}
 	}
 	common.CheckErr(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema).WithShardNum(1).WithConsistencyLevel(entity.ClStrong).WithProperty("rls.enabled", enabled).WithProperty("collection.autocompaction.enabled", false)), true)
 	t.Cleanup(func() {
@@ -994,7 +1001,12 @@ func prepareRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, enab
 	for _, batch := range []struct{ start, end int64 }{{1, 3001}, {3001, 3501}, {3501, 4001}} {
 		input := make([]any, 0, batch.end-batch.start)
 		for id := batch.start; id < batch.end; id++ {
-			input = append(input, rows[id])
+			if legacy {
+				row := rows[id]
+				input = append(input, map[string]any{"id": id, "resource": row.Resource, "content": row.Content, "vector": row.Vector})
+			} else {
+				input = append(input, rows[id])
+			}
 		}
 		_, err := mc.Insert(ctx, client.NewRowBasedInsertOption(name, input...).WithSkipRLS(true))
 		common.CheckErr(t, err, true)
@@ -1011,6 +1023,28 @@ func prepareRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, enab
 		}
 	}
 	checkRLSMixedSegments(ctx, t, mc, name)
+	if legacy {
+		before, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(name))
+		common.CheckErr(t, err, true)
+		for _, field := range permissionFields {
+			require.NotContains(t, mapFieldsByName(before.Schema.Fields), field.Name)
+			common.CheckErr(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(name, field.WithNullable(true))), true)
+		}
+		common.CheckErr(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)), true)
+		load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
+		common.CheckErr(t, err, true)
+		common.CheckErr(t, load.Await(ctx), true)
+		after, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(name))
+		common.CheckErr(t, err, true)
+		for _, field := range permissionFields {
+			require.True(t, mapFieldsByName(after.Schema.Fields)[field.Name].Nullable)
+		}
+		for id, row := range rows {
+			row.NullFields = []string{"tenant", "spaces", "access"}
+			rows[id] = row
+		}
+		checkRLSMixedSegments(ctx, t, mc, name)
+	}
 	checkRLSSpaceStored(ctx, t, mc, name, rows)
 	sealed := maps.Clone(rows)
 	maps.DeleteFunc(sealed, func(id int64, _ rlsSpaceRow) bool { return id > 3500 })
@@ -1037,6 +1071,12 @@ func checkRLSSpaceResult(t *testing.T, result client.ResultSet, expected map[int
 		for field, want := range map[string]any{"tenant": r.Tenant, "spaces": r.Spaces, "resource": r.Resource, "access": r.Access, "content": r.Content, "vector": entity.FloatVector(r.Vector)} {
 			c := result.GetColumn(field)
 			require.NotNil(t, c, field)
+			isNull, err := c.IsNull(i)
+			require.NoError(t, err)
+			require.Equal(t, slices.Contains(r.NullFields, field), isNull, "id=%d field=%s", id, field)
+			if isNull {
+				continue
+			}
 			got, err := c.Get(i)
 			require.NoError(t, err)
 			if values, ok := want.([]string); ok {
@@ -1147,7 +1187,7 @@ func checkRLSSpaceReads(ctx context.Context, t *testing.T, mc *client.Client, na
 func TestRLSSpaceReadMatrix(t *testing.T) {
 	ctx := hp.CreateContext(t, 10*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-	name, rows := prepareRLSSpaces(ctx, t, mc, true)
+	name, rows := prepareRLSSpaces(ctx, t, mc, true, false)
 	configureRLSSpaces(ctx, t, mc, name)
 	for principal, resources := range map[string][]string{
 		"member_0": {"resource_0", "resource_1"}, "member_1": {"resource_0", "resource_2"},
@@ -1166,7 +1206,7 @@ func TestRLSSpaceWriteMatrix(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			ctx := hp.CreateContext(t, 12*time.Minute)
 			mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-			name, original := prepareRLSSpaces(ctx, t, mc, true)
+			name, original := prepareRLSSpaces(ctx, t, mc, true, false)
 			configureRLSSpaces(ctx, t, mc, name)
 			want := maps.Clone(original)
 			for position, principal := range []string{"member_0", "member_1", "member_2", "member_3", "visitor", "unknown"} {
@@ -1252,7 +1292,6 @@ func TestRLSSpaceWriteMatrix(t *testing.T) {
 						common.CheckErr(t, err, true)
 						want = maps.Clone(original)
 					}
-
 				})
 			}
 		})
@@ -1262,7 +1301,7 @@ func TestRLSSpaceWriteMatrix(t *testing.T) {
 func TestRLSSpaceInvalidDestinationPreservesRows(t *testing.T) {
 	ctx := hp.CreateContext(t, 12*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-	name, rows := prepareRLSSpaces(ctx, t, mc, true)
+	name, rows := prepareRLSSpaces(ctx, t, mc, true, false)
 	configureRLSSpaces(ctx, t, mc, name)
 	for _, operation := range []string{"insert", "upsert", "partial_upsert"} {
 		for _, scenario := range []string{"multiple_spaces", "empty_spaces", "foreign_tenant", "read_only_space"} {
@@ -1306,7 +1345,7 @@ func TestRLSSpaceInvalidDestinationPreservesRows(t *testing.T) {
 func TestRLSSpaceMembershipLifecycle(t *testing.T) {
 	ctx := hp.CreateContext(t, 12*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-	name, rows := prepareRLSSpaces(ctx, t, mc, true)
+	name, rows := prepareRLSSpaces(ctx, t, mc, true, false)
 	configureRLSSpaces(ctx, t, mc, name)
 	policies, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
 	common.CheckErr(t, err, true)
@@ -1360,7 +1399,7 @@ func TestRLSSpaceMembershipLifecycle(t *testing.T) {
 func TestRLSSpaceResourceSharingLifecycle(t *testing.T) {
 	ctx := hp.CreateContext(t, 12*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-	name, rows := prepareRLSSpaces(ctx, t, mc, true)
+	name, rows := prepareRLSSpaces(ctx, t, mc, true, false)
 	configureRLSSpaces(ctx, t, mc, name)
 	for _, stage := range []struct {
 		name      string
@@ -1413,7 +1452,7 @@ func TestRLSSpaceLinkLifecycle(t *testing.T) {
 		t.Run(fmt.Sprintf("tenant_wall_%t", wall), func(t *testing.T) {
 			ctx := hp.CreateContext(t, 12*time.Minute)
 			mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-			name, rows := prepareRLSSpaces(ctx, t, mc, true)
+			name, rows := prepareRLSSpaces(ctx, t, mc, true, false)
 			configureRLSSpaces(ctx, t, mc, name)
 			common.CheckErr(t, mc.SetRLSPrincipalTags(ctx, client.NewSetRLSPrincipalTagsOption(name, "link_0", `{"tenant":"tenant_0"}`)), true)
 			var input []any
@@ -1468,7 +1507,7 @@ func TestRLSSpaceLinkLifecycle(t *testing.T) {
 func TestRLSSpaceEnableExistingData(t *testing.T) {
 	ctx := hp.CreateContext(t, 12*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-	name, rows := prepareRLSSpaces(ctx, t, mc, false)
+	name, rows := prepareRLSSpaces(ctx, t, mc, false, false)
 	policies, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
 	common.CheckErr(t, err, true)
 	require.Empty(t, policies)
@@ -1533,5 +1572,108 @@ func TestRLSSpaceEnableExistingData(t *testing.T) {
 	after, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
 	common.CheckErr(t, err, true)
 	require.Equal(t, policies, after)
+	checkRLSSpaceStored(ctx, t, mc, name, rows)
+}
+
+func TestRLSSpaceAddNullableFieldsExistingData(t *testing.T) {
+	ctx := hp.CreateContext(t, 12*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+	name, rows := prepareRLSSpaces(ctx, t, mc, false, true)
+	input := func(row rlsSpaceRow) map[string]any {
+		value := map[string]any{"id": row.ID, "tenant": row.Tenant, "spaces": row.Spaces, "access": row.Access, "resource": row.Resource, "content": row.Content, "vector": row.Vector}
+		for _, field := range row.NullFields {
+			value[field] = nil
+		}
+		return value
+	}
+	// Backfill creates new versions; resource_0 retains implicit NULLs in old segments.
+	var updates []any
+	for id, row := range rows {
+		if row.Resource == "resource_0" {
+			continue
+		}
+		switch row.Resource {
+		case "resource_1":
+			row.Tenant, row.Spaces, row.NullFields = "tenant_0", []string{"tenant_0/red"}, []string{"access"}
+		case "resource_2":
+			row.Tenant, row.Access, row.NullFields = "tenant_0", []string{"member_1"}, []string{"spaces"}
+		case "resource_3":
+			row.Spaces, row.Access, row.NullFields = []string{"tenant_0/red"}, []string{"member_0"}, []string{"tenant"}
+		case "resource_4":
+			row.Tenant, row.Spaces, row.Access, row.NullFields = "tenant_0", []string{}, []string{}, nil
+		}
+		value := input(row)
+		for _, field := range []string{"resource", "content", "vector"} {
+			delete(value, field)
+		}
+		updates = append(updates, value)
+		rows[id] = row
+	}
+	_, err := mc.Upsert(ctx, client.NewRowBasedInsertOption(name, updates...).WithPartialUpdate(true))
+	common.CheckErr(t, err, true)
+	checkRLSSpaceStored(ctx, t, mc, name, rows)
+	configureRLSSpaces(ctx, t, mc, name)
+	result, err := mc.Query(ctx, client.NewQueryOption(name).WithOutputFields("*").WithFilter("id >= 0").WithRLSPrincipal("unknown"))
+	common.CheckErr(t, err, true)
+	checkRLSSpaceResult(t, result, rows)
+	common.CheckErr(t, mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(name).WithProperty("rls.enabled", true)), true)
+	for principal, resources := range map[string][]string{"member_0": {"resource_1"}, "member_1": {"resource_2"}, "unknown": {}} {
+		checkRLSSpaceReads(ctx, t, mc, name, principal, rows, resources...)
+	}
+
+	// NULL access permits a space writer; NULL tenant or space fails its write checks.
+	for _, field := range []string{"tenant", "spaces"} {
+		_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": int64(2), field: nil}).WithPartialUpdate(true).WithRLSPrincipal("member_0"))
+		common.CheckErr(t, err, false, "RLS")
+		fresh := input(rows[2])
+		fresh["id"], fresh[field], fresh["vector"] = int64(5001), nil, common.GenFloatVector(128)
+		_, err = mc.Insert(ctx, client.NewRowBasedInsertOption(name, fresh).WithRLSPrincipal("member_0"))
+		common.CheckErr(t, err, false, "RLS")
+		checkRLSSpaceStored(ctx, t, mc, name, rows)
+	}
+	omitted := input(rows[2])
+	omitted["id"], omitted["vector"] = int64(5001), common.GenFloatVector(128)
+	for _, field := range []string{"tenant", "spaces", "access"} {
+		delete(omitted, field)
+	}
+	_, err = mc.Insert(ctx, client.NewRowBasedInsertOption(name, omitted).WithRLSPrincipal("member_0"))
+	common.CheckErr(t, err, false, "RLS")
+	fresh := rows[2]
+	fresh.ID, fresh.Vector = 5001, common.GenFloatVector(128)
+	_, err = mc.Insert(ctx, client.NewRowBasedInsertOption(name, input(fresh)).WithRLSPrincipal("member_0"))
+	common.CheckErr(t, err, true)
+	fresh.Content = "full_update"
+	_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, input(fresh)).WithRLSPrincipal("member_0"))
+	common.CheckErr(t, err, true)
+	_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": int64(5001), "content": "partial_update", "access": nil}).WithPartialUpdate(true).WithRLSPrincipal("member_0"))
+	common.CheckErr(t, err, true)
+	fresh.Content = "partial_update"
+	rows[5001] = fresh
+	checkRLSSpaceStored(ctx, t, mc, name, rows)
+	deleted, err := mc.Delete(ctx, client.NewDeleteOption(name).WithInt64IDs("id", []int64{5001, 1, 3001, 3501}).WithRLSPrincipal("member_0"))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 1, deleted.DeleteCount)
+	delete(rows, 5001)
+	checkRLSSpaceStored(ctx, t, mc, name, rows)
+
+	// A trusted migration job can resume backfill after enforcement is enabled.
+	updates = nil
+	for id, row := range rows {
+		if row.Resource != "resource_0" {
+			continue
+		}
+		row.Tenant, row.Spaces, row.NullFields = "tenant_0", []string{"tenant_0/red"}, []string{"access"}
+		updates = append(updates, map[string]any{"id": id, "tenant": row.Tenant, "spaces": row.Spaces})
+		rows[id] = row
+	}
+	_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, updates...).WithPartialUpdate(true).WithSkipRLS(true))
+	common.CheckErr(t, err, true)
+	checkRLSSpaceReads(ctx, t, mc, name, "member_0", rows, "resource_0", "resource_1")
+	checkRLSSpaceReads(ctx, t, mc, name, "member_1", rows, "resource_2")
+	common.CheckErr(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)), true)
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, load.Await(ctx), true)
+	checkRLSSpaceReads(ctx, t, mc, name, "member_0", rows, "resource_0", "resource_1")
 	checkRLSSpaceStored(ctx, t, mc, name, rows)
 }
