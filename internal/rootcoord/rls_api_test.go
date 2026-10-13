@@ -53,19 +53,19 @@ func TestRLSProtoRequestConversion(t *testing.T) {
 	require.Equal(t, []rlsutil.PolicyAction{rlsutil.PolicyActionQuery, rlsutil.PolicyActionUpsert}, req.GetActions())
 	defaultTypeReq := createRowPolicyRequestFromProto(&milvuspb.CreateRowPolicyRequest{})
 	require.Equal(t, rlsutil.PolicyTypePermissive, defaultTypeReq.GetPolicyType())
+	explicitUnknown := createRowPolicyRequestFromProto(&milvuspb.CreateRowPolicyRequest{
+		PolicyType: milvuspb.RowPolicyType_RowPolicyTypeUnknown.Enum(),
+	})
+	require.Equal(t, rlsutil.PolicyTypeUnknown, explicitUnknown.GetPolicyType())
+	require.Equal(t, rlsutil.PolicyTypeUnknown, updateRowPolicyRequestFromProto(&milvuspb.UpdateRowPolicyRequest{}).GetPolicyType())
+	actions := []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Query}
+	create := createRowPolicyRequestFromProto(&milvuspb.CreateRowPolicyRequest{Actions: actions})
+	update := updateRowPolicyRequestFromProto(&milvuspb.UpdateRowPolicyRequest{Actions: actions})
+	actions[0] = milvuspb.RowPolicyAction_Delete
+	require.Equal(t, []rlsutil.PolicyAction{rlsutil.PolicyActionQuery}, create.Actions)
+	require.Equal(t, []rlsutil.PolicyAction{rlsutil.PolicyActionQuery}, update.Actions)
 	require.Nil(t, createRowPolicyRequestFromProto(nil))
 	require.Nil(t, updateRowPolicyRequestFromProto(nil))
-}
-
-func TestRLSPolicyActionValuesMatchPublicProto(t *testing.T) {
-	require.Equal(t, int32(milvuspb.RowPolicyAction_Query), int32(rlsutil.PolicyActionQuery))
-	require.Equal(t, int32(milvuspb.RowPolicyAction_Search), int32(rlsutil.PolicyActionSearch))
-	require.Equal(t, int32(milvuspb.RowPolicyAction_Insert), int32(rlsutil.PolicyActionInsert))
-	require.Equal(t, int32(milvuspb.RowPolicyAction_Delete), int32(rlsutil.PolicyActionDelete))
-	require.Equal(t, int32(milvuspb.RowPolicyAction_Upsert), int32(rlsutil.PolicyActionUpsert))
-	require.Equal(t, int32(milvuspb.RowPolicyAction_QueryIterator), int32(rlsutil.PolicyActionQueryIterator))
-	require.Equal(t, int32(milvuspb.RowPolicyAction_SearchIterator), int32(rlsutil.PolicyActionSearchIterator))
-	require.Equal(t, int32(milvuspb.RowPolicyAction_HybridSearch), int32(rlsutil.PolicyActionHybridSearch))
 }
 
 func TestCoreRejectsLegacyRowPolicyRoles(t *testing.T) {

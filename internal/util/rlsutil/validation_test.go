@@ -46,6 +46,28 @@ func arrayTagValueForTest(values []TagValue) (TagValue, error) {
 	return TagValue{Kind: TagValueKindArray, arrayValue: array}, nil
 }
 
+func TestPolicyEnumCompatibility(t *testing.T) {
+	paramtable.Init()
+	for _, policyType := range []PolicyType{PolicyTypeUnknown, -1, 100} {
+		err := ValidateStoredPolicy("policy", policyType, []PolicyAction{PolicyActionQuery}, "true", "")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Contains(t, err.Error(), "invalid RLS policy type: RowPolicyTypeUnknown")
+	}
+	for _, action := range []PolicyAction{-1, 100} {
+		err := ValidateStoredPolicy("policy", PolicyTypePermissive, []PolicyAction{action}, "true", "")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Contains(t, err.Error(), "invalid RLS policy action: Unknown")
+		require.Equal(t, "unknown", PolicyActionOperation(action))
+	}
+	for action, operation := range map[PolicyAction]string{
+		PolicyActionQuery: "query", PolicyActionSearch: "search", PolicyActionInsert: "insert",
+		PolicyActionDelete: "delete", PolicyActionUpsert: "upsert", PolicyActionQueryIterator: "query iterator",
+		PolicyActionSearchIterator: "search iterator", PolicyActionHybridSearch: "hybrid search",
+	} {
+		require.Equal(t, operation, PolicyActionOperation(action))
+	}
+}
+
 func TestValidatePayloadBounds(t *testing.T) {
 	paramtable.Init()
 

@@ -365,6 +365,10 @@ type MetaCache struct {
 	mu             sync.RWMutex
 	credMut        sync.RWMutex
 
+	// Lock before mu; drain the entire singleflight before evicting so new
+	// requests cannot reuse a pre-DDL result after invalidation completes.
+	fillMu sync.RWMutex
+
 	sfGlobal conc.Singleflight[*collectionInfo]
 	sfDB     conc.Singleflight[*databaseInfo]
 
@@ -640,6 +644,9 @@ func buildSfKeyById(database string, collectionID UniqueID) string {
 }
 
 func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName string) (*collectionInfo, error) {
+	m.fillMu.RLock()
+	defer m.fillMu.RUnlock()
+
 	collection, err, _ := m.sfGlobal.Do(buildSfKeyByName(database, collectionName), func() (*collectionInfo, error) {
 		return m.update(ctx, database, collectionName, 0)
 	})
@@ -656,6 +663,9 @@ func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName s
 }
 
 func (m *MetaCache) UpdateByID(ctx context.Context, database string, collectionID UniqueID) (*collectionInfo, error) {
+	m.fillMu.RLock()
+	defer m.fillMu.RUnlock()
+
 	collection, err, _ := m.sfGlobal.Do(buildSfKeyById(database, collectionID), func() (*collectionInfo, error) {
 		return m.update(ctx, database, "", collectionID)
 	})
@@ -1059,6 +1069,9 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 }
 
 func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionName string, version uint64) {
+	m.fillMu.Lock()
+	defer m.fillMu.Unlock()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1089,6 +1102,9 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 }
 
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
+	m.fillMu.Lock()
+	defer m.fillMu.Unlock()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
