@@ -20,6 +20,14 @@ type (
 	Append = func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
 )
 
+// MessageWriteGuard coordinates writes before their visibility timestamp is
+// allocated. CommitTxn is presented only after all its admitted bodies finish.
+// The returned context may retain decoded write metadata for later interceptors.
+// The release function runs after transaction, acknowledgement and MVCC publication.
+type MessageWriteGuard interface {
+	Acquire(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error)
+}
+
 // InterceptorBuildParam is the parameter to build a interceptor.
 type InterceptorBuildParam struct {
 	ChannelInfo            types.PChannelInfo
@@ -32,6 +40,7 @@ type InterceptorBuildParam struct {
 	TxnManager             *txn.TxnManager              // The transaction manager for the wal, used to manage the transactions.
 	ShardManager           shards.ShardManager          // The shard manager for the wal, used to manage the shards, segment assignment, partition.
 	ReplicateManager       replicates.ReplicatesManager // The replicates manager for the wal, used to manage the replicates.
+	WriteGuard             MessageWriteGuard            // Optional per-write admission before timestamp allocation.
 }
 
 // Clear release the resources in the interceptor build param.

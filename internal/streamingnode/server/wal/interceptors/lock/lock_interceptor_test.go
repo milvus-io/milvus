@@ -122,6 +122,8 @@ func TestAcquireLockGuard(t *testing.T) {
 		assert.True(t, interceptor.glock.TryRLock())
 		interceptor.glock.RUnlock()
 		assert.False(t, interceptor.vchannelLocker.TryLock(testVChannel))
+		assert.True(t, interceptor.vchannelLocker.TryRLock(testVChannel), "CAS commit must keep the shard lock shareable")
+		interceptor.vchannelLocker.RUnlock(testVChannel)
 		assert.True(t, interceptor.vchannelLocker.TryLock("other-vchannel"))
 		interceptor.vchannelLocker.Unlock("other-vchannel")
 		guard()
@@ -182,7 +184,7 @@ func TestAcquireLockGuard(t *testing.T) {
 	})
 }
 
-func TestPartialUpdateCASCommitWaitsForSameVChannelWriter(t *testing.T) {
+func TestPartialUpdateCASCommitSharesShardLockWithWriter(t *testing.T) {
 	interceptor := newTestInterceptor()
 	writer := newLockTestInsertMessage(testVChannel)
 	commit := newLockTestCASCommit(t, testVChannel)
@@ -211,18 +213,12 @@ func TestPartialUpdateCASCommitWaitsForSameVChannelWriter(t *testing.T) {
 
 	select {
 	case <-commitEntered:
+	case <-time.After(time.Second):
 		close(releaseWriter)
-		require.NoError(t, <-writerDone)
-		t.Fatal("CAS commit entered while a same-vchannel writer still held the read lock")
-	case <-time.After(20 * time.Millisecond):
+		t.Fatal("CAS commit still acquired an exclusive shard lock")
 	}
 	close(releaseWriter)
 	require.NoError(t, <-writerDone)
-	select {
-	case <-commitEntered:
-	case <-time.After(time.Second):
-		t.Fatal("CAS commit did not resume after the writer released the lock")
-	}
 	require.NoError(t, <-commitDone)
 }
 
