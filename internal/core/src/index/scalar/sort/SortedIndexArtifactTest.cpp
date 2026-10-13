@@ -27,6 +27,8 @@
 #include "index/scalar/sort/SortedIndexFormat.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
+#include <string>
+#include "index/scalar/sort/SortedIndexReader.h"
 
 namespace milvus::index::test {
 namespace {
@@ -251,6 +253,31 @@ TEST(SortedIndexArtifactTest, TruncatedStringPayloadIsRejected) {
 
     ExpectSegcoreError(ErrorCode::DataFormatBroken,
                        [&] { static_cast<void>(OpenV3(backend, persisted)); });
+}
+
+TEST(SortedIndexArtifactTest, HeapMemoryCountsInlinePostingStorageOnce) {
+    std::vector<std::string> values{"a", "b"};
+    std::vector<SortedStringPostingList> postings{{0, 1, 2, 3}, {4}};
+    const auto expected = values.capacity() * sizeof(std::string) +
+                          postings.capacity() * sizeof(SortedStringPostingList);
+    auto layout =
+        SortedStringLayout::FromHeap(std::move(values), std::move(postings), 5);
+    EXPECT_EQ(layout->MemoryUsage(), expected);
+    EXPECT_EQ(layout->Posting(0).size, 4);
+    EXPECT_EQ(layout->Posting(0).At(3), 3);
+}
+
+TEST(SortedIndexArtifactTest, HeapMemoryIncludesSpilledPostingStorage) {
+    std::vector<std::string> values{"a"};
+    std::vector<SortedStringPostingList> postings{{0, 1, 2, 3, 4, 5, 6, 7}};
+    const auto expected =
+        values.capacity() * sizeof(std::string) +
+        postings.capacity() * sizeof(SortedStringPostingList) +
+        postings.front().capacity() * sizeof(uint32_t);
+    auto layout =
+        SortedStringLayout::FromHeap(std::move(values), std::move(postings), 8);
+    EXPECT_EQ(layout->MemoryUsage(), expected);
+    EXPECT_EQ(layout->Posting(0).At(7), 7);
 }
 
 }  // namespace
