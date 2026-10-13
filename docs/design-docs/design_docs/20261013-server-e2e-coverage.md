@@ -1,8 +1,17 @@
-# Go and C++ coverage for server E2E tests
+# MEP: Go and C++ coverage for server E2E tests
 
-Related issue: https://github.com/milvus-io/milvus/issues/54200
+- **Created:** 2026-10-13
+- **Author(s):** @zhuwenxing
+- **Status:** Draft
+- **Component:** Other (build and test infrastructure)
+- **Related Issues:** #54200
 
-## Problem and scope
+## Summary
+
+Provide an opt-in Go/C++ server build and local runtime snapshots for E2E
+coverage collection, with matching build metadata and reporting tools.
+
+## Motivation
 
 SDK and REST tests exercise a long-running server across Go and C++ boundaries.
 Unit-test coverage does not measure those server processes. This design provides
@@ -13,7 +22,16 @@ Compiler optimization remains controlled by the normal build mode; optimization
 and inlining can merge or remove C++ source lines, so coverage reflects the
 instrumented binary rather than a guarantee about every original source line.
 
-## Build contract
+## Public Interfaces
+
+The new interfaces are the `USE_SERVER_COVERAGE=ON` build option,
+`MILVUS_COVERAGE_DIR` runtime environment variable, and the packaging/export
+scripts described below. There are no new RPCs, SDK APIs, metrics, or production
+configuration keys.
+
+## Design Details
+
+### Build contract
 
 In a configured Milvus Linux build environment:
 
@@ -40,7 +58,7 @@ the matching `gcov` and Go `covdata` decoders. Keep this bundle paired with the
 exact server binary and shared libraries. A source update requires rebuilding
 all of these artifacts; coverage data must not be mixed across builds.
 
-## Runtime contract
+### Runtime contract
 
 Use a fresh, writable absolute directory for each process:
 
@@ -83,7 +101,7 @@ For remote collection, save the archive inside the container before downloading
 it. A failed stream must not be mistaken for a valid archive. Verify its size and
 checksum after transfer, and retain raw data when report conversion fails.
 
-## Snapshot protocol and artifacts
+### Snapshot protocol and artifacts
 
 Create an empty file `requests/<id>`, where `<id>` is 32 lowercase hexadecimal
 characters. The collector processes requests serially and creates an exclusive
@@ -113,7 +131,7 @@ process, which would count earlier work more than once.
 A crash, OOM kill, forced termination, or removed pod can lose unexported data.
 This mechanism neither stops the server nor guarantees crash persistence.
 
-## Distributed reporting
+### Distributed reporting
 
 Collect one snapshot from every participating Milvus process before teardown,
 including proxies, coordinators and worker nodes. Record pod UID, container ID,
@@ -131,7 +149,14 @@ collector itself when reporting application Go coverage.
 Report Go statement coverage and C++ line coverage separately. They have
 different denominators and must not be averaged into a single percentage.
 
-## Validation
+## Compatibility, Deprecation, and Migration Plan
+
+The default is OFF. Existing binaries, deployment manifests, and unit-test
+coverage targets require no migration. Coverage builds use separate artifacts
+and should not replace normal production images. Old raw coverage files are
+build-specific and are not upgraded or merged across source revisions.
+
+## Test Plan
 
 Collector tests exercise raw snapshot copying, duplicate IDs, malformed IDs,
 conflicting/stale directories, Go writer failures, absent native counters,
@@ -139,3 +164,22 @@ copy errors, and persistent native dump failures. Full validation also requires
 an instrumented Linux/GCC build, a live SDK workload against that build, and
 successful report decoding with observed hits in both Go and C++ business code.
 Normal builds must continue to compile without the collector/native hook.
+
+## Rejected Alternatives
+
+- `go test` binaries: they do not provide the ordinary server build used by SDK
+  and REST E2E tests.
+- Exit-only collection: Go and native shutdown paths differ, and stopping a
+  distributed server complicates collection. Explicit live snapshots give the
+  test runner a completion/failure result before teardown.
+- A new HTTP endpoint: local filesystem access is sufficient for test runners
+  with container access and avoids another network interface.
+- Downstream source rewriting: keeping build flags and startup hooks in Milvus
+  makes upstream refactoring testable through a supported contract.
+
+## References
+
+- [Enhancement issue #54200](https://github.com/milvus-io/milvus/issues/54200)
+- [Go application coverage](https://go.dev/doc/build-cover)
+- [Go runtime/coverage](https://pkg.go.dev/runtime/coverage)
+- [GCC runtime coverage](https://gcc.gnu.org/onlinedocs/gcc/Gcov-and-Optimization.html)
