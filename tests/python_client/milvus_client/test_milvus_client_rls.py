@@ -217,7 +217,7 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
         # Unique PKs allow an exact sorted comparison without the generic checker's quadratic matching.
         assert sorted(result, key=lambda row: row["id"]) == sorted(rls_values(expected), key=lambda row: row["id"])
 
-    def _check_stored(self, client, name, rows):
+    def _check_stored(self, client, name, rows, owner_policy=True):
         self._check_rows(client, name, rows, skip_rls=True)
         vectors, _ = self.query(client, name, filter="owner != ''", output_fields=["id", "vector"], skip_rls=True)
         assert sorted(row["id"] for row in vectors) == sorted(row["id"] for row in rows)
@@ -233,8 +233,9 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                 assert got == {index: float(np.float32(value)) for index, value in want.items()}
             else:
                 np.testing.assert_array_equal(got, np.asarray(want, dtype=np.float32))
-        for principal in ["alice", "bob", "nobody"]:
-            self._check_rows(client, name, [r for r in rows if r["owner"] == principal], rls_principal=principal)
+        if owner_policy:
+            for principal in ["alice", "bob", "nobody"]:
+                self._check_rows(client, name, [r for r in rows if r["owner"] == principal], rls_principal=principal)
 
     @pytest.fixture
     def rls_import_file(self, minio_host, minio_bucket, tmp_path):
@@ -317,7 +318,7 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
             self.refresh_load(client, name)
         if mode == "forced_skip":
             self.alter_collection_properties(client, name, {"rls.force": False})
-        self._check_rows(client, name, rows, skip_rls=True)
+        self._check_stored(client, name, rows, owner_policy=mode != "tags")
         visible = (
             [row for row in rows if row["department"] == "eng"]
             if mode == "tags"
