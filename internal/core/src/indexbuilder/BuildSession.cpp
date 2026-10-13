@@ -17,7 +17,6 @@
 #include "indexbuilder/BuildSession.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cctype>
 #include <cstdint>
 #include <exception>
@@ -289,40 +288,6 @@ NormalizeJsonPath(index::BuildParams& params, const std::string& canonical) {
 }
 
 int64_t
-ParseBinlogSequence(const std::string& path) {
-    const auto slash = path.find_last_of('/');
-    const auto name = std::string_view(path).substr(
-        slash == std::string::npos ? 0 : slash + 1);
-    int64_t sequence = 0;
-    const auto [end, error] =
-        std::from_chars(name.data(), name.data() + name.size(), sequence);
-    if (name.empty() || error != std::errc{} ||
-        end != name.data() + name.size()) {
-        ThrowInfo(DataFormatBroken,
-                  "insert binlog path has a non-numeric filename: {}",
-                  path);
-    }
-    return sequence;
-}
-
-void
-SortBinlogPaths(std::vector<std::string>& paths) {
-    std::vector<std::pair<int64_t, std::string>> sequenced;
-    sequenced.reserve(paths.size());
-    for (auto& path : paths) {
-        sequenced.emplace_back(ParseBinlogSequence(path), std::move(path));
-    }
-    std::sort(sequenced.begin(),
-              sequenced.end(),
-              [](const auto& left, const auto& right) {
-                  return left.first < right.first;
-              });
-    for (size_t i = 0; i < sequenced.size(); ++i) {
-        paths[i] = std::move(sequenced[i].second);
-    }
-}
-
-int64_t
 MissingBatchRows(size_t estimated_row_bytes, int64_t remaining) {
     estimated_row_bytes = std::max<size_t>(1, estimated_row_bytes);
     const auto bytes_limited =
@@ -363,7 +328,7 @@ VisitBuildField(const BuildSource& build_source,
                                ? storage::VisitOutcome::FieldMissing
                                : storage::VisitOutcome::Exhausted;
                 }
-                SortBinlogPaths(files);
+                storage::SortBinlogPaths(files);
 
                 const auto slice_size = FILE_SLICE_SIZE.load();
                 AssertInfo(slice_size > 0,

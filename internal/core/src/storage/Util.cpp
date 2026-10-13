@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <deque>
 #include <filesystem>
@@ -22,6 +23,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <string_view>
 #include "common/FastMem.h"
 
 #include "arrow/array/builder_binary.h"
@@ -1624,6 +1626,48 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     return field_datas;
 }
 
+namespace {
+
+int64_t
+ParseBinlogSequence(const std::string& path) {
+    const auto slash = path.find_last_of('/');
+    const auto name = std::string_view(path).substr(
+        slash == std::string::npos ? 0 : slash + 1);
+    int64_t sequence = 0;
+    const auto [end, error] =
+        std::from_chars(name.data(), name.data() + name.size(), sequence);
+    if (name.empty() || error != std::errc{} ||
+        end != name.data() + name.size()) {
+        ThrowInfo(DataFormatBroken,
+                  "insert binlog path has a non-numeric filename: {}",
+                  path);
+    }
+    return sequence;
+}
+
+}  // namespace
+
+void
+SortBinlogPaths(std::vector<std::string>& paths) {
+    if (paths.size() == 1) {
+        ParseBinlogSequence(paths.front());
+        return;
+    }
+    std::vector<std::pair<int64_t, std::string>> sequenced;
+    sequenced.reserve(paths.size());
+    for (auto& path : paths) {
+        sequenced.emplace_back(ParseBinlogSequence(path), std::move(path));
+    }
+    std::sort(sequenced.begin(),
+              sequenced.end(),
+              [](const auto& left, const auto& right) {
+                  return left.first < right.first;
+              });
+    for (size_t i = 0; i < sequenced.size(); ++i) {
+        paths[i] = std::move(sequenced[i].second);
+    }
+}
+
 // Shared implementation of the storage-v2 read path. A positive `max_rows`
 // keeps #50088's partial download: only the row groups covering
 // [offset, offset + max_rows) are read, and the visit ends once that many rows
@@ -1654,8 +1698,13 @@ VisitFieldDataFromStorageV2Paged(
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "[StorageV2] remote files size is 0");
         }
-        int64_t group_id = ExtractGroupIdFromPath(remote_chunk_files[0]);
-        column_group_files[group_id] = remote_chunk_files;
+        auto files = remote_chunk_files;
+        // This is the common boundary for BuildSession primary/optional
+        // fields and the memory/disk cache readers used by stats builds.
+        // Normalize once per group before metadata lookup or row delivery.
+        SortBinlogPaths(files);
+        const auto group_id = ExtractGroupIdFromPath(files.front());
+        column_group_files[group_id] = std::move(files);
     }
 
     std::vector<std::string> remote_chunk_files;
