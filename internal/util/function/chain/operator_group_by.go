@@ -169,83 +169,37 @@ func (o *GroupByOp) String() string {
 		o.groupByField, o.groupSize, o.limit, o.offset, o.groupScorer)
 }
 
-func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	// Validate columns exist
-	groupCol := input.Column(o.groupByField)
-	if groupCol == nil {
-		return nil, merr.WrapErrServiceInternalMsg("group_by_op: column %q not found", o.groupByField)
+func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error) {
+	if o.offset < 0 || o.limit < 0 {
+		return nil, merr.WrapErrServiceInternalMsg("group_by_op: negative internal limit or offset")
 	}
-	scoreCol := input.Column(types.ScoreFieldName)
-	if scoreCol == nil {
-		return nil, merr.WrapErrServiceInternalMsg("group_by_op: column %q not found", types.ScoreFieldName)
+	for _, name := range []string{o.groupByField, types.ScoreFieldName, types.IDFieldName} {
+		if input.Column(name) == nil {
+			return nil, merr.WrapErrServiceInternalMsg("group_by_op: column %q not found", name)
+		}
 	}
-
-	numChunks := input.NumChunks()
-	colNames := input.ColumnNames()
-
-	// Prepare collectors
-	collector := NewChunkCollector(colNames, numChunks)
-	defer collector.Release()
-
-	// Prepare group score builder
-	groupScoreChunks := make([]arrow.Array, numChunks)
-	newChunkSizes := make([]int64, numChunks)
-
-	// Release groupScoreChunks on error
-	success := false
+	selection := &RowSelection{Chunks: make([]ChunkSelection, input.NumChunks())}
+	chunks := make([]arrow.Array, input.NumChunks())
 	defer func() {
-		if !success {
-			for _, chunk := range groupScoreChunks {
-				if chunk != nil {
-					chunk.Release()
-				}
+		for _, chunk := range chunks {
+			if chunk != nil {
+				chunk.Release()
 			}
 		}
 	}()
-
-	// Process each chunk independently
-	for chunkIdx := 0; chunkIdx < numChunks; chunkIdx++ {
-		result, err := o.processChunk(ctx, input, chunkIdx)
+	for i := range chunks {
+		result, err := o.processChunk(ctx, input, i)
 		if err != nil {
 			return nil, err
 		}
-
-		newChunkSizes[chunkIdx] = int64(len(result.indices))
-		groupScoreChunks[chunkIdx] = result.groupScores
-
-		// Reorder existing columns by indices
-		for _, colName := range colNames {
-			col := input.Column(colName)
-			dataChunk := col.Chunk(chunkIdx)
-			reordered, err := dispatchPickByIndices(ctx.Pool(), dataChunk, result.indices)
-			if err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("group_by_op: reorder column %s: %v", colName, err)
-			}
-			collector.Set(colName, chunkIdx, reordered)
-		}
+		selection.Chunks[i] = RowIndices(result.indices)
+		chunks[i] = result.groupScores
 	}
-
-	// Build output DataFrame
-	builder := NewDataFrameBuilder()
-	defer builder.Release()
-
-	builder.SetChunkSizes(newChunkSizes)
-
-	// Add existing columns
-	for _, colName := range colNames {
-		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {
-			return nil, err
-		}
-		builder.CopyFieldMetadata(input, colName)
-	}
-
-	// Add group score column
-	if err := builder.AddColumnFromChunks(GroupScoreFieldName, groupScoreChunks); err != nil {
-		return nil, err
-	}
-
-	success = true
-	return builder.Build(), nil
+	col := arrow.NewChunked(arrow.PrimitiveTypes.Float32, chunks)
+	return &OperatorResult{
+		Selection: selection,
+		Columns:   []NamedColumn{{Field: arrow.Field{Name: GroupScoreFieldName, Type: col.DataType()}, Data: col}},
+	}, nil
 }
 
 // chunkResult holds the result of processing a single chunk.
@@ -306,14 +260,8 @@ func (o *GroupByOp) processChunk(ctx *types.FuncContext, input *DataFrame, chunk
 	})
 
 	// Step 5: Apply offset and limit on groups
-	startGroup := int(o.offset)
-	endGroup := int(o.offset + o.limit)
-	if startGroup > len(groups) {
-		startGroup = len(groups)
-	}
-	if endGroup > len(groups) {
-		endGroup = len(groups)
-	}
+	startGroup := min(o.offset, int64(len(groups)))
+	endGroup := startGroup + min(o.limit, int64(len(groups))-startGroup)
 	selectedGroups := groups[startGroup:endGroup]
 
 	// Step 6: Build output indices and group scores

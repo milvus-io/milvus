@@ -23,7 +23,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -75,104 +74,52 @@ func (o *FilterOp) Name() string { return "Filter" }
 
 // Inputs and Outputs are inherited from BaseOp
 
-func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	// Read input columns from DataFrame
+func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error) {
+	if o.function == nil {
+		return nil, merr.WrapErrServiceInternalMsg("filter_op: function is nil")
+	}
 	inputs, err := o.ReadInputColumns("filter_op", input)
 	if err != nil {
 		return nil, err
 	}
-
-	// Execute FunctionExpr to get boolean result
 	outputs, err := o.function.Execute(ctx, inputs)
+	defer func() {
+		for _, output := range outputs {
+			if output != nil {
+				output.Release()
+			}
+		}
+	}()
 	if err != nil {
-		return nil, merr.WrapErrFunctionFailed(err, "filter_op: function execution failed")
+		return nil, merr.Wrap(err, "filter_op: function execution failed")
 	}
-
-	// Validate output at runtime (especially important for dynamic output types)
 	if len(outputs) != 1 {
-		for _, out := range outputs {
-			if out != nil {
-				out.Release()
+		return nil, merr.WrapErrServiceInternalMsg("filter_op: function must return exactly 1 output, got %d", len(outputs))
+	}
+	mask := outputs[0]
+	if err := validateChunkedColumn(mask, input.chunkSizes); err != nil {
+		return nil, merr.Wrap(err, "filter_op: mask")
+	}
+	if mask.DataType().ID() != arrow.BOOL {
+		return nil, merr.WrapErrServiceInternalMsg("filter_op: function must return boolean type, got %s", mask.DataType().Name())
+	}
+	selection := &RowSelection{Chunks: make([]ChunkSelection, input.NumChunks())}
+	for chunkIdx, chunk := range mask.Chunks() {
+		values := chunk.(*array.Boolean)
+		indices := make([]int, 0, values.Len())
+		for row := 0; row < values.Len(); row++ {
+			// SQL filter semantics: false and NULL both exclude the row.
+			if values.IsValid(row) && values.Value(row) {
+				indices = append(indices, row)
 			}
 		}
-		return nil, merr.WrapErrFunctionFailedMsg("filter_op: function must return exactly 1 output, got %d", len(outputs))
+		selection.Chunks[chunkIdx] = RowIndices(indices)
 	}
-
-	filterCol := outputs[0]
-	defer filterCol.Release() // Release the temporary boolean column
-
-	// Validate the output is boolean type
-	if filterCol.DataType().ID() != arrow.BOOL {
-		return nil, merr.WrapErrFunctionFailedMsg("filter_op: function must return boolean type, got %s", filterCol.DataType().Name())
-	}
-
-	// Create builder for result DataFrame
-	builder := NewDataFrameBuilder()
-	defer builder.Release()
-
-	// Process each chunk - extract boolean chunks with type safety
-	newChunkSizes := make([]int64, 0, input.NumChunks())
-	filterChunks := make([]*array.Boolean, input.NumChunks())
-	for chunkIdx := range input.NumChunks() {
-		boolChunk, ok := filterCol.Chunk(chunkIdx).(*array.Boolean)
-		if !ok {
-			return nil, merr.WrapErrFunctionFailedMsg("filter_op: chunk %d is not a boolean array", chunkIdx)
-		}
-		filterChunks[chunkIdx] = boolChunk
-
-		// Count true values
-		trueCount := int64(0)
-		for i := range boolChunk.Len() {
-			if boolChunk.IsValid(i) && boolChunk.Value(i) {
-				trueCount++
-			}
-		}
-		newChunkSizes = append(newChunkSizes, trueCount)
-	}
-
-	builder.SetChunkSizes(newChunkSizes)
-
-	// Use ChunkCollector for filtered chunks
-	colNames := input.ColumnNames()
-	collector := NewChunkCollector(colNames, input.NumChunks())
-	defer collector.Release()
-
-	// Filter each column
-	for _, colName := range colNames {
-		col := input.Column(colName)
-
-		for chunkIdx := range input.NumChunks() {
-			dataChunk := col.Chunk(chunkIdx)
-
-			filtered, err := filterArray(ctx.Pool(), dataChunk, filterChunks[chunkIdx])
-			if err != nil {
-				return nil, merr.WrapErrFunctionFailed(err, "filter_op: column %s", colName)
-			}
-			collector.Set(colName, chunkIdx, filtered)
-		}
-
-		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {
-			return nil, err
-		}
-		builder.CopyFieldMetadata(input, colName)
-	}
-
-	return builder.Build(), nil
+	return &OperatorResult{Selection: selection}, nil
 }
 
 func (o *FilterOp) String() string {
 	return fmt.Sprintf("Filter(%s)", o.function.Name())
-}
-
-// filterArray filters an array based on a boolean mask.
-func filterArray(pool memory.Allocator, data arrow.Array, mask *array.Boolean) (arrow.Array, error) {
-	indices := make([]int, 0, mask.Len())
-	for i := range mask.Len() {
-		if mask.IsValid(i) && mask.Value(i) {
-			indices = append(indices, i)
-		}
-	}
-	return dispatchPickByIndices(pool, data, indices)
 }
 
 // NewFilterOpFromRepr creates a FilterOp from an OperatorRepr.
@@ -186,7 +133,7 @@ func NewFilterOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionB
 	}
 	fn, err := FunctionFromReprWithContext(repr.Function, buildCtx)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("filter function: %v", err)
+		return nil, merr.Wrap(err, "filter function")
 	}
 	if len(repr.Inputs) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("filter_op: inputs is required")
