@@ -173,3 +173,24 @@ func TestStartRejectsConflictingOrStaleOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestStartDoesNotModifyAnOwnedDirectory(t *testing.T) {
+	root := t.TempDir()
+	for _, key := range []string{"GCOV_PREFIX", "GCOV_PREFIX_STRIP", "GCOV_ERROR_FILE"} {
+		t.Setenv(key, "")
+	}
+	ready := filepath.Join(root, "ready")
+	if err := os.WriteFile(ready, []byte("owner"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := start(t.Context(), root, func() {}); err == nil {
+		t.Fatal("accepted occupied directory")
+	}
+	data, err := os.ReadFile(ready)
+	if err != nil || string(data) != "owner" {
+		t.Fatalf("owner marker changed: %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "go")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("modified owned directory before claiming it: %v", err)
+	}
+}
