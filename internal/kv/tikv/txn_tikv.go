@@ -21,12 +21,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	tikverr "github.com/tikv/client-go/v2/error"
 	tikv "github.com/tikv/client-go/v2/kv"
+	"github.com/tikv/client-go/v2/oracle"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"github.com/tikv/client-go/v2/txnkv/txnsnapshot"
@@ -125,6 +127,11 @@ var (
 	writeTxnRetryAttempts = uint(5)
 	writeTxnRetrySleep    = 200 * time.Millisecond
 )
+
+// pessimisticLockWait is the longest time that one pessimistic lock attempt
+// on the predicate keys waits for another transaction that holds the lock.
+// Declared as a var so tests can lower it.
+var pessimisticLockWait = 3 * time.Second
 
 var EmptyValueByte = []byte(EmptyValueString)
 
@@ -226,8 +233,11 @@ func (kv *txnTiKV) Has(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
+// rollbackOnFailure rolls back a failed transaction when EnableRollback is
+// set, and always rolls back a failed pessimistic transaction, which holds
+// locks that would otherwise stay until their TTL ends.
 func rollbackOnFailure(err *error, txn *transaction.KVTxn) {
-	if *err != nil && EnableRollback == true {
+	if *err != nil && (EnableRollback || txn.IsPessimistic()) {
 		txn.Rollback()
 	}
 }
@@ -496,15 +506,91 @@ func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
-// checkPredicates evaluates each predicate against txn. It returns an error
-// marked as predicate-not-met when a predicate does not hold, an unmarked IO
-// error when the target key cannot be read, and a build-abort ParameterInvalid
-// error for an invalid predicate, which is rejected before any read.
-func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate) error {
+// guardsUnwrittenKey reports whether a value predicate targets a key for which
+// written returns false.
+func guardsUnwrittenKey(preds []predicates.Predicate, written func(key string) bool) bool {
+	for _, pred := range preds {
+		if pred.Target() == predicates.PredTargetValue && !written(pred.Key()) {
+			return true
+		}
+	}
+	return false
+}
+
+// beginPredicateTxn prepares txn for preds. TiKV transactions are optimistic,
+// and an optimistic transaction detects a conflict only on the keys that it
+// writes or locks; even a key locked without a write conflicts with every
+// later transaction that locks it. When a value predicate targets a key that
+// the call does not write, as a guard on another record, the transaction
+// becomes pessimistic and takes a pessimistic lock on every predicate key at a
+// fresh timestamp. Concurrent guarded writes then wait for each other instead
+// of failing, and a concurrent change of a guarded key either waits for the
+// lock or is seen by the predicate. It returns the locked values by key, or
+// nil when the transaction stays optimistic.
+func (kv *txnTiKV) beginPredicateTxn(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate, written func(key string) bool) (map[string]tikv.ReturnedValue, error) {
+	if !guardsUnwrittenKey(preds, written) {
+		return nil, nil
+	}
+	if err := checkPredicateShapes(preds); err != nil {
+		return nil, err
+	}
+	txn.SetPessimistic(true)
+	keys := make([][]byte, 0, len(preds))
+	seen := typeutil.NewSet[string]()
+	for _, pred := range preds {
+		key := kv.GetPath(pred.Key())
+		if !seen.Contain(key) {
+			seen.Insert(key)
+			keys = append(keys, []byte(key))
+		}
+	}
+	for {
+		forUpdateTS, err := kv.txn.CurrentTimestamp(oracle.GlobalTxnScope)
+		if err != nil {
+			return nil, merr.WrapErrIoFailedReason("failed to get the timestamp of the predicate lock", err.Error())
+		}
+		lockCtx := tikv.NewLockCtx(forUpdateTS, pessimisticLockWait.Milliseconds(), time.Now())
+		lockCtx.InitReturnValues(len(keys))
+		err = txn.LockKeys(ctx, lockCtx, keys...)
+		if err == nil {
+			return lockCtx.Values, nil
+		}
+		// the key changed after forUpdateTS, for example while the lock
+		// waited for another writer: lock again at a newer timestamp, until
+		// the request times out
+		if tikverr.IsErrWriteConflict(err) && ctx.Err() == nil {
+			continue
+		}
+		return nil, merr.WrapErrIoFailedReason("failed to lock the predicate keys", err.Error())
+	}
+}
+
+// checkPredicateShapes rejects an invalid predicate before any read.
+func checkPredicateShapes(preds []predicates.Predicate) error {
 	for _, pred := range preds {
 		switch pred.Target() {
 		case predicates.PredTargetValue:
-			val, exists, err := kv.readPredicateTarget(ctx, txn, pred)
+		case predicates.PredTargetKeyExistence:
+			if pred.Type() != predicates.PredTypeNotExist {
+				return markBuildAbort(merr.WrapErrParameterInvalid("valid key existence predicate type", fmt.Sprintf("%d", pred.Type())))
+			}
+		default:
+			return markBuildAbort(merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target())))
+		}
+	}
+	return nil
+}
+
+// checkPredicates evaluates each predicate against txn, or against locked
+// when it is not nil (the values from beginPredicateTxn). It returns an error
+// marked as predicate-not-met when a predicate does not hold, an unmarked IO
+// error when the target key cannot be read, and a build-abort ParameterInvalid
+// error for an invalid predicate, which is rejected before any read.
+func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate, locked map[string]tikv.ReturnedValue) error {
+	for _, pred := range preds {
+		switch pred.Target() {
+		case predicates.PredTargetValue:
+			val, exists, err := kv.readPredicateTarget(ctx, txn, pred, locked)
 			if err != nil {
 				return err
 			}
@@ -518,7 +604,7 @@ func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, 
 			if pred.Type() != predicates.PredTypeNotExist {
 				return markBuildAbort(merr.WrapErrParameterInvalid("valid key existence predicate type", fmt.Sprintf("%d", pred.Type())))
 			}
-			_, exists, err := kv.readPredicateTarget(ctx, txn, pred)
+			_, exists, err := kv.readPredicateTarget(ctx, txn, pred, locked)
 			if err != nil {
 				return err
 			}
@@ -532,9 +618,14 @@ func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, 
 	return nil
 }
 
-// readPredicateTarget reads the target key of pred inside txn. A missing key
-// returns exists=false and no error; any other read failure is an IO error.
-func (kv *txnTiKV) readPredicateTarget(ctx context.Context, txn *transaction.KVTxn, pred predicates.Predicate) ([]byte, bool, error) {
+// readPredicateTarget reads the target key of pred inside txn, or from locked
+// when it is not nil. A missing key returns exists=false and no error; any
+// other read failure is an IO error.
+func (kv *txnTiKV) readPredicateTarget(ctx context.Context, txn *transaction.KVTxn, pred predicates.Predicate, locked map[string]tikv.ReturnedValue) ([]byte, bool, error) {
+	if locked != nil {
+		v := locked[kv.GetPath(pred.Key())]
+		return v.Value, v.Exists, nil
+	}
 	val, err := txn.Get(ctx, []byte(kv.GetPath(pred.Key())))
 	if err != nil {
 		if errors.Is(err, tikverr.ErrNotExist) {
@@ -559,8 +650,13 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	removeKeys := typeutil.NewSet(removals...)
 	removals = removeKeys.Complement(saveKeys).Collect()
 
+	written := func(key string) bool { return saveKeys.Contain(key) || removeKeys.Contain(key) }
 	loggingErr = kv.runWriteTxnWithRetry(ctx, "MultiSaveAndRemove", func(txn *transaction.KVTxn) error {
-		if err := kv.checkPredicates(ctx, txn, preds); err != nil {
+		locked, err := kv.beginPredicateTxn(ctx, txn, preds, written)
+		if err != nil {
+			return err
+		}
+		if err := kv.checkPredicates(ctx, txn, preds, locked); err != nil {
 			return err
 		}
 
@@ -600,8 +696,18 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	var loggingErr error
 	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveWithPrefix() error", mlog.Strings("saveKeys", lo.Keys(saves)), mlog.Strings("removes", removals), mlog.Int("saveLength", len(saves)), mlog.Int("removeLength", len(removals)))
 
+	written := func(key string) bool {
+		if _, ok := saves[key]; ok {
+			return true
+		}
+		return lo.SomeBy(removals, func(prefix string) bool { return strings.HasPrefix(key, prefix) })
+	}
 	loggingErr = kv.runWriteTxnWithRetry(ctx, "MultiSaveAndRemoveWithPrefix", func(txn *transaction.KVTxn) error {
-		if err := kv.checkPredicates(ctx, txn, preds); err != nil {
+		locked, err := kv.beginPredicateTxn(ctx, txn, preds, written)
+		if err != nil {
+			return err
+		}
+		if err := kv.checkPredicates(ctx, txn, preds, locked); err != nil {
 			return err
 		}
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1268,4 +1269,119 @@ func TestWriteTxnRetry(t *testing.T) {
 		// The retry.Unrecoverable marker must not leak to callers.
 		assert.True(t, retry.IsRecoverable(err))
 	})
+}
+
+// Writes of many records guarded by one shared key, which none of them
+// writes, run at the same time without a failed transaction: with one write
+// attempt each, every write succeeds and the guard key does not change.
+func TestTxnGuardKeyConcurrentWrites(t *testing.T) {
+	skipOnMockTiKV(t)
+	kv := NewTiKV(txnClient, "/tikv/test/root/guard_concurrent")
+	ctx := context.TODO()
+	require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	attempts := writeTxnRetryAttempts
+	writeTxnRetryAttempts = 1
+	defer func() { writeTxnRetryAttempts = attempts }()
+
+	const guard = "claim/p"
+	require.NoError(t, kv.Save(ctx, guard, "t1"))
+	const writers = 16
+	errs := make([]error, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := fmt.Sprintf("pointer/p_1v%d", i)
+			errs[i] = kv.MultiSaveAndRemove(ctx, map[string]string{key: "v"}, nil,
+				predicates.KeyNotExist(key), predicates.ValueEqual(guard, "t1"))
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		assert.NoError(t, err, "writer %d", i)
+	}
+	keys, _, err := kv.LoadWithPrefix(ctx, "pointer/")
+	require.NoError(t, err)
+	assert.Len(t, keys, writers)
+	value, err := kv.Load(ctx, guard)
+	require.NoError(t, err)
+	assert.Equal(t, "t1", value)
+}
+
+// A change of the guard key after a guarded write began, and before it locked
+// the guard key, fails the guarded write; a guarded write after the change
+// with the old value fails too.
+func TestTxnGuardKeyChangedDuringWrite(t *testing.T) {
+	skipOnMockTiKV(t)
+	kv := NewTiKV(txnClient, "/tikv/test/root/guard_changed")
+	ctx := context.TODO()
+	require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	const guard = "claim/p"
+	require.NoError(t, kv.Save(ctx, guard, "t1"))
+
+	raised := false
+	beginTxn = func(c *txnkv.Client) (*transaction.KVTxn, error) {
+		txn, err := tiTxnBegin(c)
+		if err == nil && !raised {
+			raised = true
+			// a claim raise commits after the start timestamp of the guarded write
+			require.NoError(t, kv.Save(ctx, guard, "t2"))
+		}
+		return txn, err
+	}
+	defer func() { beginTxn = tiTxnBegin }()
+
+	err := kv.MultiSaveAndRemove(ctx, map[string]string{"pointer/a": "v"}, nil, predicates.ValueEqual(guard, "t1"))
+	require.True(t, raised)
+	assert.True(t, errors.Is(err, errPredicateNotMet), "%v", err)
+	_, err = kv.Load(ctx, "pointer/a")
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+
+	// without the pessimistic lock, the snapshot read at the start timestamp
+	// would see "t1" and the write would succeed
+	err = kv.MultiSaveAndRemove(ctx, map[string]string{"pointer/b": "v"}, nil, predicates.ValueEqual(guard, "t1"))
+	assert.True(t, errors.Is(err, errPredicateNotMet), "%v", err)
+	require.NoError(t, kv.MultiSaveAndRemove(ctx, map[string]string{"pointer/b": "v"}, nil, predicates.ValueEqual(guard, "t2")))
+}
+
+// While a guarded write holds the lock of the guard key, a write of the guard
+// key waits for it and then commits.
+func TestTxnGuardKeyWriteWaitsForGuardedWrite(t *testing.T) {
+	kv := NewTiKV(txnClient, "/tikv/test/root/guard_wait")
+	ctx := context.TODO()
+	require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	const guard = "claim/p"
+	require.NoError(t, kv.Save(ctx, guard, "t1"))
+
+	raiseErr := make(chan error, 1)
+	sawLock := false
+	commitTxn = func(c context.Context, txn *transaction.KVTxn) error {
+		if txn.IsPessimistic() {
+			sawLock = true
+			// the guard key is locked: a raise now must not overtake this write
+			go func() {
+				raiseErr <- kv.MultiSaveAndRemove(ctx, map[string]string{guard: "t2"}, nil, predicates.ValueEqual(guard, "t1"))
+			}()
+			time.Sleep(200 * time.Millisecond)
+		}
+		return tiTxnCommit(c, txn)
+	}
+	defer func() { commitTxn = tiTxnCommit }()
+
+	require.NoError(t, kv.MultiSaveAndRemove(ctx, map[string]string{"pointer/a": "v"}, nil, predicates.ValueEqual(guard, "t1")))
+	require.True(t, sawLock, "a guard on a key that the call does not write uses a pessimistic transaction")
+	require.NoError(t, <-raiseErr)
+	value, err := kv.Load(ctx, guard)
+	require.NoError(t, err)
+	assert.Equal(t, "t2", value)
 }
