@@ -18,6 +18,7 @@
 #include <memory>
 #include <utility>
 #include "common/ScopedTimer.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "log/Log.h"
 #include "query/Utils.h"
 
@@ -227,7 +228,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     if (expr_->is_in_field_) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
-        if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+        if (SegmentExpr::CanUseIndex() && use_index_ && !has_offset_input_) {
             // we create double index for json int64 field for now
             using GetType =
                 std::conditional_t<std::is_same_v<ValueType, int64_t>,
@@ -574,18 +575,6 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
     auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
-        if constexpr (std::is_same_v<GetType, int64_t>) {
-            // for int64_t, we need to a double vector to store the values
-            auto int_arg_set =
-                std::static_pointer_cast<SetElement<int64_t>>(arg_set_);
-            std::vector<double> double_vals;
-            for (const auto& val : int_arg_set->GetElements()) {
-                double_vals.emplace_back(static_cast<double>(val));
-            }
-            arg_set_double_ = std::make_shared<SetElement<double>>(double_vals);
-        } else if constexpr (std::is_same_v<GetType, double>) {
-            arg_set_double_ = arg_set_;
-        }
         arg_inited_ = true;
     }
 
@@ -612,10 +601,10 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
 
         // process shredding data
         auto try_execute = [&](milvus::index::JSONType json_type,
-                               auto GetType) {
+                               auto get_type) {
             auto target_field = index->GetShreddingField(pointer, json_type);
             if (!target_field.empty()) {
-                using ColType = decltype(GetType);
+                using ColType = decltype(get_type);
                 TargetBitmap target_res(active_count_, false);
                 TargetBitmapView target_res_view(target_res);
                 TargetBitmap target_valid(active_count_, true);
@@ -630,8 +619,12 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                             res[i] = valid_res[i] = false;
                             continue;
                         }
-                        if constexpr (std::is_same_v<ColType, double>) {
-                            res[i] = this->arg_set_double_->In(src[i]);
+                        if constexpr (std::is_same_v<GetType, int64_t> ||
+                                      std::is_same_v<GetType, double>) {
+                            auto value =
+                                ConvertJsonNumberExact<GetType>(src[i]);
+                            res[i] =
+                                value.has_value() && this->arg_set_->In(*value);
                         } else {
                             res[i] = this->arg_set_->In(src[i]);
                         }
@@ -682,11 +675,17 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                                    uint32_t value_offset) {
             if constexpr (std::is_same_v<GetType, int64_t> ||
                           std::is_same_v<GetType, double>) {
-                auto get_value =
-                    bson.ParseAsValueAtOffset<double>(value_offset);
-                if (get_value.has_value()) {
+                auto number = bson.ParseAsNumberAtOffset(value_offset);
+                if (number.has_value()) {
+                    auto value = std::visit(
+                        [](auto number) {
+                            return ConvertJsonNumberExact<GetType>(number);
+                        },
+                        *number);
                     res_view[row_offset] =
-                        this->arg_set_double_->In(get_value.value());
+                        value.has_value() && this->arg_set_->In(*value);
+                    // A numeric value that cannot convert exactly is a known
+                    // non-match, not UNKNOWN (including under NOT IN).
                     valid_res_view[row_offset] = true;
                 }
                 return;
@@ -736,6 +735,12 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
         return ExecJsonInVariableByStats<ValueType>();
     }
 
+    if (!use_index_ && !segment_->HasFieldData(field_id)) {
+        ThrowInfo(Unsupported,
+                  "Exact JSON numeric IN requires raw JSON or usable JSON "
+                  "stats; the numeric index may contain rounded int64 values");
+    }
+
     milvus::ScopedTimer timer("term_json_bruteforce", [this](double us) {
         json_filter_bruteforce_latency_us_ += us;
     });
@@ -783,25 +788,16 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            if constexpr (std::is_same_v<GetType, std::int64_t>) {
+            if constexpr (std::is_same_v<GetType, int64_t> ||
+                          std::is_same_v<GetType, double>) {
                 auto x_num = data[i].at_numeric(pointer);
                 if (x_num.error()) {
                     return std::make_pair(false, false);
                 }
-                auto n = x_num.value();
-                if (n.is_int64()) {
-                    return std::make_pair(true,
-                                          terms->In(ValueType(n.get_int64())));
-                }
-                // uint64 or double → compare as double, consistent with
-                // index/stats paths.
-                auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
-                                          : n.get_double();
-                // if the term set is {1}, and the value is 1.1, we should
-                // not return true.
-                return std::make_pair(
-                    true,
-                    std::floor(dval) == dval && terms->In(ValueType(dval)));
+                const auto value =
+                    ConvertJsonNumberExact<ValueType>(x_num.value());
+                return std::make_pair(true,
+                                      value.has_value() && terms->In(*value));
             } else {
                 auto x = data[i].template at<GetType>(pointer);
                 if (x.error()) {

@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <type_traits>
 
 #include <simdjson.h>
 
@@ -77,6 +78,56 @@ CompareInt64ToDouble(int64_t lhs, double rhs) {
         return 1;
     }
     return 0;
+}
+
+inline bool
+Int64RoundTripsThroughDouble(int64_t value) {
+    return CompareInt64ToDouble(value, static_cast<double>(value)) == 0;
+}
+
+inline std::optional<int64_t>
+DoubleToInt64Exact(double value) {
+    constexpr double kInt64Lower = -0x1p63;
+    constexpr double kInt64Upper = 0x1p63;
+    if (!std::isfinite(value) || value < kInt64Lower || value >= kInt64Upper) {
+        return std::nullopt;
+    }
+    const auto integer = static_cast<int64_t>(value);
+    return CompareInt64ToDouble(integer, value) == 0
+               ? std::optional<int64_t>(integer)
+               : std::nullopt;
+}
+
+// A homogeneous numeric term can match the other JSON numeric storage type,
+// but only when conversion preserves the value exactly.
+template <typename Target, typename Source>
+std::optional<Target>
+ConvertJsonNumberExact(Source value) {
+    static_assert(
+        (std::is_same_v<Target, int64_t> || std::is_same_v<Target, double>)&&(
+            std::is_same_v<Source, int64_t> || std::is_same_v<Source, double>));
+    if constexpr (std::is_same_v<Target, Source>) {
+        return value;
+    } else if constexpr (std::is_same_v<Target, int64_t>) {
+        return DoubleToInt64Exact(value);
+    } else {
+        return Int64RoundTripsThroughDouble(value)
+                   ? std::optional<double>(static_cast<double>(value))
+                   : std::nullopt;
+    }
+}
+
+template <typename Target>
+std::optional<Target>
+ConvertJsonNumberExact(const simdjson::ondemand::number& number) {
+    if (number.is_int64()) {
+        return ConvertJsonNumberExact<Target>(number.get_int64());
+    }
+    // JSON stats and numeric indexes store uint64 values as double.
+    const auto value = number.is_uint64()
+                           ? static_cast<double>(number.get_uint64())
+                           : number.get_double();
+    return ConvertJsonNumberExact<Target>(value);
 }
 
 inline int
