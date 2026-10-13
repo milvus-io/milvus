@@ -1,9 +1,62 @@
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from common.data_integrity_diagnostics import emit_data_integrity_event, exception_diagnostics
 
 pytest_plugins = ["pytester"]
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_data_integrity_diagnostics_unit_default_entrypoint_emits_without_log_overrides(tmp_path):
+    test_file = tmp_path / "test_entry_diagnostic_probe.py"
+    test_file.write_text(
+        "import pytest\n"
+        "from common.data_integrity_diagnostics import emit_data_integrity_event\n"
+        "@pytest.mark.tags('L3')\n"
+        "@pytest.mark.compaction_data_integrity_serial\n"
+        "def test_entry_diagnostic_probe():\n"
+        "    emit_data_integrity_event({'event': 'continuous_heartbeat', 'lane': 'import'})\n"
+        "    raise ValueError('safe entrypoint failure')\n"
+    )
+    tests_dir = Path(__file__).resolve().parents[2]
+    report_dir = tmp_path / "report"
+    env = dict(
+        os.environ,
+        PATH=f"{Path(sys.executable).parent}:{os.environ['PATH']}",
+        CI_LOG_PATH=str(report_dir),
+    )
+    env.pop("DATA_INTEGRITY_DIAGNOSTICS_PATH", None)
+    env.pop("PYTEST_ADDOPTS", None)
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        [
+            "bash",
+            str(tests_dir / "scripts/ci_compaction_integrity.sh"),
+            # Load the real repository conftest before the external probe path.
+            "milvus_client/test_milvus_client_continuous_data_integrity.py",
+            "-c",
+            str(tests_dir / "python_client/pytest.ini"),
+            str(test_file),
+            "-k",
+            "test_entry_diagnostic_probe",
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert '"event":"continuous_heartbeat"' in result.stdout
+    events = [json.loads(line) for line in (report_dir / "case-events.jsonl").read_text().splitlines()]
+    assert any(event["event"] == "continuous_heartbeat" for event in events)
+    assert any(event.get("phase") == "call" and event.get("outcome") == "failed" for event in events)
+    report = json.loads((report_dir / "test_report.json").read_text())
+    assert "continuous_heartbeat" in json.dumps(report)
 
 
 @pytest.mark.tags("CompactionIntegrityUnit")
