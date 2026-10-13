@@ -1160,3 +1160,19 @@ LoadConfig under the collection guard before triggering and waiting for schema
 handoff. This changes LoadInfoVersion because field/index membership changed,
 not because the schema revision changed. Replays are idempotent; absent load
 state is never recreated. Ordinary schema-only changes do not mutate LoadConfig.
+
+### Partial partition release completion
+
+`ReleasePartitions` holds the collection broadcast lock through both the desired
+configuration update and its serving handoff. Partial release waits on the shared
+`loadstatus.Wait` predicate: every metadata VChannel × configured replica must
+have an Up view with the current LoadInfoVersion. Older Up views and partial
+shard coverage do not confirm completion. A repeated release or an unchanged
+broadcast request must still wait for an earlier handoff. Cancellation reports
+failure without reverting the durable desired configuration.
+
+Releasing the last loaded partition uses DropLoadConfig's existing final-cleanup
+acknowledgement. If LoadConfig is already absent, repeat release drains the
+Balancer and waits for final Registry removal under the same collection lock.
+Physical cleanup of older views after a partial release continues through the
+normal serving lease/reference protocol; fresh Phase 1 plans select the new Up.

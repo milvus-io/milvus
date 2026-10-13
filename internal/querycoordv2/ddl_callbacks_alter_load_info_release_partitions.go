@@ -21,6 +21,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
+	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -41,8 +43,15 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 
 	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
 	if currentLoadConfig.Collection == nil {
-		// collection is not loaded, return success directly.
-		return true, nil
+		// A previous full release may still be cleaning up its views.
+		return true, s.waitQueryViewsReleased(ctx, req.GetCollectionID())
+	}
+	waitHandoff := func() error {
+		// Keep the collection broadcast lock until the current configuration is
+		// serving on every expected shard/replica, including on a repeated release.
+		return loadstatus.Wait(ctx, s.qviewsRuntime.loadConfigStore,
+			s.qviewsRuntime.shardViewRegistry, s.qviewsRuntime.readyChanges,
+			req.GetCollectionID(), coll.GetVirtualChannelNames(), 0, qviews.DataVersion{})
 	}
 
 	// remove the partitions that should be released.
@@ -52,9 +61,9 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 		partitionIDsSet.Remove(partitionID)
 	}
 
-	// no partition to be released, return success directly.
+	// Desired state may already exclude these partitions while handoff is pending.
 	if len(partitionIDsSet) == previousLength {
-		return false, nil
+		return false, waitHandoff()
 	}
 
 	var msg message.BroadcastMutableMessage
@@ -88,11 +97,14 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 			return false, err
 		}
 		if msg == nil {
-			// load config unchanged, nothing to broadcast.
-			return false, nil
+			return false, waitHandoff()
 		}
 		collectionReleased = false
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
+	if err == nil && !collectionReleased {
+		err = waitHandoff()
+	}
+	// Full release already waits for final cleanup in the DropLoadConfig callback.
 	return collectionReleased, err
 }
