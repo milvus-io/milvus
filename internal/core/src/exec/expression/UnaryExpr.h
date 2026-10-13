@@ -934,11 +934,38 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     bool
+    CanReadFromRawExprCache() const override {
+        if (SegmentExpr::CanReadFromRawExprCache()) {
+            return true;
+        }
+        // FM regex candidates are always canonically rechecked. A cached
+        // complete predicate bitmap can serve this deferred path before it
+        // prepares Counts or decides whether to Locate.
+        return fm_regex_deferred_ &&
+               expr_->op_type_ == proto::plan::OpType::RegexMatch &&
+               exec_path_ == ExprExecPath::ScalarIndex &&
+               segment_->type() == SegmentType::Sealed && num_data_chunk_ > 0 &&
+               !expr_->column_.element_level_ && PinnedIndexIsFMIndex();
+    }
+
+    bool
     SupportOffsetInput() override {
         if (IsTextIndexOpType(expr_->op_type_)) {
             return false;
         }
         return true;
+    }
+
+    bool
+    CanExecuteAllAtOnce() const override {
+        EnsureExecPathDetermined();
+        // The FM regex path may scan when the upstream bitmap is sparse.
+        // Keep ordinary scan batches until that bitmap is available instead
+        // of forcing a potential fallback to materialize the whole column.
+        if (fm_regex_deferred_) {
+            return false;
+        }
+        return SegmentExpr::CanExecuteAllAtOnce();
     }
 
     std::string
@@ -1077,6 +1104,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::optional<VectorPtr>
     ExecFMPatternCandidates(EvalCtx& context);
 
+    VectorPtr
+    ExecFMRegexFallback(EvalCtx& context);
+
     static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
 
@@ -1100,6 +1130,13 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::unique_ptr<PartialRegexMatcher> cached_regex_matcher_;
     std::string cached_volnitsky_literal_;
     std::unique_ptr<VolnitskySearcher> cached_volnitsky_searcher_;
+
+    // Index-local Counts and the selected AND/OR condition are prepared once.
+    // A sparse batch may defer preparation or Locate; it does not prevent a
+    // later, denser batch from amortizing the full-segment candidate lookup.
+    RegexLiteralCondition fm_regex_requirements_;
+    std::shared_ptr<const RegexIndexPlan> fm_regex_plan_;
+    bool fm_regex_deferred_{false};
 
     void
     EnsureRegexCache() {

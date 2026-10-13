@@ -13,14 +13,18 @@
 
 #include <array>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <utility>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/RegexQuery.h"
+#include "common/RegexIndexPlan.h"
 #include "common/Schema.h"
 #include "common/Volnitsky.h"
 #include "index/scalar/fmindex/FmIndexReader.h"
@@ -28,6 +32,9 @@
 #include "exec/QueryContext.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "exec/expression/RawExprCacheAdapter.h"
+#include "exec/expression/UnaryExpr.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -38,12 +45,16 @@ using namespace milvus;
 
 namespace {
 
+using FMReaderDecorator =
+    std::function<index::IIndexReaderBasePtr(index::IIndexReaderBasePtr)>;
+
 struct SealedFMMatch {
     SchemaPtr schema;
     FieldId varchar_id;
     FieldId int_id;
     std::unique_ptr<test::expr_index::RawFieldFiles> raw_files;
     segcore::SegmentSealedUPtr segment;
+    double reader_cost_ratio = 0.001;
 };
 
 expr::TypedExprPtr
@@ -88,7 +99,9 @@ LoadSealedFMMatch(const std::vector<std::string>& rows,
                   bool nullable = false,
                   const uint8_t* valid_bitmap = nullptr,
                   const std::vector<int64_t>* ints = nullptr,
-                  bool with_index = true) {
+                  bool with_index = true,
+                  FMReaderDecorator decorate_reader = {},
+                  std::optional<double> reader_cost_ratio = std::nullopt) {
     SealedFMMatch out;
     out.raw_files = std::make_unique<test::expr_index::RawFieldFiles>();
     out.schema = std::make_shared<Schema>();
@@ -123,6 +136,34 @@ LoadSealedFMMatch(const std::vector<std::string>& rows,
                                                DataType::NONE,
                                                false,
                                                true);
+    if (reader_cost_ratio.has_value()) {
+        // Explicit construction-time injection for policy tests. The loader's
+        // production default does not follow later global config mutations.
+        auto engine = std::make_shared<index::fmindex::FMIndex>();
+        std::vector<std::string_view> docs(rows.begin(), rows.end());
+        TargetBitmap nulls(rows.size(), false);
+        for (size_t row = 0; row < rows.size(); ++row) {
+            if (nullable && !(valid_bitmap[row / 8] & (1u << (row % 8)))) {
+                nulls.set(row);
+                docs[row] = {};
+            }
+        }
+        engine->Build(docs, 8);
+        auto storage =
+            index::FmIndexStorage::Create(nullptr,
+                                          std::move(engine),
+                                          std::move(nulls),
+                                          rows.size(),
+                                          DataType::VARCHAR,
+                                          nullable,
+                                          index::FmIndexStateOrigin::Builder);
+        opened.reader = std::make_unique<index::FmIndexReader>(
+            std::move(storage), *reader_cost_ratio);
+        out.reader_cost_ratio = *reader_cost_ratio;
+    }
+    if (decorate_reader) {
+        opened.reader = decorate_reader(std::move(opened.reader));
+    }
     test::expr_index::InstallIndex(
         *out.segment, out.varchar_id, DataType::VARCHAR, std::move(opened));
     return out;
@@ -147,6 +188,161 @@ MakeLongTextZebraRows(size_t nb) {
         data.push_back(std::move(row));
     }
     return data;
+}
+
+struct RegexRoutingCounts {
+    size_t prepare = 0;
+    size_t execute = 0;
+    size_t legacy_guard = 0;
+    size_t legacy_pattern = 0;
+    std::shared_ptr<const RegexIndexPlan> plan;
+};
+
+// FmIndexReader remains final. This untimed observer retains the production
+// reader and forwards all metadata and query mixins used by the consumer.
+class CountingFMReader final : public index::IIndexReaderBase,
+                               public index::IPatternMatchReader,
+                               public index::INullReader {
+ public:
+    CountingFMReader(index::IIndexReaderBasePtr reader,
+                     std::shared_ptr<RegexRoutingCounts> counts,
+                     double preparation_floor)
+        : reader_(std::move(reader)),
+          pattern_(
+              dynamic_cast<const index::IPatternMatchReader*>(reader_.get())),
+          nulls_(dynamic_cast<const index::INullReader*>(reader_.get())),
+          counts_(std::move(counts)),
+          preparation_floor_(preparation_floor) {
+        AssertInfo(pattern_ != nullptr && nulls_ != nullptr,
+                   "FM reader observer requires pattern and null contracts");
+    }
+
+    index::ReaderCaps
+    Caps() const override {
+        return reader_->Caps();
+    }
+    index::Domain
+    CoordDomain() const override {
+        return reader_->CoordDomain();
+    }
+    int64_t
+    Count() const override {
+        return reader_->Count();
+    }
+    DataType
+    ValueType() const override {
+        return reader_->ValueType();
+    }
+    int64_t
+    MemoryUsage() const override {
+        return reader_->MemoryUsage();
+    }
+    cachinglayer::ResourceUsage
+    CellByteSize() const override {
+        return reader_->CellByteSize();
+    }
+    TargetBitmap
+    IsNull() const override {
+        return nulls_->IsNull();
+    }
+    TargetBitmap
+    IsNotNull() const override {
+        return nulls_->IsNotNull();
+    }
+    RegexIndexCostModel
+    GetRegexIndexCostModel() const override {
+        auto model = pattern_->GetRegexIndexCostModel();
+        model.preparation_floor_bytes = preparation_floor_;
+        return model;
+    }
+    std::shared_ptr<const RegexIndexPlan>
+    PrepareRegexIndexPlan(
+        const RegexLiteralCondition& requirements) const override {
+        ++counts_->prepare;
+        counts_->plan = pattern_->PrepareRegexIndexPlan(requirements);
+        return counts_->plan;
+    }
+    TargetBitmap
+    ExecuteRegexIndexPlan(const RegexIndexPlan& plan) const override {
+        ++counts_->execute;
+        return pattern_->ExecuteRegexIndexPlan(plan);
+    }
+    bool
+    ShouldUseForOp(index::PatternOp op,
+                   std::string_view pattern) const override {
+        counts_->legacy_guard += op == index::PatternOp::RegexMatch;
+        return pattern_->ShouldUseForOp(op, pattern);
+    }
+    bool
+    PatternMatchIsExact(index::PatternOp op) const override {
+        return pattern_->PatternMatchIsExact(op);
+    }
+    TargetBitmap
+    PatternMatch(std::string_view pattern, index::PatternOp op) const override {
+        counts_->legacy_pattern += op == index::PatternOp::RegexMatch;
+        return pattern_->PatternMatch(pattern, op);
+    }
+
+ private:
+    index::IIndexReaderBasePtr reader_;
+    const index::IPatternMatchReader* pattern_;
+    const index::INullReader* nulls_;
+    std::shared_ptr<RegexRoutingCounts> counts_;
+    double preparation_floor_;
+};
+
+FMReaderDecorator
+ObserveFMReader(
+    std::shared_ptr<RegexRoutingCounts> counts,
+    double preparation_floor = RegexIndexCostModel{}.preparation_floor_bytes) {
+    return [counts = std::move(counts),
+            preparation_floor](index::IIndexReaderBasePtr reader) {
+        return std::make_unique<CountingFMReader>(
+            std::move(reader), counts, preparation_floor);
+    };
+}
+
+class PrefetchObservingUnaryExpr : public exec::PhyUnaryRangeFilterExpr {
+ public:
+    using PhyUnaryRangeFilterExpr::PhyUnaryRangeFilterExpr;
+
+    size_t
+    RawPrefetchCalls() const {
+        return raw_prefetch_calls_.load(std::memory_order_relaxed);
+    }
+
+ protected:
+    void
+    PrefetchRawData() override {
+        raw_prefetch_calls_.fetch_add(1, std::memory_order_relaxed);
+        exec::SegmentExpr::PrefetchRawData();
+    }
+
+ private:
+    std::atomic<size_t> raw_prefetch_calls_{0};
+};
+
+std::vector<FieldDataPtr>
+MakeNullableStringChunks(const std::vector<std::string>& rows,
+                         const std::vector<uint8_t>& validity,
+                         const std::vector<size_t>& boundaries) {
+    std::vector<FieldDataPtr> chunks;
+    for (size_t part = 1; part < boundaries.size(); ++part) {
+        const size_t begin = boundaries[part - 1];
+        const size_t length = boundaries[part] - begin;
+        std::vector<uint8_t> local((length + 7) / 8, 0);
+        for (size_t i = 0; i < length; ++i) {
+            if (validity[(begin + i) / 8] & (1u << ((begin + i) % 8))) {
+                local[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+            }
+        }
+        chunks.push_back(test::expr_index::StringField(
+            std::vector<std::string>(rows.begin() + begin,
+                                     rows.begin() + begin + length),
+            true,
+            local.data()));
+    }
+    return chunks;
 }
 
 std::shared_ptr<const index::FmIndexReader>
@@ -426,12 +622,13 @@ TEST_P(FmIndexPatternExpressionTest, MultiChunk) {
         op);
     EXPECT_TRUE(CompiledUseIndexCursor(
         match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
-    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
-        match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
+    EXPECT_EQ(milvus::test::CanExprExecuteAllAtOnce(
+                  match_expr, loaded.segment.get(), static_cast<int64_t>(nb)),
+              op != proto::plan::OpType::RegexMatch);
 
-    // FilterBits executes this scalar-index expression all at once. Hits at 25,
-    // 125, and 225 therefore force one ProcessDataByOffsets call to read
-    // candidates from all three raw chunks.
+    // LIKE keeps all-at-once execution; regex retains ordinary batches so
+    // upstream bitmaps can inform routing. Both paths read candidates from
+    // all three raw chunks.
     auto node =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, match_expr);
     auto got = milvus::query::ExecuteQueryExpr(
@@ -453,7 +650,7 @@ TEST_P(FmIndexPatternExpressionTest, MultiChunk) {
 TEST_P(FmIndexPatternExpressionTest, NullableAndOffsets) {
     const auto op = GetParam();
     std::string filler(500, 'y');
-    std::vector<std::string> rows(200, filler);
+    std::vector<std::string> rows(512, filler);
     rows[0] = filler + "ZEBRA";
     rows[50] = filler + "ZEBRA";
     rows[51] = "";
@@ -548,7 +745,9 @@ TEST(FmIndexExpressionTest, RegexExternalWordBoundaryCandidatesAndRawFallback) {
 }
 
 TEST(FmIndexExpressionTest, RegexInteriorLiteralCandidatesAndFallback) {
-    std::vector<std::string> rows(200, std::string(500, 'x') + "COMMON");
+    // Enough scan work to exercise FM preparation, including after adding
+    // the small-window gate. Preserve real candidate/recheck coverage.
+    std::vector<std::string> rows(512, std::string(500, 'x') + "COMMON");
     rows[0] += "RARE123END";
     rows[1] += "RAREwrong";
     rows[2] = "A";
@@ -559,32 +758,36 @@ TEST(FmIndexExpressionTest, RegexInteriorLiteralCandidatesAndFallback) {
     rows[7] += "RARE123END";  // Candidate payload in a null row.
     std::vector<uint8_t> validity((rows.size() + 7) / 8, 0xff);
     validity[0] &= ~(1u << 7);
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto factory = ObserveFMReader(calls);
     for (bool with_index : {false, true}) {
         auto loaded = LoadSealedFMMatch(
-            rows, {}, true, validity.data(), nullptr, with_index);
-        for (const auto& [pattern, uses_index] :
-             std::vector<std::pair<std::string, bool>>{
-                 {".*RARE", true},
-                 {"x.*RARE123END", true},
-                 {".*RARE[0-9]+END", true},
-                 {R"(.*RARE\d+END)", true},
-                 {"x.*RARE123END+", true},
-                 {"x.*RARE123END?", true},
-                 {"x.*(RARE123END){1,2}", true},
-                 {"x.*RARE(123)END", true},
-                 {".*x{500}COMMONRARE123END", true},
-                 {"(?s).*RARE123END", true},
-                 {"x.*(?P<n>RARE123END)", true},
-                 {R"(.*\QRARE123END\E)", true},
-                 {"x.*(RARE123END)", true},
-                 {".*(RARE123END)?COMMON", false},
-                 {".*((RARE123END)+)?COMMON", false},
-                 {".*RARE[[:digit:]]+END", true},
-                 {"x.*RARE?", true},
-                 {"x.*(RARE)?", false},
-                 {"x.*RARE|bar", true},
-                 {R"(.*\x41)", false},
-                 {R"(\Bfoo|bar)", true}}) {
+            rows, {}, true, validity.data(), nullptr, with_index, factory);
+        for (const auto& [pattern, initially_eligible, executes_candidates] :
+             std::vector<std::tuple<std::string, bool, bool>>{
+                 {".*RARE", true, true},
+                 {"x.*RARE123END", true, true},
+                 {".*RARE[0-9]+END", true, true},
+                 {R"(.*RARE\d+END)", true, true},
+                 {"x.*RARE123END+", true, true},
+                 {"x.*RARE123END?", true, true},
+                 {"x.*(RARE123END){1,2}", true, true},
+                 {"x.*RARE(123)END", true, true},
+                 {".*x{500}COMMONRARE123END", true, true},
+                 {"(?s).*RARE123END", true, true},
+                 {"x.*(?P<n>RARE123END)", true, true},
+                 {R"(.*\QRARE123END\E)", true, true},
+                 {"x.*(RARE123END)", true, true},
+                 // COMMON is useful syntax, but Count makes Locate expensive.
+                 {".*(RARE123END)?COMMON", true, false},
+                 {".*((RARE123END)+)?COMMON", true, false},
+                 {".*RARE[[:digit:]]+END", true, true},
+                 {"x.*RARE?", true, true},
+                 {"x.*(RARE)?", false, false},
+                 {"x.*RARE|bar", true, true},
+                 {R"(.*\x41)", false, false},
+                 {R"(\Bfoo|bar)", true, true}}) {
+            *calls = RegexRoutingCounts{};
             auto expression = MakeMatchTypedExpr(loaded.schema,
                                                  loaded.varchar_id,
                                                  pattern,
@@ -592,10 +795,18 @@ TEST(FmIndexExpressionTest, RegexInteriorLiteralCandidatesAndFallback) {
                                                  proto::plan::RegexMatch);
             EXPECT_EQ(CompiledUseIndexCursor(
                           expression, loaded.segment.get(), rows.size()),
-                      with_index && uses_index)
+                      with_index && initially_eligible)
                 << pattern;
+            EXPECT_EQ(calls->prepare, 0u) << pattern;
+            EXPECT_EQ(calls->execute, 0u) << pattern;
             auto evaluated = milvus::test::EvalExprInBatches(
                 expression, loaded.segment.get(), rows.size());
+            EXPECT_EQ(calls->prepare,
+                      with_index && initially_eligible ? 1u : 0u)
+                << pattern;
+            EXPECT_EQ(calls->execute,
+                      with_index && executes_candidates ? 1u : 0u)
+                << pattern;
             TargetBitmapView result(evaluated.result->GetRawData(),
                                     rows.size());
             TargetBitmapView valid(evaluated.result->GetValidRawData(),
@@ -610,6 +821,86 @@ TEST(FmIndexExpressionTest, RegexInteriorLiteralCandidatesAndFallback) {
                 }
             }
         }
+    }
+}
+
+TEST(FmIndexExpressionTest, RegexGuardAndFallback) {
+    std::vector<std::string> rows(1000, std::string(500, 'x'));
+    rows[500] += "RARE123";
+    auto idx = MakeRawDataIndex(rows);
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, R"(RARE\d+)"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "ABSENT.*"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, ".*RARE"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "x.*RARE123"));
+    EXPECT_EQ(idx->PatternMatch("x.*RARE123", proto::plan::RegexMatch).count(),
+              1);
+    for (const std::string pattern : {"x+", ".*", "", "RARE|", "(?i)rare"}) {
+        EXPECT_FALSE(idx->ShouldUseOp(proto::plan::RegexMatch, pattern))
+            << pattern;
+    }
+    EXPECT_FALSE(
+        idx->ShouldUseOp(proto::plan::RegexMatch, std::string(4097, 'a')));
+}
+
+TEST(FmIndexExpressionTest, RegexCandidatesKeepRarePrefixWhenInteriorIsCommon) {
+    std::vector<std::string> rows(1000, std::string(500, 'x') + "COMMON");
+    rows[500] = "RARE" + rows[500];
+    auto idx = MakeRawDataIndex(rows);
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "RARE.*COMMON"));
+    const auto candidates =
+        idx->PatternMatch("RARE.*COMMON", proto::plan::RegexMatch);
+    EXPECT_EQ(candidates.count(), 1);
+    EXPECT_TRUE(candidates[500]);
+}
+
+TEST(FmIndexExpressionTest, RegexPreparationDoesNotCacheIndexStatistics) {
+    std::vector<std::string> first_rows(1000, std::string(500, 'x') + "bar");
+    first_rows[7] = "foo" + first_rows[7];
+    std::vector<std::string> second_rows(1000, "foo" + std::string(500, 'x'));
+    second_rows[9] += "bar";
+    auto first = MakeRawDataIndex(first_rows);
+    auto second = MakeRawDataIndex(second_rows);
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        EXPECT_TRUE(first->ShouldUseOp(proto::plan::RegexMatch, "foo.*bar"));
+        EXPECT_TRUE(second->ShouldUseOp(proto::plan::RegexMatch, "foo.*bar"));
+        // The same cached requirements choose different rarest fragments.
+        const auto first_candidates =
+            first->PatternMatch("foo.*bar", proto::plan::RegexMatch);
+        const auto second_candidates =
+            second->PatternMatch("foo.*bar", proto::plan::RegexMatch);
+        EXPECT_EQ(first_candidates.count(), 1);
+        EXPECT_TRUE(first_candidates[7]);
+        EXPECT_EQ(second_candidates.count(), 1);
+        EXPECT_TRUE(second_candidates[9]);
+    }
+}
+
+TEST(FmIndexExpressionTest, RegexBooleanConditionsUseCurrentCounts) {
+    std::vector<std::string> rows(
+        1000, std::string(500, 'x') + "COMMON_LONG foo qux ERROR");
+    rows[9] += "RARE bar timeout";
+    rows[19] += "baz";
+    auto index = MakeRawDataIndex(rows);
+    for (const auto& [pattern, expected] :
+         std::vector<std::pair<std::string, size_t>>{
+             {".*COMMON_LONG.*RARE", 1},
+             {"(ERROR|WARN).*timeout", 1},
+             {"foo.*bar|baz.*qux", 2},
+             {"foo.*ABSENT|baz.*qux", 1}}) {
+        EXPECT_TRUE(index->ShouldUseOp(proto::plan::RegexMatch, pattern));
+        auto candidates = index->PatternMatch(pattern, proto::plan::RegexMatch);
+        EXPECT_EQ(candidates.count(), expected) << pattern;
+        PartialRegexMatcher matcher(pattern);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            EXPECT_EQ(candidates[i] && matcher(rows[i]), matcher(rows[i]))
+                << pattern;
+        }
+    }
+    for (const std::string pattern :
+         {"a|timeout", "(?i:foo)|timeout", "(foo)?|timeout"}) {
+        EXPECT_FALSE(index->ShouldUseOp(proto::plan::RegexMatch, pattern));
+        EXPECT_EQ(index->PatternMatch(pattern, proto::plan::RegexMatch).count(),
+                  rows.size());
     }
 }
 
@@ -1042,10 +1333,8 @@ TEST(FmIndexExpressionTest, DISABLED_RegexEndToEndBenchmark) {
     RecordProperty("expression_result_cache", "disabled");
     RecordProperty("rows", static_cast<int>(rows.size()));
     RecordProperty("sa_sample_rate", 8);
-    RecordProperty(
-        "fmindex_cost_ratio",
-        std::to_string(
-            segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio()));
+    RecordProperty("fmindex_cost_ratio",
+                   std::to_string(indexed.reader_cost_ratio));
     for (const auto& [name, pattern] : workloads) {
         PartialRegexMatcher matcher(pattern);
         const auto candidates = candidate_index->PatternMatch(
@@ -1097,3 +1386,612 @@ TEST(FmIndexExpressionTest, DISABLED_RegexEndToEndBenchmark) {
                        std::to_string(measure(indexed, true)));
     }
 }
+
+TEST(FmIndexExpressionTest,
+     ExecutorRegexPrefilterRoutesAndKeepsBatchSemantics) {
+    constexpr size_t n = 1027;
+    constexpr size_t batch_size = 128;
+    std::vector<std::string> rows(n, "COMMON foo " + std::string(1000, 'x'));
+    for (size_t i = 0; i < n; i += 101) {
+        if ((i / 101) % 2 == 0) {
+            rows[i] += " RARE123END";
+        } else {
+            // This is a necessary-literal candidate, but the order is wrong.
+            rows[i] = "RARE123END " + rows[i];
+        }
+    }
+    std::vector<uint8_t> validity((n + 7) / 8, 0xff);
+    for (size_t i : {size_t{0}, size_t{404}, size_t{1026}}) {
+        validity[i / 8] &= static_cast<uint8_t>(~(1u << (i % 8)));
+    }
+    auto chunks = MakeNullableStringChunks(rows, validity, {0, 199, 540, n});
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto factory = ObserveFMReader(calls, 128 * 1024);
+    auto loaded = LoadSealedFMMatch(
+        rows, chunks, true, validity.data(), nullptr, true, factory);
+    milvus::test::ExprBatchSizeGuard batch_guard(batch_size);
+    const std::vector<std::pair<std::string, std::vector<int>>> schedules{
+        {"absent", {-1}},
+        {"zero", {0}},
+        {"one_percent", {1}},
+        {"ten_percent", {10}},
+        {"dense", {100}},
+        {"sparse_then_dense", {0, 1, 100}},
+        {"dense_then_sparse", {100, 1, 0}},
+    };
+    for (const std::string pattern : {"foo.*RARE123END",
+                                      "foo.*RARE123END|ABSENT_54191.*",
+                                      "COMMON.*foo",
+                                      ".*",
+                                      "a|RARE123END",
+                                      "ABSENT_54191.*"}) {
+        auto expression = MakeMatchTypedExpr(loaded.schema,
+                                             loaded.varchar_id,
+                                             pattern,
+                                             true,
+                                             proto::plan::RegexMatch);
+        PartialRegexMatcher oracle(pattern);
+        for (const auto& [name, densities] : schedules) {
+            for (bool negate : {false, true}) {
+                SCOPED_TRACE(pattern + "/" + name +
+                             (negate ? "/not" : "/positive"));
+                *calls = RegexRoutingCounts{};
+                expr::TypedExprPtr root = expression;
+                if (negate) {
+                    root = std::make_shared<expr::LogicalUnaryExpr>(
+                        expr::LogicalUnaryExpr::OpType::LogicalNot, root);
+                }
+                auto query_context = std::make_shared<exec::QueryContext>(
+                    DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+                query_context->set_enable_expr_cache(false);
+                exec::ExecContext exec_context(query_context.get());
+                auto compiled =
+                    exec::CompileExpressions({root}, &exec_context, {}, false);
+                ASSERT_FALSE(compiled[0]->CanExecuteAllAtOnce());
+                exec::EvalCtx context(&exec_context);
+                for (size_t begin = 0, part = 0; begin < n;
+                     begin += batch_size, ++part) {
+                    const size_t size = std::min(batch_size, n - begin);
+                    const int density =
+                        densities[std::min(part, densities.size() - 1)];
+                    TargetBitmap input;
+                    if (density >= 0) {
+                        input = TargetBitmap(size, density == 100);
+                        if (density > 0 && density < 100) {
+                            for (size_t i = 0; i < size; i += 100 / density) {
+                                input.set(i);
+                            }
+                        }
+                    }
+                    auto saved = input.clone();
+                    context.set_bitmap_input(std::move(input));
+                    VectorPtr output;
+                    compiled[0]->Eval(context, output);
+                    auto result =
+                        std::dynamic_pointer_cast<ColumnVector>(output);
+                    ASSERT_NE(result, nullptr);
+                    ASSERT_EQ(result->size(), size);
+                    TargetBitmapView hits(result->GetRawData(), size);
+                    TargetBitmapView valid(result->GetValidRawData(), size);
+                    for (size_t i = 0; i < size; ++i) {
+                        if (!saved.empty()) {
+                            EXPECT_EQ(context.get_bitmap_input()[i], saved[i]);
+                            if (!saved[i]) {
+                                continue;
+                            }
+                        }
+                        const size_t row = begin + i;
+                        const bool expected_valid =
+                            validity[row / 8] & (1u << (row % 8));
+                        EXPECT_EQ(valid[i], expected_valid) << "row=" << row;
+                        if (expected_valid) {
+                            EXPECT_EQ(hits[i], negate != oracle(rows[row]))
+                                << "row=" << row;
+                        }
+                    }
+                    EXPECT_LE(calls->prepare, 1u);
+                    EXPECT_LE(calls->execute, 1u);
+                    if (name == "sparse_then_dense" && part < 2) {
+                        EXPECT_EQ(calls->prepare, 0u);
+                        EXPECT_EQ(calls->execute, 0u);
+                    }
+                }
+                // nullptr means actual exhaustion, never a rejected route.
+                if (!negate) {
+                    VectorPtr exhausted;
+                    compiled[0]->Eval(context, exhausted);
+                    EXPECT_EQ(exhausted, nullptr);
+                }
+                EXPECT_EQ(calls->legacy_guard, 0u);
+                EXPECT_EQ(calls->legacy_pattern, 0u);
+                if (name == "zero" || name == "one_percent") {
+                    EXPECT_EQ(calls->prepare, 0u);
+                    EXPECT_EQ(calls->execute, 0u);
+                } else if (pattern == ".*" || pattern == "a|RARE123END") {
+                    EXPECT_EQ(calls->prepare, 0u);
+                    EXPECT_EQ(calls->execute, 0u);
+                } else {
+                    EXPECT_EQ(calls->prepare, 1u);
+                    EXPECT_EQ(calls->execute,
+                              pattern == "COMMON.*foo" ? 0u : 1u);
+                    if (pattern == "ABSENT_54191.*") {
+                        ASSERT_NE(calls->plan, nullptr);
+                        EXPECT_TRUE(calls->plan->empty_result);
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(FmIndexExpressionTest, ExecutorRegexCountPlanSurvivesSparseRejection) {
+    constexpr size_t n = 1027;
+    constexpr size_t batch_size = 128;
+    std::vector<std::string> rows(n, std::string(1000, 'x'));
+    for (size_t i = 0; i < n; i += 101) {
+        rows[i] += " RARE123END";
+    }
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto factory = ObserveFMReader(calls, 0);
+    auto loaded =
+        LoadSealedFMMatch(rows, {}, false, nullptr, nullptr, true, factory);
+    milvus::test::ExprBatchSizeGuard batch_guard(batch_size);
+    auto expression = MakeMatchTypedExpr(loaded.schema,
+                                         loaded.varchar_id,
+                                         "RARE123END$",
+                                         false,
+                                         proto::plan::RegexMatch);
+    auto query_context = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+    query_context->set_enable_expr_cache(false);
+    exec::ExecContext exec_context(query_context.get());
+    auto compiled =
+        exec::CompileExpressions({expression}, &exec_context, {}, false);
+    exec::EvalCtx context(&exec_context);
+    std::shared_ptr<const RegexIndexPlan> first_plan;
+    for (size_t begin = 0; begin < n; begin += batch_size) {
+        const size_t size = std::min(batch_size, n - begin);
+        TargetBitmap input(size, begin != 0);
+        if (begin == 0) {
+            input.set(0);
+        }
+        context.set_bitmap_input(std::move(input));
+        VectorPtr output;
+        compiled[0]->Eval(context, output);
+        auto result = std::dynamic_pointer_cast<ColumnVector>(output);
+        ASSERT_NE(result, nullptr);
+        ASSERT_EQ(result->size(), size);
+        ASSERT_EQ(calls->prepare, 1u);
+        if (begin == 0) {
+            EXPECT_EQ(calls->execute, 0u);
+            first_plan = calls->plan;
+        } else {
+            EXPECT_EQ(calls->execute, 1u);
+            EXPECT_EQ(calls->plan, first_plan);
+        }
+        TargetBitmapView hits(result->GetRawData(), size);
+        for (size_t i = 0; i < size; ++i) {
+            if (context.get_bitmap_input()[i]) {
+                EXPECT_EQ(hits[i], (begin + i) % 101 == 0);
+            }
+        }
+    }
+}
+
+TEST(FmIndexExpressionTest, ExecutorRegexParentSkipAndOffsetInput) {
+    constexpr size_t n = 1027;
+    constexpr size_t batch_size = 128;
+    std::vector<std::string> rows(n, std::string(1000, 'x'));
+    std::vector<int64_t> numbers(n);
+    for (size_t i = 0; i < n; ++i) {
+        numbers[i] = i;
+        if (i % 101 == 0) {
+            rows[i] += " RARE123END";
+        }
+    }
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto factory = ObserveFMReader(calls, 0);
+    auto loaded =
+        LoadSealedFMMatch(rows, {}, false, nullptr, &numbers, true, factory);
+    milvus::test::ExprBatchSizeGuard batch_guard(batch_size);
+    auto regex = MakeMatchTypedExpr(loaded.schema,
+                                    loaded.varchar_id,
+                                    "RARE123END$",
+                                    false,
+                                    proto::plan::RegexMatch);
+    proto::plan::GenericValue lower;
+    lower.set_int64_val(batch_size);
+    auto numeric = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(loaded.int_id, DataType::INT64),
+        proto::plan::GreaterEqual,
+        lower);
+    auto conjunction = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, numeric, regex);
+    auto query_context = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+    query_context->set_enable_expr_cache(false);
+    exec::ExecContext exec_context(query_context.get());
+    auto compiled =
+        exec::CompileExpressions({conjunction}, &exec_context, {}, false);
+    exec::EvalCtx context(&exec_context);
+    for (size_t begin = 0; begin < n; begin += batch_size) {
+        const size_t size = std::min(batch_size, n - begin);
+        VectorPtr output;
+        compiled[0]->Eval(context, output);
+        auto result = std::dynamic_pointer_cast<ColumnVector>(output);
+        ASSERT_NE(result, nullptr);
+        ASSERT_EQ(result->size(), size);
+        TargetBitmapView hits(result->GetRawData(), size);
+        for (size_t i = 0; i < size; ++i) {
+            const size_t row = begin + i;
+            EXPECT_EQ(hits[i], row >= batch_size && row % 101 == 0);
+        }
+        EXPECT_EQ(calls->prepare, begin == 0 ? 0u : 1u);
+        EXPECT_EQ(calls->execute, begin == 0 ? 0u : 1u);
+    }
+
+    // Offset input always uses the existing raw Take path. It must neither
+    // Count nor Locate, including repeated requests in a different row order.
+    *calls = RegexRoutingCounts{};
+    auto offset_context = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+    offset_context->set_enable_expr_cache(false);
+    exec::ExecContext offset_exec(offset_context.get());
+    auto offset_compiled =
+        exec::CompileExpressions({regex}, &offset_exec, {}, false);
+    exec::EvalCtx eval_offset(&offset_exec);
+    exec::OffsetVector offsets{0, 101, 199, 303, 404, 1026};
+    for (bool reverse : {false, true}) {
+        if (reverse) {
+            std::reverse(offsets.begin(), offsets.end());
+        }
+        TargetBitmap input(offsets.size(), true);
+        input[2] = false;
+        auto saved = input.clone();
+        eval_offset.set_bitmap_input(std::move(input));
+        eval_offset.set_offset_input(&offsets);
+        VectorPtr output;
+        offset_compiled[0]->Eval(eval_offset, output);
+        auto result = std::dynamic_pointer_cast<ColumnVector>(output);
+        ASSERT_NE(result, nullptr);
+        ASSERT_EQ(result->size(), offsets.size());
+        TargetBitmapView hits(result->GetRawData(), offsets.size());
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            EXPECT_EQ(eval_offset.get_bitmap_input()[i], saved[i]);
+            if (saved[i]) {
+                EXPECT_EQ(hits[i], offsets[i] % 101 == 0);
+            }
+        }
+        EXPECT_EQ(calls->prepare, 0u);
+        EXPECT_EQ(calls->execute, 0u);
+    }
+}
+
+TEST(FmIndexExpressionTest,
+     ExecutorRegexNoCandidateProofPreservesEagerRawPrefetch) {
+    constexpr size_t n = 1027;
+    constexpr size_t batch_size = 128;
+    std::vector<std::string> rows(n, "COMMON foo " + std::string(1000, 'x'));
+    rows[101] += " RARE123END";
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto factory = ObserveFMReader(calls, 128 * 1024);
+    auto loaded =
+        LoadSealedFMMatch(rows, {}, false, nullptr, nullptr, true, factory);
+    auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    auto check = [&](const SealedFMMatch& fixture,
+                     const std::string& pattern,
+                     size_t active_rows,
+                     bool expect_raw) {
+        SCOPED_TRACE(pattern + "/rows=" + std::to_string(active_rows));
+        *calls = RegexRoutingCounts{};
+        auto typed = MakeMatchTypedExpr(fixture.schema,
+                                        fixture.varchar_id,
+                                        pattern,
+                                        false,
+                                        proto::plan::RegexMatch);
+        auto unary =
+            std::dynamic_pointer_cast<const expr::UnaryRangeFilterExpr>(typed);
+        ASSERT_NE(unary, nullptr);
+        auto physical = std::make_shared<PrefetchObservingUnaryExpr>(
+            std::vector<std::shared_ptr<exec::Expr>>{},
+            unary,
+            "PhyUnaryRangeFilterExpr",
+            nullptr,
+            fixture.segment.get(),
+            active_rows,
+            batch_size,
+            0);
+        physical->PrefetchAsync(pool);
+        physical->WaitPrefetch();
+        EXPECT_EQ(physical->GetExecPath(),
+                  expect_raw ? exec::ExprExecPath::RawData
+                             : exec::ExprExecPath::ScalarIndex);
+        EXPECT_EQ(physical->RawPrefetchCalls(), expect_raw ? 1u : 0u);
+        EXPECT_EQ(calls->prepare, 0u);
+        EXPECT_EQ(calls->execute, 0u);
+        EXPECT_EQ(calls->legacy_guard, 0u);
+    };
+    check(loaded, ".*", n, true);
+    check(loaded, "a|RARE123END", n, true);
+    check(loaded, "(?i)foo", n, true);
+    check(loaded, "RARE123END$", 64, true);
+    check(loaded, "RARE123END$", n, false);
+    // High Count is not known from syntax. Do not read that Count or eagerly
+    // prefetch the whole column before the upstream bitmap becomes available.
+    check(loaded, "COMMON.*foo", n, false);
+
+    auto disabled = LoadSealedFMMatch(
+        rows, {}, false, nullptr, nullptr, true, factory, 0.0);
+    check(disabled, "RARE123END$", n, true);
+}
+
+class FMIndexRegexCacheTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        exec::ExprResCacheManager::SetEnabled(true);
+        exec::CacheConfig config;
+        config.mode = exec::CacheMode::Memory;
+        config.mem_max_bytes = 1U << 20;
+        config.compression_enabled = false;
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = 0;
+        ASSERT_TRUE(exec::ExprResCacheManager::Instance().SetConfig(config));
+        exec::ExprResCacheManager::Instance().Clear();
+    }
+
+    void
+    TearDown() override {
+        exec::ExprResCacheManager::Instance().Clear();
+        exec::ExprResCacheManager::SetEnabled(false);
+    }
+};
+
+TEST_F(FMIndexRegexCacheTest, DeferredFMRegexReadsExactPredicateCache) {
+    constexpr size_t n = 1027;
+    constexpr size_t batch_size = 128;
+    std::vector<std::string> rows(n, "COMMON foo " + std::string(1000, 'x'));
+    rows[101] += " RARE123END";
+    std::vector<uint8_t> validity((n + 7) / 8, 0xff);
+    validity[404 / 8] &= static_cast<uint8_t>(~(1u << (404 % 8)));
+    validity[1026 / 8] &= static_cast<uint8_t>(~(1u << (1026 % 8)));
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto factory = ObserveFMReader(calls, 0);
+    auto loaded = LoadSealedFMMatch(
+        rows, {}, true, validity.data(), nullptr, true, factory);
+    milvus::test::ExprBatchSizeGuard batch_guard(batch_size);
+    auto& manager = exec::ExprResCacheManager::Instance();
+    for (const std::string pattern : {"COMMON.*foo", "foo.*RARE123END"}) {
+        auto expression = MakeMatchTypedExpr(loaded.schema,
+                                             loaded.varchar_id,
+                                             pattern,
+                                             true,
+                                             proto::plan::RegexMatch);
+        PartialRegexMatcher oracle(pattern);
+        for (bool cache_hit : {false, true}) {
+            *calls = RegexRoutingCounts{};
+            auto query_context = std::make_shared<exec::QueryContext>(
+                DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+            query_context->set_enable_expr_cache(false);
+            exec::ExecContext exec_context(query_context.get());
+            auto compiled = exec::CompileExpressions(
+                {expression}, &exec_context, {}, false);
+            auto adapter = std::dynamic_pointer_cast<exec::RawExprCacheAdapter>(
+                compiled[0]);
+            ASSERT_NE(adapter, nullptr);
+            EXPECT_EQ(adapter->wrapped_expr()->GetExecPath(),
+                      exec::ExprExecPath::ScalarIndex);
+            exec::ExprResCacheManager::Key key{
+                loaded.segment->get_segment_id(),
+                adapter->wrapped_expr()->GetSignatureForRawExprCache()};
+            exec::EvalCtx context(&exec_context);
+            for (size_t begin = 0; begin < n; begin += batch_size) {
+                const size_t size = std::min(batch_size, n - begin);
+                VectorPtr output;
+                compiled[0]->Eval(context, output);
+                auto result = std::dynamic_pointer_cast<ColumnVector>(output);
+                ASSERT_NE(result, nullptr);
+                ASSERT_EQ(result->size(), size);
+                TargetBitmapView hits(result->GetRawData(), size);
+                TargetBitmapView valid(result->GetValidRawData(), size);
+                for (size_t i = 0; i < size; ++i) {
+                    const size_t row = begin + i;
+                    const bool expected_valid =
+                        validity[row / 8] & (1u << (row % 8));
+                    EXPECT_EQ(valid[i], expected_valid);
+                    if (expected_valid) {
+                        EXPECT_EQ(hits[i], oracle(rows[row]));
+                    }
+                }
+            }
+            EXPECT_EQ(calls->prepare, cache_hit ? 0u : 1u);
+            EXPECT_EQ(calls->execute,
+                      !cache_hit && pattern == "foo.*RARE123END" ? 1u : 0u);
+            exec::ExprResCacheManager::Value cached;
+            cached.active_count = n;
+            ASSERT_TRUE(manager.Get(key, cached));
+            ASSERT_NE(cached.result, nullptr);
+            ASSERT_NE(cached.valid_result, nullptr);
+            EXPECT_EQ(cached.result->size(), n);
+            EXPECT_EQ(cached.valid_result->size(), n);
+        }
+    }
+}
+
+// Opt-in paired measurement of the production expression path. Data and
+// indexes and shared regex-analysis caches are warm. Every sample owns fresh
+// query/planner state, including Count preparation. This does not measure the
+// first-ever RE2 compilation. Route
+// counters are collected separately from an untimed spy, never in production.
+// BEGIN_COMPATIBLE_REGEX_PREFILTER_BENCHMARK
+// Append this block to the baseline test TU with
+// MILVUS_FM_PREFILTER_BASELINE defined to run the identical timed query body.
+TEST(FmIndexExpressionTest, DISABLED_RegexPrefilterRoutingBenchmark) {
+    constexpr size_t n = 32771;
+    constexpr size_t batch_size = 8192;
+    constexpr int warmup = 3;
+    constexpr int repetitions = 31;
+    milvus::test::ExprBatchSizeGuard batch_guard(batch_size);
+    std::vector<std::string> rows(n, "COMMON foo " + std::string(512, 'x'));
+    for (size_t i = 0; i < n; ++i) {
+        if (i % 64 == 0) {
+            rows[i] += " MID_54191 tail";
+        }
+        if (i % 4096 == 0) {
+            rows[i] += " RARE_54191 tail";
+        }
+    }
+    auto indexed = LoadSealedFMMatch(rows, {}, false, nullptr, nullptr);
+    auto scan = LoadSealedFMMatch(rows, {}, false, nullptr, nullptr, false);
+#ifndef MILVUS_FM_PREFILTER_BASELINE
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto factory =
+        ObserveFMReader(calls, RegexIndexCostModel{}.preparation_floor_bytes);
+    auto spy =
+        LoadSealedFMMatch(rows, {}, false, nullptr, nullptr, true, factory);
+#endif
+    const std::vector<std::pair<std::string, std::string>> workloads{
+        {"rare", "foo.*RARE_54191"},
+        {"medium", "foo.*MID_54191"},
+        {"common", "COMMON.*foo"},
+        {"no_literal", ".*"},
+        {"short_branch", "a|RARE_54191"},
+        {"folded", "(?i)COMMON"},
+        {"zero_hits", "ABSENT_54191.*"},
+        {"or_branches", "foo.*MID_54191|RARE_54191.*foo"},
+    };
+    RecordProperty("rows", n);
+    RecordProperty("batch_size", batch_size);
+    RecordProperty("samples", repetitions);
+    RecordProperty("expression_result_cache", "disabled");
+    RecordProperty("timing_scope",
+                   "fresh query and Count plan; warm data/index/regex caches");
+    auto row_ids = [](const TargetBitmap& bitmap) {
+        std::vector<int64_t> ids;
+        for (size_t row = 0; row < bitmap.size(); ++row) {
+            if (bitmap[row]) {
+                ids.push_back(static_cast<int64_t>(row));
+            }
+        }
+        return ids;
+    };
+    RecordProperty("fmindex_cost_ratio", "0.001 (reader constructor default)");
+    auto run = [&](const SealedFMMatch& fixture,
+                   const expr::TypedExprPtr& expression,
+                   const TargetBitmap& mask) {
+        const auto start = std::chrono::steady_clock::now();
+        auto query_context = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, fixture.segment.get(), n, MAX_TIMESTAMP);
+        query_context->set_enable_expr_cache(false);
+        exec::ExecContext exec_context(query_context.get());
+        auto compiled =
+            exec::CompileExpressions({expression}, &exec_context, {}, false);
+        exec::EvalCtx context(&exec_context);
+        TargetBitmap combined;
+        for (size_t begin = 0; begin < n; begin += batch_size) {
+            const size_t size = std::min(batch_size, n - begin);
+            TargetBitmap input;
+            input.append(mask, begin, size);
+            context.set_bitmap_input(std::move(input));
+            VectorPtr output;
+            compiled[0]->Eval(context, output);
+            auto result = std::dynamic_pointer_cast<ColumnVector>(output);
+            AssertInfo(result != nullptr && result->size() == size,
+                       "benchmark batch {} has unexpected result size",
+                       begin);
+            combined.append(TargetBitmapView(result->GetRawData(), size));
+        }
+        const double elapsed = std::chrono::duration<double, std::micro>(
+                                   std::chrono::steady_clock::now() - start)
+                                   .count();
+        combined &= mask;
+        return std::pair(std::move(combined), elapsed);
+    };
+    auto samples_text = [](const std::vector<double>& samples) {
+        std::string text;
+        for (double sample : samples) {
+            if (!text.empty()) {
+                text += ',';
+            }
+            text += std::to_string(sample);
+        }
+        return text;
+    };
+    for (const auto& [name, pattern] : workloads) {
+        PartialRegexMatcher oracle(pattern);
+        auto scan_expr = MakeMatchTypedExpr(scan.schema,
+                                            scan.varchar_id,
+                                            pattern,
+                                            false,
+                                            proto::plan::RegexMatch);
+        auto indexed_expr = MakeMatchTypedExpr(indexed.schema,
+                                               indexed.varchar_id,
+                                               pattern,
+                                               false,
+                                               proto::plan::RegexMatch);
+#ifndef MILVUS_FM_PREFILTER_BASELINE
+        auto spy_expr = MakeMatchTypedExpr(spy.schema,
+                                           spy.varchar_id,
+                                           pattern,
+                                           false,
+                                           proto::plan::RegexMatch);
+#endif
+        for (int density : {0, 1, 10, 100}) {
+            const std::string key = name + "_mask_" + std::to_string(density);
+            SCOPED_TRACE(key);
+            TargetBitmap mask(n, density == 100);
+            if (density > 0 && density < 100) {
+                for (size_t i = 0; i < n; i += 100 / density) {
+                    mask.set(i);
+                }
+            }
+            std::vector<int64_t> expected;
+            for (size_t row = 0; row < n; ++row) {
+                if (mask[row] && oracle(rows[row])) {
+                    expected.push_back(row);
+                }
+            }
+            std::array<std::vector<double>, 2> samples;
+            for (int repetition = -warmup; repetition < repetitions;
+                 ++repetition) {
+                for (int order = 0; order < 2; ++order) {
+                    const bool with_index =
+                        (order + repetition + warmup) % 2 != 0;
+                    auto [got, elapsed] = with_index
+                                              ? run(indexed, indexed_expr, mask)
+                                              : run(scan, scan_expr, mask);
+                    ASSERT_EQ(row_ids(got), expected);
+                    if (repetition >= 0) {
+                        samples[with_index].push_back(elapsed);
+                    }
+                }
+            }
+            for (int indexed_mode = 0; indexed_mode < 2; ++indexed_mode) {
+                const std::string prefix =
+                    key + (indexed_mode ? "_indexed_" : "_scan_");
+                RecordProperty(prefix + "samples_us",
+                               samples_text(samples[indexed_mode]));
+                auto sorted = samples[indexed_mode];
+                std::sort(sorted.begin(), sorted.end());
+                RecordProperty(prefix + "p50_us",
+                               std::to_string(sorted[sorted.size() / 2]));
+                RecordProperty(
+                    prefix + "p95_us",
+                    std::to_string(sorted[(sorted.size() * 95 - 1) / 100]));
+            }
+#ifndef MILVUS_FM_PREFILTER_BASELINE
+            *calls = RegexRoutingCounts{};
+            auto [got, ignored_elapsed] = run(spy, spy_expr, mask);
+            ASSERT_EQ(row_ids(got), expected);
+            RecordProperty(key + "_prepare_calls", calls->prepare);
+            RecordProperty(key + "_execute_calls", calls->execute);
+            RecordProperty(key + "_count",
+                           calls->plan
+                               ? std::to_string(calls->plan->occurrences)
+                               : "not_prepared");
+#endif
+            RecordProperty(key + "_hits", expected.size());
+        }
+    }
+}
+// END_COMPATIBLE_REGEX_PREFILTER_BENCHMARK

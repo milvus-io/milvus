@@ -39,6 +39,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
+#include "common/RegexIndexPlan.h"
 #include "common/ScopedTimer.h"
 #include "common/Span.h"
 #include "common/Tracer.h"
@@ -2207,6 +2208,37 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             break;
         case DataType::VARCHAR:
         case DataType::TEXT: {
+            if (expr_->op_type_ == proto::plan::OpType::RegexMatch &&
+                PinnedIndexIsFMIndex() && pattern_reader_ != nullptr) {
+                const auto model = pattern_reader_->GetRegexIndexCostModel();
+                if (model.rows > 0) {
+                    fm_regex_deferred_ = true;
+                    can_use = segment_->type() == SegmentType::Sealed &&
+                              num_data_chunk_ > 0 &&
+                              !expr_->column_.element_level_ &&
+                              null_reader_ != nullptr;
+                    if (!can_use) {
+                        break;
+                    }
+                    const auto initial_batch_rows =
+                        std::min(batch_size_, active_count_);
+                    // These proofs require no Count or upstream bitmap.
+                    // Preserve eager raw prefetch when no later work mask
+                    // can justify preparing candidates, or no useful byte
+                    // condition exists. Useful conditions defer Count/Locate.
+                    can_use = ShouldPrepareRegexIndexPlan(model,
+                                                          active_count_,
+                                                          initial_batch_rows,
+                                                          initial_batch_rows);
+                    if (can_use) {
+                        EnsureRegexCache();
+                        fm_regex_requirements_ =
+                            cached_regex_matcher_->RequiredIndexCondition();
+                        can_use = !fm_regex_requirements_.IsTrue();
+                    }
+                    break;
+                }
+            }
             can_use = SegmentExpr::CanUseIndexForOp<std::string>(
                 expr_->op_type_, StringLiteralForCostGuard());
             break;
@@ -2585,10 +2617,57 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     AssertInfo(num_data_chunk_ > 0,
                "FMINDEX pattern recheck needs sealed VARCHAR field data");
 
+    const auto& bitmap_input = context.get_bitmap_input();
+    AssertInfo(bitmap_input.empty() ||
+                   static_cast<int64_t>(bitmap_input.size()) == real_batch_size,
+               "bitmap_input size {} != real_batch_size {}",
+               bitmap_input.size(),
+               real_batch_size);
+
     // Phase 1: one segment-level index query, cached for every later batch.
     if (cached_phase1_res_ == nullptr) {
-        auto candidates = pattern_reader_->PatternMatch(
-            literal, ToIndexPatternOp(expr_->op_type_));
+        TargetBitmap candidates;
+        if (fm_regex_deferred_ &&
+            expr_->op_type_ == proto::plan::OpType::RegexMatch) {
+            const int64_t active_rows =
+                bitmap_input.empty()
+                    ? real_batch_size
+                    : static_cast<int64_t>(bitmap_input.count());
+            const auto remaining_rows =
+                active_count_ - current_index_chunk_pos_;
+            if (fm_regex_plan_ == nullptr) {
+                if (!ShouldPrepareRegexIndexPlan(
+                        pattern_reader_->GetRegexIndexCostModel(),
+                        remaining_rows,
+                        active_rows,
+                        real_batch_size)) {
+                    return ExecFMRegexFallback(context);
+                }
+                fm_regex_plan_ = pattern_reader_->PrepareRegexIndexPlan(
+                    fm_regex_requirements_);
+                if (fm_regex_plan_ == nullptr || !fm_regex_plan_->Usable()) {
+                    exec_path_ = ExprExecPath::RawData;
+                    return ExecFMRegexFallback(context);
+                }
+            }
+            if (!ShouldUseRegexIndexPlan(*fm_regex_plan_,
+                                         remaining_rows,
+                                         active_rows,
+                                         real_batch_size)) {
+                if (!CanRegexIndexPlanEverHelp(
+                        *fm_regex_plan_, remaining_rows, real_batch_size)) {
+                    // Fixed full-segment work cannot be paid by any later,
+                    // smaller window. Do not popcount/reprice future batches.
+                    exec_path_ = ExprExecPath::RawData;
+                }
+                return ExecFMRegexFallback(context);
+            }
+            candidates =
+                pattern_reader_->ExecuteRegexIndexPlan(*fm_regex_plan_);
+        } else {
+            candidates = pattern_reader_->PatternMatch(
+                literal, ToIndexPatternOp(expr_->op_type_));
+        }
         // FM candidate evaluation is sealed-only, and a sealed segment's active row count is
         // its complete row count. The reader must therefore answer that exact
         // domain; a mismatch is not an uncovered growing-index tail.
@@ -2614,12 +2693,7 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     batch_candidates.append(
         *cached_phase1_res_, segment_offset, real_batch_size);
 
-    const auto& bitmap_input = context.get_bitmap_input();
     if (!bitmap_input.empty()) {
-        AssertInfo(static_cast<int64_t>(bitmap_input.size()) == real_batch_size,
-                   "bitmap_input size {} != real_batch_size {}",
-                   bitmap_input.size(),
-                   real_batch_size);
         batch_candidates &= bitmap_input;
     }
 
@@ -2688,6 +2762,16 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(batch_candidates),
                                           std::move(valid_result));
+}
+
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecFMRegexFallback(EvalCtx& context) {
+    // Ordinary masked VARCHAR scan: preserve batch shape and validity and
+    // advance the data cursor once. ScalarIndex has a separate row cursor;
+    // synchronize it without MoveCursor(), which would advance data twice.
+    auto result = ExecRangeVisitorImplForData<std::string_view>(context);
+    current_index_chunk_pos_ = current_data_global_pos_;
+    return result;
 }
 
 std::optional<VectorPtr>
