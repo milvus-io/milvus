@@ -284,3 +284,7 @@ func getExpectErr() error {
 		return nil
 	}
 }
+
+func (n *noopWALAccesser) AnalyzerClient() AnalyzerClient {
+	return nil
+}

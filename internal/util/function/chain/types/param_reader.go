@@ -140,6 +140,18 @@ func (r ParamReader) StringSlice(key string, required bool) ([]string, error) {
 	return result, nil
 }
 
+func (r ParamReader) Object(key string, required bool) (*schemapb.FunctionParamObject, error) {
+	value, ok, err := r.get(key, required)
+	if err != nil || !ok {
+		return nil, err
+	}
+	objectValue, ok := value.GetValue().(*schemapb.FunctionParamValue_ObjectValue)
+	if !ok || objectValue.ObjectValue == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("%s: parameter %q must be an object", r.scope, key)
+	}
+	return objectValue.ObjectValue, nil
+}
+
 func (r ParamReader) Float64Slice(key string, required bool) ([]float64, error) {
 	value, ok, err := r.get(key, required)
 	if err != nil {

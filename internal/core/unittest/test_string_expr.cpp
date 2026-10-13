@@ -59,7 +59,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "common/RegexQuery.h"
 #include "common/Volnitsky.h"
-#include "index/NgramInvertedIndex.h"
+#include "index/scalar/ngram/NgramRegex.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 
@@ -294,7 +294,7 @@ TEST(StringExpr, Term) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -386,7 +386,7 @@ TEST(StringExpr, TermNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -524,7 +524,7 @@ TEST(StringExpr, Compare) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         }
     }
 
@@ -674,7 +674,7 @@ TEST(StringExpr, CompareNullable) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         }
     }
 
@@ -828,7 +828,7 @@ TEST(StringExpr, CompareNullable2) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         }
     }
 
@@ -954,7 +954,7 @@ TEST(StringExpr, UnaryRange) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1083,7 +1083,7 @@ TEST(StringExpr, UnaryRangeNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1195,7 +1195,7 @@ TEST(StringExpr, NullExpr) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
     std::vector<NullExprType> ops{NullExprType::NullExpr_NullOp_IsNull,
                                   NullExprType::NullExpr_NullOp_IsNotNull};
@@ -1328,7 +1328,7 @@ TEST(StringExpr, BinaryRange) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1477,7 +1477,7 @@ TEST(StringExpr, BinaryRangeNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1554,7 +1554,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     auto plan_proto = GenAlwaysTruePlan(fvec_meta, str_meta);
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
@@ -1630,7 +1630,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     auto expr_proto = GenAlwaysTrueExprIfValid(fvec_meta, str_meta);
     auto plan_proto = GenPlanNode();
@@ -1673,7 +1673,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFieldsNullable) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     auto expr_proto = GenAlwaysTrueExprIfValid(fvec_meta, str_meta);
     auto plan_proto = GenPlanNode();
@@ -1720,7 +1720,7 @@ TEST(StringExpr, NotIsNotNullExpr) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1775,7 +1775,7 @@ TEST(StringExpr, NotIsNullExpr) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1836,7 +1836,7 @@ TEST(StringExpr, IsNotNullAndNullCondition) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1946,7 +1946,7 @@ TEST(StringExpr, RegexMatch) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());

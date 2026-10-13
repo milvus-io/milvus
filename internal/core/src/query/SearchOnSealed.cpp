@@ -18,9 +18,7 @@
 #include <utility>
 #include <vector>
 
-#include "cachinglayer/CacheSlot.h"
-#include "cachinglayer/Utils.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
@@ -33,8 +31,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "exec/operator/Utils.h"
-#include "index/Index.h"
-#include "index/VectorIndex.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -44,13 +41,12 @@
 #include "query/SubSearchResult.h"
 #include "query/Utils.h"
 #include "query/helper.h"
-#include "segcore/SealedIndexingRecord.h"
 
 namespace milvus::query {
 
 void
 SearchOnSealedIndex(const Schema& schema,
-                    const segcore::SealedIndexingEntry& entry,
+                    const index::IVectorReader& reader,
                     const SearchInfo& search_info,
                     const void* query_data,
                     const size_t* query_offsets,
@@ -59,7 +55,9 @@ SearchOnSealedIndex(const Schema& schema,
                     milvus::OpContext* op_context,
                     SearchResult& search_result) {
     const auto* schema_ptr = &schema;
-    const auto* entry_ptr = &entry;
+    // The reader stays pinned for the lifetime of the SearchResult that owns
+    // the recreator.
+    const auto* reader_ptr = &reader;
     auto register_vector_search_provider = [&] {
         if (!search_result.allow_filtered_vector_search_ ||
             !CanUseStrictGroupSearch(search_info, num_queries) ||
@@ -69,7 +67,7 @@ SearchOnSealedIndex(const Schema& schema,
         search_result.SetVectorSearchProvider(
             bitset,
             [schema_ptr,
-             entry_ptr,
+             reader_ptr,
              phase1_search_info = search_info,
              query_data,
              query_offsets,
@@ -79,7 +77,7 @@ SearchOnSealedIndex(const Schema& schema,
                          SearchResult& filtered_result) {
                 SearchOnSealedIndex(
                     *schema_ptr,
-                    *entry_ptr,
+                    *reader_ptr,
                     StrictGroupSearchInfo(phase1_search_info, remaining_topk),
                     query_data,
                     query_offsets,
@@ -104,10 +102,10 @@ SearchOnSealedIndex(const Schema& schema,
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
     auto dim = is_sparse ? 0 : field.get_dim();
 
-    AssertInfo(entry.metric_type_ == search_info.metric_type_,
+    AssertInfo(reader.Metric() == search_info.metric_type_,
                "Metric type of field index isn't the same with search info,"
                "field index: {}, search info: {}",
-               entry.metric_type_,
+               reader.Metric(),
                search_info.metric_type_);
 
     knowhere::DataSetPtr dataset;
@@ -125,20 +123,21 @@ SearchOnSealedIndex(const Schema& schema,
     }
 
     dataset->SetIsSparse(is_sparse);
-    auto accessor = SemiInlineGet(entry.indexing_->PinCells(op_context, {0}));
-    auto vec_index =
-        dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
-    const bool is_element_level_search = search_info.array_offsets_ != nullptr;
+    // Nullable row mapping lives inside the reader's knowhere IdMap (#50524),
+    // so the plan's logical bitset and the result offsets both stay in
+    // logical row space here.
+    const bool is_element_level_search =
+        search_info.struct_element_offsets_ != nullptr;
     search_result.element_level_ = is_element_level_search;
     BitsetView search_bitset = bitset;
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(
-            *vec_index, dataset, search_info, search_bitset, op_context);
+            reader, dataset, search_info, search_bitset, op_context);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
-                                    search_info.array_offsets_.get());
+                                    search_info.struct_element_offsets_.get());
         return;
     }
 
@@ -148,18 +147,18 @@ SearchOnSealedIndex(const Schema& schema,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      *vec_index,
+                                                      reader,
                                                       op_context);
     if (!use_iterator) {
-        vec_index->Query(
-            dataset, search_info, search_bitset, op_context, search_result);
+        reader.Search(dataset,
+                      milvus::exec::ProjectVectorSearchParams(search_info),
+                      search_bitset,
+                      op_context,
+                      search_result);
     }
     FinalizeVectorSearchOffsets(
         search_result,
-        use_iterator ? nullptr : search_info.array_offsets_.get());
-    if (use_iterator) {
-        search_result.resource_pins_.emplace_back(std::move(accessor));
-    }
+        use_iterator ? nullptr : search_info.struct_element_offsets_.get());
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topK;
     register_vector_search_provider();
@@ -237,8 +236,9 @@ SearchOnSealedColumn(const Schema& schema,
 
     CheckBruteForceSearchParam(field, search_info);
 
-    const bool is_element_level_search = data_type == DataType::VECTOR_ARRAY &&
-                                         search_info.array_offsets_ != nullptr;
+    const bool is_element_level_search =
+        data_type == DataType::VECTOR_ARRAY &&
+        search_info.struct_element_offsets_ != nullptr;
     // Nullable vector chunks scan compacted physical rows. Row-level searches
     // need p2l ids; element-level VECTOR_ARRAY searches map element ids later.
     const bool needs_offset_mapping =
@@ -284,7 +284,8 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_bitview,
                                          data_type);
         cached_iter.NextBatch(search_info, result);
-        FinalizeVectorSearchOffsets(result, search_info.array_offsets_.get());
+        FinalizeVectorSearchOffsets(result,
+                                    search_info.struct_element_offsets_.get());
         return;
     }
 
@@ -377,10 +378,10 @@ SearchOnSealedColumn(const Schema& schema,
     } else {
         // See FinalizeVectorSearchOffsets for the rationale: element-level
         // and row-level remapping are mutually exclusive.
-        if (search_info.array_offsets_ != nullptr) {
+        if (search_info.struct_element_offsets_ != nullptr) {
             auto [seg_offsets, elem_indicies] =
                 final_qr.convert_to_element_offsets(
-                    search_info.array_offsets_.get());
+                    search_info.struct_element_offsets_.get());
             result.seg_offsets_ = std::move(seg_offsets);
             result.element_indices_ = std::move(elem_indicies);
             result.element_level_ = true;

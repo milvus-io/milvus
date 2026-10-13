@@ -17,9 +17,10 @@
 package model
 
 import (
+	"maps"
+	"slices"
 	"sort"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 )
@@ -45,8 +46,8 @@ func MarshalRLSPolicyModel(policy *RLSPolicy) *rootcoordpb.RLSPolicyInfo {
 		CollectionId: policy.CollectionID,
 		PolicyId:     policy.PolicyID,
 		PolicyName:   policy.PolicyName,
-		PolicyType:   milvuspb.RowPolicyType(policy.PolicyType),
-		Actions:      policyActionsToProto(policy.Actions),
+		PolicyType:   policy.PolicyType,
+		Actions:      slices.Clone(policy.Actions),
 		UsingExpr:    policy.UsingExpr,
 		CheckExpr:    policy.CheckExpr,
 		Description:  policy.Description,
@@ -62,8 +63,8 @@ func UnmarshalRLSPolicyModel(policy *rootcoordpb.RLSPolicyInfo) *RLSPolicy {
 		CollectionID: policy.GetCollectionId(),
 		PolicyID:     policy.GetPolicyId(),
 		PolicyName:   policy.GetPolicyName(),
-		PolicyType:   rlsutil.PolicyType(policy.GetPolicyType()),
-		Actions:      policyActionsFromProto(policy.GetActions()),
+		PolicyType:   policy.GetPolicyType(),
+		Actions:      slices.Clone(policy.GetActions()),
 		UsingExpr:    policy.GetUsingExpr(),
 		CheckExpr:    policy.GetCheckExpr(),
 		Description:  policy.GetDescription(),
@@ -77,7 +78,7 @@ func (policy *RLSPolicy) ToRowPolicy() *rlsutil.RowPolicy {
 	return &rlsutil.RowPolicy{
 		PolicyName:  policy.PolicyName,
 		PolicyType:  policy.PolicyType,
-		Actions:     cloneRowPolicyActions(policy.Actions),
+		Actions:     slices.Clone(policy.Actions),
 		UsingExpr:   policy.UsingExpr,
 		CheckExpr:   policy.CheckExpr,
 		Description: policy.Description,
@@ -95,7 +96,7 @@ func CloneRLSPolicy(policy *RLSPolicy) *RLSPolicy {
 		PolicyID:     policy.PolicyID,
 		PolicyName:   policy.PolicyName,
 		PolicyType:   policy.PolicyType,
-		Actions:      cloneRowPolicyActions(policy.Actions),
+		Actions:      slices.Clone(policy.Actions),
 		UsingExpr:    policy.UsingExpr,
 		CheckExpr:    policy.CheckExpr,
 		Description:  policy.Description,
@@ -187,48 +188,6 @@ func CloneRLSPrincipal(principal *RLSPrincipal) *RLSPrincipal {
 		DBID:          principal.DBID,
 		CollectionID:  principal.CollectionID,
 		PrincipalName: principal.PrincipalName,
-		Tags:          cloneRLSTags(principal.Tags),
+		Tags:          maps.Clone(principal.Tags),
 	}
-}
-
-func cloneRowPolicyActions(actions []rlsutil.PolicyAction) []rlsutil.PolicyAction {
-	if actions == nil {
-		return nil
-	}
-	cloned := make([]rlsutil.PolicyAction, len(actions))
-	copy(cloned, actions)
-	return cloned
-}
-
-func policyActionsToProto(actions []rlsutil.PolicyAction) []milvuspb.RowPolicyAction {
-	if actions == nil {
-		return nil
-	}
-	converted := make([]milvuspb.RowPolicyAction, len(actions))
-	for i, action := range actions {
-		converted[i] = milvuspb.RowPolicyAction(action)
-	}
-	return converted
-}
-
-func policyActionsFromProto(actions []milvuspb.RowPolicyAction) []rlsutil.PolicyAction {
-	if actions == nil {
-		return nil
-	}
-	converted := make([]rlsutil.PolicyAction, len(actions))
-	for i, action := range actions {
-		converted[i] = rlsutil.PolicyAction(action)
-	}
-	return converted
-}
-
-func cloneRLSTags(in map[string]rlsutil.TagValue) map[string]rlsutil.TagValue {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]rlsutil.TagValue, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }

@@ -25,9 +25,6 @@ from pymilvus.function_chain.chain import FunctionChainExpr
 from pymilvus.grpc_gen import common_pb2, milvus_pb2, schema_pb2
 
 prefix = "function_chain"
-HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON = (
-    "temporarily skipped because CI PyMilvus does not yet include Hybrid Search Function Chain support"
-)
 
 
 class TestFunctionChain(TestMilvusClientV2Base):
@@ -1184,6 +1181,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
             DataType.NONE,
         )
 
+        # Final scores must be non-null; nullable-root behavior has separate coverage.
         res, _ = self.search(
             client,
             collection_name,
@@ -1191,13 +1189,16 @@ class TestFunctionChain(TestMilvusClientV2Base):
             anns_field=self.vector_field,
             search_params={"metric_type": "L2"},
             limit=6,
+            filter="id < 6",
             output_fields=["id"],
             function_chains=chain,
         )
 
-        expected_ids = [4, 1, 2, 3, 5, 6]
+        expected_ids = [4, 1, 2, 3, 5]
         assert [[hit["id"] for hit in hits] for hits in res] == [expected_ids, expected_ids]
+        expected_scores = [114.0, 101.0, 92.0, 83.0, 40.0]
         for hits in res:
+            assert [abs(hit["distance"]) for hit in hits] == pytest.approx(expected_scores)
             for hit in hits:
                 assert self._hit_field(hit, "metadata") is None
                 assert self._hit_field(hit, "profile") is None
@@ -1223,7 +1224,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         client = self._client()
         collection_name = self._create_json_dynamic_collection(client, multi_segment=True)
         chain = FunctionChain(stage, name=f"{stage.name.lower()}_preserve_json_roots").map(
-            "$score",
+            "nullable_path_score",
             fn.num_combine(
                 col('metadata["rank"]'),
                 col('$meta["profile"]["bonus"]'),
@@ -1239,6 +1240,13 @@ class TestFunctionChain(TestMilvusClientV2Base):
             DataType.NONE,
         )
 
+        # Keep the nullable JSON projection, but export only a finite score.
+        chain.map(
+            "$score",
+            fn.num_combine(col('$meta["profile"]["bonus"]'), col("base_score"), mode="sum"),
+        )
+        self._set_input_data_types(chain, 1, DataType.DOUBLE, DataType.NONE)
+
         res, _ = self.search(
             client,
             collection_name,
@@ -1252,7 +1260,8 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
         expected_ranks = {1: 100, 2: 0, 3: 60, 4: 50, 5: 25}
         expected_bonuses = {1: 0.0, 2: 90.0, 3: 20.0, 4: 60.0, 5: 10.0, 6: 70.0}
-        assert [hit["id"] for hit in res[0]] == [4, 1, 2, 3, 5, 6]
+        assert [hit["id"] for hit in res[0]] == [2, 6, 4, 3, 5, 1]
+        assert [abs(hit["distance"]) for hit in res[0]] == pytest.approx([92, 76, 64, 23, 15, 1])
         for hit in res[0]:
             entity_id = hit["id"]
             metadata = self._hit_field(hit, "metadata")
@@ -1267,6 +1276,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
             assert self._hit_field(hit, 'metadata["rank"]') is None
             assert self._hit_field(hit, '$meta["profile"]["bonus"]') is None
             assert self._hit_field(hit, "$l1_source_index") is None
+            assert self._hit_field(hit, "nullable_path_score") is None
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
@@ -1370,9 +1380,9 @@ class TestFunctionChain(TestMilvusClientV2Base):
     )
     def test_search_with_querynode_function_chain_mixed_json_dynamic_path_values(self, stage):
         """
-        target: test L0/L1 handle valid, mismatched, null, missing, and nullable-root path values
+        target: test L0/L1 compute finite scores from the valid subset of mixed path values
         method: read a mixed JSON or $meta path as INT64 and combine it with a scalar score component
-        expected: only integer path values produce scores; every other representation becomes Arrow null
+        expected: valid integer path values produce exact scores without exporting null
         """
         client = self._client()
         collection_name = self._create_json_dynamic_collection(client, multi_segment=True)
@@ -1399,16 +1409,44 @@ class TestFunctionChain(TestMilvusClientV2Base):
                 anns_field=self.vector_field,
                 search_params={"metric_type": "L2"},
                 limit=6,
+                filter="id in [1, 4]",
                 output_fields=["id"],
                 function_chains=chain,
             )
 
-            assert [hit["id"] for hit in res[0]] == [4, 1, 2, 3, 5, 6]
+            assert [hit["id"] for hit in res[0]] == [4, 1]
             assert abs(res[0][0]["distance"]) == pytest.approx(24.0)
             assert abs(res[0][1]["distance"]) == pytest.approx(11.0)
             for hit in res[0]:
                 assert self._hit_field(hit, path) is None
                 assert self._hit_field(hit, "base_score") is None
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
+        "stage",
+        [FunctionChainStage.L0_RERANK, FunctionChainStage.L1_RERANK, FunctionChainStage.L2_RERANK],
+        ids=["l0", "l1", "l2"],
+    )
+    @pytest.mark.parametrize(
+        "path", ['metadata["rank"]', 'metadata["mixed"]', '$meta["profile"]["mixed"]', 'metadata["missing"]']
+    )
+    def test_search_function_chain_rejects_final_null_scores(self, stage, path):
+        """Nullable roots, mismatches, and missing paths cannot cross a stage boundary."""
+        client = self._client()
+        collection_name = self._create_json_dynamic_collection(client, multi_segment=True)
+        chain = FunctionChain(stage).map("$score", fn.num_combine(col(path), col("base_score"), mode="sum"))
+        self._set_input_data_types(chain, 0, DataType.INT64, DataType.NONE)
+        self.search(
+            client,
+            collection_name,
+            data=[[0.0, 0.0]],
+            anns_field=self.vector_field,
+            search_params={"metric_type": "L2"},
+            limit=6,
+            function_chains=chain,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 2400, ct.err_msg: "$score contains null"},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
@@ -1687,6 +1725,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
             DataType.NONE,
         )
 
+        # Final scores must be non-null; nullable-root behavior has separate coverage.
         res, _ = self.search(
             client,
             collection_name,
@@ -1694,13 +1733,16 @@ class TestFunctionChain(TestMilvusClientV2Base):
             anns_field=self.vector_field,
             search_params={"metric_type": "L2"},
             limit=6,
+            filter="id < 6",
             output_fields=["id"],
             function_chains=chain,
         )
 
-        expected_ids = [4, 1, 2, 3, 5, 6]
+        expected_ids = [4, 1, 2, 3, 5]
         assert [[hit["id"] for hit in hits] for hits in res] == [expected_ids, expected_ids]
+        expected_scores = [114.0, 101.0, 92.0, 83.0, 40.0]
         for hits in res:
+            assert [abs(hit["distance"]) for hit in hits] == pytest.approx(expected_scores)
             for hit in hits:
                 assert self._hit_field(hit, "metadata") is None
                 assert self._hit_field(hit, "profile") is None
@@ -1787,6 +1829,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         )
         self._set_input_data_types(chain, 0, DataType.INT64, DataType.DOUBLE)
 
+        # Final scores must be non-null; nullable-root behavior has separate coverage.
         res, _ = self.search(
             client,
             collection_name,
@@ -1794,11 +1837,13 @@ class TestFunctionChain(TestMilvusClientV2Base):
             anns_field=self.vector_field,
             search_params={"metric_type": "L2"},
             limit=6,
+            filter="id < 6",
             output_fields=["id"],
             function_chains=chain,
         )
 
-        assert [hit["id"] for hit in res[0]] == [4, 1, 2, 3, 5, 6]
+        assert [hit["id"] for hit in res[0]] == [4, 1, 2, 3, 5]
+        assert [abs(hit["distance"]) for hit in res[0]] == pytest.approx([110.0, 100.0, 90.0, 80.0, 35.0])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_with_l2_function_chain_repeated_json_path_occurrences(self):
@@ -1823,6 +1868,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         )
         self._set_input_data_types(chain, 0, DataType.INT64, DataType.INT64)
 
+        # Final scores must be non-null; nullable-root behavior has separate coverage.
         res, _ = self.search(
             client,
             collection_name,
@@ -1830,11 +1876,13 @@ class TestFunctionChain(TestMilvusClientV2Base):
             anns_field=self.vector_field,
             search_params={"metric_type": "L2"},
             limit=6,
+            filter="id < 6",
             output_fields=["id"],
             function_chains=chain,
         )
 
-        assert [hit["id"] for hit in res[0]] == [1, 3, 4, 5, 2, 6]
+        assert [hit["id"] for hit in res[0]] == [1, 3, 4, 5, 2]
+        assert [abs(hit["distance"]) for hit in res[0]] == pytest.approx([200.0, 120.0, 100.0, 50.0, 0.0])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_with_l2_function_chain_json_sort_limit_preserves_root_output(self):
@@ -2679,8 +2727,8 @@ class TestFunctionChain(TestMilvusClientV2Base):
             .sort("$score", desc=True, tie_break_col="$id")
         )
         self._set_input_data_types(top, 0, DataType.NONE, DataType.DOUBLE)
-        request = self._hybrid_edge_request(name, [{"chains": [l0]}, {"chains": [l1]}], top)
-        # 1.5 becomes null in the Int64 L0 path, but remains 1.5 at L1/L2.
+        request = self._hybrid_edge_request(name, [{"chains": [l0], "filter": "id != 1"}, {"chains": [l1]}], top)
+        # Exclude 1.5 from the Int64 L0 score; it remains valid at L1/L2.
         # Integer values contribute at all three stages. Hints are scoped to
         # their chain; unlike conflicting hints within one chain, this is valid.
         scores = {row["id"]: 3 * row["metadata"]["rank"] for row in rows}
@@ -2780,14 +2828,26 @@ class TestFunctionChain(TestMilvusClientV2Base):
         for key, data_type in [("i", DataType.INT64), ("d", DataType.DOUBLE), ("missing", DataType.INT64)]:
             path = f'metadata["{key}"]' if source == "metadata" else f'$meta["profile"]["{key}"]'
             nested = self._hybrid_typed_map(stage, path, data_type)
+            if key != "missing":
+                # Keep numeric projection and RRF coverage for both stages using
+                # valid rows. Do not rely on L0 heap merge discarding null bits.
+                request = self._hybrid_edge_request(
+                    name,
+                    [{"chains": [nested], "filter": "id in [2, 5]"}, {"filter": "id < 0"}],
+                    strategy="rrf",
+                )
+                result = client._get_connection()._execute_hybrid_search(request, timeout=60)
+                assert [[hit["id"] for hit in hits] for hits in result] == [[5, 2], [5, 2]], (stage, path)
+                for hits in result:
+                    assert [hit["distance"] for hit in hits] == pytest.approx([1 / 61, 1 / 62])
+
+            # Invalid final scores fail at both QueryNode stage boundaries, before
+            # segment merging or Proxy RRF can discard or replace the value.
             request = self._hybrid_edge_request(name, [{"chains": [nested]}, {"filter": "id < 0"}], strategy="rrf")
-            result = client._get_connection()._execute_hybrid_search(request, timeout=60)
-            # Positive valid values lead; mismatches, overflow, missing and null
-            # inputs trail with a deterministic ID tie-break. All-null is valid.
-            expected_ids = list(range(1, 8)) if key == "missing" else [5, 2, 1, 3, 4, 6, 7]
-            assert [[hit["id"] for hit in hits] for hits in result] == [expected_ids, expected_ids], (stage, path)
-            for hits in result:
-                assert [hit["distance"] for hit in hits] == pytest.approx([1 / (60 + r) for r in range(1, 8)])
+            with pytest.raises(MilvusException) as error:
+                client._get_connection()._execute_hybrid_search(request, timeout=60)
+            assert error.value.code == 2400
+            assert "$score contains null" in error.value.message
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("source", ["metadata", "$meta"])
@@ -2979,7 +3039,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_chain_server_validation(self):
-        """Exercise server contracts currently hidden by SDK-specific skipped tests."""
+        """Exercise server contracts directly, bypassing SDK validation."""
         client = self._client()
         name = self._create_hybrid_edge_collection(client, self._hybrid_edge_rows())
         for case, message in [
@@ -3032,7 +3092,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_dynamic_merge_strategies(self):
-        """Run the server part of the skipped SDK merge-strategy coverage."""
+        """Verify merge strategies through direct protobuf requests."""
         client = self._client()
         rows = self._hybrid_edge_rows()
         name = self._create_hybrid_edge_collection(client, rows)
@@ -3244,7 +3304,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
             assert "requires an explicit data_type" in error.value.message
             op.params["$input_data_types"].CopyFrom(hint)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_function_chain_sdk_owns_final_output(self):
         """
@@ -3292,7 +3351,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         scores = [hit["distance"] for hit in res[0]]
         assert scores == sorted(scores, reverse=True)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_with_l0_l1_l2_function_chains_execute_in_stage_order(self):
         """
@@ -3385,7 +3443,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
             assert self._hit_field(hit, "category") == entity_id
             assert self._hit_field(hit, "payload") == entity_id * 101
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_l0_then_l1_isolated_from_sibling_and_l2_owns_final_limit(
         self,
@@ -3439,7 +3496,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         assert res[0][0]["distance"] == pytest.approx(63.4, rel=1e-5, abs=1e-5)
         assert res[0][1]["distance"] == pytest.approx(55.0, rel=1e-5, abs=1e-5)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_same_anns_field_keeps_nested_chains_by_request_index(self):
         """
@@ -3483,7 +3539,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         for hit, expected_score in zip(res[0], expected_scores):
             assert hit["distance"] == pytest.approx(expected_score, rel=1e-5, abs=1e-5)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
         "top_source",
@@ -3544,7 +3599,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         assert len(res[0]) == 3
         assert len({hit["id"] for hit in res[0]}) == 3
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_nested_and_top_chain_inputs_do_not_leak_into_response(self):
         """
@@ -3594,33 +3648,38 @@ class TestFunctionChain(TestMilvusClientV2Base):
             assert self._hit_field(hit, "category") is None
             assert self._hit_field(hit, "payload") is None
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
-        "case_name, expected_error",
+        "case_name, expected_code, expected_error",
         [
             (
                 "invalid_l0_sub_chain",
+                1100,
                 'system output "$id" is not writable by L0 rerank function chain',
             ),
             (
                 "invalid_l1_sub_chain",
+                1100,
                 'system output "$id" is not writable by L1 rerank function chain',
             ),
             (
                 "invalid_l2_top_chain",
+                2201,
                 "field missing_field not exist",
             ),
             (
                 "l2_chain_in_sub_request",
-                "stage FunctionChainStageL2Rerank is not supported",
+                1100,
+                "function chains only support L0 and L1 stages",
             ),
             (
                 "l0_chain_at_hybrid_top",
+                1100,
                 "stage FunctionChainStageL0Rerank is not supported in search request",
             ),
             (
                 "l1_chain_at_hybrid_top",
+                1100,
                 "stage FunctionChainStageL1Rerank is not supported in search request",
             ),
         ],
@@ -3636,13 +3695,14 @@ class TestFunctionChain(TestMilvusClientV2Base):
     def test_hybrid_search_with_l0_l1_l2_rejects_invalid_chain_placement_or_execution(
         self,
         case_name,
+        expected_code,
         expected_error,
     ):
         """
         target: test errors from every Hybrid Search function-chain stage fail the whole request
         method: combine nested L0/L1 chains with a top-level L2 chain, then make one stage
                 invalid or place a chain at the wrong level
-        expected: HybridSearch raises parameter error and never returns partial sub-search results
+        expected: HybridSearch raises the specific parameter or query-plan error without partial results
         """
         client = self._client()
         collection_name = self._create_function_chain_collection(client)
@@ -3727,10 +3787,9 @@ class TestFunctionChain(TestMilvusClientV2Base):
         with pytest.raises(MilvusException) as exc_info:
             client._get_connection()._execute_hybrid_search(request, timeout=120)
 
-        assert exc_info.value.code == 1100
+        assert exc_info.value.code == expected_code
         assert expected_error in str(exc_info.value)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
         "strategy, merge_params",
@@ -3781,7 +3840,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         assert [hit["id"] for hit in res[0]] == [1, 2]
         assert len(res[0]) == 2
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
         "chain_factory, ranker_factory, expected_error",
@@ -3823,7 +3881,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
                     FunctionChain(FunctionChainStage.L2_RERANK, name="second").merge(strategy="rrf"),
                 ],
                 lambda: None,
-                "requires exactly one function chain",
+                "requires exactly one L2_RERANK function chain",
             ),
             (
                 lambda: FunctionChain(FunctionChainStage.L2_RERANK, name="bad_weight_count").merge(
@@ -3852,9 +3910,9 @@ class TestFunctionChain(TestMilvusClientV2Base):
         expected_error,
     ):
         """
-        target: test PyMilvus validates invalid Hybrid Function Chain requests before RPC
+        target: test SDK and server validation reject invalid Hybrid Function Chain requests
         method: build conflicting or structurally invalid chains and submit two ANN requests
-        expected: PyMilvus raises a parameter error describing the invalid request
+        expected: SDK or server raises a parameter error describing the invalid request
         """
         client = self._client()
         collection_name = self._create_function_chain_collection(client)

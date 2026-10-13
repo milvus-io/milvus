@@ -235,10 +235,11 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
         int64_t row_offset = raw_offset;
         int32_t element_index = -1;
         if (is_element_id) {
-            AssertInfo(search_info.array_offsets_ != nullptr,
-                       "Array offsets not available for element-level search");
+            AssertInfo(search_info.struct_element_offsets_ != nullptr,
+                       "Struct element offsets not available for element-level "
+                       "search");
             auto [doc_id, elem_idx] =
-                search_info.array_offsets_->ElementIDToRowID(
+                search_info.struct_element_offsets_->ElementIDToRowID(
                     static_cast<int32_t>(raw_offset));
             row_offset = doc_id;
             element_index = elem_idx;

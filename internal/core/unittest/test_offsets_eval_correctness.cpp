@@ -27,13 +27,13 @@
 #include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
-#include "index/ScalarIndexSort.h"
 #include "knowhere/comp/index_param.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -274,14 +274,14 @@ VerifyNullableElementFullScanLogicalCount(
     int64_t expected_live_elements) {
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, segment, row_count, MAX_TIMESTAMP);
-    auto array_offsets = segment->GetArrayOffsets(array_fid);
-    ASSERT_NE(array_offsets, nullptr);
-    ASSERT_EQ(array_offsets->GetTotalElementCount(),
+    auto struct_element_offsets = segment->GetStructElementOffsets(array_fid);
+    ASSERT_NE(struct_element_offsets, nullptr);
+    ASSERT_EQ(struct_element_offsets->GetTotalElementCount(),
               expected_skipped_elements + expected_live_elements);
 
     // DataGen keeps a physical payload for nullable ARRAY rows in growing
     // storage even when the row validity bit is false. Sealed binlog
-    // serialization may discard that payload, but ArrayOffsets maps the NULL
+    // serialization may discard that payload, but StructElementOffsets maps the NULL
     // row to zero logical elements in either layout.
     if (segment->type() == SegmentType::Sealed) {
         auto pw = segment->get_batch_views<ArrayView>(
@@ -299,7 +299,7 @@ VerifyNullableElementFullScanLogicalCount(
         EXPECT_FALSE(chunk.is_valid(1));
         EXPECT_EQ(chunk.data()[1].length(), 2);
     }
-    const auto null_row_range = array_offsets->ElementIDRangeOfRow(1);
+    const auto null_row_range = struct_element_offsets->ElementIDRangeOfRow(1);
     EXPECT_EQ(null_row_range.first, null_row_range.second);
 
     SegmentExpr segment_expr(std::vector<ExprPtr>{},
@@ -336,7 +336,8 @@ VerifyNullableElementFullScanLogicalCount(
         res.set(0, size, true);
     };
 
-    const auto logical_elements = array_offsets->GetTotalElementCount();
+    const auto logical_elements =
+        struct_element_offsets->GetTotalElementCount();
     TargetBitmap res(logical_elements, false);
     TargetBitmap valid(logical_elements, true);
     const auto processed =
@@ -402,13 +403,13 @@ class OffsetsEvalCorrectnessTest : public ::testing::Test {
                          N,
                          dataset.row_ids_.data(),
                          dataset.timestamps_.data(),
-                         dataset.raw_);
-        ASSERT_NE(growing_->GetArrayOffsets(array_fid_), nullptr);
+                         dataset.SharedRaw());
+        ASSERT_NE(growing_->GetStructElementOffsets(array_fid_), nullptr);
 
         auto sealed_first = DataGen(schema_, N / 2, 43, 0, 1, 1);
         auto sealed_second = DataGen(schema_, N / 2, 44, 0, 1, 1);
         sealed_ = CreateTwoChunkSealed(schema_, sealed_first, sealed_second);
-        ASSERT_NE(sealed_->GetArrayOffsets(array_fid_), nullptr);
+        ASSERT_NE(sealed_->GetStructElementOffsets(array_fid_), nullptr);
     }
 
     std::shared_ptr<SegmentExpr>
@@ -576,7 +577,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, segment.get(), N, MAX_TIMESTAMP);
@@ -1585,7 +1586,7 @@ TEST(OffsetsEvalNullableElementTest,
                     kRowCount,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     VerifyNullableElementFullScanLogicalCount(
         segment.get(), array_fid, kRowCount, 0, 2, 2);
@@ -1682,14 +1683,16 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     }
     index_valid[1] = false;
 
-    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
-    scalar_index->Build(kRowCount, index_values.data(), index_valid.get());
-    LoadIndexInfo load_index_info;
+    auto scalar_index = milvus::BuildTestScalarIndex<int64_t>(
+
+        "sort", kRowCount, index_values.data(), index_valid.get());
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = value_fid.get();
     load_index_info.field_type = DataType::INT64;
     load_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
-    load_index_info.index_params = GenIndexParams(scalar_index.get());
+    load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+    SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
     load_index_info.cache_index =
         CreateTestCacheIndex("offset-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
@@ -1780,14 +1783,15 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     for (int64_t i = 0; i < kRowCount; ++i) {
         index_valid[i] = true;
     }
-    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
-    scalar_index->Build(kRowCount, index_values.data(), index_valid.get());
-    LoadIndexInfo load_index_info;
+    auto scalar_index = milvus::BuildTestScalarIndex<int64_t>(
+        "sort", kRowCount, index_values.data(), index_valid.get());
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = value_fid.get();
     load_index_info.field_type = DataType::INT64;
     load_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
-    load_index_info.index_params = GenIndexParams(scalar_index.get());
+    load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+    SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
     load_index_info.cache_index =
         CreateTestCacheIndex("snapshot-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
@@ -1917,14 +1921,15 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     for (int64_t i = 0; i < kRowCount; ++i) {
         index_valid[i] = true;
     }
-    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
-    scalar_index->Build(kRowCount, index_values.data(), index_valid.get());
-    LoadIndexInfo load_index_info;
+    auto scalar_index = milvus::BuildTestScalarIndex<int64_t>(
+        "sort", kRowCount, index_values.data(), index_valid.get());
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = value_fid.get();
     load_index_info.field_type = DataType::INT64;
     load_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
-    load_index_info.index_params = GenIndexParams(scalar_index.get());
+    load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+    SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
     load_index_info.cache_index =
         CreateTestCacheIndex("pinned-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
@@ -1975,14 +1980,22 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     }
     index_valid[1] = false;
 
-    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
-    scalar_index->Build(kRowCount, index_values.data(), index_valid.get());
-    LoadIndexInfo load_index_info;
+    auto scalar_index = milvus::BuildTestScalarIndex<int64_t>(
+        "sort",
+        kRowCount,
+        index_values.data(),
+        index_valid.get(),
+        {{"field_type", DataType::TIMESTAMPTZ},
+         {"value_type", DataType::TIMESTAMPTZ}});
+    ASSERT_EQ(scalar_index->ValueType(), DataType::TIMESTAMPTZ);
+    ASSERT_TRUE(scalar_index->Caps().value_lookup);
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = timestamp_fid.get();
     load_index_info.field_type = DataType::TIMESTAMPTZ;
     load_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
-    load_index_info.index_params = GenIndexParams(scalar_index.get());
+    load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+    SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
     load_index_info.cache_index = CreateTestCacheIndex(
         "offset-timestamptz-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);

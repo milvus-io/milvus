@@ -181,7 +181,7 @@ class RawExprCacheExtendedTest : public ::testing::TestWithParam<Backend> {
                             kRows,
                             dataset.row_ids_.data(),
                             dataset.timestamps_.data(),
-                            dataset.raw_);
+                            std::make_shared<InsertRecordProto>(*dataset.raw_));
             segment_ = std::move(growing);
         } else {
             segment_ = CreateSealedWithFieldDataLoaded(schema_, dataset);

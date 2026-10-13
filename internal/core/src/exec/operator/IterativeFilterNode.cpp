@@ -31,7 +31,7 @@
 
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/QueryResult.h"
@@ -131,13 +131,14 @@ PhyIterativeFilterNode::GetOutput() {
                    "your code");
 
         bool element_level = search_result.element_level_;
-        auto array_offsets = query_context_->get_array_offsets();
+        auto struct_element_offsets =
+            query_context_->get_struct_element_offsets();
 
-        // For element-level, we need array_offsets to convert element_id → doc_id
+        // For element-level, we need struct_element_offsets to convert element_id → doc_id
         if (element_level) {
-            AssertInfo(
-                array_offsets != nullptr,
-                "Array offsets required for element-level iterative filter");
+            AssertInfo(struct_element_offsets != nullptr,
+                       "Struct element offsets required for element-level "
+                       "iterative filter");
         }
 
         int nq_index = 0;
@@ -221,7 +222,8 @@ PhyIterativeFilterNode::GetOutput() {
                             elem_idx = element_id - cached_first_elem;
                         } else {
                             const auto row =
-                                array_offsets->ElementIDToRowInfo(element_id);
+                                struct_element_offsets->ElementIDToRowInfo(
+                                    element_id);
                             doc_id = row.row_id;
                             elem_idx = row.element_index;
                             cached_doc_id = row.row_id;

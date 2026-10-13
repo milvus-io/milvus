@@ -55,9 +55,7 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/IndexFactory.h"
-#include "index/IndexInfo.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
@@ -464,6 +462,60 @@ TEST(test_chunk_segment,
     }
 }
 
+// The result-fill phase must produce identical output whether it reads through
+// the request-pinned snapshot (SearchResult::read_snapshot_) or the per-call
+// segment fallback. This covers FillTargetEntry -> TryTakeForSearch /
+// bulk_subscript_from_state reusing the pinned published state instead of
+// re-capturing it per output field.
+TEST(test_chunk_segment, PinnedFillTargetEntryMatchesUnpinned) {
+    constexpr int64_t row_count = 16;
+    constexpr int64_t dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto scalar_id = schema->AddDebugField("scalar", DataType::INT64);
+    auto vector_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+
+    auto segment = CreateColdVectorOutputSegment(schema, vector_id, row_count);
+    auto* chunked =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(chunked, nullptr);
+
+    auto snapshot = chunked->CaptureReadSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    // The type-erased bridge must rebind the sealed snapshot to the concrete
+    // published state, and reject null / non-sealed inputs.
+    auto state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(snapshot);
+    ASSERT_NE(state, nullptr);
+    ASSERT_EQ(segcore::ChunkedSegmentSealedImpl::ToPublishedState(nullptr),
+              nullptr);
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {pk_id, scalar_id, vector_id};
+
+    auto pinned = MakeSearchResult({0, 3, 7, 11});
+    pinned.read_snapshot_ = snapshot;
+    auto unpinned = MakeSearchResult({0, 3, 7, 11});
+
+    // Vector field is cold in CreateColdVectorOutputSegment; disable the
+    // reject-remote-vector-output gate so both paths exercise the same fill.
+    ScopedRejectRemoteVectorOutput scoped_config(false);
+    ASSERT_NO_THROW(chunked->TestFillTargetEntry(&plan, pinned));
+    ASSERT_NO_THROW(chunked->TestFillTargetEntry(&plan, unpinned));
+
+    for (auto field_id : plan.target_entries_) {
+        ASSERT_EQ(pinned.output_fields_data_.count(field_id), 1);
+        ASSERT_EQ(unpinned.output_fields_data_.count(field_id), 1);
+        EXPECT_EQ(
+            pinned.output_fields_data_.at(field_id)->SerializeAsString(),
+            unpinned.output_fields_data_.at(field_id)->SerializeAsString())
+            << "field " << field_id.get();
+    }
+    EXPECT_EQ(pinned.search_storage_cost_.scanned_total_bytes,
+              unpinned.search_storage_cost_.scanned_total_bytes);
+}
+
 TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
@@ -522,7 +574,7 @@ TEST(test_chunk_segment, GetFieldIndexMetaThrowsOnMissingField) {
                  SegcoreError);
 }
 
-TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
+TEST(test_chunk_segment, MissingStructElementOffsetsReturnsEmptyForOldRows) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
     auto pk = old_schema->AddDebugField("pk", DataType::INT64);
@@ -558,7 +610,7 @@ TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
                          false);
     segment->Reopen(new_schema);
 
-    auto offsets = segment->GetArrayOffsets(label);
+    auto offsets = segment->GetStructElementOffsets(label);
     ASSERT_NE(offsets, nullptr);
     EXPECT_EQ(offsets->GetRowCount(), row_count);
     EXPECT_EQ(offsets->GetTotalElementCount(), 0);
@@ -592,9 +644,10 @@ TEST(test_chunk_segment,
                                     array_len);
     auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
 
-    auto old_offsets = segment->GetArrayOffsets(old_label);
+    auto old_offsets = segment->GetStructElementOffsets(old_label);
     ASSERT_NE(old_offsets, nullptr);
-    ASSERT_EQ(old_offsets.get(), segment->GetArrayOffsets(old_score).get());
+    ASSERT_EQ(old_offsets.get(),
+              segment->GetStructElementOffsets(old_score).get());
     // DataGen marks alternating rows valid for nullable scalar fields, starting
     // with row 0. Sealed binlog serialization drops payloads from null rows, so
     // only the three valid rows contribute elements to the shared offsets.
@@ -625,14 +678,15 @@ TEST(test_chunk_segment,
     // name is unchanged, while every child field ID belongs to a new generation.
     segment->Reopen(new_schema);
 
-    auto new_offsets = segment->GetArrayOffsets(new_label);
+    auto new_offsets = segment->GetStructElementOffsets(new_label);
     ASSERT_NE(new_offsets, nullptr);
     EXPECT_NE(new_offsets.get(), old_offsets.get());
-    EXPECT_EQ(new_offsets.get(), segment->GetArrayOffsets(new_score).get());
+    EXPECT_EQ(new_offsets.get(),
+              segment->GetStructElementOffsets(new_score).get());
     EXPECT_EQ(new_offsets->GetRowCount(), row_count);
     EXPECT_EQ(new_offsets->GetTotalElementCount(), 0);
-    EXPECT_EQ(segment->GetArrayOffsets(old_label), nullptr);
-    EXPECT_EQ(segment->GetArrayOffsets(old_score), nullptr);
+    EXPECT_EQ(segment->GetStructElementOffsets(old_label), nullptr);
+    EXPECT_EQ(segment->GetStructElementOffsets(old_score), nullptr);
 }
 
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {
@@ -1489,21 +1543,6 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
 
     // test with inverted index
     auto fid = fields.at("int64");
-    auto file_manager_ctx = storage::FileManagerContext();
-    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-        milvus::proto::schema::Int64);
-    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
-    file_manager_ctx.fieldDataMeta.field_id = fid.get();
-    milvus::storage::IndexMeta index_meta;
-    index_meta.field_id = fid.get();
-    index_meta.build_id = rand();
-    index_meta.index_version = rand();
-    file_manager_ctx.indexMeta = index_meta;
-    index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::INT64;
-    create_index_info.index_type = index::INVERTED_INDEX_TYPE;
-    auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
-        create_index_info, file_manager_ctx);
     std::vector<int64_t> data(test_data_count * chunk_num);
     for (int i = 0; i < chunk_num; i++) {
         auto pw = segment->chunk_data<int64_t>(nullptr, fid, i);
@@ -1513,12 +1552,14 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
                   data.begin() + i * test_data_count);
     }
 
-    index->BuildWithRawDataForUT(data.size(), data.data());
-    segcore::LoadIndexInfo load_index_info;
-    load_index_info.index_params = GenIndexParams(index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(index));
-    load_index_info.field_id = fid.get();
+    auto opened =
+        test::consumer::BuildScalarReader<int64_t>(fid,
+                                                   DataType::INT64,
+                                                   index::INVERTED_INDEX_TYPE,
+                                                   data.size(),
+                                                   data.data());
+    auto load_index_info = test::consumer::MakeLoadIndexInfo(
+        std::move(opened), DataType::INT64, fid.get());
     segment->LoadIndex(load_index_info);
 
     expr = std::make_shared<expr::CompareExpr>(
@@ -1535,6 +1576,7 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
 
 TEST_P(TestChunkSegment, TestPkRange) {
     using namespace milvus::segcore;
+    using namespace milvus::test::consumer;
     bool pk_is_string = GetParam();
     auto segment_impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
@@ -1591,6 +1633,7 @@ TEST_P(TestChunkSegment, TestPkRange) {
 
 TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
     using namespace milvus::segcore;
+    using namespace milvus::test::consumer;
 
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
@@ -1714,6 +1757,7 @@ TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
 
 TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
     using namespace milvus::segcore;
+    using namespace milvus::test::consumer;
 
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);

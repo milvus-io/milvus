@@ -191,23 +191,6 @@ func (it *UpsertTask) refreshMutationResultCounts() {
 	it.result.UpsertCnt = it.result.InsertCnt
 }
 
-func (it *UpsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
-	ret := make(map[pChan]pChanStatistics)
-
-	channels := it.GetChannels()
-
-	beginTs := it.BeginTs()
-	endTs := it.EndTs()
-
-	for _, channel := range channels {
-		ret[channel] = pChanStatistics{
-			MinTs: beginTs,
-			MaxTs: endTs,
-		}
-	}
-	return ret, nil
-}
-
 func (it *UpsertTask) SetChannels() error {
 	collID, err := it.GetMetaCache().GetCollectionID(it.ctx, it.req.GetDbName(), it.req.CollectionName)
 	if err != nil {
@@ -1344,7 +1327,9 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 			},
 		}), nil
 
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_Timestamptz:
+		// Partial upsert merges query-result strings before insert validation
+		// converts Timestamptz values to their internal int64 representation.
 		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
@@ -1390,23 +1375,6 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 						ArrayData: &schemapb.ArrayArray{
 							Data:        make([]*schemapb.ScalarField, upsertIDSize),
 							ElementType: field.GetElementType(),
-						},
-					},
-				},
-			},
-		}), nil
-
-	case schemapb.DataType_Timestamptz:
-		return withValidData(&schemapb.FieldData{
-			FieldId:   field.FieldID,
-			FieldName: field.Name,
-			Type:      field.DataType,
-			IsDynamic: field.IsDynamic,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_TimestamptzData{
-						TimestamptzData: &schemapb.TimestamptzArray{
-							Data: make([]int64, upsertIDSize),
 						},
 					},
 				},

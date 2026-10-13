@@ -463,7 +463,6 @@ func (c *Core) initKVCreator() {
 func (c *Core) initMetaTable(initCtx context.Context) error {
 	fn := func() error {
 		var catalog metastore.RootCoordCatalog
-		var err error
 
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
@@ -482,9 +481,11 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 			return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
 
-		if c.meta, err = NewMetaTable(c.ctx, catalog, c.tsoAllocator); err != nil {
+		meta, err := NewMetaTable(c.ctx, catalog, c.tsoAllocator)
+		if err != nil {
 			return err
 		}
+		c.meta = meta
 
 		return nil
 	}
@@ -1203,6 +1204,16 @@ func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateColl
 	return &milvuspb.TruncateCollectionResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+// IsCollectionAvailable lets in-process GC skip live collections without
+// materializing their schemas. False means unknown, not safe to delete.
+func (c *Core) IsCollectionAvailable(collectionID int64) bool {
+	if c.GetStateCode() != commonpb.StateCode_Healthy {
+		return false
+	}
+	checker, ok := c.meta.(interface{ IsCollectionAvailable(int64) bool })
+	return ok && checker.IsCollectionAvailable(collectionID)
 }
 
 // HasCollection check collection existence

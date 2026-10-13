@@ -27,7 +27,7 @@
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
 #include "segcore/SegmentInterface.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
 
 namespace milvus {
@@ -35,13 +35,11 @@ namespace exec {
 
 template <typename T>
 struct TermIndexFunc {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, size_t n, const IndexInnerType* val) {
-        return index->In(n, val);
+    operator()(const index::IScalarPredicateReader<T>* reader,
+               size_t n,
+               const T* val) {
+        return reader->In(n, val);
     }
 };
 
