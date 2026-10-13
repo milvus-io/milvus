@@ -36,6 +36,7 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "segcore/Types.h"
+#include "segcore/SegmentLoadInfo.h"
 #include "test_utils/PlannerCipherPlugin.h"
 #include "test_utils/AsyncLoadTestUtils.h"
 #include "storage/artifact/LocalDirectory.h"
@@ -135,6 +136,92 @@ class RecordingOpenFileSystem : public arrow::fs::LocalFileSystem {
     std::shared_ptr<arrow::fs::FileSystem> fs_;
 };
 }  // namespace
+
+TEST(LegacyLoadResourceTest, SegmentMetadataPreservesFileAwareEstimates) {
+    ResourceFixture fixture;
+    storage::MemFileManagerImpl manager(fixture.context);
+    BinarySet payload;
+    payload.Append(
+        "index_data", std::shared_ptr<uint8_t[]>(new uint8_t[4096]()), 4096);
+    ASSERT_TRUE(manager.AddFile(payload));
+    for (bool vector : {false, true}) {
+        auto schema = std::make_shared<Schema>();
+        const auto field =
+            vector ? schema->AddDebugField(
+                         "value", DataType::VECTOR_FLOAT, int64_t{4}, "L2")
+                   : schema->AddDebugField("value", DataType::INT64);
+        proto::segcore::SegmentLoadInfo metadata;
+        metadata.set_collectionid(1);
+        metadata.set_partitionid(2);
+        metadata.set_segmentid(3);
+        auto* index = metadata.add_index_infos();
+        index->set_fieldid(field.get());
+        index->set_indexid(1000);
+        index->set_buildid(1000);
+        index->set_index_version(10000);
+        index->set_index_size(4096);
+        index->set_num_rows(256);
+        for (const auto& [path, size] : manager.GetRemotePathsToFileSize())
+            index->add_index_file_paths(path);
+        for (const auto& [key, value] : std::map<std::string, std::string>{
+                 {INDEX_TYPE, vector ? "FLAT" : ASCENDING_SORT},
+                 {METRIC_TYPE, "L2"},
+                 {"mmap.enabled", "false"}}) {
+            auto* param = index->add_index_params();
+            param->set_key(key);
+            param->set_value(value);
+        }
+        segcore::SegmentLoadInfo segment(metadata, schema);
+        const auto infos = segment.GetFieldIndexInfos(field);
+        ASSERT_EQ(infos.size(), 1);
+        const auto& info = infos.front();
+        const auto generic = IndexLoadResource(info.field_type,
+                                               info.element_type,
+                                               info.index_engine_version,
+                                               info.index_size,
+                                               info.index_params,
+                                               info.enable_mmap,
+                                               info.num_rows,
+                                               info.dim);
+        for (bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "vector=" << vector << " async=" << async);
+            fixture.context.use_async_load = async;
+            auto expected = generic;
+            if (vector && async) {
+                storage::LoadOptions options;
+                options.params = Config(info.index_params);
+                expected = LegacyVectorFileLoadResource(
+                    generic, false, options, info.index_files, fixture.context);
+                EXPECT_GT(expected.max_memory_cost, generic.max_memory_cost);
+            } else if (!vector) {
+                expected = ScalarIndexFileLoadResource(info.field_type,
+                                                       info.index_size,
+                                                       info.index_params,
+                                                       info.enable_mmap,
+                                                       info.num_rows,
+                                                       info.index_files,
+                                                       fixture.context)
+                               .request;
+            }
+            segcore::storagev1translator::SealedIndexTranslator translator(
+                &info,
+                tracer::TraceContext{},
+                fixture.context,
+                Config(info.index_params));
+            const auto [resident, transient] =
+                translator.estimated_byte_size_of_cell(0);
+            EXPECT_EQ(resident,
+                      (cachinglayer::ResourceUsage{expected.final_memory_cost,
+                                                   expected.final_disk_cost}));
+            EXPECT_EQ(
+                transient,
+                (cachinglayer::ResourceUsage{
+                    expected.max_memory_cost - expected.final_memory_cost,
+                    2 * expected.max_disk_cost - expected.final_disk_cost}));
+        }
+    }
+}
 
 TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
     using namespace milvus;

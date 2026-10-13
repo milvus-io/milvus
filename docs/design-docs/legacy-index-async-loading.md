@@ -123,6 +123,11 @@ sidecars. Native disk-stream engine files remain covered by Knowhere's existing
 resource estimate. Request-owned buffers are not assigned to shared scratch
 reservations.
 
+SegmentLoadInfo uses generic estimates to derive raw-data capabilities only.
+It leaves the load resource override unset so the translator's file-aware
+estimate reaches cache admission. Explicit caller-provided overrides retain
+their existing precedence.
+
 Regression tests cover raw/Parquet/encrypted envelopes, exact slice assembly,
 real legacy scalar/vector loading, mmap, NULL and empty-list state, typed I/O
 and corruption errors, admission/read cancellation and local executor placement.
