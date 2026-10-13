@@ -106,9 +106,11 @@ func TestBoundedExprCacheBoundsAreInclusive(t *testing.T) {
 func TestExprCacheCostPolicy(t *testing.T) {
 	assert.Equal(t, int64(8192+3+4*3+350*2), treeCost("a>1", "a>1", 2))
 	assert.Equal(t, int64(2048+3+4), errorCost("a>(", errors.New("boom")))
-	// The process-wide cache is bounded, at the documented sizes.
-	assert.Equal(t, paramtable.Get().ProxyCfg.ExprCacheMaxBytes.GetAsInt64(), getExprCache().maxBytes)
-	assert.Equal(t, paramtable.Get().ProxyCfg.ExprCacheMaxEntryBytes.GetAsInt64(), getExprCache().maxEntry)
+	// The process-wide cache uses the configured startup limits, clamping the
+	// per-entry limit to the total even when only the total was customized.
+	cfg := &paramtable.Get().ProxyCfg
+	assert.Equal(t, cfg.ExprCacheMaxBytes.GetAsInt64(), getExprCache().maxBytes)
+	assert.Equal(t, min(cfg.ExprCacheMaxBytes.GetAsInt64(), cfg.ExprCacheMaxEntryBytes.GetAsInt64()), getExprCache().maxEntry)
 }
 
 func TestExprCacheConfiguredAdmission(t *testing.T) {
