@@ -20,6 +20,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -205,22 +206,22 @@ ReaderMatches(const ExprIndexRequirement& req,
     return false;
 }
 
-inline int
+inline std::pair<int, size_t>
 PathMatchScore(const ExprIndexRequirement& req,
                const segcore::IndexCapabilityEntry& entry) {
     if (!req.is_json_field) {
-        return entry.json_path.empty() ? 1 : -1;
+        return {entry.json_path.empty() ? 1 : -1, 0};
     }
     if (entry.json_path == req.json_path) {
-        return 2;
+        return {2, entry.json_path.size()};
     }
     const bool multi_path_router =
         entry.caps.json_paths && entry.value_type == DataType::JSON;
     if (!multi_path_router || !IsPathPrefix(entry.json_path, req.json_path) ||
         RelativePathContainsInteger(entry.json_path, req.json_path)) {
-        return -1;
+        return {-1, 0};
     }
-    return 1;
+    return {1, entry.json_path.size()};
 }
 
 // AdaptIndexType builds a TIMESTAMPTZ index over its INT64 storage, so the
@@ -284,6 +285,7 @@ DetermineExecPath(const ExprIndexRequirement& req,
 
     const segcore::IndexCapabilityEntry* selected = nullptr;
     int selected_score = -1;
+    size_t selected_root_length = 0;
     for (const auto& entry : capabilities.entries()) {
         const bool needs_refine =
             index_path_detail::NeedsCandidateRefine(req.reader, entry.caps);
@@ -294,7 +296,8 @@ DetermineExecPath(const ExprIndexRequirement& req,
             !index_path_detail::ValueTypeMatches(req, entry)) {
             continue;
         }
-        const auto path_score = index_path_detail::PathMatchScore(req, entry);
+        const auto [path_score, root_length] =
+            index_path_detail::PathMatchScore(req, entry);
         if (path_score < 0) {
             continue;
         }
@@ -303,9 +306,13 @@ DetermineExecPath(const ExprIndexRequirement& req,
                                    entry.caps.cheap_value_lookup
                                ? 1
                                : 0);
-        if (selected == nullptr || score > selected_score) {
+        // Preserve exact/prefix and refine/cheap scoring. Among equal scores,
+        // prefer the most specific JSON root before the stable identity order.
+        if (selected == nullptr || score > selected_score ||
+            (score == selected_score && root_length > selected_root_length)) {
             selected = &entry;
             selected_score = score;
+            selected_root_length = root_length;
         }
     }
     if (selected == nullptr) {
