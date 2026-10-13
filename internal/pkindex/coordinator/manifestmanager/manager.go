@@ -218,6 +218,9 @@ func (m *Manager) load(ctx context.Context, key string) (*entry, error) {
 	if err := proto.Unmarshal([]byte(ptr), &p); err != nil {
 		return nil, errors.Mark(errors.Wrapf(err, "decode manifest pointer %s", key), pkerr.ErrCorrupted)
 	}
+	if p.GetVersion() == 0 || p.GetBodyKey() == "" {
+		return nil, errors.Mark(errors.Newf("manifest pointer %s has version %d and body key %q", key, p.GetVersion(), p.GetBodyKey()), pkerr.ErrCorrupted)
+	}
 	body, err := m.store.Read(ctx, p.GetBodyKey())
 	if err != nil {
 		return nil, markUnavailable(err, "read manifest body %s", p.GetBodyKey())

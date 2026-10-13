@@ -387,6 +387,19 @@ func TestLoadErrors(t *testing.T) {
 		_, _, err := New(p, s, testLayout).Get(ctx, 1, "v")
 		assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
 	})
+	t.Run("pointer names no body", func(t *testing.T) {
+		zeroVersion, err := proto.Marshal(&pkindexpb.ManifestPointer{BodyKey: testLayout.ManifestBodyKey(1, "v", 1, "x")})
+		require.NoError(t, err)
+		for _, ptr := range []string{"", string(zeroVersion)} {
+			p.Put(manifest.PointerKey(1, "v"), ptr)
+			// an object store rejects an empty key as a request error, not as a missing object
+			s.ReadErr = errors.New("object name cannot be empty")
+			_, _, err := New(p, s, testLayout).Get(ctx, 1, "v")
+			s.ReadErr = nil
+			assert.True(t, errors.Is(err, pkerr.ErrCorrupted), "pointer %q", ptr)
+			assert.False(t, errors.Is(err, pkerr.ErrUnavailable), "pointer %q", ptr)
+		}
+	})
 }
 
 func TestBodyWriteFails(t *testing.T) {
