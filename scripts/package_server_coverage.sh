@@ -12,6 +12,10 @@ if ! go version -m bin/milvus | grep -F -- '-cover=true' >/dev/null; then
     echo 'The server must be built with USE_SERVER_COVERAGE=ON' >&2
     exit 1
 fi
+if ! go version -m bin/milvus | grep -E 'build[[:space:]]+-tags=.*servercoverage' >/dev/null; then
+    echo 'The server coverage build tag is missing' >&2
+    exit 1
+fi
 if ! nm -D lib/libmilvus_core.so | grep -F 'MilvusDumpCoverage' >/dev/null; then
     echo 'libmilvus_core.so does not contain the server coverage hook' >&2
     exit 1
@@ -49,7 +53,7 @@ GOFLAGS= CGO_ENABLED=0 go build -o "$output/bin/coverage-covdata" cmd/covdata
 cp scripts/export_server_coverage.sh "$output/bin/coverage-export"
 chmod +x "$output/bin/coverage-export"
 {
-    printf 'commit=%s\n' "$(git rev-parse HEAD)"
+    printf 'commit=%s\n' "${GIT_COMMIT:-$(git rev-parse HEAD)}"
     printf 'source_root=%s\n' "$source_root"
     printf 'gcno_files=%s\n' "$count"
     printf 'working_tree_dirty=%s\n' "$(test -z "$(git status --porcelain)" && echo false || echo true)"
