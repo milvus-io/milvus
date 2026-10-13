@@ -102,7 +102,11 @@ func (p *ProxyWatcher) WatchProxy(ctx context.Context) error {
 		cancel()
 		p.wg.Done()
 	}
-	revision, err := p.initSessions(ctx)
+	// Bound synchronous initialization, but let background recovery wait until
+	// etcd is available again or the watcher is stopped.
+	initCtx, initCancel := context.WithTimeout(ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	revision, err := p.initSessions(initCtx)
+	initCancel()
 	if err != nil {
 		cleanup()
 		return err
@@ -118,9 +122,7 @@ func (p *ProxyWatcher) WatchProxy(ctx context.Context) error {
 }
 
 func (p *ProxyWatcher) initSessions(ctx context.Context) (int64, error) {
-	childCtx, cancel := context.WithTimeout(ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
-	defer cancel()
-	sessions, revision, err := p.getSessionsOnEtcd(childCtx)
+	sessions, revision, err := p.getSessionsOnEtcd(ctx)
 	if err != nil {
 		return 0, err
 	}

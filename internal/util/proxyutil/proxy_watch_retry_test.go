@@ -265,3 +265,97 @@ func TestProxyWatchResumesSnapshot(t *testing.T) {
 		require.Equal(t, int32(2), watches.Load())
 	})
 }
+
+func TestProxyWatchInitialSnapshotTimeout(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	originalTimeout := params.EtcdCfg.RequestTimeout.GetValue()
+	require.NoError(t, params.Save(params.EtcdCfg.RequestTimeout.Key, "100"))
+	defer params.Save(params.EtcdCfg.RequestTimeout.Key, originalTimeout)
+	mockey.PatchConvey("initial snapshot still has a request timeout", t, func() {
+		p := NewProxyWatcher(nil)
+		defer p.Stop()
+		mockey.Mock((*ProxyWatcher).getSessionsOnEtcd).To(func(_ *ProxyWatcher, ctx context.Context) ([]*sessionutil.Session, int64, error) {
+			<-ctx.Done()
+			return nil, 0, ctx.Err()
+		}).Build()
+		// The caller stays alive after the shorter initialization timeout.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.ErrorIs(t, p.WatchProxy(ctx), context.DeadlineExceeded)
+		require.NoError(t, ctx.Err())
+	})
+}
+
+func TestProxyWatchRecoverySnapshotTimeout(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	originalTimeout := params.EtcdCfg.RequestTimeout.GetValue()
+	require.NoError(t, params.Save(params.EtcdCfg.RequestTimeout.Key, "100"))
+	defer params.Save(params.EtcdCfg.RequestTimeout.Key, originalTimeout)
+	for _, outcome := range []string{"recovered", "parent deadline", "permission denied"} {
+		t.Run(outcome, func(t *testing.T) {
+			mockey.PatchConvey(outcome, t, func() {
+				cli, err := etcd.GetRemoteEtcdClient(params.EtcdCfg.Endpoints.GetAsStrings())
+				require.NoError(t, err)
+				defer cli.Close()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				var reconciled, added int64
+				p := NewProxyWatcher(cli, func(sessions []*sessionutil.Session) {
+					require.Len(t, sessions, 1)
+					reconciled = sessions[0].ServerID
+				})
+				defer p.Stop()
+				p.AddSessionFunc(func(s *sessionutil.Session) {
+					added = s.ServerID
+					cancel()
+				})
+				mockey.Mock((*ProxyWatcher).getSessionsOnEtcd).To(func(_ *ProxyWatcher, getCtx context.Context) ([]*sessionutil.Session, int64, error) {
+					if outcome == "parent deadline" {
+						<-getCtx.Done()
+						return nil, 0, getCtx.Err()
+					}
+					// Simulate etcd remaining unavailable beyond RequestTimeout.
+					select {
+					case <-getCtx.Done():
+						return nil, 0, getCtx.Err()
+					case <-time.After(300 * time.Millisecond):
+					}
+					if outcome == "permission denied" {
+						return nil, 0, rpctypes.ErrPermissionDenied
+					}
+					return []*sessionutil.Session{{SessionRaw: sessionutil.SessionRaw{ServerID: 2}}}, 20, nil
+				}).Build()
+				watches := 0
+				mockey.Mock(mockey.GetMethod(cli.Watcher, "Watch")).To(func(_ context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+					watches++
+					ch := make(chan clientv3.WatchResponse, 1)
+					if watches == 1 {
+						ch <- clientv3.WatchResponse{CompactRevision: 1}
+					} else {
+						require.Equal(t, int64(21), clientv3.OpGet(key, opts...).Rev())
+						ch <- clientv3.WatchResponse{Events: []*clientv3.Event{
+							{Type: mvccpb.PUT, Kv: &mvccpb.KeyValue{Value: []byte(`{"ServerID":3}`)}},
+						}}
+					}
+					return ch
+				}).Build()
+				err = p.startWatchEtcd(ctx, 10)
+				switch outcome {
+				case "recovered":
+					require.ErrorIs(t, err, context.Canceled)
+					require.Equal(t, int64(2), reconciled)
+					require.Equal(t, int64(3), added)
+					require.Equal(t, 2, watches)
+				case "parent deadline":
+					require.ErrorIs(t, err, context.DeadlineExceeded)
+					require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+				case "permission denied":
+					require.ErrorIs(t, err, rpctypes.ErrPermissionDenied)
+					require.NoError(t, ctx.Err())
+				}
+			})
+		})
+	}
+}
