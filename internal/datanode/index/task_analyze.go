@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
+	"github.com/milvus-io/milvus/internal/util/clustercompaction"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -280,7 +281,8 @@ func validateAnalyzeRequest(req *workerpb.AnalyzeRequest, memory uint64) error {
 	if math.IsNaN(ratio) || ratio <= 0 || ratio > 1 || budget < 1 || budget >= float64(math.MaxInt64) {
 		return merr.WrapErrServiceInternalMsg("invalid analyze training memory budget")
 	}
-	if req.GetFieldType() != schemapb.DataType_FloatVector || req.GetDim() <= 0 || req.GetDim() > math.MaxInt64/4 || req.GetNumClusters() <= 0 || req.GetNumClusters() > math.MaxUint32 || req.GetClusterType() == "" {
+	elementBytes := clustercompaction.VectorElementBytes(req.GetFieldType())
+	if elementBytes == 0 || req.GetDim() <= 0 || req.GetDim() > math.MaxInt64/elementBytes || req.GetNumClusters() <= 0 || req.GetNumClusters() > math.MaxUint32 || req.GetClusterType() == "" {
 		return merr.WrapErrServiceInternalMsg("invalid analyze field shape or cluster parameters")
 	}
 	if field := req.GetField(); field != nil && (field.GetFieldID() != req.GetFieldID() || field.GetDataType() != req.GetFieldType()) {
@@ -293,7 +295,7 @@ func validateAnalyzeRequest(req *workerpb.AnalyzeRequest, memory uint64) error {
 		}
 		rows += stats.GetNumRows()
 	}
-	if rows > math.MaxInt64/(req.GetDim()*4) {
+	if rows > math.MaxInt64/(req.GetDim()*elementBytes) {
 		return merr.WrapErrServiceInternalMsg("analyze input size overflows int64")
 	}
 	return nil

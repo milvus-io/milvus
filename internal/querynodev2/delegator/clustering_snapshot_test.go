@@ -120,3 +120,34 @@ func TestClusteringCandidateRanges(t *testing.T) {
 	binding.index = nil
 	require.Empty(t, call())
 }
+
+func TestClusteringHalfCandidateRanges(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			binding := testStatsBinding(100, false)
+			binding.stats.ClusteringStats.DataType = dtype
+			pt := commonpb.PlaceholderType_Float16Vector
+			other := commonpb.PlaceholderType_BFloat16Vector
+			if dtype == schemapb.DataType_BFloat16Vector {
+				pt, other = other, pt
+			}
+			plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{QueryInfo: &planpb.QueryInfo{SearchParams: "{}"}}}})
+			require.NoError(t, err)
+			req := &internalpb.SearchRequest{FieldId: 100, MetricType: "L2", Nq: 1, SerializedExprPlan: plan}
+			call := func(typ commonpb.PlaceholderType, values ...[]byte) map[int64]*querypb.ClusteringRowRanges {
+				ph, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{{Tag: "$0", Type: typ, Values: values}}})
+				require.NoError(t, err)
+				req.PlaceholderGroup = ph
+				return clusteringCandidateRanges(context.Background(), map[int64]*partitionStatsBinding{2: binding}, req,
+					[]SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{{SegmentID: 10, PartitionID: 2}, {SegmentID: 20, PartitionID: 2}}}}, map[int64]int64{10: 8, 20: 4}, 0.5)
+			}
+			require.Equal(t, int64(3), call(pt, make([]byte, 4))[10].Ranges[0].RowCount)
+			require.Empty(t, call(other, make([]byte, 4)), "same byte width does not make FP16 and BF16 interchangeable")
+			require.Empty(t, call(commonpb.PlaceholderType_FloatVector, make([]byte, 8)))
+			for _, n := range []int{0, 3, 5, 8} {
+				require.Empty(t, call(pt, make([]byte, n)))
+			}
+			require.Empty(t, call(pt, make([]byte, 4), make([]byte, 4)), "NQ mismatch must not narrow scope")
+		})
+	}
+}

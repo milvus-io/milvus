@@ -717,6 +717,12 @@ class KmeansSamplingTest : public ::testing::Test {
     std::shared_ptr<arrow::fs::FileSystem> fs_;
 };
 
+TEST_F(KmeansSamplingTest, BinlogFP16) {
+    CheckBinlogSampling<knowhere::fp16, DataType::VECTOR_FLOAT16>();
+}
+TEST_F(KmeansSamplingTest, BinlogBF16) {
+    CheckBinlogSampling<knowhere::bf16, DataType::VECTOR_BFLOAT16>();
+}
 TEST_F(KmeansSamplingTest, BinlogFloat) {
     CheckBinlogSampling<float, DataType::VECTOR_FLOAT>();
 }

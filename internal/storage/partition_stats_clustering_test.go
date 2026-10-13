@@ -231,8 +231,7 @@ func TestClusteringSnapshotGroupMembership(t *testing.T) {
 
 	// Offsets belong to each snapshot: swapping the group order and cluster
 	// labels preserves all physical ranges and unique derived memberships.
-	snapshot.ClusteringStats.Groups[0], snapshot.ClusteringStats.Groups[1] =
-		snapshot.ClusteringStats.Groups[1], snapshot.ClusteringStats.Groups[0]
+	snapshot.ClusteringStats.Groups[0], snapshot.ClusteringStats.Groups[1] = snapshot.ClusteringStats.Groups[1], snapshot.ClusteringStats.Groups[0]
 	for _, stats := range snapshot.SegmentStats {
 		for _, entry := range stats.ClusteringRanges {
 			entry.ClusterOffset = 2 - entry.ClusterOffset
@@ -367,8 +366,6 @@ func TestClusteringSnapshotDecodeErrors(t *testing.T) {
 
 	for _, mutate := range []func(*PartitionStatsSnapshot){
 		func(s *PartitionStatsSnapshot) { s.ClusteringStats.FormatVersion = 99 },
-		func(s *PartitionStatsSnapshot) { s.ClusteringStats.DataType = schemapb.DataType_Float16Vector },
-		func(s *PartitionStatsSnapshot) { s.ClusteringStats.DataType = schemapb.DataType_BFloat16Vector },
 		// Scalar metadata has no vector dimension or metric. It must fail as an
 		// unsupported capability until typed mapping/query support is available,
 		// rather than being mistaken for malformed vector metadata or admitted.

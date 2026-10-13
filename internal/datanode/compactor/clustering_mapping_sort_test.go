@@ -26,9 +26,11 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestClusteringMappingExternalSort(t *testing.T) {
@@ -86,6 +88,50 @@ func TestClusteringMappingExternalSort(t *testing.T) {
 		require.NoError(t, s.Close())
 		_, err = os.Stat(s.dir)
 		require.True(t, os.IsNotExist(err))
+	}
+}
+
+func TestClusteringMappingHalfPayloadSpills(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "vector", DataType: dtype, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "3"}}}}}
+			as, err := storage.ConvertToArrowSchema(schema, false)
+			require.NoError(t, err)
+			builder := array.NewRecordBuilder(memory.DefaultAllocator, as)
+			defer builder.Release()
+			var payloads [][]byte
+			for i := 0; i < 300; i++ {
+				payload, err := typeutil.ConvertFloat32ToFP16BF16Bytes([]float32{float32(i) / 8, -float32(i) / 16, 0.125}, dtype)
+				require.NoError(t, err)
+				payloads = append(payloads, payload)
+				builder.Field(0).(*array.FixedSizeBinaryBuilder).Append(payload)
+			}
+			record := storage.NewSimpleArrowRecord(builder.NewRecord(), map[int64]int{100: 0})
+			defer record.Release()
+			// One-row runs force multi-level merging; a large budget exercises the
+			// same order without intermediate merges. Neither may convert vectors.
+			var reference []uint64
+			for _, budget := range []uint64{1, 1 << 20} {
+				sorter, err := newClusteringMappingSorter(context.Background(), schema, t.TempDir(), budget)
+				require.NoError(t, err)
+				defer sorter.Close()
+				for i := 299; i >= 0; i-- {
+					require.NoError(t, sorter.Append(record, i, clusteringSortKey{cluster: uint32(i % 3), distance: float32(i % 7), row: uint64(i)}))
+				}
+				var order []uint64
+				require.NoError(t, sorter.Finish(func(r storage.Record, row int, key clusteringSortKey) error {
+					require.Equal(t, payloads[key.row], r.Column(100).(*array.FixedSizeBinary).Value(row))
+					order = append(order, key.row)
+					return nil
+				}))
+				require.Len(t, order, len(payloads))
+				if reference == nil {
+					reference = order
+				} else {
+					require.Equal(t, reference, order)
+				}
+			}
+		})
 	}
 }
 

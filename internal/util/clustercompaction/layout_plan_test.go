@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestLayoutPlanCoverage(t *testing.T) {
@@ -64,4 +65,36 @@ func TestLayoutPlanCentroidValidation(t *testing.T) {
 	require.Error(t, ValidateCentroids(stats, schemapb.DataType_Float16Vector, 2))
 	stats.Centroids[0].GetFloatVector().Data[0] = float32(math.NaN())
 	require.Error(t, ValidateCentroids(stats, schemapb.DataType_FloatVector, 2))
+}
+
+func TestHalfCentroidValidation(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			set := func(raw []byte) *clusteringpb.ClusteringCentroidsStats {
+				c := &schemapb.VectorField{Dim: 3}
+				if dtype == schemapb.DataType_Float16Vector {
+					c.Data = &schemapb.VectorField_Float16Vector{Float16Vector: raw}
+				} else {
+					c.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: raw}
+				}
+				return &clusteringpb.ClusteringCentroidsStats{Centroids: []*schemapb.VectorField{c}}
+			}
+			good, err := typeutil.ConvertFloat32ToFP16BF16Bytes([]float32{0, 1, -65504}, dtype)
+			require.NoError(t, err)
+			require.NoError(t, ValidateCentroids(set(good), dtype, 3))
+			for _, bad := range [][]byte{nil, good[:5], append(append([]byte(nil), good...), 0, 0)} {
+				require.Error(t, ValidateCentroids(set(bad), dtype, 3))
+			}
+			require.Error(t, ValidateCentroids(set(good), schemapb.DataType_FloatVector, 3))
+			for _, value := range []float32{float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1))} {
+				var raw []byte
+				if dtype == schemapb.DataType_Float16Vector {
+					raw = typeutil.Float32ArrayToFloat16Bytes([]float32{value, 1, 2})
+				} else {
+					raw = typeutil.Float32ArrayToBFloat16Bytes([]float32{value, 1, 2})
+				}
+				require.Error(t, ValidateCentroids(set(raw), dtype, 3))
+			}
+		})
+	}
 }

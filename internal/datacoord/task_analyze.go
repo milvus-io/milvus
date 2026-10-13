@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type analyzeTask struct {
@@ -314,7 +315,7 @@ func (at *analyzeTask) DropTaskOnWorker(cluster session.Cluster) {
 
 // Reject stale/corrupt task metadata instead of silently changing its shape.
 func validateAnalyzeField(task *indexpb.AnalyzeTask, field *schemapb.FieldSchema) error {
-	if field == nil || field.GetFieldID() != task.GetFieldID() || field.GetDataType() != task.GetFieldType() || field.GetDataType() != schemapb.DataType_FloatVector || task.GetNumClusters() <= 0 || task.GetClusterType() == "" {
+	if field == nil || field.GetFieldID() != task.GetFieldID() || field.GetDataType() != task.GetFieldType() || !typeutil.IsDenseFloatVectorType(field.GetDataType()) || task.GetNumClusters() <= 0 || task.GetClusterType() == "" {
 		return merr.WrapErrServiceInternalMsg("analyze task does not match its clustering field")
 	}
 	dim, err := storage.GetDimFromParams(field.GetTypeParams())

@@ -39,12 +39,12 @@ func TestClusteringAnalyzeK(t *testing.T) {
 		{101, 128, 1024, 16, 128, 51},
 		{10000, 128, 1024, 16, 128, 128},
 	} {
-		k, err := clusteringAnalyzeK(tc.rows, tc.dim, tc.chunk, tc.min, tc.max)
+		k, err := clusteringAnalyzeK(tc.rows, tc.dim, 4, tc.chunk, tc.min, tc.max)
 		require.NoError(t, err)
 		require.Equal(t, tc.expected, k)
 	}
 	for _, args := range [][5]int64{{-1, 128, 1024, 1, 128}, {1, 0, 1024, 1, 128}, {1, 128, 0, 1, 128}, {1, 128, 1024, 129, 128}, {math.MaxInt64, 2, 1, 1, 128}, {1, math.MaxInt64, 1, 1, 128}} {
-		_, err := clusteringAnalyzeK(args[0], args[1], args[2], args[3], args[4])
+		_, err := clusteringAnalyzeK(args[0], args[1], 4, args[2], args[3], args[4])
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 	}
 }
@@ -85,4 +85,15 @@ func (s *ClusteringCompactionTaskSuite) TestFailedCompactionRetainsUncertainAnal
 	s.Require().True(task.Clean())
 	s.NotNil(s.meta.analyzeMeta.GetTask(777))
 	s.NotNil(s.meta.analyzeMeta.GetTask(778))
+}
+
+func TestClusteringAnalyzeKUsesPhysicalElementWidth(t *testing.T) {
+	fp32, err := clusteringAnalyzeK(100, 128, 4, 1024, 1, 1024)
+	require.NoError(t, err)
+	half, err := clusteringAnalyzeK(100, 128, 2, 1024, 1, 1024)
+	require.NoError(t, err)
+	require.Equal(t, int64(50), fp32)
+	require.Equal(t, int64(25), half)
+	_, err = clusteringAnalyzeK(100, 128, 0, 1024, 1, 1024)
+	require.Error(t, err)
 }
