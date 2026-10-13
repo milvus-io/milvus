@@ -367,7 +367,11 @@ func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *t
 			continue
 		}
 		require.Nil(t, acker)
-		require.True(t, status.AsStreamingError(appendErr).IsIgnoredOperation())
+		if msg.MessageType() == message.MessageTypeCommitTxn {
+			require.True(t, status.AsStreamingError(appendErr).IsReplicateViolation())
+		} else {
+			require.True(t, status.AsStreamingError(appendErr).IsIgnoredOperation())
+		}
 	}
 	checkpoint, err := rm.GetReplicateCheckpoint()
 	require.NoError(t, err)

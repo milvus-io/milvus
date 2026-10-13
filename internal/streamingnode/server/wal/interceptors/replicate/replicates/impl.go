@@ -230,6 +230,10 @@ func (impl *replicatesManagerImpl) startReplicateTxnMessage(_ context.Context, m
 		return replicateAckerImpl(func(err error) {
 			if err == nil {
 				impl.secondaryState.AddNewMessageDone(rh)
+			} else if errors.Is(err, errTxnAborted) {
+				impl.secondaryState.AbortDone()
+			} else if errors.Is(err, errTxnAbortPending) {
+				impl.secondaryState.aborting = true
 			}
 			impl.mu.Unlock()
 		}), nil

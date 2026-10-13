@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -97,6 +98,19 @@ func TestRedoInterceptorWaitUntilGrowingSegmentReadyReturnsUnrecoverableForDropp
 			})
 			require.Nil(t, msgID)
 			require.Error(t, err)
+			require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+
+			// Shard validation must run inside the replicate interceptor to trigger rollback.
+			msg = msg.WithReplicateHeader(&message.ReplicateHeader{
+				ClusterID: "source", MessageID: walimplstest.NewTestMessageID(1),
+				LastConfirmedMessageID: walimplstest.NewTestMessageID(0),
+			})
+			called := false
+			_, err = interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				called = true
+				return nil, status.NewUnrecoverableError("shard rejected missing metadata")
+			})
+			require.True(t, called)
 			require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 		})
 	}

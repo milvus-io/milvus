@@ -67,6 +67,50 @@ func TestTimeTickCommitInnerErrorPreservesExistingStateTransition(t *testing.T) 
 	requireCommitAckerError(t, impl, expectedErr)
 }
 
+func TestTimeTickRollbackAppendFailureCanBeRetried(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	rollback := message.NewRollbackTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.RollbackTxnMessageHeader{}).
+		WithBody(&message.RollbackTxnMessageBody{}).
+		MustBuildMutable().WithTxnContext(*commit.TxnContext())
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	expectedErr := errors.New("rollback WAL append failed")
+	_, err := impl.DoAppend(ctx, rollback, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return nil, expectedErr
+	})
+	require.ErrorIs(t, err, expectedErr)
+	require.Equal(t, message.TxnStateOnRollback, session.State())
+	require.Error(t, session.AddNewMessage(ctx, rollback.TimeTick()))
+	require.Error(t, session.RequestCommitAndWait(ctx, rollback.TimeTick()))
+
+	_, err = impl.DoAppend(ctx, rollback, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return walimplstest.NewTestMessageID(3), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+}
+
+func TestTimeTickLocalReplicationAbortWithoutSession(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+	commit, _ := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	impl.txnManager.FailTxnAtVChannel("v1")
+	rollback := message.NewRollbackTxnMessageBuilderV2().
+		WithVChannel("v1").WithUnreplicable().
+		WithHeader(&message.RollbackTxnMessageHeader{}).
+		WithBody(&message.RollbackTxnMessageBody{}).
+		MustBuildMutable().WithTxnContext(*commit.TxnContext())
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	appended := false
+	_, err := impl.DoAppend(ctx, rollback, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return walimplstest.NewTestMessageID(3), nil
+	})
+	require.NoError(t, err)
+	require.True(t, appended, "the durable fragments still need a rollback record")
+}
+
 func requireCommitAckerSuccess(t *testing.T, impl *timeTickAppendInterceptor, session *txn.TxnSession) {
 	t.Helper()
 	details, err := impl.operator.AckManager().SyncAndGetAcknowledged(context.Background())

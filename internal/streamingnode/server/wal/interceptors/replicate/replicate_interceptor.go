@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -67,10 +68,41 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 		return nil, err
 	}
 
-	defer func() {
-		acker.Ack(err)
-	}()
-	return appendOp(ctx, msg)
+	var ackErr error
+	defer func() { acker.Ack(ackErr) }()
+	msgID, err = appendOp(ctx, msg)
+	ackErr = err
+	if err == nil || msg.TxnContext() == nil ||
+		msg.MessageType() == message.MessageTypeBeginTxn ||
+		msg.MessageType() == message.MessageTypeCommitTxn ||
+		!status.AsStreamingError(err).IsUnrecoverable() {
+		return msgID, err
+	}
+
+	// Hold the manager lock while appending the rollback; clear transaction state
+	// only after it is durable, or recovery would restore the failed transaction.
+	// Omit the replicate header to leave the source checkpoint unchanged.
+	ackErr = replicates.MarkTxnAbortPending(err)
+	if impl.txnManager != nil {
+		if session, sessionErr := impl.txnManager.GetSessionOfTxn(msg.TxnContext().TxnID); sessionErr == nil {
+			// Block body/commit writes before timestamp allocation, which can fail.
+			// Retries must finish the rollback even if the missing metadata is restored.
+			if rollbackErr := session.RequestRollback(ctx, msg.TimeTick()); rollbackErr != nil && !status.AsStreamingError(rollbackErr).IsTxnUnavilable() {
+				return nil, errors.CombineErrors(err, rollbackErr)
+			}
+		}
+	}
+	rollback := message.NewRollbackTxnMessageBuilderV2().
+		WithVChannel(msg.VChannel()).
+		WithUnreplicable().
+		WithHeader(&message.RollbackTxnMessageHeader{}).
+		WithBody(&message.RollbackTxnMessageBody{}).
+		MustBuildMutable().WithTxnContext(*msg.TxnContext())
+	if _, rollbackErr := appendOp(ctx, rollback); rollbackErr != nil {
+		return nil, errors.CombineErrors(err, rollbackErr)
+	}
+	ackErr = replicates.MarkTxnAborted(err)
+	return nil, err
 }
 
 func (impl *replicateInterceptor) Close() {

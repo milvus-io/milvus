@@ -197,6 +197,9 @@ func (s *TxnSession) RollbackDone() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.state == message.TxnStateRollbacked {
+		return
+	}
 	if s.state != message.TxnStateOnRollback {
 		// unreachable code here.
 		panic("invalid state for rollback done")
@@ -246,7 +249,8 @@ func (s *TxnSession) getDoneChan(timetick uint64, state message.TxnState) (<-cha
 		return nil, err
 	}
 
-	if s.state != message.TxnStateInFlight {
+	// Allow retrying a failed rollback append while keeping body/commit writes blocked.
+	if s.state != message.TxnStateInFlight && !(state == message.TxnStateOnRollback && s.state == state) {
 		return nil, status.NewInvalidTransactionState("GetWaitChan", message.TxnStateInFlight, s.state)
 	}
 	s.state = state

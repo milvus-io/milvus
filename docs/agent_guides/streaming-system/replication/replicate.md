@@ -33,6 +33,16 @@ The secondary maintains a `ReplicateCheckpoint` per PChannel: `{ClusterID, PChan
 
 The checkpoint is persisted in the [WALCheckpoint](../wal/recovery-storage.md) and can be queried by the primary via `GetReplicateInfo` to resume replication from the correct position after restart.
 
+### Rejected transaction bodies
+
+An unrecoverable transaction body append error, such as DML for a missing collection, fails the replication stream without confirming the rejected message. The replicate interceptor appends a local `Unreplicable` RollbackTxn before releasing the transaction. Consumers and recovery discard its persisted bodies; the source checkpoint stays unchanged.
+
+If rollback fails, the transaction continues to block unrelated messages. Its local session rejects body/commit writes but allows rollback retries on replay. Transient body append errors keep the transaction and its message-ID deduplication state for retry.
+
+Once rollback is durable, other messages may use the PChannel. Replay must start from BeginTxn: body/commit messages above the checkpoint are rejected when no transaction is active. Senders must preserve source ordering. Bootstrap tooling must restore required metadata before replay and keep the checkpoint below data still awaiting restoration; advancing it makes older messages ineligible for replay.
+
+After sending queued confirmations, the Proxy returns the receive-loop error. Streaming append errors retain their code and cause in gRPC status details, allowing clients to distinguish permanent rejection, retryable errors, and normal EOF.
+
 ## Recovery
 
 On WAL open, `RecoverReplicateManager` loads the `ReplicateConfig` and `ReplicateCheckpoint` from the [RecoveryStorage](../wal/recovery-storage.md) snapshot. For SECONDARY clusters, it also recovers in-progress transaction state from the `TxnBuffer` (uncommitted replicated transactions), so that the secondary can continue receiving body/commit messages for the interrupted transaction.

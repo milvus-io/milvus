@@ -1,10 +1,28 @@
 package replicates
 
 import (
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+var (
+	errTxnAborted      = errors.New("replicated transaction durably aborted")
+	errTxnAbortPending = errors.New("replicated transaction rollback pending")
+)
+
+// MarkTxnAbortPending tells the acker to block commits until rollback succeeds.
+func MarkTxnAbortPending(err error) error {
+	return errors.Mark(err, errTxnAbortPending)
+}
+
+// MarkTxnAborted tells the acker that the local rollback is durable.
+// It preserves the original append error and code.
+func MarkTxnAborted(err error) error {
+	return errors.Mark(err, errTxnAborted)
+}
 
 // newReplicateTxnHelper creates a new replicate txn helper.
 func newReplicateTxnHelper() *replicateTxnHelper {
@@ -19,6 +37,7 @@ func newReplicateTxnHelper() *replicateTxnHelper {
 type replicateTxnHelper struct {
 	currentTxn *message.TxnContext
 	messageIDs typeutil.Set[string]
+	aborting   bool
 }
 
 // CurrentTxn returns the current txn context.
@@ -39,11 +58,12 @@ func (s *replicateTxnHelper) StartBegin(txn *message.TxnContext, replicateHeader
 func (s *replicateTxnHelper) BeginDone(txn *message.TxnContext) {
 	s.currentTxn = txn
 	s.messageIDs = typeutil.NewSet[string]()
+	s.aborting = false
 }
 
 func (s *replicateTxnHelper) AddNewMessage(txn *message.TxnContext, replicateHeader *message.ReplicateHeader) error {
 	if s.currentTxn == nil {
-		return status.NewIgnoreOperation("add new txn message without txn, maybe already committed, incoming: %d", txn.TxnID)
+		return status.NewReplicateViolation("add new txn message without txn, replay from BeginTxn, incoming: %d", txn.TxnID)
 	}
 	if s.currentTxn.TxnID != txn.TxnID {
 		return status.NewReplicateViolation("add new txn message with different txn, current: %d, incoming: %d", s.currentTxn.TxnID, txn.TxnID)
@@ -60,10 +80,13 @@ func (s *replicateTxnHelper) AddNewMessageDone(replicateHeader *message.Replicat
 
 func (s *replicateTxnHelper) StartCommit(txn *message.TxnContext) error {
 	if s.currentTxn == nil {
-		return status.NewIgnoreOperation("commit txn without txn, maybe already committed, txnID: %d", txn.TxnID)
+		return status.NewReplicateViolation("commit txn without txn, replay from BeginTxn, txnID: %d", txn.TxnID)
 	}
 	if s.currentTxn.TxnID != txn.TxnID {
 		return status.NewReplicateViolation("commit txn with different txn, current: %d, incoming: %d", s.currentTxn.TxnID, txn.TxnID)
+	}
+	if s.aborting {
+		return status.NewReplicateViolation("txn rollback is pending, replay from BeginTxn, txnID: %d", txn.TxnID)
 	}
 	s.currentTxn = nil
 	s.messageIDs = nil
@@ -71,6 +94,13 @@ func (s *replicateTxnHelper) StartCommit(txn *message.TxnContext) error {
 }
 
 func (s *replicateTxnHelper) CommitDone(txn *message.TxnContext) {
+	s.AbortDone()
+}
+
+// AbortDone clears transaction and deduplication state.
+// Call only after a durable commit or rollback.
+func (s *replicateTxnHelper) AbortDone() {
 	s.currentTxn = nil
 	s.messageIDs = nil
+	s.aborting = false
 }

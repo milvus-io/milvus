@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -209,6 +210,64 @@ func TestReplicateStreamServer_recvLoop_RecvError(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+func TestReplicateStreamServer_ExecuteRecvError(t *testing.T) {
+	stream := newMockReplicateStreamServer(createContextWithClusterID("test-cluster"))
+	stream.recvError = errors.New("receive failed")
+	server, err := CreateReplicateServer(stream)
+	require.NoError(t, err)
+	server.replicateRespCh <- &milvuspb.ReplicateResponse{
+		Response: &milvuspb.ReplicateResponse_ReplicateConfirmedMessageInfo{
+			ReplicateConfirmedMessageInfo: &milvuspb.ReplicateConfirmedMessageInfo{ConfirmedTimeTick: 42},
+		},
+	}
+	require.ErrorIs(t, server.Execute(), stream.recvError)
+	require.EqualValues(t, 42, stream.GetSentResponse().GetReplicateConfirmedMessageInfo().GetConfirmedTimeTick())
+}
+
+func TestReplicateStreamServer_ExecuteAppendError(t *testing.T) {
+	for _, appendErr := range []*status.StreamingError{
+		status.NewUnrecoverableError("collection not found"),
+		status.NewReplicateViolation("txn is in progress"),
+		status.NewOnShutdownError("wal is closing"),
+	} {
+		t.Run(appendErr.Code.String(), func(t *testing.T) {
+			stream := newMockReplicateStreamServer(createContextWithClusterID("test-cluster"))
+			replicateService := mock_streaming.NewMockReplicateService(t)
+			replicateService.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, appendErr).Once()
+			mockWAL := mock_streaming.NewMockWALAccesser(t)
+			mockWAL.EXPECT().Replicate().Return(replicateService)
+			streaming.SetWALForTest(mockWAL)
+
+			messageID := pulsar2.NewPulsarID(pulsar.EarliestMessageID())
+			msg := message.NewInsertMessageBuilderV1().
+				WithVChannel("test-vchannel").
+				WithHeader(&messagespb.InsertMessageHeader{}).
+				WithBody(&msgpb.InsertRequest{}).
+				MustBuildMutable().WithTimeTick(42).WithLastConfirmed(messageID)
+			stream.SendRequest(&milvuspb.ReplicateRequest{
+				Request: &milvuspb.ReplicateRequest_ReplicateMessage{
+					ReplicateMessage: &milvuspb.ReplicateMessage{
+						SourceClusterId: "source",
+						Message: message.ImmutableMessageToMilvusMessage(
+							commonpb.WALName_Pulsar.String(), msg.IntoImmutableMessage(messageID)),
+					},
+				},
+			})
+			server, err := CreateReplicateServer(stream)
+			require.NoError(t, err)
+			err = server.Execute()
+			require.Error(t, err)
+			// Check that the error code and cause survive gRPC status conversion.
+			wireErr := grpcstatus.Convert(err).Err()
+			got := status.AsStreamingError(status.ConvertStreamingError("CreateReplicateStream", wireErr))
+			require.Equal(t, appendErr.Code, got.Code)
+			require.Equal(t, appendErr.Cause, got.Cause)
+			require.Equal(t, appendErr.IsUnrecoverable(), got.IsUnrecoverable())
+			require.Empty(t, stream.sentResponses, "rejected messages must not be confirmed")
+		})
+	}
 }
 
 func TestReplicateStreamServerRejectsNilReplicateMessage(t *testing.T) {

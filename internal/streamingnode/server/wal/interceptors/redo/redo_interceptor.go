@@ -57,6 +57,11 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(uniqueKey)
 			if err != nil {
 				if errors.IsAny(err, shards.ErrCollectionNotFound, shards.ErrPartitionNotFound) {
+					if msg.ReplicateHeader() != nil {
+						// Defer rejection to shard validation so the replicate
+						// interceptor can roll back the failed transaction.
+						return nil
+					}
 					return status.NewUnrecoverableError("fail to wait growing segment ready, %s", err.Error())
 				}
 				return err

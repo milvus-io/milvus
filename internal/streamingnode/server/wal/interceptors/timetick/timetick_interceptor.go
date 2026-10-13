@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -97,7 +98,11 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 		if txnSession, err = impl.handleRollback(ctx, msg); err != nil {
 			return nil, err
 		}
-		defer txnSession.RollbackDone()
+		defer func() {
+			if err == nil && txnSession != nil {
+				txnSession.RollbackDone()
+			}
+		}()
 	case message.MessageTypeTimeTick:
 		// cleanup the expired transaction sessions and the already done transaction.
 		impl.txnManager.CleanupTxnUntil(msg.TimeTick())
@@ -188,11 +193,18 @@ func (impl *timeTickAppendInterceptor) handleRollback(ctx context.Context, msg m
 	}
 	session, err = impl.txnManager.GetSessionOfTxn(rollbackTxnMsg.TxnContext().TxnID)
 	if err != nil {
+		if msg.IsUnreplicable() && status.AsStreamingError(err).IsTxnExpired() {
+			// Persist the local rollback even if the session is gone,
+			// so recovery can discard the transaction's stored messages.
+			return nil, nil
+		}
 		return nil, err
 	}
 
-	// Start commit the message.
 	if err = session.RequestRollback(ctx, msg.TimeTick()); err != nil {
+		if msg.IsUnreplicable() && (status.AsStreamingError(err).IsTxnExpired() || session.State() == message.TxnStateRollbacked) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return session, nil

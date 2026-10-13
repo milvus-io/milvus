@@ -40,16 +40,18 @@ type ReplicateStreamServer struct {
 
 // Execute starts the replicate server.
 func (p *ReplicateStreamServer) Execute() error {
-	// Start a recv arm to handle the control message from client.
+	// Buffer the result so recvLoop can exit even if sendLoop fails first.
+	recvErrCh := make(chan error, 1)
 	go func() {
-		// recv loop will be blocked until the stream is closed.
-		_ = p.recvLoop()
+		recvErrCh <- p.recvLoop()
 	}()
 
-	// Start a send loop on current main goroutine.
-	// the loop will be blocked until the stream is closed.
-	err := p.sendLoop()
-	return err
+	if err := p.sendLoop(); err != nil {
+		return err
+	}
+	// sendLoop has drained the responses queued before recvLoop closed the channel.
+	// Return the receive error so the client can distinguish failure from EOF.
+	return <-recvErrCh
 }
 
 // sendLoop sends the message to client.
@@ -149,6 +151,10 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	span.RecordError(err)
 	// unexpected error, will close the stream and wait for client to reconnect.
 	mlog.Warn(ctx, "append replicate message to wal failed", mlog.FieldMessage(msg), mlog.Err(err))
+	var streamingErr *status.StreamingError
+	if errors.As(err, &streamingErr) {
+		return status.NewGRPCStatusFromStreamingError(streamingErr).Err()
+	}
 	return err
 }
 
