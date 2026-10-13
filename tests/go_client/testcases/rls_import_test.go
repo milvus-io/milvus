@@ -125,7 +125,7 @@ func TestRLSBulkImportChecks(t *testing.T) {
 					require.Equal(t, commonpb.ImportState_ImportCompleted, progress.GetState(), reason)
 					expected = append(expected, 10, 11)
 				}
-				load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name).WithRefresh(true))
+				load, err := mc.RefreshLoad(ctx, client.NewRefreshLoadOption(name))
 				require.NoError(t, err)
 				require.NoError(t, load.Await(ctx))
 			}
