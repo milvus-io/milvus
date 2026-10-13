@@ -115,6 +115,7 @@ func Main(args []string) {
 		}
 	}
 
+	startServerCoverage(args)
 	RunMilvus(args)
 }
 
