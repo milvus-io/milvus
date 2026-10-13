@@ -245,6 +245,27 @@ func TestCollectionGaugeVecAggregatePolicies(t *testing.T) {
 	})
 }
 
+func TestCollectionGaugeVecSuppressed(t *testing.T) {
+	sum := newCollectionGaugeVec(
+		prometheus.GaugeOpts{Name: "test_collection_gauge_suppressed_sum", Help: "test"},
+		[]string{nodeIDLabelName, collectionIDLabelName},
+		collectionGaugeAggregateSum,
+	)
+	disabled := newCollectionGaugeVec(
+		prometheus.GaugeOpts{Name: "test_collection_gauge_suppressed_disabled", Help: "test"},
+		[]string{nodeIDLabelName, collectionIDLabelName},
+		collectionGaugeAggregateDisabled,
+	)
+
+	setCollectionMetricsModeForTest(t, CollectionLevelMetricsModeFull)
+	assert.False(t, sum.Suppressed())
+	assert.False(t, disabled.Suppressed())
+
+	setCollectionMetricsModeForTest(t, CollectionLevelMetricsModeAggregate)
+	assert.False(t, sum.Suppressed())
+	assert.True(t, disabled.Suppressed())
+}
+
 func TestSetCollectionLevelMetricsModeRejectsInvalidValue(t *testing.T) {
 	SetCollectionLevelMetricsMode(" AGGREGATE ")
 	assert.Equal(t, CollectionLevelMetricsModeAggregate, CollectionLevelMetricsMode())

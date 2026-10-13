@@ -446,6 +446,12 @@ func (v *CardinalityGaugeVec) aggregateDisabled() bool {
 	return IsCollectionLevelMetricsAggregateMode() && v.policy == collectionGaugeAggregateDisabled
 }
 
+// Suppressed reports whether writes to this gauge are discarded, so producers
+// can skip computing values that would never be exported.
+func (v *CardinalityGaugeVec) Suppressed() bool {
+	return v.aggregateDisabled()
+}
+
 func (v *CardinalityGaugeVec) GetMetricWithLabelValues(values ...string) (prometheus.Gauge, error) {
 	if v.aggregateDisabled() {
 		if err := v.labels.validateValues(values); err != nil {
