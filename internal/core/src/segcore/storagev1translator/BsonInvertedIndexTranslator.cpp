@@ -25,7 +25,8 @@
 #include "common/ScopedTimer.h"
 #include "fmt/core.h"
 #include "glog/logging.h"
-#include "index/json_stats/bson_inverted.h"
+#include "index/LoadResource.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "log/Log.h"
 #include "pb/common.pb.h"
 #include "segcore/CacheMetricAttribution.h"
@@ -72,10 +73,16 @@ BsonInvertedIndexTranslator::estimated_byte_size_of_cell(
     // ignore the cid checking, because there is only one cell
     if (load_info_.enable_mmap) {
         // loaded: on disk; overhead: temp memory for download buffer
-        return {{0, load_info_.index_size}, {load_info_.index_size, 0}};
+        return {{static_cast<int64_t>(index::kScalarIndexFixedResidentBytes),
+                 load_info_.index_size},
+                {load_info_.index_size, 0}};
     } else {
         // loaded: in memory; overhead: temp disk for local file before loading
-        return {{load_info_.index_size, 0}, {0, load_info_.index_size}};
+        return {{load_info_.index_size +
+                     static_cast<int64_t>(
+                         index::kScalarIndexFixedResidentBytes),
+                 0},
+                {0, load_info_.index_size}};
     }
 }
 
