@@ -102,9 +102,15 @@ func (policy *bumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[Compact
 			continue
 		}
 		collectionID := collection.ID
-		capturedSchema := proto.Clone(collection.Schema).(*schemapb.CollectionSchema)
-		collectionSchemaVersion := capturedSchema.GetVersion()
+		// The collection cache publishes replacements. Keep this schema reference
+		// so candidate selection and the task snapshot use the same version.
+		schema := collection.Schema
+		collectionSchemaVersion := schema.GetVersion()
 		partSegments := policy.staleFlushedSegments(collectionID, collectionSchemaVersion)
+		if len(partSegments) == 0 {
+			continue
+		}
+		capturedSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
 
 		var views []CompactionView
 		var collectionTriggerID int64

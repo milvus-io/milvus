@@ -24,6 +24,53 @@ func (_m *MockWALAccesser) EXPECT() *MockWALAccesser_Expecter {
 	return &MockWALAccesser_Expecter{mock: &_m.Mock}
 }
 
+// AnalyzerClient provides a mock function with no fields
+func (_m *MockWALAccesser) AnalyzerClient() streaming.AnalyzerClient {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for AnalyzerClient")
+	}
+
+	var r0 streaming.AnalyzerClient
+	if rf, ok := ret.Get(0).(func() streaming.AnalyzerClient); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streaming.AnalyzerClient)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_AnalyzerClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AnalyzerClient'
+type MockWALAccesser_AnalyzerClient_Call struct {
+	*mock.Call
+}
+
+// AnalyzerClient is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) AnalyzerClient() *MockWALAccesser_AnalyzerClient_Call {
+	return &MockWALAccesser_AnalyzerClient_Call{Call: _e.mock.On("AnalyzerClient")}
+}
+
+func (_c *MockWALAccesser_AnalyzerClient_Call) Run(run func()) *MockWALAccesser_AnalyzerClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_AnalyzerClient_Call) Return(_a0 streaming.AnalyzerClient) *MockWALAccesser_AnalyzerClient_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_AnalyzerClient_Call) RunAndReturn(run func() streaming.AnalyzerClient) *MockWALAccesser_AnalyzerClient_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AppendMessages provides a mock function with given fields: ctx, msgs
 func (_m *MockWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses {
 	_va := make([]interface{}, len(msgs))

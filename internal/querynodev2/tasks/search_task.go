@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -437,6 +438,17 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		!funcutil.SliceSetEqual(t.req.GetReq().GetPartitionIDs(), other.req.GetReq().GetPartitionIDs()) ||
 		!funcutil.SliceSetEqual(t.req.GetSegmentIDs(), other.req.GetSegmentIDs()) ||
 		!bytes.Equal(t.req.GetReq().GetSerializedExprPlan(), other.req.GetReq().GetSerializedExprPlan()) {
+		return false
+	}
+
+	// Plans are identical, so checking one is sufficient. Keep function-chain
+	// failures scoped to the original request instead of propagating them to
+	// every request in a merged task through Done.
+	plan := &planpb.PlanNode{}
+	if err := proto.Unmarshal(t.req.GetReq().GetSerializedExprPlan(), plan); err != nil {
+		return false
+	}
+	if len(plan.GetQuerynodeFunctionChains()) > 0 {
 		return false
 	}
 

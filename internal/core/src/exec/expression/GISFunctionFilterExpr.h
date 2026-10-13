@@ -37,6 +37,37 @@
 namespace milvus {
 namespace exec {
 
+namespace gis_detail {
+
+inline index::SpatialOp
+ToSpatialOp(proto::plan::GISFunctionFilterExpr_GISOp op) {
+    using PlanOp = proto::plan::GISFunctionFilterExpr_GISOp;
+    switch (op) {
+        case PlanOp::GISFunctionFilterExpr_GISOp_Equals:
+            return index::SpatialOp::Equals;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Touches:
+            return index::SpatialOp::Touches;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Overlaps:
+            return index::SpatialOp::Overlaps;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Crosses:
+            return index::SpatialOp::Crosses;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Contains:
+            return index::SpatialOp::Contains;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Intersects:
+            return index::SpatialOp::Intersects;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Within:
+            return index::SpatialOp::Within;
+        case PlanOp::GISFunctionFilterExpr_GISOp_DWithin:
+            return index::SpatialOp::DWithin;
+        default:
+            ThrowInfo(UnexpectedError,
+                      "unsupported spatial operator {}",
+                      static_cast<int>(op));
+    }
+}
+
+}  // namespace gis_detail
+
 // Evaluate a single GIS predicate using a prepared query geometry against an
 // already-constructed `left` row geometry. This centralizes the prepared
 // predicate semantics — notably the contains/within swap
@@ -109,9 +140,9 @@ EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
 //
 // Returns true when `coarse` was short and has been promoted; false when it
 // already spanned (at least) `active_count` rows and was left untouched.
-// Validity is deliberately NOT handled here: the per-predicate path needs
-// IsNotNull(active_count) (absolute null offsets survive independently of the
-// short entry count) while the fusion path derives nullness in Refine.
+// Validity is deliberately NOT handled here: the per-predicate path reads
+// exact field validity from raw data while the fusion path derives nullness in
+// Refine.
 inline bool
 PromoteShortGISCoarseBitmap(TargetBitmap& coarse, int64_t active_count) {
     if (static_cast<int64_t>(coarse.size()) >= active_count) {

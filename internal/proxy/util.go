@@ -116,6 +116,17 @@ func restoreStructFieldNames(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
+// storedStructSubFieldName returns the flattened name of a struct-array
+// sub-field, preserving already-flattened names. Duplicated in the ddl package
+// (which owns the add-field DDL paths); the root copy backs the struct data
+// helpers that stay in this package.
+func storedStructSubFieldName(structName string, fieldName string) string {
+	if typeutil.IsStructSubField(fieldName) {
+		return fieldName
+	}
+	return typeutil.ConcatStructFieldName(structName, fieldName)
+}
+
 // isAlpha check if c is alpha.
 func isAlpha(c uint8) bool {
 	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
@@ -324,6 +335,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	return nil
 }
 
+// validateFieldName validates names from user schema requests.
 func validateFieldName(fieldName string) error {
 	fieldName = strings.TrimSpace(fieldName)
 
@@ -822,6 +834,15 @@ func validateStructArrayFieldMaxCapacity(structArrayField *schemapb.StructArrayF
 // ValidateStructArrayField validates the struct array field schema.
 // When the struct is nullable, sub-field schemas are mutated in-place to set Nullable=true.
 func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
+	if err := validateFieldName(structArrayField.GetName()); err != nil {
+		return err
+	}
+	return validateStructArrayField(structArrayField, schema)
+}
+
+// validateStructArrayField validates the remaining schema after the parent name
+// has been checked. Add-field validation checks the name before reserved fields.
+func validateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
 	if len(structArrayField.Fields) == 0 {
 		return merr.WrapErrParameterInvalidMsg("struct array field %s has no sub-fields", structArrayField.Name)
 	}
@@ -2723,7 +2744,8 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 	return scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, true
 }
 
-// GetRequestInfo returns collection name and rateType of request and return tokens needed.
+// GetRequestInfo returns the quota scope, rate type, and tokens needed by a request.
+// Zero tokens bypass rate limiting and its metrics; the rate type is unused in that case.
 func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	if metaCache == nil {
 		return util.InvalidDBID, map[int64][]int64{}, 0, 0, merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), "meta cache initialization")
@@ -2757,23 +2779,13 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 	case *milvuspb.CreateCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest, *milvuspb.PinSnapshotDataRequest:
-		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
-		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.RestoreSnapshotRequest:
-		targetDBName := r.GetTargetDbName()
-		if targetDBName == "" {
-			targetDBName = GetCurDBNameFromContextOrDefault(ctx)
-		}
-		return getDatabaseID(metaCache, targetDBName), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.UnpinSnapshotDataRequest:
-		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest,
+		*milvuspb.PinSnapshotDataRequest, *milvuspb.UnpinSnapshotDataRequest,
+		*milvuspb.ExportSnapshotRequest, *milvuspb.RestoreSnapshotRequest,
+		*milvuspb.RestoreExternalSnapshotRequest:
+		// Snapshot operations do not consume quota or honor DDL force-deny.
+		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
 	case *milvuspb.RefreshExternalCollectionRequest:
-		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
-		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.RestoreExternalSnapshotRequest:
-		return getDatabaseID(metaCache, r.GetDbName()), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.ExportSnapshotRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
