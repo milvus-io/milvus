@@ -37,6 +37,11 @@
 #include <utility>
 #include "index/scalar/marisa/MarisaIndexLoader.h"
 #include "index/test_utils/LoaderTestAccess.h"
+#include <cerrno>
+#include <fcntl.h>
+#include <fstream>
+#include <sys/stat.h>
+#include "index/Families.h"
 
 namespace milvus::index::test {
 namespace {
@@ -435,6 +440,117 @@ TEST(MarisaIndexArtifactTest, TrieReadFailureReportsFileReadFailed) {
         static_cast<void>(
             LoaderTestAccess::Finish<MarisaIndexLoader>(plan, options));
     });
+}
+
+class ObserveMarisaTrieWriter final : public storage::IndexEntryWriter {
+ public:
+    ObserveMarisaTrieWriter(TestArtifactData& output,
+                            std::string directory,
+                            bool fail)
+        : inner_(output), directory_(std::move(directory)), fail_(fail) {
+    }
+
+    void
+    WriteEntry(const std::string& name,
+               const void* data,
+               size_t size) override {
+        inner_.WriteEntry(name, data, size);
+    }
+
+    void
+    WriteEntry(const std::string& name, int fd, size_t size) override {
+        if (name == MARISA_TRIE_INDEX) {
+            trie_fd = fd;
+            struct stat status {};
+            ASSERT_EQ(::fstat(fd, &status), 0);
+            EXPECT_EQ(status.st_nlink, 0);
+            const auto flags = ::fcntl(fd, F_GETFD);
+            ASSERT_NE(flags, -1);
+            EXPECT_NE(flags & FD_CLOEXEC, 0);
+            const auto path = std::filesystem::read_symlink("/proc/self/fd/" +
+                                                            std::to_string(fd))
+                                  .string();
+            EXPECT_EQ(path.find(directory_ + "/marisa_trie_"), 0);
+            const std::string suffix = " (deleted)";
+            ASSERT_TRUE(path.ends_with(suffix));
+            replacement = path.substr(0, path.size() - suffix.size());
+            std::ofstream file(replacement);
+            file << "replacement";
+            file.close();
+            ASSERT_FALSE(file.fail());
+            if (fail_) {
+                ThrowInfo(FileWriteFailed, "injected MARISA sink failure");
+            }
+        }
+        inner_.WriteEntry(name, fd, size);
+    }
+
+    void
+    Finish() override {
+        for (const auto& [key, value] : meta_json_.items()) {
+            inner_.PutMeta(key, value);
+        }
+        inner_.Finish();
+    }
+
+    size_t
+    GetTotalBytesWritten() const override {
+        return inner_.GetTotalBytesWritten();
+    }
+
+    int trie_fd{-1};
+    std::string replacement;
+
+ private:
+    TestArtifactWriter inner_;
+    std::string directory_;
+    bool fail_;
+};
+
+TEST(MarisaIndexArtifactTest, PackedTrieStagesAndReleasesItsUnlinkedName) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("MarisaVarcharNonNull");
+    for (const bool fail : {false, true}) {
+        SCOPED_TRACE(fail);
+        auto root = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "marisa-staging-XXXXXX",
+            "marisa staging test");
+        const auto directory = root->Path() + "/configured";
+        auto params = backend.BuildParams();
+        params["local_dir"] = directory;
+        auto builder =
+            BuilderRegistry<ScalarBuildInput<std::string_view>>::Instance()
+                .Create(families::kMarisa, params);
+        ASSERT_NE(builder, nullptr);
+        ScalarTestData<std::string_view> data(
+            {"alpha", "beta", "beta", "gamma", "delta"});
+        data.validity_present = false;
+        const ScalarTestInput<std::string_view> input(data);
+        auto artifact = std::move(*builder).Build(input.View());
+        TestArtifactData persisted;
+        ObserveMarisaTrieWriter sink(persisted, directory, fail);
+        if (fail) {
+            ExpectSegcoreError(ErrorCode::FileWriteFailed,
+                               [&] { artifact->Serialize(sink); });
+        } else {
+            artifact->Serialize(sink);
+            sink.Finish();
+        }
+        ASSERT_GE(sink.trie_fd, 0);
+        errno = 0;
+        EXPECT_EQ(::fcntl(sink.trie_fd, F_GETFD), -1);
+        EXPECT_EQ(errno, EBADF);
+        if (!fail) {
+            auto reader = OpenV3(backend, persisted, {.row_count = 5});
+            ExpectBetaRows(*reader);
+        }
+        ASSERT_FALSE(sink.replacement.empty());
+        std::ifstream replacement(sink.replacement);
+        std::string contents;
+        std::getline(replacement, contents);
+        EXPECT_EQ(contents, "replacement");
+    }
 }
 
 }  // namespace
