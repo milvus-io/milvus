@@ -727,6 +727,7 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 		Fields: []*schemapb.FieldSchema{
 			{Name: "field1", DataType: schemapb.DataType_Int64},
 			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+			{Name: "ttl_next", DataType: schemapb.DataType_Timestamptz, Nullable: true},
 		},
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
@@ -741,14 +742,37 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
-	// Alter properties to set ttl field should succeed and should NOT change schema version in meta.
+	// A changed TTL field must drive the same handoff as other schema updates.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	// Repeating the same property is a no-op, including its schema version.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	// Switching to another field must also replace the runtime schema.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl_next"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		DeleteKeys: []string{common.CollectionTTLFieldKey},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {

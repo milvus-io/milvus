@@ -92,6 +92,11 @@ latest schema; this field does not identify a retrievable historical snapshot.
 Schema is not part of durable LoadConfig or its LoadInfoVersion. Legacy schema
 fields in load-config protos are ignored and retained only for wire compatibility.
 
+Changing `ttl_field` also advances the schema version, even when the field
+list is unchanged: the property changes the runtime query schema. Setting,
+switching and removing the property use this handoff; repeating the same value
+does not advance the version.
+
 The AlterCollection acknowledgement follows this order:
 
 1. RootCoord persists and publishes the new schema in MetaTable.
