@@ -687,10 +687,16 @@ func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
 	o.syncResource()
 }
 
+// syncFunctionsBeforeRetainHook runs in tests inside SyncFunctions, under the oracle lock, before the
+// segments drop their removed fields.
+var syncFunctionsBeforeRetainHook func()
+
 func (o *idfOracle) SyncFunctions(functions []*schemapb.FunctionSchema) error {
 	o.Lock()
-	o.schemaEpoch.Inc()
 	fieldIDs := o.current.SyncFunctions(functions)
+	if syncFunctionsBeforeRetainHook != nil {
+		syncFunctionsBeforeRetainHook()
+	}
 	for _, stats := range o.growing {
 		stats.RetainFields(fieldIDs)
 	}
@@ -702,6 +708,9 @@ func (o *idfOracle) SyncFunctions(functions []*schemapb.FunctionSchema) error {
 	if removedDiskSize > 0 {
 		o.sealedDiskSize.Add(-removedDiskSize)
 	}
+	// only after every segment dropped its removed fields: a sync that reads the new epoch outside
+	// the lock then reads those segments without the dropped fields
+	o.schemaEpoch.Inc()
 	o.Unlock()
 	o.syncResource()
 	return nil

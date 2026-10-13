@@ -268,6 +268,41 @@ func TestSyncDistributionSyncFunctionsDropsFieldDuringFetch(t *testing.T) {
 	assertCurrentField(t, o, 104, seg.stats[104])
 }
 
+// A sync that reads its stats while SyncFunctions is dropping a field must start over, not fail: the
+// field's files are gone by the time the sync re-reads them under the lock.
+func TestSyncDistributionReadsStatsWhileSyncFunctionsDropsField(t *testing.T) {
+	r := rand.New(rand.NewSource(5))
+	o := newSyncTestOracle(t, 102, 104)
+	o.targetVersion.Store(1)
+	seg := newSyncTestSegment(t, 1, map[int64]*storage.BM25Stats{
+		102: randomSyncTestStats(r, 2),
+		104: randomSyncTestStats(r, 3),
+	})
+	seg.load(t, o, 102, 104)
+
+	snap := syncTestSnapshot(2, 1)
+	o.next.SetSnapshot(snap)
+	fetched := make(chan struct{})
+	var once sync.Once
+	syncDistributionAfterFetchHook = func() { once.Do(func() { close(fetched) }) }
+	defer func() { syncDistributionAfterFetchHook = nil }()
+	syncErr := make(chan error, 1)
+	// the sync reads its stats after SyncFunctions changed the fields of current and before the
+	// segments drop field 102, then waits for the oracle lock until SyncFunctions is done
+	syncFunctionsBeforeRetainHook = func() {
+		go func() { syncErr <- o.SyncDistribution() }()
+		<-fetched
+	}
+	defer func() { syncFunctionsBeforeRetainHook = nil }()
+	require.NoError(t, o.SyncFunctions(syncTestFunctions(104)))
+
+	require.NoError(t, <-syncErr)
+	require.Equal(t, snap.targetVersion, o.TargetVersion())
+	_, err := o.current.GetStats(102)
+	assert.Error(t, err)
+	assertCurrentField(t, o, 104, seg.stats[104])
+}
+
 // Without concurrent changes, activating and deactivating many segments matches a serial sum.
 func TestSyncDistributionManySegmentsMatchesSerial(t *testing.T) {
 	r := rand.New(rand.NewSource(5))
