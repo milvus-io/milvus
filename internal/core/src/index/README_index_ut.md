@@ -1,33 +1,36 @@
-# index_tests 测试框架
+# index_tests test framework
 
-`index_tests` 用一组集中定义的数据集和后端配置，展开索引读取、过滤和
-Artifact 生命周期测试。核心原则是：注册阶段只组合轻量描述符；每个 GTest
-执行时才生成数据、构建索引并打开 Reader。这样可以让每个“用例 × 后端”
-组合拥有独立名称、独立失败结果和独立资源生命周期，同时避免在参数表中保存
-大数据或已构建索引。
+`index_tests` expands index read, filter, and Artifact lifecycle tests from one centrally defined
+set of datasets and backend configurations. The core principle is that registration only combines
+lightweight descriptors; data is generated, the index is built, and the Reader is opened only when
+each GTest runs. This gives every "case × backend" combination its own name, its own failure
+result, and its own resource lifecycle, while avoiding storing large data or built indexes in the
+parameter table.
 
-## 两个集中目录
+## Two central catalogs
 
-数据集由 [ScalarTestData.h](test_utils/ScalarTestData.h) 定义描述符和所有权模型，
-在 [ScalarDataSets.cpp](test_utils/ScalarDataSets.cpp) 的 `ScalarDataSets()` 中统一
-注册。Text、Ngram、Spatial 和 JSON 的数据可以拆到独立 `.cpp`，但仍通过这个
-唯一入口加入同一个 `DataCatalog`。
+Datasets have their descriptors and ownership model defined in
+[ScalarTestData.h](test_utils/ScalarTestData.h) and are all registered in `ScalarDataSets()` in
+[ScalarDataSets.cpp](test_utils/ScalarDataSets.cpp). Text, Ngram, Spatial, and JSON data can be
+split into separate `.cpp` files, but they still join the same `DataCatalog` through this single
+entry point.
 
-一个 `ScalarDataSet<T>` 只保存：
+A `ScalarDataSet<T>` stores only:
 
-- 名称和输入 C++ 类型 `T`；
-- 输入形状 `BackendInputShape`，例如普通标量、数组行、嵌套元素、WKB 或 JSON；
-- 坐标域 `Domain` 和可选的逻辑值类型；
-- 数据是否含 null；
-- 一个无参数 `make_data` 生成器。
+- its name and input C++ type `T`;
+- the input shape `BackendInputShape`, such as plain scalars, array rows, nested elements, WKB, or
+  JSON;
+- the coordinate domain `Domain` and an optional logical value type;
+- whether the data contains nulls;
+- a parameterless `make_data` generator.
 
-生成器返回 `ScalarTestData<T>`。它拥有值、有效位图、批次边界和每个数据集需要的
-元数据。字符串、数组和 JSON 投影的底层字节也由它拥有，不把悬空
-`string_view` 或 `ArrayView` 存进全局目录。`batch_sizes` 只描述切分；
-`ScalarTestInput<T>` 在运行时生成借用视图，并保证有效位图子视图保持原来的
-位偏移。
+The generator returns `ScalarTestData<T>`, which owns the values, the validity bitmap, the batch
+boundaries, and the metadata each dataset needs. It also owns the underlying bytes of strings,
+arrays, and JSON projections, so no dangling `string_view` or `ArrayView` is stored in the global
+catalog. `batch_sizes` only describes the split; `ScalarTestInput<T>` creates borrowed views at
+runtime and guarantees that validity bitmap subviews keep their original bit offsets.
 
-最小的数据注册形态如下：
+The minimal form of a data registration is:
 
 ```cpp
 catalog.Add<int64_t>({
@@ -41,33 +44,37 @@ catalog.Add<int64_t>({
 });
 ```
 
-后端由 [ScalarReaderFactory.h](test_utils/ScalarReaderFactory.h) 定义，在
-[ScalarReaderBackends.cpp](test_utils/ScalarReaderBackends.cpp) 的
-`ScalarReaderBackends()` 中统一注册。一个 `BackendSpec` 表示一个可单独执行的
-构建/打开配置，包括索引族、输入形状、物理字段类型、逻辑值类型、坐标域、
-可空性、堆内存/mmap 请求、构建/加载参数和打开方式。Hybrid 或 JSON 包装器
-可以声明多个可能的加载器索引族，并用数据集元数据补齐路径等运行参数。
+Backends are defined in [ScalarReaderFactory.h](test_utils/ScalarReaderFactory.h) and are all
+registered in `ScalarReaderBackends()` in
+[ScalarReaderBackends.cpp](test_utils/ScalarReaderBackends.cpp). A `BackendSpec` represents one
+independently runnable build/open configuration, including the index family, input shape, physical
+field type, logical value type, coordinate domain, nullability, heap/mmap request, build/load
+parameters, and open mode. A Hybrid or JSON wrapper can declare several possible loader index
+families and use dataset metadata to fill in runtime parameters such as paths.
 
-用例不复制后端配置，也不按后端名称实现查询结果。后端目录负责说明“怎样创建
-Reader”和“Reader 宣称什么能力”；用例负责输入、操作参数和正确结果。
+Cases do not copy backend configuration and do not implement query results per backend name. The
+backend catalog describes "how to create the Reader" and "which capabilities the Reader claims";
+the case provides the input, operation arguments, and correct results.
 
-## 从用例到独立 GTest
+## From a case to independent GTests
 
-[CaseTestDriver.h](test_utils/CaseTestDriver.h) 提供公共 `IndexTestCase<T>`。`T` 是构建输入
-类型；其余字段记录数据集、输入形状、坐标域、逻辑值类型、输入生命周期和后端
-选择条件。`body` 明确本次测试停在哪个阶段：
+[CaseTestDriver.h](test_utils/CaseTestDriver.h) provides the common `IndexTestCase<T>`. `T` is the
+build input type; the other fields record the dataset, input shape, coordinate domain, logical value
+type, input lifetime, and backend selection conditions. `body` states which stage this test stops
+at:
 
-- `Query<Op>` 打开 Reader 后执行一次查询，能力由 `Op` 给出；
-- `QueryBatch<T>` 在同一个 Reader 上按顺序执行多个具名 `Query<Op>`；
-- `Observe<T>` 打开 Reader 后执行观察回调，可指定需要的能力；
-- `BuildFails` 只调用构建器并校验错误，不进入包装或 `Open`。
+- `Query<Op>` runs one query after opening the Reader, with the capability given by `Op`;
+- `QueryBatch<T>` runs several named `Query<Op>` in order on the same Reader;
+- `Observe<T>` runs an observation callback after opening the Reader and can specify the
+  capabilities it needs;
+- `BuildFails` only calls the builder and checks the error, without entering wrapping or `Open`.
 
-`Query<Op>` 使用 `Op::ValueType` 作为构建输入类型，从 `Op::Args` 取得查询参数，
-并通过 `Op::Reader` 调用对应 Reader 接口。
-`QueryBatch<T>` 中各 `Op` 可以不同，但 `Op::ValueType` 必须都是 `T`。批内名称
-不能为空且不能重复。
+`Query<Op>` uses `Op::ValueType` as the build input type, takes the query arguments from
+`Op::Args`, and calls the corresponding Reader interface through `Op::Reader`.
+The `Op`s in a `QueryBatch<T>` may differ, but every `Op::ValueType` must be `T`. Names within a
+batch must be non-empty and unique.
 
-用例文件定义小型操作适配器后，可以直接注册公共描述符：
+After a case file defines small operation adapters, it can register common descriptors directly:
 
 ```cpp
 cases.Add(IndexTestCase<int64_t>{
@@ -79,7 +86,7 @@ cases.Add(IndexTestCase<int64_t>{
 });
 ```
 
-同一数据集需要核对多个查询时可合并为一个用例：
+When several queries need to be checked on the same dataset, they can be combined into one case:
 
 ```cpp
 cases.Add(IndexTestCase<int64_t>{
@@ -92,105 +99,129 @@ cases.Add(IndexTestCase<int64_t>{
 });
 ```
 
-`IndexTestCases::Add` 在注册阶段先核对数据集描述符，再取以下条件的交集：
+During registration, `IndexTestCases::Add` first checks the dataset descriptor and then intersects
+the following conditions:
 
-1. C++ 输入类型、输入形状、坐标域和逻辑值类型；
-2. 数据是否含 null、后端是否允许 null，以及查询或观察阶段声明的能力；
-3. 可选的索引族、精确后端名和 `select_backend` 条件。
+1. the C++ input type, input shape, coordinate domain, and logical value type;
+2. whether the data contains nulls, whether the backend allows nulls, and the capabilities declared
+   by the query or observation stage;
+3. the optional index family, exact backend name, and `select_backend` condition.
 
-批量查询对所有子查询声明的 Reader capability 取交集；只有能执行完整 batch 的
-后端才会生成 GTest。操作参数导致的 `Unsupported` 仍由对应 `Query<Op>` 的 policy
-和错误期望校验，不作为 capability 缺失跳过。
+A batch query intersects the Reader capabilities declared by all of its subqueries; only backends
+that can run the complete batch generate a GTest. An `Unsupported` caused by operation arguments is
+still checked by the policy and error expectation of the corresponding `Query<Op>`, and is not
+skipped as a missing capability.
 
-每个匹配后端生成一个 `FilterParam`，名称为
-`backend_dataset_case`。参数化测试体只调用 `GetParam().run()`，因此
-GTest 报告中的每一项都是一个确定组合，不在单个测试体内循环多个后端。
-注册闭包只保留用例配置、数据集描述符和一个后端配置，不调用 `make_data`；数据集
-生成的运行元数据会在执行时传给构建/加载参数补全逻辑。
+Each matching backend generates one `FilterParam` named
+`backend_dataset_case`. The parameterized test body only calls `GetParam().run()`, so each entry in
+the GTest report is one fixed combination, and no single test body loops over multiple backends.
+The registration closure keeps only the case configuration, the dataset descriptor, and one backend
+configuration, and does not call `make_data`; the runtime metadata generated by the dataset is
+passed to the build/load parameter completion logic at execution time.
 
-`InputLifetime::KeepUntilBodyCompletes` 让输入数据和借用视图存活到查询或观察结束；
-`ReleaseBeforeBody` 使用相互独立的期望数据和构建输入，并在回调前销毁输入所有者。
-`BuildFails` 是同步借用输入，只允许前一种生命周期。
-`QueryBatch<T>` 沿用同一规则：前一种生命周期只生成一次数据并 Build/Open 一次，
-后一种仍生成独立的期望数据和临时构建输入，但整个 batch 也只 Build/Open 一次。
+`InputLifetime::KeepUntilBodyCompletes` keeps the input data and borrowed views alive until the
+query or observation finishes; `ReleaseBeforeBody` uses mutually independent expected data and build
+input, and destroys the input owner before the callback.
+`BuildFails` borrows its input synchronously and allows only the former lifetime.
+`QueryBatch<T>` follows the same rule: with the former lifetime, data is generated once and
+Build/Open runs once; with the latter, independent expected data and a temporary build input are
+still generated, but the whole batch also runs Build/Open only once.
 
-数据集的 `requires_nullable` 表示生成数据确实含 null；后端的 `nullable` 表示该配置
-接受可空输入。普通选择不把前者送入不可空后端。只有明确验证这一矛盾输入的
-`BuildFails` 才可显式允许不匹配；数据必须含 null，且索引族、名称和谓词取交集后的
-后端必须全部不可空，否则注册失败。这不代表所有索引族承诺相同错误。
+A dataset's `requires_nullable` means the generated data actually contains nulls; a backend's
+`nullable` means that configuration accepts nullable input. Ordinary selection never sends the
+former to a non-nullable backend. Only a `BuildFails` that explicitly verifies this contradictory
+input may explicitly allow the mismatch; the data must contain nulls, and every backend left after
+intersecting index family, name, and predicate must be non-nullable, otherwise registration fails.
+This does not mean that every index family promises the same error.
 
-## 执行与结果规则
+## Execution and result rules
 
-公共 driver 在测试体中生成数据和 `ScalarTestInput`。查询和观察阶段调用
-`ReaderBackend::Create` 并共同检查 Count 和坐标域；Observe 阶段额外检查
-ValueType、Caps 基本关系和资源统计。随后 Query 适配器与 Observe 回调分别检查
-自己需要的能力、动态接口及结果。
-简单谓词由 `Op::Oracle` 根据原始数据计算期望；复杂 LIKE、正则或边界数据使用
-`ManualHits` 明确列出偏移。实际和期望位图直接整体比较。查询错误只包围
-`Op::Run`，并校验精确 `ErrorCode`，不会把构建/加载失败误算成正确的查询拒绝。
-batch 在每个子查询执行时加入其稳定名称的 `SCOPED_TRACE`；普通 `EXPECT` 失败后
-继续执行后续查询，fatal failure 则停止当前 batch，避免继续使用无效 Reader。
+The common driver generates the data and `ScalarTestInput` inside the test body. The query and
+observation stages call `ReaderBackend::Create` and both check Count and the coordinate domain; the
+Observe stage additionally checks ValueType, the basic Caps relations, and resource statistics. The
+Query adapter and the Observe callback then each check the capabilities, dynamic interfaces, and
+results they need.
+For simple predicates, `Op::Oracle` computes the expectation from the raw data; complex LIKE, regex,
+or edge-case data list the offsets explicitly with `ManualHits`. The actual and expected bitmaps are
+compared directly as a whole. The query error check wraps only `Op::Run` and verifies the exact
+`ErrorCode`, so a build/load failure is never miscounted as a correct query rejection.
+A batch adds a `SCOPED_TRACE` with each subquery's stable name when that subquery runs; after an
+ordinary `EXPECT` failure the remaining queries keep running, while a fatal failure stops the
+current batch so that an invalid Reader is not used further.
 
-`BuildFails` 先在错误断言外生成数据和输入，并通过 `CreateBuilder` 完成 registry
-查找与配置解析；错误断言只包围生产构建器的 `Build`。它不调用 Artifact 包装或
-`Open`，因此 fixture、registry 和加载错误不会冒充预期的构建失败。
+`BuildFails` first generates the data and input outside the error assertion and performs the
+registry lookup and configuration parsing through `CreateBuilder`; the error assertion wraps only
+the production builder's `Build`. It does not call Artifact wrapping or `Open`, so fixture,
+registry, and load errors cannot pass as the expected build failure.
 
-模式匹配的结果真值仍属于用例；后端目录只额外保存 `ShouldUseForOp` 的路由预期：
-可使用、拒绝优化但仍可直接查询、不支持、或依数据选择。一个操作即使不适合优化，
-只要契约允许直接查询，仍会验证结果。
+The ground truth of pattern-match results still belongs to the case; the backend catalog only
+additionally stores the routing expectation for `ShouldUseForOp`: usable, declines optimization but
+can still be queried directly, unsupported, or selected depending on the data. Even if an operation
+is not suitable for optimization, its result is still verified as long as the contract allows a
+direct query.
 
-Ngram 和 Spatial 返回候选集，不承诺等于最终真值。公共契约用例只按各接口承诺
-验证候选超集；只有接收初始掩码的接口，才进一步检查不在掩码外新增位和 AND 收缩。
-某个具体实现当前产生的完整第一阶段位图，只能放在命名索引族的回归测试中，
-不能作为所有候选 Reader 的共同预期。
+Ngram and Spatial return candidate sets and do not promise that they equal the final ground truth.
+The common contract cases verify only the candidate superset that each interface promises; only for
+interfaces that receive an initial mask do they further check that no bits are added outside the
+mask and that the AND narrows the mask. The complete first-phase bitmap that a specific
+implementation currently produces belongs only in the regression tests of that named index family,
+and cannot be the shared expectation for all candidate Readers.
 
-[AssertHelpers.h](test_utils/AssertHelpers.h) 统一位图构造与相等、空值和错误码断言，
-避免在每个契约文件重复一套比较逻辑。
+[AssertHelpers.h](test_utils/AssertHelpers.h) centralizes bitmap construction and the equality,
+null, and error-code assertions, so that each contract file does not repeat its own comparison
+logic.
 
-## Build、Open 与资源生命周期
+## Build, Open, and resource lifecycle
 
-[ScalarReaderFactory.cpp](test_utils/ScalarReaderFactory.cpp) 把运行过程分成
-`Build`、`Open` 和组合入口 `Create`：
+[ScalarReaderFactory.cpp](test_utils/ScalarReaderFactory.cpp) splits a run into
+`Build`, `Open`, and the combined entry point `Create`:
 
-1. `make_data` 创建拥有实际字节的输入；`ScalarTestInput` 创建借用 span/view。
-2. `Build` 从生产 `BuilderRegistry` 创建构建器。构建器在消费输入并返回
-   `ArtifactPtr` 后销毁；输入所有者至少活到 `Build` 返回。
-3. `Open` 根据后端配置走 `Serialize` 或 `Consume`。
-4. 返回 Reader 前，框架用实际加载器派生的 Caps 检查 Reader，并检查 Domain 和
-   ValueType。
-5. 查询或观察回调完成后释放 Reader；Reader 持有的映射、文件和目录所有者随之
-   释放。最后再释放期望数据。
+1. `make_data` creates the input that owns the actual bytes; `ScalarTestInput` creates borrowed
+   spans/views.
+2. `Build` creates the builder from the production `BuilderRegistry`. The builder is destroyed after
+   it consumes the input and returns an `ArtifactPtr`; the input owner lives at least until `Build`
+   returns.
+3. `Open` takes the `Serialize` or `Consume` path according to the backend configuration.
+4. Before returning the Reader, the framework checks the Reader against the Caps derived by the
+   actual loader, and checks Domain and ValueType.
+5. The Reader is released after the query or observation callback completes; the mapping, file, and
+   directory owners held by the Reader are released with it. The expected data is released last.
 
-`Serialize` 路径把 Artifact 写入
-[TestArtifactIO.h](test_utils/TestArtifactIO.h) 提供的内存 V3 接收端，再通过读取端
-解析实际加载器索引族并打开。`Open` 返回时，原 Artifact、接收端、读取端和内存
-传输数据都已退出局部作用域，所以返回的 Reader 必须自行拥有查询所需状态。
-需要落盘的加载器由读取端原子写入自己的临时位置。
+The `Serialize` path writes the Artifact into the in-memory V3 sink provided by
+[TestArtifactIO.h](test_utils/TestArtifactIO.h), then resolves the actual loader index family
+through the source and opens it. By the time `Open` returns, the original Artifact, the sink, the
+source, and the in-memory transport data have all left local scope, so the returned Reader must
+own the state it needs for queries.
+For loaders that need local files, the source writes them atomically to its own temporary location.
 
-`Consume` 路径把 `ArtifactPtr` 移交给 `IReaderConvertible::FromArtifact`，不经过序列化；返回的
-Reader 接管继续存活所需的产物状态。这条路径用于验证 RAM/可消费 Artifact，而非
-模拟持久化加载。
+The `Consume` path hands the `ArtifactPtr` to `IReaderConvertible::FromArtifact` without
+serialization; the returned Reader takes over the artifact state it needs to stay alive. This path
+verifies RAM/consumable Artifacts rather than simulating a persisted load.
 
-mmap 配置把系统临时目录作为父目录。加载器创建的文件或
-[LocalDirectory.h](../storage/artifact/LocalDirectory.h) 子目录由 Reader 内部存储的
-RAII 所有者持有：先释放映射和文件句柄，再由最后一个目录所有者删除自己创建的
-子目录；父目录不属于测试，不会被删除。`enable_mmap` 表示请求，具体数据布局仍可
-选择堆内存，因此需要 mmap 的实现回归会另选能实际触发文件布局的数据。
+mmap configurations use the system temporary directory as the parent directory. Files or
+[LocalDirectory.h](../storage/artifact/LocalDirectory.h) subdirectories created by the loader are
+held by RAII owners stored inside the Reader: mappings and file handles are released first, and then
+the last directory owner deletes the subdirectory it created; the parent directory does not belong
+to the test and is not deleted. `enable_mmap` is a request, and a specific data layout may still
+choose heap memory, so implementation regressions that need mmap pick separate data that actually
+triggers a file layout.
 
-设置 `ReleaseBeforeBody` 的观察用例会调用两次 `make_data`：一份用于期望，一份用于
-Build。Build/Open 完成后立即销毁输入所有者，再执行 Reader 断言，从而检查 Reader
-没有继续借用测试输入。需要验证更细所有权行为的用例可以显式 reset Reader 或
-Artifact，但普通用例不需要管理临时路径。
+An observation case that sets `ReleaseBeforeBody` calls `make_data` twice: once for the
+expectations and once for Build. The input owner is destroyed right after Build/Open completes,
+before the Reader assertions run, which checks that the Reader no longer borrows the test input.
+Cases that need to verify finer ownership behavior can explicitly reset the Reader or Artifact, but
+ordinary cases do not need to manage temporary paths.
 
-## 查阅入口
+## Entry points
 
-- [ScalarTestData.h](test_utils/ScalarTestData.h)：数据所有权、输入形状和延迟生成的
-  数据集描述符。
+- [ScalarTestData.h](test_utils/ScalarTestData.h): data ownership, input shapes, and lazily
+  generated dataset descriptors.
 - [ScalarReaderFactory.h](test_utils/ScalarReaderFactory.h) /
-  [ScalarReaderFactory.cpp](test_utils/ScalarReaderFactory.cpp)：后端描述符、筛选、
-  Build/Open/Create。
-- [CaseTestDriver.h](test_utils/CaseTestDriver.h)：公共用例配置、阶段、生命周期和展开。
-- [AssertHelpers.h](test_utils/AssertHelpers.h)：共享位图、空值和错误码断言。
+  [ScalarReaderFactory.cpp](test_utils/ScalarReaderFactory.cpp): backend descriptors, selection,
+  Build/Open/Create.
+- [CaseTestDriver.h](test_utils/CaseTestDriver.h): common case configuration, stages, lifetimes, and
+  expansion.
+- [AssertHelpers.h](test_utils/AssertHelpers.h): shared bitmap, null, and error-code assertions.
 - [TestArtifactIO.h](test_utils/TestArtifactIO.h) /
-  [TestArtifactIO.cpp](test_utils/TestArtifactIO.cpp)：测试用 V3 内存传输和原子
-  本地落盘。
+  [TestArtifactIO.cpp](test_utils/TestArtifactIO.cpp): in-memory V3 transport for tests and atomic
+  local writes to disk.

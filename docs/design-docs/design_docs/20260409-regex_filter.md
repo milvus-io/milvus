@@ -206,11 +206,15 @@ To avoid re-compiling RE2 and re-extracting literals on every batch, `PhyUnaryRa
 ```cpp
 // Constructed once per segment, reused across all batches:
 std::unique_ptr<PartialRegexMatcher> cached_regex_matcher_;
-std::string cached_volnitsky_literal_;     // longest extractable literal
+std::string cached_volnitsky_literal_;     // mandatory raw-scan substring
 std::unique_ptr<VolnitskySearcher> cached_volnitsky_searcher_;
 ```
 
-The `EnsureRegexCache()` method is called before the per-batch lambda and the cached pointers are captured by value, ensuring zero-cost reuse across batches.
+`EnsureRegexCache()` compiles the canonical matcher during physical-expression
+construction, validating syntax even when a candidate set will be empty.
+`EnsureRegexScanCache()` lazily obtains `RequiredLiteral()` and builds Volnitsky
+only for raw scanning. FM candidate rechecks reuse RE2 without that scan table.
+Cached pointers are captured by the per-batch lambda.
 
 #### Volnitsky Pre-Filter
 
@@ -262,10 +266,14 @@ This is the same two-phase architecture already used by `LIKE` on ngram indexes.
 
 For a `VARCHAR` field with an `FMINDEX`, regex preparation uses RE2's
 public `RequiredLiterals()` API to build a bounded Boolean condition over
-original-byte literals from the compiled matcher's AST. FMIndex counts the
+original-byte literals from the compiled matcher's AST. `FmIndexReader`
+(`index/scalar/fmindex/FmIndexReader.cpp`) counts the
 retained literals on the current segment, selects the lowest-cost child of each
 AND, and evaluates the selected condition as candidate bitmaps. The expression
-layer rechecks candidate values with the canonical RE2 matcher. AND/OR
+layer's `ExecFMPatternCandidates` consumes `IPatternMatchReader` and
+`INullReader`, intersects batch input bits, reads sealed raw VARCHAR chunks,
+and rechecks candidates with canonical RE2. `PatternMatchIsExact(RegexMatch)`
+is false, and offset input retains the raw path. AND/OR
 relationships remain intact, so alternatives
 retain coverage while selective literals can be chosen per segment. See the
 [FMIndex regex candidate design](20261004-fmindex-regex-candidates.md) for the
@@ -401,7 +409,10 @@ Regex supports the same field types and access patterns as LIKE:
 - With ngram index: create ngram index on field, verify regex queries use ngram acceleration.
 - With FMIndex: create an FM index on a VARCHAR field, verify Count-selected
   candidates and canonical RE2 recheck preserve results.
-- All index types: inverted, sort, marisa, bitmap, ngram, FMIndex — verified across the regex cases above.
+- All index types: inverted, sort, marisa, bitmap, ngram, FMIndex — exercise the
+  regex cases above. The Segcore contract port awaits consolidated build/test
+  validation; FM reader tests belong to `index_tests` and expression tests to
+  `all_tests`.
 - Case-insensitive: verify `(?i)` patterns return correct results with and without ngram index.
 - JSON field: `metadata["key"] =~ "pattern"`.
 - Combined with vector search: hybrid search with regex filter.
