@@ -131,14 +131,14 @@ func newCardinalityMetricLabels(labelNames, aggregateLabelNames []string) cardin
 // allocation; wrapped metrics have fewer labels than this.
 const maxInlineLabelValues = 8
 
-// normalizeValues returns values with the aggregate labels collapsed, written
-// into buf so the caller can keep it on the stack. values itself is never
+// normalizeValues returns values with the aggregate labels collapsed, appended
+// to the empty buf so the caller can keep it on the stack. values itself is never
 // modified, because callers may share it with other metric writes.
 func (l cardinalityMetricLabels) normalizeValues(buf []string, values []string) []string {
 	if !IsCollectionLevelMetricsAggregateMode() {
 		return values
 	}
-	normalized := append(buf[:0], values...)
+	normalized := append(buf, values...)
 	for _, index := range l.indexes {
 		if index < len(normalized) {
 			normalized[index] = AllLabel
@@ -451,18 +451,14 @@ func (v *CardinalityGaugeVec) Reset() {
 	v.vec.Reset()
 }
 
-func (v *CardinalityGaugeVec) aggregateDisabled() bool {
-	return IsCollectionLevelMetricsAggregateMode() && v.policy == collectionGaugeAggregateDisabled
-}
-
 // Suppressed reports whether writes to this gauge are discarded, so producers
 // can skip computing values that would never be exported.
 func (v *CardinalityGaugeVec) Suppressed() bool {
-	return v.aggregateDisabled()
+	return IsCollectionLevelMetricsAggregateMode() && v.policy == collectionGaugeAggregateDisabled
 }
 
 func (v *CardinalityGaugeVec) GetMetricWithLabelValues(values ...string) (prometheus.Gauge, error) {
-	if v.aggregateDisabled() {
+	if v.Suppressed() {
 		if err := v.labels.validateValues(values); err != nil {
 			return nil, err
 		}
@@ -481,7 +477,7 @@ func (v *CardinalityGaugeVec) WithLabelValues(values ...string) prometheus.Gauge
 }
 
 func (v *CardinalityGaugeVec) GetMetricWith(labels prometheus.Labels) (prometheus.Gauge, error) {
-	if v.aggregateDisabled() {
+	if v.Suppressed() {
 		if err := v.labels.validateLabels(labels); err != nil {
 			return nil, err
 		}

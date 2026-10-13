@@ -1077,7 +1077,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 }
 
-func TestQuotaCenterAggregatesCollectionEntityMetrics(t *testing.T) {
+func setAggregateEntityMetricsModeForTest(t *testing.T) {
+	t.Helper()
 	previousMode := metrics.CollectionLevelMetricsMode()
 	metrics.SetCollectionLevelMetricsMode(metrics.CollectionLevelMetricsModeAggregate)
 	t.Cleanup(func() {
@@ -1085,6 +1086,10 @@ func TestQuotaCenterAggregatesCollectionEntityMetrics(t *testing.T) {
 		metrics.RootCoordNumEntities.Reset()
 		metrics.RootCoordIndexedNumEntities.Reset()
 	})
+}
+
+func TestQuotaCenterAggregatesCollectionEntityMetrics(t *testing.T) {
+	setAggregateEntityMetricsModeForTest(t)
 
 	const databaseName = "aggregate-db"
 	collections := map[int64]*model.Collection{
@@ -1183,13 +1188,7 @@ func TestQuotaCenterAggregatesCollectionEntityMetrics(t *testing.T) {
 }
 
 func TestQuotaCenterKeepsAggregateEntityMetricsOnFailedRefresh(t *testing.T) {
-	previousMode := metrics.CollectionLevelMetricsMode()
-	metrics.SetCollectionLevelMetricsMode(metrics.CollectionLevelMetricsModeAggregate)
-	t.Cleanup(func() {
-		metrics.SetCollectionLevelMetricsMode(previousMode)
-		metrics.RootCoordNumEntities.Reset()
-		metrics.RootCoordIndexedNumEntities.Reset()
-	})
+	setAggregateEntityMetricsModeForTest(t)
 
 	const databaseName = "aggregate-db"
 	metrics.RootCoordNumEntities.WithLabelValues(databaseName, metrics.AllLabel, metrics.LoadedLabel).Set(30)
