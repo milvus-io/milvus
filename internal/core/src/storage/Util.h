@@ -342,10 +342,11 @@ enum class VisitOutcome {
 
 using FieldDataVisitor = std::function<VisitControl(FieldDataPtr)>;
 
-// Visits storage-v2 data on the calling thread in file/row-group order. Stop
-// takes effect after the current row group: no later row group is read, but a
-// row group is not a fixed byte bound and may itself be large. Producer work
-// for the current row group is complete before the visitor is called.
+// Visits storage-v2 data on the calling thread in numeric binlog-ID order,
+// preserving row-group order within each file. Stop takes effect after the
+// current row group: no later row group is read, but a row group is not a fixed
+// byte bound and may itself be large. Producer work for the current row group
+// is complete before the visitor is called.
 VisitOutcome
 VisitFieldDataFromStorageV2(
     const std::vector<std::vector<std::string>>& remote_files,
@@ -548,6 +549,11 @@ using DataTypeToOffsetMap =
 
 std::vector<FieldDataPtr>
 FetchFieldData(ChunkManager* cm, const std::vector<std::string>& batch_files);
+
+// Sort insert binlogs by their complete numeric basename. Malformed names,
+// including a one-file list, fail with DataFormatBroken.
+void
+SortBinlogPaths(std::vector<std::string>& paths);
 
 inline void
 SortByPath(std::vector<std::string>& paths) {

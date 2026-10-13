@@ -311,9 +311,6 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     }
 
     auto& remote_files = segment_insert_files.value();
-    for (auto& files : remote_files) {
-        SortByPath(files);
-    }
     auto field_datas = GetFieldDatasFromStorageV2(remote_files,
                                                   field_meta_.field_id,
                                                   data_type.value(),
@@ -455,9 +452,6 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
     AssertInfo(segment_insert_files.has_value(),
                "insert file paths for storage v2 is empty when build index");
     auto& remote_files = segment_insert_files.value();
-    for (auto& files : remote_files) {
-        SortByPath(files);
-    }
 
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
     for (auto& [field_id, tup] : fields_map) {
