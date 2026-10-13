@@ -36,13 +36,11 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// createdManifestVersion is the version of a manifest that a claim creates.
-const createdManifestVersion = 1
 
 // warnFailures is the number of failures in a row after which a failed
 // handover logs at warn level.
@@ -67,8 +65,11 @@ type Index struct {
 	cancel   context.CancelFunc
 	lifetime *typeutil.Lifetime
 
-	// claimed is closed when the claim succeeds. sstBasePath is set before.
-	claimed     chan struct{}
+	// ready is closed when the pchannel is claimed and, for an Index of an
+	// existing collection, the manifest of the vchannel is looked up.
+	ready     chan struct{}
+	readyOnce sync.Once
+	// sstBasePath is the object key prefix of the tables of the vchannel.
 	sstBasePath string
 
 	lastCommitted atomic.Uint64
@@ -81,8 +82,8 @@ type Index struct {
 	// serving writes, but it does not hand over again.
 	handoverStopped atomic.Bool
 	// notFresh is set when the Index may miss writes that the WAL holds: the
-	// local directories had files from before this open, or the claim did not
-	// create the manifest (its version is not 1). Such an Index serves writes, but it never hands over and it
+	// local directories had files from before this open, or the vchannel has
+	// a manifest. Such an Index serves writes, but it never hands over and it
 	// stays out of the LastAcked heap. A handover would commit a checkpoint
 	// that covers the missing writes.
 	//
@@ -105,10 +106,14 @@ type Index struct {
 	removed bool
 	heapPos int
 	heapKey uint64
+	// recovered is set for an Index that is open when the claim starts: the
+	// Index of a collection that existed at WAL open. Only such an Index
+	// looks up its manifest.
+	recovered bool
 }
 
 // openIndex opens the engine of a vchannel and builds the Index on top of it.
-// The caller starts the claim.
+// The caller starts the manifest lookup.
 //
 // When the engine or committed directory holds files from before this open,
 // openIndex removes both directories first, and the Index starts empty and
@@ -157,7 +162,8 @@ func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID in
 		ctx:          idxCtx,
 		cancel:       cancel,
 		lifetime:     typeutil.NewLifetime(),
-		claimed:      make(chan struct{}),
+		ready:        make(chan struct{}),
+		sstBasePath:  metautil.BuildPKIndexSSTBasePath(cfg.StorageRootPath, collectionID, vchannel),
 		heapPos:      -1,
 	}
 	idx.notFresh.Store(leftover)
@@ -246,7 +252,7 @@ func (idx *Index) dirty() bool {
 	return idx.dirtyFlag.Load() || idx.pending.Load() != nil || len(idx.eng.FrozenGenerations()) > 0
 }
 
-// close stops the Index. It waits for the claim, a running handover and
+// close stops the Index. It waits for a running handover and
 // every open Intent, then closes the engine. It keeps the local files.
 func (idx *Index) close(ctx context.Context) {
 	idx.lifetime.SetState(typeutil.LifetimeStateStopped)
@@ -343,7 +349,17 @@ func (idx *Index) VChannel() string { return idx.vchannel }
 // PChannelTerm implements snapshot.Target.
 func (idx *Index) PChannelTerm() int64 { return idx.ch.info.Term }
 
-// SSTBasePath implements snapshot.Target. It is set by the claim.
+// PKDataType implements snapshot.Target.
+func (idx *Index) PKDataType() schemapb.DataType { return idx.pkDataType }
+
+// InstalledVersion implements snapshot.Target.
+func (idx *Index) InstalledVersion() int64 {
+	idx.installMu.Lock()
+	defer idx.installMu.Unlock()
+	return idx.installedVersion
+}
+
+// SSTBasePath implements snapshot.Target.
 func (idx *Index) SSTBasePath() string { return idx.sstBasePath }
 
 // CommittedDir implements snapshot.Target.
@@ -464,115 +480,59 @@ func (idx *Index) resolveLocal(ctx context.Context, basePath string, id sst.ID, 
 	return path, nil
 }
 
-// startClaim starts the claim goroutine. The claim holds the lifetime.
-// Without a Committer the Index does not claim, and it never hands over.
-//
-// TODO: a later change injects the Committer that the manifest service
-// client implements.
-func (idx *Index) startClaim() {
-	if idx.ch.m.cfg.Committer == nil {
-		return
-	}
-	idx.lifetime.Add(typeutil.LifetimeStateWorking)
-	go idx.claim()
-}
-
-// claimedDone reports whether the claim succeeded.
-func (idx *Index) claimedDone() bool {
+// readyDone reports whether the Index is ready: the pchannel is claimed and
+// the manifest lookup of the vchannel is done.
+func (idx *Index) readyDone() bool {
 	select {
-	case <-idx.claimed:
+	case <-idx.ready:
 		return true
 	default:
 		return false
 	}
 }
 
-// claim claims the manifest of the vchannel for the term of the pchannel,
-// and retries with backoff until it succeeds, the term is fenced, or the
-// Index closes.
-func (idx *Index) claim() {
-	defer idx.lifetime.Done()
-	ctx := idx.ctx
-	var bo snapshot.Backoff
-	args := snapshot.ClaimArgs{
-		CollectionID: idx.collectionID,
-		VChannel:     idx.vchannel,
-		PChannelTerm: idx.ch.info.Term,
-		PKDataType:   idx.pkDataType,
-	}
-	for {
-		m, err := idx.ch.m.cfg.Committer.Claim(ctx, args)
-		if err == nil {
-			idx.onClaimed(ctx, m)
-			return
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		if isFatal(err) {
-			idx.logger.Error(ctx, "primary key index claim failed, the WAL becomes unavailable", mlog.Err(err))
-			idx.handoverStopped.Store(true)
-			idx.ch.fatal(err)
-			return
-		}
-		idx.fail(&bo, time.Now())
-		idx.logger.Warn(ctx, "primary key index claim failed, retry later", mlog.Int("failures", bo.Failures()), mlog.Err(err))
-		for !bo.Ready(time.Now()) {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(bo.Base):
-			}
-		}
-	}
-}
-
 // fail records a failure in b with the current backoff params.
 func (idx *Index) fail(b *snapshot.Backoff, now time.Time) {
-	params := idx.ch.m.cfg.Params()
-	b.Base, b.Max = params.BackoffBase, params.MaxBackoff
-	b.Fail(now)
+	idx.ch.fail(b, now)
 }
 
-// onClaimed records the claimed manifest and marks the claim done. A manifest
-// that this claim did not create makes the Index not fresh.
-//
-// The claim creates the manifest at version 1, and a retry of the claim with
-// the same term returns it unchanged. Any other version means that an owner
-// claimed it before: a claim with a higher term raises the version, even when
-// the old owner never handed over. The old owner can have writes that it did
-// not hand over, and this Index does not have them. So an empty manifest
-// with a version above 1 is not enough.
+// markReady marks the Index ready, once. found reports whether the vchannel
+// has a manifest. A manifest of any version makes the Index not fresh: an
+// owner committed it, and this Index can miss the writes of that owner that
+// it neither handed over nor replayed. It does nothing after the Index closed.
 //
 // The engine holds no frozen generation here: openIndex removed the data from
-// before the open, and no handover starts before the claim. So no generation
-// needs to retire through the claimed manifest.
+// before the open, and no handover starts before the Index is ready. So no
+// generation needs to retire through the manifest.
 //
-// TODO: recovery opens the Index with the data from before the open. It must
-// retire the frozen generations whose staged tables the claimed manifest
-// already holds, else the first handover sends them again and the manifest
-// service rejects them as duplicates. After a compaction, a match by staged
-// table IDs can add tables back that the compaction removed. Reading the
-// staged list must not stage a generation, so the engine needs an accessor
-// that only reads the STAGED list.
-func (idx *Index) onClaimed(ctx context.Context, m snapshot.ManifestView) {
-	idx.sstBasePath = m.SSTBasePath
-	if cp := m.CheckpointTimeTick; cp > idx.LastCommittedTimeTick() {
-		idx.SetLastCommittedTimeTick(cp)
+// TODO: recovery opens the Index with the data from before the open. It reads
+// the manifest body from the BodyKey of the lookup, and it must retire the
+// frozen generations whose staged tables the manifest already holds, else the
+// first handover sends them again and the manifest service rejects them as
+// duplicates. After a compaction, a match by staged table IDs can add tables
+// back that the compaction removed. Reading the staged list must not stage a
+// generation, so the engine needs an accessor that only reads the STAGED list.
+func (idx *Index) markReady(ctx context.Context, found bool) {
+	if !idx.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return
 	}
-	if m.Version != createdManifestVersion {
-		// The engine holds only writes from after this open. Keep them, but
-		// never hand them over: the manifest can cover writes that this
-		// Index does not have.
-		idx.notFresh.Store(true)
+	defer idx.lifetime.Done()
+	first := false
+	idx.readyOnce.Do(func() {
+		first = true
+		if found {
+			// The engine holds only writes from after this open. Keep them,
+			// but never hand them over: the manifest can cover writes that
+			// this Index does not have.
+			idx.notFresh.Store(true)
+		}
+		close(idx.ready)
+	})
+	if !first {
+		return
 	}
-	close(idx.claimed)
 	idx.ch.refreshAcked(idx)
-	idx.logger.Info(ctx, "primary key index claimed",
-		mlog.Int64("manifestVersion", m.Version),
-		mlog.Uint64("checkpointTimeTick", m.CheckpointTimeTick),
-		mlog.Int("ssts", len(m.Tables)),
-		mlog.Bool("fresh", idx.fresh()))
+	idx.logger.Info(ctx, "primary key index ready", mlog.Bool("manifestFound", found), mlog.Bool("fresh", idx.fresh()))
 }
 
 // submitHandover submits one handover of the Index to the node scheduler.

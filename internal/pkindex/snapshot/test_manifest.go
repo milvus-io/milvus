@@ -19,6 +19,8 @@
 package snapshot
 
 import (
+	"strconv"
+
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -28,9 +30,10 @@ import (
 // FakeManifest is a manifest of one vchannel as a fake manifest service
 // keeps it. Tests use it to fake a Committer.
 type FakeManifest struct {
-	View       ManifestView
-	Term       int64
-	PKDataType schemapb.DataType
+	View ManifestView
+	// LastFlushTerm is the term of the last flush that changed the manifest.
+	LastFlushTerm int64
+	PKDataType    schemapb.DataType
 }
 
 // clone returns a copy of m that shares no slice with m.
@@ -40,55 +43,57 @@ func (m *FakeManifest) clone() *FakeManifest {
 	return &c
 }
 
-// FakeClaim applies a claim to cur, with the rules of the manifest service.
-// It returns the manifest after the claim and whether the claim changed it:
+// FakeClaimPChannel applies a claim of a pchannel for term to the claimed
+// term cur (0 when the pchannel was never claimed), with the rules of the
+// manifest service. It returns the claimed term after the claim:
 //
-//   - no manifest: a new one at version 1 with basePath,
 //   - a lower term: ErrFenced,
-//   - another primary key type: ErrRejected,
-//   - the same term: cur, unchanged,
-//   - a higher term: the next version with the new term.
-func FakeClaim(cur *FakeManifest, args ClaimArgs, basePath string) (*FakeManifest, bool, error) {
-	if cur == nil {
-		return &FakeManifest{
-			View:       ManifestView{Version: 1, SSTBasePath: basePath},
-			Term:       args.PChannelTerm,
-			PKDataType: args.PKDataType,
-		}, true, nil
+//   - the same term: cur,
+//   - a higher term or no claim: term.
+func FakeClaimPChannel(pchannel string, cur, term int64) (int64, error) {
+	if term < cur {
+		return cur, errors.Wrapf(ErrFenced, "pchannel %s: claimed term %d, claim term %d", pchannel, cur, term)
 	}
-	if args.PChannelTerm < cur.Term {
-		return nil, false, errors.Wrapf(ErrFenced, "vchannel %s: manifest term %d, claim term %d", args.VChannel, cur.Term, args.PChannelTerm)
-	}
-	if args.PKDataType != cur.PKDataType {
-		return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: primary key type %s, claim %s", args.VChannel, cur.PKDataType, args.PKDataType)
-	}
-	if args.PChannelTerm == cur.Term {
-		return cur.clone(), false, nil
-	}
-	next := cur.clone()
-	next.View.Version++
-	next.Term = args.PChannelTerm
-	return next, true, nil
+	return term, nil
 }
 
-// FakeFlush applies a flush to cur, with the rules of the manifest service.
-// It returns the manifest after the flush and whether the flush changed it:
+// FakeRecoveryManifest returns the answer for the manifest cur (nil when
+// the vchannel has none).
+func FakeRecoveryManifest(cur *FakeManifest) RecoveryManifest {
+	if cur == nil {
+		return RecoveryManifest{}
+	}
+	return RecoveryManifest{Found: true, Version: cur.View.Version, BodyKey: "manifest/" + strconv.FormatInt(cur.View.Version, 10) + ".pb"}
+}
+
+// FakeFlush applies a flush to cur (nil when the vchannel has no manifest),
+// with the rules of the manifest service. claimed is the claimed term of the
+// pchannel, and basePath the SST base path of a new manifest. It returns the
+// manifest after the flush and whether the flush changed it:
 //
-//   - no manifest: ErrRejected (not claimed),
-//   - a lower term: ErrFenced,
-//   - a checkpoint that does not move forward: cur for the same term (an
-//     applied retry), ErrRejected for a higher term,
+//   - a term below claimed: ErrFenced,
+//   - a term above claimed: ErrRejected (not claimed),
+//   - no manifest: a new one, so the flush gives version 1,
+//   - another primary key type: ErrRejected,
+//   - a checkpoint that does not move forward: cur when the term is the term
+//     of the last flush (an applied retry), else ErrRejected,
 //   - a table that is in cur or listed twice: ErrRejected,
 //   - else the next version with the new tables in front.
-func FakeFlush(cur *FakeManifest, args FlushArgs) (*FakeManifest, bool, error) {
-	if cur == nil {
-		return nil, false, errors.Wrapf(ErrRejected, "vchannel %s is not claimed", args.VChannel)
+func FakeFlush(cur *FakeManifest, claimed int64, args FlushArgs, basePath string) (*FakeManifest, bool, error) {
+	if args.PChannelTerm < claimed {
+		return nil, false, errors.Wrapf(ErrFenced, "vchannel %s: claimed term %d, flush term %d", args.VChannel, claimed, args.PChannelTerm)
 	}
-	if args.PChannelTerm < cur.Term {
-		return nil, false, errors.Wrapf(ErrFenced, "vchannel %s: manifest term %d, flush term %d", args.VChannel, cur.Term, args.PChannelTerm)
+	if args.PChannelTerm > claimed {
+		return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: term %d is not claimed", args.VChannel, args.PChannelTerm)
+	}
+	if cur == nil {
+		cur = &FakeManifest{View: ManifestView{SSTBasePath: basePath}, PKDataType: args.PKDataType}
+	}
+	if args.PKDataType != cur.PKDataType {
+		return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: primary key type %s, flush %s", args.VChannel, cur.PKDataType, args.PKDataType)
 	}
 	if args.CheckpointTimeTick <= cur.View.CheckpointTimeTick {
-		if args.PChannelTerm > cur.Term {
+		if args.PChannelTerm != cur.LastFlushTerm {
 			return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: checkpoint regressed from %d to %d", args.VChannel, cur.View.CheckpointTimeTick, args.CheckpointTimeTick)
 		}
 		return cur.clone(), false, nil
@@ -105,7 +110,7 @@ func FakeFlush(cur *FakeManifest, args FlushArgs) (*FakeManifest, bool, error) {
 	}
 	next := cur.clone()
 	next.View.Version++
-	next.Term = args.PChannelTerm
+	next.LastFlushTerm = args.PChannelTerm
 	next.View.CheckpointTimeTick = args.CheckpointTimeTick
 	next.View.Tables = append(append([]TableRef(nil), args.AddTables...), cur.View.Tables...)
 	return next, true, nil

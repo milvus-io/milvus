@@ -37,8 +37,8 @@ problems stay:
 
 ```
 index.Manager            one per streaming node: shared engine caches, config
- └─ index.Channel        one per pchannel: the handover driver,
-     │                   lastAppliedTimeTick, LastAcked
+ └─ index.Channel        one per pchannel: the claim, the manifest lookups,
+     │                   the handover driver, lastAppliedTimeTick, LastAcked
      └─ index.Index      one per vchannel: engine, decider, lastCommittedTimeTick
           └─ handover ── upload ──▶ object storage   (snapshot.TableStore)
                       ── commit ──▶ manifest service (snapshot.Committer)
@@ -53,8 +53,9 @@ index.Manager            one per streaming node: shared engine caches, config
 - `snapshot.TableStore` has two methods, `UploadFile` and `DownloadFile`. The
   handover defines this interface for its own use. It does not use the
   object store interface of the manifest service.
-- `snapshot.Committer` has two methods, `Claim` and `CommitFlush`. The
-  handover defines it with its own types, so the handover code does not
+- `snapshot.Committer` has three methods, `ClaimPChannel`,
+  `GetRecoveryManifests` and `CommitFlush`. The handover defines it with its
+  own types, so the handover code does not
   import the manifest service, its client or its proto. See
   [Committer](#committer).
 
@@ -66,20 +67,31 @@ The handover owns the types that it exchanges with the manifest service:
 |---|---|
 | `ManifestView` | `Version`, `SSTBasePath`, `CheckpointTimeTick`, `Tables []TableRef` |
 | `TableRef` | the table info of the core library (`sst.Info`): `ID`, `TableFormat`, `Size`, `MinKey`, `MaxKey`, `NumEntries` |
-| `ClaimArgs` | `CollectionID`, `VChannel`, `PChannelTerm`, `PKDataType` |
-| `FlushArgs` | `CollectionID`, `VChannel`, `PChannelTerm`, `AddTables`, `CheckpointTimeTick` |
+| `VChannelRef` | `CollectionID`, `VChannel` |
+| `RecoveryManifest` | `Found bool`, `Version`, `BodyKey` (the object key of the manifest body), `Err` (the failure of this item) |
+| `FlushArgs` | `CollectionID`, `VChannel`, `PChannelTerm`, `PKDataType`, `AddTables`, `CheckpointTimeTick` |
 
 ```go
 type Committer interface {
-    Claim(ctx context.Context, args ClaimArgs) (ManifestView, error)
+    ClaimPChannel(ctx context.Context, pchannel string, term int64) error
+    GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error)
     CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error)
 }
 ```
 
+- `ClaimPChannel` claims the pchannel for the term of the WAL instance. A
+  claim with the claimed term again succeeds.
+- `GetRecoveryManifests` returns one answer for each ref, in the same order.
+  An item that fails has its own `Err`. A call has at most
+  `MaxRecoveryManifests` (10000) refs. The handover only uses `Found`.
+  `Version` and `BodyKey` are for recovery, which reads the manifest body.
+- The first `CommitFlush` of a vchannel creates its manifest at version 1
+  with `PKDataType`.
+
 A `Committer` returns an error that matches one of two sentinels of the
 handover when a retry can not help:
 
-- `snapshot.ErrFenced`: a newer term owns the vchannel.
+- `snapshot.ErrFenced`: a newer term owns the pchannel.
 - `snapshot.ErrRejected`: the manifest service rejected the request for
   good. Examples are a bug of the caller, an invalid request, and a
   corrupted stored manifest.
@@ -94,12 +106,23 @@ later change (see [Not done in this change](#not-done-in-this-change)):
 | `ServiceInternal`, `ParameterInvalid`, `DataIntegrity` | `ErrRejected` |
 | `ServiceUnavailable`, `ServiceNotReady`, a timeout, a cancel | retryable, unchanged |
 
+The streaming node computes the SST base path of a vchannel itself, with the
+shared helper `metautil.BuildPKIndexSSTBasePath(rootPath, collectionID,
+vchannel)`: `<rootPath>/pk_index/<collectionID>/<vchannel>/sst`, where
+`rootPath` is `ChunkManager.RootPath()`. This follows how the streaming node
+builds binlog paths with `metautil.BuildInsertLogPath`. The handover uploads
+under the computed path. The manifest records its own `SSTBasePath`, and the
+install downloads with it. When the two differ, the commit is `ErrRejected`.
+The helper and the constant `common.PKIndexPath` are byte-identical to the
+copies in the manifest service change. The change that merges second drops
+its copy at the rebase.
+
 `snapshot.SSTKey` builds the object key of a table:
 `<sst_base_path>/<id>.sst`. The manifest service and its garbage collection
 use the same format. A test fixes the format, and the adapter change checks
 it against the key function of the manifest service.
 
-When the `Manager` has no `Committer`, no `Index` claims, and no `Index`
+When the `Manager` has no `Committer`, no `Channel` claims, and no `Index`
 hands over. The indexes still deduplicate the writes, and they stay out of
 the `LastAcked` heap. This change does not inject a `Committer` (see
 [Wiring into the streaming node](#wiring-into-the-streaming-node)).
@@ -175,7 +198,7 @@ Prepare (only when the vchannel has no pending request):
   for each frozen generation, newest first:   includes leftovers of failed handovers
       StageFrozen                             same tables, same IDs on every call
       hard-link each table to <dir>/committed/<id>.sst
-  request := CommitFlushRequest{add_ssts, checkpoint_time_tick = covered}
+  request := CommitFlushRequest{pk_data_type, add_ssts, checkpoint_time_tick = covered}
   record it as the pending request at once    no upload yet
                                               (request is nil when there are no tables)
 
@@ -183,7 +206,10 @@ Commit (a retry sends the same pending request):
   request is nil:  DropFrozen the generations, lastCommittedTimeTick = covered
   otherwise:       if no upload finished, or the upload is older than grace/2:
                        upload each table to <sst_base_path>/<id>
+                   before := installed version
                    CommitFlush(request) → complete manifest
+                   manifest.version < before or
+                   manifest.checkpoint < covered:  ErrRejected, keep the generations
                    installIfNewer(manifest, retire the generations)
                    lastCommittedTimeTick = covered, clear the pending request
 ```
@@ -232,6 +258,17 @@ Cost: while a request is pending, no new handover starts. This also applies
 while its upload fails. During a long object
 storage outage, the active generation keeps growing on local disk. The engine
 memtable flushes to local tables when it is full, so memory stays bounded.
+
+### The returned manifest must have the request in effect
+
+`Commit` installs the returned manifest and retires the frozen generations
+only when the manifest has the request in effect: its version is not below
+the installed version from before the commit, and its checkpoint is not below
+the covered time tick of this handover. Otherwise `Commit` returns
+`ErrRejected`, which marks the WAL unavailable, and the generations stay.
+Without this check, a flush that the manifest service takes as an applied
+retry by mistake would make the generations retire while their tables are
+not committed.
 
 ### Upload again before a late retry
 
@@ -296,11 +333,24 @@ version check runs again under the lock.
 
 ### Claim
 
-When an `Index` opens and the `Manager` has a `Committer`, the `Index` claims
-the manifest of its vchannel (see [Claim](manifest.md#claim)) in the
-background. The first handover waits for the claim. A failed claim retries
-with backoff. A fenced claim and a rejected claim (see
-[Failure handling](#failure-handling)) mark the WAL unavailable.
+The WAL open first adds the `Index` of each existing collection, and then
+calls `Channel.StartClaim`. When the `Manager` has a `Committer`, the
+`Channel` claims its pchannel once, in the background (see
+[the manifest service](manifest.md)). The number of vchannels does not change
+the number of claims. A failed claim retries with backoff. A fenced claim and
+a rejected claim (see [Failure handling](#failure-handling)) mark the WAL
+unavailable.
+
+After the claim, the `Channel` looks up the manifests of the indexes of the
+existing collections with `GetRecoveryManifests`, in calls of at most 10000
+items. It retries only the items that failed, with backoff. A fenced or
+rejected item, or a fenced or rejected call, marks the WAL unavailable. The
+answer decides whether the `Index` is fresh.
+
+An `Index` that a CreateCollection adds does not look up. Its collection is
+new, and the vchannel name holds the new collection ID, so no manifest can
+exist for it. The check for local files from before still applies. No `Index`
+hands over before the claim and the lookups are done.
 
 ### Only a fresh index hands over
 
@@ -309,19 +359,17 @@ An `Index` is fresh when both of these are true:
 - When it opens, its engine directory and its `committed/` directory hold no
   files from before this open. A file in only one of them counts too, for
   example the rest of a removal that did not finish.
-- The manifest that it claims has version 1. The claim created the manifest,
-  and a retry of the claim with the same term returns it unchanged at
-  version 1.
+- Its vchannel has no manifest.
 
 When an open finds files from before, it removes both local directories, and
-the `Index` starts empty and not fresh. When the claimed manifest has another
-version, the `Index` keeps the writes from after the open, but it is not
-fresh either.
+the `Index` starts empty and not fresh. When the vchannel has a manifest of
+any version and content, the `Index` keeps the writes from after the open,
+but it is not fresh either.
 
-An empty manifest is not enough. A claim with a higher term raises the
-version, also when the old owner never handed over. The old owner can have
-writes that it did not hand over. A handover of the new owner would commit a
-checkpoint that covers them, and the WAL replay would skip them.
+A manifest means that an owner committed for the vchannel. That owner can
+have writes that it did not hand over, and that this `Index` neither has nor
+replays. A handover of this `Index` would commit a checkpoint that covers
+them, and the WAL replay would skip them.
 
 The rule is conservative. `engine.Open` always creates the first generation,
 so any reopen of a vchannel on the same node finds files from before and does
@@ -348,12 +396,9 @@ Why the data from before can not hand over:
   data that the other node committed since. A handover of them would hide the
   newer state.
 - **Crash after a commit.** The pending request lives only in memory. A crash
-  after a successful commit and before the install loses it. The claimed
-  manifest then has a version above 1, so the `Index` is not fresh and does
-  not send the tables again.
-- **Takeover before a handover.** A new owner claims with a higher term an
-  empty manifest that the old owner claimed and never handed over. The
-  version is 2, so the new owner is not fresh.
+  after a successful commit and before the install loses it. The vchannel
+  then has a manifest, so the `Index` is not fresh and does not send the
+  tables again.
 
 An alternative was to hand over as usual and let recovery mark the older
 checkpoints as not trusted by version. It was not chosen, because the wrong
@@ -453,7 +498,7 @@ generations, or a pending request.
   `lastAppliedTimeTick`. WAL summary uses the same rule.
 - A min-heap keyed by `lastCommittedTimeTick` holds the dirty indexes. The
   first write after a clean state adds an `Index`. The end of each handover
-  and of the claim updates or removes it. An `Index` that is not fresh never
+  and of the manifest lookup updates or removes it. An `Index` that is not fresh never
   joins the heap. A pchannel with many vchannels
   does not compute a full minimum on each call.
 - The value is monotonic. `Channel` keeps the largest value that it returned
@@ -477,7 +522,7 @@ scheduler (`nodescheduler`). An idle vchannel has no goroutine and no timer.
 | 2 | Early tail | Hand over before the WAL throttles appends | WAL recovery tail ≥ `handover.tailBytes` and `LastAcked` < the recovery time tick of the WAL: the dirty vchannel with the smallest `lastCommittedTimeTick` hands over | 2 GiB |
 | 3 | Soft pressure | Fallback for trigger 2 | WAL recovery tail ≥ `walRecovery.tail.softWatermark` and `LastAcked` < the recovery time tick of the WAL: same pick as trigger 2 | 8 GiB |
 
-Only a fresh `Index` whose claim is done can hand over.
+Only a fresh `Index` whose claim and manifest lookup are done can hand over.
 
 The condition on `LastAcked` makes sure that the index holds the WAL tail
 back. The driver reads the recovery time tick (`RecoveryTimeTick` in the
@@ -526,11 +571,11 @@ reach 64 MiB and hand over through trigger 2.
 
 | Case | Handling |
 |---|---|
-| Retryable upload, download, claim or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. Each failure reads `handover.maxBackoff` again. The pending request keeps the same table IDs. |
-| Fenced (`snapshot.ErrFenced`) | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
+| Retryable upload, download, claim, lookup or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. Each failure reads `handover.maxBackoff` again. The pending request keeps the same table IDs. |
+| Fenced (`snapshot.ErrFenced`) on the claim, a lookup or a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
 | Corrupted (`pkerr.ErrCorrupted`) in a handover | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable. The WAL is assigned again and recovers on another node. |
 | Corrupted (`pkerr.ErrCorrupted`) in a lookup on the write path | `Decide` returns the error and calls `OnFatal`, which marks the WAL unavailable. |
-| Rejected claim or commit (`snapshot.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, not claimed, an invalid request, a corrupted stored manifest) | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
+| Rejected claim, lookup item or commit (`snapshot.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, not claimed, an invalid request, a corrupted stored manifest), a returned manifest that does not have the flush in effect, or a manifest with another SST base path | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
 | Missing object on download | `DownloadFile` marks it as corrupted. A manifest lists the table, so a retry can not clear it. |
 | Local disk error when the index of an existing collection opens at WAL open | `OnFatal` marks the WAL unavailable. The streaming node and its other WALs keep running. |
 | Concurrency | At most one handover per vchannel at a time. The node scheduler limits the handovers of the node. |
@@ -573,7 +618,7 @@ Metrics:
 | `streaming.pkindex.maxOpenFiles` | `4096` | No, forbidden at runtime | Table cache size that all indexes on one streaming node share. |
 | `streaming.pkindex.handover.activeBytes` | `64m` | Yes, at the next driver step | Size trigger. |
 | `streaming.pkindex.handover.tailBytes` | `2g` | Yes, at the next driver step | Early tail trigger. Keep it below `streaming.walRecovery.tail.lowWatermark`. |
-| `streaming.pkindex.handover.maxBackoff` | `60s` | Yes, at the next failure | Longest wait between two attempts of a failed handover or claim. Each failure reads it again. |
+| `streaming.pkindex.handover.maxBackoff` | `60s` | Yes, at the next failure | Longest wait between two attempts of a failed handover, claim or manifest lookup. Each failure reads it again. |
 | `streaming.pkindex.memTableSize` | `4m` | No, read when an `Index` opens | Memtable size of the engine of one vchannel. |
 | `streaming.walRecovery.tail.softWatermark` | `8g` | Yes, at the next driver step | Existing key. Soft pressure trigger. |
 | `dataCoord.pkindex.gc.grace` | `86400` (s) | — | Key of the manifest service. The change that injects the `Committer` sets `ReuploadAfter` of the index layer to half of it. A retry uploads again after that age. |
@@ -615,7 +660,8 @@ Common patterns:
   adapter that implements `snapshot.Committer`. It translates the proto
   types and the merr codes (see [Committer](#committer)), with a test for
   each error class, and the streaming node injects it into the `Manager`. It
-  also sets `ReuploadAfter`. Until then no `Index` claims or hands over.
+  also sets `ReuploadAfter`. Until then no `Channel` claims and no `Index`
+  hands over.
 - **End-to-end tests of the handover.** They run in the wiring change: a
   handover with object storage, an object storage outage, sustained writes
   with large vectors, and a check in the integration suite that a handover
@@ -659,19 +705,27 @@ Unit tests cover these cases:
   rotate again. A retry keeps the table IDs and sends the same request, also
   after a lost response. A retry after grace/2 uploads again. An empty
   handover retires its generations and moves `lastCommittedTimeTick`. An
-  older manifest does not replace a newer one.
+  older manifest does not replace a newer one. A returned manifest below the
+  installed version, with a checkpoint below the covered time tick, or with
+  another SST base path, is rejected, and the generations stay.
 - Install: a missing table is downloaded, and a missing object is fatal.
 - Fresh only: an open with engine data from before removes the local data,
   starts empty and does not hand over. A file from before in `committed/`
-  only, such as the temporary file of a download, has the same result. A
-  claimed manifest that is not empty stops the handovers too. An empty
-  manifest at version 2 (the old owner never handed over) gives an `Index`
-  that is not fresh and never calls `CommitFlush`. A same-term claim retry
-  that returns version 1 stays fresh. An `Index` that is not fresh is not in
+  only, such as the temporary file of a download, has the same result. No
+  manifest and no leftover is fresh, uploads under the SST base path that it
+  computes, and creates the manifest at version 1 with its first handover. A
+  manifest of any version, also version 1 with no tables, gives an `Index`
+  that is not fresh and never calls `CommitFlush`. An `Index` that is not fresh is not in
   the `LastAcked` heap.
-- Claim: no handover before the claim, a retryable claim error retries, a
-  fenced claim is fatal, and a rejected claim is fatal.
-- No `Committer`: the `Index` does not claim, does not hand over, stays out
+- Claim and lookup: one `ClaimPChannel` call for a `Channel` with many
+  vchannels, and one `GetRecoveryManifests` call for the indexes of the
+  existing collections. More than the batch size splits into several calls.
+  A retry sends only the failed items. An `Index` of a new collection does
+  not look up, also when it opens while the claim runs, and it waits for
+  the claim. No handover before the claim. A retryable claim or lookup
+  error retries. A fenced claim, a rejected claim, a rejected call and a
+  rejected item are fatal.
+- No `Committer`: the `Channel` does not claim, the `Index` does not hand over, stays out
   of the `LastAcked` heap, and still deduplicates the writes.
 - Fatal errors: `ErrFenced`, `ErrRejected` and `ErrCorrupted` are fatal.
   Other errors are retryable, also a merr code that no adapter translated.
@@ -699,7 +753,7 @@ Unit tests cover these cases:
 - Interceptor: without a `Manager`, it passes every message through. With a
   `Manager`, it uses the index.
 
-The fake `Committer` of the tests follows the claim and flush rules of the
+The fake `Committer` of the tests follows the claim, lookup and flush rules of the
 manifest service. The integration suite of the write path runs with the
 index on, but no handover runs in it without a `Committer`.
 

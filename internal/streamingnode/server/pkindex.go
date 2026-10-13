@@ -71,7 +71,8 @@ func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager) *pkindex
 			id, err := resource.Resource().IDAllocator().Allocate(ctx)
 			return int64(id), err
 		},
-		Store: pkindexstore.New(cm),
+		Store:           pkindexstore.New(cm),
+		StorageRootPath: cm.RootPath(),
 		// TODO: a later change injects the Committer over the manifest
 		// service client. Until then the indexes do not claim and never
 		// hand over. They only deduplicate the writes.

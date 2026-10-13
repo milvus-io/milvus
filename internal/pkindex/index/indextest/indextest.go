@@ -34,17 +34,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-// Committer applies claims the way the manifest service does. A handover is
-// not tested with it, so CommitFlush always fails.
+// Committer applies claims the way the manifest service does. No vchannel
+// has a manifest. A handover is not tested with it, so CommitFlush always
+// fails.
 type Committer struct {
-	mu        sync.Mutex
-	manifests map[string]*snapshot.FakeManifest
-	claimErr  error
+	mu       sync.Mutex
+	claimed  map[string]int64
+	claimErr error
 }
 
-// NewCommitter creates a Committer with no manifests.
+// NewCommitter creates a Committer with no claims.
 func NewCommitter() *Committer {
-	return &Committer{manifests: make(map[string]*snapshot.FakeManifest)}
+	return &Committer{claimed: make(map[string]int64)}
 }
 
 // SetClaimErr makes every later claim fail with err.
@@ -54,19 +55,25 @@ func (c *Committer) SetClaimErr(err error) {
 	c.claimErr = err
 }
 
-// Claim implements snapshot.Committer.
-func (c *Committer) Claim(ctx context.Context, args snapshot.ClaimArgs) (snapshot.ManifestView, error) {
+// ClaimPChannel implements snapshot.Committer.
+func (c *Committer) ClaimPChannel(ctx context.Context, pchannel string, term int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.claimErr != nil {
-		return snapshot.ManifestView{}, c.claimErr
+		return c.claimErr
 	}
-	next, _, err := snapshot.FakeClaim(c.manifests[args.VChannel], args, "pkindex/"+args.VChannel+"/sst")
+	next, err := snapshot.FakeClaimPChannel(pchannel, c.claimed[pchannel], term)
 	if err != nil {
-		return snapshot.ManifestView{}, err
+		return err
 	}
-	c.manifests[args.VChannel] = next
-	return next.View, nil
+	c.claimed[pchannel] = next
+	return nil
+}
+
+// GetRecoveryManifests implements snapshot.Committer. No vchannel has a
+// manifest.
+func (c *Committer) GetRecoveryManifests(ctx context.Context, refs []snapshot.VChannelRef) ([]snapshot.RecoveryManifest, error) {
+	return make([]snapshot.RecoveryManifest, len(refs)), nil
 }
 
 var errNoHandover = errors.New("a handover is not tested here")
@@ -116,13 +123,14 @@ func NewEnv(t *testing.T, root string) *Env {
 		ReuploadAfter: time.Hour,
 	}
 	env.Manager = index.NewManager(index.ManagerConfig{
-		Root:      root,
-		Shared:    shared,
-		AllocID:   func(context.Context) (int64, error) { return nextID.Add(1), nil },
-		Store:     snapshottest.NewStore(),
-		Committer: env.Committer,
-		Sched:     NeverScheduler{},
-		Params:    func() index.Params { return params },
+		Root:            root,
+		Shared:          shared,
+		AllocID:         func(context.Context) (int64, error) { return nextID.Add(1), nil },
+		Store:           snapshottest.NewStore(),
+		StorageRootPath: "root",
+		Committer:       env.Committer,
+		Sched:           NeverScheduler{},
+		Params:          func() index.Params { return params },
 	})
 	t.Cleanup(env.Manager.Close)
 	return env

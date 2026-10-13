@@ -89,8 +89,12 @@ type ManagerConfig struct {
 	AllocID func(ctx context.Context) (int64, error)
 	// Store moves tables between local disk and object storage.
 	Store snapshot.TableStore
-	// Committer claims and changes the manifests. When it is nil, an Index
-	// does not claim and never hands over. It still serves the writes.
+	// StorageRootPath is the root path of the object storage
+	// (ChunkManager.RootPath()). The SST base path of a vchannel is under it.
+	StorageRootPath string
+	// Committer claims the pchannels and reads and changes the manifests.
+	// When it is nil, a Channel does not claim and no Index hands over. The
+	// indexes still serve the writes.
 	Committer snapshot.Committer
 	// Sched runs the handovers of all pchannels of the node.
 	Sched nodescheduler.Scheduler
@@ -127,6 +131,9 @@ func NewManager(cfg ManagerConfig) *Manager {
 // message when the WAL opens. tail returns the WAL recovery tail, zeros when
 // it is unknown. Zeros never start a handover. onFatal marks the WAL
 // unavailable. It must not block.
+//
+// The caller adds the indexes of the existing collections and then calls
+// Channel.StartClaim.
 //
 // After Close, OpenChannel returns a closed Channel: Add on it fails.
 func (m *Manager) OpenChannel(info types.PChannelInfo, seed uint64, tail func() WALTail, onFatal func(error)) *Channel {

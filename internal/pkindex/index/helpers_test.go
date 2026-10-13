@@ -18,7 +18,6 @@ package index
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -37,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/internal/pkindex/snapshot/snapshottest"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -49,19 +49,33 @@ const (
 // farFuture is a step time at which every backoff is ready.
 var farFuture = time.Now().Add(24 * time.Hour)
 
+// testStorageRoot is the object storage root path of the tests.
+const testStorageRoot = "root"
+
 func testBasePath(vchannel string) string {
-	return fmt.Sprintf("root/pkindex/%d/%s/sst", testCollectionID, vchannel)
+	return metautil.BuildPKIndexSSTBasePath(testStorageRoot, testCollectionID, vchannel)
 }
 
-// fakeClient applies claims and flushes the way the manifest service does.
+// fakeClient applies claims, lookups and flushes the way the manifest
+// service does. The tests use one pchannel.
 type fakeClient struct {
-	mu        sync.Mutex
-	manifests map[string]*snapshot.FakeManifest
+	mu sync.Mutex
+	// claimedTerm is the claimed term of the pchannel, 0 before a claim.
+	claimedTerm int64
+	manifests   map[string]*snapshot.FakeManifest
 	// history keeps every manifest version, by vchannel.
 	history map[string][]*snapshot.FakeManifest
 
 	claimErrs  []error
 	claimBlock chan struct{}
+	claimCalls int
+
+	lookupErrs  []error
+	lookupBlock chan struct{}
+	// itemErrs are the per-item errors of the lookups, by vchannel.
+	itemErrs map[string][]error
+	// lookups are the refs of each GetRecoveryManifests call, in order.
+	lookups [][]snapshot.VChannelRef
 
 	commitErrs []error
 	loseNext   bool
@@ -82,15 +96,16 @@ func newFakeClient() *fakeClient {
 	}
 }
 
-func (c *fakeClient) Claim(ctx context.Context, args snapshot.ClaimArgs) (snapshot.ManifestView, error) {
+func (c *fakeClient) ClaimPChannel(ctx context.Context, pchannel string, term int64) error {
 	c.mu.Lock()
+	c.claimCalls++
 	block := c.claimBlock
 	c.mu.Unlock()
 	if block != nil {
 		select {
 		case <-block:
 		case <-ctx.Done():
-			return snapshot.ManifestView{}, ctx.Err()
+			return ctx.Err()
 		}
 	}
 	c.mu.Lock()
@@ -98,14 +113,67 @@ func (c *fakeClient) Claim(ctx context.Context, args snapshot.ClaimArgs) (snapsh
 	if len(c.claimErrs) > 0 {
 		err := c.claimErrs[0]
 		c.claimErrs = c.claimErrs[1:]
-		return snapshot.ManifestView{}, err
+		return err
 	}
-	next, changed, err := snapshot.FakeClaim(c.manifests[args.VChannel], args, testBasePath(args.VChannel))
+	next, err := snapshot.FakeClaimPChannel(pchannel, c.claimedTerm, term)
 	if err != nil {
-		return snapshot.ManifestView{}, err
+		return err
 	}
-	c.store(args.VChannel, next, changed)
-	return next.View, nil
+	c.claimedTerm = next
+	return nil
+}
+
+func (c *fakeClient) GetRecoveryManifests(ctx context.Context, refs []snapshot.VChannelRef) ([]snapshot.RecoveryManifest, error) {
+	c.mu.Lock()
+	c.lookups = append(c.lookups, append([]snapshot.VChannelRef(nil), refs...))
+	block := c.lookupBlock
+	c.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.lookupErrs) > 0 {
+		err := c.lookupErrs[0]
+		c.lookupErrs = c.lookupErrs[1:]
+		return nil, err
+	}
+	out := make([]snapshot.RecoveryManifest, 0, len(refs))
+	for _, ref := range refs {
+		if errs := c.itemErrs[ref.VChannel]; len(errs) > 0 {
+			c.itemErrs[ref.VChannel] = errs[1:]
+			out = append(out, snapshot.RecoveryManifest{Err: errs[0]})
+			continue
+		}
+		out = append(out, snapshot.FakeRecoveryManifest(c.manifests[ref.VChannel]))
+	}
+	return out, nil
+}
+
+// seed gives vchannel a manifest with view, as if another owner committed it.
+func (c *fakeClient) seed(vchannel string, view snapshot.ManifestView) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	view.SSTBasePath = testBasePath(vchannel)
+	c.store(vchannel, &snapshot.FakeManifest{View: view, LastFlushTerm: 1, PKDataType: schemapb.DataType_Int64}, true)
+}
+
+// claimCount returns the number of ClaimPChannel calls.
+func (c *fakeClient) claimCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.claimCalls
+}
+
+// lookupList returns the refs of each GetRecoveryManifests call.
+func (c *fakeClient) lookupList() [][]snapshot.VChannelRef {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][]snapshot.VChannelRef(nil), c.lookups...)
 }
 
 func (c *fakeClient) store(vchannel string, m *snapshot.FakeManifest, changed bool) {
@@ -135,7 +203,7 @@ func (c *fakeClient) CommitFlush(ctx context.Context, args snapshot.FlushArgs) (
 		c.commitErrs = c.commitErrs[1:]
 		return snapshot.ManifestView{}, err
 	}
-	next, changed, err := snapshot.FakeFlush(c.manifests[args.VChannel], args)
+	next, changed, err := snapshot.FakeFlush(c.manifests[args.VChannel], c.claimedTerm, args, testBasePath(args.VChannel))
 	if err != nil {
 		c.applyErrs = append(c.applyErrs, err)
 		return snapshot.ManifestView{}, err
@@ -303,13 +371,14 @@ func newTestEnv(t *testing.T, sched nodescheduler.Scheduler) *testEnv {
 	var nextID atomic.Int64
 	nextID.Store(1000)
 	env.mgr = NewManager(ManagerConfig{
-		Root:      env.root,
-		Shared:    shared,
-		AllocID:   func(context.Context) (int64, error) { return nextID.Add(1), nil },
-		Store:     env.store,
-		Committer: env.client,
-		Sched:     sched,
-		Params:    func() Params { return *env.params.Load() },
+		Root:            env.root,
+		Shared:          shared,
+		AllocID:         func(context.Context) (int64, error) { return nextID.Add(1), nil },
+		Store:           env.store,
+		StorageRootPath: testStorageRoot,
+		Committer:       env.client,
+		Sched:           sched,
+		Params:          func() Params { return *env.params.Load() },
 	})
 	t.Cleanup(env.mgr.Close)
 	return env
@@ -321,8 +390,29 @@ func (env *testEnv) setParams(f func(p *Params)) {
 	env.params.Store(&p)
 }
 
-// channel opens a Channel without the driver goroutine.
+// channel opens a Channel without the driver goroutine and starts its claim.
+// Every Index that a test adds to it is the Index of a new collection.
 func (env *testEnv) channel(seed uint64) *Channel {
+	ch := env.openChannel(seed)
+	ch.StartClaim()
+	return ch
+}
+
+// recoveredChannel opens a Channel, adds the indexes of vchannels as the
+// indexes of existing collections, and starts the claim. It does not wait
+// for the claim.
+func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *Channel {
+	ch := env.openChannel(seed)
+	for _, v := range vchannels {
+		created, err := ch.Add(context.Background(), v, testCollectionID, schemapb.DataType_Int64)
+		require.NoError(env.t, err)
+		require.True(env.t, created)
+	}
+	ch.StartClaim()
+	return ch
+}
+
+func (env *testEnv) openChannel(seed uint64) *Channel {
 	info := types.PChannelInfo{Name: "test-dml_0", Term: testTerm}
 	return env.mgr.openChannel(info, seed, env.walTail, env.onFatal, false)
 }
@@ -356,22 +446,22 @@ func (env *testEnv) waitFatal() error {
 	return err
 }
 
-// add opens the Index of vchannel and waits for its claim.
+// add opens the Index of vchannel and waits until it is ready.
 func (env *testEnv) add(ch *Channel, vchannel string) *Index {
 	created, err := ch.Add(context.Background(), vchannel, testCollectionID, schemapb.DataType_Int64)
 	require.NoError(env.t, err)
 	require.True(env.t, created)
 	idx := ch.Get(vchannel)
 	require.NotNil(env.t, idx)
-	waitClaimed(env.t, idx)
+	waitReady(env.t, idx)
 	return idx
 }
 
-func waitClaimed(t *testing.T, idx *Index) {
+func waitReady(t *testing.T, idx *Index) {
 	select {
-	case <-idx.claimed:
+	case <-idx.ready:
 	case <-time.After(waitTimeout):
-		t.Fatalf("claim of %s did not finish", idx.vchannel)
+		t.Fatalf("claim and manifest lookup of %s did not finish", idx.vchannel)
 	}
 }
 

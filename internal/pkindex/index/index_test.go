@@ -47,7 +47,7 @@ func TestTwoHandoversInOneProcess(t *testing.T) {
 	ch.Tick(10)
 	ch.step(farFuture)
 	first := env.client.manifest("v0")
-	require.EqualValues(t, 2, first.Version)
+	require.EqualValues(t, 1, first.Version, "the first flush creates the manifest")
 	require.EqualValues(t, 10, first.CheckpointTimeTick)
 	require.NotEmpty(t, first.Tables)
 	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
@@ -57,7 +57,7 @@ func TestTwoHandoversInOneProcess(t *testing.T) {
 	ch.Tick(20)
 	ch.step(farFuture)
 	second := env.client.manifest("v0")
-	require.EqualValues(t, 3, second.Version)
+	require.EqualValues(t, 2, second.Version)
 	// the second install holds the tables of the first, which come from installedPaths
 	assert.Subset(t, sstIDs(second), sstIDs(first))
 	assert.Equal(t, len(second.Tables), idx.eng.Stats().CommittedTables)
@@ -143,7 +143,7 @@ func inHeap(idx *Index) bool {
 	return idx.heapPos >= 0
 }
 
-func TestClaimedManifestNotEmptyStopsTheHandovers(t *testing.T) {
+func TestFoundManifestStopsTheHandovers(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
@@ -152,25 +152,23 @@ func TestClaimedManifestNotEmptyStopsTheHandovers(t *testing.T) {
 	ch.step(farFuture)
 	require.NotEmpty(t, env.client.manifest("v0").Tables)
 
-	// the vchannel moves to a node with no local files
-	ch.Remove(context.Background(), "v0")
+	// the pchannel moves to a node with no local files, and the WAL opens again
+	ch.Close()
 	require.NoError(t, os.RemoveAll(filepath.Join(env.root, "v0")))
 	block := make(chan struct{})
-	env.client.set(func(c *fakeClient) { c.claimBlock = block })
-	created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
-	require.NoError(t, err)
-	require.True(t, created)
+	env.client.set(func(c *fakeClient) { c.lookupBlock = block })
+	ch = env.recoveredChannel(0, "v0")
 	idx = ch.Get("v0")
 	assert.True(t, idx.fresh(), "no local leftovers")
-	// a write before the claim puts the Index into the heap
+	// a write before the lookup puts the Index into the heap
 	insert(t, idx, 20, 2)
 	require.True(t, inHeap(idx))
 
 	close(block)
-	waitClaimed(t, idx)
+	waitReady(t, idx)
 	assert.False(t, idx.fresh())
-	assert.False(t, inHeap(idx), "the claim removes the Index from the heap")
-	assert.EqualValues(t, 20, segmentOf(t, idx, 2), "the claim keeps the new writes")
+	assert.False(t, inHeap(idx), "the lookup removes the Index from the heap")
+	assert.EqualValues(t, 20, segmentOf(t, idx, 2), "the lookup keeps the new writes")
 	insert(t, idx, 30, 3)
 	ch.Tick(30)
 	assert.False(t, inHeap(idx))
@@ -201,49 +199,61 @@ func TestCommittedLeftoverOnlyMakesTheIndexNotFresh(t *testing.T) {
 	assert.Empty(t, env.fatalList())
 }
 
-func TestClaimOfAnEmptyManifestAboveVersionOneIsNotFresh(t *testing.T) {
-	env := newTestEnv(t, syncScheduler{})
-	// an older owner claimed the vchannel and never handed over
-	_, err := env.client.Claim(context.Background(), snapshot.ClaimArgs{
-		CollectionID: testCollectionID, VChannel: "v0", PChannelTerm: testTerm - 1, PKDataType: schemapb.DataType_Int64,
-	})
-	require.NoError(t, err)
+// TestAnyManifestMakesTheIndexNotFresh checks that a manifest of any version
+// makes the Index of an existing collection not fresh: an owner committed it,
+// and the Index can miss the writes of that owner.
+func TestAnyManifestMakesTheIndexNotFresh(t *testing.T) {
+	cases := map[string]snapshot.ManifestView{
+		"version 1 with no tables":    {Version: 1},
+		"a later version with tables": {Version: 7, CheckpointTimeTick: 5, Tables: []snapshot.TableRef{{ID: 900}}},
+	}
+	for name, view := range cases {
+		t.Run(name, func(t *testing.T) {
+			env := newTestEnv(t, syncScheduler{})
+			env.client.seed("v0", view)
 
-	ch := env.channel(0)
-	idx := env.add(ch, "v0")
-	m := env.client.manifest("v0")
-	require.EqualValues(t, 2, m.Version)
-	require.Empty(t, m.Tables)
-	require.Zero(t, m.CheckpointTimeTick)
-	assert.False(t, idx.fresh())
+			ch := env.recoveredChannel(0, "v0")
+			idx := ch.Get("v0")
+			waitReady(t, idx)
+			assert.False(t, idx.fresh())
 
-	insert(t, idx, 10, 1)
-	ch.Tick(10)
-	assert.False(t, inHeap(idx))
-	assert.Empty(t, ch.pickHandovers(farFuture))
-	ch.step(farFuture)
-	assert.Empty(t, env.client.requestList(), "no CommitFlush")
-	assert.Empty(t, env.fatalList())
+			insert(t, idx, 10, 1)
+			ch.Tick(10)
+			assert.False(t, inHeap(idx))
+			assert.Empty(t, ch.pickHandovers(farFuture))
+			ch.step(farFuture)
+			assert.Empty(t, env.client.requestList(), "no CommitFlush")
+			assert.EqualValues(t, 10, segmentOf(t, idx, 1), "the Index still deduplicates")
+			assert.Empty(t, env.fatalList())
+		})
+	}
 }
 
-func TestSameTermClaimRetryStaysFresh(t *testing.T) {
+// TestNoManifestAndNoLeftoverIsFresh checks that the Index of an existing
+// collection without a manifest and without local files from before is
+// fresh, uploads under the SST base path that it computes, and creates the
+// manifest with its first handover.
+func TestNoManifestAndNoLeftoverIsFresh(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
-	// the first claim of this term succeeded, but its response was lost
-	_, err := env.client.Claim(context.Background(), snapshot.ClaimArgs{
-		CollectionID: testCollectionID, VChannel: "v0", PChannelTerm: testTerm, PKDataType: schemapb.DataType_Int64,
-	})
-	require.NoError(t, err)
-
-	ch := env.channel(0)
-	idx := env.add(ch, "v0")
-	require.EqualValues(t, 1, env.client.manifest("v0").Version)
+	ch := env.recoveredChannel(0, "v0")
+	idx := ch.Get("v0")
+	waitReady(t, idx)
 	assert.True(t, idx.fresh())
+	assert.Equal(t, "root/pk_index/100/v0/sst", idx.SSTBasePath())
 
 	insert(t, idx, 10, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
-	require.Len(t, env.client.requestList(), 1)
-	assert.EqualValues(t, 2, env.client.manifest("v0").Version)
+	reqs := env.client.requestList()
+	require.Len(t, reqs, 1)
+	assert.Equal(t, schemapb.DataType_Int64, reqs[0].PKDataType)
+	m := env.client.manifest("v0")
+	assert.EqualValues(t, 1, m.Version)
+	assert.Equal(t, idx.SSTBasePath(), m.SSTBasePath)
+	keys := env.store.Keys()
+	for _, ref := range m.Tables {
+		assert.Contains(t, keys, snapshot.SSTKey(idx.SSTBasePath(), ref.ID))
+	}
 	assert.Empty(t, env.fatalList())
 }
 
@@ -346,14 +356,14 @@ func TestInstallIfNewerIgnoresAnOlderVersion(t *testing.T) {
 	insert(t, idx, 20, 2)
 	ch.Tick(20)
 	ch.step(farFuture)
-	require.EqualValues(t, 3, idx.installedVersion)
+	require.EqualValues(t, 2, idx.installedVersion)
 	paths := idx.installedPaths
 	tables := idx.eng.Stats().CommittedTables
 
-	older := env.client.version("v0", 2)
+	older := env.client.version("v0", 1)
 	require.NotNil(t, older)
 	require.NoError(t, idx.InstallIfNewer(context.Background(), *older, nil))
-	assert.EqualValues(t, 3, idx.installedVersion)
+	assert.EqualValues(t, 2, idx.installedVersion)
 	assert.Equal(t, paths, idx.installedPaths)
 	assert.Equal(t, tables, idx.eng.Stats().CommittedTables)
 	assert.EqualValues(t, 20, segmentOf(t, idx, 2))
@@ -418,7 +428,7 @@ func TestNoCommitterDedupsButNeverHandsOver(t *testing.T) {
 	assert.EqualValues(t, 20, segmentOf(t, idx, 1))
 	assert.EqualValues(t, 10, segmentOf(t, idx, 2))
 
-	assert.False(t, idx.claimedDone(), "no claim")
+	assert.False(t, idx.readyDone(), "no claim")
 	assert.False(t, idx.fresh())
 	assert.False(t, inHeap(idx))
 	assert.Empty(t, ch.pickHandovers(farFuture))

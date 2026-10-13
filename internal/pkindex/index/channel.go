@@ -57,12 +57,17 @@ type Channel struct {
 	// happens outside mu.
 	opMu sync.Mutex
 
-	// mu guards indexes, the LastAcked heap, ackedMax, and Index.removed,
-	// Index.heapPos and Index.heapKey.
+	// mu guards indexes, the LastAcked heap, ackedMax, claimed, and
+	// Index.removed, Index.heapPos, Index.heapKey and Index.recovered.
 	mu       sync.Mutex
 	indexes  map[string]*Index
 	acked    ackHeap
 	ackedMax uint64
+	// claimStarted is set by StartClaim. claimed is set when the pchannel is
+	// claimed and the manifests of the recovered indexes are looked up. An
+	// Index added after that is ready at once.
+	claimStarted bool
+	claimed      bool
 }
 
 func newChannel(m *Manager, info types.PChannelInfo, seed uint64, tail func() WALTail, onFatal func(error)) *Channel {
@@ -111,8 +116,13 @@ func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, 
 	}
 	c.mu.Lock()
 	c.indexes[vchannel] = idx
+	ready := c.claimed
 	c.mu.Unlock()
-	idx.startClaim()
+	if ready {
+		// A collection created after the claim has a new collection ID in its
+		// vchannel name, so no manifest can exist for it.
+		idx.markReady(ctx, false)
+	}
 	return true, nil
 }
 
@@ -268,7 +278,7 @@ func (c *Channel) pickHandovers(now time.Time) []*Index {
 	var oldest *Index
 	for _, idx := range c.list() {
 		idx.reapHandover()
-		if idx.running.Load() || idx.handoverStopped.Load() || !idx.claimedDone() || !idx.fresh() {
+		if idx.running.Load() || idx.handoverStopped.Load() || !idx.readyDone() || !idx.fresh() {
 			continue
 		}
 		if !idx.backoff.Ready(now) {

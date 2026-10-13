@@ -92,7 +92,9 @@ func newTestIndexEnvAt(t *testing.T, root string) *testIndexEnv {
 
 // openChannel opens the index Channel of the test pchannel.
 func (env *testIndexEnv) openChannel(seed uint64) *index.Channel {
-	return env.mgr.OpenChannel(types.PChannelInfo{Name: testPChannel, Term: 1}, seed, nil, env.onFatal)
+	ch := env.mgr.OpenChannel(types.PChannelInfo{Name: testPChannel, Term: 1}, seed, nil, env.onFatal)
+	ch.StartClaim()
+	return ch
 }
 
 func (env *testIndexEnv) onFatal(err error) {

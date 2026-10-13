@@ -88,6 +88,9 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 			panic(fmt.Sprintf("create the primary key index of vchannel %s at wal open: %v", info.VChannel, err))
 		}
 	}
+	// The indexes of the existing collections are open, so the claim looks up
+	// their manifests. A later CreateCollection does not look up.
+	ch.StartClaim()
 	// param.TxnManager is a pointer, so it must not be assigned to the interface
 	// while it is nil. The interface would then be non-nil and carry a nil pointer.
 	var sessions txnSessions

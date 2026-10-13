@@ -85,6 +85,8 @@ func newFakeTarget(t *testing.T) *fakeTarget {
 func (f *fakeTarget) CollectionID() int64           { return testCollectionID }
 func (f *fakeTarget) VChannel() string              { return testVChannel }
 func (f *fakeTarget) PChannelTerm() int64           { return testTerm }
+func (f *fakeTarget) PKDataType() schemapb.DataType { return schemapb.DataType_Int64 }
+func (f *fakeTarget) InstalledVersion() int64       { return f.installed }
 func (f *fakeTarget) SSTBasePath() string           { return testSSTBasePath }
 func (f *fakeTarget) CommittedDir() string          { return f.committedDir }
 func (f *fakeTarget) LastAppliedTimeTick() uint64   { return f.lastApplied }
@@ -135,21 +137,24 @@ type fakeCommitter struct {
 	failNext error
 	// loseNext applies the next call and then returns an IO error.
 	loseNext bool
+	// rewrite changes the returned manifest, if it is not nil.
+	rewrite func(m ManifestView) ManifestView
 }
 
 func newFakeCommitter(t *testing.T) *fakeCommitter {
-	m, _, err := FakeClaim(nil, ClaimArgs{
-		CollectionID: testCollectionID,
-		VChannel:     testVChannel,
-		PChannelTerm: testTerm,
-		PKDataType:   schemapb.DataType_Int64,
-	}, testSSTBasePath)
-	require.NoError(t, err)
-	return &fakeCommitter{cur: m}
+	return &fakeCommitter{}
 }
 
-func (c *fakeCommitter) Claim(ctx context.Context, args ClaimArgs) (ManifestView, error) {
-	return c.cur.View, nil
+func (c *fakeCommitter) ClaimPChannel(ctx context.Context, pchannel string, term int64) error {
+	return nil
+}
+
+func (c *fakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error) {
+	out := make([]RecoveryManifest, 0, len(refs))
+	for range refs {
+		out = append(out, FakeRecoveryManifest(c.cur))
+	}
+	return out, nil
 }
 
 func (c *fakeCommitter) CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error) {
@@ -159,7 +164,7 @@ func (c *fakeCommitter) CommitFlush(ctx context.Context, args FlushArgs) (Manife
 		c.failNext = nil
 		return ManifestView{}, err
 	}
-	next, changed, err := FakeFlush(c.cur, args)
+	next, changed, err := FakeFlush(c.cur, testTerm, args, testSSTBasePath)
 	if err != nil {
 		return ManifestView{}, err
 	}
@@ -168,6 +173,9 @@ func (c *fakeCommitter) CommitFlush(ctx context.Context, args FlushArgs) (Manife
 	if c.loseNext {
 		c.loseNext = false
 		return ManifestView{}, pkindex.MarkIO(errors.New("connection reset"), "commit flush response")
+	}
+	if c.rewrite != nil {
+		return c.rewrite(next.View), nil
 	}
 	return next.View, nil
 }
@@ -241,6 +249,7 @@ func TestHandoverNormal(t *testing.T) {
 	assert.Equal(t, testCollectionID, req.CollectionID)
 	assert.Equal(t, testVChannel, req.VChannel)
 	assert.Equal(t, testTerm, req.PChannelTerm)
+	assert.Equal(t, schemapb.DataType_Int64, req.PKDataType)
 	require.NotEmpty(t, req.AddTables)
 
 	for _, ref := range req.AddTables {
@@ -257,7 +266,7 @@ func TestHandoverNormal(t *testing.T) {
 	assert.ElementsMatch(t, addIDs, storeIDs(t, store))
 
 	require.Len(t, target.installCalls, 1)
-	assert.Equal(t, int64(2), target.installed)
+	assert.Equal(t, int64(1), target.installed, "the first flush creates version 1")
 	for _, v := range lookup(t, target.eng, 1, 2, 3) {
 		assert.NotNil(t, v)
 	}
@@ -308,7 +317,7 @@ func TestHandoverLostResponseRetriesSameRequest(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, pkindex.ErrIO))
 	assert.Equal(t, []bool{true}, c.applied)
-	assert.Equal(t, int64(2), c.cur.View.Version)
+	assert.Equal(t, int64(1), c.cur.View.Version)
 	assert.Empty(t, target.installCalls)
 	assert.Empty(t, target.setCommittedCalls)
 
@@ -324,11 +333,11 @@ func TestHandoverLostResponseRetriesSameRequest(t *testing.T) {
 	assert.Equal(t, uint64(50), c.requests[1].CheckpointTimeTick)
 	// the second request took the applied retry branch
 	assert.Equal(t, []bool{true, false}, c.applied)
-	assert.Equal(t, int64(2), c.cur.View.Version)
+	assert.Equal(t, int64(1), c.cur.View.Version)
 	assert.Equal(t, uint64(50), c.cur.View.CheckpointTimeTick)
 
 	require.Len(t, target.installCalls, 1)
-	assert.Equal(t, int64(2), target.installed)
+	assert.Equal(t, int64(1), target.installed)
 	assert.Equal(t, []uint64{50}, target.setCommittedCalls)
 	stats := target.eng.Stats()
 	assert.Equal(t, 0, stats.FrozenGenerations)
@@ -376,14 +385,62 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 	}
 }
 
-func TestHandoverInstallDoesNotGoBack(t *testing.T) {
+// TestHandoverRejectsAManifestThatWentBack checks the safety check after the
+// flush: a returned manifest below the installed version, or with a checkpoint
+// below the covered time tick, does not have the request in effect. A
+// manifest with another SST base path does not list the uploaded tables. It is
+// rejected, nothing is installed, and the generations stay frozen.
+func TestHandoverRejectsAManifestThatWentBack(t *testing.T) {
+	cases := map[string]struct {
+		installed int64
+		rewrite   func(m ManifestView) ManifestView
+	}{
+		"version below the installed one": {installed: 100},
+		"checkpoint below the covered time tick": {rewrite: func(m ManifestView) ManifestView {
+			m.CheckpointTimeTick = 49
+			return m
+		}},
+		"another SST base path": {rewrite: func(m ManifestView) ManifestView {
+			m.SSTBasePath = "other/sst"
+			return m
+		}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			target := newFakeTarget(t)
+			store := snapshottest.NewStore()
+			c := newFakeCommitter(t)
+			c.rewrite = tc.rewrite
+			target.write(t, 1)
+			target.lastApplied = 50
+			target.installed = tc.installed
+
+			p, err := Prepare(ctx, target)
+			require.NoError(t, err)
+			require.NotNil(t, p)
+			err = Commit(ctx, target, store, c, p, time.Hour)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrRejected))
+			assert.Empty(t, target.installCalls)
+			assert.Empty(t, target.setCommittedCalls)
+			assert.Equal(t, tc.installed, target.installed)
+			assert.Equal(t, 1, target.eng.Stats().FrozenGenerations)
+		})
+	}
+}
+
+// TestHandoverAcceptsTheSameVersion checks that a returned manifest at the
+// installed version passes the safety check when its checkpoint covers the
+// handover.
+func TestHandoverAcceptsTheSameVersion(t *testing.T) {
 	ctx := context.Background()
 	target := newFakeTarget(t)
 	store := snapshottest.NewStore()
 	c := newFakeCommitter(t)
 	target.write(t, 1)
 	target.lastApplied = 50
-	target.installed = 100
+	target.installed = 1
 
 	p, err := Prepare(ctx, target)
 	require.NoError(t, err)
@@ -391,16 +448,8 @@ func TestHandoverInstallDoesNotGoBack(t *testing.T) {
 	require.NoError(t, Commit(ctx, target, store, c, p, time.Hour))
 
 	require.Len(t, target.installCalls, 1)
-	call := target.installCalls[0]
-	assert.Equal(t, c.cur.View, call.manifest)
-	assert.Equal(t, int64(2), call.manifest.Version)
-	assert.Equal(t, p.Gens, call.gens)
-	assert.Equal(t, target.eng.FrozenGenerations(), call.gens)
-	require.Len(t, call.local, len(call.manifest.Tables))
-	for _, ref := range call.manifest.Tables {
-		assert.Equal(t, filepath.Join(target.committedDir, sstFileName(ref.ID)), call.local[ref.ID])
-	}
-	assert.Equal(t, int64(100), target.installed)
+	assert.Equal(t, int64(1), target.installCalls[0].manifest.Version)
+	assert.Equal(t, p.Gens, target.installCalls[0].gens)
 	assert.Equal(t, []uint64{50}, target.setCommittedCalls)
 }
 

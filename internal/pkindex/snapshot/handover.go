@@ -28,6 +28,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
@@ -38,6 +39,7 @@ type Target interface {
 	CollectionID() int64
 	VChannel() string
 	PChannelTerm() int64
+	PKDataType() schemapb.DataType
 	// SSTBasePath is the complete object key prefix of the SSTs.
 	SSTBasePath() string
 	// CommittedDir is the local directory of the committed tables.
@@ -47,6 +49,9 @@ type Target interface {
 	// LastCommittedTimeTick is the checkpoint of the last successful handover.
 	LastCommittedTimeTick() uint64
 	Lifecycle() engine.Lifecycle
+	// InstalledVersion is the version of the installed manifest, 0 when no
+	// manifest is installed.
+	InstalledVersion() int64
 	// InstallIfNewer installs m when its version is newer than the installed
 	// one, and retires gens in the same step. local maps the tables of this
 	// handover to their local files.
@@ -125,6 +130,7 @@ func Prepare(ctx context.Context, t Target) (*Pending, error) {
 			CollectionID:       t.CollectionID(),
 			VChannel:           t.VChannel(),
 			PChannelTerm:       t.PChannelTerm(),
+			PKDataType:         t.PKDataType(),
 			AddTables:          refs,
 			CheckpointTimeTick: covered,
 		}
@@ -141,6 +147,15 @@ func Prepare(ctx context.Context, t Target) (*Pending, error) {
 // tables safe from the coordinator garbage collection (grace window) before
 // the commit. The keys and files do not change, so the request does not
 // change either.
+//
+// Commit installs the returned manifest and retires the generations only when
+// the manifest has the request in effect: its version is not below the
+// installed version, and its checkpoint is not below p.Covered. Else it
+// returns ErrRejected and keeps the generations. It also returns ErrRejected
+// when the manifest records another SST base path than the one the tables
+// are uploaded under. A manifest service that
+// takes the request as an applied retry by mistake can not make the
+// generations retire while their tables are not committed.
 //
 // Commit does not read the watermark again and does not rotate. Only one
 // Prepare or Commit for one Target can run at a time.
@@ -168,9 +183,18 @@ func Commit(ctx context.Context, t Target, store TableStore, c Committer, p *Pen
 		return dropErr
 	}
 
+	before := t.InstalledVersion()
 	m, err := c.CommitFlush(ctx, *p.Request)
 	if err != nil {
 		return err
+	}
+	if m.Version < before || m.CheckpointTimeTick < p.Covered {
+		return errors.Wrapf(ErrRejected, "vchannel %s: the manifest after the flush has version %d and checkpoint %d, want at least version %d and checkpoint %d",
+			t.VChannel(), m.Version, m.CheckpointTimeTick, before, p.Covered)
+	}
+	if m.SSTBasePath != t.SSTBasePath() {
+		return errors.Wrapf(ErrRejected, "vchannel %s: the manifest has the SST base path %s, the tables are uploaded under %s",
+			t.VChannel(), m.SSTBasePath, t.SSTBasePath())
 	}
 	if err := t.InstallIfNewer(ctx, m, p.Local, p.Gens...); err != nil {
 		return err

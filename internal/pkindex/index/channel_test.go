@@ -151,6 +151,7 @@ func TestTailTriggerIgnoresTheLastAckedClamp(t *testing.T) {
 func TestNoWALTailNeverTriggers(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.mgr.openChannel(types.PChannelInfo{Name: "test-dml_1", Term: testTerm}, 0, nil, env.onFatal, false)
+	ch.StartClaim()
 	a := env.add(ch, "va")
 	env.setParams(func(p *Params) {
 		p.ActiveBytes = math.MaxUint64
@@ -176,8 +177,147 @@ func TestNoHandoverBeforeTheClaim(t *testing.T) {
 
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	close(block)
-	waitClaimed(t, idx)
+	waitReady(t, idx)
 	assert.Equal(t, []*Index{idx}, ch.pickHandovers(farFuture))
+}
+
+// refNames returns the vchannels of refs.
+func refNames(refs []snapshot.VChannelRef) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, ref.VChannel)
+	}
+	return out
+}
+
+// TestOneClaimAndOneLookupForManyVChannels checks that a Channel claims its
+// pchannel once, looks up the manifests of the indexes of the existing
+// collections in one call, and makes an Index of a new collection ready
+// without a lookup.
+func TestOneClaimAndOneLookupForManyVChannels(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	vchannels := []string{"v0", "v1", "v2", "v3", "v4"}
+	ch := env.recoveredChannel(0, vchannels...)
+	for _, v := range vchannels {
+		idx := ch.Get(v)
+		waitReady(t, idx)
+		assert.True(t, idx.fresh())
+		assert.Equal(t, testBasePath(v), idx.SSTBasePath())
+	}
+	assert.Equal(t, 1, env.client.claimCount())
+	lookups := env.client.lookupList()
+	require.Len(t, lookups, 1, "one GetRecoveryManifests call for the existing collections")
+	for _, ref := range lookups[0] {
+		assert.Equal(t, testCollectionID, ref.CollectionID)
+	}
+	assert.ElementsMatch(t, vchannels, refNames(lookups[0]))
+
+	created := env.add(ch, "v5")
+	assert.True(t, created.fresh())
+	assert.Equal(t, 1, env.client.claimCount(), "a new collection does not claim")
+	assert.Len(t, env.client.lookupList(), 1, "a new collection does not look up")
+	assert.Empty(t, env.fatalList())
+}
+
+// TestNewCollectionBeforeTheClaimWaitsForIt checks that an Index of a new
+// collection that opens while the claim runs is not looked up, and becomes
+// ready when the claim and the lookups are done.
+func TestNewCollectionBeforeTheClaimWaitsForIt(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	block := make(chan struct{})
+	env.client.set(func(c *fakeClient) { c.claimBlock = block })
+	ch := env.recoveredChannel(0, "v0")
+	created, err := ch.Add(context.Background(), "v1", testCollectionID, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	require.True(t, created)
+	assert.False(t, ch.Get("v1").readyDone())
+
+	close(block)
+	waitReady(t, ch.Get("v0"))
+	waitReady(t, ch.Get("v1"))
+	lookups := env.client.lookupList()
+	require.Len(t, lookups, 1)
+	assert.Equal(t, []string{"v0"}, refNames(lookups[0]))
+}
+
+func TestLookupSplitsIntoBatches(t *testing.T) {
+	old := recoveryBatch
+	recoveryBatch = 2
+	t.Cleanup(func() { recoveryBatch = old })
+	env := newTestEnv(t, syncScheduler{})
+	vchannels := []string{"v0", "v1", "v2", "v3", "v4"}
+	ch := env.recoveredChannel(0, vchannels...)
+	for _, v := range vchannels {
+		waitReady(t, ch.Get(v))
+	}
+	lookups := env.client.lookupList()
+	require.Len(t, lookups, 3)
+	var all []string
+	for _, l := range lookups {
+		assert.LessOrEqual(t, len(l), 2)
+		all = append(all, refNames(l)...)
+	}
+	assert.ElementsMatch(t, vchannels, all)
+}
+
+func TestLookupRetriesOnlyTheFailedItems(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	env.client.seed("v2", snapshot.ManifestView{Version: 3, CheckpointTimeTick: 5})
+	env.client.set(func(c *fakeClient) {
+		c.itemErrs = map[string][]error{"v1": {merr.WrapErrServiceUnavailable("down")}}
+	})
+	ch := env.recoveredChannel(0, "v0", "v1", "v2")
+	for _, v := range []string{"v0", "v1", "v2"} {
+		waitReady(t, ch.Get(v))
+	}
+	lookups := env.client.lookupList()
+	require.Len(t, lookups, 2)
+	assert.ElementsMatch(t, []string{"v0", "v1", "v2"}, refNames(lookups[0]))
+	assert.Equal(t, []string{"v1"}, refNames(lookups[1]), "only the failed item is retried")
+	assert.True(t, ch.Get("v0").fresh())
+	assert.True(t, ch.Get("v1").fresh())
+	assert.False(t, ch.Get("v2").fresh(), "a found manifest makes the Index not fresh")
+	assert.Empty(t, env.fatalList())
+}
+
+func TestFatalItemErrorIsFatal(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	env.client.set(func(c *fakeClient) {
+		c.itemErrs = map[string][]error{"v1": {errors.Wrap(snapshot.ErrRejected, "corrupted pointer")}}
+	})
+	ch := env.recoveredChannel(0, "v0", "v1")
+	err := env.waitFatal()
+	assert.True(t, errors.Is(err, snapshot.ErrRejected))
+	assert.False(t, ch.Get("v1").readyDone())
+	insert(t, ch.Get("v1"), 1, 1)
+	assert.Empty(t, ch.pickHandovers(farFuture))
+}
+
+func TestLookupRetriesAfterARetryableError(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	env.client.set(func(c *fakeClient) {
+		c.lookupErrs = []error{merr.WrapErrServiceUnavailable("down")}
+	})
+	ch := env.recoveredChannel(0, "v0")
+	idx := ch.Get("v0")
+	waitReady(t, idx)
+	assert.True(t, idx.fresh())
+	assert.Len(t, env.client.lookupList(), 2)
+	assert.Empty(t, env.fatalList())
+}
+
+func TestRejectedLookupIsFatal(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	env.client.set(func(c *fakeClient) {
+		c.lookupErrs = []error{errors.Wrap(snapshot.ErrRejected, "invalid request")}
+	})
+	ch := env.recoveredChannel(0, "v0")
+	err := env.waitFatal()
+	assert.True(t, errors.Is(err, snapshot.ErrRejected))
+	idx := ch.Get("v0")
+	assert.False(t, idx.readyDone())
+	insert(t, idx, 1, 1)
+	assert.Empty(t, ch.pickHandovers(farFuture))
 }
 
 func TestClaimRetriesAfterARetryableError(t *testing.T) {
@@ -200,7 +340,7 @@ func TestFencedClaimIsFatal(t *testing.T) {
 	err = env.waitFatal()
 	assert.True(t, errors.Is(err, snapshot.ErrFenced))
 	idx := ch.Get("v0")
-	assert.False(t, idx.claimedDone())
+	assert.False(t, idx.readyDone())
 	insert(t, idx, 1, 1)
 	assert.Empty(t, ch.pickHandovers(farFuture))
 }
@@ -328,8 +468,9 @@ func TestRejectedClaimIsFatal(t *testing.T) {
 	err = env.waitFatal()
 	assert.True(t, errors.Is(err, snapshot.ErrRejected))
 	idx := ch.Get("v0")
-	assert.False(t, idx.claimedDone())
-	assert.True(t, idx.handoverStopped.Load())
+	assert.False(t, idx.readyDone())
+	insert(t, idx, 1, 1)
+	assert.Empty(t, ch.pickHandovers(farFuture))
 }
 
 func TestBackoffParamsAreReadAtEachFailure(t *testing.T) {
@@ -456,6 +597,7 @@ func TestManagerCloseClosesChannels(t *testing.T) {
 func TestDriverRunsHandovers(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.mgr.OpenChannel(types.PChannelInfo{Name: "test-dml_1", Term: testTerm}, 0, nil, env.onFatal)
+	ch.StartClaim()
 	idx := env.add(ch, "v0")
 	insert(t, idx, 1, 1)
 	ch.Tick(10)

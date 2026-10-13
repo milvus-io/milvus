@@ -80,7 +80,7 @@ func (c *Channel) lastAckedLocked() uint64 {
 //
 //   - The first write after the dirty flag is cleared adds the Index
 //     (trackDirty). The writer sets the flag first and then takes mu.
-//   - The end of every handover and of the claim refreshes the Index
+//   - The end of every handover and of the manifest lookup refreshes the Index
 //     (refreshAcked). It reads the flag under mu. If it reads false, no
 //     write set the flag yet, and that write adds the Index later. If it
 //     reads true, the Index stays. So a dirty Index is never left out.
