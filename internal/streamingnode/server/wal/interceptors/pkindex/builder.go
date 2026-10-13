@@ -20,11 +20,13 @@ import (
 	"context"
 	"fmt"
 
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/index"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const interceptorName = "pkindex"
@@ -33,13 +35,7 @@ var _ interceptors.InterceptorBuilder = (*interceptorBuilder)(nil)
 
 // NewInterceptorBuilder creates the builder of the primary key index interceptor.
 // The interceptor must be placed between the replicate and the timetick interceptor.
-// It panics when the index is enabled but the binary has no index engine, so a
-// misconfigured streaming node fails at start instead of writing without the index.
 func NewInterceptorBuilder() interceptors.InterceptorBuilder {
-	enabled := &paramtable.Get().StreamingCfg.PKIndexEnabled
-	if enabled.GetAsBool() && !snpkindex.HasEngineFactory() {
-		panic(enabled.Key + " is true but this binary has no primary key index engine")
-	}
 	return &interceptorBuilder{}
 }
 
@@ -51,18 +47,32 @@ type collectionSchemaLister interface {
 	GetAllCollectionSchemaInfos() map[int64]shards.CollectionSchemaInfo
 }
 
+// Build returns the passthrough interceptor when the streaming node has no
+// index manager. The streaming node builds the manager at start exactly when
+// streaming.pkindex.enabled is true, and that param can not change at runtime.
+// So the manager, not the param, decides.
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	ctx := context.TODO()
-	if !paramtable.Get().StreamingCfg.PKIndexEnabled.GetAsBool() {
+	mgr := pkindexManager()
+	if mgr == nil {
 		return passthroughInterceptor{}
 	}
 
-	reg := newRegistry(paramtable.Get().StreamingCfg.PKIndexLockStripes.GetAsInt())
+	// The seed is the time tick of the last TimeTick message at WAL open. Every
+	// message before it is appended, and nothing is replayed into the index.
+	// TODO: the recovery replays the WAL into the index and seeds the watermark from it.
+	var seed uint64
+	if param.LastTimeTickMessage != nil {
+		seed = param.LastTimeTickMessage.TimeTick()
+	}
+	ch := mgr.OpenChannel(param.ChannelInfo, seed, tailOf(param.RecoveryStorage), onFatalOf(param))
+	reg := newRegistry(ch)
 	if lister, ok := param.ShardManager.(collectionSchemaLister); ok {
 		for collectionID, info := range lister.GetAllCollectionSchemaInfos() {
 			// A collection that exists can not have a schema the index rejects, and
 			// the WAL can not serve the vchannel without its index.
 			if _, err := reg.add(ctx, info.VChannel, collectionID, info.Schema); err != nil {
+				ch.Close()
 				panic(fmt.Sprintf("create the primary key index of vchannel %s at wal open: %v", info.VChannel, err))
 			}
 		}
@@ -74,13 +84,49 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		sessions = param.TxnManager
 	}
 	return &appendInterceptor{
+		ch:       ch,
 		registry: reg,
 		sessions: sessions,
 		metrics:  newMetrics(),
 	}
 }
 
-// passthroughInterceptor is used when the index is off.
+// pkindexManager returns the index manager of the streaming node, nil when
+// the resource or the manager is not set.
+func pkindexManager() *index.Manager {
+	r := resource.Resource()
+	if r == nil {
+		return nil
+	}
+	return r.PKIndexManager()
+}
+
+// tailOf returns a function that reads the WAL recovery tail. The function
+// returns zeros when rs is nil.
+func tailOf(rs recovery.RecoveryStorage) func() index.WALTail {
+	if rs == nil {
+		return func() index.WALTail { return index.WALTail{} }
+	}
+	return func() index.WALTail {
+		m := rs.Metrics()
+		return index.WALTail{Bytes: m.RecoveryTailBytes, RecoveryTimeTick: m.RecoveryTimeTick}
+	}
+}
+
+// onFatalOf returns param.OnFatal. When it is nil, as in tests, the returned
+// function only logs the error.
+func onFatalOf(param *interceptors.InterceptorBuildParam) func(error) {
+	if param.OnFatal != nil {
+		return param.OnFatal
+	}
+	pchannel := param.ChannelInfo.Name
+	return func(err error) {
+		mlog.Error(context.TODO(), "primary key index failed, no handler marks the WAL unavailable",
+			mlog.FieldPChannel(pchannel), mlog.Err(err))
+	}
+}
+
+// passthroughInterceptor is used when the streaming node has no index manager.
 type passthroughInterceptor struct{}
 
 func (passthroughInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {

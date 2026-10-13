@@ -18,17 +18,19 @@ package pkindex
 
 import (
 	"context"
-	"encoding/binary"
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
-// ErrNoEngineFactory is returned by NewAuthority when no engine factory is registered.
-// It is a plain identity sentinel, not a merr error, so that errors.Is matches
-// only this error and not every merr service-internal error.
-var ErrNoEngineFactory = errors.New("no primary key index engine factory is registered")
+var (
+	// errNilEngine reports a caller that passes no engine to New.
+	errNilEngine = errors.New("primary key index engine is nil")
+	// errValueCountMismatch reports an engine whose MultiGet result does not align with the keys.
+	errValueCountMismatch = errors.New("primary key index engine returned a wrong number of values")
+)
 
 // Entry is what the index stores for one primary key.
 type Entry struct {
@@ -36,20 +38,22 @@ type Entry struct {
 }
 
 func (e Entry) encode() []byte {
-	value := make([]byte, 8)
-	binary.BigEndian.PutUint64(value, uint64(e.SegmentID))
-	return value
+	return codec.EncodePKEntry(codec.PKEntry{SegmentID: e.SegmentID})
 }
 
 func decodeEntry(value []byte) (*Entry, error) {
-	if len(value) != 8 {
-		return nil, merr.WrapErrServiceInternalMsg("corrupted primary key index entry of %d bytes", len(value))
+	entry, err := codec.DecodePKEntry(value)
+	if err != nil {
+		return nil, err
 	}
-	return &Entry{SegmentID: int64(binary.BigEndian.Uint64(value))}, nil
+	return &Entry{SegmentID: entry.SegmentID}, nil
 }
 
 // Authority is the primary key index of one vchannel. It has key-value semantics
 // only: it knows nothing about the WAL or about deduplication.
+//
+// The Authority does not own its engine. The owner closes the engine through
+// engine.Lifecycle after it stops using the Authority.
 //
 // TODO: the index starts empty on every WAL open. Recovery and lazy loading are not designed yet.
 type Authority interface {
@@ -58,36 +62,32 @@ type Authority interface {
 	// MultiGet returns the entries aligned with pks, nil for absent keys.
 	MultiGet(ctx context.Context, pks []PK) ([]*Entry, error)
 	NewBatch() *Batch
-	// Write applies the whole batch atomically.
+	// Write applies the whole batch atomically. It can block on disk.
+	// The caller ends the process on an error, because the WAL already accepted
+	// the write that the batch describes.
 	Write(ctx context.Context, b *Batch) error
 	// Ready is closed once the index of this vchannel can be used.
 	// It gates this vchannel only, never the whole pchannel.
 	Ready() <-chan struct{}
-	Close() error
 }
 
-// NewAuthority creates the Authority of a vchannel with the registered engine factory.
-func NewAuthority(vchannel string) (Authority, error) {
-	factory := getEngineFactory()
-	if factory == nil {
-		return nil, ErrNoEngineFactory
+// NewAuthority creates the Authority of a vchannel on top of eng.
+func NewAuthority(vchannel string, eng engine.RW) (Authority, error) {
+	if eng == nil {
+		return nil, errors.Wrapf(errNilEngine, "create primary key index authority of vchannel %s", vchannel)
 	}
-	engine, err := factory(vchannel)
-	if err != nil {
-		return nil, errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel)
-	}
-	return newAuthority(vchannel, engine), nil
+	return newAuthority(vchannel, eng), nil
 }
 
-func newAuthority(vchannel string, engine Engine) *authorityImpl {
+func newAuthority(vchannel string, eng engine.RW) *authorityImpl {
 	ready := make(chan struct{})
 	close(ready)
-	return &authorityImpl{vchannel: vchannel, engine: engine, ready: ready}
+	return &authorityImpl{vchannel: vchannel, engine: eng, ready: ready}
 }
 
 type authorityImpl struct {
 	vchannel string
-	engine   Engine
+	engine   engine.RW
 	ready    chan struct{}
 }
 
@@ -112,7 +112,7 @@ func (a *authorityImpl) MultiGet(ctx context.Context, pks []PK) ([]*Entry, error
 		return nil, err
 	}
 	if len(values) != len(keys) {
-		return nil, merr.WrapErrServiceInternalMsg("primary key index engine returned %d values for %d keys", len(values), len(keys))
+		return nil, errors.Wrapf(errValueCountMismatch, "%d values for %d keys", len(values), len(keys))
 	}
 	entries := make([]*Entry, len(pks))
 	for i, value := range values {
@@ -139,8 +139,4 @@ func (a *authorityImpl) Write(ctx context.Context, b *Batch) error {
 
 func (a *authorityImpl) Ready() <-chan struct{} {
 	return a.ready
-}
-
-func (a *authorityImpl) Close() error {
-	return a.engine.Close()
 }

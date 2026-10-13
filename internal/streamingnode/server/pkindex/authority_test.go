@@ -21,14 +21,20 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
 func newTestAuthority(t *testing.T) Authority {
 	t.Helper()
-	a, err := NewAuthority("v1")
+	eng := NewMemoryEngine()
+	a, err := NewAuthority("v1", eng)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = a.Close() })
+	t.Cleanup(func() { _ = eng.Close() })
 	return a
 }
 
@@ -100,21 +106,21 @@ func TestAuthorityEmptyBatchAndEmptyMultiGet(t *testing.T) {
 
 func TestAuthorityRejectsCorruptValue(t *testing.T) {
 	ctx := context.Background()
-	engine, err := NewMemoryEngine("v1")
-	require.NoError(t, err)
-	require.NoError(t, engine.Write(ctx, []Mutation{{Key: Int64PK(1).Encode(), Value: []byte{1, 2, 3}}}))
-	a := newAuthority("v1", engine)
+	eng := NewMemoryEngine()
+	require.NoError(t, eng.Write(ctx, []engine.Mutation{{Key: Int64PK(1).Encode(), Value: []byte{1, 2, 3}}}))
+	a := newAuthority("v1", eng)
 
-	_, err = a.Get(ctx, Int64PK(1))
+	_, err := a.Get(ctx, Int64PK(1))
 	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrNoEngineFactory))
+	require.True(t, errors.Is(err, pkindex.ErrCorrupted))
 }
 
-func TestAuthorityAfterClose(t *testing.T) {
+func TestAuthorityAfterEngineClose(t *testing.T) {
 	ctx := context.Background()
-	a, err := NewAuthority("v1")
+	eng := NewMemoryEngine()
+	a, err := NewAuthority("v1", eng)
 	require.NoError(t, err)
-	require.NoError(t, a.Close())
+	require.NoError(t, eng.Close())
 	_, err = a.Get(ctx, Int64PK(1))
 	require.Error(t, err)
 }
@@ -122,7 +128,7 @@ func TestAuthorityAfterClose(t *testing.T) {
 // fakeLengthEngine returns a MultiGet result of a fixed length, regardless of
 // the number of keys asked for.
 type fakeLengthEngine struct {
-	Engine
+	engine.RW
 	returnLen int
 }
 
@@ -147,11 +153,29 @@ func TestAuthorityMultiGetRejectsWrongLength(t *testing.T) {
 	}
 }
 
-func TestNewWithoutEngineFactory(t *testing.T) {
-	RegisterEngineFactory(nil)
-	defer RegisterEngineFactory(NewMemoryEngine)
+func TestNewTakesEngine(t *testing.T) {
+	a, err := NewAuthority("v", NewMemoryEngine())
+	require.NoError(t, err)
+	b := a.NewBatch()
+	b.Put(Int64PK(7), Entry{SegmentID: 3})
+	require.NoError(t, a.Write(context.Background(), b))
+	got, err := a.MultiGet(context.Background(), []PK{Int64PK(7)})
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, got[0].SegmentID)
+}
 
-	require.False(t, HasEngineFactory())
-	_, err := NewAuthority("v1")
-	require.True(t, errors.Is(err, ErrNoEngineFactory))
+func TestNewRejectsNilEngine(t *testing.T) {
+	_, err := NewAuthority("v", nil)
+	assert.Error(t, err)
+}
+
+func TestKeyAndValueUseCodec(t *testing.T) {
+	assert.Equal(t, codec.EncodeInt64PK(-5), Int64PK(-5).Encode())
+	assert.Equal(t, codec.EncodeVarcharPK("a"), VarCharPK("a").Encode())
+	assert.Equal(t, codec.EncodePKEntry(codec.PKEntry{SegmentID: 9}), Entry{SegmentID: 9}.encode())
+}
+
+func TestCorruptEntryIsMarked(t *testing.T) {
+	_, err := decodeEntry([]byte{0x7f})
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 }

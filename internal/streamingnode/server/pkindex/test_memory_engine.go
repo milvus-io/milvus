@@ -24,39 +24,40 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
 // This file is compiled only with the "test" build tag. It provides an in-memory
-// Engine so that unit tests, WAL chain tests and integration tests can exercise
-// the primary key index before the persistent engine exists.
+// engine.RW so that unit tests, WAL chain tests and integration tests can exercise
+// the primary key index before the persistent engine is wired in.
 // It keeps nothing across restarts and must not be used in production.
-// Production binaries have no engine factory, so the index stays disabled there.
-// Remove this file once the persistent engine is wired in.
 
-func init() {
-	RegisterEngineFactory(NewMemoryEngine)
-}
+// errMemoryEngineTombstoneValue reports a put whose value is the reserved tombstone
+// encoding, which the persistent engine rejects too.
+var errMemoryEngineTombstoneValue = errors.New("memory engine value is the reserved tombstone encoding")
 
-// errMemoryEngineClosed is an internal sentinel. It never crosses a component
-// boundary on its own: a caller that needs it on the wire must translate it first.
-var errMemoryEngineClosed = errors.New("memory engine is closed")
+var _ engine.RW = (*MemoryEngine)(nil)
 
-type memoryEngine struct {
+// MemoryEngine is an in-memory engine.RW. A deleted key is absent, so MultiGet
+// returns nil for it, as the persistent engine does.
+type MemoryEngine struct {
 	mu     sync.RWMutex
 	data   map[string][]byte
 	closed bool
 }
 
 // NewMemoryEngine creates an empty in-memory engine.
-func NewMemoryEngine(string) (Engine, error) {
-	return &memoryEngine{data: make(map[string][]byte)}, nil
+func NewMemoryEngine() *MemoryEngine {
+	return &MemoryEngine{data: make(map[string][]byte)}
 }
 
-func (e *memoryEngine) MultiGet(_ context.Context, keys [][]byte) ([][]byte, error) {
+func (e *MemoryEngine) MultiGet(_ context.Context, keys [][]byte) ([][]byte, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.closed {
-		return nil, errMemoryEngineClosed
+		return nil, engine.ErrClosed
 	}
 	values := make([][]byte, len(keys))
 	for i, key := range keys {
@@ -67,11 +68,16 @@ func (e *memoryEngine) MultiGet(_ context.Context, keys [][]byte) ([][]byte, err
 	return values, nil
 }
 
-func (e *memoryEngine) Write(_ context.Context, muts []Mutation) error {
+func (e *MemoryEngine) Write(_ context.Context, muts []engine.Mutation) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
-		return errMemoryEngineClosed
+		return engine.ErrClosed
+	}
+	for _, mut := range muts {
+		if !mut.Delete && codec.IsTombstone(mut.Value) {
+			return errMemoryEngineTombstoneValue
+		}
 	}
 	for _, mut := range muts {
 		if mut.Delete {
@@ -83,7 +89,8 @@ func (e *memoryEngine) Write(_ context.Context, muts []Mutation) error {
 	return nil
 }
 
-func (e *memoryEngine) Close() error {
+// Close makes every later call fail with engine.ErrClosed.
+func (e *MemoryEngine) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.closed = true

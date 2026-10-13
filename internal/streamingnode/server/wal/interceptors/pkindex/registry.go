@@ -21,17 +21,19 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// target is what the interceptor needs to handle the writes of one vchannel.
+// target is what the interceptor needs to translate the writes of one vchannel.
 type target struct {
-	decider      *snpkindex.Decider
+	idx          *index.Index
 	collectionID int64
 	pkFieldID    int64
 	pkDataType   schemapb.DataType
@@ -40,16 +42,17 @@ type target struct {
 	cipher atomic.Pointer[message.CipherConfig]
 }
 
-// registry maps vchannels to their targets.
+// registry turns the collection events of the WAL into calls on the index
+// Channel, and maps vchannels to their targets.
 type registry struct {
-	stripeCount int
+	ch *index.Channel
 
 	mu      sync.RWMutex
 	targets map[string]*target
 }
 
-func newRegistry(stripeCount int) *registry {
-	return &registry{stripeCount: stripeCount, targets: make(map[string]*target)}
+func newRegistry(ch *index.Channel) *registry {
+	return &registry{ch: ch, targets: make(map[string]*target)}
 }
 
 func (r *registry) get(vchannel string) *target {
@@ -73,6 +76,10 @@ func (r *registry) forEach(f func(t *target)) {
 // schema has no usable primary key or the index can not be created. The caller
 // decides what that error means for it.
 //
+// The caller serializes add and remove of one vchannel: the WAL open builds
+// the targets before any append, and a collection DDL holds the exclusive
+// lock of its vchannel.
+//
 // TODO: replace the global switch with the PRIMARY_KEY index enablement once it is delivered to the streaming node.
 // TODO: transactions left uncommitted by a previous WAL lifetime are recovered by TxnManager and can
 // still be committed, but their pending writes are not rebuilt here.
@@ -89,55 +96,57 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	if dt := pkField.GetDataType(); dt != schemapb.DataType_Int64 && dt != schemapb.DataType_VarChar {
 		return false, merr.WrapErrServiceInternalMsg("primary key of collection %d has the unsupported data type %s", collectionID, dt)
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	// A vchannel name embeds the id of its collection, so an existing target of
 	// this name can not belong to another collection and is kept as it is.
-	if _, ok := r.targets[vchannel]; ok {
+	if r.get(vchannel) != nil {
 		return false, nil
 	}
-	a, err := snpkindex.NewAuthority(vchannel)
+	// The engine open does disk IO, so it runs outside mu. Writes of other
+	// vchannels keep reading the registry meanwhile.
+	created, err := r.ch.Add(ctx, vchannel, collectionID, pkField.GetDataType())
 	if err != nil {
-		return false, err
+		return false, errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel)
+	}
+	idx := r.ch.Get(vchannel)
+	if idx == nil {
+		return false, merr.WrapErrServiceInternalMsg("primary key index of vchannel %s is removed while it is created", vchannel)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.targets[vchannel]; ok {
+		return false, nil
 	}
 	// The primary key field is cached for the life of the target. It stays valid
 	// because a schema change can neither drop the primary key field nor alter
 	// its id or its data type.
 	r.targets[vchannel] = &target{
-		decider:      snpkindex.NewDecider(a, r.stripeCount),
+		idx:          idx,
 		collectionID: collectionID,
 		pkFieldID:    pkField.GetFieldID(),
 		pkDataType:   pkField.GetDataType(),
 	}
 	mlog.Info(ctx, "primary key index of vchannel created",
 		mlog.FieldVChannel(vchannel), mlog.FieldCollectionID(collectionID))
-	return true, nil
+	return created, nil
 }
 
+// remove drops the target of a vchannel and closes its index. It keeps the
+// local files of the index.
 func (r *registry) remove(ctx context.Context, vchannel string) {
 	r.mu.Lock()
-	t, ok := r.targets[vchannel]
+	_, ok := r.targets[vchannel]
 	delete(r.targets, vchannel)
 	r.mu.Unlock()
 	if !ok {
 		return
 	}
-	closeTarget(ctx, vchannel, t)
+	r.ch.Remove(ctx, vchannel)
 }
 
-func (r *registry) close(ctx context.Context) {
+// close drops every target and closes the Channel.
+func (r *registry) close() {
 	r.mu.Lock()
-	targets := r.targets
 	r.targets = make(map[string]*target)
 	r.mu.Unlock()
-	for vchannel, t := range targets {
-		closeTarget(ctx, vchannel, t)
-	}
-}
-
-func closeTarget(ctx context.Context, vchannel string, t *target) {
-	if err := t.decider.Close(); err != nil {
-		mlog.Warn(ctx, "failed to close the primary key index of a vchannel",
-			mlog.FieldVChannel(vchannel), mlog.Err(err))
-	}
+	r.ch.Close()
 }

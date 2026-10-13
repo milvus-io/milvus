@@ -22,6 +22,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/index"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
@@ -41,8 +43,9 @@ type txnSessions interface {
 }
 
 // appendInterceptor translates WAL messages into primary key index requests and
-// appends what the decider asks for. It holds no index logic of its own.
+// appends what the index asks for. It holds no index logic of its own.
 type appendInterceptor struct {
+	ch       *index.Channel
 	registry *registry
 	sessions txnSessions
 	metrics  *pkindexMetrics
@@ -61,8 +64,11 @@ func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMes
 	case message.MessageTypeTimeTick:
 		// The timetick interceptor below removes the ended transactions from the
 		// manager on every TimeTick. Their pending writes are dropped right after.
+		// A TimeTick message carries its time tick before the append, and a
+		// failed append does not tick.
 		id, err := appendOp(ctx, msg)
 		if err == nil {
+			i.ch.Tick(msg.TimeTick())
 			i.dropPendingOfEndedTxns()
 		}
 		return id, err
@@ -93,7 +99,7 @@ func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMes
 }
 
 func (i *appendInterceptor) Close() {
-	i.registry.close(context.TODO())
+	i.registry.close()
 }
 
 func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
@@ -189,7 +195,7 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 
 // applyInsert reads the assigned segment back from the appended insert. The shard
 // interceptor rewrites the header downstream, so it must be decoded again here.
-func (i *appendInterceptor) applyInsert(ctx context.Context, intent *snpkindex.Intent, appended message.ImmutableMessage, timeTick uint64) {
+func (i *appendInterceptor) applyInsert(ctx context.Context, intent *index.Intent, appended message.ImmutableMessage, timeTick uint64) {
 	header := message.MustAsImmutableInsertMessageV1(appended).Header()
 	var segmentID int64
 	if partitions := header.GetPartitions(); len(partitions) > 0 {
@@ -295,16 +301,12 @@ func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg m
 	return id, nil
 }
 
-// decide calls the decider and classifies its error for the WAL.
-func (i *appendInterceptor) decide(ctx context.Context, t *target, req snpkindex.Request) (*snpkindex.Intent, error) {
+// decide calls the index and classifies its error for the WAL.
+func (i *appendInterceptor) decide(ctx context.Context, t *target, req snpkindex.Request) (*index.Intent, error) {
 	start := time.Now()
-	intent, err := t.decider.Decide(ctx, req)
+	intent, err := t.idx.Decide(ctx, req)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, err
-		}
-		// The index failed, not the request, so the append stays retriable for the client.
-		return nil, status.NewInner("primary key index lookup failed: %v", err)
+		return nil, decideError(err)
 	}
 	switch {
 	case req.Kind == snpkindex.KindCommitTxn:
@@ -325,6 +327,20 @@ func (i *appendInterceptor) decide(ctx context.Context, t *target, req snpkindex
 	return intent, nil
 }
 
+// decideError classifies an error of Index.Decide for the WAL.
+func decideError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	// The index is closed. That happens when the WAL closes, and the client
+	// retries on the next owner of the channel.
+	if errors.Is(err, engine.ErrClosed) {
+		return status.NewOnShutdownError("primary key index is closed: %v", err)
+	}
+	// The index failed, not the request, so the append stays retriable for the client.
+	return status.NewInner("primary key index lookup failed: %v", err)
+}
+
 // dropPendingOfEndedTxns drops the pending writes of every transaction whose
 // session is gone. A pending set exists only for a transaction whose session
 // existed when a body of it was applied, and every end of a session removes it
@@ -335,9 +351,9 @@ func (i *appendInterceptor) dropPendingOfEndedTxns() {
 		return
 	}
 	i.registry.forEach(func(t *target) {
-		for _, txnID := range t.decider.PendingTxnIDs() {
+		for _, txnID := range t.idx.PendingTxnIDs() {
 			if _, err := i.sessions.GetSessionOfTxn(message.TxnID(txnID)); err != nil {
-				t.decider.DropTxn(txnID)
+				t.idx.DropTxn(txnID)
 			}
 		}
 	})

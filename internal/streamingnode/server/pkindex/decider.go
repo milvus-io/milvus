@@ -179,11 +179,6 @@ func (d *Decider) DropTxn(txnID int64) {
 	delete(d.pending, txnID)
 }
 
-// Close closes the underlying Authority.
-func (d *Decider) Close() error {
-	return d.authority.Close()
-}
-
 func (i *Intent) acquire(pks []PK) {
 	start := time.Now()
 	i.guard = i.d.stripes.acquire(pks)

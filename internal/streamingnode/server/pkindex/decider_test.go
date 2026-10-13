@@ -29,11 +29,19 @@ import (
 
 func newTestDecider(t *testing.T) (*Decider, Authority) {
 	t.Helper()
-	a, err := NewAuthority("v1")
-	require.NoError(t, err)
-	d := NewDecider(a, 16)
-	t.Cleanup(func() { _ = d.Close() })
+	d, a, _ := newTestDeciderWithEngine(t)
 	return d, a
+}
+
+// newTestDeciderWithEngine also returns the memory engine, so that a test can
+// close it to make every later engine call fail.
+func newTestDeciderWithEngine(t *testing.T) (*Decider, Authority, *MemoryEngine) {
+	t.Helper()
+	eng := NewMemoryEngine()
+	a, err := NewAuthority("v1", eng)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = eng.Close() })
+	return NewDecider(a, 16), a, eng
 }
 
 func int64PKs(values ...int64) []PK {
@@ -274,10 +282,11 @@ func TestDecideHonorsContextWhileWaitingForReady(t *testing.T) {
 
 func TestDecideReturnsProbeError(t *testing.T) {
 	ctx := context.Background()
-	a, err := NewAuthority("v1")
+	eng := NewMemoryEngine()
+	a, err := NewAuthority("v1", eng)
 	require.NoError(t, err)
 	d := NewDecider(a, 4)
-	require.NoError(t, a.Close()) // the memory engine fails every call after Close
+	require.NoError(t, eng.Close()) // the memory engine fails every call after Close
 
 	_, err = d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 	require.Error(t, err)
@@ -299,14 +308,14 @@ func TestDecideReturnsProbeError(t *testing.T) {
 // autocommit decision, so it can fail the same way and must release the same way.
 func TestDecideCommitReturnsProbeError(t *testing.T) {
 	ctx := context.Background()
-	d, a := newTestDecider(t)
+	d, _, eng := newTestDeciderWithEngine(t)
 	const txnID = 51
 
 	body, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
 	require.NoError(t, err)
 	body.Apply(ctx, Applied{SegmentID: 500, TimeTick: 11})
 
-	require.NoError(t, a.Close()) // the memory engine fails every call after Close
+	require.NoError(t, eng.Close()) // the memory engine fails every call after Close
 
 	_, err = d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 	require.Error(t, err)
@@ -327,11 +336,11 @@ func TestDecideCommitReturnsProbeError(t *testing.T) {
 
 func TestApplyPanicsWhenTheEngineWriteFails(t *testing.T) {
 	ctx := context.Background()
-	d, a := newTestDecider(t)
+	d, _, eng := newTestDeciderWithEngine(t)
 
 	intent, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 	require.NoError(t, err)
-	require.NoError(t, a.Close()) // the memory engine fails every call after Close
+	require.NoError(t, eng.Close()) // the memory engine fails every call after Close
 
 	require.Panics(t, func() {
 		intent.Apply(ctx, Applied{SegmentID: 500, TimeTick: 11})
@@ -492,4 +501,3 @@ type notReadyAuthority struct {
 }
 
 func (a *notReadyAuthority) Ready() <-chan struct{} { return a.ready }
-func (a *notReadyAuthority) Close() error           { return nil }

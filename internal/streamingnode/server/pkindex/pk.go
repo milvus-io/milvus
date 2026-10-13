@@ -17,8 +17,9 @@
 package pkindex
 
 import (
-	"encoding/binary"
 	"hash/fnv"
+
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 )
 
 // PK is one primary key, either an int64 or a varchar.
@@ -39,16 +40,12 @@ func (p PK) Int64() int64 { return p.i }
 
 func (p PK) VarChar() string { return p.s }
 
-// Encode returns the order-preserving key of the primary key.
-// An int64 becomes 8 big-endian bytes with the sign bit flipped.
-// A varchar is its raw bytes.
+// Encode returns the order-preserving key of the primary key, as codec defines it.
 func (p PK) Encode() []byte {
 	if p.varchar {
-		return []byte(p.s)
+		return codec.EncodeVarcharPK(p.s)
 	}
-	key := make([]byte, 8)
-	binary.BigEndian.PutUint64(key, uint64(p.i)^(1<<63))
-	return key
+	return codec.EncodeInt64PK(p.i)
 }
 
 // Hash is used to spread keys over lock stripes.

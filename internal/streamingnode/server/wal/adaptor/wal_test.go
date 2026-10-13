@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/pkindex/index"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -76,6 +77,12 @@ func TestWAL(t *testing.T) {
 }
 
 func initResourceForTest(t *testing.T) {
+	initResourceForTestWithPKIndex(t, nil)
+}
+
+// initResourceForTestWithPKIndex is initResourceForTest with pkMgr as the
+// primary key index manager of the resource. A nil pkMgr leaves it unset.
+func initResourceForTestWithPKIndex(t *testing.T, pkMgr *index.Manager) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")
@@ -99,6 +106,7 @@ func initResourceForTest(t *testing.T) {
 		resource.OptMixCoordClient(fMixCoordClient),
 		resource.OptStreamingNodeCatalog(catalog),
 		resource.OptChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))),
+		resource.OptPKIndexManager(pkMgr),
 	)
 }
 
