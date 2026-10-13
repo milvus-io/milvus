@@ -16,6 +16,7 @@
 
 #include "index/growing/RTreeGrowingSpatialIndex.h"
 
+#include <algorithm>
 #include <iterator>
 #include <limits>
 #include <utility>
@@ -123,8 +124,6 @@ RTreeGrowingSpatialIndex::PublishPending() {
     AssertInfo(accepted_end_ > published_end_,
                "growing R-Tree has no pending rows to publish");
 
-    auto frozen_null_offsets =
-        std::make_shared<const std::vector<size_t>>(null_offsets_);
     auto next_levels = levels_;
     auto next_window_count = value_window_count_;
 
@@ -173,7 +172,7 @@ RTreeGrowingSpatialIndex::PublishPending() {
         }
     }
     auto state = RTreeIndexState::CreateFromValidatedShards(
-        std::move(engines), std::move(frozen_null_offsets), accepted_end_);
+        std::move(engines), validity_.Freeze(), accepted_end_);
     auto reader = std::make_unique<RTreeIndexReader>(std::move(state));
     PublishSnapshot(std::move(reader), accepted_end_);
 
@@ -230,20 +229,22 @@ RTreeGrowingSpatialIndex::Append(int64_t row_begin,
         row_begin, batch_end, batch_values, batch_null_offsets);
 
     if (batch_values.size() >
-            std::numeric_limits<size_t>::max() - pending_values_.size() ||
-        batch_null_offsets.size() >
-            std::numeric_limits<size_t>::max() - null_offsets_.size()) {
+        std::numeric_limits<size_t>::max() - pending_values_.size()) {
         ThrowInfo(UnexpectedError,
                   "growing R-Tree pending state exceeds size_t domain");
     }
     pending_values_.reserve(pending_values_.size() + batch_values.size());
-    null_offsets_.reserve(null_offsets_.size() + batch_null_offsets.size());
+    validity_.PrepareAppend(static_cast<size_t>(batch_end),
+                            !batch_null_offsets.empty());
+
+    // All storage is ready before either values or NULL bits are accepted.
     pending_values_.insert(pending_values_.end(),
                            std::make_move_iterator(batch_values.begin()),
                            std::make_move_iterator(batch_values.end()));
-    null_offsets_.insert(null_offsets_.end(),
-                         batch_null_offsets.begin(),
-                         batch_null_offsets.end());
+    for (const auto row : batch_null_offsets) {
+        validity_.AppendNull(row);
+    }
+    validity_.FinishAppend(static_cast<size_t>(batch_end));
     accepted_end_ = batch_end;
 
     if (accepted_end_ - published_end_ >= publish_window_rows_) {
