@@ -339,6 +339,12 @@ VectorDiskBuildFileManager::LoadFile(const std::string& filename) {
     }
 }
 
+void
+VectorDiskBuildFileManager::SetInputFiles(std::vector<std::string> paths) {
+    std::lock_guard lock(mutex_);
+    input_files_ = std::move(paths);
+}
+
 bool
 VectorDiskBuildFileManager::AddFile(const std::string& filename) {
     try {
@@ -436,7 +442,14 @@ VectorDiskBuildFileManager::RemoveFile(const std::string& filename) {
 std::shared_ptr<milvus::InputStream>
 VectorDiskBuildFileManager::OpenInputStream(const std::string& filename) {
     try {
-        if (!local_files_->Owns(filename)) {
+        bool borrowed;
+        {
+            std::lock_guard lock(mutex_);
+            borrowed =
+                std::find(input_files_.begin(), input_files_.end(), filename) !=
+                input_files_.end();
+        }
+        if (!borrowed && !local_files_->Owns(filename)) {
             ThrowInfo(FileReadFailed,
                       "refusing to open unowned local vector input {}",
                       filename);

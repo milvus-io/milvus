@@ -37,6 +37,7 @@
 #include "index/contracts/build/VectorBuildInput.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/KnowhereEngine.h"
+#include "index/vector/VectorDiskBuildFileManager.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/FileManager.h"
@@ -248,6 +249,74 @@ RunOrdinaryDiskSearch(bool mmap) {
                 reader->GetVector(GenIdsDataset(ids.size(), ids.data()))));
         }
     }
+}
+
+TEST(VectorDiskFileManagerTest, PreparedInputsAreBorrowedReadOnly) {
+    auto inputs = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_inputs_XXXXXX", "prepared input test");
+    const auto raw = inputs->Path() + "/raw";
+    WriteRaw<float>(raw, {1.0f, 2.0f}, 1, 2);
+    auto output = storage::LocalDirectory::CreateOwned(
+        inputs->Path(), "outputs_XXXXXX", "prepared input test");
+    const auto output_dir = output->Path();
+    auto manager =
+        std::make_shared<VectorDiskBuildFileManager>(std::move(output));
+    manager->SetInputFiles({raw});
+    auto stream = manager->OpenInputStream(raw);
+    ASSERT_NE(stream, nullptr);
+    EXPECT_EQ(stream->Size(), 2 * sizeof(uint32_t) + 2 * sizeof(float));
+    std::array<uint32_t, 2> header;
+    EXPECT_EQ(stream->Read(header.data(), sizeof(header)), sizeof(header));
+    EXPECT_EQ(header, (std::array<uint32_t, 2>{1, 2}));
+    std::array<float, 2> values;
+    EXPECT_EQ(stream->Read(values.data(), sizeof(values)), sizeof(values));
+    EXPECT_EQ(values, (std::array<float, 2>{1.0f, 2.0f}));
+    EXPECT_TRUE(manager->Files().empty());
+    EXPECT_THROW(manager->OpenOutputStream(raw), SegcoreError);
+    EXPECT_FALSE(manager->AddFile(raw));
+    EXPECT_FALSE(manager->RemoveFile(raw));
+    EXPECT_TRUE(std::filesystem::exists(raw));
+    manager.reset();
+    EXPECT_TRUE(std::filesystem::exists(output_dir));
+    stream.reset();
+    EXPECT_FALSE(std::filesystem::exists(output_dir));
+    EXPECT_TRUE(std::filesystem::exists(raw));
+}
+
+TEST(VectorDiskFileManagerTest, InputFailuresKeepTheirOriginalCode) {
+    auto inputs = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_inputs_XXXXXX", "prepared input failure test");
+    const auto raw = inputs->Path() + "/raw";
+    WriteRaw<float>(raw, {1.0f}, 1, 1);
+    auto make_manager = [&] {
+        return std::make_shared<VectorDiskBuildFileManager>(
+            storage::LocalDirectory::CreateOwned(
+                inputs->Path(),
+                "outputs_XXXXXX",
+                "prepared input failure test"));
+    };
+    auto expect_code = [](auto&& operation, ErrorCode code) {
+        try {
+            operation();
+            FAIL() << "expected input failure";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), code);
+        }
+    };
+    auto undeclared = make_manager();
+    expect_code([&] { undeclared->OpenInputStream(raw); }, FileReadFailed);
+    auto missing = make_manager();
+    missing->SetInputFiles({raw + ".missing"});
+    expect_code([&] { missing->OpenInputStream(raw + ".missing"); },
+                FileOpenFailed);
+    expect_code([&] { missing->RethrowFirstFailure(); }, FileOpenFailed);
+    auto truncated = make_manager();
+    truncated->SetInputFiles({raw});
+    auto stream = truncated->OpenInputStream(raw);
+    std::filesystem::resize_file(raw, 0);
+    uint32_t value;
+    expect_code([&] { stream->Read(&value, sizeof(value)); }, FileReadFailed);
+    expect_code([&] { truncated->RethrowFirstFailure(); }, FileReadFailed);
 }
 
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {
