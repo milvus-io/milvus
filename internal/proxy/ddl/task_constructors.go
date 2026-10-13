@@ -377,17 +377,6 @@ func NewListResourceGroupsTask(ctx context.Context, node taskmodel.TaskNode, req
 	}
 }
 
-// NewRunAnalyzerTask constructs a RunAnalyzerTask.
-func NewRunAnalyzerTask(ctx context.Context, node taskmodel.TaskNode, request *milvuspb.RunAnalyzerRequest) *RunAnalyzerTask {
-	return &RunAnalyzerTask{
-		baseTask:           baseTask{MetaCache: node.GetMetaCache()},
-		ctx:                ctx,
-		lb:                 node.LBPolicy(),
-		Condition:          NewTaskCondition(ctx),
-		RunAnalyzerRequest: request,
-	}
-}
-
 // NewCreateAliasTask constructs a CreateAliasTask.
 func NewCreateAliasTask(ctx context.Context, node taskmodel.TaskNode, request *milvuspb.CreateAliasRequest) *CreateAliasTask {
 	return &CreateAliasTask{
@@ -696,7 +685,6 @@ func (t *DescribeResourceGroupTask) Result() *milvuspb.DescribeResourceGroupResp
 func (t *TransferNodeTask) Result() *commonpb.Status                                 { return t.result }
 func (t *TransferReplicaTask) Result() *commonpb.Status                              { return t.result }
 func (t *ListResourceGroupsTask) Result() *milvuspb.ListResourceGroupsResponse       { return t.result }
-func (t *RunAnalyzerTask) Result() *milvuspb.RunAnalyzerResponse                     { return t.result }
 func (t *CreateAliasTask) Result() *commonpb.Status                                  { return t.result }
 func (t *DropAliasTask) Result() *commonpb.Status                                    { return t.result }
 func (t *AlterAliasTask) Result() *commonpb.Status                                   { return t.result }

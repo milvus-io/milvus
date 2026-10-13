@@ -69,6 +69,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -7105,50 +7106,54 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 
-	// build and run analyzer at any streaming node/query node
-	// if collection and field not set
+	request := &streamingpb.StreamingNodeRunAnalyzerRequest{
+		Placeholder: req.GetPlaceholder(), WithDetail: req.GetWithDetail(), WithHash: req.GetWithHash(),
+	}
 	if req.GetCollectionName() == "" {
-		return node.mixCoord.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
-			AnalyzerParams: req.GetAnalyzerParams(),
-			Placeholder:    req.GetPlaceholder(),
-			WithDetail:     req.GetWithDetail(),
-			WithHash:       req.GetWithHash(),
-		})
+		request.Source = &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{
+			InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: req.GetAnalyzerParams()},
+		}
+	} else {
+		if err := validateRunAnalyzer(req); err != nil {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(merr.WrapErrAsInputError(err))}, nil
+		}
+		cache := node.GetMetaCache()
+		id, err := cache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
+		}
+		// Resolve by ID so drop/recreate cannot redirect this request to a new collection.
+		info, err := cache.GetCollectionInfo(ctx, req.GetDbName(), "", id)
+		if err != nil {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
+		}
+		fieldID, exists := info.Schema.MapFieldID(req.GetFieldName())
+		if !exists {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(req.GetFieldName())))}, nil
+		}
+		if len(info.VChannels) == 0 {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(merr.WrapErrServiceNotReadyMsg("collection has no analyzer channel"))}, nil
+		}
+		request.Source = &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{
+			CollectionId: id, Vchannel: info.VChannels[0], FieldId: fieldID, AnalyzerNames: req.GetAnalyzerNames(),
+		}}
 	}
 
-	// run builded analyzer by delegator
-	// collection must loaded
-	if err := validateRunAnalyzer(req); err != nil {
-		return &milvuspb.RunAnalyzerResponse{
-			Status: merr.Status(merr.WrapErrAsInputError(err)),
-		}, nil
+	response, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, request)
+	if err != nil {
+		// Translate streaming failures only; analyzer Status is forwarded below.
+		switch {
+		case status.IsCanceled(err):
+		case status.AsStreamingError(err).IsInvalidArgument():
+			err = merr.WrapErrParameterInvalidErr(err, "run analyzer")
+		case grpcstatus.Code(err) == codes.Unimplemented:
+			err = merr.Wrap(merr.ErrServiceUnimplemented, err.Error())
+		default:
+			err = merr.WrapErrServiceUnavailableErr(err, "run analyzer")
+		}
+		return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
-
-	method := "RunAnalyzer"
-	task := NewRunAnalyzerTask(ctx, node, req)
-
-	if err := node.sched.DqQueue.Enqueue(task); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToEnqueue(method),
-			mlog.Err(err),
-		)
-
-		return &milvuspb.RunAnalyzerResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	if err := task.WaitToFinish(); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToWaitToFinish(method),
-			mlog.Err(err),
-		)
-
-		return &milvuspb.RunAnalyzerResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	return task.Result(), nil
+	return &milvuspb.RunAnalyzerResponse{Status: response.GetStatus(), Results: response.GetResults()}, nil
 }
 
 func authorizeRunAnalyzerCollection(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (context.Context, error) {

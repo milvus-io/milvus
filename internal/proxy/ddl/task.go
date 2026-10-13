@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
-	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
@@ -82,7 +81,6 @@ const (
 	TransferReplicaTaskName         = "TransferReplicaTask"
 	ListResourceGroupsTaskName      = "ListResourceGroupsTask"
 	DescribeResourceGroupTaskName   = "DescribeResourceGroupTask"
-	RunAnalyzerTaskName             = "RunAnalyzer"
 	HighlightTaskName               = "Highlight"
 
 	CreateDatabaseTaskName   = "CreateCollectionTask"
@@ -4121,120 +4119,5 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 }
 
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-type RunAnalyzerTask struct {
-	baseTask
-	Condition
-	*milvuspb.RunAnalyzerRequest
-	ctx          context.Context
-	collectionID typeutil.UniqueID
-	fieldID      typeutil.UniqueID
-	dbName       string
-	lb           shardclient.LBPolicy
-
-	result *milvuspb.RunAnalyzerResponse
-}
-
-func (t *RunAnalyzerTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-func (t *RunAnalyzerTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-func (t *RunAnalyzerTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-func (t *RunAnalyzerTask) Name() string {
-	return RunAnalyzerTaskName
-}
-
-func (t *RunAnalyzerTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-func (t *RunAnalyzerTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *RunAnalyzerTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *RunAnalyzerTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-func (t *RunAnalyzerTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	t.Base.MsgType = commonpb.MsgType_RunAnalyzer
-	t.Base.SourceID = paramtable.GetNodeID()
-	return nil
-}
-
-func (t *RunAnalyzerTask) PreExecute(ctx context.Context) error {
-	t.dbName = t.GetDbName()
-
-	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.dbName, t.GetCollectionName())
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
-
-	t.collectionID = collID
-
-	schema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.dbName, t.GetCollectionName())
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
-
-	fieldId, ok := schema.MapFieldID(t.GetFieldName())
-	if !ok {
-		return merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(t.GetFieldName()))
-	}
-
-	t.fieldID = fieldId
-	t.result = &milvuspb.RunAnalyzerResponse{}
-	return nil
-}
-
-func (t *RunAnalyzerTask) runAnalyzerOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	resp, err := qn.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
-		Channel:       channel,
-		FieldId:       t.fieldID,
-		AnalyzerNames: t.GetAnalyzerNames(),
-		Placeholder:   t.GetPlaceholder(),
-		WithDetail:    t.GetWithDetail(),
-		WithHash:      t.GetWithHash(),
-	})
-	if err != nil {
-		return err
-	}
-
-	if err := merr.Error(resp.GetStatus()); err != nil {
-		return err
-	}
-	t.result = resp
-	return nil
-}
-
-func (t *RunAnalyzerTask) Execute(ctx context.Context) error {
-	err := t.lb.ExecuteOneChannel(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.dbName,
-		CollectionName: t.GetCollectionName(),
-		CollectionID:   t.collectionID,
-		Nq:             int64(len(t.GetPlaceholder())),
-		Exec:           t.runAnalyzerOnShardleader,
-	})
-
-	return err
-}
-
-func (t *RunAnalyzerTask) PostExecute(ctx context.Context) error {
 	return nil
 }

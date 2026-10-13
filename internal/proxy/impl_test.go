@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -2061,14 +2062,6 @@ func TestRunAnalyzer(t *testing.T) {
 
 	p := &Proxy{}
 
-	tsoAllocatorIns := newMockTsoAllocator()
-	sched, err := scheduler.NewTaskScheduler(ctx, tsoAllocatorIns)
-	require.NoError(t, err)
-	sched.Start()
-	defer sched.Close()
-
-	p.sched = sched
-
 	t.Run("run analyzer err with node not healthy", func(t *testing.T) {
 		p.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
@@ -2079,60 +2072,39 @@ func TestRunAnalyzer(t *testing.T) {
 	})
 
 	p.UpdateStateCode(commonpb.StateCode_Healthy)
-	t.Run("run analyzer with mixcoord success", func(t *testing.T) {
-		mockMixcoord := mocks.NewMockMixCoordClient(t)
-		p.mixCoord = mockMixcoord
-		mockMixcoord.EXPECT().RunAnalyzer(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.RunAnalyzerResponse{Status: merr.Status(nil)}, nil)
-
-		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
-			Placeholder: [][]byte{[]byte("test doc")},
+	for _, fail := range []bool{false, true} {
+		mockey.PatchConvey(fmt.Sprintf("inline analyzer on SN, fail=%v", fail), t, func() {
+			mockStreamingAnalyzerClient()
+			var rpcErr error
+			if fail {
+				rpcErr = merr.ErrServiceUnavailable
+			}
+			called := mockey.Mock((*analyzerTestClient).RunAnalyzer).To(func(_ *analyzerTestClient, _ context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+				require.NotNil(t, req.GetInlineAnalyzer())
+				require.Nil(t, req.GetFieldAnalyzer())
+				return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success()}, rpcErr
+			}).Build()
+			resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{Placeholder: [][]byte{[]byte("test doc")}})
+			require.NoError(t, err)
+			if fail {
+				require.Error(t, merr.Error(resp.GetStatus()))
+			} else {
+				require.NoError(t, merr.Error(resp.GetStatus()))
+			}
+			require.Equal(t, 1, called.Times())
 		})
+	}
 
+	mockey.PatchConvey("inline analyzer status is forwarded unchanged", t, func() {
+		mockStreamingAnalyzerClient()
+		status := merr.Status(merr.WrapErrParameterInvalidMsg("unknown tokenizer"))
+		status.Detail = "analyzer detail"
+		status.ExtraInfo["analyzer"] = "original"
+		call := mockey.Mock((*analyzerTestClient).RunAnalyzer).Return(&streamingpb.StreamingNodeRunAnalyzerResponse{Status: status}, nil).Build()
+		resp, err := p.RunAnalyzer(ctx, &milvuspb.RunAnalyzerRequest{Placeholder: [][]byte{[]byte("hello")}})
 		require.NoError(t, err)
-		require.NoError(t, merr.Error(resp.GetStatus()))
-	})
-
-	t.Run("run analyzer with mixcoord failed", func(t *testing.T) {
-		mockMixcoord := mocks.NewMockMixCoordClient(t)
-		p.mixCoord = mockMixcoord
-		mockMixcoord.EXPECT().RunAnalyzer(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.RunAnalyzerResponse{Status: merr.Status(fmt.Errorf("mock error"))}, nil)
-
-		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
-			Placeholder: [][]byte{[]byte("test doc")},
-		})
-		require.NoError(t, err)
-		require.Error(t, merr.Error(resp.GetStatus()))
-	})
-
-	t.Run("run analyzer from loaded collection field", func(t *testing.T) {
-		mockCache := NewMockCache(t)
-		p.metaCache = mockCache
-
-		fieldMap := &typeutil.ConcurrentMap[string, int64]{}
-		fieldMap.Insert("test_text", 100)
-		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "test_collection").Return(1, nil)
-		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, "test_collection").Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{{
-					FieldID: 100,
-					Name:    "test_text",
-				}},
-			},
-			FieldMap: fieldMap,
-		}, nil)
-
-		lb := shardclient.NewMockLBPolicy(t)
-		lb.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Return(nil)
-		p.lbPolicy = lb
-
-		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
-			Placeholder:    [][]byte{[]byte("test doc")},
-			CollectionName: "test_collection",
-			FieldName:      "test_text",
-		})
-
-		require.NoError(t, err)
-		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Same(t, status, resp.GetStatus())
+		require.Equal(t, 1, call.Times())
 	})
 }
 

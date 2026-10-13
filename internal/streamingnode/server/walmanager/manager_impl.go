@@ -211,6 +211,10 @@ type nopCloseWAL struct {
 	wal.WAL
 }
 
+func (w nopCloseWAL) UnwrapWAL() wal.WAL {
+	return w.WAL
+}
+
 func (w nopCloseWAL) Close() {
 	// do nothing
 }
