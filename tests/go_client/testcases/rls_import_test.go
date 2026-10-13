@@ -55,8 +55,8 @@ func TestRLSBulkImportChecks(t *testing.T) {
 			}
 			createRLSPolicy(ctx, t, mc, name, "importer", expr, check, actions...)
 			rows := []map[string]any{
-				{"id": int64(10), "owner": "alice", "department": "eng", "active": true, "number": int64(10), "vector": []float32{10, 1, 2, 3}},
-				{"id": int64(11), "owner": "alice", "department": "eng", "active": true, "number": int64(11), "vector": []float32{11, 1, 2, 3}},
+				{"id": int64(10), "owner": "alice", "department": "eng", "active": true, "number": int64(10), "vector": entity.FloatVector{10, 1, 2, 3}},
+				{"id": int64(11), "owner": "alice", "department": "eng", "active": true, "number": int64(11), "vector": entity.FloatVector{11, 1, 2, 3}},
 			}
 			if mode == "mixed" || mode == "skip" || mode == "forced_skip" {
 				rows[1]["owner"] = "bob"
