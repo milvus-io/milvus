@@ -230,12 +230,9 @@ OpenTrie(const std::string& path, bool mmap_enabled) {
         }
         return trie;
     } catch (const marisa::Exception& error) {
-        // Preserve allocation failures separately. Other MARISA failures use
-        // the staged-payload classification supplied to ClassifyMarisaError.
-        ThrowInfo(
-            ClassifyMarisaError(error, DataFormatBroken, DataFormatBroken),
-            "invalid marisa trie entry: {}",
-            error.what());
+        ThrowInfo(ClassifyMarisaError(error, FileReadFailed, DataFormatBroken),
+                  "failed to load marisa trie entry: {}",
+                  error.what());
     }
 }
 
