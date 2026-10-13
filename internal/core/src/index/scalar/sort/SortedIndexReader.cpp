@@ -193,7 +193,7 @@ ValidatePacked(const uint8_t* data, size_t size, size_t total_num_rows) {
 class HeapStringLayout final : public SortedStringLayout {
  public:
     HeapStringLayout(std::vector<std::string> values,
-                     std::vector<std::vector<uint32_t>> postings,
+                     std::vector<SortedStringPostingList> postings,
                      size_t total_num_rows)
         : values_(std::move(values)), postings_(std::move(postings)) {
         if (values_.size() != postings_.size() ||
@@ -245,14 +245,16 @@ class HeapStringLayout final : public SortedStringLayout {
     int64_t
     MemoryUsage() const override {
         size_t total = values_.capacity() * sizeof(std::string) +
-                       postings_.capacity() * sizeof(std::vector<uint32_t>);
+                       postings_.capacity() * sizeof(SortedStringPostingList);
         for (const auto& value : values_) {
             if (value.capacity() > StringSsoThreshold()) {
                 total += value.capacity() + 1;
             }
         }
         for (const auto& posting : postings_) {
-            total += posting.capacity() * sizeof(uint32_t);
+            if (posting.capacity() > kSortedStringPostingInlineCapacity) {
+                total += posting.capacity() * sizeof(uint32_t);
+            }
         }
         return ToInt64(total);
     }
@@ -264,7 +266,7 @@ class HeapStringLayout final : public SortedStringLayout {
 
  private:
     std::vector<std::string> values_;
-    std::vector<std::vector<uint32_t>> postings_;
+    std::vector<SortedStringPostingList> postings_;
 };
 
 class PackedStringLayout final : public SortedStringLayout {
@@ -472,7 +474,7 @@ SortedStringLayout::BuildOffsets(size_t total_num_rows) const {
 
 std::shared_ptr<const SortedStringLayout>
 SortedStringLayout::FromHeap(std::vector<std::string> unique_values,
-                             std::vector<std::vector<uint32_t>> posting_lists,
+                             std::vector<SortedStringPostingList> posting_lists,
                              size_t total_num_rows) {
     return std::make_shared<HeapStringLayout>(
         std::move(unique_values), std::move(posting_lists), total_num_rows);

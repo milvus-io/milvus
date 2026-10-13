@@ -225,8 +225,21 @@ MakeNumericOffsets(const std::vector<IndexStructure<T>>& data, size_t count) {
     return result;
 }
 
+void
+AppendStringPosting(
+    std::map<std::string, SortedStringPostingList, std::less<>>& postings,
+    std::string_view value,
+    uint32_t coordinate) {
+    auto found = postings.lower_bound(value);
+    if (found == postings.end() || found->first != value) {
+        found = postings.emplace_hint(
+            found, std::string(value), SortedStringPostingList{});
+    }
+    found->second.push_back(coordinate);
+}
+
 std::vector<int32_t>
-MakeStringOffsets(const std::vector<std::vector<uint32_t>>& postings,
+MakeStringOffsets(const std::vector<SortedStringPostingList>& postings,
                   size_t count) {
     if (postings.size() >
         static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
@@ -337,8 +350,9 @@ SortedStringIndexBuilder::Build(
             const bool is_valid =
                 params_.nested || !batch.validity || batch.validity[i];
             if (is_valid) {
-                postings_[std::string(batch.values[i])].push_back(
-                    static_cast<uint32_t>(coordinate));
+                AppendStringPosting(postings_,
+                                    batch.values[i],
+                                    static_cast<uint32_t>(coordinate));
             } else {
                 validity_.reset(coordinate);
             }
@@ -349,7 +363,7 @@ SortedStringIndexBuilder::Build(
         ThrowInfo(DataIsEmpty, "sorted string index cannot build empty input");
     }
     std::vector<std::string> values;
-    std::vector<std::vector<uint32_t>> postings;
+    std::vector<SortedStringPostingList> postings;
     values.reserve(postings_.size());
     postings.reserve(postings_.size());
     for (auto& [value, rows] : postings_) {
@@ -364,7 +378,7 @@ SortedStringIndexBuilder::Build(
                                                     std::move(offsets),
                                                     total_num_rows_,
                                                     params_.nested);
-    std::map<std::string, std::vector<uint32_t>>().swap(postings_);
+    decltype(postings_)().swap(postings_);
     return artifact;
 }
 
@@ -412,15 +426,16 @@ class StringArrayBuilderImpl final : public SortedArrayIndexBuilder::Impl {
     void
     AddRow(const ArrayView& value, int32_t coordinate) override {
         for (int i = 0; i < value.length(); ++i) {
-            postings_[std::string(ArrayValue<std::string_view>(value, i))]
-                .push_back(static_cast<uint32_t>(coordinate));
+            AppendStringPosting(postings_,
+                                ArrayValue<std::string_view>(value, i),
+                                static_cast<uint32_t>(coordinate));
         }
     }
 
     storage::ArtifactPtr
     Finish(TargetBitmap validity, size_t count) override {
         std::vector<std::string> values;
-        std::vector<std::vector<uint32_t>> postings;
+        std::vector<SortedStringPostingList> postings;
         values.reserve(postings_.size());
         postings.reserve(postings_.size());
         for (auto& [value, rows] : postings_) {
@@ -437,7 +452,7 @@ class StringArrayBuilderImpl final : public SortedArrayIndexBuilder::Impl {
     }
 
  private:
-    std::map<std::string, std::vector<uint32_t>> postings_;
+    std::map<std::string, SortedStringPostingList, std::less<>> postings_;
 };
 
 std::unique_ptr<SortedArrayIndexBuilder::Impl>
