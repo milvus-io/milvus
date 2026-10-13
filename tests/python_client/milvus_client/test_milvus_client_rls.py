@@ -488,6 +488,96 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
         self._check_rows(client, name, visible, rls_principal="alice")
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "mode", ["combined", "denied_owner", "denied_active", "denied_department", "snapshot_policy", "snapshot_tags"]
+    )
+    def test_rls_bulk_import_policy_composition_and_snapshot(self, rls_client, rls_import_file, mode):
+        """
+        target: multi-file import combines policies and retains the submitted CHECK snapshot
+        method: import 4096 rows with a rejected final row or change metadata after submission
+        expected: exact data on success, no visible prefix on failure, and later jobs use new metadata
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        client.create_row_policy(name, "reader", "permissive", "query", "true", timeout=30)
+        snapshot = mode.startswith("snapshot_")
+        if snapshot:
+            expr = OWNER
+            if mode == "snapshot_tags":
+                expr = "department == $current_principal_tags['department']"
+                client.set_rls_principal_tags(name, "alice", {"department": "eng"}, timeout=30)
+            client.create_row_policy(name, "writer", "permissive", "insert", check_expr=expr, timeout=30)
+        else:
+            for number, (kind, expr) in enumerate(
+                [
+                    ("permissive", "owner == 'alice'"),
+                    ("permissive", "owner == 'bob'"),
+                    ("restrictive", "active == true"),
+                    ("restrictive", "department == 'eng'"),
+                ]
+            ):
+                client.create_row_policy(name, f"rule_{number}", kind, "insert", check_expr=expr, timeout=30)
+        imported = [
+            {**rows[0], "id": 100 + number, "owner": "alice" if snapshot or number % 2 == 0 else "bob"}
+            for number in range(4096)
+        ]
+        if mode == "denied_owner":
+            imported[-1]["owner"] = "nobody"
+        elif mode == "denied_active":
+            imported[-1]["active"] = False
+        elif mode == "denied_department":
+            imported[-1]["department"] = "sales"
+        # The second file contains the only invalid row in rejection cases.
+        files = [[rls_import_file(imported[:2048])], [rls_import_file(imported[2048:])]]
+        url = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+
+        def submit():
+            response = bulk_import(
+                url=url,
+                collection_name=name,
+                files=files,
+                options={"rls_principal": "alice"},
+                api_key=cf.param_info.param_token,
+            ).json()
+            assert response["code"] == 0, response
+            return response["data"]["jobId"]
+
+        def progress(job):
+            response = get_import_progress(url=url, job_id=job, api_key=cf.param_info.param_token).json()
+            assert response["code"] == 0, response
+            return response["data"]
+
+        def wait(job, expected):
+            deadline = time.monotonic() + 300
+            while time.monotonic() < deadline:
+                result = progress(job)
+                if result["state"] in ["Completed", "Failed"]:
+                    assert result["state"] == expected, result
+                    if expected == "Failed":
+                        assert "rls" in result["reason"].lower(), result
+                    return
+                time.sleep(2)
+            pytest.fail(f"Import did not terminate: {result}")
+
+        job = submit()
+        if snapshot:
+            # A visible job has persisted its CHECK snapshot; worker overlap is not assumed.
+            progress(job)
+            if mode == "snapshot_policy":
+                client.update_row_policy(name, "writer", "permissive", "insert", check_expr="false", timeout=30)
+            else:
+                client.set_rls_principal_tags(name, "alice", {"department": "sales"}, timeout=30)
+        expected = "Failed" if mode.startswith("denied_") else "Completed"
+        wait(job, expected)
+        if snapshot:
+            wait(submit(), "Failed")
+        self.refresh_load(client, name)
+        if expected == "Completed":
+            rows += imported
+        self._check_stored(client, name, rows, owner_policy=False)
+        self._check_rows(client, name, rows, rls_principal="alice")
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rls_nullable_array_not_checks(self, rls_client):
         """
         target: NULL and empty arrays under a negated read/write predicate
