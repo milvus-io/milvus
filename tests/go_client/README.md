@@ -234,6 +234,14 @@ every authorized row, without duplicates, and an explicit EOF. BIN_IVF_FLAT's
 documented `index not supported` iterator error is checked explicitly; it is not
 counted as successful binary indexed iteration.
 
+Mixed-segment iterator settings are aligned with the Python RLS matrix: dimension
+128, batch size 127, and full per-group candidate sets. INT8 uses
+`common.GenInt8Vector` through `hp.GenColumnData` to sample the full signed-byte
+range, with HNSW `M=16`, `efConstruction=200`, and search `ef=4096`.
+Each SDK independently generates its fixture; other vector types retain their
+suite's common-generator defaults. Unique vectors do not guarantee unique
+distances, and equal-distance hits must still satisfy strict iterator checks.
+
 `TestRLSSchemaKeys` adds INT64/VARCHAR partition keys, partition-key isolation,
 clustering keys, and combined partition/clustering keys with independent key
 distributions. These eight profiles use FLOAT_VECTOR with an INT64 primary key;
