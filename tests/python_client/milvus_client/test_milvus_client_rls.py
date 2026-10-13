@@ -1,7 +1,10 @@
 import copy
+import json
 import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 
 import numpy as np
 import pytest
@@ -9,7 +12,9 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from minio import Minio
 from pymilvus import AnnSearchRequest, DataType, RRFRanker
+from pymilvus.bulk_writer import bulk_import, get_import_progress
 from pymilvus.client.types import SegmentState
 from pymilvus.exceptions import MilvusException
 from pymilvus.grpc_gen import milvus_pb2
@@ -230,6 +235,538 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                 np.testing.assert_array_equal(got, np.asarray(want, dtype=np.float32))
         for principal in ["alice", "bob", "nobody"]:
             self._check_rows(client, name, [r for r in rows if r["owner"] == principal], rls_principal=principal)
+
+    @pytest.fixture
+    def rls_import_file(self, minio_host, minio_bucket, tmp_path):
+        storage = Minio(f"{minio_host}:9000", access_key="minioadmin", secret_key="minioadmin", secure=False)
+        objects = []
+
+        def upload(rows):
+            name = f"bulkinsert_data/{uuid4()}/rls.json"
+            path = tmp_path / f"{uuid4()}.json"
+            path.write_text(json.dumps(rows), encoding="utf-8")
+            objects.append(name)
+            storage.fput_object(minio_bucket, name, str(path))
+            return name
+
+        yield upload
+        for name in objects:
+            storage.remove_object(minio_bucket, name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "mode", ["owner", "tags", "mixed", "missing_principal", "no_insert", "skip", "forced_skip"]
+    )
+    def test_rls_bulk_import_checks(self, rls_client, rls_import_file, mode):
+        """
+        target: public bulk import admission and persisted INSERT CHECK
+        method: import authorized or mixed-owner rows with principal, tags and bypass options
+        expected: accepted rows are exact; admission and CHECK failures leave all existing rows intact
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        expr = "department == $current_principal_tags['department']" if mode == "tags" else OWNER
+        actions = ["query"] if mode == "no_insert" else ["query", "insert"]
+        client.create_row_policy(
+            name, "importer", "permissive", actions, expr, "" if mode == "no_insert" else expr, timeout=30
+        )
+        if mode == "tags":
+            client.set_rls_principal_tags(name, "alice", {"department": "eng"}, timeout=30)
+        imported = [{**rows[0], "id": 10}, {**rows[0], "id": 11}]
+        if mode in ["mixed", "skip", "forced_skip"]:
+            imported[1] = {**rows[1], "id": 11}
+        options = {} if mode == "missing_principal" else {"rls_principal": "alice"}
+        if mode in ["skip", "forced_skip"]:
+            options["skip_rls"] = "true"
+        if mode == "forced_skip":
+            self.alter_collection_properties(client, name, {"rls.force": True})
+        url = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        files = [[rls_import_file(imported)]]
+        if mode in ["missing_principal", "forced_skip"]:
+            message = {"missing_principal": "rls_principal", "no_insert": "no applicable", "forced_skip": "rls.force"}[
+                mode
+            ]
+            with pytest.raises(MilvusException, match=message):
+                bulk_import(
+                    url=url, collection_name=name, files=files, options=options, api_key=cf.param_info.param_token
+                )
+        else:
+            response = bulk_import(
+                url=url, collection_name=name, files=files, options=options, api_key=cf.param_info.param_token
+            ).json()
+            assert response["code"] == 0, response
+            deadline = time.monotonic() + 300
+            while time.monotonic() < deadline:
+                progress = get_import_progress(
+                    url=url, job_id=response["data"]["jobId"], api_key=cf.param_info.param_token
+                ).json()
+                assert progress["code"] == 0, progress
+                state = progress["data"]["state"]
+                if state in ["Completed", "Failed"]:
+                    break
+                time.sleep(2)
+            else:
+                pytest.fail(f"Import did not terminate: {progress}")
+            assert state == ("Failed" if mode in ["mixed", "no_insert"] else "Completed"), progress
+            if mode in ["mixed", "no_insert"]:
+                assert "rls" in progress["data"]["reason"].lower(), progress
+                if mode == "no_insert":
+                    assert "no applicable" in progress["data"]["reason"], progress
+            else:
+                rows += imported
+            self.refresh_load(client, name)
+        if mode == "forced_skip":
+            self.alter_collection_properties(client, name, {"rls.force": False})
+        self._check_rows(client, name, rows, skip_rls=True)
+        visible = (
+            [row for row in rows if row["department"] == "eng"]
+            if mode == "tags"
+            else [row for row in rows if row["owner"] == "alice"]
+        )
+        self._check_rows(client, name, visible, rls_principal="alice")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rls_nullable_array_not_checks(self, rls_client):
+        """
+        target: NULL and empty arrays under a negated read/write predicate
+        method: query and insert four array states, then partially update an authorized row to NULL
+        expected: empty/nonmatching arrays pass; NULL/matching arrays fail without changing rows
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        self.add_collection_field(
+            client,
+            name,
+            "access",
+            DataType.ARRAY,
+            element_type=DataType.VARCHAR,
+            max_length=64,
+            max_capacity=8,
+            nullable=True,
+        )
+        # Existing rows acquire NULL; reload before querying the added field.
+        self.release_collection(client, name)
+        self.load_collection(client, name)
+        expr = "not array_contains(access, $current_principal)"
+        client.create_row_policy(name, "access", "permissive", ["query", "insert", "upsert"], expr, expr, timeout=30)
+        self._check_rows(client, name, [], rls_principal="alice")
+        accepted = []
+        for number, access in enumerate([None, [], ["alice"], ["bob"]], 10):
+            row = {**rows[0], "id": number, "access": access}
+            if access in [[], ["bob"]]:
+                self.insert(client, name, [row], rls_principal="alice")
+                accepted.append(row)
+            else:
+                self.insert(
+                    client,
+                    name,
+                    [row],
+                    rls_principal="alice",
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_msg: "RLS"},
+                )
+        self.upsert(
+            client,
+            name,
+            [{"id": 11, "access": None}],
+            partial_update=True,
+            rls_principal="alice",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_msg: "RLS"},
+        )
+        self._check_rows(client, name, rows + accepted, skip_rls=True)
+        result = self.query(client, name, filter="id >= 0", output_fields=["id", "access"], rls_principal="alice")[0]
+        assert sorted(result, key=lambda row: row["id"]) == [{"id": 11, "access": []}, {"id": 13, "access": ["bob"]}]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dtype,boundary", [(DataType.FLOAT, 2**24), (DataType.DOUBLE, 2**53)])
+    def test_rls_numeric_precision_boundaries(self, rls_client, dtype, boundary):
+        """
+        target: lossless integer-tag binding to floating-point fields
+        method: read and write at the exact boundary, its rounded neighbor and next exact integer
+        expected: lossy binding denies access rather than granting access to the rounded value
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        self.add_collection_field(client, name, "value", dtype, nullable=True)
+        self.release_collection(client, name)
+        self.load_collection(client, name)
+        expr = "value == $current_principal_tags['value']"
+        client.create_row_policy(name, "numeric", "permissive", ["query", "insert"], expr, expr, timeout=30)
+        stored = [{**rows[0], "id": 10, "value": float(boundary)}, {**rows[0], "id": 12, "value": float(boundary + 2)}]
+        self.insert(client, name, stored, skip_rls=True)
+        for offset in range(3):
+            client.set_rls_principal_tags(name, "alice", {"value": boundary + offset}, timeout=30)
+            expected = [] if offset == 1 else [stored[offset // 2]]
+            self._check_rows(client, name, expected, rls_principal="alice")
+            candidate = {**stored[0], "id": 20 + offset, "value": float(boundary + offset)}
+            if offset == 1:
+                self.insert(
+                    client,
+                    name,
+                    [candidate],
+                    rls_principal="alice",
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_msg: "RLS"},
+                )
+            else:
+                self.insert(client, name, [candidate], rls_principal="alice")
+                self.delete(client, name, ids=[candidate["id"]], skip_rls=True)
+        self._check_rows(client, name, rows + stored, skip_rls=True)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rls_alias_rebind_and_collection_recreation(self, rls_client, request):
+        """
+        target: metadata identity across alias rebinding and name reuse
+        method: warm an alias on A, rebind to B, then recreate A under its old name
+        expected: reads use B's policies and the recreated collection inherits no old metadata
+        """
+        client = rls_client
+        first, rows, _ = self._prepare_rls(client)
+        second, _, _ = self._prepare_rls(client, policy=False)
+        client.create_row_policy(second, "bob", "permissive", "query", "owner == 'bob'", timeout=30)
+        client.set_rls_principal_tags(first, "alice", {"department": "eng"}, timeout=30)
+        alias = cf.gen_unique_str("rls_alias")
+        self.create_alias(client, first, alias)
+        request.addfinalizer(lambda: client.drop_alias(alias))
+        self._check_rows(client, alias, rows[::2], rls_principal="alice")
+        self.alter_alias(client, second, alias)
+        self._check_rows(client, alias, rows[1::2], rls_principal="alice")
+        self.drop_collection(client, first)
+        _, recreated, _ = self._prepare_rls(client, name=first, policy=False)
+        assert client.list_row_policies(first, timeout=30) == []
+        assert client.list_rls_principals(first, timeout=30) == []
+        self.query(
+            client,
+            first,
+            filter="id >= 0",
+            rls_principal="alice",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_msg: "no applicable"},
+        )
+        self._check_rows(client, first, recreated, skip_rls=True)
+        self._check_rows(client, alias, rows[1::2], rls_principal="alice")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rls_combined_expression_limit_repair(self, rls_client):
+        """
+        target: default combined-expression admission and runtime quotas
+        method: exceed the quota through create, then update, and repair the oversized policy set
+        expected: rejected creation preserves metadata; runtime denial disappears after repair
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        # Internal whitespace contributes to the 16384-byte combined limit; each expression stays below 4096.
+        large = "owner" + " " * 4000 + "== 'alice'"
+        for number in range(4):
+            client.create_row_policy(name, f"rule_{number}", "permissive", "query", large, timeout=30)
+        policies = client.list_row_policies(name, timeout=30)
+        self._check_rows(client, name, rows[::2], rls_principal="alice")
+        with pytest.raises(MilvusException, match="combined"):
+            client.create_row_policy(name, "overflow", "permissive", "query", large, timeout=30)
+        assert client.list_row_policies(name, timeout=30) == policies
+        client.create_row_policy(name, "overflow", "permissive", "query", OWNER, timeout=30)
+        client.update_row_policy(name, "overflow", "permissive", "query", large, timeout=30)
+        self.query(
+            client,
+            name,
+            filter="id >= 0",
+            rls_principal="alice",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_msg: "combined"},
+        )
+        client.update_row_policy(name, "overflow", "permissive", "query", OWNER, timeout=30)
+        self._check_rows(client, name, rows[::2], rls_principal="alice")
+        self._check_rows(client, name, rows, skip_rls=True)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("operation", ["query_iterator", "search_iterator"])
+    @pytest.mark.parametrize("change", ["policy", "tags"])
+    def test_rls_iterator_next_page_uses_current_metadata(self, rls_client, operation, change):
+        """
+        target: metadata revocation between pages of the same iterator
+        method: consume one page, then revoke the predicate before requesting the next page
+        expected: subsequent server pages return no newly unauthorized rows
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        expr = "department == $current_principal_tags['department']"
+        client.set_rls_principal_tags(name, "alice", {"department": "eng"}, timeout=30)
+        client.create_row_policy(name, "reader", "permissive", operation, expr, timeout=30)
+        if operation == "query_iterator":
+            iterator = client.query_iterator(
+                name, filter="id >= 0", batch_size=1, output_fields=["id"], rls_principal="alice", timeout=30
+            )
+        else:
+            iterator = client.search_iterator(
+                name,
+                [rows[0]["vector"]],
+                batch_size=1,
+                search_params={"metric_type": "L2"},
+                rls_principal="alice",
+                timeout=30,
+            )
+        try:
+            first = iterator.next()
+            assert len(first) == 1
+            if change == "tags":
+                client.set_rls_principal_tags(name, "alice", {"department": "absent"}, timeout=30)
+            else:
+                client.update_row_policy(name, "reader", "permissive", operation, "false", timeout=30)
+            assert len(iterator.next()) == 0
+        finally:
+            iterator.close()
+        self._check_rows(client, name, rows, skip_rls=True)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rls_upsert_uses_one_tag_snapshot(self, rls_client):
+        """
+        target: USING and CHECK share one tag snapshot during upsert
+        method: alternate the tag while moving an existing row from eng to sales
+        expected: every coherent snapshot rejects the move and the original row remains intact
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        expr = "department == $current_principal_tags['department']"
+        client.create_row_policy(name, "writer", "permissive", "upsert", expr, expr, timeout=30)
+        client.set_rls_principal_tags(name, "alice", {"department": "eng"}, timeout=30)
+        barrier = threading.Barrier(2)
+
+        def update_tags():
+            barrier.wait(timeout=30)
+            for number in range(20):
+                client.set_rls_principal_tags(
+                    name, "alice", {"department": "sales" if number % 2 else "eng"}, timeout=30
+                )
+
+        def upsert():
+            barrier.wait(timeout=30)
+            for _ in range(20):
+                with pytest.raises(MilvusException, match="RLS"):
+                    client.upsert(
+                        name,
+                        [{**rows[0], "department": "sales", "note": "must_not_commit"}],
+                        rls_principal="alice",
+                        timeout=30,
+                    )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(update_tags), executor.submit(upsert)]
+            for future in futures:
+                future.result()
+        self._check_rows(client, name, rows, skip_rls=True)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("granted", ALL_ACTIONS)
+    def test_rls_independent_action_grants(self, rls_client, granted):
+        """
+        target: independent grants for all eight actions
+        method: grant one action and exercise every other action before the authorized request
+        expected: ungranted operations fail without modifying rows; the granted operation succeeds
+        """
+        client = rls_client
+        name, rows, metric = self._prepare_rls(client, policy=False)
+        client.create_row_policy(
+            name,
+            "only",
+            "permissive",
+            granted,
+            "" if granted == "insert" else OWNER,
+            OWNER if granted in ["insert", "upsert"] else "",
+            timeout=30,
+        )
+
+        def run(action):
+            context = {"rls_principal": "alice", "timeout": 30}
+            if action == "query":
+                return client.query(name, filter="id >= 0", **context)
+            if action == "search":
+                return client.search(name, [rows[0]["vector"]], limit=4, **context)
+            if action == "hybrid_search":
+                requests = [AnnSearchRequest([rows[0]["vector"]], "vector", {"metric_type": metric}, 4)]
+                return client.hybrid_search(name, requests, RRFRanker(), limit=4, **context)
+            if action in ["query_iterator", "search_iterator"]:
+                iterator = None
+                try:
+                    if action == "query_iterator":
+                        iterator = client.query_iterator(name, filter="id >= 0", batch_size=1, **context)
+                    else:
+                        iterator = client.search_iterator(name, [rows[0]["vector"]], batch_size=1, **context)
+                    return iterator.next()
+                finally:
+                    if iterator is not None:
+                        iterator.close()
+            if action == "delete":
+                return client.delete(name, ids=[1], **context)
+            return getattr(client, action)(name, [{**rows[0], "id": 5}], **context)
+
+        for action in ALL_ACTIONS:
+            if action != granted:
+                with pytest.raises(MilvusException, match="no applicable"):
+                    run(action)
+        self._check_rows(client, name, rows, skip_rls=True)
+        assert run(granted)
+        expected = rows[1:] if granted == "delete" else rows
+        if granted in ["insert", "upsert"]:
+            expected = rows + [{**rows[0], "id": 5}]
+        self._check_rows(client, name, expected, skip_rls=True)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("operation", ["insert", "upsert"])
+    def test_rls_combined_batch_checks(self, rls_client, operation):
+        """
+        target: per-row permissive OR and independent restrictive AND write checks
+        method: write rows granted by different policies, then violate each restriction in a mixed batch
+        expected: the valid batch persists; neither rejected batch changes any row
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        for policy, kind, expr in [
+            ("alice", "permissive", "owner == 'alice'"),
+            ("bob", "permissive", "owner == 'bob'"),
+            ("active", "restrictive", "active == true"),
+            ("department", "restrictive", "department == 'eng'"),
+        ]:
+            client.create_row_policy(name, policy, kind, ["insert", "upsert"], expr, expr, timeout=30)
+        accepted = [{**rows[0], "id": 10}, {**rows[1], "id": 11}]
+        getattr(self, operation)(client, name, accepted, rls_principal="alice")
+        expected = rows + accepted
+        self._check_rows(client, name, expected, skip_rls=True)
+        for violation in [{"active": False}, {"department": "sales"}]:
+            batch = [{**accepted[0], "note": "must_not_commit"}, {**accepted[1], "id": 12, **violation}]
+            getattr(self, operation)(
+                client,
+                name,
+                batch,
+                rls_principal="alice",
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_msg: "RLS"},
+            )
+            self._check_rows(client, name, expected, skip_rls=True)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("tags", [{}, {"department": 1}, {"department": ["eng"]}])
+    def test_rls_not_unbound_tags_deny_reads_and_writes(self, rls_client, tags):
+        """
+        target: NOT cannot grant access through a missing or incompatible tag
+        method: query, insert and partial upsert with an unbound negated predicate
+        expected: no visible rows, rejected writes and unchanged stored values
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        expr = "not (department == $current_principal_tags['department'])"
+        client.create_row_policy(
+            name, "department", "permissive", ["query", "insert", "upsert"], expr, expr, timeout=30
+        )
+        if tags:
+            client.set_rls_principal_tags(name, "alice", tags, timeout=30)
+        self._check_rows(client, name, [], rls_principal="alice")
+        self.insert(
+            client,
+            name,
+            [{**rows[0], "id": 5}],
+            rls_principal="alice",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_msg: "RLS"},
+        )
+        self.upsert(
+            client,
+            name,
+            [{"id": 1, "note": "must_not_commit"}],
+            partial_update=True,
+            rls_principal="alice",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_msg: "RLS"},
+        )
+        self._check_rows(client, name, rows, skip_rls=True)
+        client.set_rls_principal_tags(name, "alice", {"department": "sales"}, timeout=30)
+        self._check_rows(client, name, rows[:2], rls_principal="alice")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("operation", ["alter", "drop"])
+    def test_rls_forced_atomic_disable_preserves_metadata(self, rls_client, operation):
+        """
+        target: legal transition out of forced enforcement
+        method: disable or remove both properties in one request, then re-enable
+        expected: unrestricted reads while disabled, retained metadata and restored owner filtering
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client)
+        client.set_rls_principal_tags(name, "alice", {"department": "eng"}, timeout=30)
+        policies = client.list_row_policies(name, timeout=30)
+        self.alter_collection_properties(client, name, {"rls.force": True})
+        self._check_rows(client, name, rows[::2], rls_principal="alice")
+        if operation == "alter":
+            self.alter_collection_properties(client, name, {"rls.enabled": False, "rls.force": False})
+        else:
+            self.drop_collection_properties(client, name, ["rls.enabled", "rls.force"])
+        self._check_rows(client, name, rows)
+        assert client.list_row_policies(name, timeout=30) == policies
+        assert client.get_rls_principal_tags(name, "alice", timeout=30) == {"department": "eng"}
+        self.alter_collection_properties(client, name, {"rls.enabled": True})
+        self._check_stored(client, name, rows)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rls_concurrent_tag_updates_preserve_keys(self, rls_client):
+        """
+        target: concurrent incremental updates of one principal binding
+        method: release eight writers together, each adding a different key
+        expected: all keys and the existing policy tag survive with unchanged authorization
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        expr = "department == $current_principal_tags['department']"
+        client.create_row_policy(name, "department", "permissive", "query", expr, timeout=30)
+        client.set_rls_principal_tags(name, "alice", {"department": "eng"}, timeout=30)
+        self._check_rows(client, name, rows[:2], rls_principal="alice")
+        barrier = threading.Barrier(8)
+
+        def update(number):
+            barrier.wait(timeout=30)
+            client.set_rls_principal_tags(name, "alice", {f"key_{number}": number}, timeout=30)
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(update, range(8)))
+        assert client.get_rls_principal_tags(name, "alice", timeout=30) == {
+            "department": "eng",
+            **{f"key_{number}": number for number in range(8)},
+        }
+        self._check_rows(client, name, rows[:2], rls_principal="alice")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rls_check_and_action_replacement(self, rls_client):
+        """
+        target: warm write decisions after CHECK-only and action-list replacement
+        method: authorize a write, replace CHECK, then replace insert with query
+        expected: old write permissions disappear and only the new action is granted
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        client.create_row_policy(name, "writer", "permissive", "insert", check_expr=OWNER, timeout=30)
+        first = {**rows[0], "id": 5}
+        self.insert(client, name, [first], rls_principal="alice")
+        client.update_row_policy(name, "writer", "permissive", "insert", check_expr="owner == 'bob'", timeout=30)
+        self.insert(
+            client,
+            name,
+            [{**first, "id": 6}],
+            rls_principal="alice",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_msg: "RLS"},
+        )
+        second = {**rows[1], "id": 6}
+        self.insert(client, name, [second], rls_principal="alice")
+        client.update_row_policy(name, "writer", "permissive", "query", OWNER, timeout=30)
+        self.insert(
+            client,
+            name,
+            [{**second, "id": 7}],
+            rls_principal="alice",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_msg: "no applicable"},
+        )
+        self._check_rows(client, name, rows[::2] + [first], rls_principal="alice")
+        self._check_rows(client, name, rows + [first, second], skip_rls=True)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("vector_type", VECTOR_TYPES, ids=lambda value: value.name)
@@ -857,7 +1394,7 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
             client.get_rls_principal_tags(name, "alice", timeout=30)
         self._check_rows(client, name, rows[::2], rls_principal="alice")
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "tags",
         [
