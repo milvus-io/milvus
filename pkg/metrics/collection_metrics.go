@@ -127,11 +127,18 @@ func newCardinalityMetricLabels(labelNames, aggregateLabelNames []string) cardin
 	return labels
 }
 
-func (l cardinalityMetricLabels) normalizeValues(values []string) []string {
+// maxInlineLabelValues is the label count normalized without a heap
+// allocation; wrapped metrics have fewer labels than this.
+const maxInlineLabelValues = 8
+
+// normalizeValues returns values with the aggregate labels collapsed, written
+// into buf so the caller can keep it on the stack. values itself is never
+// modified, because callers may share it with other metric writes.
+func (l cardinalityMetricLabels) normalizeValues(buf []string, values []string) []string {
 	if !IsCollectionLevelMetricsAggregateMode() {
 		return values
 	}
-	normalized := slices.Clone(values)
+	normalized := append(buf[:0], values...)
 	for _, index := range l.indexes {
 		if index < len(normalized) {
 			normalized[index] = AllLabel
@@ -226,7 +233,8 @@ func (v *CardinalityCounterVec) Reset() {
 }
 
 func (v *CardinalityCounterVec) GetMetricWithLabelValues(values ...string) (prometheus.Counter, error) {
-	return v.vec.GetMetricWithLabelValues(v.labels.normalizeValues(values)...)
+	var buf [maxInlineLabelValues]string
+	return v.vec.GetMetricWithLabelValues(v.labels.normalizeValues(buf[:0], values)...)
 }
 
 func (v *CardinalityCounterVec) WithLabelValues(values ...string) prometheus.Counter {
@@ -312,7 +320,8 @@ func (v *CardinalityHistogramVec) Reset() {
 }
 
 func (v *CardinalityHistogramVec) GetMetricWithLabelValues(values ...string) (prometheus.Observer, error) {
-	return v.vec.GetMetricWithLabelValues(v.labels.normalizeValues(values)...)
+	var buf [maxInlineLabelValues]string
+	return v.vec.GetMetricWithLabelValues(v.labels.normalizeValues(buf[:0], values)...)
 }
 
 func (v *CardinalityHistogramVec) WithLabelValues(values ...string) prometheus.Observer {
@@ -459,7 +468,8 @@ func (v *CardinalityGaugeVec) GetMetricWithLabelValues(values ...string) (promet
 		}
 		return disabledCollectionGauge, nil
 	}
-	return v.vec.GetMetricWithLabelValues(v.labels.normalizeValues(values)...)
+	var buf [maxInlineLabelValues]string
+	return v.vec.GetMetricWithLabelValues(v.labels.normalizeValues(buf[:0], values)...)
 }
 
 func (v *CardinalityGaugeVec) WithLabelValues(values ...string) prometheus.Gauge {

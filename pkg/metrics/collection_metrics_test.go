@@ -245,6 +245,20 @@ func TestCollectionGaugeVecAggregatePolicies(t *testing.T) {
 	})
 }
 
+func TestCollectionMetricsKeepCallerLabelValues(t *testing.T) {
+	setCollectionMetricsModeForTest(t, CollectionLevelMetricsModeAggregate)
+	counter := newCollectionCounterVec(
+		prometheus.CounterOpts{Name: "test_collection_counter_caller_labels", Help: "test"},
+		[]string{nodeIDLabelName, databaseLabelName, collectionName},
+	)
+
+	labels := []string{"node", "db", "collection"}
+	counter.WithLabelValues(labels...).Inc()
+
+	assert.Equal(t, []string{"node", "db", "collection"}, labels)
+	assert.Equal(t, float64(1), testutil.ToFloat64(counter.WithLabelValues("node", "db", AllLabel)))
+}
+
 func TestCollectionGaugeVecSuppressed(t *testing.T) {
 	sum := newCollectionGaugeVec(
 		prometheus.GaugeOpts{Name: "test_collection_gauge_suppressed_sum", Help: "test"},
