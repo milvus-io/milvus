@@ -26,6 +26,7 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/OpContext.h"
 #include "common/Utils.h"
 #include "index/Families.h"
 #include "index/Meta.h"
@@ -251,7 +252,11 @@ HybridInternalIndexTypeToIndexType(ScalarIndexType type) {
 // preserves the historical fallback to the generic HYBRID estimate.
 IndexType
 ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
-                             const storage::FileManagerContext& context) {
+                             const storage::FileManagerContext& context,
+                             milvus::OpContext* op_ctx) {
+    const auto token =
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{};
+    storage::ThrowIfCancelled(token, "inspect legacy hybrid metadata");
     if (!context.Valid()) {
         return {};
     }
@@ -265,8 +270,12 @@ ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
     }
     try {
         storage::MemFileManagerImpl manager(context);
-        auto data = manager.LoadIndexToMemory(
-            {*file}, proto::common::LoadPriority::HIGH);
+        const auto priority =
+            op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
+                ? proto::common::LoadPriority::LOW
+                : proto::common::LoadPriority::HIGH;
+        auto data = manager.LoadIndexToMemory({*file}, priority, token);
+        storage::ThrowIfCancelled(token, "inspect legacy hybrid metadata");
         BinarySet binary_set;
         AssembleIndexDatas(data, binary_set);
         const auto type = binary_set.GetByName(INDEX_TYPE);
@@ -281,6 +290,7 @@ ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
         return HybridInternalIndexTypeToIndexType(
             static_cast<ScalarIndexType>(type->data[0]));
     } catch (const std::exception& e) {
+        storage::ThrowIfCancelled(token, "inspect legacy hybrid metadata");
         LOG_WARN(
             "failed to resolve legacy hybrid internal index type from {}, "
             "fallback to hybrid estimate: {}",
@@ -550,7 +560,8 @@ LegacyScalarLoadResource(DataType field_type,
                          bool mmap_enable,
                          int64_t num_rows,
                          const std::vector<std::string>& paths,
-                         const storage::FileManagerContext& context) {
+                         const storage::FileManagerContext& context,
+                         milvus::OpContext* op_ctx) {
     auto estimate = [&]() -> folly::coro::Task<LoadResourceRequest> {
         auto params = index_params;
         auto type = params.at(INDEX_TYPE);
@@ -558,6 +569,7 @@ LegacyScalarLoadResource(DataType field_type,
             type == HYBRID_INDEX_TYPE || type == INVERTED_INDEX_TYPE ||
             type == NGRAM_INDEX_TYPE || type == RTREE_INDEX_TYPE;
         storage::LoadOptions options;
+        options.op_ctx = op_ctx;
         options.params = ParseConfigFromIndexParams(params);
         auto source = co_await storage::V1RemoteSource::OpenAsync(
             context,
@@ -682,7 +694,9 @@ LegacyScalarLoadResource(DataType field_type,
     return folly::coro::blockingWait(folly::coro::co_withExecutor(
         storage::ResolveAsyncLoadExecutor(
             storage::LocalFileIOPool::GetInstance().GetExecutor(),
-            proto::common::LoadPriority::HIGH),
+            op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
+                ? proto::common::LoadPriority::LOW
+                : proto::common::LoadPriority::HIGH),
         estimate()));
 }
 }  // namespace
@@ -726,7 +740,10 @@ LegacyVectorFileLoadResource(LoadResourceRequest request,
     return folly::coro::blockingWait(folly::coro::co_withExecutor(
         storage::ResolveAsyncLoadExecutor(
             storage::LocalFileIOPool::GetInstance().GetExecutor(),
-            proto::common::LoadPriority::HIGH),
+            options.op_ctx &&
+                    options.op_ctx->runtime_load_priority.value_or(0) != 0
+                ? proto::common::LoadPriority::LOW
+                : proto::common::LoadPriority::HIGH),
         estimate()));
 }
 
@@ -739,7 +756,11 @@ ScalarIndexFileLoadResource(
     int64_t num_rows,
     const std::vector<std::string>& index_files,
     const storage::FileManagerContext& context,
-    storage::ArtifactStorageNamespace storage_namespace) {
+    storage::ArtifactStorageNamespace storage_namespace,
+    milvus::OpContext* op_ctx) {
+    storage::ThrowIfCancelled(
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{},
+        "estimate scalar index resources");
     const auto version =
         GetValueFromConfig<int32_t>(ParseConfigFromIndexParams(index_params),
                                     SCALAR_INDEX_ENGINE_VERSION)
@@ -754,12 +775,14 @@ ScalarIndexFileLoadResource(
                                              mmap_enable,
                                              num_rows,
                                              index_files,
-                                             context),
+                                             context,
+                                             op_ctx),
                     std::nullopt};
         }
         auto resolved_params = index_params;
         if (resolved_params.at(INDEX_TYPE) == HYBRID_INDEX_TYPE) {
-            auto type = ResolveLegacyHybridIndexType(index_files, context);
+            auto type =
+                ResolveLegacyHybridIndexType(index_files, context, op_ctx);
             if (!type.empty()) {
                 resolved_params[INDEX_TYPE] = std::move(type);
             }
@@ -773,7 +796,7 @@ ScalarIndexFileLoadResource(
                 std::nullopt};
     }
     auto reader =
-        InspectPackedIndexFile(index_files, context, storage_namespace);
+        InspectPackedIndexFile(index_files, context, storage_namespace, op_ctx);
     return PackedScalarIndexLoadResource(field_type,
                                          index_size,
                                          index_params,

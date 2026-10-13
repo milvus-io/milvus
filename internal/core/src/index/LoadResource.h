@@ -62,6 +62,7 @@ struct ScalarIndexLoadResources {
     std::optional<cachinglayer::LoadingOverheadConfig> overhead;
 };
 
+// op_ctx is borrowed only through metadata inspection; estimates retain no context.
 ScalarIndexLoadResources
 ScalarIndexFileLoadResource(
     DataType field_type,
@@ -72,7 +73,8 @@ ScalarIndexFileLoadResource(
     const std::vector<std::string>& index_files,
     const storage::FileManagerContext& context,
     storage::ArtifactStorageNamespace storage_namespace =
-        storage::ArtifactStorageNamespace::Index);
+        storage::ArtifactStorageNamespace::Index,
+    milvus::OpContext* op_ctx = nullptr);
 
 /**
  * @brief Estimate packed scalar loading resources from inspected metadata.

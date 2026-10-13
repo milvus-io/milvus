@@ -1432,7 +1432,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     // use cache layer to load vector/scalar index
     auto translator = std::make_unique<
         milvus::segcore::storagev1translator::SealedIndexTranslator>(
-        load_index_info, ctx, file_manager_context, config);
+        load_index_info, ctx, file_manager_context, config, op_ctx);
     load_index_info->index_family = translator->Family();
     load_index_info->index_value_type = translator->ValueType();
     load_index_info->index_caps = translator->Caps();

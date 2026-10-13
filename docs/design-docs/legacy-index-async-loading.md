@@ -9,6 +9,12 @@ an entire cache cell, including metadata inspection and resource estimation.
 This change does not add an asynchronous writer or change the persisted format.
 BSON/JSON stats and the legacy TextMatch translator are outside this rollout.
 
+Translator construction borrows the loading request's `OpContext` for metadata
+inspection and file-aware estimates, including cancellation and runtime priority.
+Already-issued I/O drains before cancellation is reported; synchronous I/O cannot
+be interrupted while in flight. Construction retains no request context, and each
+subsequent cache-cell load binds its own context.
+
 ## Read path
 
 `LoaderEntry::Load` opens the logical legacy directory with

@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstring>
+#include <thread>
 #include <filesystem>
 #include <arrow/filesystem/localfs.h>
 #include <roaring/roaring.hh>
@@ -24,6 +25,7 @@
 #include "index/LoadResource.h"
 #include "index/Families.h"
 #include "index/Meta.h"
+#include "monitor/Monitor.h"
 #include "index/scalar/spatial/RTreeIndexReader.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/AsyncLoadExecutor.h"
@@ -31,6 +33,7 @@
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/Util.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
@@ -107,6 +110,10 @@ class RecordingOpenFileSystem : public arrow::fs::LocalFileSystem {
     explicit RecordingOpenFileSystem(std::shared_ptr<arrow::fs::FileSystem> fs)
         : fs_(std::move(fs)) {
     }
+    std::string
+    type_name() const override {
+        return injected_input ? "metadata_test" : "local";
+    }
     arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenInputFile(const std::string& path) override {
         ++sync_opens;
@@ -121,10 +128,13 @@ class RecordingOpenFileSystem : public arrow::fs::LocalFileSystem {
     int sync_opens{0};
     int async_opens{0};
     std::shared_ptr<milvus::test::AsyncTrackingRandomAccessFile> input;
+    std::shared_ptr<arrow::io::RandomAccessFile> injected_input;
 
  private:
     arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenTrackedFile(const std::string& path) {
+        if (injected_input)
+            return injected_input;
         ARROW_ASSIGN_OR_RAISE(auto file, fs_->OpenInputFile(path));
         ARROW_ASSIGN_OR_RAISE(const auto size, file->GetSize());
         ARROW_ASSIGN_OR_RAISE(auto bytes, file->ReadAt(0, size));
@@ -135,7 +145,237 @@ class RecordingOpenFileSystem : public arrow::fs::LocalFileSystem {
 
     std::shared_ptr<arrow::fs::FileSystem> fs_;
 };
+
+class MetadataChunkManager : public storage::LocalChunkManager {
+ public:
+    using LocalChunkManager::LocalChunkManager;
+    uint64_t
+    Size(const std::string& path) override {
+        ++size_calls;
+        return LocalChunkManager::Size(path);
+    }
+    uint64_t
+    Read(const std::string& path, void* data, uint64_t bytes) override {
+        const auto count = LocalChunkManager::Read(path, 0, data, bytes);
+        if (after_read)
+            after_read();
+        return count;
+    }
+    std::atomic<size_t> size_calls{0};
+    std::function<void()> after_read;
+};
 }  // namespace
+
+class IndexMetadataContextTest : public ::testing::Test {
+ protected:
+    segcore::LoadIndexInfo
+    Persist(bool packed) {
+        segcore::LoadIndexInfo info{};
+        info.field_type = DataType::INT64;
+        info.element_type = DataType::NONE;
+        info.field_id = 101;
+        info.num_rows = 1;
+        info.index_engine_version = 3;
+        info.warmup_policy = "disable";
+        info.index_params = {{INDEX_TYPE, HYBRID_INDEX_TYPE},
+                             {SCALAR_INDEX_ENGINE_VERSION, packed ? "3" : "1"}};
+        if (packed) {
+            info.index_files = {fixture.WritePacked(
+                {{"index_data", std::vector<uint8_t>(8)}},
+                {{INDEX_TYPE,
+                  static_cast<uint8_t>(ScalarIndexType::STLSORT)}})};
+            info.index_size = fixture.Size(info.index_files.front());
+        } else {
+            storage::MemFileManagerImpl manager(fixture.context);
+            BinarySet payload;
+            payload.Append(INDEX_TYPE,
+                           std::shared_ptr<uint8_t[]>(new uint8_t[1]{
+                               static_cast<uint8_t>(ScalarIndexType::STLSORT)}),
+                           1);
+            payload.Append(
+                "index_data", std::shared_ptr<uint8_t[]>(new uint8_t[8]()), 8);
+            EXPECT_TRUE(manager.AddFile(payload));
+            for (const auto& [path, size] :
+                 manager.GetRemotePathsToFileSize()) {
+                info.index_files.push_back(path);
+                info.index_size += size;
+            }
+        }
+        return info;
+    }
+
+    static void
+    ExpectCancelled(const std::function<void()>& run) {
+        try {
+            run();
+            FAIL() << "expected metadata cancellation";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+    }
+
+    void
+    Construct(const segcore::LoadIndexInfo& info,
+              OpContext& ctx,
+              bool resource_only = false) {
+        if (resource_only) {
+            ScalarIndexFileLoadResource(
+                info.field_type,
+                info.index_size,
+                info.index_params,
+                false,
+                info.num_rows,
+                info.index_files,
+                fixture.context,
+                storage::ArtifactStorageNamespace::Index,
+                &ctx);
+            return;
+        }
+        Config config(info.index_params);
+        config["load_priority"] = 1;
+        segcore::storagev1translator::SealedIndexTranslator translator(
+            &info,
+            tracer::TraceContext{},
+            fixture.context,
+            std::move(config),
+            &ctx);
+    }
+
+    ResourceFixture fixture;
+};
+
+TEST_F(IndexMetadataContextTest, CancelledConstructionDoesNotOpenFiles) {
+    for (bool packed : {false, true}) {
+        const auto info = Persist(packed);
+        auto fs = std::make_shared<RecordingOpenFileSystem>(fixture.context.fs);
+        fixture.context.fs = fs;
+        auto chunks =
+            std::make_shared<MetadataChunkManager>(fixture.root->Path());
+        fixture.context.chunkManagerPtr = chunks;
+        for (bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << packed << "/" << async);
+            fixture.context.use_async_load = async;
+            folly::CancellationSource cancel;
+            cancel.requestCancellation();
+            OpContext ctx(cancel.getToken());
+            ExpectCancelled([&] { Construct(info, ctx); });
+            ExpectCancelled([&] { Construct(info, ctx, true); });
+            EXPECT_EQ(fs->sync_opens + fs->async_opens, 0);
+            EXPECT_EQ(chunks->size_calls.load(), 0);
+        }
+    }
+}
+
+TEST_F(IndexMetadataContextTest, LowPriorityMetadataWaitIsCancellable) {
+    auto& budget = storage::LoadAdmissionController::GetInstance();
+    const auto previous_slots = budget.CapacitySlots();
+    auto restore =
+        folly::makeGuard([&] { budget.SetCapacitySlots(previous_slots); });
+    budget.SetCapacitySlots(1);
+    for (bool packed : {false, true}) {
+        const auto info = Persist(packed);
+        for (bool resource_only : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << packed << "/" << resource_only);
+            fixture.context.use_async_load = true;
+            auto held = folly::coro::blockingWait(budget.AcquireAsync(
+                {0, 1}, storage::LoadAdmissionPriority::High));
+            folly::CancellationSource cancel;
+            OpContext ctx(cancel.getToken());
+            ctx.runtime_load_priority = 1;
+            if (!resource_only)
+                ctx.runtime_load_priority.reset();
+            const auto original_priority = ctx.runtime_load_priority;
+            auto task = std::async(std::launch::async, [&] {
+                Construct(info, ctx, resource_only);
+            });
+            auto release = folly::makeGuard([&] {
+                cancel.requestCancellation();
+                held.Release();
+                task.wait();
+            });
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            do {
+                budget.UpdateMetrics();
+                if (monitor::internal_load_admission_pending_requests_low
+                            .Value() +
+                        monitor::internal_load_admission_pending_requests_high
+                            .Value() >
+                    0)
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            } while (std::chrono::steady_clock::now() < deadline);
+            EXPECT_EQ(
+                monitor::internal_load_admission_pending_requests_low.Value(),
+                1);
+            EXPECT_EQ(
+                monitor::internal_load_admission_pending_requests_high.Value(),
+                0);
+            cancel.requestCancellation();
+            EXPECT_EQ(task.wait_for(std::chrono::seconds(2)),
+                      std::future_status::ready);
+            held.Release();
+            release.dismiss();
+            ExpectCancelled([&] { task.get(); });
+            EXPECT_EQ(ctx.runtime_load_priority, original_priority);
+        }
+    }
+}
+
+TEST_F(IndexMetadataContextTest, SyncHybridCancellationDoesNotFallBack) {
+    const auto info = Persist(false);
+    fixture.context.use_async_load = false;
+    auto chunks = std::make_shared<MetadataChunkManager>(fixture.root->Path());
+    fixture.context.chunkManagerPtr = chunks;
+    for (bool resource_only : {false, true}) {
+        folly::CancellationSource cancel;
+        OpContext ctx(cancel.getToken());
+        chunks->after_read = [&] { cancel.requestCancellation(); };
+        ExpectCancelled([&] { Construct(info, ctx, resource_only); });
+        chunks->after_read = {};
+    }
+}
+
+TEST_F(IndexMetadataContextTest, AsyncCancellationDrainsIssuedMetadataRead) {
+    const auto original_fs = fixture.context.fs;
+    for (bool packed : {false, true}) {
+        SCOPED_TRACE(packed);
+        const auto info = Persist(packed);
+        fixture.context.use_async_load = true;
+        // The legacy selector is the first payload read during family selection.
+        auto path = info.index_files.front();
+        if (!packed) {
+            for (const auto& file : info.index_files)
+                if (std::filesystem::path(file).filename() == INDEX_TYPE)
+                    path = file;
+        }
+        auto file = fixture.context.fs->OpenInputFile(path).ValueOrDie();
+        const auto bytes =
+            file->ReadAt(0, file->GetSize().ValueOrDie()).ValueOrDie();
+        auto input = std::make_shared<milvus::test::ControlledDirectReadFile>(
+            std::vector<uint8_t>(bytes->data(), bytes->data() + bytes->size()));
+        input->SetAutoComplete(false);
+        auto fs = std::make_shared<RecordingOpenFileSystem>(fixture.context.fs);
+        fs->injected_input = input;
+        fixture.context.fs = fs;
+        folly::CancellationSource cancel;
+        OpContext ctx(cancel.getToken());
+        auto task =
+            std::async(std::launch::async, [&] { Construct(info, ctx); });
+        const bool started = input->WaitForCallCount(1);
+        EXPECT_TRUE(started);
+        cancel.requestCancellation();
+        EXPECT_EQ(task.wait_for(std::chrono::milliseconds(20)),
+                  std::future_status::timeout);
+        input->SetAutoComplete(true);
+        if (started)
+            input->Complete(0);
+        ExpectCancelled([&] { task.get(); });
+        EXPECT_EQ(input->DirectReadCalls().size(), 1);
+        fixture.context.fs = original_fs;
+    }
+}
 
 TEST(LegacyLoadResourceTest, SegmentMetadataPreservesFileAwareEstimates) {
     ResourceFixture fixture;

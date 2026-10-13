@@ -72,12 +72,14 @@ RunPackedIndexLoad(PackedIndexSource& source,
  * payloads.
  * @note Blocking family-selection boundary; stream opening and metadata reads
  * follow the pinned mode, or the global configuration when no mode is pinned.
+ * @param op_ctx Borrowed during inspection for cancellation and load priority.
  * @return A packed source retaining the selected reader.
  */
 PackedIndexSource
 InspectPackedIndexFile(const std::vector<std::string>& files,
                        const storage::FileManagerContext& context,
                        storage::ArtifactStorageNamespace storage_namespace =
-                           storage::ArtifactStorageNamespace::Index);
+                           storage::ArtifactStorageNamespace::Index,
+                       milvus::OpContext* op_ctx = nullptr);
 
 }  // namespace milvus::index
