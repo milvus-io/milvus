@@ -25,6 +25,9 @@ func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType sche
 		if !lo.Contains(validSTLSORTJSONCastTypes, castType) {
 			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported for STL_SORT index", castType)
 		}
+		if err := checkJSONCastFunction(castType, params); err != nil {
+			return err
+		}
 		if _, exist := params[common.JSONPathKey]; !exist {
 			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
 		}
