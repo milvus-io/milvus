@@ -60,7 +60,7 @@ func NewFFISegmentReader(
 	if storageConfig == nil {
 		return nil, merr.WrapErrStorageMsg("storageConfig must not be nil")
 	}
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return nil, err
 	}
@@ -80,14 +80,14 @@ func NewFFISegmentReader(
 	defer cleanupConfig()
 	cNeededColumns, numColumns, cleanupColumns := buildCSegmentReaderColumns(neededColumns)
 	defer cleanupColumns()
-	cBasePath := C.CString(basePath)
+	cBasePath := C.CString(manifest.BasePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var handle C.LoonSegmentReaderHandle
 	result := C.loon_segment_reader_open(
 		cBasePath,
-		C.int64_t(version),
-		C.int64_t(-1), // manifest size unknown
+		C.int64_t(manifest.ManifestVersion),
+		C.int64_t(manifest.Size),
 		cSchema,
 		cNeededColumns,
 		numColumns,

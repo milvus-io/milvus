@@ -1515,6 +1515,7 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	cConfig.schema_length = C.int64_t(len(schemaBlob))
 
 	cConfig.read_version = C.int64_t(config.ReadVersion)
+	cConfig.read_manifest_size = C.int64_t(config.ReadManifestSize)
 	cConfig.retry_limit = C.uint32_t(3)
 	writerFormat := config.WriterFormat
 	if writerFormat != "" {
@@ -1683,7 +1684,8 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	if idx := strings.Index(rawPath, "/_metadata/"); idx >= 0 {
 		basePath = rawPath[:idx]
 	}
-	manifestPath := packed.MarshalManifestPath(basePath, committedVersion)
+	manifestPath := packed.CommittedManifestPath(basePath, committedVersion, int64(cResult.manifest_size),
+		paramtable.Get().CommonCfg.StorageType.GetValue())
 	fieldNullCounts := make(map[int64]int64, int(cResult.num_field_stats))
 	if cResult.num_field_stats > 0 {
 		fieldIDs := unsafe.Slice(cResult.field_ids, int(cResult.num_field_stats))

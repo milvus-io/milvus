@@ -110,7 +110,7 @@ func CommitManifestUpdates(baseManifestPath string,
 	if updates.isEmpty() {
 		return baseManifestPath, nil
 	}
-	basePath, baseVersion, err := UnmarshalManifestPath(baseManifestPath)
+	baseManifest, err := ParseManifestPath(baseManifestPath)
 	if err != nil {
 		return "", merr.WrapErrDataIntegrity(err, "parse base manifest path %q", baseManifestPath)
 	}
@@ -133,22 +133,14 @@ func CommitManifestUpdates(baseManifestPath string,
 	}
 	defer C.loon_properties_free(cProperties)
 
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
 	// Use OVERWRITE for the whole bundle: stats updates rely on
 	// overwrite-on-key semantics (loon_transaction_update_stat replaces
 	// existing entries with the same key), while column-group appends and
 	// delta-log adds don't collide on a key in the first place. A single
 	// resolve mode keeps the API simple and matches the prior
 	// AddStatsToManifest behavior.
-	var handle C.LoonTransactionHandle
-	res := C.loon_transaction_open(cBasePath, cProperties,
-		C.int64_t(baseVersion),
-		C.int64_t(-1), // manifest size unknown
-		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
-		getRetryLimit(), &handle)
-	if err := HandleLoonFFIResult(res); err != nil {
+	handle, err := openTransaction(baseManifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+	if err != nil {
 		// HandleLoonFFIResult returns a bare ErrLoonTransient chain; give it the
 		// storage wire code like transaction.go does, instead of leaking 65535.
 		return "", merr.WrapErrStorage(err, "commit manifest begin")
@@ -159,12 +151,11 @@ func CommitManifestUpdates(baseManifestPath string,
 		return "", err
 	}
 
-	var commitVersion C.int64_t
-	res = C.loon_transaction_commit(handle, &commitVersion, nil)
-	if err := HandleLoonFFIResult(res); err != nil {
+	manifestPath, err := commitTransaction(handle, baseManifest.BasePath, storageConfig)
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "commit manifest commit")
 	}
-	return MarshalManifestPath(basePath, int64(commitVersion)), nil
+	return manifestPath, nil
 }
 
 // applyManifestUpdates stages every operation in updates onto the loon

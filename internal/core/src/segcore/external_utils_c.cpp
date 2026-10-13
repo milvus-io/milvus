@@ -42,9 +42,9 @@
 #include "milvus-storage/ffi_internal/bridge.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
-#include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/util.h"
 #include "common/EasyAssert.h"
 
 namespace {
@@ -66,21 +66,6 @@ ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
     ThrowInfo(error_code, "{}: {}", context, detail);
 }
 
-struct TransactionGuard {
-    LoonTransactionHandle handle = 0;
-
-    ~TransactionGuard() {
-        if (handle != 0) {
-            loon_transaction_destroy(handle);
-        }
-    }
-
-    TransactionGuard() = default;
-    TransactionGuard(const TransactionGuard&) = delete;
-    TransactionGuard&
-    operator=(const TransactionGuard&) = delete;
-};
-
 struct ManifestGuard {
     LoonManifest* manifest = nullptr;
 
@@ -99,24 +84,16 @@ struct ManifestGuard {
 std::shared_ptr<milvus_storage::api::ColumnGroups>
 ReadManifestColumnGroupsWithFFI(const char* manifest_path,
                                 const LoonProperties* properties) {
-    auto j = nlohmann::json::parse(manifest_path);
-    auto base_path = j.at("base_path").get<std::string>();
-    auto version = j.at("ver").get<int64_t>();
-
-    TransactionGuard transaction;
-    ThrowIfFFIError(loon_transaction_open(base_path.c_str(),
-                                          properties,
-                                          version,
-                                          /*manifest_size=*/-1,
-                                          LOON_TRANSACTION_RESOLVE_FAIL,
-                                          1,
-                                          &transaction.handle),
-                    "open external segment manifest transaction");
+    auto parsed = ParseLoonManifestPath(manifest_path);
+    if (!parsed.has_value()) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Invalid manifest path: {}",
+                  manifest_path);
+    }
 
     ManifestGuard manifest;
-    ThrowIfFFIError(
-        loon_transaction_get_manifest(transaction.handle, &manifest.manifest),
-        "get external segment manifest");
+    ThrowIfFFIError(ReadLoonManifest(*parsed, properties, &manifest.manifest),
+                    "read external segment manifest");
     if (manifest.manifest == nullptr) {
         ThrowInfo(milvus::ErrorCode::UnexpectedError,
                   "{}",

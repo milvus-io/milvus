@@ -897,7 +897,7 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.talon_enable_for_external_table};
 }
 
-std::optional<std::pair<std::string, int64_t>>
+std::optional<LoonManifestPath>
 ParseLoonManifestPath(const std::string& path) {
     auto j = json::parse(path, nullptr, /*allow_exceptions=*/false);
     if (j.is_discarded() || !j.is_object()) {
@@ -909,20 +909,46 @@ ParseLoonManifestPath(const std::string& path) {
         !ver->is_number_integer()) {
         return std::nullopt;
     }
-    return std::make_pair(base_path->get<std::string>(), ver->get<int64_t>());
+    LoonManifestPath manifest_path{base_path->get<std::string>(),
+                                   ver->get<int64_t>()};
+    if (auto size = j.find("size");
+        size != j.end() && size->is_number_integer()) {
+        manifest_path.size = size->get<int64_t>();
+    }
+    return manifest_path;
+}
+
+LoonFFIResult
+ReadLoonManifest(const LoonManifestPath& manifest_path,
+                 const LoonProperties* properties,
+                 LoonManifest** out_manifest) {
+    LoonTransactionHandle handle = 0;
+    auto result = loon_transaction_open(manifest_path.base_path.c_str(),
+                                        properties,
+                                        manifest_path.version,
+                                        manifest_path.size,
+                                        LOON_TRANSACTION_RESOLVE_FAIL,
+                                        1,
+                                        &handle);
+    if (loon_ffi_is_success(&result) == 0) {
+        return result;
+    }
+    loon_ffi_free_result(&result);
+    result = loon_transaction_get_manifest(handle, out_manifest);
+    loon_transaction_destroy(handle);
+    return result;
 }
 
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<milvus_storage::api::Properties>& properties) {
-    auto revision = ParseLoonManifestPath(path);
-    if (!revision.has_value()) {
+    auto manifest_path = ParseLoonManifestPath(path);
+    if (!manifest_path.has_value()) {
         ThrowInfo(milvus::ErrorCode::DataFormatBroken,
                   "Invalid manifest path: {}",
                   path);
     }
-    const auto& [base_path, version] = *revision;
 
     auto fs_result =
         milvus_storage::FilesystemCache::getInstance().get(*properties);
@@ -937,9 +963,9 @@ GetLoonManifest(
     auto transaction_result =
         milvus_storage::api::transaction::Transaction::Open(
             fs,
-            base_path,
-            version,
-            /*manifest_size=*/-1,
+            manifest_path->base_path,
+            manifest_path->version,
+            manifest_path->size,
             milvus_storage::api::transaction::FailResolver,
             1);
     if (!transaction_result.ok()) {
@@ -967,7 +993,8 @@ IsSameLoonManifestPath(const std::string& lhs, const std::string& rhs) {
     auto lhs_revision = ParseLoonManifestPath(lhs);
     auto rhs_revision = ParseLoonManifestPath(rhs);
     return lhs_revision.has_value() && rhs_revision.has_value() &&
-           *lhs_revision == *rhs_revision;
+           lhs_revision->base_path == rhs_revision->base_path &&
+           lhs_revision->version == rhs_revision->version;
 }
 
 // ==================== C-ABI: external spec injection ====================

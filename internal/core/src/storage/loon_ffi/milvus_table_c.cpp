@@ -24,17 +24,14 @@
 #include <utility>
 #include <vector>
 
-#include <nlohmann/json.hpp>
-
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_internal/ffi_error_code.h"
 #include "milvus-storage/ffi_internal/result.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/loon_ffi/loon_error_code.h"
+#include "storage/loon_ffi/util.h"
 #include "storage/StatusToErrorCode.h"
 #include "common/EasyAssert.h"
-
-using json = nlohmann::json;
 
 namespace {
 
@@ -598,24 +595,16 @@ MaterializeColumnGroups(const std::vector<ColumnGroupData>& groups) {
 ManifestGuard
 ReadManifestWithFFI(const std::string& manifest_path,
                     const LoonProperties* properties) {
-    json j = json::parse(manifest_path);
-    auto base_path = j.at("base_path").get<std::string>();
-    auto version = j.at("ver").get<int64_t>();
-
-    TransactionGuard transaction;
-    ThrowIfFFIError(loon_transaction_open(base_path.c_str(),
-                                          properties,
-                                          version,
-                                          /*manifest_size=*/-1,
-                                          LOON_TRANSACTION_RESOLVE_FAIL,
-                                          1,
-                                          &transaction.handle),
-                    "open source manifest transaction " + manifest_path);
+    auto parsed = ParseLoonManifestPath(manifest_path);
+    if (!parsed.has_value()) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Invalid source manifest path: {}",
+                  manifest_path);
+    }
 
     ManifestGuard manifest;
-    ThrowIfFFIError(
-        loon_transaction_get_manifest(transaction.handle, &manifest.manifest),
-        "get source manifest " + manifest_path);
+    ThrowIfFFIError(ReadLoonManifest(*parsed, properties, &manifest.manifest),
+                    "read source manifest " + manifest_path);
     if (manifest.manifest == nullptr) {
         ThrowInfo(milvus::ErrorCode::UnexpectedError,
                   "{}",
@@ -819,7 +808,8 @@ AppendSourceDeltalogs(LoonTransactionHandle transaction,
 // loon_milvus_table_create_manifest_from_segment_manifests creates one target
 // StorageV3 manifest from source StorageV3 segment manifests. Real-PK mode also
 // imports source deltalogs and bloom-filter stats; virtual-PK mode leaves delete
-// translation to DataNode.
+// translation to DataNode. On success it reports the committed version and,
+// when out_manifest_size is not null, the byte size of the committed manifest.
 extern "C" LoonFFIResult
 loon_milvus_table_create_manifest_from_segment_manifests(
     const char* base_path,
@@ -831,16 +821,17 @@ loon_milvus_table_create_manifest_from_segment_manifests(
     const char* external_source,
     const LoonProperties* properties,
     int has_external_primary_key,
-    char** out_manifest_path) {
+    int64_t* out_committed_version,
+    int64_t* out_manifest_size) {
     if (base_path == nullptr || source_manifest_paths == nullptr ||
         source_row_counts == nullptr || num_source_manifests == 0 ||
         target_columns == nullptr || num_target_columns == 0 ||
-        out_manifest_path == nullptr) {
-        RETURN_ERROR(LOON_INVALID_ARGS,
-                     "base_path, source_manifest_paths, source_row_counts, "
-                     "target_columns, and out_manifest_path must not be empty");
+        out_committed_version == nullptr) {
+        RETURN_ERROR(
+            LOON_INVALID_ARGS,
+            "base_path, source_manifest_paths, source_row_counts, "
+            "target_columns, and out_committed_version must not be empty");
     }
-    *out_manifest_path = nullptr;
 
     try {
         std::unordered_set<std::string> target_column_set;
@@ -915,19 +906,10 @@ loon_milvus_table_create_manifest_from_segment_manifests(
 
         AppendImportedStats(transaction.handle, imported_stats);
 
-        int64_t committed_version = 0;
-        ThrowIfFFIError(loon_transaction_commit(
-                            transaction.handle, &committed_version, nullptr),
-                        "commit milvus-table target manifest");
-        json manifest_path = {
-            {"base_path", std::string(base_path)},
-            {"ver", committed_version},
-        };
-        *out_manifest_path = strdup(manifest_path.dump().c_str());
-        if (*out_manifest_path == nullptr) {
-            RETURN_ERROR(LOON_MEMORY_ERROR,
-                         "failed to allocate milvus-table manifest path");
-        }
+        ThrowIfFFIError(
+            loon_transaction_commit(
+                transaction.handle, out_committed_version, out_manifest_size),
+            "commit milvus-table target manifest");
         RETURN_SUCCESS();
     } catch (const LoonFFIError& e) {
         // Preserve the producer's own err_code instead of collapsing to

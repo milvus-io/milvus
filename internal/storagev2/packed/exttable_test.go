@@ -823,7 +823,7 @@ func TestMarshalManifestPath_EmptyBasePath(t *testing.T) {
 
 func TestManifestPathKey(t *testing.T) {
 	canonical := MarshalManifestPath("files/insert_log/1/2/3", 7)
-	// The C++ milvus-table writer emits nlohmann's sorted keys, and a newer
+	// Older milvus-table builds wrote nlohmann's sorted keys, and a newer
 	// writer may add optional fields; neither changes the revision.
 	reordered := `{"base_path":"files/insert_log/1/2/3","ver":7}`
 	extended := `{"ver":7,"base_path":"files/insert_log/1/2/3","size":1024}`
@@ -842,6 +842,28 @@ func TestManifestPathKey(t *testing.T) {
 		assert.Equal(t, raw, ManifestPathKey(raw))
 	}
 	assert.False(t, SameManifestPath("s3://bucket/a.parquet", "s3://bucket/b.parquet"))
+}
+
+func TestManifestPathRecordsSize(t *testing.T) {
+	base := "files/insert_log/1/2/3"
+
+	// Without a size, a path is spelled exactly as before sizes were recorded.
+	assert.Equal(t, `{"ver":3,"base_path":"files/insert_log/1/2/3"}`, MarshalManifestPath(base, 3))
+
+	sized := CommittedManifestPath(base, 3, 1024, "remote")
+	assert.Equal(t, `{"ver":3,"base_path":"files/insert_log/1/2/3","size":1024}`, sized)
+	parsed, err := ParseManifestPath(sized)
+	require.NoError(t, err)
+	assert.Equal(t, ManifestJSON{ManifestVersion: 3, BasePath: base, Size: 1024}, parsed)
+
+	// Local storage and unknown sizes record nothing.
+	for _, got := range []string{
+		CommittedManifestPath(base, 3, 1024, "local"),
+		CommittedManifestPath(base, 3, 0, "remote"),
+		CommittedManifestPath(base, 3, -1, "remote"),
+	} {
+		assert.Equal(t, MarshalManifestPath(base, 3), got)
+	}
 }
 
 func TestCreateSegmentManifestWithBasePath_CanceledContext(t *testing.T) {
@@ -2013,6 +2035,15 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata_ResolvesManifestBasePath(
 	require.Equal(t, []FileInfo{
 		{FilePath: resolvedManifest, NumRows: 100, SourceSegmentID: 10},
 	}, fileInfos)
+}
+
+// Resolving a source base only changes how the manifest object is addressed,
+// so the size recorded for it still holds.
+func TestResolveMilvusTableSourceManifestPathKeepsSize(t *testing.T) {
+	got, err := resolveMilvusTableSourceManifestPath(`{"ver":2,"base_path":"files/insert_log/10","size":2048}`,
+		func(sourcePath string) (string, error) { return "s3://source-bucket/" + sourcePath, nil })
+	require.NoError(t, err)
+	assert.Equal(t, `{"ver":2,"base_path":"s3://source-bucket/files/insert_log/10","size":2048}`, got)
 }
 
 func TestResolveMilvusTableSegmentDeltalogPaths(t *testing.T) {

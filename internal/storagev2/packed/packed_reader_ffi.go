@@ -429,39 +429,21 @@ func GetManifestHandleWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 ) (loonManifestHandle *C.LoonManifest, err error) {
-	var cManifestHandle *C.LoonManifest
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
-		return cManifestHandle, err
+		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
-	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", basePath), mlog.Int64("version", version))
+	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", manifest.BasePath), mlog.Int64("version", manifest.ManifestVersion))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return cManifestHandle, err
+		return nil, err
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return cManifestHandle, merr.Wrap(err, "inject extfs")
+		return nil, merr.Wrap(err, "inject extfs")
 	}
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1) /* manifest_size */, C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
-	err = HandleLoonFFIResult(result)
-	if err != nil {
-		return cManifestHandle, err
-	}
-	defer C.loon_transaction_destroy(cTransactionHandle)
-
-	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifestHandle)
-	err = HandleLoonFFIResult(result)
-	if err != nil {
-		return cManifestHandle, err
-	}
-
-	return cManifestHandle, nil
+	return openManifest(manifest, cProperties)
 }
 
 // Ensure FFIPackedReader implements array.RecordReader interface

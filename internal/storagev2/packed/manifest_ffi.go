@@ -33,7 +33,8 @@ LoonFFIResult loon_milvus_table_create_manifest_from_segment_manifests(
     const char* external_source,
     const LoonProperties* properties,
     int has_external_primary_key,
-    char** out_manifest_path);
+    int64_t* out_committed_version,
+    int64_t* out_manifest_size);
 */
 import "C"
 
@@ -190,33 +191,25 @@ func CreateManifestForSegment(
 	}
 	defer C.loon_properties_free(cProperties)
 
-	// Convert base path to C string
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	// Begin transaction (read_version=0 for earliest, retry_limit=10)
-	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(0), C.int64_t(-1) /* manifest_size */, C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
+	// Begin transaction at the earliest version
+	transactionHandle, err := openTransaction(ManifestJSON{BasePath: basePath, ManifestVersion: ManifestEarliest}, cProperties,
+		C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "loon_transaction_open failed")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
 
 	// Append files to transaction
-	result = C.loon_transaction_append_files(transactionHandle, columnGroups)
+	result := C.loon_transaction_append_files(transactionHandle, columnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "loon_transaction_append_files failed")
 	}
 
-	// Commit transaction
-	var committedVersion C.int64_t
-	result = C.loon_transaction_commit(transactionHandle, &committedVersion, nil)
-	if err := HandleLoonFFIResult(result); err != nil {
+	manifestPath, err := commitTransaction(transactionHandle, basePath, storageConfig)
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "loon_transaction_commit failed")
 	}
-
-	// Return manifest path using the helper function
-	return MarshalManifestPath(basePath, int64(committedVersion)), nil
+	return manifestPath, nil
 }
 
 // CreateMilvusTableManifestFromSegmentManifests builds a target external
@@ -297,7 +290,7 @@ func CreateMilvusTableManifestFromSegmentManifests(
 		cColumnsPtr = &cColumns[0]
 	}
 
-	var outManifestPath *C.char
+	var committedVersion, manifestSize C.int64_t
 	hasExternalPrimaryKey := C.int(0)
 	if extfs.MilvusTablePKMode.usesExternalPrimaryKey() {
 		hasExternalPrimaryKey = C.int(1)
@@ -312,17 +305,13 @@ func CreateMilvusTableManifestFromSegmentManifests(
 		cExternalSource,
 		cProperties,
 		hasExternalPrimaryKey,
-		&outManifestPath,
+		&committedVersion,
+		&manifestSize,
 	)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
-	if outManifestPath == nil {
-		return "", merr.WrapErrServiceInternalMsg("loon_milvus_table_create_manifest_from_segment_manifests returned nil manifest path")
-	}
-	manifestPath := C.GoString(outManifestPath)
-	C.loon_free_cstr(outManifestPath)
-	return manifestPath, nil
+	return CommittedManifestPath(basePath, int64(committedVersion), int64(manifestSize), storageConfig.GetStorageType()), nil
 }
 
 // createColumnGroups creates storage-owned column groups, including all file properties.
@@ -637,29 +626,12 @@ func readColumnGroupsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 ) ([]manifestColumnGroup, error) {
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
-		return nil, merr.Wrap(err, "failed to parse manifest path")
-	}
-
-	manifestFilePath := manifestObjectPath(basePath, version)
-
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
-	if err != nil {
-		return nil, merr.Wrap(err, "failed to create properties")
-	}
-	defer C.loon_properties_free(cProperties)
-
-	cManifestFilePath := C.CString(manifestFilePath)
-	defer C.free(unsafe.Pointer(cManifestFilePath))
-
-	var manifest *C.LoonManifest
-	result := C.loon_exttable_read_manifest(cManifestFilePath, cProperties, &manifest)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.Wrap(err, "loon_exttable_read_manifest failed")
+		return nil, merr.Wrap(err, "failed to read manifest")
 	}
 	if manifest == nil {
-		return nil, merr.WrapErrServiceInternalMsg("loon_exttable_read_manifest returned nil manifest")
+		return nil, merr.WrapErrServiceInternalMsg("reading manifest %s returned nil", manifestPath)
 	}
 	defer C.loon_manifest_destroy(manifest)
 
