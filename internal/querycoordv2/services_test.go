@@ -1221,58 +1221,6 @@ func (suite *ServiceSuite) TestReleasePartition() {
 	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
 
-func (suite *ServiceSuite) TestRefreshCollection() {
-	ctx := context.Background()
-	server := suite.server
-
-	// Test refresh all collections.
-	for _, collection := range suite.collections {
-		err := server.refreshCollection(ctx, collection)
-		// Collection not loaded error.
-		suite.ErrorIs(err, merr.ErrCollectionNotLoaded)
-	}
-
-	// Test load all collections
-	suite.loadAll()
-
-	// Test refresh all collections again when collections are loaded. This time should fail with collection not 100% loaded.
-	for _, collection := range suite.collections {
-		suite.updateCollectionStatus(ctx, collection, querypb.LoadStatus_Loading)
-		err := server.refreshCollection(ctx, collection)
-		suite.ErrorIs(err, merr.ErrCollectionNotLoaded)
-	}
-
-	// Test refresh all collections
-	for _, id := range suite.collections {
-		// Load and explicitly mark load percentage to 100%.
-		suite.updateChannelDist(ctx, id)
-		suite.updateSegmentDist(id, suite.nodes[0])
-		suite.updateCollectionStatus(ctx, id, querypb.LoadStatus_Loaded)
-
-		err := server.refreshCollection(ctx, id)
-		suite.NoError(err)
-
-		readyCh, err := server.targetObserver.UpdateNextTarget(id)
-		suite.NoError(err)
-		<-readyCh
-
-		// Now the refresh must be done
-		collection := server.meta.GetCollection(ctx, id)
-		suite.True(collection.IsRefreshed())
-	}
-
-	// Test refresh not ready
-	for _, id := range suite.collections {
-		suite.updateChannelDistWithoutSegment(ctx, id)
-		err := server.refreshCollection(ctx, id)
-		suite.NoError(err)
-
-		// Now the refresh must be not done
-		collection := server.meta.GetCollection(ctx, id)
-		suite.False(collection.IsRefreshed())
-	}
-}
-
 func TestValidateAnalyzerUsesStreamingNodeManager(t *testing.T) {
 	mockey.PatchConvey("validate analyzer is routed to streamingnode manager", t, func() {
 		mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).
@@ -2340,45 +2288,6 @@ func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
 		node := suite.nodeMgr.Get(node)
 		node.SetLastHeartbeat(time)
 	}
-}
-
-func (suite *ServiceSuite) TestManualUpdateCurrentTarget() {
-	ctx := context.Background()
-	server := suite.server
-	collectionID := suite.collections[0]
-
-	// Test when server is not healthy
-	server.UpdateStateCode(commonpb.StateCode_Initializing)
-	err := server.ManualUpdateCurrentTarget(ctx, collectionID)
-	suite.ErrorIs(err, merr.ErrServiceNotReady)
-
-	// Restore healthy state
-	server.UpdateStateCode(commonpb.StateCode_Healthy)
-
-	// Test collection not loaded case
-	err = server.ManualUpdateCurrentTarget(ctx, collectionID)
-	suite.NoError(err)
-
-	// Load collection for success test cases
-	suite.loadAll()
-
-	// Test success case
-	mockey.PatchConvey("TestManualUpdateCurrentTarget success", suite.T(), func() {
-		m := mockey.Mock(job.WaitCurrentTargetUpdated).Return(nil).Build()
-		defer m.UnPatch()
-
-		err := server.ManualUpdateCurrentTarget(ctx, collectionID)
-		suite.NoError(err)
-	})
-
-	// Test WaitCurrentTargetUpdated error case
-	mockey.PatchConvey("TestManualUpdateCurrentTarget error", suite.T(), func() {
-		m := mockey.Mock(job.WaitCurrentTargetUpdated).Return(errors.New("mock error")).Build()
-		defer m.UnPatch()
-
-		err := server.ManualUpdateCurrentTarget(ctx, collectionID)
-		suite.Error(err)
-	})
 }
 
 func (suite *ServiceSuite) TearDownTest() {

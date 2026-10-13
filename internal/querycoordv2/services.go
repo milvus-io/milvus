@@ -36,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -147,7 +149,11 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		percentage := progress.Percentage()
 		resp.InMemoryPercentages = append(resp.InMemoryPercentages, percentage)
 		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, progress.Ready())
-		resp.RefreshProgress = append(resp.RefreshProgress, 0)
+		refreshProgress, err := s.qviewsRefreshProgress(ctx, collectionID, percentage)
+		if err != nil {
+			return &querypb.ShowCollectionsResponse{Status: merr.Status(err)}, nil
+		}
+		resp.RefreshProgress = append(resp.RefreshProgress, refreshProgress)
 		resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{
 			Data: qviewsLoadFieldIDs(cfg),
 		})
@@ -189,7 +195,10 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 
 	partitions := req.GetPartitionIDs()
 	percentages := make([]int64, 0)
-	refreshProgress := int64(0)
+	refreshProgress, err := s.qviewsRefreshProgress(ctx, req.GetCollectionID(), progress.Percentage())
+	if err != nil {
+		return &querypb.ShowPartitionsResponse{Status: merr.Status(err)}, nil
+	}
 
 	if len(partitions) == 0 {
 		partitions = append([]int64{}, cfg.PartitionIDs...)
@@ -521,7 +530,7 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 }
 
 func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
-	mlog.Info(context.TODO(), "received sync new created partition request")
+	mlog.Info(ctx, "received sync new created partition request")
 
 	failedMsg := "failed to sync new created partition"
 	if err := merr.CheckHealthy(s.State()); err != nil {
@@ -529,136 +538,21 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		return merr.Status(err), nil
 	}
 
-	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.broker, s.targetObserver, s.targetMgr)
-	go func() {
-		defer func() {
-			syncJob.PostExecute()
-			syncJob.Done()
-		}()
-
-		err := syncJob.PreExecute()
-		if err != nil {
-			mlog.Warn(ctx, failedMsg, mlog.Err(err))
-			syncJob.SetError(err)
-			return
-		}
-		err = syncJob.Execute()
-		if err != nil {
-			mlog.Warn(ctx, failedMsg, mlog.Err(err))
-			syncJob.SetError(err)
-			return
-		}
-	}()
-	err := syncJob.Wait()
-	if err != nil {
-		mlog.Warn(ctx, failedMsg, mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	return merr.Success(), nil
+	return merr.Status(qvresource.Resource().AddPartition(ctx, req.GetCollectionID(), req.GetPartitionID())), nil
 }
 
-// refreshCollection must be called after loading a collection. It looks for new segments that are not loaded yet and
-// tries to load them up. It returns when all segments of the given collection are loaded, or when error happens.
-// Note that a collection's loading progress always stays at 100% after a successful load and will not get updated
-// during refreshCollection.
+// refreshCollection publishes pending SegmentMeta changes and waits for every
+// expected shard's serving QueryView to cover that DataView and current config.
 func (s *Server) refreshCollection(ctx context.Context, collectionID int64) error {
-	collection := s.meta.GetCollection(ctx, collectionID)
-	if collection == nil {
-		return merr.WrapErrCollectionNotLoaded(collectionID)
+	progress, err := s.qviewsLoadProgress(ctx, collectionID)
+	if err != nil {
+		return err
 	}
-
-	// Check that collection is fully loaded.
-	if collection.GetStatus() != querypb.LoadStatus_Loaded {
+	if progress.Config == nil || !progress.Ready() {
 		return merr.WrapErrCollectionNotLoaded(collectionID, "collection not fully loaded")
 	}
-
-	// Set a placeholder notifier BEFORE updating the target to avoid a race condition.
-	// Without this, the segment checker might run between UpdateNextTarget and SetNotifierCollectionOp,
-	// see the new segments in next target, but think IsRefreshed() is true (because the notifier
-	// hasn't been set yet), and incorrectly assign LOW priority to import segments.
-	placeholderCh := make(chan struct{})
-	if err := s.meta.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(placeholderCh)); err != nil {
-		if errors.Is(err, merr.ErrCollectionNotFound) {
-			return nil
-		}
-		return err
-	}
-
-	// Pull the latest target.
-	readyCh, err := s.targetObserver.UpdateNextTarget(collectionID)
-	if err != nil {
-		// On failure, close the placeholder channel so IsRefreshed() returns true
-		close(placeholderCh)
-		return err
-	}
-
-	// Replace the placeholder with the real readyCh from target observer
-	err = s.meta.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(readyCh))
-	// Close the placeholder channel (no one is waiting on it, but good practice)
-	close(placeholderCh)
-
-	// if collection already released, treat as success
-	if errors.Is(err, merr.ErrCollectionNotFound) {
-		return nil
-	}
-	return err
+	return qvresource.Resource().Refresh(ctx, collectionID)
 }
-
-// This is totally same to refreshCollection, remove it for now
-// refreshPartitions must be called after loading a collection. It looks for new segments that are not loaded yet and
-// tries to load them up. It returns when all segments of the given collection are loaded, or when error happens.
-// Note that a collection's loading progress always stays at 100% after a successful load and will not get updated
-// during refreshPartitions.
-// func (s *Server) refreshPartitions(ctx context.Context, collID int64, partIDs []int64) (*commonpb.Status, error) {
-// 	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
-// 	defer cancel()
-
-// 	log := mlog.With(
-// 		mlog.Int64("collectionID", collID),
-// 		mlog.Int64s("partitionIDs", partIDs),
-// 	)
-// 	if s.status.Load() != commonpb.StateCode_Healthy {
-// 		msg := "failed to refresh partitions"
-// 		mlog.Warn(ctx, msg, mlog.Err(ErrNotHealthy))
-// 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-// 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
-// 	}
-
-// 	// Check that all partitions are fully loaded.
-// 	if s.meta.CollectionManager.GetCurrentLoadPercentage(collID) != 100 {
-// 		errMsg := "partitions must be fully loaded before refreshing"
-// 		mlog.Warn(errMsg)
-// 		return &commonpb.Status{
-// 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-// 			Reason:    errMsg,
-// 		}, nil
-// 	}
-
-// 	// Pull the latest target.
-// 	readyCh, err := s.targetObserver.UpdateNextTarget(collID)
-// 	if err != nil {
-// 		mlog.Warn(context.TODO(), "failed to update next target", mlog.Err(err))
-// 		return &commonpb.Status{
-// 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-// 			Reason:    err.Error(),
-// 		}, nil
-// 	}
-
-// 	select {
-// 	case <-ctx.Done():
-// 		mlog.Warn(context.TODO(), "refresh partitions failed as context canceled")
-// 		return &commonpb.Status{
-// 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-// 			Reason:    "context canceled",
-// 		}, nil
-// 	case <-readyCh:
-// 		mlog.Info(context.TODO(), "refresh partitions succeeded")
-// 		return &commonpb.Status{
-// 			ErrorCode: commonpb.ErrorCode_Success,
-// 		}, nil
-// 	}
-// }
 
 func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 	isStopping, err := s.nodeMgr.IsStoppingNode(nodeID)
@@ -1307,28 +1201,20 @@ func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.Comput
 	return resp, nil
 }
 
-// ManualUpdateCurrentTarget is used to manually update the current target for TruncateCollection
-func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
-	mlog.Info(context.TODO(), "manual update current target request received")
-
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		mlog.Warn(context.TODO(), "failed to manual update current target", mlog.Err(err))
-		return err
+// Without an outstanding refresh fence the normal load progress applies.
+func (s *Server) qviewsRefreshProgress(ctx context.Context, collectionID, loadPercentage int64) (int64, error) {
+	version, ok := s.qviewsRuntime.refreshVersions.Load(collectionID)
+	if !ok {
+		return loadPercentage, nil
 	}
-
-	// Check if collection is loaded
-	percentage := s.meta.CalculateLoadPercentage(ctx, collectionID)
-	if percentage < 0 {
-		mlog.Info(context.TODO(), "collection not loaded, skip ManualUpdateCurrentTarget")
-		return nil
-	}
-
-	err := job.WaitCurrentTargetUpdated(ctx, s.targetObserver, collectionID)
+	collection, err := s.broker.DescribeCollection(ctx, collectionID)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to wait current target updated", mlog.Err(err))
-		return err
+		return 0, err
 	}
-
-	mlog.Info(context.TODO(), "manual update current target done")
-	return nil
+	progress := loadstatus.GetAtVersions(s.qviewsRuntime.loadConfigStore, s.qviewsRuntime.shardViewRegistry,
+		collectionID, collection.GetVirtualChannelNames(), 0, version.(qviews.DataVersion))
+	if current, ok := s.qviewsRuntime.refreshVersions.Load(collectionID); !ok || current != version {
+		return 0, nil
+	}
+	return progress.Percentage(), nil
 }

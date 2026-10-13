@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // DirtyCollectionNotifier is called after desired load state changes. The
@@ -35,11 +36,31 @@ func (m *CollectionLoadManager) UpdateLoadConfig(
 	ctx context.Context,
 	result message.BroadcastResultAlterLoadConfigMessageV2,
 ) error {
-	msg := result.Message.Header()
+	return m.ApplyLoadConfig(ctx, result.Message.Header())
+}
+
+// ApplyLoadConfig applies desired state under the caller's collection DDL lock.
+func (m *CollectionLoadManager) ApplyLoadConfig(ctx context.Context, msg *messagespb.AlterLoadConfigMessageHeader) error {
 	if msg == nil {
 		return nil
 	}
-	cfg := FromAlterLoadConfigMessage(msg)
+	return m.apply(ctx, FromAlterLoadConfigMessage(msg))
+}
+
+// AddPartition extends an existing config under the CreatePartition DDL lock.
+func (m *CollectionLoadManager) AddPartition(ctx context.Context, collectionID, partitionID int64) error {
+	cfg := m.store.GetConfig(collectionID)
+	if cfg == nil {
+		return nil
+	}
+	cfg = cfg.Clone()
+	partitions := typeutil.NewUniqueSet(cfg.PartitionIDs...)
+	partitions.Insert(partitionID)
+	cfg.PartitionIDs = partitions.Collect()
+	return m.apply(ctx, cfg)
+}
+
+func (m *CollectionLoadManager) apply(ctx context.Context, cfg *LoadConfig) error {
 	if err := m.store.Put(ctx, cfg); err != nil {
 		return err
 	}

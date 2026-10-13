@@ -33,6 +33,7 @@ import (
 )
 
 func TestDDLCallbacksCollectionDDL(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -174,6 +175,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 }
 
 func TestCreatePartitionMaxCountIgnoresDroppedPartitions(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	Params.Save(Params.RootCoordCfg.MaxPartitionNum.Key, "2")
 	defer Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 

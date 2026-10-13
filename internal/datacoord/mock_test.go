@@ -1068,10 +1068,6 @@ func (s *mockMixCoord) DropSegmentsByTime(ctx context.Context, collectionID int6
 	panic("implement me")
 }
 
-func (s *mockMixCoord) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
-	panic("implement me")
-}
-
 // Snapshot related methods
 func (s *mockMixCoord) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
 	panic("implement me")

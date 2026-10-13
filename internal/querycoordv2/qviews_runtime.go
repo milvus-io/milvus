@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"sync"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/nodeview"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -47,10 +49,12 @@ type qviewsBalancer interface {
 }
 
 type qviewsRuntime struct {
+	resources         *qvresource.Resources
 	loadConfigStore   *loadmgr.LoadConfigStore
 	loadManager       *loadmgr.CollectionLoadManager
 	shardViewRegistry *coordview.ShardViewRegistry
 	readyChanges      *readiness.Notifications
+	refreshVersions   sync.Map // collection ID -> qviews.DataVersion, max requested refresh fence
 	syncer            syncer.ReliableSyncer
 	balancer          qviewsBalancer
 	balanceCache      *cache.Cache
@@ -62,8 +66,10 @@ type qviewsRuntime struct {
 }
 
 type qviewsRuntimeDependencies struct {
-	queryCoordCatalog metastore.QueryCoordCatalog
-	queryViewCatalog  queryview.QueryViewCatalog
+	dataViewReconciler qvresource.DataViewReconciler
+	vchannels          func(context.Context, int64) ([]string, error)
+	queryCoordCatalog  metastore.QueryCoordCatalog
+	queryViewCatalog   queryview.QueryViewCatalog
 
 	viewSyncClient       syncer.ViewSyncClient
 	queryNodeClient      nodeview.QueryNodeStatePublisher
@@ -144,7 +150,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		},
 	)
 
-	return &qviewsRuntime{
+	runtime := &qviewsRuntime{
 		loadConfigStore:      loadConfigStore,
 		loadManager:          loadManager,
 		shardViewRegistry:    shardViewRegistry,
@@ -156,7 +162,14 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		queryNodeManager:     deps.queryNodeManager,
 		streamingCoordClient: deps.streamingCoordClient,
 		streamingNodeHandler: deps.streamingNodeHandler,
-	}, nil
+	}
+	runtime.resources = &qvresource.Resources{DataViews: deps.dataViewProvider, Balancer: balancerController, BalanceCache: balanceCache, LoadConfigs: loadConfigStore, LoadManager: loadManager, ShardViews: shardViewRegistry, Readiness: runtime.readyChanges, Reconciler: deps.dataViewReconciler, VChannels: deps.vchannels, RefreshVersions: &runtime.refreshVersions}
+	loadConfigStore.RegisterObserver(func(collectionID int64, released bool) {
+		if released {
+			runtime.refreshVersions.Delete(collectionID)
+		}
+	})
+	return runtime, nil
 }
 
 func (r *qviewsRuntime) start(ctx context.Context) {
@@ -204,7 +217,21 @@ func newDefaultQViewsRuntimeDependencies(
 		dataViewProvider = source.DataViewProvider()
 	}
 	broker := meta.NewCoordinatorBroker(mixCoord)
+	var reconciler qvresource.DataViewReconciler
+	if source, ok := mixCoord.(interface {
+		QueryViewDataReconciler() qvresource.DataViewReconciler
+	}); ok {
+		reconciler = source.QueryViewDataReconciler()
+	}
 	deps := qviewsRuntimeDependencies{
+		dataViewReconciler: reconciler,
+		vchannels: func(ctx context.Context, id int64) ([]string, error) {
+			coll, err := broker.DescribeCollection(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			return coll.GetVirtualChannelNames(), nil
+		},
 		schemaVersion: func(ctx context.Context, id int64) (int32, error) {
 			collection, err := broker.DescribeCollection(ctx, id)
 			if err != nil {

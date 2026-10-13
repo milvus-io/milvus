@@ -2,7 +2,7 @@
 
 Status: agreed design TODO for issue #40451, recorded on 2026-09-24.
 **The MVCC-based design and its distributed delivery are outside the current SN
-query extraction PR.** This document does not change the current DDL protocol.
+query extraction PR.** The transitional QueryView fence below is implemented for TruncateCollection.
 
 ## 1. Two Visibility Models
 
@@ -94,12 +94,40 @@ GrowingRuntime does not implement their time-based visibility effects. The
 local Summary-backed adaptor supports SN Delete bootstrap; remote QN delivery
 is still outside this extraction.
 
-The legacy Truncate callback explicitly invokes ManualUpdateCurrentTarget,
-which waits for QueryCoord's current target. DropPartition instead notifies
-DataCoord, changes metadata and expires Proxy caches; that callback alone is
-not evidence that the new QueryView handoff fence already exists. The table
-above records the agreed transitional correctness contract, not a claim that
-this PR has wired or validated the full new Coord/Proxy workflow for both DDLs.
+Truncate's callback calls `resource.Resource().Refresh` directly. The package-level
+accessor in `internal/views/coord/resource` exposes the Coordinator's shared
+QueryView infrastructure without forwarding through QueryCoord RPCs. DataCoord
+synchronously reconciles committed SegmentMeta into a DataView and returns its
+DataVersion; the shared QueryView readiness service waits for every expected VChannel × configured replica
+to report an Up view covering that version and the current LoadInfoVersion.
+Preparing/Ready and an older Up view cannot satisfy this fence. An unloaded
+collection has no serving obligation, and release ends an existing obligation.
+Fresh loads consume the committed DataView. Cancellation and publication errors
+propagate to the DDL callback for retry.
+
+DropPartition still needs a separate audit of its completion fence; this change
+does not claim to implement typed DDL Transform entries or its handoff wait.
+
+### Refresh load and newly created partitions
+
+`LoadCollection(refresh=true)` and `LoadPartitions(refresh=true)` use the same
+synchronous DataView publication and QueryView handoff path. Refresh requires a
+loaded QueryView configuration. QueryCoord records the greatest requested data
+fence in memory and reports refresh progress against that fence and the current
+LoadInfoVersion, separately from ordinary loading progress. Release clears the
+fence. Concurrent refreshes cannot lower it. These are request-local completion
+requirements, not a new durable configuration or DataView field.
+
+CreatePartition first commits partition metadata in its WAL acknowledgement
+callback, then applies the union of the new partition and the existing loaded
+partition set through the same application path as AlterLoadConfig. It preserves
+fields and replica placement, and does not load an unloaded collection. The
+CreatePartition WAL operation supplies serialization and replay: the callback
+must not recursively acquire a collection broadcast lock. Coordinator waits for
+all expected Up views to carry the resulting current LoadInfoVersion, then
+expires caches and completes CreatePartition; Proxy performs no extra wait.
+Duplicate callback delivery must neither duplicate partitions nor skip the
+QueryView readiness check.
 
 Follow-up work must cover typed entries and retained replay, ordered SN/QN
 application, MVCC selection, segment/compaction boundaries, DDL completion,
@@ -110,8 +138,8 @@ must not silently skip them and still claim Transform coverage.
 Validation must include pre/post-DDL queries through old and new views, lagging
 and restarted nodes, later segment loads, duplicate delivery, Truncate followed
 by new writes, partition recreation, compaction across the boundary, and Up
-leases spanning a handoff. No proto, runtime, transport or acknowledgement
-implementation is included in this TODO update.
+leases spanning a handoff. The typed DDL Transform protocol remains deferred; the implementation above
+uses the transitional view-based protocol.
 
 ## References
 
@@ -125,4 +153,4 @@ Source checkpoints: pkg/proto/streaming.proto;
 pkg/streaming/util/message/messageutil/transform_log.go;
 internal/streamingnode/server/wal/vchannel/growingruntime/{live,dispatch,segment}.go;
 internal/rootcoord/ddl_callbacks_{truncate_collection,drop_partition}.go;
-internal/querycoordv2/services.go (ManualUpdateCurrentTarget).
+internal/views/coord/resource/resource.go; internal/views/coord/loadstatus/wait.go.

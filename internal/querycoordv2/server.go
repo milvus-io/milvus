@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -407,6 +408,7 @@ func (s *Server) initQViewsRuntime() error {
 		return err
 	}
 	s.qviewsRuntime = runtime
+	qvresource.Init(runtime.resources)
 	s.collectionUsage = newCollectionUsageManager(
 		runtime.loadConfigStore,
 		s.autoReleaseCollection,

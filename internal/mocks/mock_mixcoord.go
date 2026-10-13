@@ -8797,53 +8797,6 @@ func (_c *MixCoord_ManualCompaction_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// ManualUpdateCurrentTarget provides a mock function with given fields: ctx, collectionID
-func (_m *MixCoord) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
-	ret := _m.Called(ctx, collectionID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ManualUpdateCurrentTarget")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
-		r0 = rf(ctx, collectionID)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MixCoord_ManualUpdateCurrentTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ManualUpdateCurrentTarget'
-type MixCoord_ManualUpdateCurrentTarget_Call struct {
-	*mock.Call
-}
-
-// ManualUpdateCurrentTarget is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-func (_e *MixCoord_Expecter) ManualUpdateCurrentTarget(ctx interface{}, collectionID interface{}) *MixCoord_ManualUpdateCurrentTarget_Call {
-	return &MixCoord_ManualUpdateCurrentTarget_Call{Call: _e.mock.On("ManualUpdateCurrentTarget", ctx, collectionID)}
-}
-
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Run(run func(ctx context.Context, collectionID int64)) *MixCoord_ManualUpdateCurrentTarget_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
-	})
-	return _c
-}
-
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Return(_a0 error) *MixCoord_ManualUpdateCurrentTarget_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) RunAndReturn(run func(context.Context, int64) error) *MixCoord_ManualUpdateCurrentTarget_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // MarkSegmentsDropped provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) MarkSegmentsDropped(_a0 context.Context, _a1 *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

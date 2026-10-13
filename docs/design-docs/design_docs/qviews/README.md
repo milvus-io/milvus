@@ -527,3 +527,31 @@ resource-group publications. MixCoord recovers DataViews before QueryViews so
 exact-version references are restored before GC starts. Native publications
 retain the dynamically generated Transform frontier and segment Manifest/cursor
 metadata; the shard frontier is not persisted.
+
+### Coordinator package-level resource access
+
+`internal/views/coord/resource.Resource()` exposes the recovered DataView
+provider, LoadConfig store/manager, ShardViewRegistry, balancer/cache and
+readiness notifications shared by the active Coordinator. Initialization
+publishes these dependencies before DDL callbacks are enabled. Runtime shutdown
+closes readiness; operations reject a closed lifecycle and pending waiters wake.
+A subsequent initialization publishes a new instance without letting cleanup of
+the old managers invalidate it.
+
+Truncate and Refresh load call `Resource().Refresh` to synchronously publish
+DataView changes and wait for serving QueryViews. CreatePartition calls
+`Resource().AddPartition` under its existing collection DDL lock; it reuses the
+LoadManager persistence/reconciliation path and waits for the resulting load
+configuration. No internal operation forwards through QueryCoord/MixCoord RPC
+methods. The existing `SyncNewCreatedPartition` wire RPC is only a compatibility
+adapter to the same native operation. The legacy Target-based partition job and
+`ManualUpdateCurrentTarget` internal entry point are removed.
+
+Retain the existing RPC definition, request/response messages, generated client,
+service registration, and server forwarding chain for older callers during
+upgrades. Replacing internal routing does not remove the wire API: both the RPC
+adapter and native DDL callback apply the QueryView load configuration and wait
+for its serving views. Full mixed-version upgrade validation is a separate check.
+
+[DDL visibility](ddl_visibility.md) specifies the DataVersion and configuration
+fences and the operations still deferred.

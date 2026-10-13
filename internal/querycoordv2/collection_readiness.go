@@ -154,40 +154,12 @@ func (s *Server) waitCollectionReady(ctx context.Context, req *querypb.EnsureCol
 }
 
 func (s *Server) waitCollectionReadyAtSchemaVersion(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, schemaVersion int32) error {
-	collectionID := req.GetCollectionID()
-	runtime := s.qviewsRuntime
-	// Subscribe before checking so state changes cannot be lost before blocking.
-	subscription := runtime.readyChanges.Subscribe(collectionID)
-	defer subscription.Close()
-	for {
-		if err := ctx.Err(); err != nil {
-			return context.Cause(ctx)
-		}
-		changed, released := subscription.Observe()
-		if released {
-			return merr.WrapErrCollectionNotLoaded(collectionID)
-		}
-		// The same configuration-version-checked result drives public loading
-		// progress and AutoLoad readiness. Observe release again after the read
-		// so a coalesced release/reload cannot satisfy an older subscriber.
-		progress := loadstatus.GetAtSchemaVersion(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, req.GetExpectedVchannels(), schemaVersion)
-		if progress.Config == nil {
-			return merr.WrapErrCollectionNotLoaded(collectionID)
-		}
-		if _, released := subscription.Observe(); released {
-			return merr.WrapErrCollectionNotLoaded(collectionID)
-		}
-		if progress.Ready() {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-runtime.readyChanges.Done():
-			return merr.WrapErrServiceUnavailableMsg("querycoord stopped while waiting for collection %d", collectionID)
-		case <-changed:
-		}
-	}
+	return s.waitCollectionReadyAtVersions(ctx, req, schemaVersion, qviews.DataVersion{})
+}
+
+func (s *Server) waitCollectionReadyAtVersions(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, schemaVersion int32, dataVersion qviews.DataVersion) error {
+	r := s.qviewsRuntime
+	return loadstatus.Wait(ctx, r.loadConfigStore, r.shardViewRegistry, r.readyChanges, req.GetCollectionID(), req.GetExpectedVchannels(), schemaVersion, dataVersion)
 }
 
 func newCollectionReadiness(loadConfigStore *loadmgr.LoadConfigStore, shardViewRegistry *coordview.ShardViewRegistry) *readiness.Notifications {

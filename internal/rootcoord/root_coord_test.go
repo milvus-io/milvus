@@ -398,6 +398,7 @@ func TestRootCoord_DropCollection(t *testing.T) {
 }
 
 func TestRootCoord_TruncateCollection(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
@@ -408,6 +409,7 @@ func TestRootCoord_TruncateCollection(t *testing.T) {
 }
 
 func TestRootCoord_CreatePartition(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()

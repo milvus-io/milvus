@@ -761,8 +761,6 @@ func withValidMixCoord() Opt {
 		}, nil,
 	)
 
-	mixc.EXPECT().ManualUpdateCurrentTarget(mock.Anything, mock.Anything).Return(nil)
-
 	mixc.EXPECT().UpdateLoadConfig(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	return withMixCoord(mixc)
 }
@@ -905,10 +903,9 @@ func withMetricsCacheManager() Opt {
 type mockBroker struct {
 	Broker
 
-	ReleaseCollectionFunc       func(ctx context.Context, collectionID UniqueID) error
-	ReleasePartitionsFunc       func(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error
-	SyncNewCreatedPartitionFunc func(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error
-	GetQuerySegmentInfoFunc     func(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error)
+	ReleaseCollectionFunc   func(ctx context.Context, collectionID UniqueID) error
+	ReleasePartitionsFunc   func(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error
+	GetQuerySegmentInfoFunc func(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error)
 
 	WatchChannelsFunc     func(ctx context.Context, info *watchInfo) error
 	UnwatchChannelsFunc   func(ctx context.Context, info *watchInfo) error
@@ -967,10 +964,6 @@ func (b mockBroker) ReleaseCollection(ctx context.Context, collectionID UniqueID
 
 func (b mockBroker) ReleasePartitions(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error {
 	return b.ReleasePartitionsFunc(ctx, collectionID)
-}
-
-func (b mockBroker) SyncNewCreatedPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
-	return b.SyncNewCreatedPartitionFunc(ctx, collectionID, partitionID)
 }
 
 func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {

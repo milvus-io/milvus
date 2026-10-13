@@ -20,14 +20,20 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // alterLoadConfigV2AckCallback is called when the put load config message is acknowledged
 func (s *Server) alterLoadConfigV2AckCallback(ctx context.Context, result message.BroadcastResultAlterLoadConfigMessageV2) error {
-	if err := s.qviewsRuntime.loadManager.UpdateLoadConfig(ctx, result); err != nil {
+	return s.applyLoadConfig(ctx, result.Message.Header())
+}
+
+// applyLoadConfig is shared by AlterLoadConfig and CreatePartition callbacks.
+func (s *Server) applyLoadConfig(ctx context.Context, header *messagespb.AlterLoadConfigMessageHeader) error {
+	if err := s.qviewsRuntime.loadManager.ApplyLoadConfig(ctx, header); err != nil {
 		return err
 	}
-	meta.GlobalFailedLoadCache.Remove(result.Message.Header().GetCollectionId())
+	meta.GlobalFailedLoadCache.Remove(header.GetCollectionId())
 	return nil
 }

@@ -35,6 +35,12 @@ func Get(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, 
 // GetAtSchemaVersion additionally fences completion on the Up views' schema.
 // Newer schemas satisfy an earlier DDL; the load configuration is unchanged.
 func GetAtSchemaVersion(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string, schemaVersion int32) Progress {
+	return GetAtVersions(store, registry, collectionID, vchannels, schemaVersion, qviews.DataVersion{})
+}
+
+// GetAtVersions also requires each serving Up view to cover the published data.
+// A newer DataVersion satisfies a fence captured before subsequent mutations.
+func GetAtVersions(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string, schemaVersion int32, dataVersion qviews.DataVersion) Progress {
 	cfg, version := store.GetConfigWithVersion(collectionID)
 	if cfg == nil {
 		return Progress{}
@@ -48,7 +54,7 @@ func GetAtSchemaVersion(store *loadmgr.LoadConfigStore, registry *coordview.Shar
 	stats := registry.SnapshotForShards(shards).StatsMap()
 	progress := Progress{Config: cfg, Total: int64(len(shards))}
 	for _, shard := range shards {
-		if stat := stats[shard]; stat != nil && stat.UpVersion != nil && stat.UpLoadInfoVersion == version && stat.UpSchemaVersion >= schemaVersion {
+		if stat := stats[shard]; stat != nil && stat.UpVersion != nil && stat.UpLoadInfoVersion == version && stat.UpSchemaVersion >= schemaVersion && stat.UpVersion.DataVersion.GTE(dataVersion) {
 			progress.Loaded++
 		}
 	}

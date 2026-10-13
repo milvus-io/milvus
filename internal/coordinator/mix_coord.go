@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -1482,9 +1483,9 @@ func (s *mixCoordImpl) DropSegmentsByTime(ctx context.Context, collectionID int6
 	return s.datacoordServer.DropSegmentsByTime(ctx, collectionID, flushTsList)
 }
 
-// ManualUpdateCurrentTarget manually update current target for TruncateCollection
-func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
-	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, collectionID)
+// QueryViewDataReconciler supplies DataCoord directly during resource wiring.
+func (s *mixCoordImpl) QueryViewDataReconciler() qvresource.DataViewReconciler {
+	return s.datacoordServer
 }
 
 func (s *mixCoordImpl) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
