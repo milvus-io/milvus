@@ -1182,6 +1182,32 @@ func TestQuotaCenterAggregatesCollectionEntityMetrics(t *testing.T) {
 			databaseName, metrics.AllLabel, "vector-index", "true")))
 }
 
+func TestQuotaCenterKeepsAggregateEntityMetricsOnFailedRefresh(t *testing.T) {
+	previousMode := metrics.CollectionLevelMetricsMode()
+	metrics.SetCollectionLevelMetricsMode(metrics.CollectionLevelMetricsModeAggregate)
+	t.Cleanup(func() {
+		metrics.SetCollectionLevelMetricsMode(previousMode)
+		metrics.RootCoordNumEntities.Reset()
+		metrics.RootCoordIndexedNumEntities.Reset()
+	})
+
+	const databaseName = "aggregate-db"
+	metrics.RootCoordNumEntities.WithLabelValues(databaseName, metrics.AllLabel, metrics.LoadedLabel).Set(30)
+
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
+	mixCoord.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
+	proxyManager := proxyutil.NewMockProxyClientManager(t)
+	proxyManager.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+	quotaCenter := NewQuotaCenter(proxyManager, mixCoord, nil, meta)
+	require.Error(t, quotaCenter.collectMetrics())
+	assert.Equal(t, float64(30), testutil.ToFloat64(
+		metrics.RootCoordNumEntities.WithLabelValues(databaseName, metrics.AllLabel, metrics.LoadedLabel)))
+}
+
 type QuotaCenterSuite struct {
 	testutils.PromMetricsSuite
 
