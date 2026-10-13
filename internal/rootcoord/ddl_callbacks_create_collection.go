@@ -113,6 +113,10 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 }
 
 func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1) error {
+	return c.applyCollectionCreation(ctx, result, etcdpb.CollectionState_CollectionCreated)
+}
+
+func (c *DDLCallback) applyCollectionCreation(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1, state etcdpb.CollectionState) error {
 	msg := result.Message
 	header := msg.Header()
 	body := msg.MustBody()
@@ -140,6 +144,7 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 		return merr.Wrap(err, "failed to create collection data view")
 	}
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
+	newCollInfo.State = state
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
 		return merr.Wrap(err, "failed to add collection to meta table")
 	}

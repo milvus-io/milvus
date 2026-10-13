@@ -132,8 +132,9 @@ type Server struct {
 	copySegmentInspector CopySegmentInspector
 	copySegmentChecker   CopySegmentChecker
 
-	snapshotManager       SnapshotManager
-	snapshotExportManager *snapshotExportManager
+	snapshotManager          SnapshotManager
+	restoreCollectionManager RestoreCollectionManager
+	snapshotExportManager    *snapshotExportManager
 
 	compactionTrigger        trigger
 	compactionInspector      CompactionInspector
@@ -395,6 +396,8 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.getChannelsByCollectionID,
 		s.indexEngineVersionManager,
 	)
+	snapshotManager.collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).collectionRestorer = s.restoreCollectionManager
 	s.snapshotManager = snapshotManager
 	snapshotExportMeta, err := newSnapshotExportMeta(s.ctx, s.meta.catalog)
 	if err != nil {

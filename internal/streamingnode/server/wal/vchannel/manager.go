@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -332,7 +333,9 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 		return nil
 	}
 	module, _ := m.modules.Get(vchannel)
-	if module != nil || msg.MessageType() != message.MessageTypeCreateCollection {
+	createsCollection := msg.MessageType() == message.MessageTypeCreateCollection ||
+		(msg.MessageType() == message.MessageTypeRestoreSnapshot && messageutil.RestoreCollectionMessage(msg) != nil)
+	if module != nil || !createsCollection {
 		return module
 	}
 	module, err := m.newModule(vchannel)

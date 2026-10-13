@@ -216,6 +216,10 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
 		m.handleCreateCollectionMessage(message.MustAsImmutableCreateCollectionMessageV1(msg))
+	case message.MessageTypeRestoreSnapshot:
+		if created := messageutil.RestoreCollectionMessage(msg); created != nil {
+			m.handleCreateCollectionMessage(created)
+		}
 	case message.MessageTypeCreatePartition:
 		m.handleCreatePartitionMessage(message.MustAsImmutableCreatePartitionMessageV1(msg))
 	case message.MessageTypeSchemaChange:

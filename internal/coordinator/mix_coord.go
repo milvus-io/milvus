@@ -110,6 +110,7 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
 	dataCoordServer := datacoord.CreateServer(c, factory)
 	dataCoordServer.SetQueryViewLoadInfoNotifier(queryCoordServer)
+	dataCoordServer.SetRestoreCollectionManager(rootCoordServer)
 
 	recoveryBarrier := newRecoveryBarrier()
 	dataCoordServer.SetDataViewCollectionRecoveryValidator(rootCoordServer.ValidateDataViewCollectionForRecovery)

@@ -818,54 +818,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		)
 	}
 
-	// Read complete snapshot data from S3 to retrieve source segment binlogs
-	var (
-		snapshotData *snapshotstorage.SnapshotData
-		err          error
-	)
-	concreteJob, ok := job.(*copySegmentJob)
-	if !ok || concreteJob.snapshotCache == nil {
-		return nil, merr.WrapErrServiceInternalMsg(
-			"copy segment job %d has no snapshot cache",
-			job.GetJobId(),
-		)
-	}
-	snapshotData, err = concreteJob.snapshotCache.load(func() (*snapshotstorage.SnapshotData, error) {
-		var loaded *snapshotstorage.SnapshotData
-		if job.GetExternal() {
-			resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
-				ctx,
-				snapshotstorage.InstanceConfigFromParamtable(Params),
-				snapshotstorage.DirectionRestore,
-				job.GetSnapshotS3Location(),
-				job.GetExternalSpec(),
-			)
-			if resolveErr != nil {
-				return nil, resolveErr
-			}
-			loaded, err = t.snapshotMeta.ReadExternalSnapshotDataWithChunkManager(
-				ctx,
-				resolved.ForeignCM,
-				job.GetSnapshotS3Location(),
-				true,
-			)
-		} else {
-			loaded, err = t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if expected := job.GetSnapshotFingerprint(); expected != "" {
-			actual, fingerprintErr := snapshotstorage.SnapshotFingerprint(loaded)
-			if fingerprintErr != nil {
-				return nil, fingerprintErr
-			}
-			if actual != expected {
-				return nil, merr.WrapErrDataIntegrityMsg("external snapshot changed after restore job creation")
-			}
-		}
-		return loaded, nil
-	})
+	snapshotData, err := loadCopySnapshot(ctx, job, t.snapshotMeta)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), mlog.Err(err))...)
@@ -1810,4 +1763,51 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 			mlog.FieldSegmentID(result.GetSegmentId()),
 			mlog.Int("count", len(result.GetJsonKeyIndexInfos())))...)
 	return nil
+}
+
+func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots *snapshotMeta) (*snapshotstorage.SnapshotData, error) {
+	concreteJob, ok := job.(*copySegmentJob)
+	if !ok || concreteJob.snapshotCache == nil {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"copy segment job %d has no snapshot cache",
+			job.GetJobId(),
+		)
+	}
+	return concreteJob.snapshotCache.load(func() (*snapshotstorage.SnapshotData, error) {
+		var loaded *snapshotstorage.SnapshotData
+		var err error
+		if job.GetExternal() {
+			resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
+				ctx,
+				snapshotstorage.InstanceConfigFromParamtable(Params),
+				snapshotstorage.DirectionRestore,
+				job.GetSnapshotS3Location(),
+				job.GetExternalSpec(),
+			)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			loaded, err = snapshots.ReadExternalSnapshotDataWithChunkManager(
+				ctx,
+				resolved.ForeignCM,
+				job.GetSnapshotS3Location(),
+				true,
+			)
+		} else {
+			loaded, err = snapshots.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if expected := job.GetSnapshotFingerprint(); expected != "" {
+			actual, fingerprintErr := snapshotstorage.SnapshotFingerprint(loaded)
+			if fingerprintErr != nil {
+				return nil, fingerprintErr
+			}
+			if actual != expected {
+				return nil, merr.WrapErrDataIntegrityMsg("external snapshot changed after restore job creation")
+			}
+		}
+		return loaded, nil
+	})
 }

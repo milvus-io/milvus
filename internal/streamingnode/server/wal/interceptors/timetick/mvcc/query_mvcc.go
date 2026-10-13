@@ -80,7 +80,7 @@ func (cm *QueryMVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	}
 	mvcc := cm.vchannelMVCCs[vchannel]
 	switch msgType {
-	case message.MessageTypeCreateCollection:
+	case message.MessageTypeCreateCollection, message.MessageTypeRestoreSnapshot:
 		if tt <= max(mvcc.GrowingTimetick, mvcc.TransformingTimetick) {
 			return
 		}

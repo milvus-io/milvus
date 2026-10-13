@@ -527,11 +527,15 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 		return err
 	}
 	for _, dbName := range resp.GetDbNames() {
-		collectionsResp, err := broker.ShowCollections(ctx, dbName)
+		collectionsResp, err := broker.ShowCollectionIDs(ctx, dbName)
 		if err != nil {
 			return err
 		}
-		for _, collectionID := range collectionsResp.GetCollectionIds() {
+		var collectionIDs []int64
+		for _, collections := range collectionsResp.GetDbCollections() {
+			collectionIDs = append(collectionIDs, collections.GetCollectionIDs()...)
+		}
+		for _, collectionID := range collectionIDs {
 			descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
 			if err != nil {
 				return err

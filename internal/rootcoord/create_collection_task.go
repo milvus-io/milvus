@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -882,6 +883,11 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 		return err2
 	}
 
+	// A restoring target reserves its name even though public metadata reads
+	// hide it until data publication completes.
+	if existing, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, true); err == nil && existing.State == etcdpb.CollectionState_CollectionRestoring {
+		return merr.WrapErrParameterInvalidMsg("collection %s is being restored", t.Req.GetCollectionName())
+	}
 	// Check if the collection already exists.
 	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err == nil {

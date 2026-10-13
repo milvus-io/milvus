@@ -10,6 +10,7 @@ import "data_coord.proto"; // for SegmentLevel, but it's a basic type should not
 import "index_coord.proto";
 import "internal.proto";
 import "milvus.proto";
+import "msg.proto";
 import "rg.proto";
 import "google/protobuf/field_mask.proto";
 
@@ -686,10 +687,10 @@ message DropSnapshotsByCollectionMessageHeader {
 message DropSnapshotsByCollectionMessageBody {}
 
 // RestoreSnapshotMessageHeader is the header of restore snapshot message.
-// Used by DDL callback to restore indexes and data after collection is created.
+// Carries the identity of a restore; new messages include target creation in the body.
 message RestoreSnapshotMessageHeader {
     string snapshot_name = 1;    // Name of the snapshot to restore
-    int64 collection_id = 2;     // Target collection ID (already created)
+    int64 collection_id = 2;     // Pre-allocated target collection ID
     int64 job_id = 3;            // Pre-allocated job ID for idempotency
     int64 source_collection_id = 4; // Source collection ID for per-collection snapshot name lookup
     int64 pin_id = 5;            // Pin ID claimed on source snapshot at phase 0, transferred to the copy segment job
@@ -700,8 +701,13 @@ message RestoreSnapshotMessageHeader {
 }
 
 // RestoreSnapshotMessageBody is the body of restore snapshot message.
-// Empty - all info is read from snapshot by snapshot_name.
-message RestoreSnapshotMessageBody {}
+// A non-empty collection payload creates the target as part of this broadcast.
+// An absent payload is the legacy restore-into-an-already-created-target recipe.
+message RestoreSnapshotMessageBody {
+    CreateCollectionMessageHeader collection_header = 1;
+    msg.CreateCollectionRequest collection = 2;
+    repeated index.FieldIndex indexes = 3;
+}
 
 message AlterWALMessageHeader {
     common.WALName target_wal_name = 1; // Specifies the target WALName for the alter operation.

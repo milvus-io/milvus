@@ -16,6 +16,8 @@ func AdvancesQueryTransformMVCC(msg message.BasicMessage) bool {
 		message.MessageTypeFlush,
 		message.MessageTypeManualFlush,
 		message.MessageTypeCreateSnapshot,
+		message.MessageTypeRestoreSnapshot,
+		message.MessageTypeRefreshExternalCollection,
 		message.MessageTypeDropPartition,
 		message.MessageTypeDropCollection,
 		message.MessageTypeTruncateCollection,

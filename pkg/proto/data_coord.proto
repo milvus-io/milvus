@@ -1488,6 +1488,12 @@ message CopySegmentJob {
   string snapshot_s3_location = 20;
   string external_spec = 21;
   string snapshot_fingerprint = 22;
+  // Per-target-VChannel RestoreSnapshot positions. These belong to the target
+  // WAL, never the source snapshot's time domain.
+  map<string, uint64> transform_start_after_timeticks = 23;
+  // The RestoreSnapshot broadcast also creates this target collection.
+  bool creates_collection = 24;
+  map<string, string> channel_mapping = 25; // Source -> target channels for idempotent segment registration.
 }
 
 message ImportJob {

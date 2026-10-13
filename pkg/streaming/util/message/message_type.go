@@ -73,6 +73,9 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeManualFlush: {
 		ExclusiveRequired: true,
 	},
+	MessageTypeRestoreSnapshot: {
+		ExclusiveRequired: true,
+	},
 	MessageTypeCreateSnapshot: {
 		ExclusiveRequired: true,
 	},

@@ -39,7 +39,8 @@ pair when resolving metadata.
 | Import | CommitImport TimeTick for this business VChannel |
 | External-table refresh | CreateCollection TimeTick for this business VChannel; retain it for same-ID Manifest updates and new/replacement Segments |
 | Non-L0 compaction | Minimum C of the actual input data versions |
-| Split or exact data copy | Inherit the source data version's C |
+| Split or exact data copy within the same collection | Inherit the source data version's C |
+| RestoreSnapshot into a new collection | Target business VChannel RestoreSnapshot TimeTick; source snapshot changes must be included in the restored base |
 | L0 compaction into Segment deltalogs | Advance to T only after complete coverage of the required interval through T is durable |
 | No matching Delete | May advance after a complete evaluation proves the interval irrelevant |
 | Index-only update | Keep C |
@@ -279,3 +280,38 @@ The coordinator calculates `min(W, A)` when projecting the immutable DataView
 into QueryView; `QueryViewMeta.transform_start_after_timetick` remains the
 consumer-facing exclusive replay start. There is no clear-on-serialization or
 restore-a-third-field path.
+
+### RestoreSnapshot creation and asynchronous publication
+
+A new restore uses one RestoreSnapshot broadcast carrying the target collection,
+partition and index creation recipe and the preallocated JobID. It addresses all
+target business VChannels plus the automatically included control channel. The
+business-channel copy also initializes SN shard/schema state, recovery metadata,
+and TransformLog retention. Its own TimeTick R is the target creation origin;
+initial W = A = R. Source WAL positions are not target replay cursors.
+
+The coordinator callback creates the target metadata in CollectionRestoring,
+persists indexes, then creates an asynchronous copy Job. Segment IDs are allocated
+inside that callback and persisted in the Job's source-to-target mappings; they
+are not part of the broadcast message. Job persistence precedes target segment
+registration. Callback replay looks up the same WAL JobID and reuses the Job.
+The background checker registers missing segments from the pinned snapshot and
+durable mappings before dispatching copy tasks, so partial registration and
+restart cannot allocate another set of target segments.
+
+The API retains its asynchronous contract: it returns a JobID without waiting
+for the target collection to become available. Internal metadata recovery includes
+Restoring collections; public collection lookup excludes them. Their names and
+resources stay reserved. Once all expected segment copies are installed, the
+checker publishes the DataView, makes the collection available, and finally
+persists the Job's Completed state. Each step is idempotent. Durable completed
+copy tasks protect this final publication from timeout/failure cleanup; no extra
+Committing job state is introduced. A public Completed result requires successful
+publication, but does not imply that the user has loaded the collection.
+
+Legacy RestoreSnapshot messages with an absent creation payload retain the old
+restore-into-an-already-created-target callback. No existing RPC is removed.
+Snapshot creation must include source Deletes in the restored data: stamping R
+alone never permits dropping source L0/delete content, and QueryView must not
+load standalone L0 as a workaround. Delete preservation is a required restore
+validation case.

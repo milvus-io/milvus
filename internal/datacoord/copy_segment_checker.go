@@ -85,11 +85,12 @@ type CopySegmentChecker interface {
 // This runs as a background service in DataCoord, checking all copy segment jobs
 // periodically and progressing them through their state machine.
 type copySegmentChecker struct {
-	ctx      context.Context     // Context for lifecycle management
-	meta     *meta               // Segment metadata for state updates
-	broker   broker.Broker       // Broker for coordinator communication
-	alloc    allocator.Allocator // ID allocator for creating tasks
-	copyMeta CopySegmentMeta     // Copy segment job/task metadata store
+	collectionRestorer RestoreCollectionManager
+	ctx                context.Context     // Context for lifecycle management
+	meta               *meta               // Segment metadata for state updates
+	broker             broker.Broker       // Broker for coordinator communication
+	alloc              allocator.Allocator // ID allocator for creating tasks
+	copyMeta           CopySegmentMeta     // Copy segment job/task metadata store
 
 	closeOnce sync.Once     // Ensures Close is called only once
 	closeChan chan struct{} // Channel for signaling shutdown
@@ -314,8 +315,19 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 		return
 	}
 
+	if job.(*copySegmentJob).GetCreatesCollection() && len(job.GetIdMappings()) > 0 {
+		if err := c.registerRestoreSegments(job); err != nil {
+			log.Warn(c.ctx, "retrying restored segment registration", mlog.Err(err))
+			return
+		}
+	}
+
 	// Step 1: Validate job has segment mappings
 	idMappings := job.GetIdMappings()
+	if len(idMappings) == 0 && job.(*copySegmentJob).GetCreatesCollection() {
+		c.finishJob(job, 0)
+		return
+	}
 	if len(idMappings) == 0 {
 		log.Warn(c.ctx, "no id mappings to copy, mark job as completed")
 		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
@@ -503,6 +515,10 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		return
 	}
 
+	if job.(*copySegmentJob).GetCreatesCollection() && !allRestoreSegmentsCopied(job, tasks) {
+		return
+	}
+
 	// Step 6: All tasks completed - collect total rows and finish job
 	var totalRows int64
 	for _, task := range tasks {
@@ -571,6 +587,9 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	}
 
 	// Step 3: Fail the job if any segment flush failed (prevents silent data availability issues)
+	if flushFailures > 0 && job.(*copySegmentJob).GetCreatesCollection() {
+		return // Copied data is durable; retry metadata publication.
+	}
 	if flushFailures > 0 {
 		reason := fmt.Sprintf("%d/%d segments failed to flush to Flushed state", flushFailures, len(targetSegmentIDs))
 		log.Error(c.ctx, "finishJob: failing job due to segment flush failures",
@@ -582,6 +601,27 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 			log.Error(c.ctx, "failed to update job state to Failed after flush failures", mlog.Err(err))
 		}
 		return
+	}
+
+	c.publishRestoredCollection(job, totalRows)
+}
+
+func (c *copySegmentChecker) publishRestoredCollection(job CopySegmentJob, totalRows int64) {
+	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
+	// Completion is downstream of the durable DataView publication. The target
+	// remains unavailable if reconciliation fails; a checker retry resumes it.
+	if c.meta.dataViewManager != nil {
+		version, err := c.meta.dataViewManager.RecomputeNow(c.ctx, job.GetCollectionId(), c.meta.loadableProjection)
+		if err != nil || version == nil {
+			log.Warn(c.ctx, "waiting for restored DataView publication", mlog.Err(err))
+			return
+		}
+	}
+	if job.(*copySegmentJob).GetCreatesCollection() {
+		if err := c.collectionRestorer.CompleteRestoreCollection(c.ctx, job.GetCollectionId()); err != nil {
+			log.Warn(c.ctx, "waiting to publish restored collection", mlog.Err(err))
+			return
+		}
 	}
 
 	// Step 4: Update job state to Completed
@@ -600,7 +640,6 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	metrics.CopySegmentJobLatency.Observe(float64(totalDuration.Milliseconds()))
 	log.Info(c.ctx, "copy segment job completed",
 		mlog.Int64("totalRows", totalRows),
-		mlog.Int("targetSegments", len(targetSegmentIDs)),
 		mlog.Duration("totalDuration", totalDuration))
 }
 
@@ -664,6 +703,10 @@ func (c *copySegmentChecker) checkFailedJob(job CopySegmentJob) {
 //
 // Timeout is set when job is created based on configuration.
 func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
+	job = c.copyMeta.GetJob(c.ctx, job.GetJobId())
+	if job == nil {
+		return
+	}
 	// Only apply timeout to non-terminal jobs
 	switch job.GetState() {
 	case datapb.CopySegmentJobState_CopySegmentJobPending,
@@ -674,6 +717,9 @@ func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 		return
 	}
 
+	if job.(*copySegmentJob).GetCreatesCollection() && allRestoreSegmentsCopied(job, c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())) {
+		return // Only idempotent metadata publication remains.
+	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
 	if job.GetTimeoutTs() == 0 || time.Now().Before(timeoutTime) {
 		return
