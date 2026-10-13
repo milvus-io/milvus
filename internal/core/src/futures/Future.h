@@ -15,6 +15,7 @@
 #include <common/EasyAssert.h>
 #include <folly/CancellationToken.h>
 #include <folly/futures/Future.h>
+#include <folly/executors/InlineExecutor.h>
 #include <folly/futures/SharedPromise.h>
 #include "future_c_types.h"
 #include "LeakyResult.h"
@@ -192,10 +193,10 @@ class Future : public IFuture {
         auto future = std::make_unique<Future<R>>();
         // setup the interrupt handler for the promise.
         future->setInterruptHandler();
+        // Attach completion before the producer can finish.
+        future->registerConsumeCallback();
         // start async function.
         future->asyncProduce(executor, priority, std::forward<Fn>(fn));
-        // register consume callback function.
-        future->registerConsumeCallback(executor, priority);
         return future;
     }
 
@@ -305,11 +306,10 @@ class Future : public IFuture {
 
     /// @brief async consume the result of the future.
     void
-    registerConsumeCallback(folly::Executor::KeepAlive<> executor,
-                            int priority) noexcept {
+    registerConsumeCallback() noexcept {
         // set up the result consume arm and exception consume arm.
         promise_->getSemiFuture()
-            .via(executor, priority)
+            .via(&folly::InlineExecutor::instance())
             .thenValue(
                 [ready = ready_](R* r) { ready->setValue(LeakyResult<R>(r)); })
             .thenError(folly::tag_t<folly::FutureCancellation>{},
