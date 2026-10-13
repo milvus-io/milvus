@@ -44,6 +44,30 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
+func TestDeltalogReaderPropagatesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	called := false
+	reader, err := NewDeltalogReader(ctx, &schemapb.FieldSchema{
+		FieldID:      100,
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}, []string{"deltalog"}, WithDownloader(func(downloadCtx context.Context, paths []string) ([][]byte, error) {
+		called = true
+		assert.Equal(t, []string{"deltalog"}, paths)
+		assert.ErrorIs(t, downloadCtx.Err(), context.Canceled)
+		return nil, downloadCtx.Err()
+	}))
+	require.NoError(t, err)
+	defer reader.Close()
+	require.False(t, called, "deltalogs should be downloaded lazily")
+
+	cancel()
+	_, err = reader.Next()
+	require.True(t, called)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestBinlogDeserializeReader(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
 		reader, err := NewBinlogDeserializeReader(generateTestSchema(), func() ([]*Blob, error) {

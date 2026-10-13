@@ -173,6 +173,14 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		}
 	}
 
+	// Only now is this step actually admitted to run: it cleared the wait
+	// queue and the executor's capacity gates above. Arm a fresh deadline for
+	// this step here (no-op if already armed for it) so time spent queued or
+	// bounced by admission doesn't count against the RPC budget, and a
+	// later step in a multi-action task gets its own full budget rather than
+	// sharing whatever was left of an earlier step's.
+	task.ActivateDeadline(step)
+
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
