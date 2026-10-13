@@ -36,7 +36,6 @@
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "storage/DataCodec.h"
-#include "storage/DiskFileManagerImpl.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileManager.h"
 #include "storage/FileWriter.h"
@@ -353,24 +352,6 @@ CloseOutput(std::ofstream& output, const std::string& path) {
     }
 }
 
-int64_t
-LocalFileSize(const std::string& path) {
-    std::error_code error;
-    auto size = std::filesystem::file_size(path, error);
-    if (error) {
-        ThrowInfo(FileReadFailed,
-                  "failed to get local artifact file size {}: {}",
-                  path,
-                  error.message());
-    }
-    if (size > static_cast<uintmax_t>(std::numeric_limits<int64_t>::max())) {
-        ThrowInfo(FileReadFailed,
-                  "local artifact file is too large to account: {}",
-                  path);
-    }
-    return static_cast<int64_t>(size);
-}
-
 void
 AppendMemory(const uint8_t* data,
              size_t size,
@@ -406,38 +387,6 @@ WriteBytes(const std::string& path,
     }
     AppendMemory(data, size, output, cancellation_token);
     CloseOutput(output, path);
-}
-
-void
-AppendFile(const std::string& source,
-           std::ofstream& output,
-           const folly::CancellationToken& cancellation_token = {}) {
-    std::ifstream input(source, std::ios::binary);
-    if (!input.good()) {
-        ThrowInfo(FileOpenFailed,
-                  "failed to open staged local artifact source {}",
-                  source);
-    }
-    std::vector<char> buffer(1024 * 1024);
-    while (input) {
-        ThrowIfCancelled(cancellation_token, "artifact file materialization");
-        input.read(buffer.data(), buffer.size());
-        auto read = input.gcount();
-        if (read > 0) {
-            output.write(buffer.data(), read);
-        }
-    }
-    if (!input.eof()) {
-        ThrowInfo(FileReadFailed,
-                  "failed to read staged local artifact source {}",
-                  source);
-    }
-    if (!output.good()) {
-        ThrowInfo(FileWriteFailed,
-                  "failed to append staged local artifact source {}",
-                  source);
-    }
-    ThrowIfCancelled(cancellation_token, "artifact file materialization");
 }
 
 }  // namespace
@@ -521,8 +470,7 @@ class V1RemoteSource::Impl {
           cancellation_token(CancellationToken(options)),
           storage_namespace(storage_namespace),
           layout(layout),
-          memory_manager(std::make_shared<MemFileManagerImpl>(context)),
-          disk_manager(std::make_shared<DiskFileManagerImpl>(context)) {
+          memory_manager(std::make_shared<MemFileManagerImpl>(context)) {
         NormalizePaths();
         if (!defer_directory) {
             BuildDirectory();
@@ -1015,36 +963,16 @@ class V1RemoteSource::Impl {
         });
     }
 
-    bool
-    CanStreamToDisk(std::string_view name) const {
-        if (layout != V1SourceLayout::DiskFiles &&
-            slice_meta_entries.count(std::string(name)) == 0) {
-            return false;
-        }
-        const auto& paths = Paths(name);
-        return !paths.empty() &&
-               std::all_of(paths.begin(), paths.end(), [](const auto& path) {
-                   return SplitNumericSuffix(SourceBaseName(path)).has_value();
-               });
-    }
-
     void
     CheckCancelled(const std::string& operation) const {
         ThrowIfCancelled(cancellation_token, operation);
     }
 
     void
-    RecordOrValidateEntrySize(std::string_view name,
-                              int64_t observed,
-                              std::string invalid_path = {}) const {
+    RecordOrValidateEntrySize(std::string_view name, int64_t observed) const {
         const auto key = std::string(name);
         auto known = entry_sizes.find(key);
         if (known != entry_sizes.end() && known->second != observed) {
-            staged_files.erase(key);
-            if (!invalid_path.empty()) {
-                std::error_code ignored;
-                std::filesystem::remove(invalid_path, ignored);
-            }
             ThrowInfo(DataFormatBroken,
                       "artifact entry size mismatch for {}: expected {}, got "
                       "{}",
@@ -1055,43 +983,6 @@ class V1RemoteSource::Impl {
         entry_sizes.emplace(key, observed);
     }
 
-    std::string
-    CacheToDisk(std::string_view name) const {
-        auto cached = staged_files.find(std::string(name));
-        if (cached != staged_files.end()) {
-            std::error_code error;
-            if (std::filesystem::exists(cached->second, error) && !error) {
-                RecordOrValidateEntrySize(
-                    name, LocalFileSize(cached->second), cached->second);
-                return cached->second;
-            }
-            if (error) {
-                ThrowInfo(FileReadFailed,
-                          "failed to inspect cached artifact entry {}: {}",
-                          cached->second,
-                          error.message());
-            }
-            staged_files.erase(cached);
-        }
-
-        const auto& paths = Paths(name);
-        CheckCancelled("V1/V2 artifact disk cache");
-        if (storage_namespace == ArtifactStorageNamespace::TextLog) {
-            disk_manager->CacheTextLogToDisk(paths, load_priority);
-        } else {
-            disk_manager->CacheIndexToDisk(paths, load_priority);
-        }
-        CheckCancelled("V1/V2 artifact disk cache");
-        for (const auto& local : disk_manager->GetLocalFilePaths()) {
-            if (SourceBaseName(local) == name) {
-                RecordOrValidateEntrySize(name, LocalFileSize(local), local);
-                staged_files.emplace(std::string(name), local);
-                return local;
-            }
-        }
-        ThrowInfo(FileReadFailed, "cached artifact entry not found: {}", name);
-    }
-
     FileManagerContext context;
     std::vector<std::string> remote_paths;
     std::vector<std::string> normalized_paths;
@@ -1100,12 +991,10 @@ class V1RemoteSource::Impl {
     ArtifactStorageNamespace storage_namespace;
     V1SourceLayout layout;
     std::shared_ptr<MemFileManagerImpl> memory_manager;
-    std::shared_ptr<DiskFileManagerImpl> disk_manager;
     std::map<std::string, std::vector<std::string>> logical_entries;
     std::unordered_map<std::string, LegacyIndexFileInfo> file_infos;
     std::set<std::string> slice_meta_entries;
     mutable std::unordered_map<std::string, int64_t> entry_sizes;
-    mutable std::unordered_map<std::string, std::string> staged_files;
 };
 
 void
@@ -1304,21 +1193,6 @@ void
 V1RemoteSource::ReadEntryToLocalFile(std::string_view name,
                                      const std::string& local_path) {
     StagedLocalFile staged(local_path);
-    if (impl_->CanStreamToDisk(name)) {
-        auto cached = impl_->CacheToDisk(name);
-        std::ofstream output(staged.Staging(),
-                             std::ios::binary | std::ios::trunc);
-        if (!output.good()) {
-            ThrowInfo(FileOpenFailed,
-                      "failed to open staged local artifact file {}",
-                      staged.Staging());
-        }
-        AppendFile(cached, output, impl_->cancellation_token);
-        CloseOutput(output, staged.Staging());
-        impl_->CheckCancelled("V1/V2 artifact file publication");
-        staged.Commit();
-        return;
-    }
     std::ofstream output(staged.Staging(), std::ios::binary | std::ios::trunc);
     if (!output.good()) {
         ThrowInfo(FileOpenFailed,
@@ -1342,12 +1216,7 @@ V1RemoteSource::ReadEntriesToLocalFile(const std::vector<std::string>& names,
                   staged.Staging());
     }
     for (const auto& name : names) {
-        if (impl_->CanStreamToDisk(name)) {
-            AppendFile(
-                impl_->CacheToDisk(name), output, impl_->cancellation_token);
-        } else {
-            impl_->Append(name, output);
-        }
+        impl_->Append(name, output);
     }
     CloseOutput(output, staged.Staging());
     impl_->CheckCancelled("V1/V2 artifact file publication");
@@ -1372,28 +1241,15 @@ V1RemoteSource::ReadEntriesToLocalDir(const std::vector<std::string>& names,
                    path);
         paths.push_back(path);
         staged.emplace_back(path);
-        if (impl_->CanStreamToDisk(name)) {
-            auto cached = impl_->CacheToDisk(name);
-            std::ofstream output(staged.back().Staging(),
-                                 std::ios::binary | std::ios::trunc);
-            if (!output.good()) {
-                ThrowInfo(FileOpenFailed,
-                          "failed to open staged local artifact file {}",
-                          staged.back().Staging());
-            }
-            AppendFile(cached, output, impl_->cancellation_token);
-            CloseOutput(output, staged.back().Staging());
-        } else {
-            std::ofstream output(staged.back().Staging(),
-                                 std::ios::binary | std::ios::trunc);
-            if (!output.good()) {
-                ThrowInfo(FileOpenFailed,
-                          "failed to open staged local artifact file {}",
-                          staged.back().Staging());
-            }
-            impl_->Append(name, output);
-            CloseOutput(output, staged.back().Staging());
+        std::ofstream output(staged.back().Staging(),
+                             std::ios::binary | std::ios::trunc);
+        if (!output.good()) {
+            ThrowInfo(FileOpenFailed,
+                      "failed to open staged local artifact file {}",
+                      staged.back().Staging());
         }
+        impl_->Append(name, output);
+        CloseOutput(output, staged.back().Staging());
     }
     impl_->CheckCancelled("V1/V2 artifact directory publication");
     CommitAll(staged);

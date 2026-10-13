@@ -37,6 +37,11 @@ envelopes before allocating. Envelope inspection, including open/size requests,
 bypasses payload admission in both modes. Async inspection still bounds concurrent
 objects per batch by the configured slot capacity and drains issued I/O on failure.
 
+Synchronous file materialization decodes bounded batches directly into the target
+staging file, including concatenated entries and directory outputs. It does not
+keep an intermediate disk copy of each entry; staging publication and rollback
+retain the existing target ownership rules.
+
 Remote reads and admission waits suspend. Local size/read/write calls run on
 LocalFileIOPool. The family coroutine also runs there so local staging, mmap,
 native initialization and failure cleanup retain their existing synchronous

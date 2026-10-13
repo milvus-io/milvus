@@ -19,9 +19,12 @@
 #include <atomic>
 #include <thread>
 #include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include <future>
+#include <functional>
 #include <fstream>
 #include <map>
+#include <set>
 #include <numeric>
 #include "arrow/filesystem/localfs.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -244,7 +247,10 @@ class CountingLegacyChunkManager final : public storage::LocalChunkManager {
     uint64_t
     Read(const std::string& path, void* data, uint64_t bytes) override {
         ++whole_reads;
-        return LocalChunkManager::Read(path, 0, data, bytes);
+        const auto read = LocalChunkManager::Read(path, 0, data, bytes);
+        if (after_read)
+            after_read(path);
+        return read;
     }
     uint64_t
     Read(const std::string& path,
@@ -257,6 +263,7 @@ class CountingLegacyChunkManager final : public storage::LocalChunkManager {
     std::atomic<size_t> whole_reads{0};
     std::atomic<size_t> range_bytes{0};
     std::atomic<size_t> size_calls{0};
+    std::function<void(const std::string&)> after_read;
 };
 
 TEST_F(LegacyIndexLoadTest, SyncUnslicedReadDownloadsOnceWithoutRemoteProbes) {
@@ -281,6 +288,137 @@ TEST_F(LegacyIndexLoadTest, SyncUnslicedReadDownloadsOnceWithoutRemoteProbes) {
     EXPECT_EQ(manager->size_calls.load(), 1);
     EXPECT_EQ(manager->range_bytes.load(), 0);
     sink.ReleaseLocalStaging();
+}
+
+TEST_F(LegacyIndexLoadTest, SyncMaterializationWritesDirectlyToTarget) {
+    context_.use_async_load = false;
+    context_.indexMeta.build_id = 6076;
+    auto manager = std::make_shared<CountingLegacyChunkManager>(
+        context_.chunkManagerPtr->GetRootPath());
+    context_.chunkManagerPtr = manager;
+    storage::V1DiskSink sink(context_);
+    const std::vector<uint8_t> a(517, 17), b(389, 23), empty;
+    for (const auto& [name, bytes] :
+         std::map<std::string, std::vector<uint8_t>>{
+             {"a", a}, {"b", b}, {"empty", empty}})
+        sink.WriteEntry(name, bytes.data(), bytes.size());
+    const auto stats = sink.Finish();
+    std::vector<std::string> paths;
+    size_t payload_files = 0;
+    for (const auto& file : stats.Files()) {
+        paths.push_back(file.file_name);
+        if (std::filesystem::path(file.file_name).filename() !=
+            INDEX_FILE_SLICE_META)
+            ++payload_files;
+    }
+    sink.ReleaseLocalStaging();
+    ASSERT_GT(payload_files, 3);
+    const auto cache_root = storage::GenIndexPathPrefix(
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager(),
+        context_.indexMeta.build_id,
+        context_.indexMeta.index_version,
+        context_.indexMeta.segment_id,
+        context_.indexMeta.field_id,
+        false);
+    auto cache_parent = std::filesystem::path(cache_root);
+    if (cache_parent.filename().empty())
+        cache_parent = cache_parent.parent_path();
+    cache_parent = cache_parent.parent_path();
+    auto cached_files = [&] {
+        std::set<std::string> files;
+        if (std::filesystem::exists(cache_parent))
+            for (const auto& entry :
+                 std::filesystem::recursive_directory_iterator(cache_parent))
+                if (entry.is_regular_file())
+                    files.insert(entry.path().string());
+        return files;
+    };
+    auto read = [](const std::string& path) {
+        std::ifstream input(path, std::ios::binary);
+        return std::vector<uint8_t>(std::istreambuf_iterator<char>(input), {});
+    };
+    const std::vector<std::string> names{"b", "empty", "a"};
+    for (const auto layout : {storage::V1SourceLayout::MemoryEntries,
+                              storage::V1SourceLayout::DiskFiles}) {
+        for (int mode : {0, 1, 2}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "mode=" << mode << " layout=" << int(layout));
+            storage::V1RemoteSource source(
+                context_,
+                paths,
+                {},
+                storage::ArtifactStorageNamespace::Index,
+                layout);
+            const auto before = cached_files();
+            manager->whole_reads = manager->range_bytes = 0;
+            const auto target = staging_ + "/combined";
+            if (mode == 0) {
+                source.ReadEntryToLocalFile("a", target);
+                EXPECT_EQ(read(target), a);
+            } else if (mode == 1) {
+                source.ReadEntriesToLocalFile(names, target);
+                auto combined = b;
+                combined.insert(combined.end(), a.begin(), a.end());
+                EXPECT_EQ(read(target), combined);
+            } else {
+                const auto outputs =
+                    source.ReadEntriesToLocalDir(names, staging_);
+                ASSERT_EQ(outputs.size(), 3);
+                EXPECT_EQ(read(outputs[0]), b);
+                EXPECT_EQ(read(outputs[1]), empty);
+                EXPECT_EQ(read(outputs[2]), a);
+            }
+            EXPECT_EQ(cached_files(), before);
+            EXPECT_EQ(manager->range_bytes, 0);
+            if (mode != 0)
+                EXPECT_EQ(manager->whole_reads, payload_files);
+
+            auto materialize = [&] {
+                if (mode == 0)
+                    source.ReadEntryToLocalFile("a", target);
+                else if (mode == 1)
+                    source.ReadEntriesToLocalFile(names, target);
+                else
+                    source.ReadEntriesToLocalDir(names, staging_);
+            };
+            auto outputs = [&] {
+                std::map<std::string, std::vector<uint8_t>> contents;
+                for (const auto& entry :
+                     std::filesystem::directory_iterator(staging_))
+                    if (entry.is_regular_file())
+                        contents.emplace(entry.path().string(),
+                                         read(entry.path()));
+                return contents;
+            };
+            const auto published = outputs();
+            folly::CancellationSource cancel;
+            source.SetLoadContext(proto::common::LoadPriority::HIGH,
+                                  cancel.getToken());
+            manager->after_read = [&](const auto&) {
+                cancel.requestCancellation();
+            };
+            ExpectError(FollyCancel, materialize);
+            manager->after_read = {};
+            EXPECT_EQ(outputs(), published);
+            source.SetLoadContext(proto::common::LoadPriority::HIGH, {});
+
+            const auto slice =
+                *std::find_if(paths.begin(), paths.end(), [](const auto& path) {
+                    return std::filesystem::path(path).filename() == "a_0";
+                });
+            std::vector<uint8_t> encoded(manager->Size(slice));
+            manager->Read(slice, encoded.data(), encoded.size());
+            auto restore = folly::makeGuard(
+                [&] { manager->Write(slice, encoded.data(), encoded.size()); });
+            uint8_t corrupt = 0;
+            manager->Write(slice, &corrupt, 1);
+            ExpectError(DataFormatBroken, materialize);
+            EXPECT_EQ(outputs(), published);
+            manager->Write(slice, encoded.data(), encoded.size());
+            materialize();
+            EXPECT_EQ(outputs(), published);
+        }
+    }
 }
 
 TEST_F(LegacyIndexLoadTest, AsyncEnvelopeInspectionOverlapsAndDrainsOnFailure) {
