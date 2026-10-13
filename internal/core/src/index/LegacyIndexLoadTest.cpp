@@ -71,6 +71,7 @@ class LegacyTestFileSystem final : public arrow::fs::SubTreeFileSystem {
     }
     arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenInputFileAsync(const std::string& path) override {
+        ++opens;
         const auto it = files.find(path);
         if (it == files.end()) {
             return arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>::
@@ -81,6 +82,7 @@ class LegacyTestFileSystem final : public arrow::fs::SubTreeFileSystem {
                 it->second));
     }
     std::map<std::string, std::shared_ptr<ControlledFile>> files;
+    std::atomic<size_t> opens{0};
 };
 
 class LegacyIndexLoadTest : public ::testing::Test {
@@ -235,9 +237,14 @@ class CountingLegacyChunkManager final : public storage::LocalChunkManager {
  public:
     using LocalChunkManager::LocalChunkManager;
     uint64_t
+    Size(const std::string& path) override {
+        ++size_calls;
+        return LocalChunkManager::Size(path);
+    }
+    uint64_t
     Read(const std::string& path, void* data, uint64_t bytes) override {
         ++whole_reads;
-        return LocalChunkManager::Read(path, data, bytes);
+        return LocalChunkManager::Read(path, 0, data, bytes);
     }
     uint64_t
     Read(const std::string& path,
@@ -249,7 +256,159 @@ class CountingLegacyChunkManager final : public storage::LocalChunkManager {
     }
     std::atomic<size_t> whole_reads{0};
     std::atomic<size_t> range_bytes{0};
+    std::atomic<size_t> size_calls{0};
 };
+
+TEST_F(LegacyIndexLoadTest, SyncUnslicedReadDownloadsOnceWithoutRemoteProbes) {
+    FILE_SLICE_SIZE.store(1024 * 1024);
+    auto manager = std::make_shared<CountingLegacyChunkManager>(
+        context_.chunkManagerPtr->GetRootPath());
+    context_.chunkManagerPtr = manager;
+    storage::V1DiskSink sink(context_);
+    const std::vector<uint8_t> payload(64 * 1024, 17);
+    sink.WriteEntry("payload", payload.data(), payload.size());
+    const auto stats = sink.Finish();
+    ASSERT_EQ(stats.Files().size(), 1);
+    storage::V1RemoteSource source(context_, {stats.Files()[0].file_name}, {});
+    manager->size_calls = 0;
+    manager->whole_reads = 0;
+    manager->range_bytes = 0;
+    EXPECT_EQ(source.ReadEntry("payload"), payload);
+    EXPECT_EQ(manager->size_calls.load(), 1);
+    EXPECT_EQ(manager->whole_reads.load(), 1);
+    EXPECT_EQ(manager->range_bytes.load(), 0);
+    EXPECT_EQ(source.EntrySize("payload"), payload.size());
+    EXPECT_EQ(manager->size_calls.load(), 1);
+    EXPECT_EQ(manager->range_bytes.load(), 0);
+    sink.ReleaseLocalStaging();
+}
+
+TEST_F(LegacyIndexLoadTest, AsyncEnvelopeInspectionOverlapsAndDrainsOnFailure) {
+    for (const auto mode : {0, 1, 2}) {
+        SCOPED_TRACE(mode);
+        FILE_SLICE_SIZE.store(1024 * 1024);
+        PersistSorted();
+        auto source =
+            Run(storage::V1RemoteSource::OpenAsync(context_, paths_, {}));
+        ASSERT_GE(source->EntryNames().size(), 2);
+        const auto first = fs_->files.begin()->second;
+        const auto second = std::next(fs_->files.begin())->second;
+        for (const auto& [path, file] : fs_->files) {
+            file->ResetCounters();
+        }
+        first->SetAutoComplete(false);
+        second->SetAutoComplete(false);
+        folly::CancellationSource cancel;
+        if (mode == 0)
+            source->SetLoadContext(proto::common::LoadPriority::HIGH,
+                                   cancel.getToken());
+        auto load = std::async(std::launch::async, [&] {
+            const auto names = source->EntryNames();
+            auto task = source->InspectLoadBytesAsync(names);
+            return mode == 1 ? Run(folly::coro::co_withCancellation(
+                                   cancel.getToken(), std::move(task)))
+                             : Run(std::move(task));
+        });
+        auto drain = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            for (const auto& [path, file] : fs_->files) {
+                file->SetAutoComplete(true);
+                for (size_t i = 0; i < file->DirectReadCalls().size(); ++i)
+                    file->Complete(i);
+            }
+            if (load.valid())
+                load.wait();
+        });
+        ASSERT_TRUE(first->WaitForCallCount(1));
+        ASSERT_TRUE(second->WaitForCallCount(1));
+        if (mode == 2)
+            second->Complete(
+                0, arrow::Status::IOError("injected envelope read failure"));
+        else
+            cancel.requestCancellation();
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        for (const auto& [path, file] : fs_->files) {
+            file->SetAutoComplete(true);
+            for (size_t i = 0; i < file->DirectReadCalls().size(); ++i)
+                file->Complete(i);
+        }
+        ExpectError(mode == 2 ? StorageError : FollyCancel,
+                    [&] { load.get(); });
+        drain.dismiss();
+        source->SetLoadContext(proto::common::LoadPriority::HIGH, {});
+        EXPECT_GT(
+            Run(source->InspectLoadBytesAsync(source->EntryNames())).payload,
+            0);
+    }
+}
+
+TEST_F(LegacyIndexLoadTest, SyncEnvelopeBypassesPayloadAdmission) {
+    FILE_SLICE_SIZE.store(1024 * 1024);
+    auto manager = std::make_shared<CountingLegacyChunkManager>(
+        context_.chunkManagerPtr->GetRootPath());
+    context_.chunkManagerPtr = manager;
+    storage::V1DiskSink sink(context_);
+    const std::vector<uint8_t> payload(64 * 1024, 17);
+    sink.WriteEntry("payload", payload.data(), payload.size());
+    const auto stats = sink.Finish();
+    ASSERT_EQ(stats.Files().size(), 1);
+    storage::V1RemoteSource source(context_, {stats.Files()[0].file_name}, {});
+    folly::CancellationSource cancel;
+    source.SetLoadContext(proto::common::LoadPriority::LOW, cancel.getToken());
+    auto& budget = storage::LoadAdmissionController::GetInstance();
+    auto lease = Run([&]() -> folly::coro::Task<storage::LoadAdmissionLease> {
+        co_return co_await budget.AcquireAsync(
+            {1, 4}, storage::LoadAdmissionPriority::High);
+    }());
+    manager->whole_reads = 0;
+    auto load = std::async(std::launch::async,
+                           [&] { return source.ReadEntry("payload"); });
+    auto drain = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        lease.Release();
+        if (load.valid())
+            load.wait();
+    });
+    EXPECT_EQ(load.wait_for(std::chrono::seconds(1)),
+              std::future_status::ready);
+    lease.Release();
+    EXPECT_EQ(load.get(), payload);
+    EXPECT_EQ(manager->whole_reads.load(), 1);
+    cancel.requestCancellation();
+    ExpectError(FollyCancel, [&] { source.ReadEntry("payload"); });
+    EXPECT_EQ(manager->whole_reads.load(), 1);
+    sink.ReleaseLocalStaging();
+}
+
+TEST_F(LegacyIndexLoadTest, AsyncEnvelopeOpenBypassesPayloadAdmission) {
+    FILE_SLICE_SIZE.store(1024 * 1024);
+    PersistSorted();
+    auto source = Run(storage::V1RemoteSource::OpenAsync(context_, paths_, {}));
+    fs_->opens = 0;
+    auto& budget = storage::LoadAdmissionController::GetInstance();
+    auto lease = Run([&]() -> folly::coro::Task<storage::LoadAdmissionLease> {
+        co_return co_await budget.AcquireAsync(
+            {1, 4}, storage::LoadAdmissionPriority::High);
+    }());
+    folly::CancellationSource cancel;
+    source->SetLoadContext(proto::common::LoadPriority::HIGH,
+                           cancel.getToken());
+    auto load = std::async(std::launch::async, [&] {
+        return Run(source->InspectLoadBytesAsync(source->EntryNames()));
+    });
+    auto drain = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        lease.Release();
+        if (load.valid())
+            load.wait();
+    });
+    EXPECT_EQ(load.wait_for(std::chrono::seconds(1)),
+              std::future_status::ready);
+    lease.Release();
+    EXPECT_GT(load.get().payload, 0);
+    EXPECT_GT(fs_->opens.load(), 0);
+}
 
 TEST_F(LegacyIndexLoadTest, SyncSizeReadsOnlyHeadersAndDoesNotCachePayload) {
     FILE_SLICE_SIZE.store(1024 * 1024);
@@ -869,7 +1028,7 @@ TEST_F(LegacyIndexLoadTest, ReversedSliceCompletionPreservesEveryRow) {
                 options,
                 storage::ArtifactStorageNamespace::Index,
                 storage::V1SourceLayout::MemoryEntries));
-        // Inspection is serial; gate only the concurrently dispatched payloads.
+        // Finish inspection before gating the concurrently dispatched payloads.
         Run(source->InspectLoadBytesAsync(source->EntryNames()));
         auto first = Object("index_data_0");
         auto second = Object("index_data_1");

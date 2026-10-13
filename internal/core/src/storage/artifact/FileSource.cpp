@@ -572,8 +572,8 @@ class V1RemoteSource::Impl {
                 encoded = std::move(*downloaded_meta);
             } else {
                 CheckCancelled("V1/V2 slice-meta download");
-                auto codecs = memory_manager->LoadIndexToMemory({meta->second},
-                                                                load_priority);
+                auto codecs = memory_manager->LoadIndexToMemory(
+                    {meta->second}, load_priority, cancellation_token);
                 CheckCancelled("V1/V2 slice-meta download");
                 auto codec = codecs.find(INDEX_FILE_SLICE_META);
                 if (codec == codecs.end() || codec->second == nullptr) {
@@ -732,19 +732,26 @@ class V1RemoteSource::Impl {
 
     folly::coro::Task<std::vector<LegacyIndexFile>>
     InspectSourcesAsync(const std::vector<std::string>& paths) {
+        CheckCancelled("V1/V2 inspect");
+        std::vector<std::string> missing;
+        missing.reserve(paths.size());
+        for (const auto& path : paths) {
+            if (!file_infos.contains(path))
+                missing.push_back(path);
+        }
+        if (!missing.empty()) {
+            const auto infos =
+                co_await InspectLegacyIndexFilesAsync(missing,
+                                                      context.chunkManagerPtr,
+                                                      context.fs,
+                                                      load_priority,
+                                                      cancellation_token);
+            file_infos.insert(infos->begin(), infos->end());
+        }
         std::vector<LegacyIndexFile> files;
         files.reserve(paths.size());
         for (const auto& path : paths) {
-            CheckCancelled("V1/V2 inspect");
-            auto found = file_infos.find(path);
-            if (found == file_infos.end()) {
-                auto input = co_await OpenLegacyIndexInputAsync(
-                    context.chunkManagerPtr, context.fs, path, load_priority);
-                auto info = co_await InspectLegacyIndexFileAsync(
-                    *input, load_priority, cancellation_token);
-                found = file_infos.emplace(path, info).first;
-            }
-            files.push_back({path, found->second});
+            files.push_back({path, file_infos.at(path)});
         }
         co_return files;
     }
@@ -846,6 +853,19 @@ class V1RemoteSource::Impl {
         staged.reserve(paths.size());
         std::exception_ptr failure;
         try {
+            std::vector<std::string> physical_paths;
+            size_t count = 0;
+            for (const auto& names : entries)
+                for (const auto& name : names) count += Paths(name).size();
+            physical_paths.reserve(count);
+            for (const auto& names : entries) {
+                for (const auto& name : names) {
+                    const auto& slices = Paths(name);
+                    physical_paths.insert(
+                        physical_paths.end(), slices.begin(), slices.end());
+                }
+            }
+            co_await InspectSourcesAsync(physical_paths);
             co_await RunLocalFileIOAsync(
                 [&] {
                     for (const auto& path : paths) {
@@ -897,8 +917,8 @@ class V1RemoteSource::Impl {
             const std::vector<std::string> batch(paths.begin() + begin,
                                                  paths.begin() + begin + count);
             CheckCancelled("V1/V2 artifact download");
-            auto codecs =
-                memory_manager->LoadIndexToMemory(batch, load_priority);
+            auto codecs = memory_manager->LoadIndexToMemory(
+                batch, load_priority, cancellation_token);
             CheckCancelled("V1/V2 artifact download");
             for (const auto& path : batch) {
                 const auto found = codecs.find(SourceBaseName(path));
@@ -957,9 +977,17 @@ class V1RemoteSource::Impl {
     // Allocate one final entry, then release each decoded slice after copying.
     std::vector<uint8_t>
     Decode(std::string_view name) {
-        std::vector<uint8_t> result(static_cast<size_t>(Measure(name)));
+        const auto known = entry_sizes.find(std::string(name));
+        const bool size_on_decode =
+            known == entry_sizes.end() && Paths(name).size() == 1;
+        // Unsliced objects reveal their size on decode. Multi-slice entries
+        // still need a total upfront to avoid reallocating the assembled entry.
+        std::vector<uint8_t> result(
+            size_on_decode ? 0 : static_cast<size_t>(Measure(name)));
         ReadPayload(
             name, [&](const uint8_t* data, size_t bytes, size_t offset) {
+                if (size_on_decode)
+                    result.resize(bytes);
                 if (offset > result.size() || bytes > result.size() - offset) {
                     ThrowInfo(DataFormatBroken,
                               "artifact entry {} exceeds declared size",
@@ -1201,15 +1229,20 @@ V1RemoteSource::ReadEntriesToLocalDirAsync(
 folly::coro::Task<V1RemoteSource::LoadBytes>
 V1RemoteSource::InspectLoadBytesAsync(const std::vector<std::string>& names) {
     LoadBytes result;
+    std::vector<std::string> paths;
+    size_t count = 0;
+    for (const auto& name : names) count += impl_->Paths(name).size();
+    paths.reserve(count);
     for (const auto& name : names) {
-        const auto files =
-            co_await impl_->InspectSourcesAsync(impl_->Paths(name));
-        for (const auto& file : files) {
-            result.payload = milvus::SaturatingAdd(
-                result.payload, uint64_t{file.info.payload_bytes});
-            result.transient = milvus::SaturatingAdd(
-                result.transient, uint64_t{file.info.TotalTransientBytes()});
-        }
+        const auto& slices = impl_->Paths(name);
+        paths.insert(paths.end(), slices.begin(), slices.end());
+    }
+    const auto files = co_await impl_->InspectSourcesAsync(paths);
+    for (const auto& file : files) {
+        result.payload = milvus::SaturatingAdd(
+            result.payload, uint64_t{file.info.payload_bytes});
+        result.transient = milvus::SaturatingAdd(
+            result.transient, uint64_t{file.info.TotalTransientBytes()});
     }
     // Directory maps and slice names survive across payload reads. Bound the
     // parsed representation from its encoded metadata and owned path strings.

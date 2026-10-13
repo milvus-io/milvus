@@ -26,9 +26,16 @@ There is no intermediate V3 file or preload-all adapter.
 physical object's envelope. Raw
 payloads stream in bounded ranges. Parquet and encrypted envelopes retain one
 complete decoding unit because their existing decoders require it. Each issued
-range/unit acquires global admission asynchronously and holds the lease through
-read, decoding and consumption. FileSource assembles physical slices in their
+payload range/unit acquires global admission asynchronously and holds the lease
+through read, decoding and consumption. FileSource assembles physical slices in their
 existing order into logical entries, memory targets or positioned file targets.
+
+Synchronous unsliced entry reads validate the envelope in the downloaded buffer
+and allocate the result from its decoded size, without separate remote probes.
+Explicit size queries and multi-slice entries without a known total still inspect
+envelopes before allocating. Envelope inspection, including open/size requests,
+bypasses payload admission in both modes. Async inspection still bounds concurrent
+objects per batch by the configured slot capacity and drains issued I/O on failure.
 
 Remote reads and admission waits suspend. Local size/read/write calls run on
 LocalFileIOPool. The family coroutine also runs there so local staging, mmap,

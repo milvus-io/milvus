@@ -152,16 +152,114 @@ TEST_F(LegacyIndexFileIOTest, ParquetInt8AndOldString) {
     }
 }
 
-TEST_F(LegacyIndexFileIOTest, CancelWaitingAdmissionBeforeAnyRead) {
+TEST_F(LegacyIndexFileIOTest,
+       SyncDownloadValidatesRawEncodedAndEncryptedFiles) {
+    test::TmpPath directory;
+    LocalChunkManager manager(directory.get().string());
+    const auto path = (directory.get() / "legacy").string();
+    auto& plugins = PluginLoader::GetInstance();
+    plugins.registerPluginForTest(
+        std::make_shared<test::CollectionBoundPlannerCipherPlugin>(1));
+    auto cleanup = folly::makeGuard(
+        [&] { plugins.unregisterPluginForTest("CipherPlugin"); });
+    auto encryption = std::make_shared<CPluginContext>();
+    encryption->collection_id = 1;
+    encryption->ez_id = 2;
+    for (bool encrypted : {false, true}) {
+        for (auto type : {DataType::NONE, DataType::INT8, DataType::STRING}) {
+            for (const auto& payload : std::vector<std::vector<uint8_t>>{
+                     {}, {0, 127, 128, 255, 42}}) {
+                auto encoded =
+                    Encode(payload, type, encrypted ? encryption : nullptr);
+                manager.Write(path, encoded.data(), encoded.size());
+                auto codec = ReadLegacyIndexFile(manager, path, kPriority);
+                ASSERT_EQ(codec->PayloadSize(), payload.size());
+                if (!payload.empty())
+                    EXPECT_EQ(std::vector<uint8_t>(
+                                  codec->PayloadData(),
+                                  codec->PayloadData() + codec->PayloadSize()),
+                              payload);
+                for (const size_t truncated :
+                     {size_t{0}, size_t{20}, encoded.size() - 1}) {
+                    manager.Write(path, encoded.data(), truncated);
+                    try {
+                        ReadLegacyIndexFile(manager, path, kPriority);
+                        FAIL() << "expected truncated envelope to fail";
+                    } catch (const SegcoreError& error) {
+                        EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+                    }
+                }
+                encoded[0] ^= 1;
+                manager.Write(path, encoded.data(), encoded.size());
+                try {
+                    ReadLegacyIndexFile(manager, path, kPriority);
+                    FAIL() << "expected invalid magic to fail";
+                } catch (const SegcoreError& error) {
+                    EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+                }
+            }
+        }
+    }
+}
+
+TEST_F(LegacyIndexFileIOTest, AsyncBatchDeduplicatesWithOneAdmissionSlot) {
+    test::TmpPath directory;
+    auto manager =
+        std::make_shared<LocalChunkManager>(directory.get().string());
+    std::vector<std::string> paths;
+    for (size_t i = 0; i < 3; ++i) {
+        paths.push_back((directory.get() / std::to_string(i)).string());
+        auto bytes = Encode(std::vector<uint8_t>(i + 1, 42));
+        manager->Write(paths.back(), bytes.data(), bytes.size());
+    }
+    paths.push_back(paths.front());
+    auto infos =
+        Run(InspectLegacyIndexFilesAsync(paths, manager, {}, kPriority));
+    ASSERT_EQ(infos->size(), 3);
+    for (size_t i = 0; i < 3; ++i)
+        EXPECT_EQ(infos->at(paths[i]).payload_bytes, i + 1);
+    paths.clear();
+    EXPECT_TRUE(Run(InspectLegacyIndexFilesAsync(paths, manager, {}, kPriority))
+                    ->empty());
+}
+
+TEST_F(LegacyIndexFileIOTest, SyncDownloadRejectsShortReads) {
+    class ShortReadManager : public LocalChunkManager {
+     public:
+        using LocalChunkManager::LocalChunkManager;
+        uint64_t
+        Read(const std::string& path, void* data, uint64_t bytes) override {
+            return LocalChunkManager::Read(path, 0, data, bytes - 1);
+        }
+    };
+    test::TmpPath directory;
+    ShortReadManager manager(directory.get().string());
+    const auto path = (directory.get() / "legacy").string();
+    auto bytes = Encode({1, 2, 3});
+    manager.Write(path, bytes.data(), bytes.size());
+    try {
+        ReadLegacyIndexFile(manager, path, kPriority);
+        FAIL() << "expected short read to fail";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+    }
+}
+
+TEST_F(LegacyIndexFileIOTest, PayloadAdmissionRemainsCancellable) {
     auto input = Open(Encode({1, 2, 3}));
+    const auto info = Run(InspectLegacyIndexFileAsync(*input, kPriority));
+    file_->ResetCounters();
+    std::vector<uint8_t> output(info.payload_bytes);
+    const EntryTarget target =
+        MemoryEntryTarget{nullptr, output.data(), output.size()};
     auto lease = Run([&]() -> folly::coro::Task<LoadAdmissionLease> {
         co_return co_await budget_.AcquireAsync({1, 1},
                                                 LoadAdmissionPriority::High);
     }());
     folly::CancellationSource cancel;
     auto task = std::async(std::launch::async, [&] {
-        return Run(
-            InspectLegacyIndexFileAsync(*input, kPriority, cancel.getToken()));
+        return Run(StreamLegacyIndexFileAsync(
+            *input, info, target, kPriority, cancel.getToken()));
     });
     EXPECT_EQ(task.wait_for(std::chrono::milliseconds(30)),
               std::future_status::timeout);
