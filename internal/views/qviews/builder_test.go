@@ -120,10 +120,11 @@ func TestQueryViewBuilderPreservesSegmentTransformStarts(t *testing.T) {
 			Vchannel:                             "v1",
 			GrowingTransformStartAfterTimetick:   40,
 			CompactedTransformStartAfterTimetick: 50,
-			Partitions:                           []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10, 20}, SegmentTransformStartAfterTimeticks: []uint64{50, 70}}},
+			Partitions:                           []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10, 20}, SegmentTransformStartAfterTimeticks: []uint64{50, 70}, SegmentManifestVersions: []int64{3, 4}}},
 		}},
 	}
 	result := NewQueryViewAtCoordBuilder(1, view, "v1").SetAssignments(map[int64]map[int64][]int64{100: {1: {20, 10}}}).Build()
 	require.Equal(t, uint64(40), result.Meta.TransformStartAfterTimetick)
 	require.Equal(t, []uint64{70, 50}, result.QueryNode[0].Partitions[0].SegmentTransformStartAfterTimeticks)
+	require.Equal(t, []int64{4, 3}, result.QueryNode[0].Partitions[0].SegmentManifestVersions)
 }

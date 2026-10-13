@@ -141,6 +141,26 @@ by new writes, partition recreation, compaction across the boundary, and Up
 leases spanning a handoff. The typed DDL Transform protocol remains deferred; the implementation above
 uses the transitional view-based protocol.
 
+### External collection refresh completion
+
+RefreshExternalCollection broadcasts to the target collection VChannels with
+AckSyncUp, advancing their Transform MVCC. Its callback only persists the job
+and per-channel fences, so it does not recursively broadcast schema changes.
+Background work explores and applies the snapshot, stamps changed Segment bases
+with those fences, and persists `segments_applied` while keeping the job
+InProgress. A crash before that marker may replay the idempotent manifest update.
+After the marker, retries must not reapply Segment results or invalidate indexes.
+
+The worker then publishes the external source/spec through RootCoord, reconciles
+the committed DataView, and uses Coordinator's shared QueryView readiness fence.
+Readiness also checks each Segment's required Manifest version; Reopen must
+load refreshed deltalogs before acknowledging that version.
+Only after current serving views cover that publication (and optional index
+waiting completes) may the job report Finished/100%. Transient publication
+failures remain pending; remote waits happen outside the job lock. An unloaded
+collection has no handoff obligation. Legacy jobs without business-channel
+fences retain their original completion path for recovery compatibility.
+
 ## References
 
 - [QueryView state machine](query_view_state_machine.md)

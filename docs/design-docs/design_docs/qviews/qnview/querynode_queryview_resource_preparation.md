@@ -227,7 +227,7 @@ Acquire behavior:
 4. create load state only for segments that are missing or reset;
 5. submit load tasks only for segments that are not already loading or loaded;
 6. report `OnLoaded` only for segments that satisfy the requesting view's
-   schema/load-info requirements and have no pending physical update; callbacks
+   schema/load-info and Segment Manifest version requirements and have no pending physical update; callbacks
    are deduplicated per view and segment.
 
 Load task behavior:
@@ -267,7 +267,8 @@ Update task behavior:
    outcome before reporting completion;
 4. return `nodescheduler.ErrDelay` for non-cancellation failures so the same
    task is retried;
-5. update only the physical segment state's applied revision after success.
+5. reload historical deltalogs after Reopen (native Reopen only updates fields/indexes);
+6. update the physical applied revision and Manifest version only after success.
 
 Update resource estimation currently matches legacy `ReopenSegments`: reserve
 the full new load-info estimate conservatively. Incremental native-diff peak
@@ -318,6 +319,14 @@ physical reference. Ready joins that view's physical preparation callback with
 the shared transform-ready state. Collection metadata preparation must not
 leave a reference gap: existing physical references are retained synchronously
 when the replacement view is recorded, before its asynchronous collection task.
+
+QueryView partitions also carry the minimum Segment Manifest versions from
+the immutable DataView. A same-ID loaded Segment cannot satisfy a newer base
+until its physical load/update completes. If the watch snapshot is older than
+the required Manifest, the manager waits for new metadata instead of repeatedly
+reopening the old snapshot. Refresh job publication invalidates the affected
+Segment subscriptions and retries that notification together with its serving
+view wait. Legacy views with no Manifest requirement retain their old behavior.
 
 The physical manager retains the latest watched snapshot and the schema/load-info
 versions successfully applied to each segment. A changed requirement schedules

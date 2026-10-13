@@ -1765,8 +1765,13 @@ message ExternalCollectionRefreshJob {
   // is the field that resolves the one ambiguity this feature introduces: a
   // FAILED job with a non-zero value did apply its data - the refreshed
   // segments are the collection's contents and are being served, and only the
-  // index wait ran out of budget. A failed job with 0 applied nothing.
+  // index wait ran out of budget. New jobs additionally expose segments_applied.
   int64 index_wait_started_time = 13;
+  // Target-vchannel WAL fences of this refresh. Empty for legacy control-only jobs.
+  map<string, uint64> transform_start_after_timeticks = 14;
+  // Persisted after applying segment results, before schema/DataView publication.
+  // Applying is replay-safe across a crash between the segment and job writes.
+  bool segments_applied = 15;
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/dataview"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -122,6 +123,27 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 	_, err = mt.dataViewManager.RecomputeNow(ctx, collectionID, mt.loadableProjection)
 	require.NoError(t, err)
 	assertFrontier([]int64{10, 30}, []int64{2, 1})
+	// A new broadcast supplies a target-shard fence; W remains the creation
+	// origin, while A follows the minimum visible segment cursor.
+	patched = proto.Clone(mt.segments.GetSegment(10).SegmentInfo).(*datapb.SegmentInfo)
+	patched.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/10", 3)
+	replacement = proto.Clone(mt.segments.GetSegment(30).SegmentInfo).(*datapb.SegmentInfo)
+	replacement.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/30", 2)
+	starts := map[string]uint64{channel: 500}
+	require.NoError(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, []int64{10, 30}, nil, []*datapb.SegmentInfo{patched, replacement}, starts))
+	_, err = mt.dataViewManager.RecomputeNow(ctx, collectionID, mt.loadableProjection)
+	require.NoError(t, err)
+	mt.dataViewManager = recoverManager()
+	ref, err := mt.dataViewManager.Latest(ctx, collectionID)
+	require.NoError(t, err)
+	shard := ref.DataView().GetShards()[0]
+	require.Equal(t, origin, shard.GetGrowingTransformStartAfterTimetick())
+	require.Equal(t, uint64(500), shard.GetCompactedTransformStartAfterTimetick())
+	require.Equal(t, []uint64{500, 500}, shard.GetPartitions()[0].GetSegmentTransformStartAfterTimeticks())
+	ref.Deref()
+	require.NoError(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, []int64{10, 30}, nil, []*datapb.SegmentInfo{patched, replacement}, starts))
+	require.Equal(t, uint64(500), mt.segments.GetSegment(10).GetTransformStartAfterTimetick())
+	require.Error(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, nil, nil, nil, map[string]uint64{"missing": 500}))
 	// Missing creation metadata must stay retriable rather than borrowing a checkpoint.
 	_, err = mt.dataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: 200, VChannels: []string{channel}})
 	require.NoError(t, err)
@@ -131,4 +153,16 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 	defer latestError.UnPatch()
 	_, err = externalRefreshTransformStart(ctx, mt, collectionID, channel)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+}
+
+func applyExternalCollectionSegmentUpdateForBaseline(
+	ctx context.Context,
+	mt *meta,
+	collectionID int64,
+	baselineSegmentIDs []int64,
+	keptSegmentIDs []int64,
+	updatedSegments []*datapb.SegmentInfo,
+	logFields ...mlog.Field,
+) error {
+	return applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, baselineSegmentIDs, keptSegmentIDs, updatedSegments, nil, logFields...)
 }

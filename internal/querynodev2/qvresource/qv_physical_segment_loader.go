@@ -70,7 +70,12 @@ func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnv
 	}
 	if action.Has(qnview.SegmentUpdateReopen) {
 		// Reopen applies the complete load-info diff, including index changes.
-		return l.loader.ReopenSegment(ctx, transform.segment, info)
+		if err := l.loader.ReopenSegment(ctx, transform.segment, info); err != nil {
+			return err
+		}
+		// Native Reopen updates fields/indexes, but does not apply historical
+		// deltalogs. A refreshed milvus-table base may carry new source deletes.
+		return l.loader.LoadDeltaLogs(ctx, transform.segment, info)
 	}
 	if action.Has(qnview.SegmentUpdateLoadIndex) {
 		// SegmentLoadInfoRevision is a content hash used only for equality. It is

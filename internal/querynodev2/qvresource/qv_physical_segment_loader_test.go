@@ -125,3 +125,18 @@ func TestRealQVSegmentLoader_NewSegmentUsesPinnedCollection(t *testing.T) {
 	assert.Same(t, localCollection, usedCollection)
 	assert.Zero(t, collections.getCount)
 }
+
+func TestQueryViewPhysicalSegmentReopenWaitsForHistoricalDeletes(t *testing.T) {
+	loader := &fakeQVLoader{}
+	physical := newQueryViewPhysicalSegmentLoader(nil, nil, loader)
+	segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10}, nil, "v1", 50)
+	snapshot := qnview.SegmentLoadInfoSnapshot{LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 10}}
+	delta := mockey.Mock((*fakeQVLoader).LoadDeltaLogs).Return(assert.AnError).Build()
+	defer delta.UnPatch()
+	err := physical.Update(t.Context(), segment, fakeQVCollectionRuntime{}, snapshot, qnview.SegmentUpdateReopen)
+	require.ErrorIs(t, err, assert.AnError)
+	require.True(t, loader.reopenCalled)
+	delta.UnPatch()
+	require.NoError(t, physical.Update(t.Context(), segment, fakeQVCollectionRuntime{}, snapshot, qnview.SegmentUpdateReopen))
+	require.True(t, loader.deltaCalled)
+}

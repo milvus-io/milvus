@@ -37,7 +37,7 @@ pair when resolving metadata.
 |---|---|
 | Ordinary WAL-flushed L1 | Earliest effective Insert TimeTick, available as the first data StartPosition |
 | Import | CommitImport TimeTick for this business VChannel |
-| External-table refresh | CreateCollection TimeTick for this business VChannel; retain it for same-ID Manifest updates and new/replacement Segments |
+| External-table refresh | RefreshExternalCollection TimeTick for the target business VChannel; unchanged Segments keep their cursor; legacy control-only jobs retain the CreateCollection origin |
 | Non-L0 compaction | Minimum C of the actual input data versions |
 | Split or exact data copy within the same collection | Inherit the source data version's C |
 | RestoreSnapshot into a new collection | Target business VChannel RestoreSnapshot TimeTick; source snapshot changes must be included in the restored base |
@@ -53,11 +53,21 @@ effective outer commit time. Imported rows use their per-VChannel commit time.
 
 External collections reject Insert/Delete/Upsert and WAL L1 Flush. Their persisted
 W therefore remains the business VChannel creation origin B across refreshes
-and recovery. DataCoord stamps refreshed Segment bases with this W before
-persisting them. Source-table deletes are part of the refreshed base, not the
-target external collection's TransformLog. This rule does not apply to writable
-collections; neither the control-channel refresh timestamp nor a checkpoint is
-a substitute for B. Missing native creation coverage remains not-ready.
+and recovery. New refresh broadcasts reach every target business VChannel and
+advance its Transform MVCC. The callback persists these target TimeTicks in the
+refresh job; DataCoord uses the corresponding fence R for new or patched Segment
+bases. A is still the minimum cursor of visible Segments, and F = min(W, A).
+Source-table deletes are included in the refreshed base, not the target's
+TransformLog. Merely retaining B as the target query Transform MVCC would hide
+source deletes newer than B, even after release/load. Legacy control-only jobs
+lack R and continue to use B; this is replay compatibility, not a visibility
+upgrade for already issued messages. A control-channel timestamp or checkpoint
+must never substitute for a business-VChannel fence.
+
+The same-cluster snapshot refresh path orders R after source snapshot creation.
+Importing snapshots from an unrelated timestamp domain needs an explicit source
+to target MVCC mapping; this fence alone does not establish cross-cluster clock
+ordering.
 
 Compaction inherits the versions it actually read. If concurrent work advances
 a parent or the shard frontier, an output requiring an earlier cursor cannot

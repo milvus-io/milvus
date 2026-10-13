@@ -3216,7 +3216,12 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 	}
 	mlog.Info(context.TODO(), "pre-allocated job ID for refresh", mlog.Int64("jobID", allocatedJobID))
 
-	// Build and broadcast the message
+	collection, err := s.handler.GetCollection(ctx, req.GetCollectionId())
+	if err != nil {
+		return &datapb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
+	}
+
+	// Advance the target shards' Transform MVCC before publishing refreshed data.
 	msg := message.NewRefreshExternalCollectionMessageBuilderV2().
 		WithHeader(&message.RefreshExternalCollectionMessageHeader{
 			CollectionId:   req.GetCollectionId(),
@@ -3227,7 +3232,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		}).
 		WithBody(&message.RefreshExternalCollectionMessageBody{}).
 		WithUnreplicable().
-		WithControlChannelBroadcast().
+		WithBroadcast(collection.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 
 	if _, err := b.Broadcast(ctx, msg); err != nil {

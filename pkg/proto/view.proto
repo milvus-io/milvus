@@ -115,6 +115,9 @@ message QueryViewOfPartition {
     repeated int64 ready_segment_ids = 3;
     // Parallel to segment_ids, copied from the immutable DataView snapshot.
     repeated uint64 segment_transform_start_after_timeticks = 4 [packed = true];
+    // Minimum physical base version required before this view reports Ready.
+    // Parallel to segment_ids; zero preserves legacy metadata resolution.
+    repeated int64 segment_manifest_versions = 5 [packed = true];
 }
 
 // SyncRequest carries an atomic state-machine input or closes the stream.

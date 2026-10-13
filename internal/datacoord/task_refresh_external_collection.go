@@ -207,17 +207,18 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 	return nil
 }
 
-// applyExternalCollectionSegmentUpdateForBaseline applies a caller-supplied
+// applyExternalCollectionSegmentUpdateAtFence applies a caller-supplied
 // immutable baseline: baseline IDs may be kept, patched, or removed, while IDs
 // outside the baseline may only be added as new segments. The job-level path
 // passes the published ownership baseline.
-func applyExternalCollectionSegmentUpdateForBaseline(
+func applyExternalCollectionSegmentUpdateAtFence(
 	ctx context.Context,
 	mt *meta,
 	collectionID int64,
 	baselineSegmentIDs []int64,
 	keptSegmentIDs []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	starts map[string]uint64,
 	logFields ...mlog.Field,
 ) error {
 	if mt == nil {
@@ -336,9 +337,17 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	}
 	insertChannel := collInfo.VChannelNames[0]
 	partitionID := collInfo.Partitions[0]
-	transformStart, err := externalRefreshTransformStart(ctx, mt, collectionID, insertChannel)
-	if err != nil {
-		return err
+	transformStart := starts[insertChannel]
+	if len(starts) != 0 && transformStart == 0 {
+		return merr.WrapErrServiceInternalMsg("refresh WAL fence is missing for channel %s", insertChannel)
+	}
+	if len(starts) == 0 {
+		// Legacy control-only messages have no target-shard WAL fence.
+		var err error
+		transformStart, err = externalRefreshTransformStart(ctx, mt, collectionID, insertChannel)
+		if err != nil {
+			return err
+		}
 	}
 	normalizedUpdatedSegments := make([]*datapb.SegmentInfo, 0, len(validUpdatedSegments))
 	normalizedUpsertSegmentMap := make(map[int64]*datapb.SegmentInfo, len(upsertSegmentMap))
