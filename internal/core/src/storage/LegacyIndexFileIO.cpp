@@ -360,8 +360,9 @@ LegacyIndexLoadTransientBytes(size_t total_bytes,
     const auto batch_bytes =
         files_per_batch == 0
             ? total_bytes
-            : std::min(total_bytes,
-                       SaturatingMultiply(max_file_bytes, files_per_batch));
+            : std::min<size_t>(
+                  total_bytes,
+                  SaturatingMultiply(max_file_bytes, files_per_batch));
     return std::max<size_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT, batch_bytes);
 }
 
