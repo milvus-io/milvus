@@ -200,6 +200,15 @@ func TestMissingBody(t *testing.T) {
 	assertCode(t, get.GetStatus(), merr.Code(merr.ErrDataIntegrity), false)
 }
 
+func TestEmptyPointer(t *testing.T) {
+	s, p, st := newService()
+	p.Put(manifest.PointerKey(1, "v"), "")
+	st.ReadErr = errors.New("object name cannot be empty")
+	get, err := s.GetManifest(context.Background(), &pkindexpb.GetManifestRequest{CollectionId: 1, Vchannel: "v"})
+	require.NoError(t, err)
+	assertCode(t, get.GetStatus(), merr.Code(merr.ErrDataIntegrity), false)
+}
+
 func TestToMerr(t *testing.T) {
 	cases := []struct {
 		name      string
