@@ -22,10 +22,12 @@
 #include <string>
 #include <vector>
 
+#include "cachinglayer/CacheSlot.h"
 #include "common/resource_c.h"
 #include "common/Types.h"
 #include "common/type_c.h"
-#include "index/Index.h"
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/query/ReaderCaps.h"
 #include "pb/index_coord.pb.h"
 #include "storage/Types.h"
 
@@ -50,11 +52,21 @@ struct LoadIndexInfo {
             INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
     std::map<std::string, std::string> index_params;
     std::vector<std::string> index_files;
-    index::IndexBasePtr index;
-    index::CacheIndexBasePtr cache_index;
+    std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>> cache_index;
+    // Captured from the translator before its unique reader factory is moved
+    // into the cache slot. Segment installation consumes these values without
+    // pinning a cold payload.
+    std::string index_family;
+    DataType index_value_type{DataType::NONE};
+    index::ReaderCaps index_caps;
     std::string uri;
     IndexVersion index_engine_version;
     proto::schema::FieldSchema schema;
+    // Remote pre-compression file size is a loading estimate, not a measurement
+    // of resident memory. V1 vector loading intentionally retains it as the
+    // legacy post-load cache charge; native reader accounting, where available,
+    // remains distinct. These byte quantities are not interchangeable for
+    // compressed or mmap-backed indexes.
     int64_t index_size;  // It's the size of index file before compressing
     // (aka. the filesize before loading operation at knowhere),
     // because the uncompressed-index-file-size may not be stored at previous milvus.
@@ -91,8 +103,10 @@ struct LoadIndexInfo {
           index_store_path_version(other.index_store_path_version),
           index_params(other.index_params),
           index_files(other.index_files),
-          index(nullptr),
           cache_index(nullptr),
+          index_family(other.index_family),
+          index_value_type(other.index_value_type),
+          index_caps(other.index_caps),
           uri(other.uri),
           index_engine_version(other.index_engine_version),
           schema(other.schema),
@@ -122,8 +136,10 @@ struct LoadIndexInfo {
             index_store_path_version = other.index_store_path_version;
             index_params = other.index_params;
             index_files = other.index_files;
-            index = nullptr;
             cache_index = nullptr;
+            index_family = other.index_family;
+            index_value_type = other.index_value_type;
+            index_caps = other.index_caps;
             uri = other.uri;
             index_engine_version = other.index_engine_version;
             schema = other.schema;
