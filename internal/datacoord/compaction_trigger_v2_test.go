@@ -1282,3 +1282,27 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 }
+
+func (s *CompactionTriggerManagerSuite) TestSubmitClusteringVectorGroups() {
+	m, view, _ := coverageMeta(s.T())
+	m.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+	for _, id := range []int64{10, 20, 30, 40, 50} {
+		m.segments.GetSegment(id).Stats = &datapb.Statistics{InsertBinlogSize: 1024}
+	}
+	s.triggerManager.meta = m
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}, view.clusteringKeyField}}
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{ID: 1, Schema: schema}, nil)
+	s.triggerManager.handler = handler
+	s.mockAlloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) { return 100, 100 + n, nil }).Once()
+	var submitted *datapb.CompactionTask
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(func(task *datapb.CompactionTask) error { submitted = task; return nil }).Once()
+	s.triggerManager.SubmitClusteringViewToScheduler(context.Background(), view)
+	s.Require().NotNil(submitted)
+	s.Equal([]int64{10, 20, 50}, submitted.GetInputSegments())
+	s.Equal(int64(7), submitted.GetBasePartitionStatsVersion())
+	s.Equal(int64(6), submitted.GetTotalRows())
+	s.Equal(paramtable.Get().KnowhereConfig.GetCompactionPlanParams(), submitted.GetClusteringPlanParams())
+	schema.Fields[0].Name = "mutated"
+	s.NotEqual("mutated", submitted.Schema.Fields[0].Name)
+}

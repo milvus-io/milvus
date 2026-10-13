@@ -37,6 +37,32 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                      int64_t* id_mapping_sizes,
                      int64_t mapping_count);
 
+// Result pointers are borrowed from the handle until DeleteClusteringCompactionPlan.
+CStatus
+BuildClusteringCompactionPlan(CClusteringCompactionPlan* result,
+                              const uint8_t* serialized_centroids,
+                              uint64_t serialized_centroids_len,
+                              int32_t field_type,
+                              const uint64_t* centroid_counts,
+                              uint64_t centroid_count,
+                              const char* cluster_type,
+                              const char* params_json);
+
+CStatus
+GetClusteringCompactionPlanMeta(CClusteringCompactionPlan plan,
+                                uint64_t* row_count,
+                                uint32_t* centroid_count,
+                                const uint64_t** centroid_counts,
+                                uint64_t* group_count);
+
+CStatus
+GetClusteringCompactionPlanGroup(CClusteringCompactionPlan plan,
+                                 uint64_t group_offset,
+                                 CClusteringGroup* group);
+
+CStatus
+DeleteClusteringCompactionPlan(CClusteringCompactionPlan plan);
+
 #ifdef __cplusplus
 };
 #endif

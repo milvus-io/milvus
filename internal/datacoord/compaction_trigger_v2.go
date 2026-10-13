@@ -19,12 +19,14 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"sync"
 	"time"
 
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -38,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CompactionTriggerType int8
@@ -519,6 +522,16 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 
+	clusteringView := view.(*ClusteringSegmentsView)
+	if typeutil.IsVectorType(clusteringView.clusteringKeyField.GetDataType()) {
+		clusteringView, err = prepareClusteringView(ctx, m.meta, clusteringView, collection.Schema.GetEnableNamespace())
+		if err != nil {
+			log.Warn(ctx, "defer clustering input selection", mlog.Err(err))
+			return
+		}
+		view = clusteringView
+	}
+
 	expectedSegmentSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
 	totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view, expectedSegmentSize)
 	if err != nil {
@@ -556,6 +569,13 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 		MaxSize:                expectedSegmentSize,
 	}
+	task.Schema = proto.Clone(collection.Schema).(*schemapb.CollectionSchema)
+	task.ClusteringKeyField = proto.Clone(clusteringView.clusteringKeyField).(*schemapb.FieldSchema)
+	if typeutil.IsVectorType(task.ClusteringKeyField.GetDataType()) {
+		task.BasePartitionStatsVersion = clusteringView.basePartitionStatsVersion
+		task.ClusteringPlanParams = maps.Clone(paramtable.Get().KnowhereConfig.GetCompactionPlanParams())
+	}
+
 	err = m.inspector.enqueueCompaction(task)
 	if err != nil {
 		log.Warn(ctx, "Failed to execute compaction task",

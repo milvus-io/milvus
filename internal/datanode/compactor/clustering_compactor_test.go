@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/clustercompaction"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
@@ -800,7 +801,13 @@ func (s *ClusteringCompactionTaskSuite) checkMappingRecords(vector bool, ttlCuto
 		for i := range ids {
 			ids[i] = uint32(i % 7)
 		}
-		encoded, err := proto.Marshal(&clusteringpb.ClusteringCentroidIdMappingStats{CentroidIdMapping: ids})
+		counts := make([]int64, 7)
+		for _, id := range ids {
+			counts[id]++
+		}
+		s.task.vectorLayout = &clustercompaction.LayoutPlan{Counts: counts}
+		s.task.compactionParams.ClusteringPlan = &compaction.ClusteringPlanParameters{SegmentRows: map[int64]int64{s.plan.SegmentBinlogs[0].SegmentID: int64(len(ids))}}
+		encoded, err := proto.Marshal(&clusteringpb.ClusteringCentroidIdMappingStats{CentroidIdMapping: ids, NumInCentroid: counts, DistanceToCentroid: make([]float32, len(ids))})
 		s.Require().NoError(err)
 		s.task.binlogIO = &clusteringOffsetReader{BinlogIO: s.mockBinlogIO, offsets: encoded}
 		s.task.isVectorClusteringKey = true
