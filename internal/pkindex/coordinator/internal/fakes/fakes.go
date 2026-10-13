@@ -30,6 +30,13 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 )
 
+var (
+	// ErrKeyExists is returned by Create when the key already exists.
+	ErrKeyExists = errors.New("key already exists")
+	// ErrValueMismatch is returned by Swap when the stored value is not the expected value.
+	ErrValueMismatch = errors.New("stored value is not the expected value")
+)
+
 // Pointers is an in-memory manifest pointer store. The fields below inject
 // faults; each one applies to the next call only and is then cleared.
 type Pointers struct {
@@ -73,7 +80,7 @@ func (p *Pointers) Load(ctx context.Context, key string) (string, bool, error) {
 func (p *Pointers) Create(_ context.Context, key, value string) error {
 	return p.write(key, value, func() error {
 		if _, ok := p.kv[key]; ok {
-			return errors.Newf("key %s already exists", key)
+			return errors.Wrapf(ErrKeyExists, "key %s", key)
 		}
 		return nil
 	})
@@ -83,7 +90,7 @@ func (p *Pointers) Create(_ context.Context, key, value string) error {
 func (p *Pointers) Swap(_ context.Context, key, expected, value string) error {
 	return p.write(key, value, func() error {
 		if v, ok := p.kv[key]; !ok || v != expected {
-			return errors.Newf("value of key %s is not the expected value", key)
+			return errors.Wrapf(ErrValueMismatch, "key %s", key)
 		}
 		return nil
 	})
