@@ -54,21 +54,23 @@ var _ Client = (*client)(nil)
 //
 // A merr.ErrChannelNotAvailable error (code 503) that a method of Client
 // returns means the term of the caller is fenced by a newer owner of the
-// vchannel; the caller must stop writing that vchannel. Other components use
+// pchannel; the caller must stop writing that pchannel. Other components use
 // the same code for a retryable state, so the caller must classify the error
 // that Client returns at the call site, not on an error chain that has other
 // errors in it. With retry.Do, the caller must pass
 // retry.RetryErr(merr.IsRetryableErr); else retry.Do retries a fenced call.
 type Client interface {
-	// ClaimManifest claims the manifest of a vchannel for the term in the request.
-	ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifestRequest) (*pkindexpb.Manifest, error)
+	// ClaimPChannel claims a pchannel for the term in the request.
+	ClaimPChannel(ctx context.Context, req *pkindexpb.ClaimPChannelRequest) error
 
 	// CommitFlush commits a flush result to the manifest of a vchannel.
 	CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error)
 
-	// GetManifest returns the manifest of a vchannel.
-	// The bool result is false if the manifest does not exist.
-	GetManifest(ctx context.Context, req *pkindexpb.GetManifestRequest) (*pkindexpb.Manifest, bool, error)
+	// GetRecoveryManifests returns the manifest pointer of each target of
+	// the request, in order; the caller reads the body from object storage.
+	// Each entry has its own status: the error of the call covers only the
+	// whole request.
+	GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error)
 
 	// Close releases the connection of the client.
 	Close()
@@ -126,6 +128,8 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	}
 	dialOptions := cfg.GetDialOptionsFromConfig()
 	dialOptions = append(dialOptions,
+		// the receive limit of the mix coordinator client; a later call option wins
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(paramtable.Get().RootCoordGrpcClientCfg.ClientMaxRecvSize.GetAsInt())),
 		grpc.WithBlock(),
 		grpc.WithResolvers(rb),
 		grpc.WithTransportCredentials(creds),
@@ -146,16 +150,13 @@ type client struct {
 	service lazygrpc.Service[pkindexpb.PKIndexCoordServiceClient]
 }
 
-func (c *client) ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifestRequest) (*pkindexpb.Manifest, error) {
+func (c *client) ClaimPChannel(ctx context.Context, req *pkindexpb.ClaimPChannelRequest) error {
 	svc, err := c.service.GetService(ctx)
 	if err != nil {
-		return nil, toClientErr(err)
+		return toClientErr(err)
 	}
-	resp, err := svc.ClaimManifest(ctx, req)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, toClientErr(err)
-	}
-	return resp.GetManifest(), nil
+	resp, err := svc.ClaimPChannel(ctx, req)
+	return toClientErr(merr.CheckRPCCall(resp, err))
 }
 
 func (c *client) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error) {
@@ -170,16 +171,16 @@ func (c *client) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequ
 	return resp.GetManifest(), nil
 }
 
-func (c *client) GetManifest(ctx context.Context, req *pkindexpb.GetManifestRequest) (*pkindexpb.Manifest, bool, error) {
+func (c *client) GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error) {
 	svc, err := c.service.GetService(ctx)
 	if err != nil {
-		return nil, false, toClientErr(err)
+		return nil, toClientErr(err)
 	}
-	resp, err := svc.GetManifest(ctx, req)
+	resp, err := svc.GetRecoveryManifests(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, false, toClientErr(err)
+		return nil, toClientErr(err)
 	}
-	return resp.GetManifest(), resp.GetFound(), nil
+	return resp.GetEntries(), nil
 }
 
 // toClientErr returns err unchanged when it is nil, a merr error, a context

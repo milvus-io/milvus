@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -53,12 +54,34 @@ func (p metaKVPointers) Load(ctx context.Context, key string) (string, bool, err
 	return v, true, nil
 }
 
-func (p metaKVPointers) Create(ctx context.Context, key, value string) error {
-	return p.kv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, predicates.KeyNotExist(key))
+// MultiLoad reads keys in one meta kv call. A key is missing when the meta kv
+// returns an empty value for it; a stored pointer or claim record is never empty.
+func (p metaKVPointers) MultiLoad(ctx context.Context, keys []string) ([]string, []bool, error) {
+	values, err := p.kv.MultiLoad(ctx, keys)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, nil, err
+	}
+	if len(values) != len(keys) {
+		return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("meta kv returned %d values for %d keys", len(values), len(keys)))
+	}
+	found := make([]bool, len(keys))
+	for i, v := range values {
+		found[i] = v != ""
+	}
+	return values, found, nil
 }
 
-func (p metaKVPointers) Swap(ctx context.Context, key, expected, value string) error {
-	return p.kv.MultiSaveAndRemove(ctx, map[string]string{key: value}, nil, predicates.ValueEqual(key, expected))
+// Save writes saves in one meta kv transaction under the predicates of conds.
+func (p metaKVPointers) Save(ctx context.Context, saves map[string]string, conds ...manifest.Cond) error {
+	preds := make([]predicates.Predicate, 0, len(conds))
+	for _, c := range conds {
+		if c.Absent {
+			preds = append(preds, predicates.KeyNotExist(c.Key))
+		} else {
+			preds = append(preds, predicates.ValueEqual(c.Key, c.Value))
+		}
+	}
+	return p.kv.MultiSaveAndRemove(ctx, saves, nil, preds...)
 }
 
 // List returns the keys under prefix without the root path of the meta kv,

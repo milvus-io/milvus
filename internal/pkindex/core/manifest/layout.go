@@ -26,10 +26,15 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
-// PointerPrefix is the etcd key prefix of all manifest pointers.
-const PointerPrefix = "pkindex-meta/manifest/"
+const (
+	// PointerPrefix is the etcd key prefix of all manifest pointers.
+	PointerPrefix = "pkindex-meta/manifest/"
+	// ClaimPrefix is the etcd key prefix of all pchannel claim records.
+	ClaimPrefix = "pkindex-meta/claim/"
+)
 
 // Layout builds the object keys of one cluster from the root path of its
 // object storage.
@@ -40,6 +45,11 @@ type Layout struct {
 // PointerKey returns the etcd key of the manifest pointer of a vchannel.
 func PointerKey(collectionID int64, vchannel string) string {
 	return PointerPrefix + strconv.FormatInt(collectionID, 10) + "/" + vchannel
+}
+
+// ClaimKey returns the etcd key of the claim record of a pchannel.
+func ClaimKey(pchannel string) string {
+	return ClaimPrefix + pchannel
 }
 
 // ParsePointerKey returns the collection ID and the vchannel of a pointer key.
@@ -65,7 +75,7 @@ func (l Layout) vchannelDir(collectionID int64, vchannel string) string {
 
 // SSTBasePath returns the complete object key prefix of the SSTs of a vchannel.
 func (l Layout) SSTBasePath(collectionID int64, vchannel string) string {
-	return l.vchannelDir(collectionID, vchannel) + "/sst"
+	return metautil.BuildPKIndexSSTBasePath(l.RootPath, collectionID, vchannel)
 }
 
 // ManifestDir returns the complete object key prefix of the manifest bodies of a vchannel.

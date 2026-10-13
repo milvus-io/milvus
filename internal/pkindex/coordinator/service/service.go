@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -55,47 +56,36 @@ func (s *Service) manager() (*manifestmanager.Manager, error) {
 	return nil, merr.WrapErrServiceNotReadyMsg("primary key index manifest service is not ready")
 }
 
-// ClaimManifest claims a vchannel for a pchannel term and returns the
-// manifest after the claim.
-func (s *Service) ClaimManifest(ctx context.Context, req *pkindexpb.ClaimManifestRequest) (*pkindexpb.ClaimManifestResponse, error) {
-	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
-		return &pkindexpb.ClaimManifestResponse{Status: merr.Status(err)}, nil
+// ClaimPChannel claims a pchannel for a pchannel term.
+func (s *Service) ClaimPChannel(ctx context.Context, req *pkindexpb.ClaimPChannelRequest) (*pkindexpb.ClaimPChannelResponse, error) {
+	if err := validatePChannel(req.GetPchannel()); err != nil {
+		return &pkindexpb.ClaimPChannelResponse{Status: merr.Status(err)}, nil
 	}
-	if t := req.GetPkDataType(); t != schemapb.DataType_Int64 && t != schemapb.DataType_VarChar {
-		return &pkindexpb.ClaimManifestResponse{Status: merr.Status(
-			merr.WrapErrParameterInvalidMsg("pk_data_type must be Int64 or VarChar, got %s", t))}, nil
+	if err := validateTerm(req.GetPchannelTerm()); err != nil {
+		return &pkindexpb.ClaimPChannelResponse{Status: merr.Status(err)}, nil
 	}
 	m, err := s.manager()
 	if err != nil {
-		return &pkindexpb.ClaimManifestResponse{Status: merr.Status(err)}, nil
+		return &pkindexpb.ClaimPChannelResponse{Status: merr.Status(err)}, nil
 	}
-	got, err := m.Claim(ctx, manifest.Claim{
-		CollectionID: req.GetCollectionId(),
-		VChannel:     req.GetVchannel(),
-		PChannelTerm: req.GetPchannelTerm(),
-		PKDataType:   req.GetPkDataType(),
-	})
-	if err != nil {
-		return &pkindexpb.ClaimManifestResponse{Status: merr.Status(toMerr(err, req.GetVchannel()))}, nil
+	if err := m.ClaimPChannel(ctx, req.GetPchannel(), req.GetPchannelTerm()); err != nil {
+		return &pkindexpb.ClaimPChannelResponse{Status: merr.Status(toMerr(err, req.GetPchannel()))}, nil
 	}
-	return &pkindexpb.ClaimManifestResponse{Status: merr.Success(), Manifest: got}, nil
+	return &pkindexpb.ClaimPChannelResponse{Status: merr.Success()}, nil
 }
 
 // CommitFlush adds the uploaded SSTs of a flush and returns the manifest
-// after the commit.
+// after the commit. The first flush of a vchannel creates its manifest.
 func (s *Service) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.CommitFlushResponse, error) {
-	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
+	if err := validateFlush(req); err != nil {
 		return &pkindexpb.CommitFlushResponse{Status: merr.Status(err)}, nil
-	}
-	if req.GetCheckpointTimeTick() == 0 {
-		return &pkindexpb.CommitFlushResponse{Status: merr.Status(
-			merr.WrapErrParameterInvalidMsg("checkpoint_time_tick must not be 0"))}, nil
 	}
 	m, err := s.manager()
 	if err != nil {
 		return &pkindexpb.CommitFlushResponse{Status: merr.Status(err)}, nil
 	}
 	got, err := m.CommitFlush(ctx, req.GetCollectionId(), req.GetVchannel(), manifest.Flush{
+		PKDataType:         req.GetPkDataType(),
 		PChannelTerm:       req.GetPchannelTerm(),
 		AddSSTs:            req.GetAddSsts(),
 		CheckpointTimeTick: req.GetCheckpointTimeTick(),
@@ -106,42 +96,126 @@ func (s *Service) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushReq
 	return &pkindexpb.CommitFlushResponse{Status: merr.Success(), Manifest: got}, nil
 }
 
-// GetManifest returns the current manifest of a vchannel. Found is false and
-// the manifest is empty when the vchannel has no manifest.
-func (s *Service) GetManifest(ctx context.Context, req *pkindexpb.GetManifestRequest) (*pkindexpb.GetManifestResponse, error) {
-	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
-		return &pkindexpb.GetManifestResponse{Status: merr.Status(err)}, nil
+// maxRecoveryTargets is the largest number of targets in one
+// GetRecoveryManifests request.
+const maxRecoveryTargets = 10000
+
+// GetRecoveryManifests returns the manifest pointer of each vchannel; the
+// caller reads the body from object storage. It reads the pointers from the
+// meta kv, not from the cache. Each entry has its own status, and the failure
+// of one target does not fail the others.
+func (s *Service) GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest) (*pkindexpb.GetRecoveryManifestsResponse, error) {
+	targets, err := validateRecoveryTargets(req.GetTargets())
+	if err != nil {
+		return &pkindexpb.GetRecoveryManifestsResponse{Status: merr.Status(err)}, nil
 	}
 	m, err := s.manager()
 	if err != nil {
-		return &pkindexpb.GetManifestResponse{Status: merr.Status(err)}, nil
+		return &pkindexpb.GetRecoveryManifestsResponse{Status: merr.Status(err)}, nil
 	}
-	got, found, err := m.Get(ctx, req.GetCollectionId(), req.GetVchannel())
-	if err != nil {
-		return &pkindexpb.GetManifestResponse{Status: merr.Status(toMerr(err, req.GetVchannel()))}, nil
+	results := m.LoadPointers(ctx, targets)
+	entries := make([]*pkindexpb.ManifestPointerEntry, 0, len(results))
+	for i, r := range results {
+		if r.Err != nil {
+			entries = append(entries, &pkindexpb.ManifestPointerEntry{Status: merr.Status(toMerr(r.Err, targets[i].VChannel))})
+			continue
+		}
+		entries = append(entries, &pkindexpb.ManifestPointerEntry{Status: merr.Success(), Found: r.Found, Pointer: r.Pointer})
 	}
-	return &pkindexpb.GetManifestResponse{Status: merr.Success(), Found: found, Manifest: got}, nil
+	return &pkindexpb.GetRecoveryManifestsResponse{Status: merr.Success(), Entries: entries}, nil
+}
+
+// validateRecoveryTargets checks that there are 1 to maxRecoveryTargets
+// targets, each valid and none repeated, and returns them.
+func validateRecoveryTargets(in []*pkindexpb.ManifestTarget) ([]manifestmanager.Target, error) {
+	if len(in) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("targets must not be empty")
+	}
+	if len(in) > maxRecoveryTargets {
+		return nil, merr.WrapErrParameterInvalidMsg("at most %d targets in one request, got %d", maxRecoveryTargets, len(in))
+	}
+	targets := make([]manifestmanager.Target, 0, len(in))
+	seen := make(map[manifestmanager.Target]struct{}, len(in))
+	for _, t := range in {
+		if err := validateTarget(t.GetCollectionId(), t.GetVchannel()); err != nil {
+			return nil, err
+		}
+		target := manifestmanager.Target{CollectionID: t.GetCollectionId(), VChannel: t.GetVchannel()}
+		if _, ok := seen[target]; ok {
+			return nil, merr.WrapErrParameterInvalidMsg("target collection %d vchannel %q is repeated", target.CollectionID, target.VChannel)
+		}
+		seen[target] = struct{}{}
+		targets = append(targets, target)
+	}
+	return targets, nil
+}
+
+// validateFlush checks the content of a flush request: a valid target whose
+// vchannel name has a pchannel, a positive term, a checkpoint that is not 0,
+// and a primary key data type of Int64 or VarChar.
+func validateFlush(req *pkindexpb.CommitFlushRequest) error {
+	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
+		return err
+	}
+	if funcutil.IsPhysicalChannel(req.GetVchannel()) {
+		return merr.WrapErrParameterInvalidMsg("vchannel %q has no pchannel in its name", req.GetVchannel())
+	}
+	if err := validateTerm(req.GetPchannelTerm()); err != nil {
+		return err
+	}
+	if req.GetCheckpointTimeTick() == 0 {
+		return merr.WrapErrParameterInvalidMsg("checkpoint_time_tick must not be 0")
+	}
+	if t := req.GetPkDataType(); t != schemapb.DataType_Int64 && t != schemapb.DataType_VarChar {
+		return merr.WrapErrParameterInvalidMsg("pk_data_type must be Int64 or VarChar, got %s", t)
+	}
+	return nil
 }
 
 // validateTarget checks that a request names a collection and a vchannel that
-// can form a manifest key: a positive collection ID and a vchannel name that
-// is not empty, ".", or "..", and does not contain "/".
+// can form a manifest key: a positive collection ID and a valid channel name.
 func validateTarget(collectionID int64, vchannel string) error {
 	if collectionID <= 0 {
 		return merr.WrapErrParameterInvalidMsg("collection_id must be positive, got %d", collectionID)
 	}
-	if vchannel == "" || vchannel == "." || vchannel == ".." || strings.Contains(vchannel, "/") {
-		return merr.WrapErrParameterInvalidMsg("invalid vchannel %q", vchannel)
+	return validateChannelName("vchannel", vchannel)
+}
+
+// validateChannelName checks that a channel name can be part of a key: it is
+// not empty, ".", or "..", and does not contain "/".
+func validateChannelName(field, name string) error {
+	if name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
+		return merr.WrapErrParameterInvalidMsg("invalid %s %q", field, name)
+	}
+	return nil
+}
+
+// validatePChannel checks that a pchannel name is a valid channel name and not
+// a vchannel name. A vchannel name would claim a key that no flush checks.
+func validatePChannel(name string) error {
+	if err := validateChannelName("pchannel", name); err != nil {
+		return err
+	}
+	if !funcutil.IsPhysicalChannel(name) {
+		return merr.WrapErrParameterInvalidMsg("pchannel %q is not a pchannel name", name)
+	}
+	return nil
+}
+
+// validateTerm checks that a pchannel term is positive.
+func validateTerm(term int64) error {
+	if term <= 0 {
+		return merr.WrapErrParameterInvalidMsg("pchannel_term must be positive, got %d", term)
 	}
 	return nil
 }
 
 // toMerr translates a manifest error at the service boundary. A fenced caller
-// no longer owns the vchannel and gets a code that is not retryable. Every
+// no longer owns the channel and gets a code that is not retryable. Every
 // other error translates by its pkerr category.
-func toMerr(err error, vchannel string) error {
+func toMerr(err error, channel string) error {
 	if errors.Is(err, manifest.ErrFenced) {
-		return errors.WithSecondaryError(merr.WrapErrChannelNotAvailable(vchannel, "pchannel term is fenced"), err)
+		return errors.WithSecondaryError(merr.WrapErrChannelNotAvailable(channel, "pchannel term is fenced"), err)
 	}
 	return pkerr.ToMerr(err)
 }

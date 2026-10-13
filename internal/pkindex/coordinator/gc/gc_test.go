@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 var testLayout = manifest.Layout{RootPath: "files"}
@@ -68,9 +69,11 @@ func newEnv(t *testing.T, cfg Config) *env {
 	return e
 }
 
+// claim claims the pchannel of vchannel for term 1 and commits an empty
+// first flush at checkpoint 1, which creates version 1.
 func (e *env) claim(t *testing.T, vchannel string) {
-	_, err := e.mgr.Claim(context.Background(), manifest.Claim{CollectionID: 1, VChannel: vchannel, PChannelTerm: 1, PKDataType: schemapb.DataType_Int64})
-	require.NoError(t, err)
+	require.NoError(t, e.mgr.ClaimPChannel(context.Background(), funcutil.ToPhysicalChannel(vchannel), 1))
+	flushWith(t, e.mgr, vchannel, 1)
 }
 
 func sstKey(vchannel string, id int64) string {
@@ -92,7 +95,7 @@ func (e *env) upload(t *testing.T, vchannel string, ids ...int64) {
 }
 
 func flushWith(t *testing.T, m *manifestmanager.Manager, vchannel string, tick uint64, ids ...int64) {
-	_, err := m.CommitFlush(context.Background(), 1, vchannel, manifest.Flush{PChannelTerm: 1, AddSSTs: refs(ids...), CheckpointTimeTick: tick})
+	_, err := m.CommitFlush(context.Background(), 1, vchannel, manifest.Flush{PChannelTerm: 1, PKDataType: schemapb.DataType_Int64, AddSSTs: refs(ids...), CheckpointTimeTick: tick})
 	require.NoError(t, err)
 }
 
@@ -138,7 +141,7 @@ func TestSSTSweep(t *testing.T) {
 	e.claim(t, "v")
 	e.upload(t, "v", 1, 2, 3, 4, 5)
 	e.flush(t, "v", 10, 2, 1)
-	_, err := e.mgr.CommitCompact(ctx, 1, "v", manifest.Compact{Inputs: []int64{2, 1}, Outputs: refs(3)})
+	_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
 	require.NoError(t, err)
 	e.inFlight = func(context.Context, int64, string) ([]int64, error) { return []int64{4}, nil }
 
@@ -227,7 +230,7 @@ func TestGCDoesNotDependOnManagerCache(t *testing.T) {
 	other := manifestmanager.New(e.pointers, e.store, testLayout)
 	flushWith(t, other, "v", 20, 2) // version 3
 	// version 4
-	_, err := other.CommitCompact(ctx, 1, "v", manifest.Compact{Inputs: []int64{2, 1}, Outputs: refs(3)})
+	_, err := other.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
 	require.NoError(t, err)
 	flushWith(t, other, "v", 30, 4) // version 5
 	flushWith(t, other, "v", 40, 5) // version 6
@@ -280,7 +283,7 @@ func TestCompactionCommittedBetweenReads(t *testing.T) {
 	e.inFlight = func(context.Context, int64, string) ([]int64, error) {
 		e.store.Now = func() time.Time { return t0 }
 		defer func() { e.store.Now = func() time.Time { return e.now } }()
-		_, err := e.mgr.CommitCompact(ctx, 1, "v", manifest.Compact{Inputs: []int64{2, 1}, Outputs: refs(3)})
+		_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
 		require.NoError(t, err)
 		return nil, nil
 	}
