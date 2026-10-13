@@ -2440,6 +2440,13 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
                "ngram index should not be null, field_id: {}",
                field_id_.get());
 
+    // Single Unary and fused LIKE AND share this entry. A complete InnerMatch
+    // gram already has exact phase-1 hits; validity is handled by the caller.
+    if (ngram_reader_->CandidatesAreExact(literal,
+                                          ToIndexPatternOp(expr_->op_type_))) {
+        return;
+    }
+
     TargetBitmapView res(candidates);
     auto apply_string_predicate = [&](auto&& predicate) {
         auto execute_batch = [&predicate](const std::string_view* data,

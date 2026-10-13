@@ -23,7 +23,8 @@
 
 // Ngram candidate generation, exposed as a pure query mixin. Results are a
 // superset (caps.ngram_candidates = true, caps.exact = false); the consumer
-// fetches original values and verifies the predicate. The index neither calls
+// fetches original values and verifies the predicate unless CandidatesAreExact
+// identifies an exact literal/operator combination. The index neither calls
 // the executor nor performs that refinement. PatternOp names the operation;
 // implementing INgramReader does not imply exact IPatternMatchReader support.
 
@@ -38,6 +39,12 @@ class INgramReader {
     // capability bit or an exception-based capability probe.
     virtual bool
     CanHandle(std::string_view literal, PatternOp op) const = 0;
+
+    // Whether Candidates returns exact predicate hits for this literal and op,
+    // so the consumer can skip raw-value refinement. False for an ineligible
+    // literal. This does not change caps.exact for the reader's general API.
+    virtual bool
+    CandidatesAreExact(std::string_view literal, PatternOp op) const = 0;
 
     // Phase 1: candidate generation. The result is AND-merged into `candidates`
     // (the caller initializes it non-empty). Semantically a superset.

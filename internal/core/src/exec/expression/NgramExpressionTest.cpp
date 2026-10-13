@@ -13,6 +13,7 @@
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <boost/container/vector.hpp>
 #include "common/RegexQuery.h"
+#include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INgramReader.h"
 
 #include <memory>
@@ -21,7 +22,11 @@
 
 #include "common/Schema.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "exec/expression/ConjunctExpr.h"
+#include "exec/expression/LikeConjunctExpr.h"
+#include "exec/expression/LogicalUnaryExpr.h"
 #include "exec/expression/UnaryExpr.h"
+#include "index/contracts/query/INullReader.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -940,6 +945,478 @@ TEST(NgramExpressionTest, PrefetchedUnaryJoinsBeforeBindingOffsetMode) {
             const auto row = with_offsets ? offsets[i] : i;
             EXPECT_EQ(bits[i], row != 1);
             EXPECT_TRUE(valid[i]);
+        }
+    }
+}
+
+namespace {
+
+// Count the raw views used by the real phase-2 implementation. These tests
+// construct physical expressions directly, without a frozen column snapshot,
+// so ProcessDataChunkForRange reaches this normal virtual segment boundary.
+class NgramRefinementSegment final : public ChunkedSegmentSealedImpl {
+ public:
+    explicit NgramRefinementSegment(const SchemaPtr& schema)
+        : ChunkedSegmentSealedImpl(
+              schema, empty_index_meta, SegcoreConfig::default_config(), 0) {
+    }
+
+    mutable size_t raw_view_reads{0};
+
+ protected:
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
+    chunk_string_view_impl(
+        OpContext* context,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        ++raw_view_reads;
+        return ChunkedSegmentSealedImpl::chunk_string_view_impl(
+            context, field_id, chunk_id, offset_len);
+    }
+};
+
+struct NgramQueryCounts {
+    size_t candidates{0};
+    size_t exactness_checks{0};
+};
+
+// Observe the production reader without substituting candidate or NULL results.
+class ObservedNgramReader final : public index::IIndexReaderBase,
+                                  public index::INgramReader,
+                                  public index::INullReader {
+ public:
+    ObservedNgramReader(index::IIndexReaderBasePtr reader,
+                        std::shared_ptr<NgramQueryCounts> counts)
+        : ObservedNgramReader(
+              index::JsonResolvedReader::Owned(std::move(reader)),
+              std::move(counts)) {
+    }
+
+    ObservedNgramReader(index::JsonResolvedReader reader,
+                        std::shared_ptr<NgramQueryCounts> counts)
+        : reader_(std::move(reader)), counts_(std::move(counts)) {
+    }
+
+    index::ReaderCaps
+    Caps() const override {
+        return reader_->Caps();
+    }
+    index::Domain
+    CoordDomain() const override {
+        return reader_->CoordDomain();
+    }
+    int64_t
+    Count() const override {
+        return reader_->Count();
+    }
+    DataType
+    ValueType() const override {
+        return reader_->ValueType();
+    }
+    int64_t
+    MemoryUsage() const override {
+        return reader_->MemoryUsage();
+    }
+    cachinglayer::ResourceUsage
+    CellByteSize() const override {
+        return reader_->CellByteSize();
+    }
+    bool
+    CanHandle(std::string_view literal, index::PatternOp op) const override {
+        return Ngram().CanHandle(literal, op);
+    }
+    bool
+    CandidatesAreExact(std::string_view literal,
+                       index::PatternOp op) const override {
+        ++counts_->exactness_checks;
+        return Ngram().CandidatesAreExact(literal, op);
+    }
+    void
+    Candidates(std::string_view literal,
+               index::PatternOp op,
+               TargetBitmap& candidates) const override {
+        ++counts_->candidates;
+        Ngram().Candidates(literal, op, candidates);
+    }
+    TargetBitmap
+    IsNull() const override {
+        return dynamic_cast<const index::INullReader&>(*reader_.get()).IsNull();
+    }
+    TargetBitmap
+    IsNotNull() const override {
+        return dynamic_cast<const index::INullReader&>(*reader_.get())
+            .IsNotNull();
+    }
+
+ private:
+    const index::INgramReader&
+    Ngram() const {
+        return dynamic_cast<const index::INgramReader&>(*reader_.get());
+    }
+
+    // Retain an owned or borrowed resolved view exactly as the router returned
+    // it. A borrowed view still relies on the enclosing JSON router cache pin.
+    index::JsonResolvedReader reader_;
+    std::shared_ptr<NgramQueryCounts> counts_;
+};
+
+class ObservedJsonNgramReader final : public index::IIndexReaderBase,
+                                      public index::IJsonIndexReader {
+ public:
+    ObservedJsonNgramReader(index::IIndexReaderBasePtr reader,
+                            std::shared_ptr<NgramQueryCounts> counts)
+        : reader_(std::move(reader)), counts_(std::move(counts)) {
+    }
+
+    index::ReaderCaps
+    Caps() const override {
+        return reader_->Caps();
+    }
+    index::Domain
+    CoordDomain() const override {
+        return reader_->CoordDomain();
+    }
+    int64_t
+    Count() const override {
+        return reader_->Count();
+    }
+    DataType
+    ValueType() const override {
+        return reader_->ValueType();
+    }
+    int64_t
+    MemoryUsage() const override {
+        return reader_->MemoryUsage();
+    }
+    cachinglayer::ResourceUsage
+    CellByteSize() const override {
+        return reader_->CellByteSize();
+    }
+    index::JsonResolvedReader
+    Resolve(std::string_view path, JsonCastType cast_type) const override {
+        auto resolved = Json().Resolve(path, cast_type);
+        if (!resolved) {
+            return {};
+        }
+        return index::JsonResolvedReader::Owned(
+            std::make_unique<ObservedNgramReader>(std::move(resolved),
+                                                  counts_));
+    }
+    TargetBitmap
+    Exists(std::string_view path) const override {
+        return Json().Exists(path);
+    }
+    std::vector<JsonCastType>
+    CastTypesOf(std::string_view path) const override {
+        return Json().CastTypesOf(path);
+    }
+
+ private:
+    const index::IJsonIndexReader&
+    Json() const {
+        return dynamic_cast<const index::IJsonIndexReader&>(*reader_);
+    }
+
+    index::IIndexReaderBasePtr reader_;
+    std::shared_ptr<NgramQueryCounts> counts_;
+};
+
+struct NgramPhase2Fixture {
+    explicit NgramPhase2Fixture(bool nullable,
+                                DataType field_type = DataType::VARCHAR)
+        : nullable(nullable), field_type(field_type) {
+        schema = std::make_shared<Schema>();
+        field_id = schema->AddDebugField("text", field_type, nullable);
+        std::vector<uint8_t> validity((rows.size() + 7) / 8, 0xFF);
+        if (nullable) {
+            validity[(rows.size() - 1) / 8] &=
+                static_cast<uint8_t>(~(1U << ((rows.size() - 1) % 8)));
+        }
+        FieldDataPtr field;
+        Config params{{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}};
+        if (field_type == DataType::JSON) {
+            std::vector<std::string> json;
+            json.reserve(rows.size());
+            for (const auto& row : rows) {
+                json.push_back(R"({"name":")" + row + R"("})");
+            }
+            field =
+                test::expr_index::JsonField(json, nullable, validity.data());
+            params[JSON_PATH] = "/name";
+            params[JSON_CAST_TYPE] = "VARCHAR";
+        } else {
+            field =
+                test::expr_index::StringField(rows, nullable, validity.data());
+        }
+        segment = std::make_unique<NgramRefinementSegment>(schema);
+        raw_segment = CreateSealedSegment(schema);
+        const auto raw_info = raw_files.Prepare(field_id, {field});
+        segment->LoadFieldData(raw_info);
+        raw_segment->LoadFieldData(raw_info);
+        auto opened = test::expr_index::BuildIndex(
+            field_id, field_type, index::NGRAM_INDEX_TYPE, {field}, params);
+        if (opened.reader->Caps().json_paths) {
+            opened.reader = std::make_unique<ObservedJsonNgramReader>(
+                std::move(opened.reader), counts);
+        } else {
+            opened.reader = std::make_unique<ObservedNgramReader>(
+                std::move(opened.reader), counts);
+        }
+        test::expr_index::InstallIndex(
+            *segment, field_id, field_type, std::move(opened));
+    }
+
+    exec::ExprPtr
+    Unary(SegmentInternalInterface* source,
+          const std::string& literal,
+          proto::plan::OpType op = proto::plan::InnerMatch,
+          bool negate = false) const {
+        proto::plan::GenericValue value;
+        value.set_string_val(literal);
+        auto typed = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_id,
+                             field_type,
+                             field_type == DataType::JSON
+                                 ? std::vector<std::string>{"name"}
+                                 : std::vector<std::string>{},
+                             nullable),
+            op,
+            value);
+        auto physical = std::make_shared<exec::PhyUnaryRangeFilterExpr>(
+            std::vector<exec::ExprPtr>{},
+            typed,
+            "PhyUnaryRangeFilterExpr",
+            nullptr,
+            source,
+            rows.size(),
+            rows.size(),
+            0);
+        if (!negate) {
+            return physical;
+        }
+        auto logical = std::make_shared<expr::LogicalUnaryExpr>(
+            expr::LogicalUnaryExpr::OpType::LogicalNot, typed);
+        return std::make_shared<exec::PhyLogicalUnaryExpr>(
+            std::vector<exec::ExprPtr>{physical},
+            logical,
+            "PhyLogicalUnaryExpr",
+            nullptr);
+    }
+
+    std::shared_ptr<exec::PhyConjunctFilterExpr>
+    And(SegmentInternalInterface* source,
+        const std::string& first,
+        const std::string& second,
+        bool fuse) const {
+        auto result = std::make_shared<exec::PhyConjunctFilterExpr>(
+            std::vector<exec::ExprPtr>{Unary(source, first),
+                                       Unary(source, second)},
+            true,
+            nullptr);
+        if (fuse) {
+            result->SetLikeIndices({0, 1});
+            result->Reorder({0, 1, 2});
+        }
+        return result;
+    }
+
+    ColumnVectorPtr
+    Eval(const exec::ExprPtr& expression,
+         SegmentInternalInterface* source,
+         exec::OffsetVector* offsets = nullptr) const {
+        exec::QueryContext query_context(
+            "ngram-phase2", source, rows.size(), MAX_TIMESTAMP);
+        exec::ExecContext exec_context(&query_context);
+        exec::EvalCtx eval_context(&exec_context, offsets);
+        VectorPtr result;
+        expression->Eval(eval_context, result);
+        return std::dynamic_pointer_cast<ColumnVector>(result);
+    }
+
+    static void
+    ExpectSame(const ColumnVectorPtr& actual, const ColumnVectorPtr& raw) {
+        ASSERT_NE(actual, nullptr);
+        ASSERT_NE(raw, nullptr);
+        ASSERT_EQ(actual->size(), raw->size());
+        TargetBitmapView actual_bits(actual->GetRawData(), actual->size());
+        TargetBitmapView actual_valid(actual->GetValidRawData(),
+                                      actual->size());
+        TargetBitmapView raw_bits(raw->GetRawData(), raw->size());
+        TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
+        for (size_t row = 0; row < actual->size(); ++row) {
+            EXPECT_EQ(actual_valid[row], raw_valid[row]) << row;
+            if (raw_valid[row]) {
+                EXPECT_EQ(actual_bits[row], raw_bits[row]) << row;
+            }
+            EXPECT_EQ(actual_bits[row] && actual_valid[row],
+                      raw_bits[row] && raw_valid[row])
+                << row;
+        }
+    }
+
+    const bool nullable;
+    const DataType field_type;
+    const std::vector<std::string> rows{"a",
+                                        "ab",
+                                        "abcd",
+                                        "abcde",
+                                        "xabcdey",
+                                        "abcd--bcde",
+                                        "ABCD",
+                                        "xyz",
+                                        "中",
+                                        "中文",
+                                        "中文测试",
+                                        "中文测试数",
+                                        "x中文测试数y",
+                                        "中文测试-文测试数",
+                                        "ab中文",
+                                        "abcd中文测试",
+                                        "",
+                                        "abcde中文测试数"};
+    SchemaPtr schema;
+    FieldId field_id{0};
+    test::expr_index::RawFieldFiles raw_files;
+    std::unique_ptr<NgramRefinementSegment> segment;
+    SegmentSealedUPtr raw_segment;
+    std::shared_ptr<NgramQueryCounts> counts =
+        std::make_shared<NgramQueryCounts>();
+};
+
+}  // namespace
+
+TEST(NgramExpressionTest, InnerMatchSkipsRefinementOnlyForCompleteGrams) {
+    for (const auto field_type : {DataType::VARCHAR, DataType::JSON}) {
+        SCOPED_TRACE(static_cast<int>(field_type));
+        NgramPhase2Fixture fixture(true, field_type);
+        for (const std::string literal : {"a",
+                                          "ab",
+                                          "abcd",
+                                          "abcde",
+                                          "中",
+                                          "中文",
+                                          "中文测试",
+                                          "中文测试数"}) {
+            SCOPED_TRACE(literal);
+            const auto length = Utf8CharCount(literal.data(), literal.size());
+            for (const bool negate : {false, true}) {
+                SCOPED_TRACE(negate);
+                *fixture.counts = {};
+                fixture.segment->raw_view_reads = 0;
+                const auto actual =
+                    fixture.Eval(fixture.Unary(fixture.segment.get(),
+                                               literal,
+                                               proto::plan::InnerMatch,
+                                               negate),
+                                 fixture.segment.get());
+                const auto raw =
+                    fixture.Eval(fixture.Unary(fixture.raw_segment.get(),
+                                               literal,
+                                               proto::plan::InnerMatch,
+                                               negate),
+                                 fixture.raw_segment.get());
+                NgramPhase2Fixture::ExpectSame(actual, raw);
+                ASSERT_NE(actual, nullptr);
+                TargetBitmapView valid(actual->GetValidRawData(),
+                                       actual->size());
+                EXPECT_FALSE(valid[fixture.rows.size() - 1]);
+                EXPECT_EQ(fixture.counts->candidates, length >= 2 ? 1 : 0);
+                if (length >= 2 && length <= 4) {
+                    EXPECT_GT(fixture.counts->exactness_checks, 0);
+                    EXPECT_EQ(fixture.segment->raw_view_reads, 0);
+                } else if (length > 4) {
+                    EXPECT_GT(fixture.counts->exactness_checks, 0);
+                    EXPECT_GT(fixture.segment->raw_view_reads, 0);
+                } else {
+                    EXPECT_EQ(fixture.counts->exactness_checks, 0);
+                }
+            }
+        }
+    }
+}
+
+TEST(NgramExpressionTest, AnchoredAndWildcardMatchesStillRefineCompleteGrams) {
+    NgramPhase2Fixture fixture(true);
+    for (const auto op : {proto::plan::PrefixMatch,
+                          proto::plan::PostfixMatch,
+                          proto::plan::Match,
+                          proto::plan::RegexMatch}) {
+        SCOPED_TRACE(static_cast<int>(op));
+        const std::string literal = op == proto::plan::Match ? "%ab%" : "ab";
+        *fixture.counts = {};
+        fixture.segment->raw_view_reads = 0;
+        const auto actual =
+            fixture.Eval(fixture.Unary(fixture.segment.get(), literal, op),
+                         fixture.segment.get());
+        const auto raw =
+            fixture.Eval(fixture.Unary(fixture.raw_segment.get(), literal, op),
+                         fixture.raw_segment.get());
+        NgramPhase2Fixture::ExpectSame(actual, raw);
+        EXPECT_EQ(fixture.counts->candidates, 1);
+        EXPECT_GT(fixture.segment->raw_view_reads, 0);
+    }
+}
+
+TEST(NgramExpressionTest, FusedInnerMatchesShareRefinementEligibility) {
+    NgramPhase2Fixture fixture(false);
+    for (const auto& literals :
+         {std::pair<std::string, std::string>{"ab", "中文"},
+          {"abcde", "中文"},
+          {"abcd", "中文测试数"}}) {
+        SCOPED_TRACE(literals.first + " AND " + literals.second);
+        *fixture.counts = {};
+        fixture.segment->raw_view_reads = 0;
+        auto fused = fixture.And(
+            fixture.segment.get(), literals.first, literals.second, true);
+        const auto actual = fixture.Eval(fused, fixture.segment.get());
+        const auto raw = fixture.Eval(fixture.And(fixture.raw_segment.get(),
+                                                  literals.first,
+                                                  literals.second,
+                                                  false),
+                                      fixture.raw_segment.get());
+        NgramPhase2Fixture::ExpectSame(actual, raw);
+        ASSERT_EQ(fused->GetInputsRef().size(), 3);
+        EXPECT_NE(std::dynamic_pointer_cast<exec::PhyLikeConjunctExpr>(
+                      fused->GetInputsRef().back()),
+                  nullptr);
+        EXPECT_EQ(fixture.counts->candidates, 2);
+        EXPECT_EQ(fixture.counts->exactness_checks, 2);
+        EXPECT_EQ(fixture.segment->raw_view_reads,
+                  literals.first == "ab"
+                      ? 0
+                      : fixture.segment->num_chunk_data(fixture.field_id));
+    }
+}
+
+TEST(NgramExpressionTest, OffsetInnerMatchesKeepRawEvaluationAndNullValidity) {
+    NgramPhase2Fixture fixture(true);
+    exec::OffsetVector offsets{17, 3, 14, 0, 17};
+    for (const bool fused : {false, true}) {
+        *fixture.counts = {};
+        auto actual_expr =
+            fused ? fixture.And(fixture.segment.get(), "ab", "中文", true)
+                  : fixture.Unary(fixture.segment.get(), "ab");
+        auto raw_expr =
+            fused ? fixture.And(fixture.raw_segment.get(), "ab", "中文", false)
+                  : fixture.Unary(fixture.raw_segment.get(), "ab");
+        const auto actual =
+            fixture.Eval(actual_expr, fixture.segment.get(), &offsets);
+        const auto raw =
+            fixture.Eval(raw_expr, fixture.raw_segment.get(), &offsets);
+        NgramPhase2Fixture::ExpectSame(actual, raw);
+        ASSERT_NE(actual, nullptr);
+        TargetBitmapView valid(actual->GetValidRawData(), actual->size());
+        EXPECT_FALSE(valid[0]);
+        EXPECT_FALSE(valid[4]);
+        EXPECT_EQ(fixture.counts->candidates, 0);
+        EXPECT_EQ(fixture.counts->exactness_checks, 0);
+        if (fused) {
+            const auto conjunction =
+                std::dynamic_pointer_cast<exec::PhyConjunctFilterExpr>(
+                    actual_expr);
+            ASSERT_NE(conjunction, nullptr);
+            EXPECT_EQ(conjunction->GetInputsRef().size(), 2);
         }
     }
 }

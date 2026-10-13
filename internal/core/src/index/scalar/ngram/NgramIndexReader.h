@@ -27,10 +27,10 @@
 #include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/INullReader.h"
 
-// INgramReader and INullReader over the ngram engine. Candidate results are a
-// superset (caps.exact = false), not exact pattern matches. The execution layer
-// fetches original values and verifies candidates; this reader must not call
-// the executor or expose a Phase2 callback.
+// INgramReader and INullReader over the ngram engine. Candidate results are
+// generally a superset (caps.exact = false); a complete gram is exact for
+// InnerMatch. The execution layer refines the other cases; this reader must not
+// call the executor or expose a Phase2 callback.
 
 namespace milvus::tantivy {
 struct TantivyIndexWrapper;
@@ -85,6 +85,9 @@ class NgramIndexReader final : public IIndexReaderBase,
     // Ask after pinning; a load-time capability bit cannot encode this answer.
     bool
     CanHandle(std::string_view literal, PatternOp op) const override;
+
+    bool
+    CandidatesAreExact(std::string_view literal, PatternOp op) const override;
 
     // Phase 1 only. AND-merged into `candidates`, which the caller has already
     // sized and initialized.
