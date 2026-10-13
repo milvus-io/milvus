@@ -117,6 +117,19 @@ ConvertJsonNumberExact(Source value) {
     }
 }
 
+template <typename Target>
+std::optional<Target>
+ConvertJsonNumberExact(const simdjson::ondemand::number& number) {
+    if (number.is_int64()) {
+        return ConvertJsonNumberExact<Target>(number.get_int64());
+    }
+    // JSON stats and numeric indexes store uint64 values as double.
+    const auto value = number.is_uint64()
+                           ? static_cast<double>(number.get_uint64())
+                           : number.get_double();
+    return ConvertJsonNumberExact<Target>(value);
+}
+
 inline int
 CompareUint64ToDouble(uint64_t lhs, double rhs) {
     constexpr double kUint64Upper = 0x1p64;

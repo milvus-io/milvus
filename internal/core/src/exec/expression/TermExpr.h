@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <functional>
 #include <fmt/core.h>
 
@@ -24,6 +25,7 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "segcore/SegmentInterface.h"
 #include "index/json_stats/JsonKeyStats.h"
 
@@ -90,6 +92,16 @@ class PhyTermFilterExpr : public SegmentExpr {
                         static_cast<int>(expr_->vals_[i].val_case()));
                 }
             }
+        }
+        // Decide before the first Eval: conjunct short-circuiting can move
+        // the cursor before this expression is evaluated. A DOUBLE index
+        // cannot distinguish neighboring int64 values beyond 2^53.
+        if (expr_->column_.data_type_ == DataType::JSON &&
+            !expr_->is_in_field_ &&
+            std::any_of(expr_->vals_.begin(),
+                        expr_->vals_.end(),
+                        JsonNumericBoundRequiresPreciseInt64Comparison)) {
+            SetNotUseIndex();
         }
     }
 

@@ -228,7 +228,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     if (expr_->is_in_field_) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
-        if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+        if (SegmentExpr::CanUseIndex() && use_index_ && !has_offset_input_) {
             // we create double index for json int64 field for now
             using GetType =
                 std::conditional_t<std::is_same_v<ValueType, int64_t>,
@@ -735,6 +735,12 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
         return ExecJsonInVariableByStats<ValueType>();
     }
 
+    if (!use_index_ && !segment_->HasFieldData(field_id)) {
+        ThrowInfo(Unsupported,
+                  "Exact JSON numeric IN requires raw JSON or usable JSON "
+                  "stats; the numeric index may contain rounded int64 values");
+    }
+
     milvus::ScopedTimer timer("term_json_bruteforce", [this](double us) {
         json_filter_bruteforce_latency_us_ += us;
     });
@@ -782,25 +788,16 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            if constexpr (std::is_same_v<GetType, std::int64_t>) {
+            if constexpr (std::is_same_v<GetType, int64_t> ||
+                          std::is_same_v<GetType, double>) {
                 auto x_num = data[i].at_numeric(pointer);
                 if (x_num.error()) {
                     return std::make_pair(false, false);
                 }
-                auto n = x_num.value();
-                if (n.is_int64()) {
-                    return std::make_pair(true,
-                                          terms->In(ValueType(n.get_int64())));
-                }
-                // uint64 or double → compare as double, consistent with
-                // index/stats paths.
-                auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
-                                          : n.get_double();
-                // if the term set is {1}, and the value is 1.1, we should
-                // not return true.
-                return std::make_pair(
-                    true,
-                    std::floor(dval) == dval && terms->In(ValueType(dval)));
+                const auto value =
+                    ConvertJsonNumberExact<ValueType>(x_num.value());
+                return std::make_pair(true,
+                                      value.has_value() && terms->In(*value));
             } else {
                 auto x = data[i].template at<GetType>(pointer);
                 if (x.error()) {
