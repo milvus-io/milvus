@@ -17,11 +17,13 @@
 package coverage
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fixture(t *testing.T) *collector {
@@ -192,5 +194,68 @@ func TestStartDoesNotModifyAnOwnedDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "go")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("modified owned directory before claiming it: %v", err)
+	}
+}
+
+func TestServeProcessesOnlyValidRegularRequests(t *testing.T) {
+	c := fixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	stopped := make(chan struct{})
+	go func() { defer close(stopped); c.serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-stopped:
+		case <-time.After(2 * time.Second):
+			t.Error("collector did not stop after cancellation")
+		}
+	})
+	id := strings.Repeat("e", 32)
+	ignored := []string{"invalid-id", strings.Repeat("f", 32)}
+	requests := filepath.Join(c.root, "requests")
+	if err := os.WriteFile(filepath.Join(requests, ignored[0]), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(requests, ignored[0]), filepath.Join(requests, ignored[1])); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(requests, id), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, err := os.Stat(filepath.Join(c.root, "runs", id, "done.json"))
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("valid request was not processed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for _, name := range ignored {
+		if _, err := os.Lstat(filepath.Join(requests, name)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(c.root, "runs", name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("processed invalid request %q: %v", name, err)
+		}
+	}
+}
+
+func TestRepeatedSnapshotsKeepPreviousData(t *testing.T) {
+	c := fixture(t)
+	first := requestSnapshot(t, c, strings.Repeat("1", 32))
+	c.dump = func() {
+		if err := os.WriteFile(filepath.Join(c.root, "cpp", "probe.gcda"), []byte("updated data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := requestSnapshot(t, c, strings.Repeat("2", 32))
+	for run, want := range map[string]string{first: "native data", second: "updated data"} {
+		got, err := os.ReadFile(filepath.Join(run, "cpp", "probe.gcda"))
+		if err != nil || string(got) != want {
+			t.Fatalf("snapshot changed: %q, %v", got, err)
+		}
 	}
 }
