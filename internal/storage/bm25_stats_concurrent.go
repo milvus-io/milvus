@@ -38,6 +38,10 @@ const (
 // Every token lives in exactly one shard, so it takes the same memory as a single BM25Stats.
 // A reader running concurrently with a merge may observe that merge partially applied.
 //
+// A concurrent BuildIDF still never sees more rows containing a token than rows in total, which would
+// make the IDF negative: Merge and MergeFrom add the row count before the token counts, and BuildIDF reads
+// the token counts before the row count. Minus does not keep this, so it must not run concurrently with BuildIDF.
+//
 // The shard locks cost an atomic update per token, which matters on hot paths that are already
 // serialized by the caller. The Unlocked methods skip them: MergeUnlocked and MinusUnlocked need
 // the caller to hold c exclusively, and BuildIDFUnlocked needs that no write runs concurrently.
@@ -78,12 +82,13 @@ func shardOf(token uint32) uint32 {
 
 // Merge adds stats into c. Safe for concurrent use.
 func (c *ConcurrentBM25Stats) Merge(stats *BM25Stats) {
-	c.apply(stats.rowsWithToken, 1)
+	// the row count goes first, see the type comment
 	c.numRow.Add(stats.numRow)
 	c.numToken.Add(stats.numToken)
+	c.apply(stats.rowsWithToken, 1)
 }
 
-// Minus subtracts stats from c. Safe for concurrent use.
+// Minus subtracts stats from c. Safe for concurrent use with other writes, but not with BuildIDF.
 func (c *ConcurrentBM25Stats) Minus(stats *BM25Stats) {
 	c.apply(stats.rowsWithToken, -1)
 	c.numRow.Add(-stats.numRow)
@@ -152,6 +157,9 @@ func (c *ConcurrentBM25Stats) apply(rows map[uint32]int32, sign int32) {
 // MergeFrom adds other into c, merging the shards in parallel. Safe for concurrent use,
 // but other must not be modified concurrently.
 func (c *ConcurrentBM25Stats) MergeFrom(other *ConcurrentBM25Stats) {
+	// the row count goes first, see the type comment
+	c.numRow.Add(other.numRow.Load())
+	c.numToken.Add(other.numToken.Load())
 	var wg sync.WaitGroup
 	for i := range c.shards {
 		wg.Add(1)
@@ -169,8 +177,6 @@ func (c *ConcurrentBM25Stats) MergeFrom(other *ConcurrentBM25Stats) {
 		}(i)
 	}
 	wg.Wait()
-	c.numRow.Add(other.numRow.Load())
-	c.numToken.Add(other.numToken.Load())
 }
 
 func (c *ConcurrentBM25Stats) NumRow() int64 {
@@ -181,19 +187,25 @@ func (c *ConcurrentBM25Stats) NumToken() int64 {
 	return c.numToken.Load()
 }
 
-// BuildIDF has the same result as BM25Stats.BuildIDF on the same data. Safe for concurrent use.
+// BuildIDF has the same result as BM25Stats.BuildIDF on the same data. Safe for concurrent use with
+// Merge and MergeFrom.
 func (c *ConcurrentBM25Stats) BuildIDF(tf []byte) (idf []byte) {
-	numRow := c.numRow.Load()
 	numElements := typeutil.SparseFloatRowElementCount(tf)
+	nqs := make([]int32, numElements)
+	for idx := 0; idx < numElements; idx++ {
+		key := typeutil.SparseFloatRowIndexAt(tf, idx)
+		shard := &c.shards[shardOf(key)]
+		shard.RLock()
+		nqs[idx] = shard.rowsWithToken[key]
+		shard.RUnlock()
+	}
+	// read after the token counts, so it covers every merge they include, see the type comment
+	numRow := c.numRow.Load()
 	idf = make([]byte, len(tf))
 	for idx := 0; idx < numElements; idx++ {
 		key := typeutil.SparseFloatRowIndexAt(tf, idx)
 		value := typeutil.SparseFloatRowValueAt(tf, idx)
-		shard := &c.shards[shardOf(key)]
-		shard.RLock()
-		nq := shard.rowsWithToken[key]
-		shard.RUnlock()
-		typeutil.SparseFloatRowSetAt(idf, idx, key, bm25TermIDF(value, numRow, nq))
+		typeutil.SparseFloatRowSetAt(idf, idx, key, bm25TermIDF(value, numRow, nqs[idx]))
 	}
 	return
 }

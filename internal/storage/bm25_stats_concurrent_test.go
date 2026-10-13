@@ -149,6 +149,68 @@ func TestConcurrentBM25StatsMergeFrom(t *testing.T) {
 	assert.Equal(t, expected.rowsWithToken, got.rowsWithToken)
 }
 
+// A search during preload reads current while segments merge into it. It must never see a token in more
+// rows than the row count, which gives a negative IDF that the worker rejects as an invalid sparse vector.
+func TestConcurrentBM25StatsBuildIDFNeverNegativeDuringMerge(t *testing.T) {
+	const vocab = 2048 // above the split threshold, like a real segment
+	// every row holds every token, so after any set of whole merges each token is in exactly numRow rows
+	row := map[uint32]float32{}
+	for i := uint32(0); i < vocab; i++ {
+		row[i] = 1
+	}
+	segment := NewBM25Stats()
+	for i := 0; i < 4; i++ {
+		segment.Append(row)
+	}
+	tf := allTokensTF(vocab)
+
+	for _, merge := range []struct {
+		name string
+		fn   func(c *ConcurrentBM25Stats)
+	}{
+		{"Merge", func(c *ConcurrentBM25Stats) { c.Merge(segment) }},
+		{"MergeFrom", func(c *ConcurrentBM25Stats) {
+			other := NewConcurrentBM25Stats()
+			other.MergeUnlocked(segment)
+			c.MergeFrom(other)
+		}},
+	} {
+		t.Run(merge.name, func(t *testing.T) {
+			c := NewConcurrentBM25Stats()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				var wg sync.WaitGroup
+				for w := 0; w < 4; w++ {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						for i := 0; i < 200; i++ {
+							merge.fn(c)
+						}
+					}()
+				}
+				wg.Wait()
+			}()
+
+			for searches := 0; ; searches++ {
+				select {
+				case <-done:
+					t.Logf("%d searches ran during the merges", searches)
+					return
+				default:
+				}
+				idf := c.BuildIDF(tf)
+				for idx := 0; idx < typeutil.SparseFloatRowElementCount(idf); idx++ {
+					if v := typeutil.SparseFloatRowValueAt(idf, idx); v < 0 {
+						require.FailNowf(t, "negative IDF", "token %d: %v", typeutil.SparseFloatRowIndexAt(idf, idx), v)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestConcurrentBM25StatsEmptyAndMemSize(t *testing.T) {
 	c := NewConcurrentBM25Stats()
 	assert.Equal(t, float64(0), c.GetAvgdl())
