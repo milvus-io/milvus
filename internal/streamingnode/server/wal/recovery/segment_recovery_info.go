@@ -117,6 +117,22 @@ func (info *segmentRecoveryInfo) ObserveFlush(timetick uint64) {
 	info.dirty = true
 }
 
+// ObserveOrphaned marks an orphaned growing segment as flushed.
+// An orphaned segment is a growing segment whose vchannel or partition is not active anymore
+// in the recovery storage (e.g. the collection was dropped but the segment assignment meta
+// survived because of non-atomic persistence or WAL truncation). Such a segment is never
+// recovered into the shard manager, so no flush message can be observed for it anymore.
+// It is moved into the flushed (terminal) state and marked dirty, so that the next persist
+// operation removes its segment assignment meta from the catalog instead of leaking it forever.
+func (info *segmentRecoveryInfo) ObserveOrphaned() {
+	if info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
+		// idempotent
+		return
+	}
+	info.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+	info.dirty = true
+}
+
 // ConsumeDirtyAndGetSnapshot consumes the dirty segment recovery info and returns a snapshot to persist.
 // Return nil if the segment recovery info is not dirty.
 func (info *segmentRecoveryInfo) ConsumeDirtyAndGetSnapshot() (dirtySnapshot *streamingpb.SegmentAssignmentMeta, shouldBeRemoved bool) {
