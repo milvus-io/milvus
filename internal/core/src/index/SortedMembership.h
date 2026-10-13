@@ -27,6 +27,41 @@
 
 namespace milvus::index::detail {
 
+inline constexpr size_t kMaxBinaryMembershipSize = 8;
+
+// Keep the original binary-search lookup for short lists and exceptional
+// floating-point queries. Matching ranges still reach the diagnostic callback.
+template <typename Iterator,
+          typename Value,
+          typename Visitor,
+          typename Validator>
+void
+VisitBinaryMatches(Iterator first,
+                   Iterator last,
+                   size_t n,
+                   const Value* values,
+                   Visitor visit,
+                   Validator validate) {
+    if (n == 0 || first == last) {
+        return;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        const Value value = values[i];
+        auto lb = std::lower_bound(
+            first, last, value, [](const auto& entry, Value value) {
+                return entry.a_ < value;
+            });
+        auto ub = std::upper_bound(
+            lb, last, value, [](Value value, const auto& entry) {
+                return value < entry.a_;
+            });
+        for (; lb != ub; ++lb) {
+            validate(value, *lb);
+            visit(lb->idx_);
+        }
+    }
+}
+
 // Queries must be sorted and distinct, and indexed values must be ordered by
 // the same comparison. Accessors let numeric entries and string dictionaries
 // (including mmap dictionaries) share the cursor without copying index data.
@@ -100,15 +135,6 @@ VisitSortedMatches(Iterator first,
     if (n == 0 || first == last) {
         return;
     }
-    const auto value_at = [&](size_t i) { return first[i].a_; };
-    const auto match = [&](size_t i, Value value) {
-        validate(value, first[i]);
-        visit(first[i].idx_);
-    };
-    const auto upper_bound_match = [](const auto& query, const auto& indexed) {
-        return !(query < indexed);
-    };
-    const size_t size = static_cast<size_t>(last - first);
     if constexpr (std::is_same_v<Value, bool>) {
         std::array<bool, 2> present{false, false};
         for (size_t i = 0; i < n; ++i) {
@@ -117,19 +143,14 @@ VisitSortedMatches(Iterator first,
                 break;
             }
         }
-        // No query allocation or sorting is needed for a two-value domain.
+        // The two-value domain always uses binary lookup without sorting.
         if (present[0] && present[1]) {
-            VisitOrderedMatches(size,
-                                std::array<bool, 2>{false, true},
-                                value_at,
-                                match,
-                                upper_bound_match);
+            const std::array<bool, 2> queries{false, true};
+            VisitBinaryMatches(
+                first, last, queries.size(), queries.data(), visit, validate);
         } else {
-            VisitOrderedMatches(size,
-                                std::array<bool, 1>{present[1]},
-                                value_at,
-                                match,
-                                upper_bound_match);
+            const bool query = present[1];
+            VisitBinaryMatches(first, last, 1, &query, visit, validate);
         }
     } else {
         if constexpr (std::is_floating_point_v<Value>) {
@@ -141,33 +162,43 @@ VisitSortedMatches(Iterator first,
             if (std::any_of(values, values + n, [](Value value) {
                     return std::isnan(value);
                 })) {
-                for (size_t i = 0; i < n; ++i) {
-                    auto lb =
-                        std::lower_bound(first,
-                                         last,
-                                         values[i],
-                                         [](const auto& entry, Value value) {
-                                             return entry.a_ < value;
-                                         });
-                    auto ub =
-                        std::upper_bound(lb,
-                                         last,
-                                         values[i],
-                                         [](Value value, const auto& entry) {
-                                             return value < entry.a_;
-                                         });
-                    for (; lb != ub; ++lb) {
-                        validate(values[i], *lb);
-                        visit(lb->idx_);
-                    }
-                }
+                VisitBinaryMatches(first, last, n, values, visit, validate);
                 return;
             }
+        }
+        if (n <= kMaxBinaryMembershipSize) {
+            // Deduplicate short lists on the stack without sorting or a cursor.
+            std::array<Value, kMaxBinaryMembershipSize> queries;
+            size_t count = 0;
+            for (size_t i = 0; i < n; ++i) {
+                const auto end = queries.begin() + count;
+                if (std::find(queries.begin(), end, values[i]) == end) {
+                    queries[count++] = values[i];
+                }
+            }
+            VisitBinaryMatches(
+                first, last, count, queries.data(), visit, validate);
+            return;
         }
         std::vector<Value> queries(values, values + n);
         std::sort(queries.begin(), queries.end());
         queries.erase(std::unique(queries.begin(), queries.end()),
                       queries.end());
+        if (queries.size() <= kMaxBinaryMembershipSize) {
+            VisitBinaryMatches(
+                first, last, queries.size(), queries.data(), visit, validate);
+            return;
+        }
+        const auto value_at = [&](size_t i) { return first[i].a_; };
+        const auto match = [&](size_t i, Value value) {
+            validate(value, first[i]);
+            visit(first[i].idx_);
+        };
+        const auto upper_bound_match = [](const auto& query,
+                                          const auto& indexed) {
+            return !(query < indexed);
+        };
+        const size_t size = static_cast<size_t>(last - first);
         // Use upper-bound semantics so malformed ranges still reach validate.
         VisitOrderedMatches(size, queries, value_at, match, upper_bound_match);
     }
@@ -184,6 +215,33 @@ VisitSortedMatches(Iterator first,
         first, last, n, values, visit, [](const auto&, const auto&) {});
 }
 
+template <typename ValueAt, typename Match>
+void
+VisitBinaryStringMatches(size_t size,
+                         size_t n,
+                         const std::string_view* values,
+                         ValueAt value_at,
+                         Match match) {
+    if (n == 0 || size == 0) {
+        return;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        const auto value = values[i];
+        size_t lo = 0, hi = size;
+        while (lo < hi) {
+            const size_t mid = lo + (hi - lo) / 2;
+            if (value_at(mid) < value) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        if (lo != size && value_at(lo) == value) {
+            match(lo);
+        }
+    }
+}
+
 // Borrow only string views for the duration of the synchronous query. Sorting
 // and deduplication copy O(N) views, not the variable-length character buffers.
 template <typename ValueAt, typename Match>
@@ -196,6 +254,19 @@ VisitSortedStringMatches(size_t size,
     if (n == 0 || size == 0) {
         return;
     }
+    if (n <= kMaxBinaryMembershipSize) {
+        std::array<std::string_view, kMaxBinaryMembershipSize> queries;
+        size_t count = 0;
+        for (size_t i = 0; i < n; ++i) {
+            const std::string_view value(values[i]);
+            const auto end = queries.begin() + count;
+            if (std::find(queries.begin(), end, value) == end) {
+                queries[count++] = value;
+            }
+        }
+        VisitBinaryStringMatches(size, count, queries.data(), value_at, match);
+        return;
+    }
     std::vector<std::string_view> queries;
     queries.reserve(n);
     for (size_t i = 0; i < n; ++i) {
@@ -203,6 +274,11 @@ VisitSortedStringMatches(size_t size,
     }
     std::sort(queries.begin(), queries.end());
     queries.erase(std::unique(queries.begin(), queries.end()), queries.end());
+    if (queries.size() <= kMaxBinaryMembershipSize) {
+        VisitBinaryStringMatches(
+            size, queries.size(), queries.data(), value_at, match);
+        return;
+    }
     VisitOrderedMatches(
         size, queries, value_at, [&](size_t i, auto) { match(i); });
 }

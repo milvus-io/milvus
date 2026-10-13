@@ -51,7 +51,9 @@ Lookup(const std::vector<Entry>& entries,
        bool not_in,
        bool batch) {
     auto result = not_in ? valid.clone() : Bitmap(valid.size(), false);
-    auto visit = [&](int32_t row) { result[row] = !not_in; };
+    // The operation is fixed for this call, as in the separate IN/NOT IN methods.
+    const bool in = !not_in;
+    auto visit = [&result, in](int32_t row) { result[row] = in; };
     if (batch) {
         milvus::index::detail::VisitSortedMatches(entries.begin(),
                                                   entries.end(),
