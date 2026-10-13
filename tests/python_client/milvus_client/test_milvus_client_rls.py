@@ -255,6 +255,167 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
             storage.remove_object(minio_bucket, name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("with_base", [False, True], ids=["only_policy", "with_base"])
+    def test_rls_policy_type_replacement(self, rls_client, with_base):
+        """
+        target: permissive/restrictive replacement invalidates warmed read and write decisions
+        method: change the same policy type in both directions, with and without another grant
+        expected: exact visible rows and write admission follow the current composition
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        actions = ["query", "search", "insert", "upsert"]
+        if with_base:
+            client.create_row_policy(name, "base", "permissive", actions, "true", "true", timeout=30)
+        expr = "owner == 'alice'"
+        client.create_row_policy(name, "owner", "permissive", actions, expr, expr, timeout=30)
+        for kind in ["permissive", "restrictive", "permissive"]:
+            client.update_row_policy(name, "owner", kind, actions, expr, expr, timeout=30)
+            policies = client.list_row_policies(name, timeout=30)
+            assert len(policies) == (2 if with_base else 1)
+            if kind == "permissive":
+                visible = rows if with_base else rows[::2]
+            else:
+                visible = rows[::2] if with_base else []
+            self._check_rows(client, name, visible, rls_principal="alice")
+            result, _ = self.search(client, name, [rows[0]["vector"]], limit=4, rls_principal="alice")
+            assert sorted(hit["id"] for hit in result[0]) == sorted(row["id"] for row in visible)
+            for owner in ["alice", "bob"]:
+                allowed = (kind == "permissive" and (with_base or owner == "alice")) or (
+                    kind == "restrictive" and with_base and owner == "alice"
+                )
+                candidate = {**rows[0], "id": 10, "owner": owner}
+                for operation in [self.insert, self.upsert]:
+                    if allowed:
+                        operation(client, name, [candidate], rls_principal="alice")
+                        self._check_rows(client, name, rows + [candidate], skip_rls=True)
+                    else:
+                        operation(
+                            client,
+                            name,
+                            [candidate],
+                            rls_principal="alice",
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_msg: "RLS"},
+                        )
+                        self._check_rows(client, name, rows, skip_rls=True)
+                    self.delete(client, name, ids=[10], skip_rls=True)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rls_concurrent_policy_creation(self, rls_client):
+        """
+        target: concurrent same-name policy creation has exactly one winner
+        method: submit eight different definitions together and compare the winner to stored state
+        expected: duplicate errors preserve the winning definition and its read decisions
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        barrier = threading.Barrier(8)
+
+        def create(number):
+            barrier.wait(timeout=30)
+            expr = f"owner == '{['alice', 'bob'][number % 2]}'"
+            try:
+                client.create_row_policy(
+                    name, "owner", "permissive", "query", expr, description=f"writer_{number}", timeout=30
+                )
+            except MilvusException as error:
+                assert "already exists" in str(error)
+                return None
+            return number
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            winners = [number for number in executor.map(create, range(8)) if number is not None]
+        assert len(winners) == 1
+        winner = winners[0]
+        policies = client.list_row_policies(name, timeout=30)
+        assert len(policies) == 1
+        assert policies[0]["description"] == f"writer_{winner}"
+        assert policies[0]["using_expr"] == f"owner == '{['alice', 'bob'][winner % 2]}'"
+        self._check_rows(client, name, rows[winner % 2 :: 2], rls_principal="alice")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rls_upsert_uses_one_policy_snapshot(self, rls_client):
+        """
+        target: USING and CHECK share one policy definition during upsert
+        method: alternate an owner policy while attempting to move an alice row to bob
+        expected: either coherent policy rejects the move and the stored row stays unchanged
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        expr = "owner == 'alice'"
+        client.create_row_policy(name, "writer", "permissive", "upsert", expr, expr, timeout=30)
+        barrier = threading.Barrier(2)
+
+        def update_policy():
+            barrier.wait(timeout=30)
+            for number in range(20):
+                expr = f"owner == '{['bob', 'alice'][number % 2]}'"
+                client.update_row_policy(name, "writer", "permissive", "upsert", expr, expr, timeout=30)
+
+        def upsert():
+            barrier.wait(timeout=30)
+            for _ in range(20):
+                with pytest.raises(MilvusException, match="RLS"):
+                    client.upsert(name, [{**rows[0], "owner": "bob"}], rls_principal="alice", timeout=30)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(update_policy), executor.submit(upsert)]
+            for future in futures:
+                future.result()
+        self._check_stored(client, name, rows, owner_policy=False)
+        policies = client.list_row_policies(name, timeout=30)
+        assert len(policies) == 1
+        assert policies[0]["using_expr"] == expr
+        assert policies[0]["check_expr"] == expr
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rls_policy_exact_length_limits(self, rls_client):
+        """
+        target: exact default expression, description and combined-expression limits are accepted
+        method: create and replace byte-boundary definitions, then combine four large predicates
+        expected: metadata round-trips and both USING and CHECK still execute at the limit
+        """
+        client = rls_client
+        name, rows, _ = self._prepare_rls(client, policy=False)
+        description = "租" * 341 + "x"
+        for number, owner in enumerate(["alice", "bob"]):
+            predicate = f"owner == '{owner}'"
+            expr = "owner" + " " * (4096 - len(predicate) + 1) + f"== '{owner}'"
+            assert len(expr.encode()) == 4096
+            assert len(description.encode()) == 1024
+            operation = client.create_row_policy if number == 0 else client.update_row_policy
+            operation(
+                name,
+                "boundary",
+                "permissive",
+                ["query", "insert"],
+                expr,
+                expr,
+                description=description,
+                timeout=30,
+            )
+            policies = client.list_row_policies(name, timeout=30)
+            assert len(policies) == 1
+            assert policies[0]["using_expr"] == expr
+            assert policies[0]["check_expr"] == expr
+            assert policies[0]["description"] == description
+            self._check_rows(client, name, rows[number::2], rls_principal="alice")
+            candidate = {**rows[0], "id": 10, "owner": owner}
+            self.insert(client, name, [candidate], rls_principal="alice")
+            self._check_rows(client, name, rows + [candidate], skip_rls=True)
+            self.delete(client, name, ids=[10], skip_rls=True)
+        client.drop_row_policy(name, "boundary", timeout=30)
+        # Four permissive predicates add 22 bytes of parentheses and OR separators.
+        for number, size in enumerate([4096, 4096, 4096, 4074]):
+            expr = "owner" + " " * (size - len("owner == 'alice'") + 1) + "== 'alice'"
+            client.create_row_policy(name, f"rule_{number}", "permissive", ["query", "insert"], expr, expr, timeout=30)
+        self._check_rows(client, name, rows[::2], rls_principal="alice")
+        candidate = {**rows[0], "id": 10}
+        self.insert(client, name, [candidate], rls_principal="alice")
+        self._check_rows(client, name, rows + [candidate], skip_rls=True)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "mode", ["owner", "tags", "mixed", "missing_principal", "no_insert", "skip", "forced_skip"]
     )
