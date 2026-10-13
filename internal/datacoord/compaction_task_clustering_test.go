@@ -324,6 +324,7 @@ func (s *ClusteringCompactionTaskSuite) generateBasicTask(vectorClusteringKey bo
 		pk = &schemapb.FieldSchema{
 			FieldID:         101,
 			Name:            FloatVecField,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
 			IsPrimaryKey:    false,
 			DataType:        schemapb.DataType_FloatVector,
 			IsClusteringKey: true,
@@ -504,14 +505,16 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining))
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:    101,
+				ID:           101,
+				CollectionID: 1, PartitionID: 10,
 				State: commonpb.SegmentState_Flushed,
 				Level: datapb.SegmentLevel_L1,
 			},
 		})
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:                    102,
+				ID:           102,
+				CollectionID: 1, PartitionID: 10,
 				State:                 commonpb.SegmentState_Flushed,
 				Level:                 datapb.SegmentLevel_L2,
 				PartitionStatsVersion: 10000,

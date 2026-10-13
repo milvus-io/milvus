@@ -164,6 +164,10 @@ func (m *analyzeMeta) FinishTask(taskID int64, result *workerpb.AnalyzeResult) e
 		return merr.WrapErrServiceInternalMsg("there is no task with taskID: %d", taskID)
 	}
 
+	if result.GetTaskID() != taskID || result.GetVersion() != t.GetVersion() {
+		return merr.WrapErrServiceInternalMsg("stale analyze result for task %d: expected version %d, got %d", taskID, t.GetVersion(), result.GetVersion())
+	}
+
 	mlog.Info(m.ctx, "finish task meta...", mlog.FieldTaskID(taskID), mlog.String("state", result.GetState().String()),
 		mlog.String("failReason", result.GetFailReason()))
 

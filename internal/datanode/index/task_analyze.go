@@ -19,6 +19,8 @@ package index
 import (
 	"context"
 	"fmt"
+	"maps"
+	"math"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -163,6 +166,8 @@ func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 		Dim:             req.GetDim(),
 		StorageConfig:   storageConfig,
 		NumClusters:     req.GetNumClusters(),
+		ClusterType:     req.GetClusterType(),
+		ClusterParams:   maps.Clone(req.GetClusterParams()),
 		TrainSize:       int64(float64(hardware.GetMemoryCount()) * req.GetMaxTrainSizeRatio()),
 		MinClusterRatio: req.GetMinClusterSizeRatio(),
 		MaxClusterRatio: req.GetMaxClusterSizeRatio(),
@@ -183,6 +188,12 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 
 	log.Info(ctx, "Begin to build analyze task")
 
+	if err := ctx.Err(); err != nil {
+		return merr.Wrap(err, "analyze canceled")
+	}
+	if err := validateAnalyzeRequest(at.req, hardware.GetMemoryCount()); err != nil {
+		return err
+	}
 	analyzeInfo := buildAnalyzeInfo(at.req)
 
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo, at.pluginContext)
@@ -207,6 +218,9 @@ func (at *analyzeTask) PostExecute(ctx context.Context) error {
 	}
 	defer gc()
 
+	if err := ctx.Err(); err != nil {
+		return merr.Wrap(err, "analyze canceled before adoption")
+	}
 	centroidsFile, _, _, _, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
 	if err != nil {
 		log.Error(ctx, "failed to upload index", mlog.Err(err))
@@ -216,6 +230,7 @@ func (at *analyzeTask) PostExecute(ctx context.Context) error {
 
 	at.manager.StoreAnalyzeFilesAndStatistic(at.req.GetClusterID(),
 		at.req.GetTaskID(),
+		at.req.GetVersion(),
 		centroidsFile)
 	at.tr.Elapse("index building all done")
 	log.Info(ctx, "Successfully save analyze files")
@@ -232,7 +247,7 @@ func (at *analyzeTask) OnEnqueue(ctx context.Context) error {
 }
 
 func (at *analyzeTask) SetState(state indexpb.JobState, failReason string) {
-	at.manager.StoreAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID(), state, failReason)
+	at.manager.StoreAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID(), at.req.GetVersion(), state, failReason)
 }
 
 func (at *analyzeTask) GetState() indexpb.JobState {
@@ -257,4 +272,29 @@ func (at *analyzeTask) Reset() {
 	at.queueDur = 0
 	at.manager = nil
 	at.pluginContext = nil
+}
+
+func validateAnalyzeRequest(req *workerpb.AnalyzeRequest, memory uint64) error {
+	ratio := req.GetMaxTrainSizeRatio()
+	budget := float64(memory) * ratio
+	if math.IsNaN(ratio) || ratio <= 0 || ratio > 1 || budget < 1 || budget >= float64(math.MaxInt64) {
+		return merr.WrapErrServiceInternalMsg("invalid analyze training memory budget")
+	}
+	if req.GetFieldType() != schemapb.DataType_FloatVector || req.GetDim() <= 0 || req.GetDim() > math.MaxInt64/4 || req.GetNumClusters() <= 0 || req.GetNumClusters() > math.MaxUint32 || req.GetClusterType() == "" {
+		return merr.WrapErrServiceInternalMsg("invalid analyze field shape or cluster parameters")
+	}
+	if field := req.GetField(); field != nil && (field.GetFieldID() != req.GetFieldID() || field.GetDataType() != req.GetFieldType()) {
+		return merr.WrapErrServiceInternalMsg("analyze field schema does not match request")
+	}
+	var rows int64
+	for id, stats := range req.GetSegmentStats() {
+		if stats == nil || id != stats.GetID() || stats.GetNumRows() < 0 || stats.GetNumRows() > math.MaxInt64-rows || (stats.GetManifestPath() != "" && len(stats.GetLogIDs()) != 0) {
+			return merr.WrapErrServiceInternalMsg("invalid analyze segment %d", id)
+		}
+		rows += stats.GetNumRows()
+	}
+	if rows > math.MaxInt64/(req.GetDim()*4) {
+		return merr.WrapErrServiceInternalMsg("analyze input size overflows int64")
+	}
+	return nil
 }

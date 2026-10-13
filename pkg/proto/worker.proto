@@ -259,6 +259,8 @@ message AnalyzeResult {
   index.JobState state = 2;
   string fail_reason = 3;
   string centroids_file = 4;
+  // Analyze generation. Results from older attempts must never be adopted.
+  int64 version = 5;
 }
 
 message AnalyzeResults {

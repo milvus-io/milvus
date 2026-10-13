@@ -34,7 +34,8 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                      const char** centroid_path,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
-                     int64_t* id_mapping_sizes);
+                     int64_t* id_mapping_sizes,
+                     int64_t mapping_count);
 
 #ifdef __cplusplus
 };

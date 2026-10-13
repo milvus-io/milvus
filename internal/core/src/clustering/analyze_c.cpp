@@ -205,7 +205,8 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                      const char** centroid_path,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
-                     int64_t* id_mapping_sizes) {
+                     int64_t* id_mapping_sizes,
+                     int64_t mapping_count) {
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -219,6 +220,13 @@ GetAnalyzeResultMeta(CAnalyze analyze,
         // struct's std::string members, so they must reference the object owned
         // by real_analyze rather than a local copy that dies on return.
         const auto& res = real_analyze->GetClusteringResultMeta();
+        AssertInfo(
+            centroid_path != nullptr && centroid_file_size != nullptr &&
+                mapping_count >= 0 &&
+                static_cast<size_t>(mapping_count) == res.id_mappings.size() &&
+                (mapping_count == 0 ||
+                 (id_mapping_paths != nullptr && id_mapping_sizes != nullptr)),
+            "analyze result buffers do not match mapping count");
         *centroid_path = res.centroid_path.data();
         *centroid_file_size = res.centroid_file_size;
 

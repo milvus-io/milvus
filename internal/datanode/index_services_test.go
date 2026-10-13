@@ -117,16 +117,19 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 	defer analyzeMock.UnPatch()
 
 	status, err := node.createAnalyzeTask(ctx, &workerpb.AnalyzeRequest{
-		ClusterID:     "cluster",
-		TaskID:        100,
-		CollectionID:  expected.GetCollectionId(),
-		PartitionID:   2,
-		FieldID:       101,
-		FieldName:     "vector",
-		FieldType:     schemapb.DataType_FloatVector,
-		Dim:           8,
-		PluginContext: requestContext,
-		StorageConfig: &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+		ClusterID:         "cluster",
+		TaskID:            100,
+		CollectionID:      expected.GetCollectionId(),
+		PartitionID:       2,
+		FieldID:           101,
+		FieldName:         "vector",
+		FieldType:         schemapb.DataType_FloatVector,
+		Dim:               8,
+		ClusterType:       "CARDINAL_KMEANS",
+		NumClusters:       1,
+		MaxTrainSizeRatio: 0.8,
+		PluginContext:     requestContext,
+		StorageConfig:     &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
 	})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
@@ -681,6 +684,7 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			Dim:                 8,
 			MaxTrainSizeRatio:   0.8,
 			NumClusters:         1,
+			ClusterType:         "CARDINAL_KMEANS",
 			MinClusterSizeRatio: 0.01,
 			MaxClusterSizeRatio: 10,
 			MaxClusterSize:      5 * 1024 * 1024 * 1024,
@@ -698,7 +702,9 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 		err = merr.Error(status)
 		s.NoError(err)
 
+		deadline := time.Now().Add(time.Minute)
 		for {
+			s.Require().True(time.Now().Before(deadline), "analyze task did not finish within one minute")
 			resp, err := s.node.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 				ClusterID: "cluster1",
 				TaskIDs:   []int64{taskID},
@@ -709,13 +715,14 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			s.NoError(err)
 			s.Equal(1, len(resp.GetAnalyzeJobResults().GetResults()))
 			result := resp.GetAnalyzeJobResults().GetResults()[0]
+			s.Equal(req.GetVersion(), result.GetVersion())
 			if result.GetState() == indexpb.JobState_JobStateFinished {
 				centroidsFile := result.GetCentroidsFile()
 				s.NotEmpty(centroidsFile)
 				s.Contains(centroidsFile, "/"+common.Centroids)
 				break
 			}
-			s.Equal(indexpb.JobState_JobStateInProgress, result.GetState())
+			s.Require().Equal(indexpb.JobState_JobStateInProgress, result.GetState(), result.GetFailReason())
 			time.Sleep(time.Second)
 		}
 

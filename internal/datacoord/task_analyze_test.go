@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -69,18 +70,21 @@ func (s *analyzeTaskSuite) SetupSuite() {
 
 	// Add task to analyze meta
 	analyzeTask := &indexpb.AnalyzeTask{
-		CollectionID: s.collID,
-		PartitionID:  s.partID,
-		FieldID:      s.fieldID,
-		FieldName:    "vector_field",
-		FieldType:    schemapb.DataType_FloatVector,
-		TaskID:       s.taskID,
-		Version:      1,
-		SegmentIDs:   []int64{101, 102},
-		NodeID:       0,
-		State:        indexpb.JobState_JobStateInit,
-		FailReason:   "",
-		Dim:          128,
+		CollectionID:  s.collID,
+		PartitionID:   s.partID,
+		FieldID:       s.fieldID,
+		FieldName:     "vector_field",
+		FieldType:     schemapb.DataType_FloatVector,
+		TaskID:        s.taskID,
+		Version:       1,
+		SegmentIDs:    []int64{101, 102},
+		NodeID:        0,
+		State:         indexpb.JobState_JobStateInit,
+		FailReason:    "",
+		Dim:           128,
+		NumClusters:   16,
+		ClusterType:   "KMEANS",
+		ClusterParams: map[string]string{"metric_type": "IP", "num_iter": "7"},
 	}
 	analyzeMt.tasks[s.taskID] = analyzeTask
 
@@ -166,10 +170,7 @@ func (s *analyzeTaskSuite) TestBasicTaskOperations() {
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker() {
-	at := newAnalyzeTask(&indexpb.AnalyzeTask{
-		TaskID: s.taskID,
-		State:  indexpb.JobState_JobStateInit,
-	}, s.mt)
+	at := s.newTask()
 
 	s.Run("task not exist in meta", func() {
 		// Remove task from meta
@@ -272,71 +273,67 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DimExtractionError() {
 	s.mt.analyzeMeta.catalog = catalog
 
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
-	// Should reset to Init state on dim error
-	s.Equal(indexpb.JobState_JobStateInit, at.GetState())
+	// Schema mismatches cannot silently change frozen task parameters.
+	s.Equal(indexpb.JobState_JobStateFailed, at.GetState())
 }
 
-func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
-	// Set MinCentroidsNum very high so data is considered too small
-	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("999999999")
-	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
-
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_EmptyInput() {
+	original := s.mt.analyzeMeta.GetTask(s.taskID)
+	defer s.restoreMetaTask(original)
+	copyTask := proto.Clone(original).(*indexpb.AnalyzeTask)
+	copyTask.SegmentIDs = nil
+	s.mt.analyzeMeta.tasks[s.taskID] = copyTask
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
 	s.mt.analyzeMeta.catalog = catalog
-	defer s.restoreMetaTask(s.mt.analyzeMeta.tasks[s.taskID])
-
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
-	// data too small → skip → mark as finished
 	s.Equal(indexpb.JobState_JobStateFinished, at.GetState())
-	// Persisting Finished is what lets the GC recycle the task's analyze stats files.
 	s.Equal(indexpb.JobState_JobStateFinished, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
 }
 
-func (s *analyzeTaskSuite) TestCreateTaskOnWorker_TerminalStateNotPersisted() {
-	// Set MinCentroidsNum very high so data is considered too small
-	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("999999999")
-	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
-
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_EmptyInputPersistFailure() {
+	original := s.mt.analyzeMeta.GetTask(s.taskID)
+	defer s.restoreMetaTask(original)
+	copyTask := proto.Clone(original).(*indexpb.AnalyzeTask)
+	copyTask.SegmentIDs = nil
+	copyTask.State = indexpb.JobState_JobStateInit
+	s.mt.analyzeMeta.tasks[s.taskID] = copyTask
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	// The first save is UpdateVersion, the second one is the terminal state transition.
+	// Dispatch first saves the new version, then tries to save the terminal state.
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).
-		Return(merr.WrapErrServiceInternalMsg("mock save error")).Once()
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(merr.ErrServiceInternal).Once()
 	s.mt.analyzeMeta.catalog = catalog
-	defer s.restoreMetaTask(s.mt.analyzeMeta.tasks[s.taskID])
-	stateBefore := s.mt.analyzeMeta.GetTask(s.taskID).GetState()
-
-	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
-	// A failed persistence leaves the task at Init so the scheduler re-enqueues it,
-	// rather than dropping it on an in-memory-only terminal state.
+	cluster := session.NewMockCluster(s.T())
+	at.CreateTaskOnWorker(1, cluster)
 	s.Equal(indexpb.JobState_JobStateInit, at.GetState())
-	s.Equal(stateBefore, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
+	s.Equal(indexpb.JobState_JobStateInit, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
+
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil).Twice()
+	at.CreateTaskOnWorker(1, cluster)
+	s.Equal(indexpb.JobState_JobStateFinished, at.GetState())
+	s.Equal(indexpb.JobState_JobStateFinished, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
 }
 
-func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
-	// Set MaxCentroidsNum=1, MinCentroidsNum=1, SegmentMaxSize very small to force numClusters > max
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_FrozenParameters() {
+	original := s.mt.analyzeMeta.GetTask(s.taskID)
+	defer s.restoreMetaTask(original)
 	origMax := Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.SwapTempValue("1")
 	defer Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.SwapTempValue(origMax)
-	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("1")
-	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
-	origSegSize := Params.DataCoordCfg.SegmentMaxSize.SwapTempValue("0.0001")
-	defer Params.DataCoordCfg.SegmentMaxSize.SwapTempValue(origSegSize)
-
+	origType := Params.KnowhereConfig.ClusterType.SwapTempValue("changed-provider")
+	defer Params.KnowhereConfig.ClusterType.SwapTempValue(origType)
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
 	s.mt.analyzeMeta.catalog = catalog
-
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
-		return req.NumClusters == 1 // capped at MaxCentroidsNum=1
-	})).Return(nil)
-
+		return req.NumClusters == original.NumClusters && req.ClusterType == original.ClusterType && req.ClusterParams["metric_type"] == "IP" && req.ClusterParams["num_iter"] == "7" && req.Version == at.Version
+	})).Return(nil).Twice()
 	at.CreateTaskOnWorker(1, cluster)
+	at = newAnalyzeTask(proto.Clone(s.mt.analyzeMeta.GetTask(s.taskID)).(*indexpb.AnalyzeTask), s.mt)
+	at.CreateTaskOnWorker(2, cluster)
 	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
 }
 
@@ -459,9 +456,10 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_ManifestPropagated() {
 
 func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 	at := newAnalyzeTask(&indexpb.AnalyzeTask{
-		TaskID: s.taskID,
-		NodeID: 1,
-		State:  indexpb.JobState_JobStateInProgress,
+		TaskID:  s.taskID,
+		Version: s.mt.analyzeMeta.GetTask(s.taskID).GetVersion(),
+		NodeID:  1,
+		State:   indexpb.JobState_JobStateInProgress,
 	}, s.mt)
 
 	s.Run("query failed", func() {
@@ -487,6 +485,7 @@ func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 		cluster.EXPECT().QueryAnalyze(mock.Anything, mock.Anything).Return(&workerpb.AnalyzeResults{
 			Results: []*workerpb.AnalyzeResult{{
 				TaskID:     s.taskID,
+				Version:    at.GetVersion(),
 				State:      indexpb.JobState_JobStateFinished,
 				FailReason: "",
 			}},
