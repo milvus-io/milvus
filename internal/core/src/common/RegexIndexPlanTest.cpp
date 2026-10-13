@@ -36,6 +36,13 @@ LargeSegment() {
     return model;
 }
 
+RegexIndexCostModel
+LongRowSegment() {
+    auto model = LargeSegment();
+    model.text_bytes = 1000 * model.rows;
+    return model;
+}
+
 Condition
 Literal(const std::string& text) {
     return Condition::Literal(text);
@@ -101,14 +108,14 @@ TEST(RegexIndexPlan, CountsDistinctAtomsOnceAndReusesPreparation) {
 }
 
 TEST(RegexIndexPlan, PrefilterCanDeclineAFormerlyUsefulLocate) {
-    const auto model = LargeSegment();
+    const auto model = LongRowSegment();
     const auto plan = PrepareRegexIndexPlan(
-        Literal("common"), [](const auto&) { return 10000; }, model);
+        Literal("common"), [](const auto&) { return 100000; }, model);
     EXPECT_TRUE(ShouldUseRegexIndexPlan(plan, model.rows, 8192, 8192));
     EXPECT_FALSE(ShouldUseRegexIndexPlan(plan, model.rows, 82, 8192));
     // Prefiltering never discounts the complete index's Locate work. An
     // erroneous Count*p estimate would make this sparse batch choose FM.
-    EXPECT_GE(RegexIndexExecutionCost(plan, model.rows, 82, 8192), 80000000);
+    EXPECT_GE(RegexIndexExecutionCost(plan, model.rows, 82, 8192), 200000000);
 }
 
 TEST(RegexIndexPlan, PrefilterNeverWidensTheOriginalLocateGuard) {
@@ -128,18 +135,19 @@ TEST(RegexIndexPlan, PrefilterNeverWidensTheOriginalLocateGuard) {
     EXPECT_FALSE(CanRegexIndexPlanEverHelp(outside, model.rows, 8192));
 
     // Inside the unchanged limit, the bitmap-aware gate remains effective.
+    const auto long_rows = LongRowSegment();
     const auto inside = PrepareRegexIndexPlan(
-        Literal("less_common"), [](const auto&) { return 3000; }, model);
+        Literal("less_common"), [](const auto&) { return 100000; }, long_rows);
     EXPECT_TRUE(RegexIndexPassesLocateGuard(inside));
-    EXPECT_TRUE(ShouldUseRegexIndexPlan(inside, model.rows, 8192, 8192));
-    EXPECT_FALSE(ShouldUseRegexIndexPlan(inside, model.rows, 1, 8192));
-    EXPECT_TRUE(CanRegexIndexPlanEverHelp(inside, model.rows, 8192));
+    EXPECT_TRUE(ShouldUseRegexIndexPlan(inside, long_rows.rows, 8192, 8192));
+    EXPECT_FALSE(ShouldUseRegexIndexPlan(inside, long_rows.rows, 82, 8192));
+    EXPECT_TRUE(CanRegexIndexPlanEverHelp(inside, long_rows.rows, 8192));
 }
 
 TEST(RegexIndexPlan, SparseDeclineCanBeReconsideredForADenseBatch) {
-    const auto model = LargeSegment();
+    const auto model = LongRowSegment();
     const auto plan = PrepareRegexIndexPlan(
-        Literal("common"), [](const auto&) { return 10000; }, model);
+        Literal("common"), [](const auto&) { return 100000; }, model);
     EXPECT_FALSE(ShouldUseRegexIndexPlan(plan, model.rows, 82, 8192));
     EXPECT_TRUE(ShouldUseRegexIndexPlan(plan, model.rows - 8192, 8192, 8192));
     // As the remaining scan window shrinks, whole-segment Locate is harder
@@ -148,7 +156,7 @@ TEST(RegexIndexPlan, SparseDeclineCanBeReconsideredForADenseBatch) {
 }
 
 TEST(RegexIndexPlan, FixedWorkCanProvePermanentFallback) {
-    const auto model = LargeSegment();
+    const auto model = LongRowSegment();
     const auto impossible = PrepareRegexIndexPlan(
         Literal("common"), [](const auto&) { return 1000000; }, model);
     EXPECT_FALSE(CanRegexIndexPlanEverHelp(impossible, model.rows, 8192));
@@ -156,12 +164,45 @@ TEST(RegexIndexPlan, FixedWorkCanProvePermanentFallback) {
               RegexIndexScanCost(model, model.rows, 8192, 8192));
 
     const auto retryable = PrepareRegexIndexPlan(
-        Literal("less_common"), [](const auto&) { return 10000; }, model);
+        Literal("less_common"), [](const auto&) { return 100000; }, model);
     EXPECT_FALSE(ShouldUseRegexIndexPlan(retryable, model.rows, 82, 8192));
     EXPECT_TRUE(CanRegexIndexPlanEverHelp(retryable, model.rows, 8192));
     EXPECT_TRUE(
         ShouldUseRegexIndexPlan(retryable, model.rows - 8192, 8192, 8192));
     EXPECT_FALSE(CanRegexIndexPlanEverHelp(retryable, 8192, 8192));
+}
+
+TEST(RegexIndexPlan, CalibratedLocateRetainsMediumAndOrSparseWins) {
+    auto model = LargeSegment();
+    // The production paired benchmark has 32771 rows averaging 523 bytes.
+    // Count is 513 for its medium literal and 522 for the complete OR.
+    model.rows = 32771;
+    model.text_bytes = 17147072;
+    const auto count = [](const std::string& literal) {
+        return literal == "medium" ? 513 : 9;
+    };
+    const auto medium = PrepareRegexIndexPlan(Literal("medium"), count, model);
+    const auto alternatives = PrepareRegexIndexPlan(
+        Condition::Combine(
+            Condition::Op::Or, Literal("medium"), Literal("rare")),
+        count,
+        model);
+    EXPECT_EQ(medium.occurrences, 513);
+    EXPECT_EQ(alternatives.occurrences, 522);
+    for (const auto* plan : {&medium, &alternatives}) {
+        EXPECT_TRUE(RegexIndexPassesLocateGuard(*plan));
+        EXPECT_TRUE(CanRegexIndexPlanEverHelp(*plan, model.rows, 8192));
+        for (size_t active : {size_t{82}, size_t{820}, size_t{8192}}) {
+            EXPECT_TRUE(
+                ShouldUseRegexIndexPlan(*plan, model.rows, active, 8192));
+        }
+    }
+    // The soft calibration cannot accept a Count rejected by the old guard.
+    const auto common = PrepareRegexIndexPlan(
+        Literal("common"), [](const auto&) { return 32771; }, model);
+    EXPECT_FALSE(RegexIndexPassesLocateGuard(common));
+    EXPECT_FALSE(ShouldUseRegexIndexPlan(common, model.rows, 8192, 8192));
+    EXPECT_FALSE(CanRegexIndexPlanEverHelp(common, model.rows, 8192));
 }
 
 TEST(RegexIndexPlan, RareCandidatesRemainUsefulAfterStrongPrefiltering) {
@@ -238,7 +279,8 @@ TEST(RegexIndexPlan, OccurrencesAreClampedToRowsForCandidateEstimation) {
     EXPECT_EQ(plan.occurrences, 5000);
     EXPECT_EQ(plan.estimated_rows, 1000);
     // Candidate estimation cannot reduce full occurrence enumeration.
-    EXPECT_GE(RegexIndexExecutionCost(plan, 1000, 1000, 1000), 40000000);
+    EXPECT_GE(RegexIndexExecutionCost(plan, 1000, 1000, 1000),
+              40000000 * regex_index_detail::kLocateWorkScale);
 }
 
 TEST(RegexIndexPlan, InvalidCostsAndLargeCountsSafelyDecline) {

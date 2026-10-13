@@ -49,6 +49,11 @@ struct RegexIndexPlan {
 
 namespace regex_index_detail {
 
+// Initial relative Locate weight from paired warm-query profiling. Those
+// measurements also include Count/setup, so this is a soft routing weight,
+// not a measured per-LF latency. The legacy Count guard remains independent.
+constexpr double kLocateWorkScale = 0.25;
+
 inline void
 CountBitmapWork(const RegexLiteralCondition& condition,
                 size_t& literals,
@@ -113,7 +118,7 @@ RegexIndexFixedCost(const RegexIndexPlan& plan) {
     // This entire term is paid once over the complete index, regardless of
     // upstream selectivity or how many physical scan rows remain.
     return plan.occurrences * std::max<uint32_t>(1, model.sa_sample_rate) /
-               model.cost_ratio +
+               model.cost_ratio * regex_index_detail::kLocateWorkScale +
            plan.bitmap_cost;
 }
 

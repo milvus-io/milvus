@@ -1527,8 +1527,11 @@ TEST(FmIndexExpressionTest,
 TEST(FmIndexExpressionTest, ExecutorRegexCountPlanSurvivesSparseRejection) {
     constexpr size_t n = 1027;
     constexpr size_t batch_size = 128;
+    // 21 occurrences retain sparse rejection with the calibrated Locate
+    // weight, while a later dense batch can reuse the same prepared plan.
+    constexpr size_t marker_stride = 49;
     std::vector<std::string> rows(n, std::string(1000, 'x'));
-    for (size_t i = 0; i < n; i += 101) {
+    for (size_t i = 0; i < n; i += marker_stride) {
         rows[i] += " RARE123END";
     }
     auto calls = std::make_shared<RegexRoutingCounts>();
@@ -1565,6 +1568,9 @@ TEST(FmIndexExpressionTest, ExecutorRegexCountPlanSurvivesSparseRejection) {
         if (begin == 0) {
             EXPECT_EQ(calls->execute, 0u);
             first_plan = calls->plan;
+            ASSERT_NE(first_plan, nullptr);
+            EXPECT_EQ(first_plan->occurrences,
+                      (n + marker_stride - 1) / marker_stride);
         } else {
             EXPECT_EQ(calls->execute, 1u);
             EXPECT_EQ(calls->plan, first_plan);
@@ -1572,7 +1578,7 @@ TEST(FmIndexExpressionTest, ExecutorRegexCountPlanSurvivesSparseRejection) {
         TargetBitmapView hits(result->GetRawData(), size);
         for (size_t i = 0; i < size; ++i) {
             if (context.get_bitmap_input()[i]) {
-                EXPECT_EQ(hits[i], (begin + i) % 101 == 0);
+                EXPECT_EQ(hits[i], (begin + i) % marker_stride == 0);
             }
         }
     }
@@ -1865,7 +1871,7 @@ TEST(FmIndexExpressionTest, DISABLED_RegexPrefilterRoutingBenchmark) {
     RecordProperty("samples", repetitions);
     RecordProperty("expression_result_cache", "disabled");
     RecordProperty("timing_scope",
-                   "fresh query and Count plan; warm data/index/regex caches");
+                   "fresh expression/RE2/Count plan; warm sealed data/index");
     auto row_ids = [](const TargetBitmap& bitmap) {
         std::vector<int64_t> ids;
         for (size_t row = 0; row < bitmap.size(); ++row) {
