@@ -413,15 +413,25 @@ func (sd *shardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int
 
 func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
 	nodeReq := &querypb.SearchRequest{
-		DmlChannels:      []string{sd.vchannelName},
-		SegmentIDs:       segmentIDs,
-		Scope:            scope,
-		Req:              shallowcopy.ShallowCopySearchRequest(req.GetReq(), targetID),
-		FromShardLeader:  req.FromShardLeader,
-		TotalChannelNum:  req.TotalChannelNum,
-		FilterOnly:       req.FilterOnly,
-		EnableExprCache:  req.EnableExprCache,
-		ClusteringRanges: req.GetClusteringRanges(),
+		DmlChannels:           []string{sd.vchannelName},
+		SegmentIDs:            segmentIDs,
+		Scope:                 scope,
+		Req:                   shallowcopy.ShallowCopySearchRequest(req.GetReq(), targetID),
+		FromShardLeader:       req.FromShardLeader,
+		TotalChannelNum:       req.TotalChannelNum,
+		FilterOnly:            req.FilterOnly,
+		EnableExprCache:       req.EnableExprCache,
+		ClusteringSearchHints: req.GetClusteringSearchHints(),
+	}
+	if scope == querypb.DataScope_Historical && len(req.GetClusteringSearchHints()) > 0 {
+		nodeReq.ClusteringSearchHints = make(map[int64]*querypb.SegmentClusterSearchHints)
+		for _, id := range segmentIDs {
+			if h := req.GetClusteringSearchHints()[id]; h != nil {
+				nodeReq.ClusteringSearchHints[id] = h
+			}
+		}
+	} else {
+		nodeReq.ClusteringSearchHints = nil
 	}
 	return nodeReq
 }
@@ -479,7 +489,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		candidates[i] = SnapshotItem{NodeID: item.NodeID, Segments: append([]SegmentEntry(nil), item.Segments...)}
 	}
 	sealed = candidates
-	req.ClusteringRanges = nil
+	req.ClusteringSearchHints = nil
 	log := sd.getLogger(ctx)
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
@@ -490,7 +500,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			stats := legacyStatsBindings(bindings[0])
 			PruneSegments(ctx, stats, req.GetReq(), nil, sd.collection.Schema(), sealed,
 				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
-			req.ClusteringRanges = clusteringCandidateRanges(ctx, bindings[0], req.GetReq(), sealed, sealedRowCount,
+			req.ClusteringSearchHints = clusteringSearchHints(ctx, bindings[0], req.GetReq(), sealed, sealedRowCount,
 				paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat())
 		}
 	}
@@ -514,7 +524,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return []*internalpb.SearchResults{}, nil
 	}
 
-	// get final sealedNum after possible segment prune
+	// Decide whether to use two-stage search before applying cluster candidates.
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 
 	rowCounts := make([]int64, 0, sealedNum)
@@ -532,6 +542,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	)
 
 	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
+		req.ClusteringSearchHints = nil // Multi-stage queries retain their original search scope.
 		results, fallback, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		if err != nil {
 			return nil, err
@@ -542,6 +553,18 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		// fallback: continue with normal single-stage search below
 		mlog.Debug(ctx, "Two-stage search requested fallback, continuing with normal search")
 	}
+
+	sealed, candidateRows := pruneClusteringSegments(sealed, sealedRowCount, req.GetClusteringSearchHints(), req.GetReq().GetNq())
+	if len(candidateRows) != len(sealedRowCount) {
+		rowCounts = rowCounts[:0]
+		for _, item := range sealed {
+			for _, seg := range item.Segments {
+				rowCounts = append(rowCounts, candidateRows[seg.SegmentID])
+			}
+		}
+		effectiveSegmentNum = optimizers.CalculateEffectiveSegmentNum(sd.queryHook, rowCounts, req.GetReq().GetTopk())
+	}
+	sealedRowCount = candidateRows
 
 	const isSecondStageSearch = false
 	indexType := sd.collection.GetIndexType(req.GetReq().GetFieldId())
@@ -630,6 +653,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	defer sd.distribution.Unpin(version)
 
 	if req.GetReq().GetIsAdvanced() {
+		// Preserve scalar pruning for hybrid sub-requests without enabling the
+		// cluster-hint path before its multi-stage semantics are supported.
+		legacyBindings := make(map[int64]*partitionStatsBinding)
+		for partition, binding := range sd.distribution.pinnedStatsBindings(version) {
+			if binding != nil && binding.stats != nil && binding.stats.ClusteringStats == nil {
+				legacyBindings[partition] = binding
+			}
+		}
 		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
 		for index, subReq := range req.GetReq().GetSubReqs() {
 			newRequest := &internalpb.SearchRequest{
@@ -676,7 +707,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					searchReq.GetReq().MvccTimestamp = tSafe
 				}
 				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
-				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount, sd.distribution.pinnedStatsBindings(version))
+				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount, legacyBindings)
 				if err != nil {
 					return nil, err
 				}

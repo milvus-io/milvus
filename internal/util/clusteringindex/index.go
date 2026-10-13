@@ -161,18 +161,18 @@ func (idx *Index) Close() {
 	runtime.SetFinalizer(idx, nil)
 }
 
-func (idx *Index) Search(ctx context.Context, vectors []byte, nq, topk int64) ([]int64, error) {
+func (idx *Index) Search(ctx context.Context, vectors []byte, nq, topk int64) ([]int64, []float32, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	width := clustercompaction.VectorElementBytes(idx.fieldType)
 	if width == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("unsupported snapshot index vector type")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("unsupported snapshot index vector type")
 	}
 	if idx.ptr == nil || nq <= 0 || topk <= 0 || topk > idx.rows || nq > math.MaxInt/topk || idx.dim <= 0 || nq > math.MaxInt/idx.dim/width || len(vectors) != int(nq*idx.dim*width) {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid snapshot index query")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("invalid snapshot index query")
 	}
 	params := make(map[string]any, len(idx.params))
 	for key, value := range idx.params {
@@ -185,22 +185,20 @@ func (idx *Index) Search(ctx context.Context, vectors []byte, nq, topk int64) ([
 	}
 	blob, err := json.Marshal(params)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cparams := C.CString(string(blob))
 	defer C.free(unsafe.Pointer(cparams))
 	labels := make([]int64, nq*topk)
-	if err := consume(C.SearchSnapshotIndex(idx.ptr, bytesPtr(vectors), C.uint64_t(len(vectors)), C.int64_t(nq), C.int64_t(topk), cparams, (*C.int64_t)(unsafe.Pointer(unsafe.SliceData(labels))))); err != nil {
-		return nil, err
+	distances := make([]float32, nq*topk)
+	if err := consume(C.SearchSnapshotIndex(idx.ptr, bytesPtr(vectors), C.uint64_t(len(vectors)), C.int64_t(nq), C.int64_t(topk), cparams, (*C.int64_t)(unsafe.Pointer(unsafe.SliceData(labels))), (*C.float)(unsafe.Pointer(unsafe.SliceData(distances))))); err != nil {
+		return nil, nil, err
 	}
 	runtime.KeepAlive(idx)
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	for _, label := range labels {
-		if label < -1 || label >= idx.rows {
-			return nil, merr.WrapErrDataIntegrityMsg("snapshot index label out of range")
-		}
-	}
-	return labels, nil
+	// The planner validates each query independently, so one malformed label
+	// cannot discard valid hints for another query in this batch.
+	return labels, distances, nil
 }

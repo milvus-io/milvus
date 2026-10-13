@@ -147,6 +147,8 @@ list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "index_runtime_acceptance_test\\.cpp
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "(KmeansClusteringTest|CompactionPlanTest)\\.cpp$")
+else()
+    list(APPEND MILVUS_TEST_FILES test_clustering_search_hints.cpp)
 endif()
 
 # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757.

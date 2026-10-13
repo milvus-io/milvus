@@ -87,7 +87,18 @@ func testSnapshotIndex(t *testing.T, dtype schemapb.DataType) {
 			version := int64(dtype)*1000 + int64(n)
 			indexParams := []*commonpb.KeyValuePair{{Key: "index_type", Value: typ}, {Key: "metric_type", Value: "L2"}, {Key: "M", Value: "8"}, {Key: "efConstruction", Value: "64"}, {Key: "ef", Value: "256"}, {Key: "warmup", Value: "sync"}}
 			if typ == "HNSW" {
-				indexParams = append(indexParams, &commonpb.KeyValuePair{Key: "mmap.enabled", Value: "true"})
+				// Keep this a graph load/search test with exact distances. Cardinal's
+				// defaults may select IVF for small dimensions and quantize vectors.
+				indexParams = append(indexParams,
+					&commonpb.KeyValuePair{Key: "mmap.enabled", Value: "true"},
+					&commonpb.KeyValuePair{Key: "index_algo", Value: "HYBRID"},
+					&commonpb.KeyValuePair{Key: "graph_search_dim_threshold", Value: "0"},
+					&commonpb.KeyValuePair{Key: "graph_build_algo", Value: "pipnn"},
+					&commonpb.KeyValuePair{Key: "pipnn_randseed", Value: "42"},
+					&commonpb.KeyValuePair{Key: "build_quant_type", Value: "NONE"},
+					&commonpb.KeyValuePair{Key: "search_quant_type", Value: "NONE"},
+					&commonpb.KeyValuePair{Key: "refine_quant_type", Value: "NONE"},
+				)
 			}
 			build := &indexcgopb.BuildIndexInfo{CollectionID: 1, PartitionID: 2, IndexVersion: version, FieldSchema: field, Dim: 4, NumRows: 256, CurrentIndexVersion: 10, IndexParams: indexParams, StorageConfig: &indexcgopb.StorageConfig{StorageType: "local", RootPath: root}}
 			prefix := filepath.Join(root, "part_stats", "1", "2", "ch", typ+".clustering_index")
@@ -107,14 +118,15 @@ func testSnapshotIndex(t *testing.T, dtype schemapb.DataType) {
 			require.NoError(t, err)
 			defer second.Close()
 			first.Close()
-			labels, err := second.Search(ctx, query, 2, 1)
+			labels, distances, err := second.Search(ctx, query, 2, 1)
 			require.NoError(t, err)
 			require.Equal(t, []int64{11, 207}, labels)
-			_, err = second.Search(ctx, query[:4], 2, 1)
+			require.Equal(t, []float32{0, 0}, distances)
+			_, _, err = second.Search(ctx, query[:4], 2, 1)
 			require.Error(t, err)
 			canceled, cancel := context.WithCancel(ctx)
 			cancel()
-			_, err = second.Search(canceled, query, 2, 1)
+			_, _, err = second.Search(canceled, query, 2, 1)
 			require.ErrorIs(t, err, context.Canceled)
 		})
 	}

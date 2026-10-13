@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -34,12 +35,17 @@ import (
 )
 
 type testClusterSearcher struct {
-	labels []int64
-	err    error
+	labels    []int64
+	distances []float32
+	err       error
 }
 
-func (s testClusterSearcher) Search(context.Context, []byte, int64, int64) ([]int64, error) {
-	return s.labels, s.err
+func (s testClusterSearcher) Search(context.Context, []byte, int64, int64) ([]int64, []float32, error) {
+	distances := s.distances
+	if distances == nil {
+		distances = make([]float32, len(s.labels))
+	}
+	return s.labels, distances, s.err
 }
 
 func testStatsBinding(version int64, reverse bool) *partitionStatsBinding {
@@ -55,7 +61,7 @@ func testStatsBinding(version int64, reverse bool) *partitionStatsBinding {
 		ClustersFile: "clusters", ClusteringIndex: &clusteringpb.ClusteringIndexInfo{IndexEngineVersion: 10, IndexSize: 100, IndexFilePaths: []string{"index"}, IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: "FLAT"}, {Key: "metric_type", Value: "L2"}}},
 		Groups: []*clusteringpb.ClusteringGroup{{SegmentIds: []int64{10, 20}}},
 	}}
-	return &partitionStatsBinding{stats: stats, index: testClusterSearcher{labels: []int64{0}}, locations: clusteringLocations(stats)}
+	return &partitionStatsBinding{stats: stats, index: testClusterSearcher{labels: []int64{0, -1}}, locations: clusteringLocations(stats)}
 }
 
 func TestClusteringBindingPinnedWithSegments(t *testing.T) {
@@ -84,30 +90,30 @@ func TestClusteringCandidateRanges(t *testing.T) {
 	binding := testStatsBinding(100, false)
 	ph, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{make([]byte, 8)}}}})
 	require.NoError(t, err)
-	plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{QueryInfo: &planpb.QueryInfo{SearchParams: "{}"}}}})
+	plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{FieldId: 100, QueryInfo: &planpb.QueryInfo{SearchParams: "{}"}}}})
 	require.NoError(t, err)
 	req := &internalpb.SearchRequest{FieldId: 100, MetricType: "L2", Nq: 1, PlaceholderGroup: ph, SerializedExprPlan: plan}
 	sealed := []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{{SegmentID: 10, PartitionID: 2}, {SegmentID: 20, PartitionID: 2}, {SegmentID: 30, PartitionID: 2}}}}
 	rows := map[int64]int64{10: 8, 20: 4, 30: 7}
-	call := func() map[int64]*querypb.ClusteringRowRanges {
-		return clusteringCandidateRanges(context.Background(), map[int64]*partitionStatsBinding{2: binding}, req, sealed, rows, 0.5)
+	call := func() map[int64]*querypb.SegmentClusterSearchHints {
+		return clusteringSearchHints(context.Background(), map[int64]*partitionStatsBinding{2: binding}, req, sealed, rows, 0.5)
 	}
 	result := call()
 	require.Len(t, result, 2)
-	require.Len(t, result[10].Ranges, 1)
-	require.Equal(t, int64(3), result[10].Ranges[0].RowCount)
-	require.Empty(t, result[20].Ranges)
+	require.Len(t, result[10].Queries[0].Hints.Ranges, 1)
+	require.Equal(t, int64(3), result[10].Queries[0].Hints.Ranges[0].RowCount)
+	require.Empty(t, result[20].Queries[0].Hints.Ranges)
 	require.NotContains(t, result, int64(30))
 	// A group is a directory: hitting c0 cannot expand to c1/c2 in the same group.
-	binding.index = testClusterSearcher{labels: []int64{0, 1, 0}}
-	require.Len(t, call()[10].Ranges, 2)
+	binding.index = testClusterSearcher{labels: []int64{0, 1}}
+	require.Len(t, call()[10].Queries[0].Hints.Ranges, 2)
 	binding.index = testClusterSearcher{labels: []int64{-1}}
 	require.Empty(t, call())
 	binding.index = testClusterSearcher{labels: []int64{99}}
 	require.Empty(t, call())
 	binding.index = testClusterSearcher{err: errors.New("corrupt index")}
 	require.Empty(t, call())
-	binding.index = testClusterSearcher{labels: []int64{0}}
+	binding.index = testClusterSearcher{labels: []int64{0, -1}}
 	rows[10] = 9
 	require.Empty(t, call())
 	rows[10] = 8
@@ -131,17 +137,17 @@ func TestClusteringHalfCandidateRanges(t *testing.T) {
 			if dtype == schemapb.DataType_BFloat16Vector {
 				pt, other = other, pt
 			}
-			plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{QueryInfo: &planpb.QueryInfo{SearchParams: "{}"}}}})
+			plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{FieldId: 100, QueryInfo: &planpb.QueryInfo{SearchParams: "{}"}}}})
 			require.NoError(t, err)
 			req := &internalpb.SearchRequest{FieldId: 100, MetricType: "L2", Nq: 1, SerializedExprPlan: plan}
-			call := func(typ commonpb.PlaceholderType, values ...[]byte) map[int64]*querypb.ClusteringRowRanges {
+			call := func(typ commonpb.PlaceholderType, values ...[]byte) map[int64]*querypb.SegmentClusterSearchHints {
 				ph, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{{Tag: "$0", Type: typ, Values: values}}})
 				require.NoError(t, err)
 				req.PlaceholderGroup = ph
-				return clusteringCandidateRanges(context.Background(), map[int64]*partitionStatsBinding{2: binding}, req,
+				return clusteringSearchHints(context.Background(), map[int64]*partitionStatsBinding{2: binding}, req,
 					[]SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{{SegmentID: 10, PartitionID: 2}, {SegmentID: 20, PartitionID: 2}}}}, map[int64]int64{10: 8, 20: 4}, 0.5)
 			}
-			require.Equal(t, int64(3), call(pt, make([]byte, 4))[10].Ranges[0].RowCount)
+			require.Equal(t, int64(3), call(pt, make([]byte, 4))[10].Queries[0].Hints.Ranges[0].RowCount)
 			require.Empty(t, call(other, make([]byte, 4)), "same byte width does not make FP16 and BF16 interchangeable")
 			require.Empty(t, call(commonpb.PlaceholderType_FloatVector, make([]byte, 8)))
 			for _, n := range []int{0, 3, 5, 8} {
@@ -150,4 +156,68 @@ func TestClusteringHalfCandidateRanges(t *testing.T) {
 			require.Empty(t, call(pt, make([]byte, 4), make([]byte, 4)), "NQ mismatch must not narrow scope")
 		})
 	}
+}
+
+func TestClusteringSearchHintsPerQuery(t *testing.T) {
+	binding := testStatsBinding(100, false)
+	binding.index = testClusterSearcher{labels: []int64{0, 2, 99}, distances: []float32{1.25, 2.5, 0}}
+	ph, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{make([]byte, 8), make([]byte, 8), make([]byte, 8)}}}})
+	require.NoError(t, err)
+	plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{FieldId: 100, QueryInfo: &planpb.QueryInfo{SearchParams: "{}"}}}})
+	require.NoError(t, err)
+	req := &internalpb.SearchRequest{FieldId: 100, MetricType: "L2", Nq: 3, PlaceholderGroup: ph, SerializedExprPlan: plan}
+	sealed := []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{{SegmentID: 10, PartitionID: 2}, {SegmentID: 20, PartitionID: 2}, {SegmentID: 30, PartitionID: 2}}}}
+	result := clusteringSearchHints(context.Background(), map[int64]*partitionStatsBinding{2: binding}, req, sealed, map[int64]int64{10: 8, 20: 4, 30: 7}, 0.3)
+	require.Len(t, result, 2)
+	require.Len(t, result[10].Queries, 3)
+	require.Equal(t, float32(1.25), result[10].Queries[0].Hints.Ranges[0].CentroidDistance)
+	require.Empty(t, result[10].Queries[1].Hints.Ranges)
+	require.NotNil(t, result[20].Queries[0].Hints)
+	require.Empty(t, result[20].Queries[0].Hints.Ranges)
+	require.Equal(t, float32(2.5), result[20].Queries[1].Hints.Ranges[0].CentroidDistance)
+	require.Nil(t, result[10].Queries[2].Hints)
+	require.Nil(t, result[20].Queries[2].Hints)
+	// Presence survives transport: ordinary and explicit empty are not aliases.
+	raw, err := proto.Marshal(result[10])
+	require.NoError(t, err)
+	decoded := &querypb.SegmentClusterSearchHints{}
+	require.NoError(t, proto.Unmarshal(raw, decoded))
+	require.True(t, proto.Equal(result[10], decoded))
+}
+
+func TestClusteringSearchHintProbeFallback(t *testing.T) {
+	binding := testStatsBinding(100, false)
+	ph, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{make([]byte, 8), make([]byte, 8)}}}})
+	require.NoError(t, err)
+	plan := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{FieldId: 100, QueryInfo: &planpb.QueryInfo{SearchParams: "{}"}}}}
+	req := &internalpb.SearchRequest{FieldId: 100, MetricType: "L2", Nq: 2, PlaceholderGroup: ph}
+	call := func() map[int64]*querypb.SegmentClusterSearchHints {
+		req.SerializedExprPlan, _ = proto.Marshal(plan)
+		return clusteringSearchHints(context.Background(), map[int64]*partitionStatsBinding{2: binding}, req, []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{{SegmentID: 10, PartitionID: 2}, {SegmentID: 20, PartitionID: 2}}}}, map[int64]int64{10: 8, 20: 4}, 0.3)
+	}
+	for _, bad := range []testClusterSearcher{
+		{labels: []int64{0, -1}, distances: []float32{1, 0}},
+		{labels: []int64{0, 3}, distances: []float32{1, 0}},
+		{labels: []int64{0, 2}, distances: []float32{1, float32(math.NaN())}},
+		{labels: []int64{0, 2}, distances: []float32{1, float32(math.Inf(1))}},
+	} {
+		binding.index = bad
+		h := call()
+		require.NotNil(t, h[10].Queries[0].Hints)
+		require.Nil(t, h[10].Queries[1].Hints)
+	}
+	binding.index = testClusterSearcher{labels: []int64{0, 2}, distances: []float32{1}}
+	require.Empty(t, call())
+	binding.index = testClusterSearcher{labels: []int64{0, 2}}
+	plan.GetVectorAnns().FieldId = 101
+	require.Empty(t, call())
+	plan.GetVectorAnns().FieldId = 100
+	plan.GetVectorAnns().QueryInfo.Hints = "iterative_filter"
+	require.Empty(t, call())
+	plan.GetVectorAnns().QueryInfo.Hints = ""
+	plan.GetVectorAnns().QueryInfo.GroupByFieldId = 102
+	require.Empty(t, call())
+	plan.GetVectorAnns().QueryInfo.GroupByFieldId = 0
+	plan.GetVectorAnns().QueryInfo.SearchParams = `{"radius":100}`
+	require.Empty(t, call())
 }

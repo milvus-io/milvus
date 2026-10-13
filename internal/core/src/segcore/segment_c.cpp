@@ -479,43 +479,60 @@ AsyncSearch(CTraceContext c_trace,
             uint64_t entity_ttl_physical_time_us,
             bool filter_only,
             bool enable_expr_cache) {
-    return AsyncSearchWithRanges(c_trace,
-                                 c_segment,
-                                 c_plan,
-                                 c_placeholder_group,
-                                 timestamp,
-                                 consistency_level,
-                                 collection_ttl,
-                                 entity_ttl_physical_time_us,
-                                 filter_only,
-                                 enable_expr_cache,
-                                 nullptr,
-                                 0,
-                                 0);
+    return AsyncSearchWithHints(c_trace,
+                                c_segment,
+                                c_plan,
+                                c_placeholder_group,
+                                timestamp,
+                                consistency_level,
+                                collection_ttl,
+                                entity_ttl_physical_time_us,
+                                filter_only,
+                                enable_expr_cache,
+                                nullptr,
+                                0,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                0,
+                                0);
 }
 
 CFuture*  // Future<milvus::SearchResult*>
-AsyncSearchWithRanges(CTraceContext c_trace,
-                      CSegmentInterface c_segment,
-                      CSearchPlan c_plan,
-                      CPlaceholderGroup c_placeholder_group,
-                      uint64_t timestamp,
-                      int32_t consistency_level,
-                      uint64_t collection_ttl,
-                      uint64_t entity_ttl_physical_time_us,
-                      bool filter_only,
-                      bool enable_expr_cache,
-                      const int64_t* ranges,
-                      int64_t range_count,
-                      int64_t expected_rows) {
-    milvus::ClusteringRowRangesPtr clustering_ranges;
-    if (expected_rows > 0 && range_count >= 0 && (ranges || range_count == 0)) {
-        auto owned = std::make_shared<milvus::ClusteringRowRanges>();
-        owned->expected_rows = expected_rows;
-        for (int64_t i = 0; i < range_count; ++i) {
-            owned->ranges.emplace_back(ranges[2 * i], ranges[2 * i + 1]);
-        }
-        clustering_ranges = std::move(owned);
+AsyncSearchWithHints(CTraceContext c_trace,
+                     CSegmentInterface c_segment,
+                     CSearchPlan c_plan,
+                     CPlaceholderGroup c_placeholder_group,
+                     uint64_t timestamp,
+                     int32_t consistency_level,
+                     uint64_t collection_ttl,
+                     uint64_t entity_ttl_physical_time_us,
+                     bool filter_only,
+                     bool enable_expr_cache,
+                     const uint8_t* presence,
+                     int64_t hint_nq,
+                     const int64_t* boundaries,
+                     const int64_t* offsets,
+                     const int64_t* counts,
+                     const float* distances,
+                     int64_t hint_count,
+                     int64_t expected_rows) {
+    milvus::ClusteringSearchHintsPtr clustering_search_hints;
+    std::exception_ptr hint_error;
+    try {
+        clustering_search_hints =
+            milvus::CopyClusteringSearchHints(expected_rows,
+                                              presence,
+                                              hint_nq,
+                                              boundaries,
+                                              offsets,
+                                              counts,
+                                              distances,
+                                              hint_count);
+    } catch (...) {
+        // Transfer allocation failures through the existing future error channel.
+        hint_error = std::current_exception();
     }
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<milvus::query::Plan*>(c_plan);
@@ -534,7 +551,11 @@ AsyncSearchWithRanges(CTraceContext c_trace,
          entity_ttl_physical_time_us,
          filter_only,
          enable_expr_cache,
-         clustering_ranges](folly::CancellationToken cancel_token) {
+         clustering_search_hints,
+         hint_error](folly::CancellationToken cancel_token) {
+            if (hint_error) {
+                std::rethrow_exception(hint_error);
+            }
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
@@ -586,7 +607,7 @@ AsyncSearchWithRanges(CTraceContext c_trace,
                                                 filter_only,
                                                 enable_expr_cache,
                                                 span,
-                                                clustering_ranges);
+                                                clustering_search_hints);
             }
             search_result->read_lease_ = std::move(read_lease);
             if (!filter_only &&

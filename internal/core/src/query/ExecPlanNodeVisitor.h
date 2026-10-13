@@ -145,8 +145,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     }
 
     void
-    SetClusteringRanges(ClusteringRowRangesPtr ranges) {
-        clustering_ranges_ = std::move(ranges);
+    SetClusteringSearchHints(ClusteringSearchHintsPtr ranges) {
+        clustering_search_hints_ = std::move(ranges);
     }
 
     void
@@ -184,7 +184,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         std::shared_ptr<milvus::exec::QueryContext> query_context);
 
  private:
-    ClusteringRowRangesPtr clustering_ranges_;
+    ClusteringSearchHintsPtr clustering_search_hints_;
     const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
     int64_t entity_ttl_physical_time_us_;
