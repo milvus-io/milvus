@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "index/contracts/query/IScalarPredicateReader.h"
+#include "index/contracts/query/INullReader.h"
 #include "index/scalar/sort/SortedIndexFormat.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
@@ -60,6 +61,67 @@ TEST(SortedIndexArtifactTest, LegacyNumericRoundTripRebuildsAuxiliaryState) {
     ScalarTestData<int64_t> data({1, 2, 2, 3});
     data.validity_present = false;
     ExpectLegacyRoundTrip<int64_t>("SortedInt64NonNull", std::move(data), 2);
+}
+
+TEST(SortedIndexArtifactTest, NumericMultipleBatchesPreserveRowsAndElements) {
+    for (const bool nested : {false, true}) {
+        SCOPED_TRACE(nested);
+        const auto& backend = ScalarReaderBackends().Get<int64_t>(
+            nested ? "SortedInt64Nested" : "SortedInt64");
+        ScalarTestData<int64_t> data(
+            {4, 3, 1, 3, 8, 2, 3, 0, 5, 3, 9, 1, 3, 6, 2, 3, 7});
+        // Include empty batches, an all-null batch in the row case, and
+        // validity subviews that start between packed-byte boundaries.
+        data.batch_sizes = {0, 3, 0, 5, 1, 8, 0};
+        if (nested) {
+            data.domain = Domain::Element;
+            data.validity_present = false;
+        } else {
+            for (const size_t row : {1, 3, 4, 5, 6, 7, 9, 15}) {
+                data.validity.reset(row);
+            }
+        }
+        const ScalarTestInput<int64_t> input(data);
+        auto artifact =
+            backend.Build(input.View(), {.row_count = data.values.size()});
+        for (const bool packed : {false, true}) {
+            SCOPED_TRACE(packed);
+            auto reader = packed ? OpenV3(backend, SerializeV3(*artifact))
+                                 : OpenV1V2(backend, SerializeV1V2(*artifact));
+            ASSERT_NE(reader, nullptr);
+            EXPECT_EQ(reader->Count(), data.values.size());
+            EXPECT_EQ(reader->CoordDomain(),
+                      nested ? Domain::Element : Domain::Row);
+            const auto* predicate =
+                dynamic_cast<const IScalarPredicateReader<int64_t>*>(
+                    reader.get());
+            const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+            ASSERT_NE(predicate, nullptr);
+            ASSERT_NE(nulls, nullptr);
+            const int64_t key = 3;
+            const auto in = predicate->In(1, &key);
+            const auto not_in = predicate->NotIn(1, &key);
+            const auto range = predicate->Range(2, true, 6, false);
+            const auto is_null = nulls->IsNull();
+            const auto is_not_null = nulls->IsNotNull();
+            ASSERT_EQ(in.size(), data.values.size());
+            ASSERT_EQ(not_in.size(), data.values.size());
+            ASSERT_EQ(range.size(), data.values.size());
+            ASSERT_EQ(is_null.size(), data.values.size());
+            ASSERT_EQ(is_not_null.size(), data.values.size());
+            for (size_t row = 0; row < data.values.size(); ++row) {
+                const bool valid = nested || data.validity[row];
+                EXPECT_EQ(in[row], valid && data.values[row] == key) << row;
+                EXPECT_EQ(not_in[row], valid && data.values[row] != key) << row;
+                EXPECT_EQ(
+                    range[row],
+                    valid && data.values[row] >= 2 && data.values[row] < 6)
+                    << row;
+                EXPECT_EQ(is_null[row], !valid) << row;
+                EXPECT_EQ(is_not_null[row], valid) << row;
+            }
+        }
+    }
 }
 
 TEST(SortedIndexArtifactTest, EmptyInputIsRejected) {

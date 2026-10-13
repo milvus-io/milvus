@@ -271,10 +271,24 @@ SortedIndexBuilder<T>::~SortedIndexBuilder() = default;
 template <typename T>
 storage::ArtifactPtr
 SortedIndexBuilder<T>::Build(const ScalarBuildInput<T>& input) && {
+    size_t total_values = 0;
+    size_t valid_values = 0;
+    for (const auto& batch : input.batches) {
+        const auto n = batch.values.size();
+        CheckAppend(total_values, n);
+        total_values += n;
+        if (params_.nested || !batch.validity) {
+            valid_values += n;
+        } else {
+            for (size_t i = 0; i < n; ++i) {
+                valid_values += batch.validity[i];
+            }
+        }
+    }
+    data_.reserve(valid_values);
     for (const auto& batch : input.batches) {
         const auto n = batch.values.size();
         CheckAppend(total_num_rows_, n);
-        data_.reserve(data_.size() + n);
         validity_.resize(total_num_rows_ + n, true);
         for (size_t i = 0; i < n; ++i) {
             const auto coordinate = total_num_rows_ + i;
