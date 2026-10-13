@@ -2223,6 +2223,7 @@ func (s *DelegatorDataSuite) TestLoadPartitionStats() {
 		segStats[segID] = *storage.NewSegmentStats(fieldStats, rows)
 	}
 	partitionStats1 := &storage.PartitionStatsSnapshot{
+		Version:      1,
 		SegmentStats: segStats,
 	}
 	statsData1, err := storage.SerializePartitionStatsSnapshot(partitionStats1)

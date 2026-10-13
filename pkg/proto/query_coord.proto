@@ -5,6 +5,7 @@ package milvus.proto.query;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/querypb";
 
 import "common.proto";
+import "clustering.proto";
 import "milvus.proto";
 import "rg.proto";
 import "internal.proto";
@@ -534,6 +535,7 @@ message SearchRequest {
     // If true, enable expression filter cache for two-stage search.
     // Stage 1 caches filter bitset, Stage 2 reuses it to skip re-execution.
     bool enable_expr_cache = 8;
+    map<int64, ClusteringRowRanges> clustering_ranges = 9;
 }
 
 message QueryRequest {
@@ -1197,4 +1199,11 @@ message ListLoadedSegmentsRequest {
 message ListLoadedSegmentsResponse {
     common.Status status = 1;
     repeated int64 segmentIDs = 2;
+}
+
+// Absent means unrestricted; an explicitly empty list means no candidate rows.
+message ClusteringRowRanges {
+    int64 snapshot_version = 1;
+    int64 num_rows = 2;
+    repeated clustering.ClusteringRange ranges = 3;
 }

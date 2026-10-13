@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "clustering/analyze_c.h"
+#include "clustering/CentroidDataset.h"
 #include "common/EasyAssert.h"
 #include "common/CGoCatch.h"
 #include "common/Utils.h"
@@ -31,46 +32,6 @@
 using namespace milvus;
 
 namespace {
-
-knowhere::DataSetPtr
-BuildFloatCentroidDataset(
-    const milvus::proto::clustering::ClusteringCentroidsStats& stats) {
-    AssertInfo(stats.centroids_size() > 0,
-               "clustering compaction centroids are empty");
-    const auto dim = stats.centroids(0).dim();
-    AssertInfo(dim > 0, "clustering compaction centroid dim is invalid");
-    AssertInfo(static_cast<uint64_t>(dim) <=
-                   std::numeric_limits<size_t>::max() / sizeof(float) /
-                       static_cast<uint64_t>(stats.centroids_size()),
-               "clustering compaction centroid data size overflows");
-
-    for (int index = 0; index < stats.centroids_size(); ++index) {
-        const auto& centroid = stats.centroids(index);
-        AssertInfo(centroid.dim() == dim,
-                   "clustering compaction centroid dimensions differ");
-        AssertInfo(centroid.has_float_vector(),
-                   "clustering compaction only supports float centroids");
-        const auto& data = centroid.float_vector().data();
-        AssertInfo(
-            data.size() == dim,
-            "clustering compaction centroid data length differs from dim");
-        for (const auto value : data) {
-            AssertInfo(std::isfinite(value), "non-finite clustering centroid");
-        }
-    }
-
-    // Validate every declared shape before allocating from metadata dimensions.
-    auto owned = std::make_unique<float[]>(
-        static_cast<size_t>(stats.centroids_size()) * dim);
-    for (int i = 0; i < stats.centroids_size(); ++i) {
-        const auto& data = stats.centroids(i).float_vector().data();
-        std::copy(data.begin(),
-                  data.end(),
-                  owned.get() + static_cast<size_t>(i) * dim);
-    }
-    return knowhere::GenResultDataSet(
-        stats.centroids_size(), dim, std::move(owned));
-}
 
 template <typename T>
 knowhere::CompactionResult
@@ -187,7 +148,7 @@ BuildClusteringCompactionPlan(CClusteringCompactionPlan* result,
             case DataType::VECTOR_FLOAT:
                 plan = BuildTypedCompactionPlan<knowhere::fp32>(
                     cluster_type,
-                    BuildFloatCentroidDataset(centroids),
+                    milvus::clustering::BuildCentroidDataset(centroids),
                     counts,
                     params);
                 break;

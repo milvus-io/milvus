@@ -1654,6 +1654,9 @@ message CompactionTask{
   uint64 create_ts = 30;
   int64 base_partition_stats_version = 31;
   map<string, string> clustering_plan_params = 32;
+  // Effective snapshot index configuration, immutable across task recovery.
+  map<string, string> clustering_index_params = 33;
+  int32 clustering_index_engine_version = 34;
 }
 
 message PartitionStatsInfo {
@@ -1665,6 +1668,10 @@ message PartitionStatsInfo {
   repeated int64 segmentIDs = 5;
   int64 analyzeTaskID = 6;
   int64 commitTime = 7;
+  // Nonzero for snapshot-owned ranges/indexes; retain while references are unknown.
+  uint32 clustering_format_version = 8;
+  // Inputs retired by this committed publication, including fresh L1 inputs.
+  repeated int64 input_segment_ids = 9;
 }
 
 message DropCompactionPlanRequest {

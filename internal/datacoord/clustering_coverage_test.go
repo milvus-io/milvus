@@ -127,11 +127,6 @@ func TestClusteringCoverageSelectionAndBasePin(t *testing.T) {
 	base, err := task.validateClusteringBase(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(7), base.Version)
-	// The legacy publisher must not adopt a partial replacement. This fails
-	// before touching the (deliberately absent) allocator or worker session.
-	require.ErrorIs(t, task.doCompact(1, nil), merr.ErrServiceUnimplemented)
-	require.Nil(t, task.plan)
-	require.Equal(t, int64(7), m.GetPartitionStatsMeta().GetCurrentPartitionStatsVersion(1, 2, "ch"))
 	// A retained group's busy member must not block selection of g0.
 	m.SetSegmentCompacting(30, true)
 	_, err = prepareClusteringView(ctx, m, view, false)
@@ -204,4 +199,16 @@ func TestClusteringCoverageLegacyRebuildUsesLiveSegments(t *testing.T) {
 	m.SetSegmentCompacting(30, true)
 	_, err = prepareClusteringView(context.Background(), m, view, false)
 	require.ErrorIs(t, err, merr.ErrCompactionPlanConflict)
+}
+
+func TestClusteringLayoutDoesNotRequireNamespaceResort(t *testing.T) {
+	m, view, _ := coverageMeta(t)
+	for _, id := range []int64{10, 20} {
+		m.segments.GetSegment(id).PartitionStatsVersion = 7
+	}
+	m.segments.GetSegment(50).IsSortedByNamespace = true
+	selected, err := prepareClusteringView(context.Background(), m, view, true)
+	require.NoError(t, err)
+	require.Len(t, selected.segments, 3)
+	require.False(t, canTriggerSortCompaction(m.segments.GetSegment(10)), "resorting invalidates frozen physical ranges")
 }

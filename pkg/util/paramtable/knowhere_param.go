@@ -19,6 +19,8 @@ type knowhereConfig struct {
 	ClusterType         ParamItem  `refreshable:"true"`
 	AnalyzeParam        ParamGroup `refreshable:"true"`
 	CompactionPlanParam ParamGroup `refreshable:"true"`
+	ClusterIndexType    ParamItem  `refreshable:"true"`
+	ClusterIndexParam   ParamGroup `refreshable:"true"`
 }
 
 const (
@@ -99,6 +101,18 @@ func (p *knowhereConfig) init(base *BaseTable) {
 		Doc:       "parameters passed through to the Knowhere clustering compaction plan implementation",
 	}
 	p.CompactionPlanParam.Init(base.mgr)
+	p.ClusterIndexType = ParamItem{Key: "knowhere.cluster.index.index_type", Version: "3.1.0", DefaultValue: "FLAT", Export: true, Doc: "Index type for the complete snapshot cluster table"}
+	p.ClusterIndexType.Init(base.mgr)
+	p.ClusterIndexParam = ParamGroup{KeyPrefix: "knowhere.cluster.index.", Version: "3.1.0", Export: true, Doc: "Snapshot cluster index parameters frozen when compaction is scheduled"}
+	p.ClusterIndexParam.Init(base.mgr)
+}
+
+func (p *knowhereConfig) GetClusterIndexParams() map[string]string {
+	params := p.ClusterIndexParam.GetValue()
+	params["index_type"] = p.ClusterIndexType.GetValue()
+	// TODO: explicitly resolve clustering metric, especially COSINE, with Analyze.
+	params["metric_type"] = "L2"
+	return params
 }
 
 func (p *knowhereConfig) GetAnalyzeParams() map[string]string {

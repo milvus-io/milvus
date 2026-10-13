@@ -71,6 +71,18 @@ FailureCStatusNoThrow(int error_code, const char* message) noexcept {
 void
 FillLoadIndexInfoFromProto(const milvus::proto::cgo::LoadIndexInfo& info_proto,
                            milvus::segcore::LoadIndexInfo* load_index_info) {
+    if (info_proto.has_partition_stats()) {
+        AssertInfo(info_proto.partition_stats().version() > 0 &&
+                       !info_proto.partition_stats().channel().empty() &&
+                       info_proto.segmentid() == 0 &&
+                       info_proto.index_buildid() == 0,
+                   "invalid partition stats index ownership");
+        load_index_info->partition_stats_channel =
+            info_proto.partition_stats().channel();
+        load_index_info->partition_stats_version =
+            info_proto.partition_stats().version();
+        load_index_info->shard = info_proto.partition_stats().channel();
+    }
     load_index_info->collection_id = info_proto.collectionid();
     load_index_info->partition_id = info_proto.partitionid();
     load_index_info->segment_id = info_proto.segmentid();

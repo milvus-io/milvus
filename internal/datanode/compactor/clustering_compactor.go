@@ -24,7 +24,6 @@ import (
 	"path"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -102,6 +101,7 @@ type clusteringCompactionTask struct {
 	keyToBufferFunc func(interface{}) *ClusterBuffer
 	// vector
 	vectorLayout           *clustercompaction.LayoutPlan
+	vectorCentroids        *clusteringpb.ClusteringCentroidsStats
 	segmentIDOffsetMapping map[int64]string
 	offsetToBufferFunc     func(int64, []uint32) *ClusterBuffer
 	// bm25
@@ -378,6 +378,12 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	}
 
 	// 4, collect partition stats
+	if t.isVectorClusteringKey {
+		partitionStats, err = t.buildClusteringSnapshot(ctx, partitionStats)
+		if err != nil {
+			return nil, err
+		}
+	}
 	err = t.uploadPartitionStats(ctx, t.collectionID, t.partitionID, partitionStats)
 	if err != nil {
 		return nil, err
@@ -385,11 +391,12 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 
 	// 5, assemble CompactionPlanResult
 	planResult := &datapb.CompactionPlanResult{
-		State:    datapb.CompactionTaskState_completed,
-		PlanID:   t.GetPlanID(),
-		Segments: uploadSegments,
-		Type:     t.plan.GetType(),
-		Channel:  t.plan.GetChannel(),
+		PartitionStatsVersion: t.plan.GetPlanID(),
+		State:                 datapb.CompactionTaskState_completed,
+		PlanID:                t.GetPlanID(),
+		Segments:              uploadSegments,
+		Type:                  t.plan.GetType(),
+		Channel:               t.plan.GetChannel(),
 	}
 
 	metrics.DataNodeCompactionLatency.
@@ -470,6 +477,9 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 ) ([]*datapb.CompactionSegment, *storage.PartitionStatsSnapshot, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mapping-%d", t.GetPlanID()))
 	defer span.End()
+	if t.isVectorClusteringKey {
+		return t.mappingSortedVector(ctx)
+	}
 	inputSegments := t.plan.GetSegmentBinlogs()
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -547,6 +557,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 	ctx context.Context,
 	segment *datapb.CompactionSegmentBinlogs,
 ) error {
+	return t.mappingSegmentRows(ctx, segment, nil)
+}
+
+// emit runs before the reader advances, so it must copy any retained columns.
+func (t *clusteringCompactionTask) mappingSegmentRows(ctx context.Context, segment *datapb.CompactionSegmentBinlogs, emit func(storage.Record, int, int64, *clusteringpb.ClusteringCentroidIdMappingStats) error) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mappingSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
 	mlog.Info(context.TODO(), "mapping segment start")
@@ -673,6 +688,14 @@ func (t *clusteringCompactionTask) mappingSegment(
 				continue
 			}
 
+			if emit != nil {
+				if err := emit(r, row, offset, mappingStats); err != nil {
+					return err
+				}
+				t.writtenRowNum.Inc()
+				remained++
+				continue
+			}
 			var clusterBuffer *ClusterBuffer
 			if t.isVectorClusteringKey {
 				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
@@ -849,7 +872,7 @@ func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, col
 	if err != nil {
 		return err
 	}
-	rootPath := strings.Split(t.plan.AnalyzeResultPath, common.AnalyzeStatsPath)[0]
+	rootPath := t.compactionParams.StorageConfig.GetRootPath()
 	newStatsPath := path.Join(rootPath, common.PartitionStatsPath, metautil.JoinIDPath(collectionID, partitionID), t.plan.GetChannel(), strconv.FormatInt(version, 10))
 	kv := map[string][]byte{
 		newStatsPath: partitionStatsBytes,

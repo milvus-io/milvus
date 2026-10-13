@@ -1426,6 +1426,24 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     milvus::storage::FileManagerContext file_manager_context(
         field_meta, index_meta, remote_chunk_manager, fs);
     file_manager_context.set_for_loading_index(true);
+    if (load_index_info->partition_stats_version > 0) {
+        AssertInfo(!load_index_info->index_files.empty(),
+                   "snapshot index has no files");
+        // Recorded keys are opaque. Retain the exact directory for FileManager
+        // streaming reads; never recreate a segment index path.
+        const auto& first = load_index_info->index_files.front();
+        auto slash = first.find_last_of('/');
+        AssertInfo(slash != std::string::npos,
+                   "snapshot index key has no prefix");
+        auto prefix = first.substr(0, slash);
+        for (const auto& file : load_index_info->index_files) {
+            AssertInfo(file.substr(0, file.find_last_of('/')) == prefix,
+                       "snapshot index files have different owners");
+        }
+        file_manager_context.index_remote_prefix = prefix;
+        file_manager_context.index_local_prefix =
+            load_index_info->SnapshotIndexKey();
+    }
 
     // use cache layer to load vector/scalar index
     auto translator = std::make_unique<

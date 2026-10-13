@@ -160,6 +160,13 @@ func (ps *PartitionStatsSnapshot) ValidateClusteringStats() error {
 	if err := validateClusteringIndex(clustering); err != nil {
 		return err
 	}
+	return ps.validateClusteringLayout()
+}
+
+// Also used by an in-memory draft before its descriptions/index are uploaded.
+// Published serialization still requires ValidateClusteringStats in full.
+func (ps *PartitionStatsSnapshot) validateClusteringLayout() error {
+	clustering := ps.ClusteringStats
 	segmentGroups := make(map[UniqueID]int)
 	for groupOffset, group := range clustering.Groups {
 		if group == nil || len(group.SegmentIds) == 0 {

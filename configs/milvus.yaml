@@ -1793,6 +1793,9 @@ knowhere:
     analyze: # Provider parameters; coordinator-owned shape and sampling fields take precedence.
     compactionPlan:
       planner: ivf
+    index:
+      index_type: FLAT # Snapshot cluster index; other build/search parameters can be configured here.
+      # TODO: explicitly freeze clustering metric with Analyze, especially COSINE.
   AISAQ:
     build:
       max_degree: 56 # Maximum degree of the Vamana graph

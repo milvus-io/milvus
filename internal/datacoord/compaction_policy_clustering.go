@@ -152,7 +152,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 			!segment.GetIsInvisible() &&
-			(!namespaceEnabled || segment.GetIsSortedByNamespace()) &&
+			(!namespaceEnabled || segment.GetIsSortedByNamespace() || segment.GetPartitionStatsVersion() > 0) &&
 			!policy.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 	}))
 

@@ -163,7 +163,7 @@ func clusteringInputSegments(ctx context.Context, m *meta, label *CompactionGrou
 		segment := m.GetHealthySegment(ctx, id)
 		if segment == nil || segment.GetCollectionID() != label.CollectionID || segment.GetPartitionID() != label.PartitionID || segment.GetInsertChannel() != label.Channel ||
 			!isFlushed(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 || segment.GetIsImporting() || segment.GetIsInvisible() ||
-			(requireAvailable && segment.isCompacting) || (namespace && !segment.GetIsSortedByNamespace()) || m.isSegmentCompactionProtected(id) {
+			(requireAvailable && segment.isCompacting) || (namespace && !segment.GetIsSortedByNamespace() && segment.GetPartitionStatsVersion() == 0) || m.isSegmentCompactionProtected(id) {
 			return nil, merr.WrapErrCompactionPlanConflict("clustering group member is unavailable or outside task scope")
 		}
 		if base != nil {

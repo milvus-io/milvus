@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -113,10 +114,19 @@ func (psm *partitionStatsMeta) ListPartitionStatsInfos(collectionID int64, parti
 // info. It is always exactly two ops, so it always fits a single atomic txn
 // (the chunked fallback never triggers). In-memory state is applied only after
 // the write succeeds, so a failed write never desyncs memory from disk.
-func (psm *partitionStatsMeta) SavePartitionStatsAndVersion(info *datapb.PartitionStatsInfo, currentVersion int64) error {
+func (psm *partitionStatsMeta) SavePartitionStatsAndVersion(info *datapb.PartitionStatsInfo, currentVersion int64, expectedBase ...int64) error {
 	psm.Lock()
 	defer psm.Unlock()
 
+	if len(expectedBase) == 1 {
+		current := psm.innerGetCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
+		if current == info.GetVersion() {
+			return nil
+		}
+		if current != expectedBase[0] {
+			return merr.WrapErrCompactionPlanConflict("clustering publication base changed")
+		}
+	}
 	if err := psm.catalog.Update(psm.ctx,
 		metastore.AddPartitionStats(info),
 		metastore.SavePartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), currentVersion),
