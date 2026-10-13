@@ -122,6 +122,10 @@ the index layer:
   metrics (`RecoveryTailBytes`). The tail triggers use it.
 - A `Decide` on a closed index returns the on-shutdown error of the streaming
   node.
+- At WAL open, the interceptor opens the index of every existing collection.
+  An open that fails on the local disk goes to `OnFatal`: the WAL rejects all
+  appends, and its next open tries again. A schema that the index rejects is
+  a broken invariant for an existing collection, and it panics.
 - DropCollection and the rollback of a failed CreateCollection call
   `Channel.Drop`. It closes the index and removes `<root>/<vchannel>/`. A
   vchannel name embeds the collection ID, so no later open of the vchannel
@@ -528,6 +532,7 @@ reach 64 MiB and hand over through trigger 2.
 | Corrupted (`pkerr.ErrCorrupted`) in a lookup on the write path | `Decide` returns the error and calls `OnFatal`, which marks the WAL unavailable. |
 | Rejected claim or commit (`snapshot.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, not claimed, an invalid request, a corrupted stored manifest) | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
 | Missing object on download | `DownloadFile` marks it as corrupted. A manifest lists the table, so a retry can not clear it. |
+| Local disk error when the index of an existing collection opens at WAL open | `OnFatal` marks the WAL unavailable. The streaming node and its other WALs keep running. |
 | Concurrency | At most one handover per vchannel at a time. The node scheduler limits the handovers of the node. |
 
 - `isFatal` checks only `snapshot.ErrFenced`, `snapshot.ErrRejected` and
@@ -677,6 +682,8 @@ Unit tests cover these cases:
 - Drop: DropCollection and the rollback of a failed CreateCollection remove
   the local directory, and a new create of the vchannel sees none of the old
   keys. A drop on a closed `Channel` fails and keeps the files.
+- WAL open: a local disk error goes to `OnFatal` and does not panic. An
+  existing collection with an unsupported primary key type panics.
 - Table store: remote failures are `ErrUnavailable`, local disk failures
   (also a write of the local chunk manager) are `ErrIO`, and a missing object
   is `ErrCorrupted`.

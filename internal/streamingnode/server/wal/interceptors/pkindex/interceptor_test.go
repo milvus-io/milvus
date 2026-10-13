@@ -523,19 +523,46 @@ func newBrokenRoot(t *testing.T) string {
 	return root
 }
 
-func TestBuildPanicsWhenTheIndexOfAnExistingCollectionCanNotBeCreated(t *testing.T) {
+// TestBuildMarksTheWALUnavailableWhenTheIndexCanNotBeOpened checks that a
+// local disk error at WAL open goes to param.OnFatal and does not panic.
+func TestBuildMarksTheWALUnavailableWhenTheIndexCanNotBeOpened(t *testing.T) {
 	newTestIndexEnvAt(t, newBrokenRoot(t)).useResource(t)
+
+	var fatals []error
+	var i interceptors.Interceptor
+	require.NotPanics(t, func() {
+		i = NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+			ChannelInfo: types.PChannelInfo{Name: testPChannel},
+			OnFatal:     func(err error) { fatals = append(fatals, err) },
+			ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
+				testCollectionID: {VChannel: testVChannel, Schema: testSchema(false)},
+			}},
+		})
+	})
+	defer i.Close()
+
+	require.Len(t, fatals, 1)
+	require.True(t, errors.Is(fatals[0], errOpenIndex), "the error is marked as an index open error")
+	require.ErrorContains(t, fatals[0], "not a directory")
+	require.Nil(t, i.(*appendInterceptor).registry.get(testVChannel))
+}
+
+func TestBuildPanicsWhenAnExistingCollectionHasAnUnsupportedPrimaryKey(t *testing.T) {
+	newTestIndexEnv(t).useResource(t)
+	schema := testSchema(false)
+	schema.Fields[0].DataType = schemapb.DataType_Float
 
 	defer func() {
 		value := recover()
 		require.NotNil(t, value, "Build must panic")
 		require.Contains(t, value.(string), "at wal open")
-		require.Contains(t, value.(string), "not a directory")
+		require.Contains(t, value.(string), "unsupported data type")
 	}()
 	NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
 		ChannelInfo: types.PChannelInfo{Name: testPChannel},
+		OnFatal:     func(err error) { t.Errorf("OnFatal must not be called: %v", err) },
 		ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
-			testCollectionID: {VChannel: testVChannel, Schema: testSchema(false)},
+			testCollectionID: {VChannel: testVChannel, Schema: schema},
 		}},
 	})
 }

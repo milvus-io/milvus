@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -65,16 +67,25 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	if param.LastTimeTickMessage != nil {
 		seed = param.LastTimeTickMessage.TimeTick()
 	}
-	ch := mgr.OpenChannel(param.ChannelInfo, seed, tailOf(param.RecoveryStorage), onFatalOf(param))
+	onFatal := onFatalOf(param)
+	ch := mgr.OpenChannel(param.ChannelInfo, seed, tailOf(param.RecoveryStorage), onFatal)
 	reg := newRegistry(ch)
 	if lister, ok := param.ShardManager.(collectionSchemaLister); ok {
 		for collectionID, info := range lister.GetAllCollectionSchemaInfos() {
-			// A collection that exists can not have a schema the index rejects, and
-			// the WAL can not serve the vchannel without its index.
-			if _, err := reg.add(ctx, info.VChannel, collectionID, info.Schema); err != nil {
-				ch.Close()
-				panic(fmt.Sprintf("create the primary key index of vchannel %s at wal open: %v", info.VChannel, err))
+			_, err := reg.add(ctx, info.VChannel, collectionID, info.Schema)
+			if err == nil {
+				continue
 			}
+			// The WAL can not serve the vchannel without its index. A local disk
+			// error makes the WAL reject all appends, and the next open of the WAL
+			// tries again. It does not stop the other WALs of the node.
+			if errors.Is(err, errOpenIndex) {
+				onFatal(err)
+				break
+			}
+			// A collection that exists can not have a schema the index rejects.
+			ch.Close()
+			panic(fmt.Sprintf("create the primary key index of vchannel %s at wal open: %v", info.VChannel, err))
 		}
 	}
 	// param.TxnManager is a pointer, so it must not be assigned to the interface

@@ -31,6 +31,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// errOpenIndex marks an error of the index open. The open does local disk IO,
+// so the error does not show a broken schema.
+var errOpenIndex = errors.New("open the primary key index")
+
 // target is what the interceptor needs to translate the writes of one vchannel.
 type target struct {
 	idx          *index.Index
@@ -105,7 +109,7 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	// vchannels keep reading the registry meanwhile.
 	created, err := r.ch.Add(ctx, vchannel, collectionID, pkField.GetDataType())
 	if err != nil {
-		return false, errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel)
+		return false, errors.Mark(errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel), errOpenIndex)
 	}
 	idx := r.ch.Get(vchannel)
 	if idx == nil {
