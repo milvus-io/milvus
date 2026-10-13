@@ -575,10 +575,12 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView, triggerType CompactionTriggerType) {
 	log := mlog.With(mlog.String("trigger type", triggerType.String()), mlog.String("view", view.String()))
 
-	// A single compaction view consumed an admission token; give it back if
-	// the view never reaches the queue, as the legacy trigger does.
+	// A view admitted by the single compaction policy consumed an admission
+	// token; give it back if the view never reaches the queue, as the legacy
+	// trigger does. Other single views (e.g. from the target reconciler) never
+	// went through admission and have nothing to give back.
 	enqueued := false
-	if triggerType == TriggerTypeSingle {
+	if mixView, ok := view.(*MixSegmentView); ok && mixView.admitted {
 		defer func() {
 			if !enqueued {
 				getSingleCompactionAdmitter().refund(1)

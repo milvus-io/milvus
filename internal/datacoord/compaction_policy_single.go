@@ -112,6 +112,7 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 			segments:      segmentViews,
 			collectionTTL: round.collectionTTL,
 			triggerID:     round.triggerID,
+			admitted:      true,
 		})
 	}
 	if deferred > 0 {
@@ -354,6 +355,9 @@ type MixSegmentView struct {
 	segments      []*SegmentView
 	collectionTTL time.Duration
 	triggerID     int64
+	// admitted marks a view that took a single compaction admission token,
+	// so the token is given back if the view never reaches the queue.
+	admitted bool
 }
 
 func (v *MixSegmentView) GetGroupLabel() *CompactionGroupLabel {

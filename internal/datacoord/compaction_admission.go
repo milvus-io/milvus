@@ -55,8 +55,13 @@ import (
 //
 // Two producers share the bucket: the legacy trigger (global rounds only;
 // collection-scoped flush signals leave single compaction to the next global
-// round so a busy collection cannot drain the budget) and the single
-// compaction policy (L2 segments). Each keeps its own fairness cursors.
+// round so a busy collection cannot drain the budget, unless no global round
+// runs, in which case they go through admission themselves) and the single
+// compaction policy (L2 segments). Each keeps its own fairness cursors. Their
+// rounds run on the same interval and nearly in phase, so while the other
+// producer has a backlog a producer takes only half of the tokens, the odd
+// token going to the two in turn; otherwise whichever runs first would take
+// the whole refill every round.
 //
 // Both knobs are refreshable; jitter=0 and tokens=0 restore legacy behavior.
 
@@ -150,6 +155,16 @@ type singleCompactionAdmitter struct {
 	// another's cursor.
 	retentionTurn  map[string]bool              // per producer: the next interleaved pick goes to retention
 	lastCollection map[admissionCursorKey]int64 // per producer and class: the round-robin resumes after this collection
+	// interleavedOddTurn, per producer: when an odd number of picks is split
+	// between over-cap and interleaved candidates, the odd pick goes to the
+	// interleaved classes. It flips on each such round.
+	interleavedOddTurn map[string]bool
+
+	// Sharing between producers: when each producer last ended a round with
+	// candidates deferred for lack of tokens, and which producer took the odd
+	// token the last time tokens were split.
+	backloggedAt map[string]time.Time
+	oddTokenTo   string
 
 	nowFn func() time.Time // injectable for tests
 }
@@ -179,9 +194,11 @@ func getSingleCompactionAdmitter() *singleCompactionAdmitter {
 
 func newSingleCompactionAdmitter(nowFn func() time.Time) *singleCompactionAdmitter {
 	return &singleCompactionAdmitter{
-		nowFn:          nowFn,
-		retentionTurn:  make(map[string]bool),
-		lastCollection: make(map[admissionCursorKey]int64),
+		nowFn:              nowFn,
+		retentionTurn:      make(map[string]bool),
+		lastCollection:     make(map[admissionCursorKey]int64),
+		interleavedOddTurn: make(map[string]bool),
+		backloggedAt:       make(map[string]time.Time),
 	}
 }
 
@@ -221,7 +238,9 @@ func admissionBudget(ctx context.Context) (budget float64, interval time.Duratio
 //
 // Order of service:
 //  1. accumulation candidates past the deferral hard cap, most deltalogs
-//     first, within half of the round so they cannot crowd out the rest;
+//     first, within half of the round so they cannot crowd out the rest (an
+//     odd pick alternates between them and the interleaved classes, so a
+//     round of one pick does not always go to them);
 //  2. the two classes alternately, each served round-robin across collections,
 //     accumulation dirtiest-first within a collection and retention by segment
 //     id. The class and collection cursors persist between rounds;
@@ -237,18 +256,20 @@ func (a *singleCompactionAdmitter) admit(ctx context.Context, producer string, c
 		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		a.observe(ctx, producer, 0, 0, len(admitted), deferred)
+		delete(a.backloggedAt, producer)
+		a.observe(ctx, producer, 0, 0, len(admitted), deferred, false)
 		return admitted, deferred
 	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	now := a.nowFn()
 	if len(candidates) == 0 {
-		a.observe(ctx, producer, budget, interval, 0, 0)
+		delete(a.backloggedAt, producer)
+		a.observe(ctx, producer, budget, interval, 0, 0, false)
 		return nil, 0
 	}
 
-	now := a.nowFn()
 	if a.lastRefill.IsZero() {
 		a.tokens = budget
 	} else {
@@ -259,30 +280,69 @@ func (a *singleCompactionAdmitter) admit(ctx context.Context, producer string, c
 	}
 	a.lastRefill = now
 
-	available := int(a.tokens)
+	tokens := a.tokenShare(producer, int(a.tokens), now)
+	available := tokens
 	if capacity >= 0 && capacity < available {
 		available = capacity
 	}
 
-	queue, urgent := a.order(producer, candidates, available)
-	if available > len(queue) {
-		available = len(queue)
+	plan := a.order(producer, candidates, available)
+	if available > len(plan.queue) {
+		available = len(plan.queue)
 	}
-	admitted = queue[:available]
-	deferred = len(queue) - available
+	admitted = plan.queue[:available]
+	deferred = len(plan.queue) - available
 	a.tokens -= float64(available)
-	// Advance the cursors only by what was admitted: the class turn flips once
-	// per interleaved pick, and each class's round-robin resumes after the
-	// collection of the last candidate admitted from it.
-	if interleaved := available - min(available, urgent); interleaved%2 == 1 {
+	// Advance the cursors only by what was admitted from the interleaved
+	// section: the class turn flips once per interleaved pick, and each
+	// class's round-robin resumes after the collection of the last candidate
+	// admitted from it. Over-cap picks, leading or trailing, move neither.
+	lead := min(available, plan.urgent)
+	tail := min(available, plan.urgent+plan.interleaved)
+	if (tail-lead)%2 == 1 {
 		a.retentionTurn[producer] = !a.retentionTurn[producer]
 	}
-	for _, c := range admitted[min(available, urgent):] {
+	for _, c := range admitted[lead:tail] {
 		a.lastCollection[admissionCursorKey{producer, c.reason}] = c.collectionID
 	}
+	if plan.oddSplit {
+		a.interleavedOddTurn[producer] = !a.interleavedOddTurn[producer]
+	}
 
-	a.observe(ctx, producer, budget, interval, len(admitted), deferred)
+	// The round is throttled only when tokens, not the queue capacity, were
+	// what held candidates back.
+	throttled := deferred > 0 && (capacity < 0 || tokens <= capacity)
+	if throttled {
+		a.backloggedAt[producer] = now
+	} else {
+		delete(a.backloggedAt, producer)
+	}
+	a.observe(ctx, producer, budget, interval, len(admitted), deferred, throttled)
 	return admitted, deferred
+}
+
+// tokenShare returns how many of the whole tokens a producer may use this
+// round. While another producer has a recent backlog, each gets half and the
+// odd token goes to the producers in turn, so the one whose round happens to
+// run first cannot take every refill.
+func (a *singleCompactionAdmitter) tokenShare(producer string, tokens int, now time.Time) int {
+	stale := 2 * Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second)
+	contested := false
+	for other, at := range a.backloggedAt {
+		if other != producer && now.Sub(at) <= stale {
+			contested = true
+			break
+		}
+	}
+	if !contested {
+		return tokens
+	}
+	share := tokens / 2
+	if tokens%2 == 1 && a.oddTokenTo != producer {
+		share++
+		a.oddTokenTo = producer
+	}
+	return share
 }
 
 // refund returns the tokens of admitted candidates that were not submitted
@@ -303,12 +363,24 @@ func (a *singleCompactionAdmitter) refund(n int) {
 	}
 }
 
-// order lays the candidates out in service order and reports how many
-// over-cap candidates lead the list. Over-cap candidates take at most half of
-// the available picks ahead of the interleaved classes (all of them when
-// nothing else is waiting), the rest queue behind. It reads the fairness
-// cursors but leaves advancing them to admit, which knows what was admitted.
-func (a *singleCompactionAdmitter) order(producer string, candidates []*singleCandidate, available int) (ordered []*singleCandidate, urgentCount int) {
+// admissionOrder is the service order of one round: urgent over-cap
+// candidates lead the queue, interleaved candidates follow, and the remaining
+// over-cap candidates trail. oddSplit says an odd pick was contested between
+// the leading over-cap and the interleaved candidates this round.
+type admissionOrder struct {
+	queue       []*singleCandidate
+	urgent      int
+	interleaved int
+	oddSplit    bool
+}
+
+// order lays the candidates out in service order. Over-cap candidates take at
+// most half of the available picks ahead of the interleaved classes (all of
+// them when nothing else is waiting), the rest queue behind; when the picks
+// are odd, the odd one alternates between them and the interleaved classes
+// across rounds. It reads the fairness cursors but leaves advancing them to
+// admit, which knows what was admitted.
+func (a *singleCompactionAdmitter) order(producer string, candidates []*singleCandidate, available int) admissionOrder {
 	hardCapCount := int(deferralHardCap * Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsFloat())
 
 	var urgent []*singleCandidate
@@ -350,12 +422,21 @@ func (a *singleCompactionAdmitter) order(producer string, candidates []*singleCa
 	accumulationRR := newCollectionRoundRobin(accumulation, accCursor, hasAcc)
 	retentionRR := newCollectionRoundRobin(retention, retCursor, hasRet)
 
-	urgentCount = len(urgent)
-	if interleavedTotal := accumulationRR.remaining() + retentionRR.remaining(); interleavedTotal > 0 {
-		urgentCount = min(len(urgent), max(1, available/2))
+	var plan admissionOrder
+	plan.urgent = len(urgent)
+	plan.interleaved = accumulationRR.remaining() + retentionRR.remaining()
+	if plan.interleaved > 0 {
+		half := available / 2
+		if available%2 == 1 && len(urgent) > half && plan.interleaved > half {
+			plan.oddSplit = true
+			if !a.interleavedOddTurn[producer] {
+				half++
+			}
+		}
+		plan.urgent = min(len(urgent), half)
 	}
-	ordered = make([]*singleCandidate, 0, len(candidates))
-	ordered = append(ordered, urgent[:urgentCount]...)
+	plan.queue = make([]*singleCandidate, 0, len(candidates))
+	plan.queue = append(plan.queue, urgent[:plan.urgent]...)
 	retentionTurn := a.retentionTurn[producer]
 	for accumulationRR.remaining()+retentionRR.remaining() > 0 {
 		var c *singleCandidate
@@ -364,11 +445,11 @@ func (a *singleCompactionAdmitter) order(producer string, candidates []*singleCa
 		} else {
 			c = accumulationRR.next()
 		}
-		ordered = append(ordered, c)
+		plan.queue = append(plan.queue, c)
 		retentionTurn = !retentionTurn
 	}
-	ordered = append(ordered, urgent[urgentCount:]...)
-	return ordered, urgentCount
+	plan.queue = append(plan.queue, urgent[plan.urgent:]...)
+	return plan
 }
 
 // collectionRoundRobin hands out candidates one collection at a time, in
@@ -419,9 +500,11 @@ func (rr *collectionRoundRobin) next() *singleCandidate {
 // deferred counts as gauges, the time the deferred backlog needs to drain at
 // the configured rate (zero when limiting is off, budget <= 0), and a warning
 // once rounds have been throttled for long enough that the bucket is evidently
-// below steady-state demand. It is called on every path, including rounds
-// with nothing eligible, so the gauges never keep a stale backlog.
-func (a *singleCompactionAdmitter) observe(ctx context.Context, producer string, budget float64, interval time.Duration, admitted, deferred int) {
+// below steady-state demand. throttled says tokens were what deferred
+// candidates; a deferral caused by the queue capacity says nothing about the
+// bucket size. It is called on every path, including rounds with nothing
+// eligible, so the gauges never keep a stale backlog.
+func (a *singleCompactionAdmitter) observe(ctx context.Context, producer string, budget float64, interval time.Duration, admitted, deferred int, throttled bool) {
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 	metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, producer, metrics.SingleCompactionAdmitted).Set(float64(admitted))
 	metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, producer, metrics.SingleCompactionDeferred).Set(float64(deferred))
@@ -431,11 +514,16 @@ func (a *singleCompactionAdmitter) observe(ctx context.Context, producer string,
 	}
 	metrics.DataCoordSingleCompactionAdmissionDrainSeconds.WithLabelValues(nodeID, producer).Set(drainSeconds)
 
-	if deferred == 0 {
-		// Only clear the counter when the round had spare capacity: a round
-		// that deferred nothing because nothing was eligible says nothing
-		// about the bucket size.
-		if a.tokens >= 1 {
+	if budget <= 0 {
+		// Limiting is off: nothing is throttled.
+		a.throttledRounds = 0
+		return
+	}
+	if !throttled {
+		// Only clear the counter when the round had spare tokens: a round
+		// that deferred nothing because nothing was eligible, or deferred on
+		// queue capacity, says nothing about the bucket size.
+		if deferred == 0 && a.tokens >= 1 {
 			a.throttledRounds = 0
 		}
 		return

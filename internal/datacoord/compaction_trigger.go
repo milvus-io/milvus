@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -131,8 +132,12 @@ type compactionTrigger struct {
 	manualSignals chan *compactionSignal
 	inspector     CompactionInspector
 	globalTrigger *time.Ticker
-	closeCh       lifetime.SafeChan
-	closeWaiter   sync.WaitGroup
+	// globalLoopRunning is set while schedule() emits global signals. Without
+	// it (auto compaction disabled globally at startup) collection-scoped
+	// signals are the only rounds left and plan single compaction themselves.
+	globalLoopRunning atomic.Bool
+	closeCh           lifetime.SafeChan
+	closeWaiter       sync.WaitGroup
 
 	indexEngineVersionManager IndexEngineVersionManager
 
@@ -190,6 +195,8 @@ func (t *compactionTrigger) schedule() {
 	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
 		return
 	}
+	t.globalLoopRunning.Store(true)
+	defer t.globalLoopRunning.Store(false)
 
 	for {
 		select {
@@ -235,6 +242,14 @@ func (t *compactionTrigger) stop() {
 	if t.cancel != nil {
 		t.cancel()
 	}
+}
+
+// plansSingleCompaction reports whether a signal's round plans single
+// compaction. Only the global round does, unless no global round runs (auto
+// compaction disabled globally while a collection enables it): then the
+// collection-scoped signals take its place.
+func (t *compactionTrigger) plansSingleCompaction(signal *compactionSignal) bool {
+	return signal.isGlobal() || !t.globalLoopRunning.Load()
 }
 
 // triggerContext returns the trigger's component context, or a background
@@ -387,6 +402,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		expectedSize int64
 		candidates   []*singleCandidate
 	}
+	plansSingle := t.plansSingleCompaction(signal)
 	prepared := make([]*preparedGroup, 0, len(groups))
 	for _, group := range groups {
 		log := mlog.With(
@@ -427,7 +443,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		}
 
 		pg := &preparedGroup{group: group, coll: coll, compactTime: ct, expectedSize: getExpectedSegmentSize(t.meta, coll.ID, coll.Schema)}
-		if signal.isGlobal() {
+		if plansSingle {
 			for _, segment := range group.segments {
 				if reason := t.singleCompactionReason(segment, ct); reason != singleReasonNone {
 					pg.candidates = append(pg.candidates, newSingleCandidate(segment, reason))
@@ -438,11 +454,12 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 	}
 
 	// Admission limits how many single compaction candidates this round may
-	// submit (see compaction_admission.go). Only the global round takes part:
-	// a manual signal expresses operator intent and bypasses admission, and a
-	// collection-scoped signal (a flush) plans no single compaction at all,
-	// leaving its segments to the next global round, so a busy collection
-	// cannot drain the shared budget with its flush signals. The limit is also
+	// submit (see compaction_admission.go). Only the round that plans single
+	// compaction takes part: a manual signal expresses operator intent and
+	// bypasses admission, and while the global loop runs a collection-scoped
+	// signal (a flush) plans no single compaction at all, leaving its segments
+	// to the next global round, so a busy collection cannot drain the shared
+	// budget with its flush signals. The limit is also
 	// bounded by the room left in the inspector so no token is spent on a plan
 	// that would be dropped, and tokens of admitted segments that still do not
 	// reach the queue are given back when the signal is done.
@@ -453,7 +470,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			candidates = append(candidates, pg.candidates...)
 		}
 		admitted, deferred := 0, 0
-		if signal.isGlobal() {
+		if plansSingle {
 			var admittedCandidates []*singleCandidate
 			admittedCandidates, deferred = getSingleCompactionAdmitter().admit(t.triggerContext(), admissionSourceTrigger, candidates, t.inspector.getRemainingCapacity())
 			admission = newSingleAdmission(admittedCandidates, deferred, candidates)

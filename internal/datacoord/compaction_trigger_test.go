@@ -4141,3 +4141,38 @@ func Test_compactionTrigger_TargetedSignalPlansNoSingleCompaction(t *testing.T) 
 	assert.True(t, isSingle)
 	assert.False(t, heldBack)
 }
+
+// With the global loop not running (auto compaction disabled globally while a
+// collection enables it), collection-scoped signals plan single compaction
+// themselves; while it runs, only the global round does.
+func Test_compactionTrigger_SingleCompactionWithoutGlobalLoop(t *testing.T) {
+	paramtable.Init()
+	key := Params.DataCoordCfg.EnableAutoCompaction.Key
+	saved := Params.DataCoordCfg.EnableAutoCompaction.GetValue()
+	t.Cleanup(func() { Params.Save(key, saved) })
+
+	collectionSignal := NewCompactionSignal().WithCollectionID(1)
+
+	Params.Save(key, "false")
+	trigger := newCompactionTrigger(nil, nil, nil, nil, nil)
+	trigger.globalTrigger = time.NewTicker(time.Hour)
+	defer trigger.globalTrigger.Stop()
+	trigger.schedule() // returns at once: the global loop does not start
+	assert.True(t, trigger.plansSingleCompaction(collectionSignal))
+	assert.True(t, trigger.plansSingleCompaction(NewCompactionSignal()))
+
+	Params.Save(key, "true")
+	trigger = newCompactionTrigger(nil, nil, nil, nil, nil)
+	trigger.globalTrigger = time.NewTicker(time.Hour)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		trigger.schedule()
+	}()
+	assert.Eventually(t, trigger.globalLoopRunning.Load, 5*time.Second, 10*time.Millisecond)
+	assert.False(t, trigger.plansSingleCompaction(collectionSignal))
+	assert.True(t, trigger.plansSingleCompaction(NewCompactionSignal()))
+	trigger.closeCh.Close()
+	<-done
+	assert.True(t, trigger.plansSingleCompaction(collectionSignal), "the flag clears when the loop exits")
+}

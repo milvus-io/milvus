@@ -380,3 +380,114 @@ func TestAdmissionMetricsClearOnEmptyAndDisabledRounds(t *testing.T) {
 	assert.Equal(t, 0.0, testutil.ToFloat64(deferredGauge))
 	assert.Equal(t, 0.0, testutil.ToFloat64(drainGauge))
 }
+
+// With one pick per round, the odd pick alternates between the over-cap lane
+// and the interleaved classes instead of always going to the over-cap lane.
+func TestAdmissionOddPickAlternatesWithOverCap(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "1", "60", "2")
+	now := time.Unix(1000, 0)
+	a := newSingleCompactionAdmitter(func() time.Time { return now })
+
+	var cands []*singleCandidate
+	for i := int64(1); i <= 4; i++ {
+		cands = append(cands, admissionSegment(i, 1, 10, 0.5, singleReasonAccumulation)) // over the cap of 8
+	}
+	cands = append(cands, admissionSegment(100, 1, 0, 0, singleReasonRetention))
+
+	var served []int64
+	for round := 0; round < 4; round++ {
+		admitted, _ := a.admit(context.Background(), admissionSourceTrigger, cands, -1)
+		require.Len(t, admitted, 1)
+		served = append(served, admitted[0].segment.GetID())
+		now = now.Add(60 * time.Second)
+	}
+	assert.Equal(t, []int64{1, 100, 1, 100}, served, "over-cap first, then the interleaved classes, in turn")
+}
+
+// Over-cap candidates admitted from the trailing section are not interleaved
+// picks: they neither flip the class turn nor move a collection cursor.
+func TestAdmissionCursorsIgnoreTrailingOverCap(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "4", "60", "2")
+	a := newSingleCompactionAdmitter(time.Now)
+
+	var cands []*singleCandidate
+	for i := int64(1); i <= 8; i++ {
+		cands = append(cands, admissionSegment(i, 1, 10+int(i), 0.5, singleReasonAccumulation))
+	}
+	cands = append(cands, admissionSegment(100, 2, 0, 0, singleReasonRetention))
+
+	admitted, deferred := a.admit(context.Background(), admissionSourceTrigger, cands, -1)
+	assert.Equal(t, []int64{8, 7, 100, 6}, ids(admitted))
+	assert.Equal(t, 5, deferred)
+	assert.True(t, a.retentionTurn[admissionSourceTrigger], "one interleaved pick flips the class turn once")
+	_, moved := a.lastCollection[admissionCursorKey{admissionSourceTrigger, singleReasonAccumulation}]
+	assert.False(t, moved, "a trailing over-cap pick does not move the accumulation cursor")
+	assert.Equal(t, int64(2), a.lastCollection[admissionCursorKey{admissionSourceTrigger, singleReasonRetention}])
+}
+
+// Only a deferral caused by tokens counts as throttling; one caused by the
+// queue capacity, or any deferral with limiting off, does not.
+func TestAdmissionCapacityDeferralIsNotThrottling(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "0", "60", "200")
+	now := time.Unix(1000, 0)
+	a := newSingleCompactionAdmitter(func() time.Time { return now })
+
+	var cands []*singleCandidate
+	for i := int64(1); i <= 5; i++ {
+		cands = append(cands, admissionSegment(i, 1, 5, 0.5, singleReasonAccumulation))
+	}
+	for round := 0; round < consecutiveThrottledRoundsToWarn+1; round++ {
+		_, deferred := a.admit(context.Background(), admissionSourceTrigger, cands, 2)
+		require.Equal(t, 3, deferred)
+	}
+	assert.Equal(t, 0, a.throttledRounds, "limiting off")
+
+	Params.Save(Params.DataCoordCfg.SingleCompactionRateLimitTokens.Key, "10")
+	for round := 0; round < consecutiveThrottledRoundsToWarn+1; round++ {
+		_, deferred := a.admit(context.Background(), admissionSourceTrigger, cands, 2)
+		require.Equal(t, 3, deferred)
+		now = now.Add(60 * time.Second)
+	}
+	assert.Equal(t, 0, a.throttledRounds, "capacity, not tokens, held the candidates back")
+
+	_, deferred := a.admit(context.Background(), admissionSourceTrigger, append(cands, cands...), -1)
+	assert.Equal(t, 0, deferred)
+	_, deferred = a.admit(context.Background(), admissionSourceTrigger, cands, -1)
+	assert.Equal(t, 5, deferred)
+	assert.Equal(t, 1, a.throttledRounds, "out of tokens")
+}
+
+// While both producers have a backlog, the one whose round runs first does not
+// take every refill: the tokens are split and the odd one alternates.
+func TestAdmissionTokensSharedBetweenProducers(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "1", "60", "200")
+	now := time.Unix(1000, 0)
+	a := newSingleCompactionAdmitter(func() time.Time { return now })
+
+	var legacy, policy []*singleCandidate
+	for i := int64(1); i <= 10; i++ {
+		legacy = append(legacy, admissionSegment(i, 1, 5, 0.5, singleReasonAccumulation))
+		policy = append(policy, admissionSegment(100+i, 2, 5, 0.5, singleReasonAccumulation))
+	}
+	served := map[string]int{}
+	for round := 0; round < 6; round++ {
+		admitted, _ := a.admit(context.Background(), admissionSourceTrigger, legacy, -1)
+		served[admissionSourceTrigger] += len(admitted)
+		admitted, _ = a.admit(context.Background(), admissionSourcePolicy, policy, -1)
+		served[admissionSourcePolicy] += len(admitted)
+		now = now.Add(60 * time.Second)
+	}
+	assert.Equal(t, 6, served[admissionSourceTrigger]+served[admissionSourcePolicy])
+	assert.GreaterOrEqual(t, served[admissionSourcePolicy], 2, "the second producer gets tokens too: %v", served)
+	assert.GreaterOrEqual(t, served[admissionSourceTrigger], 2, "the first producer is not starved either: %v", served)
+
+	// A producer whose backlog is gone, or stale, no longer holds back the other.
+	a.admit(context.Background(), admissionSourcePolicy, nil, -1)
+	now = now.Add(60 * time.Second)
+	admitted, _ := a.admit(context.Background(), admissionSourceTrigger, legacy, -1)
+	assert.Len(t, admitted, 1)
+}
