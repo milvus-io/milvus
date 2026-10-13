@@ -180,6 +180,15 @@ func TestQueryTransformBarrierMessagesAdvanceTransformingMVCC(t *testing.T) {
 	assert.Equal(t, QueryVChannelMVCC{GrowingTimetick: 120, TransformingTimetick: 130, Confirmed: true}, mvcc)
 }
 
+func TestCreateSnapshotAdvancesTransformMVCC(t *testing.T) {
+	cm := NewQueryMVCCManager(100)
+	cm.ApplyRecoveryBarrier("vc1", 120)
+	cm.UpdateMVCC(createQueryTestMessage(t, 150, "vc1", message.MessageTypeInsert, false, true))
+	cm.UpdateMVCC(createQueryTestMessage(t, 160, "vc1", message.MessageTypeCreateSnapshot, false, true))
+	cm.UpdateMVCC(createQueryTestMessage(t, 160, "", message.MessageTypeTimeTick, false, true))
+	assert.Equal(t, QueryVChannelMVCC{GrowingTimetick: 150, TransformingTimetick: 160, Confirmed: true}, cm.GetQueryMVCCOfVChannel("vc1"))
+}
+
 func TestQueryCommitImportAdvancesQueryPlanMVCC(t *testing.T) {
 	cm := NewQueryMVCCManager(100)
 	cm.ApplyRecoveryBarrier("vc1", 120)

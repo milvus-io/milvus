@@ -23,6 +23,7 @@ func TestQueryTransformMessageClassification(t *testing.T) {
 		{message.MessageTypeCommitImport, true, false},
 		{message.MessageTypeFlush, true, false},
 		{message.MessageTypeManualFlush, true, false},
+		{message.MessageTypeCreateSnapshot, true, false},
 		{message.MessageTypeDropPartition, true, false},
 		{message.MessageTypeDropCollection, true, false},
 		{message.MessageTypeTruncateCollection, true, false},
