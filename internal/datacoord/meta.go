@@ -1314,12 +1314,20 @@ func updateManifestPathIfNewer(segment *SegmentInfo, manifestPath string) error 
 	return nil
 }
 
+// l0ManifestCommit is task-local retry state, not a durable deduplication record.
+// Reuse requires the original base or the already-adopted result to be current.
+type l0ManifestCommit struct {
+	baseManifest string
+	manifestPath string
+}
+
 type l0ManifestUpdate struct {
 	segmentID            int64
 	deltalogs            []*datapb.FieldBinlog
 	storageConfig        *indexpb.StorageConfig
-	committedV3Manifests map[int64]string
+	committedV3Manifests map[int64]l0ManifestCommit
 	segment              *SegmentInfo
+	baseManifest         string
 	manifestPath         string
 	entries              []packed.DeltaLogEntry
 }
@@ -1331,6 +1339,13 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 			mlog.Int64("segmentID", u.segmentID))
 		return false
 	}
+	u.baseManifest = u.segment.GetManifestPath()
+	// Work on owned copies: failed publication must leave the worker result's
+	// paths available for a fresh-base retry.
+	u.deltalogs = filterDuplicateFieldBinlogs(u.segment.GetDeltalogs(), u.deltalogs)
+	u.deltalogs = lo.Map(u.deltalogs, func(fb *datapb.FieldBinlog, _ int) *datapb.FieldBinlog {
+		return proto.Clone(fb).(*datapb.FieldBinlog)
+	})
 	if len(u.deltalogs) == 0 {
 		return false
 	}
@@ -1342,8 +1357,12 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 		return true
 	}
 
-	if u.committedV3Manifests != nil {
-		u.manifestPath = u.committedV3Manifests[u.segmentID]
+	if cached, ok := u.committedV3Manifests[u.segmentID]; ok {
+		if cached.baseManifest == u.baseManifest || cached.manifestPath == u.baseManifest {
+			u.manifestPath = cached.manifestPath
+		} else {
+			delete(u.committedV3Manifests, u.segmentID)
+		}
 	}
 	if u.manifestPath != "" {
 		return true
@@ -1406,7 +1425,7 @@ func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
 	err := conc.BlockOnAll(futures...)
 	for _, update := range updates {
 		if update.committedV3Manifests != nil && update.manifestPath != "" {
-			update.committedV3Manifests[update.segmentID] = update.manifestPath
+			update.committedV3Manifests[update.segmentID] = l0ManifestCommit{baseManifest: update.baseManifest, manifestPath: update.manifestPath}
 		}
 	}
 	return err
@@ -1447,7 +1466,7 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 	segmentID int64,
 	deltalogs []*datapb.FieldBinlog,
 	storageConfig *indexpb.StorageConfig,
-	committedV3Manifests map[int64]string,
+	committedV3Manifests map[int64]l0ManifestCommit,
 ) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		update := &l0ManifestUpdate{
@@ -1962,31 +1981,47 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
+// L0 operators and their companion input-retirement operators must be safe to
+// re-evaluate against fresh segment clones after manifest I/O. Segment and
+// metric changes remain staged until publication below.
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
-	updatePack := &updateSegmentPack{
-		meta:       m,
-		segments:   make(map[int64]*SegmentInfo),
-		increments: make(map[int64]metastore.BinlogsIncrement),
-		metricMutation: &segMetricMutation{
-			stateChange:             make(segmentMetricStateChange),
-			deferSegmentLabelChange: true,
-		},
+	updatePack := m.prepareSegmentUpdates(operators)
+	if updatePack.err != nil {
+		return updatePack.err
 	}
-
-	for _, operator := range operators {
-		operator(updatePack)
+	if len(updatePack.l0ManifestUpdates) > 0 {
+		prepared := updatePack.l0ManifestUpdates
+		// The pack owns its segment clones. Neither object-store I/O nor the
+		// wait for the commit pool may hold the global metadata lock.
+		m.segMu.Unlock()
+		err := commitL0ManifestUpdates(prepared)
+		m.segMu.Lock()
+		if err != nil {
+			return err
+		}
+		paths := make(map[int64]string, len(prepared))
+		for _, update := range prepared {
+			current := m.segments.GetSegment(update.segmentID)
+			if current == nil || current.GetState() != update.segment.GetState() || current.GetManifestPath() != update.baseManifest {
+				delete(update.committedV3Manifests, update.segmentID)
+				return merr.WrapErrServiceUnavailableMsg("L0 manifest base changed during commit, segmentID=%d", update.segmentID)
+			}
+			paths[update.segmentID] = update.manifestPath
+		}
+		// Re-evaluate the operators against the latest records, preserving
+		// ordinary metadata changes made while manifest I/O was in progress.
+		// Input retirement remains in this same catalog publication.
+		updatePack = m.prepareSegmentUpdates(operators)
 		if updatePack.err != nil {
 			return updatePack.err
 		}
-	}
-	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
-		return err
-	}
-	for _, update := range updatePack.l0ManifestUpdates {
-		if !update.apply(updatePack) {
-			return updatePack.err
+		for _, update := range updatePack.l0ManifestUpdates {
+			update.manifestPath = paths[update.segmentID]
+			if !update.apply(updatePack) && updatePack.err != nil {
+				return updatePack.err
+			}
 		}
 	}
 
@@ -2025,6 +2060,27 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	}
 	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
 	return nil
+}
+
+// prepareSegmentUpdates must be called with segMu held. Operators prepare only
+// cloned metadata; all persistence and metric publication happens afterwards.
+func (m *meta) prepareSegmentUpdates(operators []UpdateOperator) *updateSegmentPack {
+	pack := &updateSegmentPack{
+		meta:       m,
+		segments:   make(map[int64]*SegmentInfo),
+		increments: make(map[int64]metastore.BinlogsIncrement),
+		metricMutation: &segMetricMutation{
+			stateChange:             make(segmentMetricStateChange),
+			deferSegmentLabelChange: true,
+		},
+	}
+	for _, operator := range operators {
+		operator(pack)
+		if pack.err != nil {
+			break
+		}
+	}
+	return pack
 }
 
 // UpdateDropChannelSegmentInfo updates segment checkpoints and binlogs before drop
