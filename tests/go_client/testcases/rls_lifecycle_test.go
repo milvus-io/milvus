@@ -332,3 +332,216 @@ func TestRLSToggleSchemaDependencies(t *testing.T) {
 	require.NoError(t, mc.DropRowPolicy(ctx, client.NewDropRowPolicyOption(name, "owner")))
 	require.NoError(t, mc.DropCollectionField(ctx, client.NewDropCollectionFieldOption(name, "owner")))
 }
+
+// Admission failures must preserve the complete definition, not just its name.
+// Small fixtures suffice because these requests fail before segment execution.
+func TestRLSRejectedPolicyDefinitions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+	name := prepareRLSCollection(ctx, t, mc, "", false)
+	owner := "owner == $current_principal"
+	createRLSPolicy(ctx, t, mc, name, "owner", owner, owner, rlsActions...)
+	before, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+	common.CheckErr(t, err, true)
+	for _, operation := range []string{"create", "update"} {
+		for _, test := range []struct {
+			name, using, check, description, message string
+			actions                                  []milvuspb.RowPolicyAction
+		}{
+			{"duplicate_action", owner, "", "", "duplicated", []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Query, milvuspb.RowPolicyAction_Query}},
+			{"too_many_actions", owner, owner, "", "max count", append(slices.Clone(rlsActions), milvuspb.RowPolicyAction_Query)},
+			{"insert_missing_check", "", "", "", "must define", []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Insert}},
+			{"upsert_missing_check", owner, "", "", "check_expr is required", []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Upsert}},
+			{"upsert_missing_using", "", owner, "", "using_expr is required", []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Upsert}},
+			{"query_unused_check", owner, owner, "", "check_expr is not used", []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Query}},
+			{"insert_unused_using", owner, owner, "", "using_expr is not used", []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Insert}},
+			{"invalid_check_field", owner, "missing_field == 1", "", "RLS", rlsActions},
+			{"unsupported_check_operator", owner, "number > 1", "", "RLS", rlsActions},
+			// These boundaries use the default admission quotas from milvus.yaml.
+			{"using_too_long", strings.Repeat(" ", 4096) + owner, owner, "", "using_expr exceeds", rlsActions},
+			{"check_too_long", owner, strings.Repeat(" ", 4096) + owner, "", "check_expr exceeds", rlsActions},
+			{"description_too_long", owner, owner, strings.Repeat("d", 1025), "description exceeds", rlsActions},
+		} {
+			t.Run(operation+"/"+test.name, func(t *testing.T) {
+				if operation == "create" {
+					err = mc.CreateRowPolicy(ctx, client.NewCreateRowPolicyOption(name, "rejected", milvuspb.RowPolicyType_RowPolicyTypePermissive, test.actions...).WithUsingExpr(test.using).WithCheckExpr(test.check).WithDescription(test.description))
+				} else {
+					err = mc.UpdateRowPolicy(ctx, client.NewUpdateRowPolicyOption(name, "owner", milvuspb.RowPolicyType_RowPolicyTypePermissive, test.actions...).WithUsingExpr(test.using).WithCheckExpr(test.check).WithDescription(test.description))
+				}
+				common.CheckErr(t, err, false, test.message)
+				after, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+				common.CheckErr(t, err, true)
+				require.Equal(t, before, after)
+				queryRLS(ctx, t, mc, name, "alice", false, 1, 3)
+				queryRLS(ctx, t, mc, name, "bob", false, 2, 4)
+				queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4)
+			})
+		}
+	}
+}
+
+func TestRLSRejectedTagMutations(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+	name := prepareRLSCollection(ctx, t, mc, "", false)
+	createRLSPolicy(ctx, t, mc, name, "department", "department == $current_principal_tags['department']", "", milvuspb.RowPolicyAction_Query)
+	const original = `{"department":"eng","keep":"original"}`
+	common.CheckErr(t, mc.SetRLSPrincipalTags(ctx, client.NewSetRLSPrincipalTagsOption(name, "alice", original)), true)
+	for _, test := range []struct{ name, payload string }{
+		{"invalid_json", `{"department":"sales",`},
+		{"non_object", `["eng"]`},
+		{"empty", `{}`},
+		{"boolean", `{"department":"sales","bad":true}`},
+		{"null", `{"department":"sales","bad":null}`},
+		{"object", `{"department":"sales","bad":{"x":1}}`},
+		{"nested_array", `{"department":"sales","bad":[[1]]}`},
+		{"mixed_array", `{"department":"sales","bad":["a",1]}`},
+		{"lossy_array", `{"department":"sales","bad":[9007199254740993,1.0]}`},
+		{"non_finite", `{"department":"sales","bad":1e309}`},
+		{"blank_key", `{"department":"sales"," ":"x"}`},
+		{"reserved_key", `{"department":"sales","a'b":"x"}`},
+		{"key_too_long", `{"department":"sales","` + strings.Repeat("k", 129) + `":"x"}`},
+		{"value_too_long", `{"department":"sales","bad":"` + strings.Repeat("v", 1025) + `"}`},
+		{"array_element_too_long", `{"department":"sales","bad":["` + strings.Repeat("v", 1025) + `"]}`},
+		{"array_too_long", `{"department":"sales","bad":[` + strings.Repeat("1,", 1024) + `1]}`},
+	} {
+		t.Run("set/"+test.name, func(t *testing.T) {
+			common.CheckErr(t, mc.SetRLSPrincipalTags(ctx, client.NewSetRLSPrincipalTagsOption(name, "alice", test.payload)), false, "RLS")
+			stored, err := mc.GetRLSPrincipalTags(ctx, client.NewGetRLSPrincipalTagsOption(name, "alice"))
+			common.CheckErr(t, err, true)
+			require.JSONEq(t, original, stored)
+			queryRLS(ctx, t, mc, name, "alice", false, 1, 3, 4)
+		})
+	}
+	for _, key := range []string{"", " \t", "a'b"} {
+		t.Run(fmt.Sprintf("delete/%q", key), func(t *testing.T) {
+			// A valid first key must not be deleted when another key is invalid.
+			common.CheckErr(t, mc.DeleteRLSPrincipalTags(ctx, client.NewDeleteRLSPrincipalTagsOption(name, "alice", "department", key)), false, "RLS")
+			stored, err := mc.GetRLSPrincipalTags(ctx, client.NewGetRLSPrincipalTagsOption(name, "alice"))
+			common.CheckErr(t, err, true)
+			require.JSONEq(t, original, stored)
+			queryRLS(ctx, t, mc, name, "alice", false, 1, 3, 4)
+		})
+	}
+	for _, principal := range []string{"", " \t", strings.Repeat("p", 256)} {
+		t.Run(fmt.Sprintf("principal_length_%d", len(principal)), func(t *testing.T) {
+			common.CheckErr(t, mc.SetRLSPrincipalTags(ctx, client.NewSetRLSPrincipalTagsOption(name, principal, original)), false, "principal")
+			principals, err := mc.ListRLSPrincipals(ctx, client.NewListRLSPrincipalsOption(name))
+			common.CheckErr(t, err, true)
+			require.Equal(t, []string{"alice"}, principals)
+		})
+	}
+	queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4)
+}
+
+func TestRLSRejectedPropertyUpdates(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+	name := prepareRLSCollection(ctx, t, mc, "", false)
+	createRLSPolicy(ctx, t, mc, name, "owner", "owner == $current_principal", "", milvuspb.RowPolicyAction_Query)
+	common.CheckErr(t, mc.SetRLSPrincipalTags(ctx, client.NewSetRLSPrincipalTagsOption(name, "alice", `{"keep":"original"}`)), true)
+	common.CheckErr(t, mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(name).WithProperty("rls.force", true)), true)
+	before, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(name))
+	common.CheckErr(t, err, true)
+	policies, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+	common.CheckErr(t, err, true)
+	for _, test := range []struct {
+		name string
+		call func() error
+	}{
+		{"invalid_enabled", func() error {
+			return mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(name).WithProperty("rls.enabled", "invalid"))
+		}},
+		{"invalid_force", func() error {
+			return mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(name).WithProperty("rls.force", "invalid"))
+		}},
+		{"disable_while_forced", func() error {
+			return mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(name).WithProperty("rls.enabled", false))
+		}},
+		{"drop_enabled_while_forced", func() error {
+			return mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(name, "rls.enabled"))
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			common.CheckErr(t, test.call(), false, "rls.")
+			after, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(name))
+			common.CheckErr(t, err, true)
+			require.Equal(t, before.Properties, after.Properties)
+			current, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+			common.CheckErr(t, err, true)
+			require.Equal(t, policies, current)
+			tags, err := mc.GetRLSPrincipalTags(ctx, client.NewGetRLSPrincipalTagsOption(name, "alice"))
+			common.CheckErr(t, err, true)
+			require.JSONEq(t, `{"keep":"original"}`, tags)
+			common.CheckErr(t, runRLSAction(ctx, mc, name, "alice", true, milvuspb.RowPolicyAction_Query), false, "rls.force")
+			queryRLS(ctx, t, mc, name, "alice", false, 1, 3)
+			queryRLS(ctx, t, mc, name, "bob", false, 2, 4)
+		})
+	}
+}
+
+func TestRLSManagementMissingTargets(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+	name := prepareRLSCollection(ctx, t, mc, "", false)
+	createRLSPolicy(ctx, t, mc, name, "owner", "owner == $current_principal", "", milvuspb.RowPolicyAction_Query)
+	common.CheckErr(t, mc.SetRLSPrincipalTags(ctx, client.NewSetRLSPrincipalTagsOption(name, "alice", `{"keep":"original"}`)), true)
+	before, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+	common.CheckErr(t, err, true)
+	for _, target := range []string{"collection", "database"} {
+		collection, database := name, "default"
+		if target == "collection" {
+			collection = common.GenRandomString("missing_rls_", 8)
+		} else {
+			database = common.GenRandomString("missing_rls_", 8)
+		}
+		for _, test := range []struct {
+			name string
+			call func() error
+		}{
+			{"create_policy", func() error {
+				return mc.CreateRowPolicy(ctx, client.NewCreateRowPolicyOption(collection, "owner", milvuspb.RowPolicyType_RowPolicyTypePermissive, milvuspb.RowPolicyAction_Query).WithUsingExpr("true").WithDbName(database))
+			}},
+			{"update_policy", func() error {
+				return mc.UpdateRowPolicy(ctx, client.NewUpdateRowPolicyOption(collection, "owner", milvuspb.RowPolicyType_RowPolicyTypePermissive, milvuspb.RowPolicyAction_Query).WithUsingExpr("true").WithDbName(database))
+			}},
+			{"drop_policy", func() error {
+				return mc.DropRowPolicy(ctx, client.NewDropRowPolicyOption(collection, "owner").WithDbName(database))
+			}},
+			{"list_policies", func() error {
+				_, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(collection).WithDbName(database))
+				return err
+			}},
+			{"set_tags", func() error {
+				return mc.SetRLSPrincipalTags(ctx, client.NewSetRLSPrincipalTagsOption(collection, "alice", `{"keep":"changed"}`).WithDbName(database))
+			}},
+			{"get_tags", func() error {
+				_, err := mc.GetRLSPrincipalTags(ctx, client.NewGetRLSPrincipalTagsOption(collection, "alice").WithDbName(database))
+				return err
+			}},
+			{"delete_tags", func() error {
+				return mc.DeleteRLSPrincipalTags(ctx, client.NewDeleteRLSPrincipalTagsOption(collection, "alice").WithDbName(database))
+			}},
+			{"list_principals", func() error {
+				_, err := mc.ListRLSPrincipals(ctx, client.NewListRLSPrincipalsOption(collection).WithDbName(database))
+				return err
+			}},
+		} {
+			t.Run(target+"/"+test.name, func(t *testing.T) {
+				common.CheckErr(t, test.call(), false, "not found")
+				current, err := mc.ListRowPolicies(ctx, client.NewListRowPoliciesOption(name))
+				common.CheckErr(t, err, true)
+				require.Equal(t, before, current)
+				tags, err := mc.GetRLSPrincipalTags(ctx, client.NewGetRLSPrincipalTagsOption(name, "alice"))
+				common.CheckErr(t, err, true)
+				require.JSONEq(t, `{"keep":"original"}`, tags)
+				queryRLS(ctx, t, mc, name, "alice", false, 1, 3)
+				queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4)
+			})
+		}
+	}
+}
