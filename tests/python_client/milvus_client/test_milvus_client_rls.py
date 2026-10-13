@@ -1277,6 +1277,7 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
         client = rls_client
         name, rows, metric = self._prepare_rls(client, vector_type, varchar, mixed_segments=True)
         mismatches = []
+        known_tie_mismatches = []
         for principal in ["alice", "bob", "nobody", ""]:
             options = {"rls_principal": principal} if principal else {"skip_rls": True}
             for group, start, count in SEGMENT_GROUPS:
@@ -1314,11 +1315,13 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                         log.info("Binary indexed iteration unsupported: %s", context)
                         continue
                     found_ids = []
+                    page_bounds = set()
                     try:
                         for _ in range(count // ITERATOR_BATCH_SIZE + 3):
                             page = iterator.next()
                             if not page:
                                 break
+                            page_bounds.add(page[-1].distance)
                             for hit in page:
                                 assert hit.id in expected_by_id, (context, "Unauthorized or unexpected ID", hit.id)
                                 actual_row = {field: hit.entity.get(field) for field in FIELDS}
@@ -1336,11 +1339,29 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                     actual = Counter(found_ids)
                     wanted = Counter(expected_by_id.keys())
                     if actual != wanted:
-                        mismatches.append(
-                            f"{context}: missing={list((wanted - actual).elements())}, "
-                            f"unexpected_or_duplicate={list((actual - wanted).elements())}"
-                        )
+                        missing = list((wanted - actual).elements())
+                        extra = list((actual - wanted).elements())
+                        detail = f"{context}: missing={missing}, unexpected_or_duplicate={extra}"
+                        # Quarantine only the confirmed discrete-distance tie loss, after all other checks.
+                        missing_rows = [row for row in expected if row["id"] in set(missing)]
+                        if (
+                            vector_type in [DataType.BINARY_VECTOR, DataType.INT8_VECTOR]
+                            and missing
+                            and not extra
+                            and all(
+                                rls_distance(vector_type, candidates[0]["vector"], row["vector"]) in page_bounds
+                                for row in missing_rows
+                            )
+                        ):
+                            known_tie_mismatches.append(detail)
+                        else:
+                            mismatches.append(detail)
         assert not mismatches, "\n".join(mismatches)
+        if known_tie_mismatches:
+            pytest.xfail(
+                "https://github.com/milvus-io/milvus/issues/54188: SearchIterator drops page-boundary ties\n"
+                + "\n".join(known_tie_mismatches)
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("vector_type", VECTOR_TYPES, ids=lambda value: value.name)
