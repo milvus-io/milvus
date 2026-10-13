@@ -50,6 +50,9 @@ class VecIndexConfig {
     knowhere::Json
     GetBuildBaseParams(DataType data_type) const;
 
+    const knowhere::Json&
+    GetSearchBaseParams() const noexcept;
+
     SearchInfo
     GetSearchConf(const SearchInfo& searchInfo) const;
 
