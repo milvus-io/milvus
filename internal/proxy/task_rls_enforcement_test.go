@@ -656,9 +656,9 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		usingExpr     string
 		wantDenied    bool
 	}{
-		{name: "partition-key full upsert allows authorized rows", usingExpr: "id != 0"},
+		{name: "partition-key full upsert allows authorized rows", usingExpr: "id in [1, 2, 3]"},
 		{name: "partition-key full upsert rejects unauthorized rows", usingExpr: "id == 1", wantDenied: true},
-		{name: "partition-key partial upsert allows authorized rows", partialUpdate: true, usingExpr: "id != 0"},
+		{name: "partition-key partial upsert allows authorized rows", partialUpdate: true, usingExpr: "id in [1, 2, 3]"},
 		{name: "partition-key partial upsert rejects unauthorized rows", partialUpdate: true, usingExpr: "id == 1", wantDenied: true},
 	} {
 		mockey.PatchConvey(tc.name, t, func() {
