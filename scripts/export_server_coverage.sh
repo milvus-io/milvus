@@ -40,6 +40,19 @@ if [[ ! -s "$metadata/build-info.txt" || ! -d "$metadata/gcno" ]]; then
     echo 'Build metadata is missing; package it from the same build as the server' >&2
     exit 1
 fi
+count=0
+while IFS= read -r -d '' counters; do
+    relative=${counters#"$run/cpp/"}
+    if [[ ! -f "$metadata/gcno/${relative%.gcda}.gcno" ]]; then
+        echo "Missing matching build metadata for $relative" >&2
+        exit 1
+    fi
+    count=$((count + 1))
+done < <(find "$run/cpp" -type f -name '*.gcda' -print0)
+if [[ "$count" == 0 ]]; then
+    echo 'Snapshot contains no C++ coverage counters' >&2
+    exit 1
+fi
 env -u LD_PRELOAD "$tools/coverage-covdata" textfmt -i="$run/go" -o="$run/go.out"
 cp -a "$metadata/gcno/." "$run/cpp/"
 cp "$metadata/build-info.txt" "$run/build-info.txt"
