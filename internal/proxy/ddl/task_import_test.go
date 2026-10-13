@@ -106,14 +106,16 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 				mapping := mockey.Mock(importutilv2.GetPartitionMapping).Return(nil, errFor("mapping")).Build()
 				defer mapping.UnPatch()
 			}
-			schema := &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			schema := &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "target", Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 				{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: tc.partitionKey},
 			}}}
 			cache := &MetaCache{}
 			idPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 			defer idPatch.UnPatch()
-			schemaPatch := mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+			schemaPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+				CollID: 100, DBName: "default", Schema: schema,
+			}, nil).Build()
 			defer schemaPatch.UnPatch()
 			partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).To(
 				func(_ *MetaCache, _ context.Context, _, _, name string) (int64, error) {
@@ -156,10 +158,11 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 			}
 			if tc.fileCount > 1 {
 				req.Files = append(req.Files, &internalpb.ImportFile{Paths: []string{"second.json"}})
-				old := Params.DataCoordCfg.MaxFilesPerImportReq.SwapTempValue("1")
-				defer Params.DataCoordCfg.MaxFilesPerImportReq.SwapTempValue(old)
+				limit := &paramtable.Get().DataCoordCfg.MaxFilesPerImportReq
+				old := limit.SwapTempValue("1")
+				defer limit.SwapTempValue(old)
 			}
-			task := &importTask{req: req, node: &Proxy{chMgr: channels}}
+			task := &ImportTask{req: req, node: &mockTaskNode{metaCache: cache, chMgr: channels}}
 			task.MetaCache = cache
 			err := task.PreExecute(context.Background())
 			if tc.wantErr != "" {

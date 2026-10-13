@@ -143,7 +143,7 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	defer start.UnPatch()
 	type mappingBroker struct{ broker.Broker }
 	fake := &mappingBroker{}
-	describe := mockey.Mock((*mappingBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+	describe := mockey.Mock((*mappingBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
 	defer describe.UnPatch()
 	show := mockey.Mock((*mappingBroker).ShowPartitions).To(func(_ *mappingBroker, _ context.Context, _ int64) (*milvuspb.ShowPartitionsResponse, error) {
 		require.True(t, locked, "target IDs must be revalidated under the broadcast lock")
@@ -169,8 +169,8 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	defer transport.UnPatch()
 	s := &Server{broker: fake, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
 	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
-	_, _, err := s.broadcastImport(ctx, "target", 100, []int64{200, 100},
-		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, snapshotImportTestSchema(), 1000, []string{"target_v1"}, "")
+	_, _, err := s.broadcastImport(ctx, 100, []int64{200, 100},
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "", "", false)
 	require.NoError(t, err)
 	require.True(t, called)
 	require.True(t, api.closeCalled.Load())
@@ -194,7 +194,7 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	type testBroker struct{ broker.Broker }
 	fakeBroker := &testBroker{}
 	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
-		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
 	defer describe.UnPatch()
 	var received []int64
 	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
@@ -207,9 +207,9 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	defer transport.UnPatch()
 	server := &Server{broker: fakeBroker}
 	partitionIDs := []int64{20, 10}
-	_, duplicated, err := server.broadcastImport(ctx, "target", 100, partitionIDs,
+	_, duplicated, err := server.broadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), &schemapb.CollectionSchema{}, 1000, []string{"target_v1"}, "")
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", "", false)
 	require.NoError(t, err)
 	require.False(t, duplicated)
 	require.Equal(t, partitionIDs, received)
@@ -220,9 +220,9 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	}}}, snapshotImportTestOptions(), nil).Build()
 	defer invalidExpansion.UnPatch()
 	received = nil
-	_, _, err = server.broadcastImport(ctx, "target", 100, partitionIDs,
+	_, _, err = server.broadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), &schemapb.CollectionSchema{}, 1000, []string{"target_v1"}, "")
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", "", false)
 	require.ErrorContains(t, err, "lost its shared L0 inventory")
 	require.Nil(t, received, "invalid source plans must fail before broadcast")
 }
@@ -242,7 +242,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			files := []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
 				Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1),
 			}}}
-			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			schema := &schemapb.CollectionSchema{Name: "target", Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			}}
 			if stage == "auto_id" {
@@ -264,7 +264,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
 			defer start.UnPatch()
 			describe := mockey.Mock((*boundaryBroker).DescribeCollectionInternal).Return(
-				&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+				&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: schema}, nil).Build()
 			defer describe.UnPatch()
 			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
 				func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
@@ -283,8 +283,8 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			}
 			type boundaryAllocator struct{ allocator.Allocator }
 			s := &Server{meta: &meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
-			_, _, err := s.broadcastImport(context.Background(), "target", 100, []int64{10}, files,
-				opts, schema, 1, []string{"v1"}, "")
+			_, _, err := s.broadcastImport(context.Background(), 100, []int64{10}, files,
+				opts, 1, []string{"v1"}, "", "", false)
 			if stage == "auto_id" {
 				require.NoError(t, err)
 				require.Equal(t, 1, transport.Times())
@@ -316,7 +316,7 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 	type testBroker struct{ broker.Broker }
 	fakeBroker := &testBroker{}
 	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
-		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
 	defer describe.UnPatch()
 	server := &Server{broker: fakeBroker, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
 	for _, encrypted := range []bool{false, true} {
@@ -349,9 +349,9 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 			defer transport.UnPatch()
 			options := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.EZK, Value: suppliedEZK},
 				&commonpb.KeyValuePair{Key: importutilv2.AutoCommitKey, Value: "false"})
-			_, _, err := server.broadcastImport(ctx, "target", 100, []int64{10},
+			_, _, err := server.broadcastImport(ctx, 100, []int64{10},
 				[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-				options, snapshotImportTestSchema(), 1000, []string{"target_v1"}, "")
+				options, 1000, []string{"target_v1"}, "", "", false)
 			require.NoError(t, err)
 			require.Equal(t, "false", received[importutilv2.AutoCommitKey])
 			require.Equal(t, importutilv2.SourceTypeSnapshot, received[importutilv2.SourceType])

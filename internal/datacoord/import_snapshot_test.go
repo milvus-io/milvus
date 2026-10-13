@@ -342,8 +342,8 @@ func TestBroadcastSnapshotImportLargeMetadataReference(t *testing.T) {
 			require.NoError(t, err)
 			require.Less(t, proto.Size(captured[0]), 32)
 			before := start.Times()
-			_, _, err = server.broadcastImport(ctx, "target", 100, []int64{10}, files,
-				snapshotImportTestOptions(), snapshotImportTestSchema(), 1000, []string{"target_v1"}, "")
+			_, _, err = server.broadcastImport(ctx, 100, []int64{10}, files,
+				snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", "", false)
 			require.ErrorIs(t, err, merr.ErrIoFailed)
 			require.Equal(t, before+1, start.Times(), "metadata size must not reject a small WAL reference")
 		})
