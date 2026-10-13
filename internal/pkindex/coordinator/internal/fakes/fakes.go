@@ -20,6 +20,7 @@ package fakes
 
 import (
 	"context"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -27,34 +28,41 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 )
 
 var (
-	// ErrKeyExists is returned by Create when the key already exists.
+	// ErrKeyExists is returned by Save when a key that must not exist exists.
 	ErrKeyExists = errors.New("key already exists")
-	// ErrValueMismatch is returned by Swap when the stored value is not the expected value.
+	// ErrValueMismatch is returned by Save when a key does not hold the expected value.
 	ErrValueMismatch = errors.New("stored value is not the expected value")
 )
 
-// Pointers is an in-memory manifest pointer store. The fields below inject
-// faults; each one applies to the next call only and is then cleared.
+// Pointers is an in-memory manifest pointer store. The fields below
+// inject faults; each one applies to the next call only and is then cleared.
 type Pointers struct {
 	mu sync.Mutex
 	kv map[string]string
 
-	// BeforeWrite is called by the next Create or Swap before it checks its
-	// condition, without the store lock held.
+	// BeforeWrite is called by the next Save before it checks its
+	// conditions, without the store lock held.
 	BeforeWrite func()
-	// WriteErr is returned by the next Create or Swap. When WriteApplies is
-	// true, that call writes the value, without a check of its condition,
-	// before it returns the error.
+	// WriteErr is returned by the next Save. When WriteApplies is true, that
+	// call writes the values, without a check of its conditions, before it
+	// returns the error.
 	WriteErr     error
 	WriteApplies bool
-	// LoadErr is returned by the next Load.
-	LoadErr error
+	// LoadErr is returned by the next Load. When LoadErrKey is not empty,
+	// LoadErr is returned only by the next Load of that key.
+	LoadErr    error
+	LoadErrKey string
+	// MultiLoadErr is returned by the next MultiLoad.
+	MultiLoadErr error
 	// ListErr is returned by the next List.
 	ListErr error
+	// MultiLoads counts the MultiLoad calls.
+	MultiLoads int
 }
 
 // NewPointers returns an empty Pointers.
@@ -68,37 +76,36 @@ func (p *Pointers) Load(ctx context.Context, key string) (string, bool, error) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if err := p.LoadErr; err != nil {
-		p.LoadErr = nil
+	if err := p.LoadErr; err != nil && (p.LoadErrKey == "" || p.LoadErrKey == key) {
+		p.LoadErr, p.LoadErrKey = nil, ""
 		return "", false, err
 	}
 	v, ok := p.kv[key]
 	return v, ok, nil
 }
 
-// Create writes value only when key does not exist.
-func (p *Pointers) Create(_ context.Context, key, value string) error {
-	return p.write(key, value, func() error {
-		if _, ok := p.kv[key]; ok {
-			return errors.Wrapf(ErrKeyExists, "key %s", key)
-		}
-		return nil
-	})
+// MultiLoad returns the value of each key and whether it exists.
+func (p *Pointers) MultiLoad(ctx context.Context, keys []string) ([]string, []bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.MultiLoads++
+	if err := p.MultiLoadErr; err != nil {
+		p.MultiLoadErr = nil
+		return nil, nil, err
+	}
+	values := make([]string, len(keys))
+	found := make([]bool, len(keys))
+	for i, k := range keys {
+		values[i], found[i] = p.kv[k]
+	}
+	return values, found, nil
 }
 
-// Swap writes value only when the value of key equals expected.
-func (p *Pointers) Swap(_ context.Context, key, expected, value string) error {
-	return p.write(key, value, func() error {
-		if v, ok := p.kv[key]; !ok || v != expected {
-			return errors.Wrapf(ErrValueMismatch, "key %s", key)
-		}
-		return nil
-	})
-}
-
-// write runs the injected faults, then writes value when check, called with
-// the store lock held, returns nil.
-func (p *Pointers) write(key, value string, check func() error) error {
+// Save runs the injected faults, then writes saves when every condition holds.
+func (p *Pointers) Save(_ context.Context, saves map[string]string, conds ...manifest.Cond) error {
 	p.mu.Lock()
 	hook := p.BeforeWrite
 	p.BeforeWrite = nil
@@ -113,14 +120,20 @@ func (p *Pointers) write(key, value string, check func() error) error {
 		applies := p.WriteApplies
 		p.WriteErr, p.WriteApplies = nil, false
 		if applies {
-			p.kv[key] = value
+			maps.Copy(p.kv, saves)
 		}
 		return err
 	}
-	if err := check(); err != nil {
-		return err
+	for _, c := range conds {
+		v, ok := p.kv[c.Key]
+		if c.Absent && ok {
+			return errors.Wrapf(ErrKeyExists, "key %s", c.Key)
+		}
+		if !c.Absent && (!ok || v != c.Value) {
+			return errors.Wrapf(ErrValueMismatch, "key %s", c.Key)
+		}
 	}
-	p.kv[key] = value
+	maps.Copy(p.kv, saves)
 	return nil
 }
 

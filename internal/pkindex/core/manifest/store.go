@@ -31,3 +31,19 @@ type ObjectStore interface {
 	Walk(ctx context.Context, prefix string, fn func(key string, modTime time.Time) bool) error
 	MultiRemove(ctx context.Context, keys []string) error
 }
+
+// Cond is a condition on one key of a conditional write to the metadata store
+// of the manifest pointers.
+type Cond struct {
+	Key string
+	// Absent requires that Key does not exist. When Absent is false, Key
+	// must exist and hold Value.
+	Absent bool
+	Value  string
+}
+
+// KeyAbsent returns the condition that key does not exist.
+func KeyAbsent(key string) Cond { return Cond{Key: key, Absent: true} }
+
+// ValueIs returns the condition that key exists and holds value.
+func ValueIs(key, value string) Cond { return Cond{Key: key, Value: value} }

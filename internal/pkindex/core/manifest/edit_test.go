@@ -29,11 +29,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 )
 
-func claimed(t *testing.T, term int64) *pkindexpb.Manifest {
-	m, changed, err := ApplyClaim(nil, Claim{CollectionID: 1, VChannel: "v", PChannelTerm: term, PKDataType: schemapb.DataType_Int64, SSTBasePath: "b"})
-	require.NoError(t, err)
-	require.True(t, changed)
-	return m
+// flush returns a flush of vchannel "v" of collection 1 with an Int64
+// primary key and SST base path "b".
+func flush(term int64, tick uint64, ids ...int64) Flush {
+	return Flush{
+		CollectionID: 1, VChannel: "v", SSTBasePath: "b", PKDataType: schemapb.DataType_Int64,
+		PChannelTerm: term, AddSSTs: ssts(ids...), CheckpointTimeTick: tick,
+	}
 }
 
 func ssts(ids ...int64) []*pkindexpb.SSTRef {
@@ -52,96 +54,116 @@ func ids(m *pkindexpb.Manifest) []int64 {
 	return out
 }
 
-func TestApplyClaim(t *testing.T) {
-	m := claimed(t, 5)
-	assert.EqualValues(t, 1, m.GetVersion())
-	assert.EqualValues(t, 5, m.GetPchannelTerm())
-	assert.Equal(t, "b", m.GetSstBasePath())
-
-	same, changed, err := ApplyClaim(m, Claim{PChannelTerm: 5, PKDataType: schemapb.DataType_Int64})
-	require.NoError(t, err)
-	assert.False(t, changed)
-	assert.Same(t, m, same)
-
-	up, changed, err := ApplyClaim(m, Claim{PChannelTerm: 6, PKDataType: schemapb.DataType_Int64})
+func TestApplyPChannelClaim(t *testing.T) {
+	first, changed, err := ApplyPChannelClaim(nil, "p", 5)
 	require.NoError(t, err)
 	assert.True(t, changed)
-	assert.EqualValues(t, 2, up.GetVersion())
-	assert.EqualValues(t, 6, up.GetPchannelTerm())
-	assert.EqualValues(t, 5, m.GetPchannelTerm(), "input must not change")
+	assert.EqualValues(t, 5, first.GetPchannelTerm())
 
-	_, _, err = ApplyClaim(up, Claim{PChannelTerm: 5, PKDataType: schemapb.DataType_Int64})
+	same, changed, err := ApplyPChannelClaim(first, "p", 5)
+	require.NoError(t, err)
+	assert.False(t, changed, "the same term is idempotent")
+	assert.Same(t, first, same)
+
+	up, changed, err := ApplyPChannelClaim(first, "p", 6)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.EqualValues(t, 6, up.GetPchannelTerm())
+	assert.EqualValues(t, 5, first.GetPchannelTerm(), "input must not change")
+
+	_, _, err = ApplyPChannelClaim(up, "p", 5)
 	assert.True(t, errors.Is(err, ErrFenced))
-	_, _, err = ApplyClaim(up, Claim{PChannelTerm: 7, PKDataType: schemapb.DataType_VarChar})
-	assert.True(t, errors.Is(err, ErrSchemaMismatch))
-	_, _, err = ApplyClaim(up, Claim{PChannelTerm: 5, PKDataType: schemapb.DataType_VarChar})
-	assert.True(t, errors.Is(err, ErrFenced), "a stale owner learns it is fenced before the type check")
+}
+
+func TestCheckFlushTerm(t *testing.T) {
+	rec := &pkindexpb.PChannelClaim{PchannelTerm: 5}
+	assert.NoError(t, CheckFlushTerm(rec, "p", 5))
+	assert.True(t, errors.Is(CheckFlushTerm(rec, "p", 4), ErrFenced))
+	assert.True(t, errors.Is(CheckFlushTerm(rec, "p", 6), ErrNotClaimed))
+	assert.True(t, errors.Is(CheckFlushTerm(nil, "p", 5), ErrNotClaimed))
+}
+
+// The first flush of a vchannel creates version 1 from the fields of the flush.
+func TestApplyFlushCreatesFirstVersion(t *testing.T) {
+	m, changed, err := ApplyFlush(nil, flush(5, 100, 2, 1))
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.EqualValues(t, 1, m.GetVersion())
+	assert.EqualValues(t, 1, m.GetCollectionId())
+	assert.Equal(t, "v", m.GetVchannel())
+	assert.Equal(t, "b", m.GetSstBasePath())
+	assert.Equal(t, schemapb.DataType_Int64, m.GetPkDataType())
+	assert.EqualValues(t, 5, m.GetLastFlushTerm())
+	assert.EqualValues(t, 100, m.GetCheckpointTimeTick())
+	assert.Equal(t, []int64{2, 1}, ids(m))
 }
 
 func TestApplyFlush(t *testing.T) {
-	m := claimed(t, 5)
-	_, _, err := ApplyFlush(nil, Flush{PChannelTerm: 5})
-	assert.True(t, errors.Is(err, ErrNotClaimed))
-
-	m1, changed, err := ApplyFlush(m, Flush{PChannelTerm: 5, AddSSTs: ssts(2, 1), CheckpointTimeTick: 100})
+	m1, changed, err := ApplyFlush(nil, flush(5, 100, 2, 1))
 	require.NoError(t, err)
 	require.True(t, changed)
-	assert.Equal(t, []int64{2, 1}, ids(m1))
-	assert.EqualValues(t, 100, m1.GetCheckpointTimeTick())
 
-	m2, _, err := ApplyFlush(m1, Flush{PChannelTerm: 5, AddSSTs: ssts(3), CheckpointTimeTick: 200})
+	m2, _, err := ApplyFlush(m1, flush(5, 200, 3))
 	require.NoError(t, err)
 	assert.Equal(t, []int64{3, 2, 1}, ids(m2), "new SSTs go first")
+	assert.EqualValues(t, 2, m2.GetVersion())
 
 	// a retry of an applied flush returns the manifest unchanged
-	again, changed, err := ApplyFlush(m2, Flush{PChannelTerm: 5, AddSSTs: ssts(3), CheckpointTimeTick: 200})
+	again, changed, err := ApplyFlush(m2, flush(5, 200, 3))
 	require.NoError(t, err)
 	assert.False(t, changed)
 	assert.Same(t, m2, again)
 
-	// the same term with an old checkpoint is an applied retry, whatever its SSTs are
-	old, changed, err := ApplyFlush(m2, Flush{PChannelTerm: 5, AddSSTs: ssts(9), CheckpointTimeTick: 150})
+	// the last flush term with an old checkpoint is an applied retry, whatever its SSTs are
+	old, changed, err := ApplyFlush(m2, flush(5, 150, 9))
 	require.NoError(t, err)
 	assert.False(t, changed)
 	assert.Same(t, m2, old)
-	_, _, err = ApplyFlush(m2, Flush{PChannelTerm: 5, AddSSTs: ssts(1), CheckpointTimeTick: 300})
+	_, _, err = ApplyFlush(m2, flush(5, 300, 1))
 	assert.True(t, errors.Is(err, ErrDuplicateSST))
-	_, _, err = ApplyFlush(m2, Flush{PChannelTerm: 4, AddSSTs: ssts(9), CheckpointTimeTick: 300})
-	assert.True(t, errors.Is(err, ErrFenced))
 
-	up, _, err := ApplyFlush(m2, Flush{PChannelTerm: 6, AddSSTs: ssts(9), CheckpointTimeTick: 300})
+	other := flush(6, 300, 9)
+	other.PKDataType = schemapb.DataType_VarChar
+	_, _, err = ApplyFlush(m2, other)
+	assert.True(t, errors.Is(err, ErrSchemaMismatch))
+
+	up, _, err := ApplyFlush(m2, flush(6, 300, 9))
 	require.NoError(t, err)
-	assert.EqualValues(t, 6, up.GetPchannelTerm(), "a higher term is accepted and recorded")
-	assert.EqualValues(t, 5, m2.GetPchannelTerm(), "input must not change")
+	assert.EqualValues(t, 6, up.GetLastFlushTerm(), "the flush term becomes the last flush term")
+	assert.EqualValues(t, 5, m2.GetLastFlushTerm(), "input must not change")
 	assert.Equal(t, []int64{3, 2, 1}, ids(m2), "input must not change")
 }
 
 func TestApplyFlushRetryAfterCompaction(t *testing.T) {
-	m, _, err := ApplyFlush(claimed(t, 5), Flush{PChannelTerm: 5, AddSSTs: ssts(2, 1), CheckpointTimeTick: 100})
+	m, _, err := ApplyFlush(nil, flush(5, 100, 2, 1))
 	require.NoError(t, err)
-	c, _, err := ApplyCompact(m, Compact{Inputs: []int64{2, 1}, Outputs: ssts(10)})
+	c, _, err := ApplyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(10)})
 	require.NoError(t, err)
 
-	again, changed, err := ApplyFlush(c, Flush{PChannelTerm: 5, AddSSTs: ssts(2, 1), CheckpointTimeTick: 100})
+	again, changed, err := ApplyFlush(c, flush(5, 100, 2, 1))
 	require.NoError(t, err)
 	assert.False(t, changed)
 	assert.Same(t, c, again)
 }
 
-func TestApplyFlushHigherTermOldCheckpoint(t *testing.T) {
-	m, _, err := ApplyFlush(claimed(t, 5), Flush{PChannelTerm: 5, AddSSTs: ssts(1), CheckpointTimeTick: 100})
+// A flush whose checkpoint does not move forward and whose term is not the
+// last flush term is a regression, not a retry.
+func TestApplyFlushOtherTermOldCheckpoint(t *testing.T) {
+	m, _, err := ApplyFlush(nil, flush(5, 100, 1))
 	require.NoError(t, err)
-	for _, tick := range []uint64{100, 50} {
-		_, _, err = ApplyFlush(m, Flush{PChannelTerm: 6, AddSSTs: ssts(1), CheckpointTimeTick: tick})
-		assert.True(t, errors.Is(err, ErrCheckpointRegressed), "%d", tick)
+	for _, term := range []int64{4, 6} {
+		for _, tick := range []uint64{100, 50} {
+			_, _, err = ApplyFlush(m, flush(term, tick, 1))
+			assert.True(t, errors.Is(err, ErrCheckpointRegressed), "term %d tick %d", term, tick)
+		}
 	}
 }
 
 func TestApplyFlushCheckpointOnly(t *testing.T) {
-	m, _, err := ApplyFlush(claimed(t, 5), Flush{PChannelTerm: 5, AddSSTs: ssts(1), CheckpointTimeTick: 100})
+	m, _, err := ApplyFlush(nil, flush(5, 100, 1))
 	require.NoError(t, err)
 
-	adv, changed, err := ApplyFlush(m, Flush{PChannelTerm: 5, CheckpointTimeTick: 200})
+	adv, changed, err := ApplyFlush(m, flush(5, 200))
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.EqualValues(t, m.GetVersion()+1, adv.GetVersion())
@@ -149,23 +171,22 @@ func TestApplyFlushCheckpointOnly(t *testing.T) {
 	assert.Equal(t, []int64{1}, ids(adv))
 
 	// an empty flush that does not move the checkpoint is an applied retry
-	same, changed, err := ApplyFlush(adv, Flush{PChannelTerm: 5, CheckpointTimeTick: 200})
+	same, changed, err := ApplyFlush(adv, flush(5, 200))
 	require.NoError(t, err)
 	assert.False(t, changed)
 	assert.Same(t, adv, same)
 }
 
 func TestApplyFlushDuplicateInsideAddSSTs(t *testing.T) {
-	m := claimed(t, 5)
-	_, _, err := ApplyFlush(m, Flush{PChannelTerm: 5, AddSSTs: ssts(7, 7), CheckpointTimeTick: 100})
+	_, _, err := ApplyFlush(nil, flush(5, 100, 7, 7))
 	assert.True(t, errors.Is(err, ErrDuplicateSST))
 }
 
-func TestApplyCompact(t *testing.T) {
-	m, _, err := ApplyFlush(claimed(t, 1), Flush{PChannelTerm: 1, AddSSTs: ssts(4, 3, 2, 1), CheckpointTimeTick: 10})
+func TestApplyCompaction(t *testing.T) {
+	m, _, err := ApplyFlush(nil, flush(1, 10, 4, 3, 2, 1))
 	require.NoError(t, err)
 
-	c, changed, err := ApplyCompact(m, Compact{Inputs: []int64{2, 1}, Outputs: ssts(10)})
+	c, changed, err := ApplyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(10)})
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, []int64{4, 3, 10}, ids(c))
@@ -174,48 +195,48 @@ func TestApplyCompact(t *testing.T) {
 	assert.Equal(t, []int64{4, 3, 2, 1}, ids(m), "input must not change")
 
 	for _, in := range [][]int64{{3, 1}, {1, 2}, {5}, {}} {
-		_, _, err := ApplyCompact(m, Compact{Inputs: in, Outputs: ssts(10)})
+		_, _, err := ApplyCompaction(m, Compaction{Inputs: in, Outputs: ssts(10)})
 		assert.True(t, errors.Is(err, ErrStaleEdit), "%v", in)
 	}
-	_, _, err = ApplyCompact(m, Compact{Inputs: []int64{2, 1}, Outputs: ssts(4)})
+	_, _, err = ApplyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(4)})
 	assert.True(t, errors.Is(err, ErrDuplicateSST))
-	_, _, err = ApplyCompact(nil, Compact{Inputs: []int64{1}, Outputs: ssts(10)})
+	_, _, err = ApplyCompaction(nil, Compaction{Inputs: []int64{1}, Outputs: ssts(10)})
 	assert.True(t, errors.Is(err, ErrNotClaimed))
 }
 
 // A retry of an applied compaction finds none of its inputs and all of its
 // outputs in the list: it returns cur unchanged.
-func TestApplyCompactRetryOfApplied(t *testing.T) {
-	m, _, err := ApplyFlush(claimed(t, 1), Flush{PChannelTerm: 1, AddSSTs: ssts(4, 3, 2, 1), CheckpointTimeTick: 10})
+func TestApplyCompactionRetryOfApplied(t *testing.T) {
+	m, _, err := ApplyFlush(nil, flush(1, 10, 4, 3, 2, 1))
 	require.NoError(t, err)
-	edit := Compact{Inputs: []int64{2, 1}, Outputs: ssts(11, 10)}
-	c, changed, err := ApplyCompact(m, edit)
+	edit := Compaction{Inputs: []int64{2, 1}, Outputs: ssts(11, 10)}
+	c, changed, err := ApplyCompaction(m, edit)
 	require.NoError(t, err)
 	require.True(t, changed)
 
-	again, changed, err := ApplyCompact(c, edit)
+	again, changed, err := ApplyCompaction(c, edit)
 	require.NoError(t, err)
 	assert.False(t, changed)
 	assert.Same(t, c, again)
 
 	// a flush after the compaction does not change the result
-	f, _, err := ApplyFlush(c, Flush{PChannelTerm: 1, AddSSTs: ssts(20), CheckpointTimeTick: 20})
+	f, _, err := ApplyFlush(c, flush(1, 20, 20))
 	require.NoError(t, err)
-	again, changed, err = ApplyCompact(f, edit)
+	again, changed, err = ApplyCompaction(f, edit)
 	require.NoError(t, err)
 	assert.False(t, changed)
 	assert.Same(t, f, again)
 }
 
 // Every other mismatch of the inputs and the outputs is a stale edit.
-func TestApplyCompactMixedIsStale(t *testing.T) {
-	m, _, err := ApplyFlush(claimed(t, 1), Flush{PChannelTerm: 1, AddSSTs: ssts(4, 3, 2, 1), CheckpointTimeTick: 10})
+func TestApplyCompactionMixedIsStale(t *testing.T) {
+	m, _, err := ApplyFlush(nil, flush(1, 10, 4, 3, 2, 1))
 	require.NoError(t, err)
 	// list after this compaction: 4 3 11 10
-	c, _, err := ApplyCompact(m, Compact{Inputs: []int64{2, 1}, Outputs: ssts(11, 10)})
+	c, _, err := ApplyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(11, 10)})
 	require.NoError(t, err)
 
-	cases := map[string]Compact{
+	cases := map[string]Compaction{
 		"some inputs present, outputs present":  {Inputs: []int64{3, 2}, Outputs: ssts(11, 10)},
 		"some inputs present, outputs absent":   {Inputs: []int64{3, 2}, Outputs: ssts(30)},
 		"inputs present not contiguous":         {Inputs: []int64{4, 11}, Outputs: ssts(30)},
@@ -224,19 +245,19 @@ func TestApplyCompactMixedIsStale(t *testing.T) {
 		"no inputs, outputs present":            {Inputs: []int64{}, Outputs: ssts(11, 10)},
 	}
 	for name, edit := range cases {
-		_, _, err := ApplyCompact(c, edit)
+		_, _, err := ApplyCompaction(c, edit)
 		assert.True(t, errors.Is(err, ErrStaleEdit), name)
 	}
 }
 
-func TestApplyCompactDuplicateInsideOutputs(t *testing.T) {
-	m, _, err := ApplyFlush(claimed(t, 1), Flush{PChannelTerm: 1, AddSSTs: ssts(2, 1), CheckpointTimeTick: 10})
+func TestApplyCompactionDuplicateInsideOutputs(t *testing.T) {
+	m, _, err := ApplyFlush(nil, flush(1, 10, 2, 1))
 	require.NoError(t, err)
-	_, _, err = ApplyCompact(m, Compact{Inputs: []int64{2, 1}, Outputs: ssts(10, 10)})
+	_, _, err = ApplyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(10, 10)})
 	assert.True(t, errors.Is(err, ErrDuplicateSST))
 }
 
-// Flush and Compact commute: applying all compactions before all flushes, or
+// Flush and Compaction commute: applying all compactions before all flushes, or
 // interleaving them in any way that keeps each kind's own order, gives the same
 // manifest.
 func TestFlushAndCompactCommute(t *testing.T) {
@@ -247,7 +268,7 @@ func TestFlushAndCompactCommute(t *testing.T) {
 		for i := range base {
 			base[i] = int64(n - i)
 		}
-		start, _, err := ApplyFlush(claimed(t, 1), Flush{PChannelTerm: 1, AddSSTs: ssts(base...), CheckpointTimeTick: 10})
+		start, _, err := ApplyFlush(nil, flush(1, 10, base...))
 		require.NoError(t, err)
 
 		nextID := int64(1000)
@@ -262,21 +283,22 @@ func TestFlushAndCompactCommute(t *testing.T) {
 
 		flushes := make([]Flush, 1+r.Intn(4))
 		for i := range flushes {
-			flushes[i] = Flush{PChannelTerm: 1, AddSSTs: fresh(r.Intn(3)), CheckpointTimeTick: uint64(20 + 10*i)}
+			flushes[i] = flush(1, uint64(20+10*i))
+			flushes[i].AddSSTs = fresh(r.Intn(3))
 		}
 
 		// compactions take disjoint contiguous runs of the base list
-		var compacts []Compact
+		var compacts []Compaction
 		for pos, want := 0, 1+r.Intn(3); pos < n && len(compacts) < want; {
 			from := pos + r.Intn(n-pos)
 			to := from + 1 + r.Intn(n-from)
-			compacts = append(compacts, Compact{Inputs: base[from:to], Outputs: fresh(1 + r.Intn(2))})
+			compacts = append(compacts, Compaction{Inputs: base[from:to], Outputs: fresh(1 + r.Intn(2))})
 			pos = to + 1
 		}
 
 		compactFirst := start
 		for _, c := range compacts {
-			compactFirst, _, err = ApplyCompact(compactFirst, c)
+			compactFirst, _, err = ApplyCompaction(compactFirst, c)
 			require.NoError(t, err)
 		}
 		for _, f := range flushes {
@@ -290,7 +312,7 @@ func TestFlushAndCompactCommute(t *testing.T) {
 				mixed, _, err = ApplyFlush(mixed, flushes[fi])
 				fi++
 			} else {
-				mixed, _, err = ApplyCompact(mixed, compacts[ci])
+				mixed, _, err = ApplyCompaction(mixed, compacts[ci])
 				ci++
 			}
 			require.NoError(t, err)
