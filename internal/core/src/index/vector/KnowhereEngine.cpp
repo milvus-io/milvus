@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "common/Utils.h"
+#include "index/Utils.h"
 #include "knowhere/index/index_factory.h"
 #include "knowhere/index/mrl_index_node.h"
 
