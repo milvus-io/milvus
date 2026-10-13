@@ -18,6 +18,7 @@
 
 #ifdef BUILD_DISK_ANN
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -118,7 +119,8 @@ BuildDisk(const std::string& raw_path,
           int64_t dim = kDim,
           int64_t logical_rows = kRows,
           const std::string& offsets_path = {},
-          bool mmap = false) {
+          bool mmap = false,
+          knowhere::ViewDataOp view_data = {}) {
     auto adapted = AdaptIndexType({
         .index_type = knowhere::IndexEnum::INDEX_DISKANN,
         .field_type =
@@ -135,6 +137,10 @@ BuildDisk(const std::string& raw_path,
                    {DISK_ANN_BUILD_DRAM_BUDGET, "2"},
                    {DISK_ANN_BUILD_THREAD_NUM, "2"}},
     });
+    if (view_data) {
+        adapted.params[MRL_DIM_KEY] = dim / 2;
+        adapted.params[WITH_MRL_REFINE_KEY] = true;
+    }
     adapted.params["local_dir"] = staging_dir;
     auto builder =
         BuilderRegistry<PreparedVectorBuildFiles<T>>::Instance().Create(
@@ -185,6 +191,7 @@ BuildDisk(const std::string& raw_path,
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = mmap;
     options.mmap_dir_path = staging_dir;
+    options.vector_data_view = std::move(view_data);
     opened.base =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
@@ -260,6 +267,47 @@ TEST(VectorDiskFamilyTest, Float16BuildLoadSearch) {
 
 TEST(VectorDiskFamilyTest, BFloat16BuildLoadSearch) {
     RunOrdinaryDiskSearch<bfloat16>(false);
+}
+
+TEST(VectorDiskFamilyTest, MRLBuildLoadAndRefine) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_mrl_XXXXXX", "vector disk MRL test");
+    const auto raw_path = files->Path() + "/raw";
+    auto values = MakeRows<float>();
+    std::copy_n(values.data(), kDim / 2, values.data() + kDim);
+    WriteRaw(raw_path, values, kRows, kDim);
+    OpenedDiskIndex<float> opened;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              "L2",
+              kDim,
+              kRows,
+              {},
+              false,
+              [&values](size_t id) {
+                  return static_cast<const void*>(values.data() + id * kDim);
+              });
+    ASSERT_NE(opened.base, nullptr);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->Dim(), kDim);
+    EXPECT_FALSE(reader->HasRawData());
+
+    VectorSearchParams params{
+        .search_params_ = {{DISK_ANN_QUERY_LIST, 8}},
+        .metric_type_ = "L2",
+        .topk_ = 2,
+    };
+    SearchResult result;
+    reader->Search(GenDataset(1, kDim, values.data() + kDim),
+                   params,
+                   BitsetView{},
+                   nullptr,
+                   result);
+    ASSERT_EQ(result.seg_offsets_.size(), 2);
+    EXPECT_EQ(result.seg_offsets_[0], 1);
+    EXPECT_FLOAT_EQ(result.distances_[0], 0.0F);
 }
 
 TEST(VectorDiskFamilyTest, MmapCapabilityAndSearch) {

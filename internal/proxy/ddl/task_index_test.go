@@ -2136,7 +2136,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	})
 
 	t.Run("case 3a, AutoIndex preserves MRL parameters", func(t *testing.T) {
-		task := &createIndexTask{
+		task := &CreateIndexTask{
 			fieldSchema: fieldSchema,
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
