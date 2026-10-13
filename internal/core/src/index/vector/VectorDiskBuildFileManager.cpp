@@ -375,13 +375,22 @@ VectorDiskBuildFileManager::AddFileMeta(const milvus::FileMeta& file_meta) {
                       file_meta.file_size);
         }
         std::lock_guard lock(mutex_);
+        if (const auto completed = files_.find(file_meta.file_path);
+            completed != files_.end()) {
+            if (completed->second.size != file_meta.file_size ||
+                completed->second.transport !=
+                    VectorDiskFileTransport::RawUnsliced) {
+                ThrowInfo(FileWriteFailed,
+                          "local vector output {} has conflicting size or "
+                          "transport",
+                          file_meta.file_path);
+            }
+            return true;
+        }
         AssertInfo(
             open_outputs_.find(file_meta.file_path) != open_outputs_.end(),
             "local vector output metadata {} has no open stream",
             file_meta.file_path);
-        AssertInfo(files_.find(file_meta.file_path) == files_.end(),
-                   "local vector output {} is already complete",
-                   file_meta.file_path);
         const auto [entry, inserted] =
             pending_meta_.emplace(file_meta.file_path, file_meta.file_size);
         if (!inserted && entry->second != file_meta.file_size) {
