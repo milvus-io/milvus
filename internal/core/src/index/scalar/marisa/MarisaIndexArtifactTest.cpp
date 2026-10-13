@@ -31,6 +31,12 @@
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
+#include <filesystem>
+#include <variant>
+#include <memory>
+#include <utility>
+#include "index/scalar/marisa/MarisaIndexLoader.h"
+#include "index/test_utils/LoaderTestAccess.h"
 
 namespace milvus::index::test {
 namespace {
@@ -296,7 +302,11 @@ TEST(MarisaIndexArtifactTest, RejectsCorruptTriePayload) {
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>("MarisaVarcharNonNull");
     auto persisted = SerializedMarisa(backend.Name());
-    persisted.entries[MARISA_TRIE_INDEX] = {0x00, 0x01, 0x02};
+    auto& trie = persisted.entries.at(MARISA_TRIE_INDEX);
+    ASSERT_FALSE(trie.empty());
+    // A short file raises MARISA_IO_ERROR; corrupt a complete header to test
+    // the library's distinct MARISA_FORMAT_ERROR classification.
+    trie.front() ^= uint8_t{0xff};
 
     ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
         static_cast<void>(OpenV3(backend, persisted, {.row_count = 5}));
@@ -398,6 +408,32 @@ TEST(MarisaIndexArtifactTest, RejectsCsrOffsetForWrongRow) {
 
     ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
         static_cast<void>(OpenV3(backend, persisted, {.row_count = 5}));
+    });
+}
+
+TEST(MarisaIndexArtifactTest, TrieReadFailureReportsFileReadFailed) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("MarisaVarcharNonNull");
+    auto input = std::make_shared<storage::RemoteInputStream>(
+        std::make_shared<arrow::io::BufferReader>(
+            MakePackedArtifactBuffer(SerializedMarisa(backend.Name()))));
+    auto source = storage::IndexEntryReader::Open(input, input->Size());
+    auto staging = storage::LocalDirectory::CreateOwned(
+        std::filesystem::temp_directory_path().string(),
+        "marisa-read-error-XXXXXX",
+        "marisa read error test");
+    storage::LoadOptions options;
+    options.mmap_dir_path = staging->Path();
+    options.params = backend.LoadParams({.row_count = 5});
+    auto plan = LoaderTestAccess::Plan<MarisaIndexLoader>(
+        source->Directory(), source->IndexMeta(), options);
+    const auto& trie =
+        std::get<storage::FileEntryTarget>(plan.At(MARISA_TRIE_INDEX).target);
+    // Opening succeeds; MARISA read then fails on the directory with EISDIR.
+    ASSERT_TRUE(std::filesystem::create_directory(trie.staging->path));
+    ExpectSegcoreError(ErrorCode::FileReadFailed, [&] {
+        static_cast<void>(
+            LoaderTestAccess::Finish<MarisaIndexLoader>(plan, options));
     });
 }
 
