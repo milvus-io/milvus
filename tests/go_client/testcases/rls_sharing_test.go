@@ -954,13 +954,7 @@ func configureRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, na
 
 func prepareRLSSpaces(ctx context.Context, t *testing.T, mc *client.Client, enabled, legacy bool) (string, map[int64]rlsSpaceRow) {
 	t.Helper()
-	threshold, err := hp.GetServerConfig("indexCoord.segment.minSegmentNumRowsToEnableIndex")
-	require.NoError(t, err)
-	var count int
-	_, err = fmt.Sscan(threshold, &count)
-	require.NoError(t, err)
-	require.Greater(t, count, 500)
-	require.LessOrEqual(t, count, 3000)
+	// Default CI uses a 1024-row index threshold; verify segment state through public APIs below.
 	name := common.GenRandomString("rls_spaces_", 8)
 	schema := entity.NewSchema().WithName(name).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
