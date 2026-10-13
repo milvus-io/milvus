@@ -256,6 +256,18 @@ The fixture waits for asynchronous sorting after Flush. If MajorCompaction
 returns an existing Sort trigger, it waits for that task and retries within a
 bounded deadline; only actual Clustering plans count as clustering coverage.
 
+Negative metadata cases check rejected policy, tag, and property changes and
+missing targets without changing existing state. `TestRLSSpace*` uses synthetic
+tenants and spaces to cover read/write memberships, direct/group/link sharing,
+revocation, resource moves, and enabling RLS on existing data. Legacy-schema
+migration adds nullable permission fields and checks partial backfill before
+and after enforcement. Adding fields seals the original growing segment; the
+case verifies that transition and preserves untouched rows and NULL values.
+
+Strict SearchIterator completeness assertions are retained for the known
+equal-distance pagination issue [#54188](https://github.com/milvus-io/milvus/issues/54188).
+A passing subset does not imply that the complete RLS matrix is green.
+
 ```bash
 cd tests/go_client
 go test -tags=dynamic,test -gcflags='all=-N -l' -count=1 \
