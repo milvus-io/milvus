@@ -67,6 +67,8 @@
 #include "query/PlanImpl.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/Collection.h"
+#include "segcore/segment_c.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
@@ -786,6 +788,75 @@ TEST(test_chunk_segment,
     EXPECT_EQ(new_offsets->GetTotalElementCount(), 0);
     EXPECT_EQ(segment->GetStructElementOffsets(old_label), nullptr);
     EXPECT_EQ(segment->GetStructElementOffsets(old_score), nullptr);
+}
+
+TEST(test_chunk_segment, InitialSegmentsHavePrivateLoadScopes) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto left = schema->AddDebugField("left", DataType::INT64);
+    auto right = schema->AddDebugField("right", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto schema_proto = schema->ToProto();
+    segcore::Collection collection(&schema_proto);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(1);
+    info.set_num_of_rows(16);
+    auto blob = info.SerializeAsString();
+    for (const auto& fields : {std::vector<int64_t>{pk.get(), left.get()},
+                               std::vector<int64_t>{pk.get(), right.get()}}) {
+        CSegmentInterface raw = nullptr;
+        auto status = NewSegmentWithLoadInfoAndLoadFields(
+            &collection,
+            Sealed,
+            1,
+            &raw,
+            false,
+            reinterpret_cast<const uint8_t*>(blob.data()),
+            blob.size(),
+            fields.data(),
+            fields.size());
+        ASSERT_EQ(status.error_code, 0);
+        std::unique_ptr<segcore::SegmentInterface> segment(
+            static_cast<segcore::SegmentInterface*>(raw));
+        auto* sealed =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        auto loaded_schema = sealed->get_schema_snapshot();
+        EXPECT_TRUE(loaded_schema->IsFieldInLoadScope(FieldId(fields[1])));
+        EXPECT_FALSE(loaded_schema->IsFieldInLoadScope(
+            fields[1] == left.get() ? right : left));
+        EXPECT_TRUE(collection.get_schema()->IsFieldInLoadScope(left));
+        EXPECT_TRUE(collection.get_schema()->IsFieldInLoadScope(right));
+    }
+}
+
+TEST(test_chunk_segment, ReadStateLoadScopeReleasesStructOffsets) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto label =
+        schema->AddDebugArrayField("chunks[label]", DataType::VARCHAR, true);
+    auto score =
+        schema->AddDebugArrayField("chunks[score]", DataType::INT32, true);
+    auto dataset = segcore::DataGen(schema, 5, 42, 0, 1, 3);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* primary =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto old = primary->PinReadState();
+    auto offsets = old->GetStructElementOffsets(label);
+    ASSERT_NE(offsets, nullptr);
+    std::weak_ptr<typename decltype(offsets)::element_type> retired = offsets;
+    offsets.reset();
+
+    auto target = std::make_shared<Schema>(*schema);
+    target->UpdateLoadFields({pk.get()});
+    auto narrowed = primary->PinReadState();
+    narrowed->Reopen(target);
+    primary->AdoptReadState(*narrowed);
+    EXPECT_EQ(primary->GetStructElementOffsets(label), nullptr);
+    EXPECT_EQ(primary->GetStructElementOffsets(score), nullptr);
+    EXPECT_FALSE(retired.expired());  // the old View still owns its offsets
+    old.reset();
+    EXPECT_TRUE(retired.expired());
 }
 
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {

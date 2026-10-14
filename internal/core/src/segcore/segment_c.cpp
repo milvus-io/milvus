@@ -119,12 +119,20 @@ std::unique_ptr<milvus::segcore::SegmentInterface>
 CreateSegment(milvus::segcore::Collection* col,
               SegmentType seg_type,
               int64_t segment_id,
-              bool is_sorted_by_pk) {
+              bool is_sorted_by_pk,
+              const int64_t* load_fields = nullptr,
+              int64_t load_field_count = 0) {
+    auto schema = col->get_schema();
+    if (load_field_count > 0) {
+        schema = std::make_shared<milvus::Schema>(*schema);
+        schema->UpdateLoadFields(
+            std::vector<int64_t>(load_fields, load_fields + load_field_count));
+    }
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
         case Growing: {
             auto seg = milvus::segcore::CreateGrowingSegment(
-                col->get_schema(),
+                schema,
                 col->get_index_meta(),
                 segment_id,
                 milvus::segcore::SegcoreConfig::default_config());
@@ -134,7 +142,7 @@ CreateSegment(milvus::segcore::Collection* col,
         case Sealed:
         case Indexing:
             segment = milvus::segcore::CreateSealedSegment(
-                col->get_schema(),
+                schema,
                 col->get_index_meta(),
                 segment_id,
                 milvus::segcore::SegcoreConfig::default_config(),
@@ -176,6 +184,27 @@ NewSegmentWithLoadInfo(CCollection collection,
                        bool is_sorted_by_pk,
                        const uint8_t* load_info_blob,
                        const int64_t load_info_length) {
+    return NewSegmentWithLoadInfoAndLoadFields(collection,
+                                               seg_type,
+                                               segment_id,
+                                               newSegment,
+                                               is_sorted_by_pk,
+                                               load_info_blob,
+                                               load_info_length,
+                                               nullptr,
+                                               0);
+}
+
+CStatus
+NewSegmentWithLoadInfoAndLoadFields(CCollection collection,
+                                    SegmentType seg_type,
+                                    int64_t segment_id,
+                                    CSegmentInterface* newSegment,
+                                    bool is_sorted_by_pk,
+                                    const uint8_t* load_info_blob,
+                                    int64_t load_info_length,
+                                    const int64_t* load_fields,
+                                    int64_t load_field_count) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -186,8 +215,12 @@ NewSegmentWithLoadInfo(CCollection collection,
 
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        auto segment =
-            CreateSegment(col, seg_type, segment_id, is_sorted_by_pk);
+        auto segment = CreateSegment(col,
+                                     seg_type,
+                                     segment_id,
+                                     is_sorted_by_pk,
+                                     load_fields,
+                                     load_field_count);
         segment->SetLoadInfo(std::move(load_info));
         *newSegment = segment.release();
         return milvus::SuccessCStatus();

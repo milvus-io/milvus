@@ -350,3 +350,22 @@ func TestSegmentResourceSharedPreparationSurvivesInitiatorRelease(t *testing.T) 
 func (l *blockedResourceTestLoader) AdoptReadState(s TransformSegment, r segments.ReadState) error {
 	return l.base.AdoptReadState(s, r)
 }
+
+func TestPrunedResourceSlicesReleaseBackingReferences(t *testing.T) {
+	first := &segmentBase{caughtUp: true}
+	second := &segmentBase{caughtUp: true}
+	retired := &preparedSegmentRead{base: first, read: &resourceTestRead{}}
+	live := &preparedSegmentRead{base: second, read: &resourceTestRead{}}
+	r := &segmentResource{
+		reads:    []*preparedSegmentRead{retired, live},
+		bases:    []*segmentBase{first, second},
+		bindings: []*segmentBinding{{prepared: live}},
+	}
+	readBacking, baseBacking := r.reads[:], r.bases[:]
+	require.Len(t, r.pruneReadsLocked(), 1)
+	require.Equal(t, []*preparedSegmentRead{live}, r.reads)
+	require.Nil(t, readBacking[1])
+	require.Equal(t, []*segmentBase{first}, r.pruneBasesLocked())
+	require.Equal(t, []*segmentBase{second}, r.bases)
+	require.Nil(t, baseBacking[1])
+}

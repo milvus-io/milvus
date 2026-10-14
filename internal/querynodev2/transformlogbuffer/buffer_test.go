@@ -726,3 +726,36 @@ func newTestQueryView(vchannel string, startAfter uint64) *qviews.QueryViewAtQue
 		&viewpb.QueryViewOfQueryNode{NodeId: 1},
 	).(*qviews.QueryViewAtQueryNode)
 }
+
+// Trimming is authorized by the oldest retained View, not by the progress of
+// currently placed segments: the remaining history is needed by future balance.
+func TestTrimReleasesPayloadsButRetainsViewRange(t *testing.T) {
+	b := newVChannelBuffer(nil, "p", "v", 0)
+	b.guards[2] = 1
+	b.guards[6] = 1
+	for tick := uint64(1); tick <= 8; tick++ {
+		b.entries = append(b.entries, &streamingpb.TransformLogEntry{TimeTick: tick})
+	}
+	backing := b.entries[:cap(b.entries)]
+	b.trimLocked()
+	require.Equal(t, uint64(2), b.retentionStart)
+	require.Len(t, b.entries, 6)
+	for _, entry := range backing[len(b.entries):] {
+		require.Nil(t, entry, "expired payload must not remain in unused capacity")
+	}
+	// A pending replay can retain more history, never less than the live Views.
+	reg := &registration{startFrom: 3}
+	b.pending[reg] = reg
+	delete(b.guards, 2)
+	b.trimLocked()
+	require.Equal(t, uint64(3), b.retentionStart)
+	require.Len(t, b.entries, 5)
+	delete(b.pending, reg)
+	b.trimLocked()
+	require.Equal(t, uint64(6), b.retentionStart)
+	require.Len(t, b.entries, 2)
+	require.Equal(t, uint64(7), b.entries[0].GetTimeTick())
+	for _, entry := range backing[len(b.entries):] {
+		require.Nil(t, entry)
+	}
+}

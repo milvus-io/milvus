@@ -62,6 +62,18 @@ NewSegmentWithLoadInfo(CCollection collection,
                        bool is_sorted_by_pk,
                        const uint8_t* load_info_blob,
                        const int64_t load_info_length);
+// Creates a segment with a private load scope while sharing collection schema.
+CStatus
+NewSegmentWithLoadInfoAndLoadFields(CCollection collection,
+                                    SegmentType seg_type,
+                                    int64_t segment_id,
+                                    CSegmentInterface* newSegment,
+                                    bool is_sorted_by_pk,
+                                    const uint8_t* load_info_blob,
+                                    int64_t load_info_length,
+                                    const int64_t* load_fields,
+                                    int64_t load_field_count);
+
 /**
  * @brief Dispatch a segment manage load task.
  * This function make segment itself load index & field data according to load info previously set.

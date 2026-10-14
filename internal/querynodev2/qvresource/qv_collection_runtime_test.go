@@ -49,7 +49,9 @@ func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs
 	require.NoError(t, err)
 	assert.False(t, retryable)
 	require.NotNil(t, guard)
-	assert.Same(t, localCollection, guard.(*queryViewCollectionRuntimeGuard).collection)
+	assert.NotSame(t, localCollection, guard.PinnedCollection())
+	assert.Equal(t, localCollection.ID(), guard.PinnedCollection().ID())
+	assert.ElementsMatch(t, []int64{10, 20}, guard.PinnedCollection().GetPartitions())
 
 	assert.Equal(t, int64(1), guard.CollectionID())
 	assert.Equal(t, "db", guard.DatabaseName())
@@ -62,8 +64,8 @@ func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs
 	assert.Equal(t, int64(1), collection.putLoadMeta.GetCollectionID())
 	assert.Equal(t, "db", collection.putLoadMeta.GetDbName())
 	assert.Zero(t, collection.putLoadMeta.GetSchemaBarrierTs())
-	assert.Equal(t, []int64{10, 20}, collection.putLoadMeta.GetPartitionIDs())
-	assert.Equal(t, []int64{100, 101}, collection.putLoadMeta.GetLoadFields())
+	assert.Empty(t, collection.putLoadMeta.GetPartitionIDs())
+	assert.Empty(t, collection.putLoadMeta.GetLoadFields())
 
 	guard.Release()
 	assert.Equal(t, int64(1), collection.unrefCollection)
@@ -77,6 +79,14 @@ func TestQueryViewCollectionRuntimeManager_AcquireUsesLoadInfoVersion(t *testing
 		loadFields:   []int64{100, 101, 102},
 	}
 	manager := newTestQueryViewCollectionRuntimeManager(provider, collection, mockQueryViewSchemaClient(t))
+
+	var getInfo func(*fakeQVLoadMetadataProvider, context.Context, int64, qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error)
+	patch := mockey.Mock((*fakeQVLoadMetadataProvider).GetQueryViewLoadInfo).Origin(&getInfo).To(
+		func(p *fakeQVLoadMetadataProvider, ctx context.Context, collectionID int64, version qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {
+			require.EqualValues(t, 7, version)
+			return getInfo(p, ctx, collectionID, version)
+		}).Build()
+	defer patch.UnPatch()
 
 	guard, retryable, err := manager.Acquire(context.Background(), qviews.NewQueryViewAtQueryNode(
 		&viewpb.QueryViewMeta{
@@ -93,8 +103,8 @@ func TestQueryViewCollectionRuntimeManager_AcquireUsesLoadInfoVersion(t *testing
 	assert.False(t, retryable)
 	require.NotNil(t, guard)
 
-	assert.Equal(t, []int64{10, 20}, collection.putLoadMeta.GetPartitionIDs())
-	assert.Equal(t, []int64{100, 101, 102}, collection.putLoadMeta.GetLoadFields())
+	assert.Empty(t, collection.putLoadMeta.GetPartitionIDs())
+	assert.Empty(t, collection.putLoadMeta.GetLoadFields())
 }
 
 func TestQueryViewCollectionRuntimeManager_AcquireClassifiesRetryability(t *testing.T) {
@@ -262,13 +272,13 @@ func TestQueryViewCollectionRuntimeIsolatesReadGenerations(t *testing.T) {
 	changedLoad := acquire(1, 12)
 	require.Same(t, old.CCollection(), oldAgain.CCollection(), "identical read generations share planning resources")
 	require.NotSame(t, old.CCollection(), target.CCollection())
-	require.NotSame(t, target.CCollection(), changedLoad.CCollection())
+	require.Same(t, target.CCollection(), changedLoad.CCollection(), "load scope is not a native schema identity")
 	require.EqualValues(t, 0, old.PinnedCollection().Schema().GetVersion())
 	require.EqualValues(t, 1, target.PinnedCollection().Schema().GetVersion())
 	unpin := old.Pin()
 	old.Release()
 	oldAgain.Release()
-	require.Len(t, manager.collections, 3, "an active query keeps its exact read collection alive")
+	require.Len(t, manager.collections, 2, "an active query keeps its exact read collection alive")
 	target.Release()
 	changedLoad.Release()
 	require.Len(t, manager.collections, 1)
@@ -308,4 +318,24 @@ func TestQueryViewCollectionRuntimeIgnoresPerChannelSchemaTicks(t *testing.T) {
 		require.EqualValues(t, schema.GetVersion(), guard.SchemaVersion())
 		require.EqualValues(t, nativeVersion, guard.SchemaVersion(), "reopen and initial segment load use the same collection-wide identity")
 	}
+}
+
+func TestQueryViewCollectionRuntimeFailedScopeUpdateReleasesReference(t *testing.T) {
+	paramtable.Init()
+	manager := newQueryViewCollectionRuntimeManager(&fakeQVLoadMetadataProvider{}, mockQueryViewSchemaClient(t))
+	view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{
+		CollectionId: 1, SchemaVersion: 1, LoadInfoVersion: 10,
+	}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
+	old, retry, err := manager.Acquire(t.Context(), view)
+	require.NoError(t, err)
+	require.False(t, retry)
+	patch := mockey.Mock((*segments.Collection).UpdateIndexMeta).Return(merr.WrapErrServiceInternalMsg("native update failed")).Build()
+	defer patch.UnPatch()
+	failed, _, err := manager.Acquire(t.Context(), view)
+	require.Error(t, err)
+	require.Nil(t, failed)
+	require.Len(t, manager.collections, 1)
+	require.NotNil(t, old.CCollection().Schema())
+	old.Release()
+	require.Empty(t, manager.collections, "the failed acquisition must not leak an owner pin")
 }

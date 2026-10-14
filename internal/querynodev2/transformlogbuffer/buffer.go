@@ -598,6 +598,9 @@ func (b *vchannelBuffer) trimLocked() {
 			kept = append(kept, entry)
 		}
 	}
+	// Release payloads in the unused backing-array tail as well. The frontier
+	// above remains determined by retained Views and pending replay pins.
+	clear(b.entries[len(kept):])
 	b.entries = kept
 	b.retentionStart = minStart
 }

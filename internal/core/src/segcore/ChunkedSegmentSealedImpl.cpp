@@ -8495,7 +8495,8 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructElementOffsets(
     std::unordered_set<std::string> surviving_structs;
     for (const auto& [field_id, target_field_meta] :
          target_schema->get_fields()) {
-        if (!current_schema->has_field(field_id)) {
+        if (!current_schema->has_field(field_id) ||
+            !target_schema->IsFieldInLoadScope(field_id)) {
             continue;
         }
 
@@ -8517,12 +8518,13 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructElementOffsets(
         }
     }
 
-    // Remove aliases for child fields that no longer exist in the target
+    // Remove aliases for child fields that no longer belong to the target load
     // schema. Otherwise their shared_ptrs keep retired StructArray offsets
     // reachable through GetStructElementOffsets().
     for (auto it = runtime.struct_element_offsets_map.begin();
          it != runtime.struct_element_offsets_map.end();) {
-        if (!target_schema->has_field(it->first)) {
+        if (!target_schema->has_field(it->first) ||
+            !target_schema->IsFieldInLoadScope(it->first)) {
             it = runtime.struct_element_offsets_map.erase(it);
         } else {
             ++it;

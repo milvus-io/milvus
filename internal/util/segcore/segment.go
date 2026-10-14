@@ -51,6 +51,7 @@ type CreateCSegmentRequest struct {
 	SegmentType SegmentType
 	IsSorted    bool
 	LoadInfo    *querypb.SegmentLoadInfo
+	LoadFields  []int64 // copied into the segment schema; never mutates CCollection
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -80,7 +81,11 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 			return nil, err
 		}
 
-		status = C.NewSegmentWithLoadInfo(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
+		var fields *C.int64_t
+		if len(req.LoadFields) > 0 {
+			fields = (*C.int64_t)(unsafe.Pointer(&req.LoadFields[0]))
+		}
+		status = C.NewSegmentWithLoadInfoAndLoadFields(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)), fields, C.int64_t(len(req.LoadFields)))
 	} else {
 		status = C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted))
 	}

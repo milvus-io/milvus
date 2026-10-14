@@ -2,6 +2,7 @@ package qnview
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -534,7 +535,7 @@ func (m *SegmentResourceManager) Release(req ReleaseSegments) {
 			r := b.resource
 			for i, candidate := range r.bindings {
 				if candidate == b {
-					r.bindings = append(r.bindings[:i], r.bindings[i+1:]...)
+					r.bindings = slices.Delete(r.bindings, i, i+1)
 					break
 				}
 			}
@@ -672,6 +673,7 @@ func (r *segmentResource) pruneReadsLocked() []segments.ReadState {
 			obsolete = append(obsolete, read.read)
 		}
 	}
+	clear(r.reads[len(retained):])
 	r.reads = retained
 	return obsolete
 }
@@ -734,6 +736,7 @@ func (r *segmentResource) pruneBasesLocked() []*segmentBase {
 			retired = append(retired, base)
 		}
 	}
+	clear(r.bases[len(kept):])
 	r.bases = kept
 	return retired
 }

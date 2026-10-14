@@ -21,9 +21,8 @@ import (
 )
 
 type collectionRuntimeKey struct {
-	collectionID    int64
-	schemaVersion   int32
-	loadInfoVersion uint64
+	collectionID  int64
+	schemaVersion int32
 }
 
 type queryViewCollectionRuntimeManager struct {
@@ -66,36 +65,43 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	if err != nil {
 		return nil, isRetryableCollectionRuntimeError(err), err
 	}
-	// Schema and load scope are immutable identities. A target view must never
-	// update the CCollection from which a published view builds query plans.
+	// Native planning resources belong to a SchemaVersion. A target view must never
+	// mutate the schema from which a published view builds query plans.
 	// Native schema identity is collection-scoped too: per-channel WAL ticks
 	// differ for the same ALTER and must not advance this shared runtime.
-	key := collectionRuntimeKey{meta.GetCollectionId(), meta.GetSchemaVersion(), meta.GetLoadInfoVersion()}
+	key := collectionRuntimeKey{meta.GetCollectionId(), meta.GetSchemaVersion()}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	collections := m.collections[key]
+	shared := collections != nil
+	indexMeta := segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.GetSchema())
 	if collections == nil {
 		collections = m.newCollections()
+		if err := collections.PutOrRef(
+			meta.GetCollectionId(), collection.GetSchema(), indexMeta,
+			&querypb.LoadMetaInfo{
+				LoadType:     querypb.LoadType_LoadCollection,
+				CollectionID: meta.GetCollectionId(),
+				DbName:       collection.GetSchema().GetDbName(),
+			},
+		); err != nil {
+			return nil, false, err
+		}
+		m.collections[key] = collections
+	} else {
+		collections.Ref(meta.GetCollectionId(), 1)
 	}
-	if err := collections.PutOrRef(
-		meta.GetCollectionId(),
-		collection.GetSchema(),
-		segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.GetSchema()),
-		&querypb.LoadMetaInfo{
-			LoadType:     querypb.LoadType_LoadCollection,
-			CollectionID: meta.GetCollectionId(),
-			PartitionIDs: loadInfoPartitionIDs(loadInfo, view.ViewOfQueryNode()),
-			DbName:       collection.GetSchema().GetDbName(),
-			LoadFields:   loadInfoFieldIDs(loadInfo),
-		},
-	); err != nil {
-		return nil, false, err
-	}
-	m.collections[key] = collections
 	localCollection := collections.Get(meta.GetCollectionId())
 	var ccollection *segcore.CCollection
 	if localCollection != nil {
+		localCollection = localCollection.WithLoadScope(loadInfoPartitionIDs(loadInfo, view.ViewOfQueryNode()), loadInfoFieldIDs(loadInfo))
 		ccollection = localCollection.GetCCollection()
+		if shared {
+			if err := localCollection.UpdateIndexMeta(indexMeta); err != nil {
+				m.releaseLocked(key)
+				return nil, false, err
+			}
+		}
 	}
 	return &queryViewCollectionRuntimeGuard{
 		manager:       m,
@@ -182,6 +188,10 @@ func (g *queryViewCollectionRuntimeGuard) Pin() func() {
 func (m *queryViewCollectionRuntimeManager) release(key collectionRuntimeKey) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.releaseLocked(key)
+}
+
+func (m *queryViewCollectionRuntimeManager) releaseLocked(key collectionRuntimeKey) {
 	if m.collections[key].Unref(key.collectionID, 1) {
 		delete(m.collections, key)
 	}

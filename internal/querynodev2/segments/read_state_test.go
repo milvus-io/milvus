@@ -1,6 +1,8 @@
 package segments
 
 import (
+	"sync"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -108,4 +110,48 @@ func (suite *SegmentSuite) TestViewReadStatePreparesEarlierSchema() {
 		LoadInfo: local.LoadInfo(), Schema: original, SchemaVersion: uint64(original.Version),
 	}), "a later-arriving old View can prepare its exact schema from shared resources")
 	suite.Equal(newer.RowNum(), older.RowNum())
+}
+
+func (suite *SegmentSuite) TestViewReadStatePreparesWhileDeletesContinue() {
+	ctx := suite.T().Context()
+	local := suite.sealed.(*LocalSegment)
+	old, err := local.PinReadState()
+	suite.Require().NoError(err)
+	defer old.ReleaseReadState()
+	schema := proto.Clone(suite.collection.Schema()).(*schemapb.CollectionSchema)
+	schema.Version++
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID: 1000, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true,
+	})
+	var wg sync.WaitGroup
+	errors := make(chan error, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := int64(0); i < 50; i++ {
+			pks := storage.NewInt64PrimaryKeys(1)
+			pks.AppendRaw(i)
+			if err := local.Delete(ctx, pks, []uint64{uint64(1000 + i)}); err != nil {
+				errors <- err
+				return
+			}
+		}
+	}()
+	defer wg.Wait()
+	for i := 0; i < 10; i++ {
+		read, err := segcore.PinSealedReadState(local.csegment)
+		suite.Require().NoError(err)
+		err = read.Reopen(ctx, &segcore.ReopenRequest{
+			LoadInfo: local.LoadInfo(), Schema: schema, SchemaVersion: uint64(schema.Version),
+		})
+		read.Release()
+		suite.Require().NoError(err)
+	}
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		suite.Require().NoError(err)
+	}
+	suite.Equal(int64(50), old.RowNum())
+	suite.Equal(old.RowNum(), local.RowNum())
 }

@@ -81,7 +81,7 @@ QueryView
 | QueryView handler/state machine | Receives desired Views, binds/unbinds their resources, aggregates reports and implements View lifecycle |
 | ViewResources | Owns one View's immutable requirements, resource references and per-binding readiness results |
 | SegmentResource | Sole owner of a Segment's physical preparation and lifetime; reconciles all bindings and owns subscriptions, operations and transform registration |
-| CollectionRuntime | Reference-counted exact schema/load runtime used by preparation and queries |
+| CollectionRuntime | Reference-counted CollectionID + SchemaVersion planning resource with a separate immutable View load scope |
 | TransformLogBuffer | Shares VChannel history and transport; applies transforms through instance-bound registrations |
 | Metadata stream | Delivers complete snapshots and resumes live subscriptions after transport failure |
 | Physical loader | Executes load/reopen/index/delta work using pinned inputs; returns results to the resource owner |
@@ -248,6 +248,28 @@ values and required statistics/indexes. A schema number is not proof of either.
 
 ### 6.1 Multiple schemas and load scopes
 
+CCollection is identified only by `(CollectionID, SchemaVersion)`. LoadInfoVersion
+is not part of this native identity. Views with the same schema share planning
+resources and current compatible index metadata; their immutable Go load scopes
+carry the required fields and partitions separately. Each View, physical Segment
+and active query pins the owning collection for the lifetime of its borrowed
+scope. A scope wrapper cannot release the native collection itself.
+Since LoadInfo index metadata is filtered by field scope, a refresh replaces
+only that scope's entries on the shared schema owner, under the owner's lock.
+It cannot erase index metadata still used by another scope. A dropped index is
+removed within the refreshed scope; index versions remain unbound to Views.
+
+Initial Segment creation copies the collection schema before applying its field
+scope. Reopen likewise prepares a private schema; neither operation changes the
+shared CCollection's load fields. StructArray offsets belong to the read state:
+when no child is in its load scope, both the per-child aliases and the struct-name
+entry are removed. Older pinned read states retain their own offsets.
+
+Private read-state Reopen preserves the physical row domain. It updates only its
+private row-count metadata and never initializes or resizes the shared delete
+bitmap. Transform application continues through the physical base while these
+private columns prepare.
+
 Each View binds its own immutable read schema and compatible ReadState. Index
 refresh follows current metadata without creating a new QueryView. Existing
 queries retain their acquired resources while later queries use a prepared successor. Native
@@ -310,6 +332,11 @@ replay and reconnection must observe committed state.
 ### 8.1 Shared range and per-instance application
 
 The View's shard cursor F protects the shared VChannel TransformLog range.
+The trim boundary is the minimum retained View F, conservatively extended by
+unfinished replay pins. Neither segment catch-up progress nor the set of segments
+currently placed on this node authorizes advancing it: future balance reuses this
+range. Trimming clears removed payload references in the backing-array tail as
+well as the logical slice.
 Each Segment's cursor C belongs to its selected physical base and identifies
 its exclusive replay start. The buffer retains history required by live range
 references and unfinished replay. Compatible Views reuse one buffer and its

@@ -1357,8 +1357,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     update_row_count(RuntimeResourceState& runtime, int64_t row_count) {
+        // A read-state fork shares the physical base's delete state. Reopen
+        // only prepares columns in the same row domain; resizing that shared
+        // bitmap would race with live Delete on the physical base.
+        AssertInfo(!read_state_fork_ || runtime.row_count == row_count,
+                   "read-state reopen cannot change the physical row domain");
         runtime.row_count = row_count;
-        deleted_record_->set_sealed_row_count(row_count);
+        if (!read_state_fork_) {
+            deleted_record_->set_sealed_row_count(row_count);
+        }
     }
 
     void
