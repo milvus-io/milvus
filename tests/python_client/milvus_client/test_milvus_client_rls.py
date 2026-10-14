@@ -1301,7 +1301,10 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                     )
                     if not created:
                         assert vector_type == DataType.BINARY_VECTOR and expected, (context, iterator)
-                        assert "index not supported" in iterator.message, (context, iterator)
+                        # Release branches wrap the unsupported indexed iterator error.
+                        assert "index not supported" in iterator.message or (
+                            group == "indexed" and "Failed to create iterators from index" in iterator.message
+                        ), (context, iterator)
                         log.info("Binary indexed iteration unsupported: %s", context)
                         continue
                     found_ids = []
@@ -1321,7 +1324,10 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                             pytest.fail(f"Search iterator did not reach EOF: {context}")
                     except MilvusException as exc:
                         assert vector_type == DataType.BINARY_VECTOR and expected, (context, exc)
-                        assert "index not supported" in str(exc), (context, exc)
+                        # Release branches wrap the unsupported indexed iterator error.
+                        assert "index not supported" in str(exc) or (
+                            group == "indexed" and "Failed to create iterators from index" in str(exc)
+                        ), (context, exc)
                         log.info("Binary indexed iteration unsupported: %s", context)
                         continue
                     finally:
