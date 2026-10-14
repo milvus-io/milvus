@@ -296,7 +296,6 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 	}
 	t.largeTopKEnabled = collectionInfo.QueryMode == common.QueryModeLargeTopK
 	t.partitionKeyIsolation = collectionInfo.PartitionKeyIsolation
-	t.rlsEnabled = collectionInfo.RlsEnabled && !collectionInfo.RlsMode.AutoSkip(t.request.GetRlsPrincipal(), t.request.GetSkipRls())
 	t.rlsDBName = collectionInfo.DBName
 	if t.rlsDBName == "" {
 		t.rlsDBName = t.request.GetDbName()
@@ -307,17 +306,14 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 		if t.IsAdvanced {
 			operation = "hybrid search"
 		}
-		if t.rlsEnabled && t.request.GetSkipRls() {
+		_, t.rlsEnabled, err = rlsutil.ResolveEnforcement(collectionInfo.RlsEnabled, t.request.GetRlsPrincipal(), t.request.GetSkipRls(), collectionInfo.RlsMode, t.rlsCollectionName, operation, func() error {
 			if t.node == nil {
 				return merr.WrapErrServiceInternalMsg("search task has no host node for SkipRLS authorization")
 			}
-			t.rlsEnabled, err = t.node.ResolveRLSEnforcement(t.ctx, t.GetMetaCache(), t.rlsEnabled, collectionInfo.RlsMode == common.RLSModeForce, true,
-				t.rlsDBName, t.rlsCollectionName, operation)
-			if err != nil {
-				return err
-			}
-		}
-		if _, _, err := rlsutil.ResolveRuntimePrincipal(t.rlsEnabled, t.request.GetRlsPrincipal(), operation); err != nil {
+			_, err := t.node.ResolveRLSEnforcement(t.ctx, t.GetMetaCache(), true, false, true, t.rlsDBName, t.rlsCollectionName, operation)
+			return err
+		})
+		if err != nil {
 			return err
 		}
 	}

@@ -135,16 +135,11 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if rlsEnabled && !paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
 		return merr.WrapErrServiceUnavailable("RLS import enforcement is unavailable until the cluster upgrade completes")
 	}
-	rlsEnabled = rlsEnabled && !colInfo.RlsMode.AutoSkip(rlsPrincipal, requestedSkipRLS)
-	if rlsEnabled && requestedSkipRLS {
-		rlsEnabled, err = node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsMode == common.RLSModeForce, requestedSkipRLS,
-			canonicalDBName, canonicalCollectionName, "import")
-		if err != nil {
-			return err
-		}
-		it.skipRLS = !rlsEnabled
-	}
-	_, _, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, rlsPrincipal, "import")
+	_, _, err = rlsutil.ResolveEnforcement(rlsEnabled, rlsPrincipal, requestedSkipRLS, colInfo.RlsMode, canonicalCollectionName, "import", func() error {
+		_, err := node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), true, false, true, canonicalDBName, canonicalCollectionName, "import")
+		it.skipRLS = err == nil
+		return err
+	})
 	if err != nil {
 		return err
 	}
