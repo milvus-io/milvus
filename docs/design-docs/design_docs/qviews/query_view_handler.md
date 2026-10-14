@@ -265,11 +265,11 @@ fails. Invalidating a target-load contribution is not a resource Release.
 The existing QN state machine retains previously ready segment IDs when it
 reports Unrecoverable; Release starts only after Coord requests teardown.
 ApplyViews processes new Preparing before old teardown within the same batch.
-The concrete `QueryViewSegmentReadinessManager` synchronously records pending
-view references before scheduling collection-runtime acquisition. Ready shared
-segments therefore remain retained even if the old view is released before
-that asynchronous step runs. `ViewScopedPhysicalSegmentManager` implements the
-physical loading and subscription layer.
+The resource layer synchronously registers complete View requirements and
+resource references before scheduling preparation. Each SegmentResource owns
+its physical lifecycle and reconciles all live bindings. Unresolved collection
+metadata is a dependency of an existing binding, so shared resources remain
+protected while it resolves. See [QueryNode resource preparation](qnview/querynode_queryview_resource_preparation.md).
 
 That implementation must establish the new view's compatible segment references
 before releasing the old view's references. Acquire must register references
@@ -286,6 +286,6 @@ prevents guaranteed reuse. A reuse miss must fall back to correct loading.
 Verify partial-success failure reports, new-reference-before-old-release
 ordering, actual reference retention, cleanup when there is no replacement,
 and node loss. Handler call-order tests alone do not establish physical reuse.
-No RPC change is required for this handover. A focused readiness-manager test
-blocks the replacement acquisition worker, releases the old view, and verifies
-that shared loaded segments survive while unshared segments are released.
+No RPC change is required for this handover. Validation blocks replacement
+preparation, releases the old View, then completes the dependency and verifies
+both protected resource reuse and eventual readiness without another push.

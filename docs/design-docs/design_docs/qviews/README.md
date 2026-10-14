@@ -401,11 +401,11 @@ view from its StreamingNode-local WAL recovery data view, Segment state, and
 TransformLog, then keeps
 consuming DML so the recovered DataView only grows while the QueryView is live.
 Long-term resource retention is driven by local QueryView references.
-QueryNode sealed segment resources continue to follow QueryNode's segment/view resource
-lifecycle.
-
-TODO(qnview/querynode_queryview_resource_preparation.md): add the QueryNode-side
-sealed segment resource preparation design when that resource module is picked.
+QueryNode binds each View's complete requirements to reference-counted resources.
+A SegmentResource owns physical preparation, metadata subscriptions and transform
+registration; reconciliation satisfies all live bindings while retaining their
+read resources. See [QueryNode resource preparation](qnview/querynode_queryview_resource_preparation.md)
+for ownership, scheduling, readiness and release.
 
 Target coordination example: if a node cannot satisfy view A's resource
 requirements, it reports A as Unrecoverable. Coord can prepare a replacement B
