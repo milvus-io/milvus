@@ -526,14 +526,16 @@ func TestImportTask_PreExecutePinsIdentityAndRLSContext(t *testing.T) {
 
 	for _, test := range []struct {
 		name              string
+		principal         string
 		rlsEnabled        bool
 		skipRLS           bool
 		expectedPrincipal string
 		expectedSkipRLS   bool
 	}{
-		{name: "principal is retained for enforcement", rlsEnabled: true, expectedPrincipal: "alice"},
-		{name: "authorized bypass is retained", rlsEnabled: true, skipRLS: true, expectedSkipRLS: true},
-		{name: "unchecked bypass on disabled collection is discarded", skipRLS: true},
+		{name: "principal is retained for enforcement", principal: "alice", rlsEnabled: true, expectedPrincipal: "alice"},
+		{name: "authorized bypass is retained", principal: "alice", rlsEnabled: true, skipRLS: true, expectedSkipRLS: true, expectedPrincipal: "alice"},
+		{name: "unchecked bypass is discarded but identity survives enable recheck", principal: "alice", skipRLS: true, expectedPrincipal: "alice"},
+		{name: "automatic skip is not forwarded as authorized explicit skip", rlsEnabled: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			const collectionID = int64(100)
@@ -564,7 +566,7 @@ func TestImportTask_PreExecutePinsIdentityAndRLSContext(t *testing.T) {
 					CollectionName: "alias",
 					Files:          []*internalpb.ImportFile{{Paths: []string{"staging/file.json"}}},
 					Options: []*commonpb.KeyValuePair{
-						{Key: "rls_principal", Value: "alice"},
+						{Key: "rls_principal", Value: test.principal},
 						{Key: "skip_rls", Value: strconv.FormatBool(test.skipRLS)},
 					},
 				},

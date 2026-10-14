@@ -610,7 +610,7 @@ func TestCheckSkipRLSPrivilege(t *testing.T) {
 
 	_, err = resolveRLSEnforcement(context.Background(), metaCache, true, true, true, "db1", "coll1", "query")
 	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-	assert.Contains(t, err.Error(), "rls.force")
+	assert.Contains(t, err.Error(), "rls.mode is Force")
 
 	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 	ctx := GetContext(context.Background(), "alice:123456")

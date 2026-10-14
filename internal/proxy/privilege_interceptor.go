@@ -287,7 +287,7 @@ func checkManageRLSPrivilege(ctx context.Context, metaCache Cache, req *milvuspb
 }
 
 // resolveRLSEnforcement returns whether RLS remains enabled after processing a
-// request-scoped bypass. rls.force takes precedence over both authorization
+// request-scoped bypass. Force mode takes precedence over both authorization
 // configuration and SkipRLS privileges.
 func resolveRLSEnforcement(ctx context.Context, metaCache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
 	if !rlsEnabled || !skipRLS {
@@ -295,7 +295,7 @@ func resolveRLSEnforcement(ctx context.Context, metaCache Cache, rlsEnabled, rls
 	}
 	if rlsForce {
 		return false, merr.WrapErrPrivilegeNotPermitted(
-			"%s operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
+			"%s operation denied by RLS: skip_rls is not allowed when rls.mode is Force on collection %s",
 			operation, collectionName)
 	}
 	if err := checkSkipRLSPrivilege(ctx, metaCache, dbName, collectionName, operation); err != nil {

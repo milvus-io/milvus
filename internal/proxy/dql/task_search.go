@@ -296,7 +296,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 	}
 	t.largeTopKEnabled = collectionInfo.QueryMode == common.QueryModeLargeTopK
 	t.partitionKeyIsolation = collectionInfo.PartitionKeyIsolation
-	t.rlsEnabled = collectionInfo.RlsEnabled
+	t.rlsEnabled = collectionInfo.RlsEnabled && !collectionInfo.RlsMode.AutoSkip(t.request.GetRlsPrincipal(), t.request.GetSkipRls())
 	t.rlsDBName = collectionInfo.DBName
 	if t.rlsDBName == "" {
 		t.rlsDBName = t.request.GetDbName()
@@ -311,7 +311,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 			if t.node == nil {
 				return merr.WrapErrServiceInternalMsg("search task has no host node for SkipRLS authorization")
 			}
-			t.rlsEnabled, err = t.node.ResolveRLSEnforcement(t.ctx, t.GetMetaCache(), t.rlsEnabled, collectionInfo.RlsForce, true,
+			t.rlsEnabled, err = t.node.ResolveRLSEnforcement(t.ctx, t.GetMetaCache(), t.rlsEnabled, collectionInfo.RlsMode == common.RLSModeForce, true,
 				t.rlsDBName, t.rlsCollectionName, operation)
 			if err != nil {
 				return err

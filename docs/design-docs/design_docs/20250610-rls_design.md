@@ -39,15 +39,25 @@ missing or stale RLS state on demand and fail closed if that fails. Already
 captured request snapshots are unchanged. Metadata is removed by explicit
 policy/tag deletion or collection drop, not by toggling enforcement.
 
-Every row-bearing request on an enabled collection must provide request-level
-RLS context. Most APIs use top-level `rls_principal` and `skip_rls`; bulk import
-carries the same values in its existing `options` map. Sub-searches inherit the
-top-level decision. A skip is allowed only when authorization is disabled or the
-authenticated Milvus user has `SkipRLS` on the collection.
+`rls.mode` controls requests when RLS is enabled and supports collection alter:
 
-`rls.force=true` rejects `skip_rls=true` and requires `rls.enabled=true`.
-To disable a forced collection, set both properties to false together, or
-delete both properties.
+| Mode | Behavior |
+| --- | --- |
+| `Force` | Requires a principal and rejects `skip_rls=true`, regardless of bypass privileges. |
+| `ExplicitSkip` | Requires a principal unless the caller explicitly sets `skip_rls=true`. |
+| `AutoSkip` (default) | Without a principal, automatically skips RLS without requiring `SkipRLS`; with a principal, applies RLS. |
+
+Explicit `skip_rls=true` requires `SkipRLS` on the collection when authorization
+is enabled, including in `AutoSkip` mode. Automatic skip does not bypass the
+original operation's RBAC checks. Only an absent/empty principal triggers
+automatic skip; a whitespace-only principal is invalid.
+
+Most APIs use top-level `rls_principal` and `skip_rls`; bulk import carries the
+same values in its existing `options` map. Sub-searches inherit the top-level
+decision. Deleting `rls.mode` restores `AutoSkip`. Mode changes use the existing
+AlterCollection cache invalidation and preserve policies and tag bindings.
+The mode can be configured while enforcement is disabled. The unreleased
+`rls.force` property is ignored and has no compatibility behavior.
 
 ## Principal Tag Bindings
 

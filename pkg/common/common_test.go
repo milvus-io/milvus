@@ -713,45 +713,10 @@ func TestRLSEnabled(t *testing.T) {
 		assert.False(t, enabled)
 	})
 
-	t.Run("force returns value and defaults to false", func(t *testing.T) {
-		force, err := IsRLSForce(&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"})
-		assert.NoError(t, err)
-		assert.True(t, force)
-
-		force, err = IsRLSForce()
-		assert.NoError(t, err)
-		assert.False(t, force)
-	})
-
 	t.Run("accepts standard boolean values", func(t *testing.T) {
 		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
 			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: value})
 			assert.NoError(t, err, "value %q should be accepted", value)
-		}
-	})
-
-	t.Run("accepts force values", func(t *testing.T) {
-		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
-			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
-			assert.NoError(t, err)
-		}
-	})
-
-	t.Run("force requires enabled RLS in effective properties", func(t *testing.T) {
-		assert.NoError(t, ValidateRLSForceRequiresEnabled(
-			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
-			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"},
-		))
-		assert.NoError(t, ValidateRLSForceRequiresEnabled(
-			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "false"},
-		))
-		for _, properties := range [][]*commonpb.KeyValuePair{
-			{{Key: RLSForceKey, Value: "true"}},
-			{{Key: RLSEnabledKey, Value: "false"}, {Key: RLSForceKey, Value: "true"}},
-		} {
-			err := ValidateRLSForceRequiresEnabled(properties...)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.ErrorContains(t, err, RLSForceKey+"=true requires "+RLSEnabledKey+"=true")
 		}
 	})
 
@@ -760,7 +725,7 @@ func TestRLSEnabled(t *testing.T) {
 	})
 
 	t.Run("rejects invalid values", func(t *testing.T) {
-		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+		for _, key := range []string{RLSEnabledKey, RLSModeKey} {
 			for _, value := range []string{"", "invalid", "yes", "2"} {
 				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: value})
 				if assert.Error(t, err, "value %q should be rejected", value) {
@@ -772,10 +737,10 @@ func TestRLSEnabled(t *testing.T) {
 	})
 
 	t.Run("rejects duplicate RLS properties", func(t *testing.T) {
-		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+		for key, value := range map[string]string{RLSEnabledKey: "false", RLSModeKey: "AutoSkip"} {
 			err := ValidateRLSProperties(
-				&commonpb.KeyValuePair{Key: key, Value: "false"},
-				&commonpb.KeyValuePair{Key: key, Value: "false"},
+				&commonpb.KeyValuePair{Key: key, Value: value},
+				&commonpb.KeyValuePair{Key: key, Value: value},
 			)
 			if assert.ErrorIs(t, err, merr.ErrParameterInvalid) {
 				assert.Contains(t, err.Error(), "duplicated collection property")
@@ -787,7 +752,7 @@ func TestRLSEnabled(t *testing.T) {
 	t.Run("rejects wrong case key", func(t *testing.T) {
 		for expected, variants := range map[string][]string{
 			RLSEnabledKey: {"RLS.ENABLED", "Rls.Enabled", "RLS.enabled"},
-			RLSForceKey:   {"RLS.FORCE", "Rls.Force", "RLS.force"},
+			RLSModeKey:    {"RLS.MODE", "Rls.Mode", "RLS.mode"},
 		} {
 			for _, key := range variants {
 				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: "true"})
@@ -798,6 +763,38 @@ func TestRLSEnabled(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestRLSMode(t *testing.T) {
+	mode, err := GetRLSMode()
+	assert.NoError(t, err)
+	assert.Equal(t, RLSModeAutoSkip, mode)
+	for value, expected := range map[string]RLSMode{
+		"AutoSkip": RLSModeAutoSkip, "ExplicitSkip": RLSModeExplicitSkip, "Force": RLSModeForce,
+	} {
+		properties := []*commonpb.KeyValuePair{{Key: RLSModeKey, Value: value}}
+		assert.NoError(t, ValidateRLSProperties(properties...))
+		mode, err := GetRLSMode(properties...)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, mode)
+		assert.Equal(t, expected == RLSModeAutoSkip, mode.AutoSkip("", false))
+		assert.False(t, mode.AutoSkip("alice", false))
+		assert.False(t, mode.AutoSkip(" ", false))
+		assert.False(t, mode.AutoSkip("", true))
+		assert.False(t, mode.AutoSkip("alice", true))
+	}
+	for _, value := range []string{"", "true", "false", "force", "auto", " AutoSkip"} {
+		_, err := GetRLSMode(&commonpb.KeyValuePair{Key: RLSModeKey, Value: value})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	}
+	// The unreleased legacy property is ignored, even when its value is invalid.
+	for _, value := range []string{"true", "false", "invalid"} {
+		legacy := &commonpb.KeyValuePair{Key: "rls.force", Value: value}
+		assert.NoError(t, ValidateRLSProperties(legacy))
+		mode, err := GetRLSMode(legacy)
+		assert.NoError(t, err)
+		assert.Equal(t, RLSModeAutoSkip, mode)
+	}
 }
 
 func TestClampScalarIndexVersion(t *testing.T) {

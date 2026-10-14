@@ -75,15 +75,18 @@ func newRLSOperationTestSchema(collectionName string) *schemaInfo {
 	})
 }
 
-func installRLSOperationTestCache(t *testing.T, collectionID int64, schema *schemaInfo, rlsForce ...bool) Cache {
-	force := len(rlsForce) > 0 && rlsForce[0]
+func installRLSOperationTestCache(t *testing.T, collectionID int64, schema *schemaInfo, modes ...common.RLSMode) Cache {
+	mode := common.RLSModeExplicitSkip
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 		CollID:     collectionID,
 		Schema:     schema,
 		RlsEnabled: true,
-		RlsForce:   force,
+		RlsMode:    mode,
 	}, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 1}, nil).Maybe()
@@ -340,6 +343,50 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 		require.Same(t, pinnedSchema, runner.schema)
 		require.Zero(t, *nameSchemaLoads)
 	})
+}
+
+func TestQueryTaskRLSModes(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().CommonCfg.AuthorizationEnabled.Key
+	require.NoError(t, paramtable.Get().Save(key, "true"))
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	for _, test := range []struct {
+		name      string
+		mode      common.RLSMode
+		principal string
+		allowed   bool
+	}{
+		{name: "auto skip needs no principal or bypass privilege", allowed: true},
+		{name: "auto skip with principal still requires a policy", principal: "alice"},
+		{name: "whitespace is not an absent principal", principal: " "},
+		{name: "explicit skip requires principal", mode: common.RLSModeExplicitSkip},
+		{name: "force requires principal", mode: common.RLSModeForce},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			schema := newRLSOperationTestSchema("rls_modes")
+			cache := installRLSOperationTestCache(t, 993001, schema, test.mode)
+			if test.principal == "alice" {
+				refreshRLSOperationTestMetadata(t, 993001, nil)
+			}
+			// No credentials: an automatic skip must never call the bypass authorizer.
+			task := dql.NewQueryTask(ctx, &mockTaskNode{metaCache: cache}, &milvuspb.QueryRequest{
+				CollectionName: "rls_modes", Expr: "id > 0", RlsPrincipal: test.principal,
+			}, nil, &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}}, cache, false)
+			require.NoError(t, task.OnEnqueue())
+			err := task.PreExecute(ctx)
+			if !test.allowed {
+				require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+				return
+			}
+			require.NoError(t, err)
+			plan := &planpb.PlanNode{}
+			require.NoError(t, proto.Unmarshal(task.GetSerializedExprPlan(), plan))
+			expected, err := planparserv2.ParseExpr(schema.SchemaHelper, "id > 0", nil)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(expected, plan.GetQuery().GetPredicates()))
+		})
+	}
 }
 
 func TestQueryTaskRLSEnforcement(t *testing.T) {
@@ -843,7 +890,7 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		const aliasName = "rls_force_query_alias"
 		ctx := context.Background()
 		schema := newRLSOperationTestSchema(canonicalName)
-		cache := installRLSOperationTestCache(t, collectionID, schema, true)
+		cache := installRLSOperationTestCache(t, collectionID, schema, common.RLSModeForce)
 		node := &mockTaskNode{metaCache: cache}
 		task := dql.NewQueryTask(ctx, node, &milvuspb.QueryRequest{
 			DbName:         "default",
@@ -856,7 +903,7 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		require.NoError(t, task.OnEnqueue())
 		err := task.PreExecute(ctx)
 		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		require.Contains(t, err.Error(), "rls.force")
+		require.Contains(t, err.Error(), "skip_rls is not allowed")
 		require.Contains(t, err.Error(), canonicalName)
 		require.NotContains(t, err.Error(), aliasName)
 	})
@@ -866,7 +913,7 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		const canonicalName = "rls_force_search"
 		const aliasName = "rls_force_search_alias"
 		ctx := context.Background()
-		cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(canonicalName), true)
+		cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(canonicalName), common.RLSModeForce)
 		node := &mockTaskNode{metaCache: cache}
 		task := dql.NewSearchTask(ctx, node, nil, &milvuspb.SearchRequest{
 			DbName:         "default",
@@ -880,7 +927,7 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		require.NoError(t, task.OnEnqueue())
 		err := task.PreExecute(ctx)
 		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		require.Contains(t, err.Error(), "rls.force")
+		require.Contains(t, err.Error(), "skip_rls is not allowed")
 		require.Contains(t, err.Error(), canonicalName)
 		require.NotContains(t, err.Error(), aliasName)
 	})
@@ -890,7 +937,7 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		const canonicalName = "rls_force_delete"
 		const aliasName = "rls_force_delete_alias"
 		ctx := context.Background()
-		cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(canonicalName), true)
+		cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(canonicalName), common.RLSModeForce)
 		runner := &DeleteRunner{node: &mockTaskNode{metaCache: cache}, metaCache: cache, req: &milvuspb.DeleteRequest{
 			DbName:         "default",
 			CollectionName: aliasName,
@@ -899,7 +946,7 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		}}
 		err := runner.Init(ctx)
 		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		require.Contains(t, err.Error(), "rls.force")
+		require.Contains(t, err.Error(), "skip_rls is not allowed")
 		require.Contains(t, err.Error(), canonicalName)
 		require.NotContains(t, err.Error(), aliasName)
 	})
@@ -909,7 +956,7 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		const canonicalName = "rls_force_insert"
 		const aliasName = "rls_force_insert_alias"
 		ctx := context.Background()
-		cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(canonicalName), true)
+		cache := installRLSOperationTestCache(t, collectionID, newRLSOperationTestSchema(canonicalName), common.RLSModeForce)
 		task := &InsertTask{
 			baseTask:  baseTask{MetaCache: cache},
 			node:      &mockTaskNode{metaCache: cache},
@@ -930,7 +977,7 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		require.NoError(t, task.OnEnqueue())
 		err := task.PreExecute(ctx)
 		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		require.Contains(t, err.Error(), "rls.force")
+		require.Contains(t, err.Error(), "skip_rls is not allowed")
 		require.Contains(t, err.Error(), canonicalName)
 		require.NotContains(t, err.Error(), aliasName)
 	})
@@ -943,11 +990,11 @@ func TestRLSForceRejectsSkipAcrossOperations(t *testing.T) {
 		canonicalName := task.schema.GetName()
 		task.req.CollectionName = aliasName
 		task.req.SkipRls = true
-		task.MetaCache = installRLSOperationTestCache(t, collectionID, task.schema, true)
+		task.MetaCache = installRLSOperationTestCache(t, collectionID, task.schema, common.RLSModeForce)
 		require.NoError(t, task.OnEnqueue())
 		err := task.PreExecute(ctx)
 		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		require.Contains(t, err.Error(), "rls.force")
+		require.Contains(t, err.Error(), "skip_rls is not allowed")
 		require.Contains(t, err.Error(), canonicalName)
 		require.NotContains(t, err.Error(), aliasName)
 	})

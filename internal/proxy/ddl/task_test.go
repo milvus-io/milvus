@@ -5372,7 +5372,7 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "did you mean")
 	})
 
-	t.Run("alter accepts rls.force", func(t *testing.T) {
+	t.Run("alter accepts rls.mode", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName)
 		alterTask := &AlterCollectionTask{
@@ -5380,7 +5380,7 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "true"}},
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSModeKey, Value: "Force"}},
 			},
 			mixCoord: qc,
 		}
@@ -5399,8 +5399,8 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName)
 		requests := []*milvuspb.AlterCollectionRequest{
-			{CollectionName: colName, Properties: []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}}},
-			{CollectionName: colName, DeleteKeys: []string{common.RLSForceKey}},
+			{CollectionName: colName, Properties: []*commonpb.KeyValuePair{{Key: common.RLSModeKey, Value: "AutoSkip"}}},
+			{CollectionName: colName, DeleteKeys: []string{common.RLSModeKey}},
 			{CollectionName: colName, Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}}},
 			{CollectionName: colName, DeleteKeys: []string{common.RLSEnabledKey}},
 		}
@@ -5429,7 +5429,7 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 		request := &milvuspb.AlterCollectionRequest{
 			DbName:         "default",
 			CollectionName: colName,
-			Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}},
+			Properties:     []*commonpb.KeyValuePair{{Key: common.RLSModeKey, Value: "AutoSkip"}},
 		}
 		initPrivileges(request.GetDbName(), colName)
 		assert.NoError(t, (&AlterCollectionTask{
@@ -5463,7 +5463,7 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				DbName:         "source_db",
 				CollectionName: "moving_alias",
-				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}},
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSModeKey, Value: "AutoSkip"}},
 			},
 			node:     &mockTaskNode{metaCache: aliasCache},
 			mixCoord: qc,
@@ -5480,7 +5480,7 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 		}).PreExecute(GetContext(context.Background(), "alice:123456")))
 	})
 
-	t.Run("alter rejects wrong case rls.force delete key", func(t *testing.T) {
+	t.Run("alter rejects wrong case rls.mode delete key", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName)
 		alterTask := &AlterCollectionTask{
@@ -5488,7 +5488,7 @@ func TestCollectionRLSEnabledValidation(t *testing.T) {
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				DeleteKeys:     []string{"RLS.Force"},
+				DeleteKeys:     []string{"RLS.Mode"},
 			},
 			mixCoord: qc,
 		}

@@ -3376,7 +3376,8 @@ func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.Se
 	if canonicalDBName == "" {
 		canonicalDBName = request.GetDbName()
 	}
-	rlsEnabled, err := resolveRLSEnforcement(ctx, node.getMetaCache(), collectionInfo.RlsEnabled, collectionInfo.RlsForce, request.GetSkipRls(),
+	rlsEnabled := collectionInfo.RlsEnabled && !collectionInfo.RlsMode.AutoSkip(request.GetRlsPrincipal(), request.GetSkipRls())
+	rlsEnabled, err = resolveRLSEnforcement(ctx, node.getMetaCache(), rlsEnabled, collectionInfo.RlsMode == common.RLSModeForce, request.GetSkipRls(),
 		canonicalDBName, collectionInfo.Schema.GetName(), "search")
 	if err != nil {
 		return nil, err

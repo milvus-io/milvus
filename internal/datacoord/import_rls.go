@@ -61,7 +61,7 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 	if err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties")
 	}
-	force, err := common.IsRLSForce(properties...)
+	mode, err := common.GetRLSMode(properties...)
 	if err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties")
 	}
@@ -72,10 +72,13 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 		return nil, merr.WrapErrImportSysFailed(
 			"RLS import enforcement is unavailable until the cluster upgrade completes")
 	}
+	if mode.AutoSkip(in.GetRlsPrincipal(), in.GetSkipRls()) {
+		return nil, nil
+	}
 	if in.GetSkipRls() {
-		if force {
+		if mode == common.RLSModeForce {
 			return nil, merr.WrapErrPrivilegeNotPermitted(
-				"import operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
+				"import operation denied by RLS: skip_rls is not allowed when rls.mode is Force on collection %s",
 				in.GetSchema().GetName())
 		}
 		return nil, nil

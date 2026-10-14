@@ -193,7 +193,7 @@ func (n *mockTaskNode) ResolveRLSEnforcement(ctx context.Context, cache metacach
 	}
 	if rlsForce {
 		return false, merr.WrapErrPrivilegeNotPermitted(
-			"%s operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
+			"%s operation denied by RLS: skip_rls is not allowed when rls.mode is Force on collection %s",
 			operation, collectionName)
 	}
 	return false, nil

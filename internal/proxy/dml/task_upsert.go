@@ -1988,13 +1988,13 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.collectionName = colInfo.Schema.GetName()
-	it.rlsEnabled = colInfo.RlsEnabled
+	it.rlsEnabled = colInfo.RlsEnabled && !colInfo.RlsMode.AutoSkip(it.req.GetRlsPrincipal(), it.req.GetSkipRls())
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = it.req.GetDbName()
 	}
 	if it.rlsEnabled && it.req.GetSkipRls() {
-		it.rlsEnabled, err = it.node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), it.rlsEnabled, colInfo.RlsForce, true,
+		it.rlsEnabled, err = it.node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), it.rlsEnabled, colInfo.RlsMode == common.RLSModeForce, true,
 			canonicalDBName, colInfo.Schema.GetName(), "upsert")
 		if err != nil {
 			return err

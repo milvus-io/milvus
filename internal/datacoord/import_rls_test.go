@@ -151,11 +151,33 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		skipped := proto.Clone(request).(*internalpb.ImportRequestInternal)
 		skipped.SkipRls = true
 		skipped.Schema.Properties = append(skipped.Schema.Properties,
-			&commonpb.KeyValuePair{Key: common.RLSForceKey, Value: "true"})
+			&commonpb.KeyValuePair{Key: common.RLSModeKey, Value: "Force"})
 
 		predicate, err := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
 		require.Nil(t, predicate)
 		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	})
+
+	t.Run("mode is rechecked before reading metadata", func(t *testing.T) {
+		for _, mode := range []string{"", "AutoSkip", "ExplicitSkip", "Force", "invalid"} {
+			t.Run(mode, func(t *testing.T) {
+				in := proto.Clone(request).(*internalpb.ImportRequestInternal)
+				in.RlsPrincipal = ""
+				if mode != "" {
+					in.Schema.Properties = append(in.Schema.Properties, &commonpb.KeyValuePair{Key: common.RLSModeKey, Value: mode})
+				}
+				predicate, err := (&Server{}).resolveImportRLSPredicate(context.Background(), in)
+				require.Nil(t, predicate)
+				switch mode {
+				case "", "AutoSkip":
+					require.NoError(t, err)
+				case "invalid":
+					require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				default:
+					require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+				}
+			})
+		}
 	})
 
 	t.Run("principal-only predicate skips tag lookup", func(t *testing.T) {

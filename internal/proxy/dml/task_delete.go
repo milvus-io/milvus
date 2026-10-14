@@ -398,9 +398,9 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	if canonicalDBName == "" {
 		canonicalDBName = dr.req.GetDbName()
 	}
-	rlsEnabled := colInfo.RlsEnabled
+	rlsEnabled := colInfo.RlsEnabled && !colInfo.RlsMode.AutoSkip(dr.req.GetRlsPrincipal(), dr.req.GetSkipRls())
 	if rlsEnabled && dr.req.GetSkipRls() {
-		rlsEnabled, err = dr.node.ResolveRLSEnforcement(ctx, dr.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
+		rlsEnabled, err = dr.node.ResolveRLSEnforcement(ctx, dr.GetMetaCache(), rlsEnabled, colInfo.RlsMode == common.RLSModeForce, true,
 			canonicalDBName, colInfo.Schema.GetName(), "delete")
 		if err != nil {
 			return err

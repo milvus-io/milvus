@@ -793,12 +793,12 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	var principalName string
 	var enforceRLS bool
 	if !t.skipRuntimeRLS {
-		rlsEnabled := colInfo.RlsEnabled
+		rlsEnabled := colInfo.RlsEnabled && !colInfo.RlsMode.AutoSkip(t.request.GetRlsPrincipal(), t.request.GetSkipRls())
 		if rlsEnabled && t.request.GetSkipRls() {
 			if t.node == nil {
 				return merr.WrapErrServiceInternalMsg("query task has no host node for SkipRLS authorization")
 			}
-			rlsEnabled, err = t.node.ResolveRLSEnforcement(ctx, t.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
+			rlsEnabled, err = t.node.ResolveRLSEnforcement(ctx, t.GetMetaCache(), rlsEnabled, colInfo.RlsMode == common.RLSModeForce, true,
 				canonicalDBName, colInfo.Schema.GetName(), "query")
 			if err != nil {
 				return err
