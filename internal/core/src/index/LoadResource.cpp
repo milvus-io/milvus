@@ -31,7 +31,6 @@
 #include "index/Families.h"
 #include "index/Meta.h"
 #include "index/ParamUtils.h"
-#include "index/ResourceUsageUtils.h"
 #include "index/scalar/spatial/RTreeIndexReader.h"
 #include "index/scalar/spatial/RTreeSerialization.h"
 #include <boost/geometry/index/detail/rtree/utilities/view.hpp>
@@ -58,8 +57,6 @@
 
 namespace milvus::index {
 namespace {
-using detail::SaturatingAdd;
-using detail::SaturatingMul;
 
 uint64_t
 RTreeHeapBytes(int64_t num_rows) {
@@ -83,7 +80,7 @@ RTreeHeapBytes(int64_t num_rows) {
         sizeof(std::vector<size_t>) +
         sizeof(std::vector<std::shared_ptr<const RTreeQueryEngine>>) +
         sizeof(std::shared_ptr<const RTreeQueryEngine>);
-    return SaturatingAdd(objects, SaturatingMul(nodes, sizeof(Node)));
+    return SaturatingAdd(objects, SaturatingMultiply(nodes, sizeof(Node)));
 }
 // Bounds for the synchronous encrypted entry-stream implementation.
 struct EntryStreamLoadInfo {
@@ -382,8 +379,9 @@ ScalarIndexLoadResourceWithOverhead(
     } else if (index_type == milvus::index::RTREE_INDEX_TYPE) {
         request.final_memory_cost = SaturatingAdd(
             RTreeHeapBytes(num_rows),
-            SaturatingMul(static_cast<uint64_t>(std::max<int64_t>(0, num_rows)),
-                          sizeof(size_t)));
+            SaturatingMultiply(
+                static_cast<uint64_t>(std::max<int64_t>(0, num_rows)),
+                sizeof(size_t)));
         request.final_disk_cost = 0;
         request.max_memory_cost = SaturatingAdd(
             request.final_memory_cost,
@@ -612,19 +610,20 @@ LegacyScalarIndexLoadResourceAsync(
     auto request = ScalarIndexLoadResourceWithOverhead(
         field_type, persisted, params, mmap_enable, rows, 0);
     if (type == BITMAP_INDEX_TYPE) {
-        auto resident = SaturatingAdd(ValidityBitmapBytes(rows),
-                                      SaturatingMul(cardinality, 128));
+        auto resident =
+            SaturatingAdd(ValidityBitmapBytes(rows),
+                          SaturatingMultiply(cardinality, uint64_t{128}));
         if (cardinality <= DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND) {
             resident = SaturatingAdd(
                 resident,
-                SaturatingMul(ValidityBitmapBytes(rows), cardinality));
+                SaturatingMultiply(ValidityBitmapBytes(rows), cardinality));
         }
         if (GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE)
                 .value_or(false)) {
             resident = SaturatingAdd(
                 resident,
-                SaturatingMul(uint64_t{std::max<int64_t>(0, rows)},
-                              sizeof(void*)));
+                SaturatingMultiply(uint64_t{std::max<int64_t>(0, rows)},
+                                   sizeof(void*)));
         }
         request.final_memory_cost =
             std::max(request.final_memory_cost,
