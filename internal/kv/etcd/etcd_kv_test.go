@@ -758,6 +758,27 @@ func (s *EtcdKVSuite) TestLoadWithPrefixIsolation() {
 	s.Len(walkedKeys, 2)
 }
 
+func (s *EtcdKVSuite) TestWalkKeysWithPrefixSnapshot() {
+	ctx := context.Background()
+	kv := s.etcdKV
+	s.Require().NoError(kv.MultiSave(ctx, map[string]string{"names/a": "tags", "names/c": "tags", "names2/x": "other"}))
+	var keys []string
+	s.Require().NoError(kv.WalkKeysWithPrefix(ctx, "names/", 1, func(key []byte) error {
+		keys = append(keys, string(key))
+		if len(keys) == 1 {
+			s.Require().NoError(kv.MultiSaveAndRemove(ctx, map[string]string{"names/b": "tags"}, []string{"names/c"}))
+		}
+		return nil
+	}))
+	s.Equal([]string{kv.GetPath("names/a"), kv.GetPath("names/c")}, keys)
+	s.Require().NoError(kv.walkWithPrefix(ctx, "names/", 1, true, func(_, value []byte) error {
+		s.Empty(value)
+		return nil
+	}))
+	err := kv.WalkKeysWithPrefix(ctx, "names/", 1, func([]byte) error { return context.Canceled })
+	s.ErrorIs(err, context.Canceled)
+}
+
 func TestEtcdKV(t *testing.T) {
 	suite.Run(t, new(EtcdKVSuite))
 }

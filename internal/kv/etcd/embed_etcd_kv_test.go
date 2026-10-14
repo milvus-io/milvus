@@ -712,6 +712,29 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.False(t, success)
 	})
 
+	te.Run("WalkKeysWithPrefixSnapshot", func(t *testing.T) {
+		ctx := context.Background()
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory("/etcd/test/keys", &param.EtcdCfg)
+		require.NoError(t, err)
+		defer metaKv.Close()
+		defer metaKv.RemoveWithPrefix(ctx, "")
+		walker := metaKv.(interface {
+			WalkKeysWithPrefix(context.Context, string, int, func([]byte) error) error
+		})
+		require.NoError(t, metaKv.MultiSave(ctx, map[string]string{"names/a": "tags", "names/c": "tags", "names2/x": "other"}))
+		var keys []string
+		require.NoError(t, walker.WalkKeysWithPrefix(ctx, "names/", 1, func(key []byte) error {
+			keys = append(keys, string(key))
+			if len(keys) == 1 {
+				require.NoError(t, metaKv.MultiSaveAndRemove(ctx, map[string]string{"names/b": "tags"}, []string{"names/c"}))
+			}
+			return nil
+		}))
+		require.Equal(t, []string{metaKv.GetPath("names/a"), metaKv.GetPath("names/c")}, keys)
+		err = walker.WalkKeysWithPrefix(ctx, "names/", 1, func([]byte) error { return context.Canceled })
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
 	te.Run("Etcd WalkWithPagination", func(t *testing.T) {
 		rootPath := "/etcd/test/root/walkWithPagination"
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)

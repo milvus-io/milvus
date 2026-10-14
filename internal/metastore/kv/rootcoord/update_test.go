@@ -63,7 +63,8 @@ func TestCatalog_Update_DropCollection(t *testing.T) {
 	err := c.Update(context.TODO(), 0, metastore.DropCollection(coll))
 	assert.NoError(t, err)
 	assert.Empty(t, gotSaves)
-	if assert.Len(t, gotRemovals, 2) {
+	if assert.Len(t, gotRemovals, 3) {
+		assert.Contains(t, gotRemovals, BuildRLSPrincipalCountKey(coll.CollectionID))
 		assert.Contains(t, gotRemovals, BuildCollectionKey(coll.DBID, coll.CollectionID))
 		assert.Contains(t, gotRemovals, BuildPartitionKey(coll.CollectionID, 10))
 	}

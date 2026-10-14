@@ -75,6 +75,7 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, enabled != "false", actual)
 		require.Len(t, coll.RLSPolicies, 1)
+		require.Equal(t, int64(1), coll.RLSPrincipalCount)
 
 		if enabled == "false" {
 			// Disabling also permits editing the configuration for the next enable.
@@ -121,6 +122,7 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	coll.RLSPolicies = nil
 	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
 	require.Len(t, coll.RLSPolicies, 1)
+	require.Equal(t, int64(1), coll.RLSPrincipalCount)
 	meta.ddLock.Lock()
 	meta.collID2Meta[id] = coll.Clone()
 	meta.ddLock.Unlock()
@@ -157,9 +159,10 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	policies, err := meta.ListRLSPolicies(ctx, &rlsutil.ListRowPoliciesRequest{DbName: db, CollectionName: name})
 	require.NoError(t, err)
 	require.Empty(t, policies)
-	principals, err := meta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: db, CollectionName: name})
+	principals, count, err := meta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: db, CollectionName: name})
 	require.NoError(t, err)
 	require.Empty(t, principals)
+	require.Zero(t, count)
 
 	// Dropping a disabled collection, unlike toggling enforcement, removes metadata.
 	require.NoError(t, core.broadcastCreateRLSPolicy(ctx, createPolicy))

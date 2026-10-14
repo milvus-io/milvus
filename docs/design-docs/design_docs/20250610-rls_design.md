@@ -63,12 +63,17 @@ Supported tag APIs:
 | --- | --- |
 | `set_rls_principal_tags` | Incrementally upsert a non-empty tag map. Supplied keys are added or overwritten; unspecified tags are preserved. |
 | `get_rls_principal_tags` | Return the stored tags for one principal identifier. |
-| `list_rls_principals` | List principal identifiers that currently have stored tags. |
+| `list_rls_principals` | Return names and `principal_cnt` for identifiers with stored tags; `count=true` returns only the count. |
 | `delete_rls_principal_tags` | Delete selected tag keys. No keys means delete all tags for that identifier. |
 
 When deletion leaves no tags, Milvus removes the empty storage record. This is
 tag-binding cleanup, not principal deletion. Deleting missing tags succeeds;
 repeated keys are deduplicated and limits are enforced.
+
+Listing reads names only, without loading tags or applying an extra total-count
+or size limit; oversized responses fail at the RPC transport limit rather than
+being truncated. The Go client retains `ListRLSPrincipals` for names and adds
+`CountRLSPrincipals` for count-only queries.
 
 One request currently performs either incremental tag upserts or deletions,
 not both. Applications that need both changes should revoke tags before
@@ -228,6 +233,14 @@ Principal tag bindings remain in the catalog and are read by
 Disabling enforcement stops execution-driven tag reads, not metadata
 management. Tag caches expire naturally without deleting stored bindings.
 
+RootCoord keeps a collection-scoped tag-binding count in memory and persists it
+atomically with binding changes. Adding the first tag or removing the last tag
+for an identifier changes the count; updates and retries do not double-count. Recovery restores the counter,
+initializing older collections without one from a keys-only scan. Collection
+drop removes it; rename and enforcement toggles preserve it. Count-only queries
+read this in-memory value without enumerating names or tags; ordinary lists
+return the size of their names snapshot.
+
 The initial design assumes policy and tag mutations are low-frequency
 control-plane operations. Each mutation uses a CChannel broadcast with the same
 `SharedDBName + ExclusiveCollectionName` resources as collection DDL. The
@@ -271,8 +284,8 @@ recovery validation remains follow-up work.
 | `proxy.rls.maxTagKeyLength` | Maximum tag-key length in bytes. |
 | `proxy.rls.maxTagValueLength` | Maximum string tag-value or array string-element length in bytes. |
 | `proxy.rls.maxArrayLiteralElements` | Maximum elements in an array tag or supported array literal. |
-| `proxy.rls.maxPrincipalCacheEntries` | Maximum cached principal entries per collection. |
-| `proxy.rls.maxPrincipalCacheBytes` | Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per collection or materialized by one non-paginated principal list. |
+| `proxy.rls.maxPrincipalCacheEntries` | Maximum principal entries cached per collection or materialized by an internal full-metadata read; not a public names-only List limit. |
+| `proxy.rls.maxPrincipalCacheBytes` | Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per collection or materialized by an internal full-metadata read; not a public names-only List limit. |
 | `proxy.rls.metaRefreshInterval` | Policy freshness interval and principal-tag cache lifetime. |
 
 RLS-bearing HybridSearch subplans share the existing request-wide

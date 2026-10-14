@@ -174,7 +174,7 @@ type IMetaTable interface {
 	ApplyAlterRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
 	ApplyDropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
 	GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)
-	ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error)
+	ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, int64, error)
 	GetRLSMetadata(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind, principalName string) (*model.RLSMetadata, error)
 
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
@@ -2608,6 +2608,11 @@ func (mt *MetaTable) reloadCollectionRLSMetadata(ctx context.Context, collection
 		recovered[cloned.PolicyName] = cloned
 	}
 	collection.RLSPolicies = recovered
+	count, err := mt.catalog.GetRLSPrincipalCount(ctx, collection.CollectionID)
+	if err != nil {
+		return merr.Wrapf(err, "failed to reload RLS principal count for collection %d", collection.CollectionID)
+	}
+	collection.RLSPrincipalCount = count
 	return nil
 }
 
@@ -3266,35 +3271,31 @@ func (mt *MetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRL
 	return maps.Clone(principal.Tags), nil
 }
 
-func (mt *MetaTable) ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error) {
+func (mt *MetaTable) ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, int64, error) {
 	if req == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("list RLS principals request is nil")
+		return nil, 0, merr.WrapErrParameterInvalidMsg("list RLS principals request is nil")
 	}
 	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	if req.GetCount() {
+		return nil, coll.RLSPrincipalCount, nil
 	}
 
-	principals, err := mt.catalog.ListRLSPrincipals(ctx, coll.CollectionID)
+	names, err := mt.catalog.ListRLSPrincipalNames(ctx, coll.CollectionID)
 	if err != nil {
-		return nil, merr.Wrap(err, "failed to list RLS principals")
+		return nil, 0, merr.Wrap(err, "failed to list RLS principals")
 	}
 	mt.ddLock.RLock()
 	current := mt.collID2Meta[coll.CollectionID]
 	available := current != nil && current.Available()
 	mt.ddLock.RUnlock()
 	if !available {
-		return nil, merr.WrapErrCollectionNotFound(coll.CollectionID)
+		return nil, 0, merr.WrapErrCollectionNotFound(coll.CollectionID)
 	}
-	names := make([]string, len(principals))
-	for i, principal := range principals {
-		if principal == nil {
-			return nil, merr.WrapErrDataIntegrityMsg("RLS principal metadata is nil for collection %d", coll.CollectionID)
-		}
-		names[i] = principal.PrincipalName
-	}
-	sort.Strings(names)
-	return names, nil
+	// Return the size of this scan's snapshot, not a counter from a different instant.
+	return names, int64(len(names)), nil
 }
 
 func (mt *MetaTable) PrepareDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*model.RLSPrincipal, bool, error) {
@@ -3353,16 +3354,28 @@ func (mt *MetaTable) ApplyAlterRLSPrincipal(ctx context.Context, principal *mode
 	if principal == nil {
 		return merr.WrapErrServiceInternalMsg("RLS principal is nil")
 	}
-	if err := mt.catalog.SaveRLSPrincipal(ctx, principal); err != nil {
+	count, err := mt.catalog.SaveRLSPrincipal(ctx, principal)
+	if err != nil {
 		return merr.Wrap(err, "failed to save RLS principal")
 	}
+	mt.ddLock.Lock()
+	if coll := mt.collID2Meta[principal.CollectionID]; coll != nil {
+		coll.RLSPrincipalCount = count
+	}
+	mt.ddLock.Unlock()
 	return nil
 }
 
 func (mt *MetaTable) ApplyDropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error {
-	if err := mt.catalog.DropRLSPrincipal(ctx, collectionID, principalName); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+	count, err := mt.catalog.DropRLSPrincipal(ctx, collectionID, principalName)
+	if err != nil {
 		return merr.Wrap(err, "failed to drop RLS principal")
 	}
+	mt.ddLock.Lock()
+	if coll := mt.collID2Meta[collectionID]; coll != nil {
+		coll.RLSPrincipalCount = count
+	}
+	mt.ddLock.Unlock()
 	return nil
 }
 

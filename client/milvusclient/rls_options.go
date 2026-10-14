@@ -259,7 +259,7 @@ func (opt *getRLSPrincipalTagsOption) Request() *milvuspb.GetRLSPrincipalTagsReq
 	}
 }
 
-// ListRLSPrincipalsOption builds a ListRLSPrincipals request.
+// ListRLSPrincipalsOption selects a collection for ListRLSPrincipals or CountRLSPrincipals.
 type ListRLSPrincipalsOption interface {
 	Request() *milvuspb.ListRLSPrincipalsRequest
 }

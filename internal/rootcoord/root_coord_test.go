@@ -1962,11 +1962,12 @@ func TestCore_RLSAPIs(t *testing.T) {
 	assert.Equal(t, "alice", getTagsResp.PrincipalName)
 
 	listPrincipalsReq := &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"}
-	meta.EXPECT().ListRLSPrincipals(mock.Anything, listPrincipalsReq).Return([]string{"alice", "bob"}, nil).Once()
+	meta.EXPECT().ListRLSPrincipals(mock.Anything, listPrincipalsReq).Return([]string{"alice", "bob"}, int64(2), nil).Once()
 	listPrincipalsResp, err := c.listRLSPrincipals(ctx, listPrincipalsReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(listPrincipalsResp.Status))
 	assert.Equal(t, []string{"alice", "bob"}, listPrincipalsResp.PrincipalNames)
+	assert.Equal(t, int64(2), listPrincipalsResp.PrincipalCnt)
 
 	meta.EXPECT().GetRLSMetadata(mock.Anything, int64(20), rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL, "").Return(&model.RLSMetadata{
 		CollectionID: 20,
@@ -2036,7 +2037,7 @@ func TestCore_RLSListQuotaStatus(t *testing.T) {
 	quotaErr := merr.WrapErrServiceQuotaExceededMsg("list too large")
 
 	listReq := &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"}
-	meta.EXPECT().ListRLSPrincipals(mock.Anything, listReq).Return(nil, quotaErr).Once()
+	meta.EXPECT().ListRLSPrincipals(mock.Anything, listReq).Return(nil, int64(0), quotaErr).Once()
 	listResp, err := c.listRLSPrincipals(ctx, listReq)
 	require.NoError(t, err)
 	require.ErrorIs(t, merr.Error(listResp.Status), merr.ErrServiceQuotaExceeded)

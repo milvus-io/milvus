@@ -129,6 +129,15 @@ func (kv *EmbedEtcdKV) GetPath(key string) string {
 }
 
 func (kv *EmbedEtcdKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	return kv.walkWithPrefix(ctx, prefix, paginationSize, false, fn)
+}
+
+// WalkKeysWithPrefix visits only keys, using one revision across all pages.
+func (kv *EmbedEtcdKV) WalkKeysWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte) error) error {
+	return kv.walkWithPrefix(ctx, prefix, paginationSize, true, func(key, _ []byte) error { return fn(key) })
+}
+
+func (kv *EmbedEtcdKV) walkWithPrefix(ctx context.Context, prefix string, paginationSize int, keysOnly bool, fn func([]byte, []byte) error) error {
 	prefix = kv.GetPath(prefix)
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
@@ -141,6 +150,9 @@ func (kv *EmbedEtcdKV) WalkWithPrefix(ctx context.Context, prefix string, pagina
 	}
 
 	key := prefix
+	if keysOnly {
+		opts = append(opts, clientv3.WithKeysOnly())
+	}
 	for {
 		resp, err := kv.client.Get(ctx1, key, opts...)
 		if err != nil {
@@ -155,6 +167,9 @@ func (kv *EmbedEtcdKV) WalkWithPrefix(ctx context.Context, prefix string, pagina
 
 		if !resp.More {
 			break
+		}
+		if keysOnly && key == prefix {
+			opts = append(opts, clientv3.WithRev(resp.Header.Revision))
 		}
 		// move to next key
 		key = string(append(resp.Kvs[len(resp.Kvs)-1].Key, 0))

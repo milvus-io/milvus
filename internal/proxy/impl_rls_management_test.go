@@ -167,6 +167,7 @@ func TestProxyRLSAPIsForwardToMixCoord(t *testing.T) {
 		DbName:         canonicalDBName,
 		CollectionName: "coll",
 		PrincipalNames: []string{"alice"},
+		PrincipalCnt:   1,
 	}, nil).Once()
 	listPrincipalsResp, err := node.ListRLSPrincipals(ctx, &milvuspb.ListRLSPrincipalsRequest{
 		DbName:         requestDBName,
@@ -176,7 +177,19 @@ func TestProxyRLSAPIsForwardToMixCoord(t *testing.T) {
 	require.Equal(t, canonicalDBName, listPrincipalsResp.GetDbName())
 	require.Equal(t, "coll", listPrincipalsResp.GetCollectionName())
 	require.Equal(t, []string{"alice"}, listPrincipalsResp.GetPrincipalNames())
+	require.Equal(t, int64(1), listPrincipalsResp.GetPrincipalCnt())
 	require.Equal(t, commonpb.ErrorCode_Success, listPrincipalsResp.GetStatus().GetErrorCode())
+
+	mixCoord.EXPECT().ListRLSPrincipals(mock.Anything, mock.MatchedBy(func(req *milvuspb.ListRLSPrincipalsRequest) bool {
+		return req.GetCount() && req.GetBase().GetMsgType() == commonpb.MsgType_ListRLSPrincipals &&
+			req.GetDbName() == canonicalDBName && req.GetCollectionName() == canonicalCollectionName
+	})).Return(&milvuspb.ListRLSPrincipalsResponse{Status: merr.Success(), PrincipalCnt: 5000000000}, nil).Once()
+	countResp, err := node.ListRLSPrincipals(ctx, &milvuspb.ListRLSPrincipalsRequest{
+		DbName: requestDBName, CollectionName: requestCollectionName, Count: true,
+	})
+	require.NoError(t, merr.CheckRPCCall(countResp, err))
+	require.Empty(t, countResp.GetPrincipalNames())
+	require.Equal(t, int64(5000000000), countResp.GetPrincipalCnt())
 
 	mixCoord.EXPECT().DeleteRLSPrincipalTags(mock.Anything, mock.MatchedBy(func(req *milvuspb.DeleteRLSPrincipalTagsRequest) bool {
 		return req != nil &&

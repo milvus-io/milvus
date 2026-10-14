@@ -95,6 +95,7 @@ func (s *RLSSuite) TestOptions() {
 	s.NotNil(listPrincipalsReq.GetBase())
 	s.Equal("db", listPrincipalsReq.GetDbName())
 	s.Equal("collection", listPrincipalsReq.GetCollectionName())
+	s.False(listPrincipalsReq.GetCount())
 
 	deleteReq := NewDeleteRLSPrincipalTagsOption("collection", "alice", "department", "region").WithDbName("db").Request()
 	s.NotNil(deleteReq.GetBase())
@@ -159,10 +160,18 @@ func (s *RLSSuite) TestAPIs() {
 	s.mock.EXPECT().ListRLSPrincipals(mock.Anything, mock.Anything).Return(&milvuspb.ListRLSPrincipalsResponse{
 		Status:         merr.Success(),
 		PrincipalNames: []string{"alice", "bob"},
+		PrincipalCnt:   2,
 	}, nil).Once()
 	principals, err := s.client.ListRLSPrincipals(ctx, NewListRLSPrincipalsOption("collection"))
 	s.NoError(err)
 	s.Equal([]string{"alice", "bob"}, principals)
+
+	s.mock.EXPECT().ListRLSPrincipals(ctx, mock.MatchedBy(func(req *milvuspb.ListRLSPrincipalsRequest) bool {
+		return req.GetCount() && req.GetDbName() == "db" && req.GetCollectionName() == "collection"
+	})).Return(&milvuspb.ListRLSPrincipalsResponse{Status: merr.Success(), PrincipalCnt: 5000000000}, nil).Once()
+	count, err := s.client.CountRLSPrincipals(ctx, NewListRLSPrincipalsOption("collection").WithDbName("db"))
+	s.NoError(err)
+	s.Equal(int64(5000000000), count)
 
 	s.mock.EXPECT().DeleteRLSPrincipalTags(mock.Anything, mock.Anything).RunAndReturn(
 		func(_ context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
@@ -192,6 +201,10 @@ func (s *RLSSuite) TestErrors() {
 			_, err := s.client.ListRLSPrincipals(ctx, nil)
 			return err
 		},
+		"count principals": func() error {
+			_, err := s.client.CountRLSPrincipals(ctx, nil)
+			return err
+		},
 		"delete tags": func() error { return s.client.DeleteRLSPrincipalTags(ctx, nil) },
 	}
 	for name, call := range nilOptionCalls {
@@ -215,6 +228,21 @@ func (s *RLSSuite) TestErrors() {
 		s.Error(err)
 		s.Nil(policies)
 	})
+}
+
+func (s *RLSSuite) TestCountRLSPrincipalsErrors() {
+	ctx := context.Background()
+	option := NewListRLSPrincipalsOption("collection")
+	s.mock.EXPECT().ListRLSPrincipals(ctx, mock.Anything).Return(nil, context.DeadlineExceeded).Once()
+	count, err := s.client.CountRLSPrincipals(ctx, option)
+	s.ErrorIs(err, context.DeadlineExceeded)
+	s.Zero(count)
+	s.mock.EXPECT().ListRLSPrincipals(ctx, mock.Anything).Return(&milvuspb.ListRLSPrincipalsResponse{
+		Status: merr.Status(merr.ErrParameterInvalid),
+	}, nil).Once()
+	count, err = s.client.CountRLSPrincipals(ctx, option)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Zero(count)
 }
 
 func TestRLS(t *testing.T) {

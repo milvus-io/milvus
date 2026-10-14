@@ -644,6 +644,15 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 
 // WalkWithPrefix visits each kv with input prefix and apply given fn to it.
 func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	return kv.walkWithPrefix(ctx, prefix, paginationSize, false, fn)
+}
+
+// WalkKeysWithPrefix scans a snapshot without fetching values from TiKV.
+func (kv *txnTiKV) WalkKeysWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte) error) error {
+	return kv.walkWithPrefix(ctx, prefix, paginationSize, true, func(key, _ []byte) error { return fn(key) })
+}
+
+func (kv *txnTiKV) walkWithPrefix(ctx context.Context, prefix string, paginationSize int, keysOnly bool, fn func([]byte, []byte) error) error {
 	start := time.Now()
 	prefix = kv.GetPath(prefix)
 
@@ -658,6 +667,17 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 
 	// Since only reading, use Snapshot for less overhead
 	ss := getSnapshot(kv.txn, paginationSize)
+	if keysOnly {
+		// MaxSnapshotTS can observe different versions across scan batches.
+		timestampCtx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
+		ts, err := kv.txn.GetTimestamp(timestampCtx)
+		cancel()
+		if err != nil {
+			return merr.Wrap(err, "get timestamp for key scan")
+		}
+		ss.SetSnapshotTS(ts)
+	}
+	ss.SetKeyOnly(keysOnly)
 
 	// Retrieve key-value pairs with the specified prefix
 	startKey := []byte(prefix)

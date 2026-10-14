@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -323,7 +324,7 @@ func (mt *MetaTable) DeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.De
 	return principal.CollectionID, nil
 }
 
-func TestReloadCollectionRLSMetadataLoadsPoliciesOnly(t *testing.T) {
+func TestReloadCollectionRLSMetadataLoadsPoliciesAndCount(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	meta := &MetaTable{catalog: catalog}
 	collection := &model.Collection{
@@ -339,13 +340,24 @@ func TestReloadCollectionRLSMetadataLoadsPoliciesOnly(t *testing.T) {
 		Actions: []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
 	}
 	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return([]*model.RLSPolicy{nil, stored}, nil).Once()
+	catalog.EXPECT().GetRLSPrincipalCount(mock.Anything, int64(20)).Return(int64(12), nil).Once()
 
 	require.NoError(t, meta.reloadCollectionRLSMetadata(context.Background(), collection))
 	require.Len(t, collection.RLSPolicies, 1)
+	require.Equal(t, int64(12), collection.RLSPrincipalCount)
 	require.Equal(t, int64(11), collection.RLSPolicies["tenant"].DBID)
 	require.Equal(t, int64(10), stored.DBID)
 	collection.RLSPolicies["tenant"].Actions[0] = rlsutil.PolicyActionInsert
 	require.Equal(t, rlsutil.PolicyActionQuery, stored.Actions[0])
+}
+
+func TestReloadRLSMetadataRejectsCountRecoveryFailure(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	meta := &MetaTable{catalog: catalog}
+	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return(nil, nil).Once()
+	catalog.EXPECT().GetRLSPrincipalCount(mock.Anything, int64(20)).Return(int64(0), merr.ErrServiceUnavailable).Once()
+	err := meta.reloadCollectionRLSMetadata(context.Background(), &model.Collection{CollectionID: 20})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
 
 func TestReloadRLSMetadataRejectsDuplicatePolicyNames(t *testing.T) {
@@ -383,9 +395,11 @@ func TestReloadCollectionsRLSMetadataRestoresDisabledCollection(t *testing.T) {
 			catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return([]*model.RLSPolicy{{
 				CollectionID: 20, PolicyID: 100, PolicyName: "tenant", UsingExpr: `dept == "sales"`,
 			}}, nil).Once()
+			catalog.EXPECT().GetRLSPrincipalCount(mock.Anything, int64(20)).Return(int64(1), nil).Once()
 
 			require.NoError(t, meta.reloadCollectionsRLSMetadata(context.Background(), []*model.Collection{collection}))
 			require.Len(t, collection.RLSPolicies, 1)
+			require.Equal(t, int64(1), collection.RLSPrincipalCount)
 			require.Equal(t, int64(100), collection.RLSPolicies["tenant"].PolicyID)
 			require.ErrorContains(t, validateRLSNoReferencedFieldDropped(collection, []int64{101}), "tenant")
 			require.NoError(t, validateRLSNoReferencedFieldDropped(collection, []int64{102}))
@@ -595,6 +609,7 @@ func TestReloadCollectionsRLSMetadataQueriesAllCollections(t *testing.T) {
 	}
 	for _, id := range []int64{10, 20, 30} {
 		catalog.EXPECT().ListRLSPolicies(mock.Anything, id).Return(nil, nil).Once()
+		catalog.EXPECT().GetRLSPrincipalCount(mock.Anything, id).Return(int64(0), nil).Once()
 	}
 
 	require.NoError(t, meta.reloadCollectionsRLSMetadata(context.Background(), collections))
@@ -634,6 +649,7 @@ func TestReloadCollectionsRLSMetadataUsesBoundedConcurrency(t *testing.T) {
 			trackCall()
 			return nil, nil
 		}).Times(collectionCount)
+	catalog.EXPECT().GetRLSPrincipalCount(mock.Anything, mock.Anything).Return(int64(0), nil).Times(collectionCount)
 
 	done := make(chan struct{})
 	var reloadErr error
@@ -1425,12 +1441,12 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			},
 		}
 		catalog.EXPECT().SaveRLSPrincipal(mock.Anything, mock.Anything).RunAndReturn(
-			func(_ context.Context, principal *model.RLSPrincipal) error {
+			func(_ context.Context, principal *model.RLSPrincipal) (int64, error) {
 				assert.Equal(t, int64(10), principal.DBID)
 				assert.Equal(t, int64(20), principal.CollectionID)
 				assert.Equal(t, "alice", principal.PrincipalName)
 				assert.Equal(t, setReq.GetTags(), principal.Tags)
-				return nil
+				return 1, nil
 			}).Once()
 		catalog.EXPECT().GetRLSPrincipal(mock.Anything, int64(20), "alice").Return(nil, merr.ErrIoKeyNotFound).Once()
 		prepared, err := meta.PrepareSetRLSPrincipalTags(ctx, setReq)
@@ -1442,7 +1458,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 
 		catalog.EXPECT().SaveRLSPrincipal(mock.Anything, mock.MatchedBy(func(principal *model.RLSPrincipal) bool {
 			return principal.PrincipalName == "alice" && assert.ObjectsAreEqual(principal.Tags["dept"], rlsutil.NewStringTagValue("engineering"))
-		})).Return(nil).Once()
+		})).Return(int64(1), nil).Once()
 		catalog.EXPECT().GetRLSPrincipal(mock.Anything, int64(20), "alice").Return(&model.RLSPrincipal{PrincipalName: "alice"}, nil).Once()
 		setReq.Tags["dept"] = rlsutil.NewStringTagValue("engineering")
 		prepared, err = meta.PrepareSetRLSPrincipalTags(ctx, setReq)
@@ -1479,7 +1495,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		catalog.EXPECT().GetRLSPrincipal(mock.Anything, int64(20), "alice").Return(&model.RLSPrincipal{PrincipalName: "alice"}, nil).Once()
 		catalog.EXPECT().SaveRLSPrincipal(mock.Anything, mock.MatchedBy(func(principal *model.RLSPrincipal) bool {
 			return principal.PrincipalName == "alice" && assert.ObjectsAreEqual(principal.Tags["dept"], rlsutil.NewStringTagValue("support"))
-		})).Return(nil).Once()
+		})).Return(int64(1), nil).Once()
 		setReq.Tags["dept"] = rlsutil.NewStringTagValue("support")
 		collectionID, err = meta.SetRLSPrincipalTags(ctx, setReq)
 		require.NoError(t, err)
@@ -1502,16 +1518,14 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		}, tags)
 
 		listMeta, listCatalog := newRLSMetaTableForTest(t)
-		listCatalog.EXPECT().ListRLSPrincipals(mock.Anything, int64(20)).Return([]*model.RLSPrincipal{
-			{PrincipalName: "bob"},
-			{PrincipalName: "alice"},
-		}, nil).Once()
-		principals, err := listMeta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"})
+		listCatalog.EXPECT().ListRLSPrincipalNames(mock.Anything, int64(20)).Return([]string{"alice", "bob"}, nil).Once()
+		principals, count, err := listMeta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"})
 		require.NoError(t, err)
 		assert.Equal(t, []string{"alice", "bob"}, principals)
-		listCatalog.EXPECT().ListRLSPrincipals(mock.Anything, int64(20)).Return(nil, merr.WrapErrServiceQuotaExceededMsg("list too large")).Once()
-		_, err = listMeta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"})
-		require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
+		assert.Equal(t, int64(2), count)
+		listCatalog.EXPECT().ListRLSPrincipalNames(mock.Anything, int64(20)).Return(nil, merr.ErrServiceUnavailable).Once()
+		_, _, err = listMeta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"})
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 
 		catalog.EXPECT().GetRLSPrincipal(mock.Anything, int64(20), "alice").Return(&model.RLSPrincipal{
 			DBID:          10,
@@ -1523,11 +1537,11 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			},
 		}, nil).Once()
 		catalog.EXPECT().SaveRLSPrincipal(mock.Anything, mock.Anything).RunAndReturn(
-			func(_ context.Context, principal *model.RLSPrincipal) error {
+			func(_ context.Context, principal *model.RLSPrincipal) (int64, error) {
 				assert.Equal(t, map[string]rlsutil.TagValue{
 					"tier": rlsutil.NewStringTagValue("gold"),
 				}, principal.Tags)
-				return nil
+				return 1, nil
 			}).Once()
 		collectionID, err = meta.DeleteRLSPrincipalTags(ctx, &rlsutil.DeleteRLSPrincipalTagsRequest{
 			DbName:         "db1",
@@ -1546,7 +1560,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 				"tier": rlsutil.NewStringTagValue("gold"),
 			},
 		}, nil).Once()
-		catalog.EXPECT().DropRLSPrincipal(mock.Anything, int64(20), "alice").Return(nil).Once()
+		catalog.EXPECT().DropRLSPrincipal(mock.Anything, int64(20), "alice").Return(int64(0), nil).Once()
 		collectionID, err = meta.DeleteRLSPrincipalTags(ctx, &rlsutil.DeleteRLSPrincipalTagsRequest{
 			DbName:         "db1",
 			CollectionName: "coll1",
@@ -1569,7 +1583,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		}, nil).Once()
 		catalog.EXPECT().SaveRLSPrincipal(mock.Anything, mock.MatchedBy(func(principal *model.RLSPrincipal) bool {
 			return len(principal.Tags) == 1 && assert.ObjectsAreEqual(principal.Tags["tier"], rlsutil.NewStringTagValue("gold"))
-		})).Return(nil).Once()
+		})).Return(int64(1), nil).Once()
 		collectionID, err = meta.DeleteRLSPrincipalTags(ctx, &rlsutil.DeleteRLSPrincipalTagsRequest{
 			DbName:         "db1",
 			CollectionName: "coll1",
@@ -1589,7 +1603,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
 
 		catalog.EXPECT().GetRLSPrincipal(mock.Anything, int64(20), "alice").Return(nil, merr.ErrIoKeyNotFound).Once()
-		catalog.EXPECT().DropRLSPrincipal(mock.Anything, int64(20), "alice").Return(nil).Once()
+		catalog.EXPECT().DropRLSPrincipal(mock.Anything, int64(20), "alice").Return(int64(0), nil).Once()
 		collectionID, err = meta.DeleteRLSPrincipalTags(ctx, &rlsutil.DeleteRLSPrincipalTagsRequest{
 			DbName:         "db1",
 			CollectionName: "coll1",
@@ -1598,6 +1612,78 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(20), collectionID)
 	})
+}
+
+func TestRLSPrincipalCountReadsMemoryAndUpdatesAfterPersistence(t *testing.T) {
+	ctx := context.Background()
+	meta, catalog := newRLSMetaTableForTest(t)
+	meta.collID2Meta[20].Properties = nil
+	meta.collID2Meta[20].RLSPrincipalCount = 5000000000
+	req := &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1", Count: true}
+	names, count, err := meta.ListRLSPrincipals(ctx, req)
+	require.NoError(t, err)
+	require.Nil(t, names)
+	require.Equal(t, int64(5000000000), count)
+	// The mock has no expected reads: count-only must not access the catalog.
+	principal := &model.RLSPrincipal{CollectionID: 20, PrincipalName: "alice"}
+	catalog.EXPECT().SaveRLSPrincipal(ctx, principal).Return(int64(5000000001), merr.ErrServiceUnavailable).Once()
+	require.ErrorIs(t, meta.ApplyAlterRLSPrincipal(ctx, principal), merr.ErrServiceUnavailable)
+	require.Equal(t, count, meta.collID2Meta[20].RLSPrincipalCount)
+	catalog.EXPECT().DropRLSPrincipal(ctx, int64(20), "alice").Return(int64(4999999999), merr.ErrServiceUnavailable).Once()
+	require.ErrorIs(t, meta.ApplyDropRLSPrincipal(ctx, 20, "alice"), merr.ErrServiceUnavailable)
+	require.Equal(t, count, meta.collID2Meta[20].RLSPrincipalCount)
+
+	req.CollectionName = "missing"
+	_, _, err = meta.ListRLSPrincipals(ctx, req)
+	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	_, _, err = meta.ListRLSPrincipals(ctx, nil)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestRLSPrincipalCountTagLifecycle(t *testing.T) {
+	ctx := context.Background()
+	meta, _ := newRLSMetaTableForTest(t)
+	meta.catalog = rootcoord.NewCatalog(memkv.NewMemoryKV())
+	meta.collID2Meta[20].Properties = nil
+	assertCount := func(want int64) {
+		t.Helper()
+		_, count, err := meta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1", Count: true})
+		require.NoError(t, err)
+		require.Equal(t, want, count)
+		persisted, err := meta.catalog.GetRLSPrincipalCount(ctx, 20)
+		require.NoError(t, err)
+		require.Equal(t, want, persisted)
+	}
+	assertCount(0)
+	for _, principal := range []string{"alice", "alice", "bob"} {
+		_, err := meta.SetRLSPrincipalTags(ctx, &rlsutil.SetRLSPrincipalTagsRequest{
+			DbName: "db1", CollectionName: "coll1", PrincipalName: principal,
+			Tags: map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales"), "tier": rlsutil.NewInt64TagValue(1)},
+		})
+		require.NoError(t, err)
+		if principal == "alice" {
+			assertCount(1)
+		} else {
+			assertCount(2)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		keys []string
+		want int64
+	}{
+		{"alice", []string{"dept"}, 2},
+		{"alice", []string{"tier"}, 1},
+		{"alice", nil, 1},
+		{"bob", nil, 0},
+		{"bob", nil, 0},
+	} {
+		_, err := meta.DeleteRLSPrincipalTags(ctx, &rlsutil.DeleteRLSPrincipalTagsRequest{
+			DbName: "db1", CollectionName: "coll1", PrincipalName: tc.name, TagKeys: tc.keys,
+		})
+		require.NoError(t, err)
+		assertCount(tc.want)
+	}
 }
 
 func TestMetaTable_RLSCatalogIODoesNotHoldGlobalDDLock(t *testing.T) {
@@ -3800,10 +3886,10 @@ func TestMetaTable_reload(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return([]*model.RLSPolicy{}, nil).Maybe()
-		catalog.On("ListRLSPrincipals",
+		catalog.On("GetRLSPrincipalCount",
 			mock.Anything,
 			mock.Anything,
-		).Return([]*model.RLSPrincipal{}, nil).Maybe()
+		).Return(int64(0), nil).Maybe()
 
 		tso := mocktso.NewAllocator(t)
 		tso.On("GenerateTSO",
@@ -3936,10 +4022,10 @@ func TestMetaTable_reload(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return([]*model.RLSPolicy{}, nil).Maybe()
-		catalog.On("ListRLSPrincipals",
+		catalog.On("GetRLSPrincipalCount",
 			mock.Anything,
 			mock.Anything,
-		).Return([]*model.RLSPrincipal{}, nil).Maybe()
+		).Return(int64(0), nil).Maybe()
 		catalog.On("ListFileResource",
 			mock.Anything,
 		).Return(nil, uint64(0), nil)

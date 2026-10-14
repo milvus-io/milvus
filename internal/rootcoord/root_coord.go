@@ -3892,7 +3892,7 @@ func (c *Core) listRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrinci
 		}, nil
 	}
 
-	principals, err := c.meta.ListRLSPrincipals(ctx, req)
+	principals, count, err := c.meta.ListRLSPrincipals(ctx, req)
 	if err != nil {
 		mlog.Warn(ctx, "failed to list RLS principals", mlog.Err(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
@@ -3908,6 +3908,7 @@ func (c *Core) listRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrinci
 	return &rlsutil.ListRLSPrincipalsResponse{
 		Status:         merr.Success(),
 		PrincipalNames: principals,
+		PrincipalCnt:   count,
 		DbName:         req.GetDbName(),
 		CollectionName: req.GetCollectionName(),
 	}, nil

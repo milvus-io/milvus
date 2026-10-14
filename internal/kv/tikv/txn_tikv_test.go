@@ -384,6 +384,22 @@ func TestWalkWithPagination(t *testing.T) {
 		assert.Equal(t, v, actualV)
 	}
 
+	t.Run("keys only", func(t *testing.T) {
+		require.NoError(t, kv.MultiSave(context.Background(), map[string]string{"names/a": "tags", "names/c": "tags", "names2/x": "other"}))
+		var keys []string
+		err := kv.WalkKeysWithPrefix(context.Background(), "names/", 1, func(key []byte) error {
+			keys = append(keys, string(key))
+			if len(keys) == 1 {
+				require.NoError(t, kv.MultiSaveAndRemove(context.Background(), map[string]string{"names/b": "tags"}, []string{"names/c"}))
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{kv.GetPath("names/a"), kv.GetPath("names/c")}, keys)
+		err = kv.WalkKeysWithPrefix(context.Background(), "A/", 1, func([]byte) error { return context.Canceled })
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
 	t.Run("apply function error ", func(t *testing.T) {
 		callbackErr := errors.New("callback stopped")
 		err = kv.WalkWithPrefix(context.TODO(), "A", 5, func(key []byte, value []byte) error {

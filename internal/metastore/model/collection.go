@@ -42,8 +42,9 @@ type Collection struct {
 	Fields            []*Field
 	StructArrayFields []*StructArrayField
 	Functions         []*Function
-	// RLS policies are owned by RootCoord and persisted in their own KV namespace.
-	RLSPolicies map[string]*RLSPolicy
+	// RLS metadata is owned by RootCoord and persisted in its own KV namespace.
+	RLSPolicies       map[string]*RLSPolicy
+	RLSPrincipalCount int64
 
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
@@ -99,6 +100,7 @@ func (c *Collection) ShallowClone() *Collection {
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
 		RLSPolicies:          maps.Clone(c.RLSPolicies),
+		RLSPrincipalCount:    c.RLSPrincipalCount,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
@@ -141,6 +143,7 @@ func (c *Collection) Clone() *Collection {
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
 		RLSPolicies:          CloneRLSPolicyMap(c.RLSPolicies),
+		RLSPrincipalCount:    c.RLSPrincipalCount,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
