@@ -7,7 +7,11 @@ Legacy scalar V1/V2 and vector artifacts retain their existing FileSource /
 FileSink formats. The pinned `use_async_load` setting selects the transport for
 an entire cache cell, including metadata inspection and resource estimation.
 This change does not add an asynchronous writer or change the persisted format.
-BSON/JSON stats and the legacy TextMatch translator are outside this rollout.
+BSON shared-key indexes use the legacy FileSource transport with the same pinned
+mode, file-aware estimates, request cancellation and priority. Their complete
+remote keys are preserved, and each load owns a private DiskFileManager directory
+until its mmap reader is released (RAM loads remove it after opening Tantivy).
+JSON stats preparation and the legacy TextMatch translator are outside this rollout.
 
 Translator construction borrows the loading request's `OpContext` for metadata
 inspection and file-aware estimates, including cancellation and runtime priority.
@@ -55,10 +59,9 @@ retain the existing target ownership rules. The staging writer is `FileWriter`,
 so load priority, configured buffered/direct mode and global write permits also
 apply to these synchronous writes.
 
-Remote reads and admission waits suspend. Local size/read/write calls run on
-LocalFileIOPool. The family coroutine also runs there so local staging, mmap,
-native initialization and failure cleanup retain their existing synchronous
-semantics without blocking the remote read executor. When the local pool is
+Remote reads and admission waits suspend. Legacy loader orchestration runs on
+the shared async-load executor; families dispatch blocking local size/read/write
+and native initialization phases to LocalFileIOPool. When the local pool is
 disabled, the configured async executor remains the existing fallback.
 The cache's synchronous interface waits once at the coroutine boundary.
 
@@ -107,6 +110,35 @@ the caller to keep the source alive.
 The synchronous bridge blocks once and runs both phases on the calling thread.
 Using coroutine return types does not itself add an executor hop. Scalar V3
 continues to use IndexEntryReader directly, without a FileSource adapter.
+
+## BSON shared-key loading
+
+The JSON stats BSON index retains its own `BsonInvertedIndexTranslator`; it is
+not a registered scalar reader family. Its translator opens a legacy `FileSource`
+with disk-file slice grouping and passes that source to `BsonInvertedIndex`.
+Both transport modes materialize files directly into the loading manager's
+private generation directory. Async remote reads and admission use the shared
+legacy pipeline. Orchestration runs on the shared async-load executor; manager
+creation, Tantivy opening, RAM-mode directory removal and failed-load cleanup
+are separate local-file phases. Remote waits do not retain the local executor,
+so disabling that pool need not wait for remote I/O. Sync loading stays on the
+calling thread; a disabled local-file pool uses the existing async executor
+fallback.
+
+The translator pins the mode at construction. Async admission uses the existing
+Tantivy file-aware estimate, including envelope/decode scratch and staging disk.
+The inspected source is detached from the construction context and consumed on
+the first load attempt, even when that attempt is cancelled. Reloads reopen it
+with the new request's cancellation and runtime priority. When effective warmup
+is disabled, the constructor releases the source and demand loading reopens it.
+The construction context is optional; forwarding it from JSON stats preparation
+is part of the preparation migration. Cache-cell loads already bind their own
+request context independently.
+
+Failed loads drain issued I/O before the index and its private directory are
+destroyed. A loaded mmap index retains that directory until destruction; a RAM
+index removes it after Tantivy has copied the files. No persisted keys or formats
+change.
 
 ## Vector backends
 

@@ -13,6 +13,7 @@
 #include <fmt/core.h>
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
+#include <folly/coro/BlockingWait.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -61,6 +62,7 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
+#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
@@ -447,8 +449,14 @@ BuildMaterializeSnapshot(const std::vector<JsonStatsRowRange>& row_ranges,
     for (const auto& file : bson_stats.Files()) {
         bson_files.push_back(file.file_name);
     }
-    loaded_bson_index.LoadIndex(
-        bson_files, milvus::proto::common::LoadPriority::HIGH, false);
+    storage::V1RemoteSource bson_source(
+        test_index.context,
+        bson_files,
+        {},
+        storage::ArtifactStorageNamespace::Index,
+        storage::V1SourceLayout::DiskFiles);
+    folly::coro::blockingWait(
+        loaded_bson_index.LoadIndex(bson_source, {}, false));
     for (const auto& path : shared_paths) {
         loaded_bson_index.TermQuery(
             path,
@@ -1776,6 +1784,182 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     std::vector<std::string> index_files_;
     milvus_storage::ArrowFileSystemPtr fs_;
 };
+
+class JsonStatsAsyncFileSystem : public arrow::fs::SubTreeFileSystem {
+ public:
+    explicit JsonStatsAsyncFileSystem(milvus_storage::ArrowFileSystemPtr fs)
+        : SubTreeFileSystem("", std::move(fs)) {
+    }
+
+    arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFileAsync(const std::string& path) override {
+        ++async_opens;
+        if (on_async_open)
+            on_async_open();
+        return SubTreeFileSystem::OpenInputFileAsync(path);
+    }
+
+    std::atomic<size_t> async_opens{0};
+    std::function<void()> on_async_open;
+};
+
+class BsonAsyncLoadTest
+    : public JsonKeyStatsUploadLoadTest,
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {};
+
+TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
+    const auto [use_async, enable_mmap] = GetParam();
+    auto& local_pool = storage::LocalFileIOPool::GetInstance();
+    local_pool.Configure(1);
+    auto reset_pool = folly::makeGuard([&] { local_pool.Configure(0); });
+    InitContext();
+    PrepareData({R"({"a": 1})", R"({"b": 2})"});
+    BuildAndUpload();
+    // Use a real BSON artifact with deterministic postings, independent of the
+    // shredding threshold used by the complete JSON stats builder.
+    storage::FileManagerContext build_context(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    const auto path =
+        TestLocalPath + "bson_async_" + std::to_string(index_build_id_);
+    std::filesystem::create_directories(path);
+    BsonInvertedIndex built(path, field_id_, build_context, 7);
+    built.AddRecord("/a", 0, 12);
+    built.AddRecord("/a", 1, 42);
+    built.BuildIndex();
+    auto artifact = built.UploadIndex();
+    std::vector<std::string> files;
+    for (const auto& file : artifact.Files()) files.push_back(file.file_name);
+    ASSERT_FALSE(files.empty());
+    auto fs = std::make_shared<JsonStatsAsyncFileSystem>(fs_);
+    storage::FileManagerContext context(
+        field_meta_, index_meta_, chunk_manager_, fs);
+    context.use_async_load = use_async;
+    segcore::storagev1translator::BsonInvertedIndexLoadInfo info{
+        .enable_mmap = enable_mmap,
+        .segment_id = segment_id_,
+        .field_id = field_id_,
+        .index_size = static_cast<int64_t>(artifact.MemSize()),
+        .index_files = files,
+        .load_priority = proto::common::LoadPriority::LOW,
+        .warmup_policy = "disable"};
+    if (use_async) {
+        size_t cold_opens = 0;
+        size_t warm_opens = 0;
+        for (const auto* policy : {"disable", "sync"}) {
+            auto probe_info = info;
+            probe_info.warmup_policy = policy;
+            segcore::storagev1translator::BsonInvertedIndexTranslator probe(
+                probe_info, context);
+            const auto before = fs->async_opens.load();
+            auto cells = probe.get_cells(nullptr, {0});
+            const auto opened = fs->async_opens.load() - before;
+            if (probe_info.warmup_policy == "disable") {
+                cold_opens = opened;
+            } else {
+                warm_opens = opened;
+            }
+        }
+        // Cold indexes reopen metadata; warmup reuses the inspected source.
+        EXPECT_GT(cold_opens, warm_opens);
+    }
+    segcore::storagev1translator::BsonInvertedIndexTranslator translator(
+        info, context);
+    const auto before_cancel = fs->async_opens.load();
+    folly::CancellationSource cancelled;
+    cancelled.requestCancellation();
+    OpContext cancelled_ctx(cancelled.getToken());
+    EXPECT_THROW(translator.get_cells(&cancelled_ctx, {0}), SegcoreError);
+    EXPECT_EQ(fs->async_opens.load(), before_cancel);
+
+    if (use_async) {
+        folly::CancellationSource during_open;
+        OpContext open_ctx(during_open.getToken());
+        fs->on_async_open = [&] { during_open.requestCancellation(); };
+        auto clear_hook = folly::makeGuard([&] { fs->on_async_open = {}; });
+        try {
+            translator.get_cells(&open_ctx, {0});
+            FAIL() << "expected cancellation during remote open";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+    }
+
+    if (use_async) {
+        // Pause remote open to check that orchestration does not retain the
+        // local executor while waiting for storage.
+        std::promise<void> opened;
+        auto ready = opened.get_future();
+        std::promise<void> resume;
+        auto resumed = resume.get_future().share();
+        bool released = false;
+        auto release = [&] {
+            if (!std::exchange(released, true))
+                resume.set_value();
+        };
+        std::atomic<bool> first_open{true};
+        fs->on_async_open = [&] {
+            if (first_open.exchange(false))
+                opened.set_value();
+            resumed.wait();
+        };
+        auto pending = std::async(std::launch::async, [&] {
+            return translator.get_cells(nullptr, {0});
+        });
+        auto drain = folly::makeGuard([&] {
+            release();
+            if (pending.valid())
+                pending.wait();
+            fs->on_async_open = {};
+        });
+        ASSERT_EQ(ready.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        auto disable =
+            std::async(std::launch::async, [&] { local_pool.Configure(0); });
+        auto release_before_join = folly::makeGuard(release);
+        EXPECT_EQ(disable.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(0)),
+                  std::future_status::timeout);
+        release_before_join.dismiss();
+        release();
+        disable.get();
+        pending.get();
+        fs->on_async_open = {};
+        drain.dismiss();
+        local_pool.Configure(1);
+    }
+
+    auto first = translator.get_cells(nullptr, {0});
+    const auto missing = files.front() + ".unavailable";
+    std::filesystem::rename(files.front(), missing);
+    {
+        auto restore = folly::makeGuard(
+            [&] { std::filesystem::rename(missing, files.front()); });
+        EXPECT_THROW(translator.get_cells(nullptr, {0}), SegcoreError);
+    }
+    auto second = translator.get_cells(nullptr, {0});
+    first.clear();
+    std::vector<std::pair<uint32_t, uint32_t>> hits;
+    second.front().second->TermQuery(
+        "/a",
+        [&](const uint32_t* rows, const uint32_t* offsets, int64_t count) {
+            for (int64_t i = 0; i < count; ++i)
+                hits.emplace_back(rows[i], offsets[i]);
+        });
+    EXPECT_EQ(hits,
+              (std::vector<std::pair<uint32_t, uint32_t>>{{0, 12}, {1, 42}}));
+    EXPECT_EQ(fs->async_opens.load() > 0, use_async);
+    if (use_async) {
+        const auto [resident, transient] =
+            translator.estimated_byte_size_of_cell(0);
+        EXPECT_GT(transient.memory_bytes, 0);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(BsonAsyncLoadModes,
+                         BsonAsyncLoadTest,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
 
 class JsonKeyStatsAsyncLoadTest
     : public JsonKeyStatsUploadLoadTest,
