@@ -1239,11 +1239,14 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 5, Params.MixCompactionSlotUsage.GetAsInt())
 		params.Save("dataCoord.slot.l0DeleteCompactionUsage", "4")
 		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
-		assert.Equal(t, 16, Params.L0ManifestUpdatePoolSize.GetAsInt())
-		params.Save("dataCoord.compaction.levelzero.manifestUpdatePoolSize", "4")
-		assert.Equal(t, 4, Params.L0ManifestUpdatePoolSize.GetAsInt())
-		params.Save("dataCoord.compaction.levelzero.manifestUpdatePoolSize", "0")
-		assert.Equal(t, 1, Params.L0ManifestUpdatePoolSize.GetAsInt())
+		params.Save("dataCoord.compaction.levelzero.manifestUpdatePoolSize", "1")
+		assert.Equal(t, 16, Params.ManifestCommitConcurrency.GetAsInt(), "obsolete L0 setting must not throttle all writers")
+		params.Save("dataCoord.manifestCommitConcurrency", "4")
+		assert.Equal(t, 4, Params.ManifestCommitConcurrency.GetAsInt())
+		params.Save("dataCoord.manifestCommitConcurrency", "0")
+		assert.Equal(t, 1, Params.ManifestCommitConcurrency.GetAsInt())
+		params.Save("dataCoord.manifestCommitConcurrency", "10000")
+		assert.Equal(t, 256, Params.ManifestCommitConcurrency.GetAsInt())
 		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
 
@@ -1764,4 +1767,25 @@ func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
 	// Excessive native concurrency is clamped independently of integer overflow.
 	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "2147483648")
 	assert.Equal(t, 256, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+}
+
+func TestStorageRuntimeThreadPoolsRequireRestart(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	for _, item := range []*ParamItem{
+		&params.CommonCfg.ArrowCPUThreadPoolCoefficient,
+		&params.CommonCfg.ArrowCPUThreadPoolMaxCapacity,
+		&params.CommonCfg.ArrowIOThreadPoolCoefficient,
+		&params.CommonCfg.ArrowIOThreadPoolMaxCapacity,
+	} {
+		t.Run(item.Key, func(t *testing.T) {
+			initial := item.GetValue()
+			params.baseTable.mgr.OnEvent(&config.Event{
+				EventType: config.UpdateType,
+				Key:       item.Key,
+				Value:     "7",
+			})
+			assert.Equal(t, initial, item.GetValue())
+		})
+	}
 }
