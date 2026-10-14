@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/clustercompaction"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -100,6 +101,7 @@ type clusteringCompactionTask struct {
 	// scalar
 	keyToBufferFunc func(interface{}) *ClusterBuffer
 	// vector
+	vectorLayout           *clustercompaction.LayoutPlan
 	segmentIDOffsetMapping map[int64]string
 	offsetToBufferFunc     func(int64, []uint32) *ClusterBuffer
 	// bm25
@@ -463,100 +465,6 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 	return nil
 }
 
-func splitCentroids(centroids []int, num int) ([][]int, map[int]int) {
-	if num <= 0 {
-		return nil, nil
-	}
-
-	result := make([][]int, num)
-	resultIndex := make(map[int]int, len(centroids))
-	listLen := len(centroids)
-
-	for i := 0; i < listLen; i++ {
-		group := i % num
-		result[group] = append(result[group], centroids[i])
-		resultIndex[i] = group
-	}
-
-	return result, resultIndex
-}
-
-func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, bufferNum int, centroids []*schemapb.VectorField) error {
-	centroidsOffset := make([]int, len(centroids))
-	for i := 0; i < len(centroids); i++ {
-		centroidsOffset[i] = i
-	}
-	centroidGroups, groupIndex := splitCentroids(centroidsOffset, bufferNum)
-	for id, group := range centroidGroups {
-		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
-		if err != nil {
-			return err
-		}
-
-		centroidValues := make([]storage.VectorFieldValue, len(group))
-		for i, offset := range group {
-			centroidValues[i] = storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroids[offset])
-		}
-
-		fieldStats.SetVectorCentroids(centroidValues...)
-
-		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
-			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
-			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			t.getWriterOpts()...,
-		)
-		if err != nil {
-			return err
-		}
-
-		buffer := newClusterBuffer(id, writer, fieldStats)
-		t.clusterBuffers = append(t.clusterBuffers, buffer)
-	}
-	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
-		centroidGroupOffset := groupIndex[int(idMapping[offset])]
-		return t.clusterBuffers[centroidGroupOffset]
-	}
-	return nil
-}
-
-func (t *clusteringCompactionTask) switchPolicyForVectorPlan(ctx context.Context, centroids *clusteringpb.ClusteringCentroidsStats) error {
-	bufferNum := len(centroids.GetCentroids())
-	bufferNumByMemory := int(t.memoryLimit / expectedBinlogSize)
-	if bufferNumByMemory < bufferNum {
-		bufferNum = bufferNumByMemory
-	}
-	return t.generatedVectorPlan(ctx, bufferNum, centroids.GetCentroids())
-}
-
-func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("getVectorAnalyzeResult-%d", t.GetPlanID()))
-	defer span.End()
-	analyzeResultPath := t.plan.AnalyzeResultPath
-	centroidFilePath := path.Join(analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
-	offsetMappingFiles := make(map[int64]string, 0)
-	for _, segmentID := range t.plan.AnalyzeSegmentIds {
-		path := path.Join(analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), common.OffsetMapping)
-		offsetMappingFiles[segmentID] = path
-		mlog.Debug(context.TODO(), "read segment offset mapping file", mlog.Int64("segmentID", segmentID), mlog.String("path", path))
-	}
-	t.segmentIDOffsetMapping = offsetMappingFiles
-	centroidBytes, err := t.binlogIO.Download(ctx, []string{centroidFilePath})
-	if err != nil {
-		return err
-	}
-	centroids := &clusteringpb.ClusteringCentroidsStats{}
-	err = proto.Unmarshal(centroidBytes[0], centroids)
-	if err != nil {
-		return err
-	}
-	mlog.Debug(context.TODO(), "read clustering centroids stats", mlog.String("path", centroidFilePath),
-		mlog.Int("centroidNum", len(centroids.GetCentroids())),
-		mlog.Any("offsetMappingFiles", t.segmentIDOffsetMapping))
-
-	return t.switchPolicyForVectorPlan(ctx, centroids)
-}
-
 // mapping read and split input segments into buffers
 func (t *clusteringCompactionTask) mapping(ctx context.Context,
 ) ([]*datapb.CompactionSegment, *storage.PartitionStatsSnapshot, error) {
@@ -662,9 +570,22 @@ func (t *clusteringCompactionTask) mappingSegment(
 		if err != nil {
 			return err
 		}
-		err = proto.Unmarshal(offsetBytes[0], mappingStats)
-		if err != nil {
+		if len(offsetBytes) != 1 {
+			return merr.WrapErrDataIntegrityMsg("missing clustering assignment payload")
+		}
+		if err := proto.Unmarshal(offsetBytes[0], mappingStats); err != nil {
+			return merr.WrapErrDataIntegrity(err, "decode clustering assignment")
+		}
+		if t.vectorLayout == nil || t.compactionParams.ClusteringPlan == nil {
+			return merr.WrapErrServiceInternalMsg("missing clustering layout")
+		}
+		if err := clustercompaction.ValidateAssignment(mappingStats, t.compactionParams.ClusteringPlan.SegmentRows[segment.GetSegmentID()], int64(len(t.vectorLayout.Counts))); err != nil {
 			return err
+		}
+		for offset, count := range mappingStats.GetNumInCentroid() {
+			if count > t.vectorLayout.Counts[offset] {
+				return merr.WrapErrDataIntegrityMsg("assignment changed after clustering planning")
+			}
 		}
 	}
 
@@ -731,6 +652,9 @@ func (t *clusteringCompactionTask) mappingSegment(
 			default:
 			}
 			offset++
+			if t.isVectorClusteringKey && offset >= int64(len(mappingStats.GetCentroidIdMapping())) {
+				return merr.WrapErrDataIntegrityMsg("physical rows exceed clustering assignment")
+			}
 			pk, err := clusteringScalarValue(pkColumn, t.primaryKeyField, row)
 			if err != nil {
 				return err
@@ -792,6 +716,9 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(entityFilter.GetDeltalogDeleteCount()))
 	metrics.DataNodeCompactionMissingDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(missing))
+	if t.isVectorClusteringKey && offset+1 != int64(len(mappingStats.GetCentroidIdMapping())) {
+		return merr.WrapErrDataIntegrityMsg("physical rows do not match clustering assignment")
+	}
 	return nil
 }
 

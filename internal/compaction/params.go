@@ -31,6 +31,10 @@ var _ mlog.ObjectMarshaler = Params{}
 // tag, plus the non-secret locator fields of StorageConfig. The credentials in
 // StorageConfig are never logged.
 func (p Params) MarshalLogObject(enc mlog.ObjectEncoder) error {
+	enc.AddBool("clusteringPlan", p.ClusteringPlan != nil)
+	if p.ClusteringPlan != nil {
+		enc.AddString("clusteringProvider", p.ClusteringPlan.ClusterType)
+	}
 	enc.AddInt64("storageVersion", p.StorageVersion)
 	enc.AddString("storageFormat", p.StorageFormat)
 	enc.AddUint64("binlogMaxSize", p.BinLogMaxSize)
@@ -52,20 +56,29 @@ func (p Params) MarshalLogObject(enc mlog.ObjectEncoder) error {
 	return nil
 }
 
+// ClusteringPlanParameters is frozen by DataCoord. A nil value is valid for
+// scalar compaction only; vector workers must not consult local provider config.
+type ClusteringPlanParameters struct {
+	ClusterType string            `json:"cluster_type"`
+	Params      map[string]string `json:"params"`
+	SegmentRows map[int64]int64   `json:"segment_rows"`
+}
+
 type Params struct {
-	StorageVersion            int64                  `json:"storage_version,omitempty"`
-	StorageFormat             string                 `json:"storage_format,omitempty"`
-	BinLogMaxSize             uint64                 `json:"binlog_max_size,omitempty"`
-	UseMergeSort              bool                   `json:"use_merge_sort,omitempty"`
-	MaxSegmentMergeSort       int                    `json:"max_segment_merge_sort,omitempty"`
-	PreferSegmentSizeRatio    float64                `json:"prefer_segment_size_ratio,omitempty"`
-	BloomFilterApplyBatchSize int                    `json:"bloom_filter_apply_batch_size,omitempty"`
-	StorageConfig             *indexpb.StorageConfig `json:"storage_config,omitempty"`
-	UseLoonFFI                bool                   `json:"use_loon_ffi,omitempty"`
-	LOBHoleRatioThreshold     float64                `json:"lob_hole_ratio_threshold,omitempty"`
-	TextInlineThreshold       int64                  `json:"text_inline_threshold,omitempty"`
-	TextMaxLobFileBytes       int64                  `json:"text_max_lob_file_bytes,omitempty"`
-	TextFlushThresholdBytes   int64                  `json:"text_flush_threshold_bytes,omitempty"`
+	ClusteringPlan            *ClusteringPlanParameters `json:"clustering_plan,omitempty"`
+	StorageVersion            int64                     `json:"storage_version,omitempty"`
+	StorageFormat             string                    `json:"storage_format,omitempty"`
+	BinLogMaxSize             uint64                    `json:"binlog_max_size,omitempty"`
+	UseMergeSort              bool                      `json:"use_merge_sort,omitempty"`
+	MaxSegmentMergeSort       int                       `json:"max_segment_merge_sort,omitempty"`
+	PreferSegmentSizeRatio    float64                   `json:"prefer_segment_size_ratio,omitempty"`
+	BloomFilterApplyBatchSize int                       `json:"bloom_filter_apply_batch_size,omitempty"`
+	StorageConfig             *indexpb.StorageConfig    `json:"storage_config,omitempty"`
+	UseLoonFFI                bool                      `json:"use_loon_ffi,omitempty"`
+	LOBHoleRatioThreshold     float64                   `json:"lob_hole_ratio_threshold,omitempty"`
+	TextInlineThreshold       int64                     `json:"text_inline_threshold,omitempty"`
+	TextMaxLobFileBytes       int64                     `json:"text_max_lob_file_bytes,omitempty"`
+	TextFlushThresholdBytes   int64                     `json:"text_flush_threshold_bytes,omitempty"`
 }
 
 func GenParams() Params {
@@ -97,7 +110,7 @@ func (p Params) GetStorageFormat() string {
 	return paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 }
 
-func GenerateJSONParams(schema *schemapb.CollectionSchema) (string, error) {
+func GenerateJSONParams(schema *schemapb.CollectionSchema, options ...func(*Params)) (string, error) {
 	compactionParams := GenParams()
 	// TEXT fields require at least V3 manifest storage for LOB support.
 	// This is a safety net: even if UseLoonFFI is toggled off, collections
@@ -109,6 +122,9 @@ func GenerateJSONParams(schema *schemapb.CollectionSchema) (string, error) {
 				break
 			}
 		}
+	}
+	for _, option := range options {
+		option(&compactionParams)
 	}
 	params, err := json.Marshal(compactionParams)
 	if err != nil {

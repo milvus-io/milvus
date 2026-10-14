@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type clusteringCompactionPolicy struct {
@@ -161,8 +162,18 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		log := mlog.With(mlog.FieldPartitionID(group.partitionID), mlog.String("channel", group.channelName))
 
 		if !policy.checkAllL2SegmentsContains(ctx, group.collectionID, group.partitionID, group.channelName) {
-			log.Warn(ctx, "clustering compaction cannot be done, otherwise the performance will fall back")
-			continue
+			// Legacy stats can only be replaced in full. A snapshot-owned
+			// directory permits retaining busy, unselected groups; selection
+			// below admission still expands and validates every touched group.
+			if !typeutil.IsVectorType(clusteringKeyField.GetDataType()) {
+				continue
+			}
+			version := policy.meta.GetPartitionStatsMeta().GetCurrentPartitionStatsVersion(group.collectionID, group.partitionID, group.channelName)
+			base, err := loadClusteringBase(ctx, policy.meta, group.collectionID, group.partitionID, group.channelName, version, clusteringKeyField)
+			if err != nil || base == nil || base.ClusteringStats == nil {
+				log.Info(ctx, "defer legacy clustering while L2 inputs are busy", mlog.Err(err))
+				continue
+			}
 		}
 
 		collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
@@ -328,11 +339,12 @@ func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collecti
 var _ CompactionView = (*ClusteringSegmentsView)(nil)
 
 type ClusteringSegmentsView struct {
-	label              *CompactionGroupLabel
-	segments           []*SegmentView
-	clusteringKeyField *schemapb.FieldSchema
-	collectionTTL      time.Duration
-	triggerID          int64
+	basePartitionStatsVersion int64
+	label                     *CompactionGroupLabel
+	segments                  []*SegmentView
+	clusteringKeyField        *schemapb.FieldSchema
+	collectionTTL             time.Duration
+	triggerID                 int64
 }
 
 func (v *ClusteringSegmentsView) GetGroupLabel() *CompactionGroupLabel {

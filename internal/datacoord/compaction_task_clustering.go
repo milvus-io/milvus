@@ -19,7 +19,10 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"maps"
+	"math"
 	"path"
+	"slices"
 	"strconv"
 	"time"
 
@@ -385,15 +388,28 @@ func (t *clusteringCompactionTask) Clean() bool {
 
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
+	var planner *compaction.ClusteringPlanParameters
+	if typeutil.IsVectorType(taskProto.GetClusteringKeyField().GetDataType()) {
+		if _, err := t.validateClusteringBase(context.TODO()); err != nil {
+			return nil, err
+		}
+		var err error
+		planner, err = t.clusteringPlannerParameters()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, t.meta.GetSegmentInfos(taskProto.GetInputSegments()), taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}
-	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
+	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema(), func(p *compaction.Params) { p.ClusteringPlan = planner })
 	if err != nil {
 		return nil, err
 	}
 	plan := &datapb.CompactionPlan{
+		BasePartitionStatsVersion: taskProto.GetBasePartitionStatsVersion(),
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
 		Type:                      taskProto.GetType(),
@@ -795,6 +811,10 @@ func (t *clusteringCompactionTask) doClean() error {
 }
 
 func (t *clusteringCompactionTask) doAnalyze() error {
+	if _, err := t.validateClusteringBase(context.TODO()); err != nil {
+		return err
+	}
+
 	// Add may have succeeded before saving the compaction state failed. Reuse
 	// its frozen parameters and generation rather than overwriting the task.
 	analyzeTask := t.meta.GetAnalyzeMeta().GetTask(t.GetTaskProto().GetAnalyzeTaskID())
@@ -816,6 +836,19 @@ func (t *clusteringCompactionTask) doAnalyze() error {
 }
 
 func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Cluster) error {
+	if typeutil.IsVectorType(t.GetTaskProto().GetClusteringKeyField().GetDataType()) {
+		base, err := t.validateClusteringBase(context.TODO())
+		if err != nil {
+			return err
+		}
+		// PR3 can select and plan partial replacements. The existing mapper
+		// still publishes legacy stats; it must not replace snapshot-owned
+		// coverage until PR4 installs complete merge/publication and query pinning.
+		if base != nil && base.ClusteringStats != nil {
+			return merr.Wrapf(merr.ErrServiceUnimplemented, "snapshot-owned clustering replacement requires the complete snapshot publisher")
+		}
+	}
+
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
 	if err != nil {
@@ -953,4 +986,40 @@ func (t *clusteringCompactionTask) NeedReAssignNodeID() bool {
 
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 	return t.GetTaskSlot()
+}
+
+// Resolve only from persisted task/Analyze state. Runtime provider configuration
+// is never consulted during resubmission. Segment physical row counts are
+// immutable while this task holds the inputs compacting.
+func (t *clusteringCompactionTask) clusteringPlannerParameters() (*compaction.ClusteringPlanParameters, error) {
+	task := t.GetTaskProto()
+	analyze := t.meta.GetAnalyzeMeta().GetTask(task.GetAnalyzeTaskID())
+	if analyze == nil || analyze.GetState() != indexpb.JobState_JobStateFinished || analyze.GetVersion() != task.GetAnalyzeVersion() || analyze.GetCentroidsFile() == "" || analyze.GetClusterType() == "" ||
+		analyze.GetCollectionID() != task.GetCollectionID() || analyze.GetPartitionID() != task.GetPartitionID() || analyze.GetFieldID() != task.GetClusteringKeyField().GetFieldID() || analyze.GetFieldType() != task.GetClusteringKeyField().GetDataType() {
+		return nil, merr.WrapErrCompactionPlanConflict("clustering plan has no matching completed Analyze generation")
+	}
+	inputs, analyzed := slices.Clone(task.GetInputSegments()), slices.Clone(analyze.GetSegmentIDs())
+	slices.Sort(inputs)
+	slices.Sort(analyzed)
+	if !slices.Equal(inputs, analyzed) {
+		return nil, merr.WrapErrCompactionPlanConflict("clustering plan inputs differ from Analyze")
+	}
+	rows := make(map[int64]int64, len(inputs))
+	var total int64
+	for _, id := range inputs {
+		segment := t.meta.GetHealthySegment(context.TODO(), id)
+		if segment == nil {
+			return nil, merr.WrapErrSegmentNotFound(id)
+		}
+		count := segment.GetNumOfRows()
+		if _, duplicate := rows[id]; duplicate || count < 0 || count > math.MaxInt64-total {
+			return nil, merr.WrapErrDataIntegrityMsg("invalid clustering plan row counts")
+		}
+		total += count
+		rows[id] = count
+	}
+	if total != task.GetTotalRows() {
+		return nil, merr.WrapErrDataIntegrityMsg("clustering plan total rows changed")
+	}
+	return &compaction.ClusteringPlanParameters{ClusterType: analyze.GetClusterType(), Params: maps.Clone(task.GetClusteringPlanParams()), SegmentRows: rows}, nil
 }

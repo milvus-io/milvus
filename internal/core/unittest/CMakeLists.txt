@@ -146,7 +146,7 @@ list(REMOVE_ITEM MILVUS_TEST_FILES ${INDEX_TEST_FILES})
 list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "index_runtime_acceptance_test\\.cpp$")
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
-    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "KmeansClusteringTest\\.cpp$")
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "(KmeansClusteringTest|CompactionPlanTest)\\.cpp$")
 endif()
 
 # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757.

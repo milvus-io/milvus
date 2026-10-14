@@ -14,3 +14,11 @@
 #include "common/type_c.h"
 
 typedef void* CAnalyze;
+
+// Task-local offsets only; no persistent group identity crosses this ABI.
+typedef void* CClusteringCompactionPlan;
+typedef struct CClusteringGroup {
+    uint64_t rows;
+    uint64_t count;
+    const uint32_t* offsets;
+} CClusteringGroup;
