@@ -1013,7 +1013,7 @@ TEST_P(TestLazyManifest, StructOffsetsBuiltBeforePublicationAndDoNotReloadRaw) {
     proxy->ManualEvictCache();
     EXPECT_FALSE(proxy->CellsLoaded(&first_row, 1));
     auto snapshot = segment->CaptureReadSnapshot();
-    EXPECT_EQ(snapshot->GetStructElementOffsets(score, nullptr), offsets);
+    EXPECT_EQ(snapshot->GetStructElementOffsets(score), offsets);
     EXPECT_EQ(segment->GetStructElementOffsets(label), offsets);
     EXPECT_FALSE(proxy->CellsLoaded(&first_row, 1));
     EXPECT_FALSE(other->IsMaterialized());

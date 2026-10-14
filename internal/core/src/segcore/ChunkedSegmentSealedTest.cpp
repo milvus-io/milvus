@@ -735,8 +735,7 @@ TEST(test_chunk_segment,
         queries;
     for (int i = 0; i < 8; ++i) {
         queries.emplace_back(std::async(std::launch::async, [&, i] {
-            return read->GetStructElementOffsets(i % 2 ? vector : score,
-                                                 nullptr);
+            return read->GetStructElementOffsets(i % 2 ? vector : score);
         }));
     }
     for (auto& query : queries) {
@@ -749,7 +748,7 @@ TEST(test_chunk_segment,
     }
     segment->ClearData();
     EXPECT_EQ(segment->GetStructElementOffsets(label), nullptr);
-    EXPECT_EQ(read->GetStructElementOffsets(label, nullptr), offsets);
+    EXPECT_EQ(read->GetStructElementOffsets(label), offsets);
 }
 
 TEST(test_chunk_segment, StructOffsetsFromNullableVectorChunks) {
@@ -794,7 +793,7 @@ TEST(test_chunk_segment,
     ASSERT_NE(sealed, nullptr);
     auto current = sealed->TestGetPublishedStateSnapshot();
     auto read = segment->CaptureReadSnapshot();
-    auto old_offsets = read->GetStructElementOffsets(field, nullptr);
+    auto old_offsets = read->GetStructElementOffsets(field);
     ASSERT_NE(old_offsets, nullptr);
     auto probe = std::make_shared<OffsetsPreparationProbe>();
     std::vector<std::vector<char>> buffers;
@@ -834,8 +833,7 @@ TEST(test_chunk_segment,
             [&] {
                 EXPECT_EQ(probe->calls, calls_before_publish);
                 EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), current);
-                EXPECT_EQ(read->GetStructElementOffsets(field, nullptr),
-                          old_offsets);
+                EXPECT_EQ(read->GetStructElementOffsets(field), old_offsets);
             });
     };
     for (const auto& [failure, code] :
@@ -862,7 +860,7 @@ TEST(test_chunk_segment,
     ASSERT_NE(offsets, nullptr);
     EXPECT_NE(offsets, old_offsets);
     EXPECT_EQ(offsets->GetTotalElementCount(), 3);
-    EXPECT_EQ(read->GetStructElementOffsets(field, nullptr), old_offsets);
+    EXPECT_EQ(read->GetStructElementOffsets(field), old_offsets);
     EXPECT_EQ(probe->calls, 4);
     column->ManualEvictCache();
     EXPECT_EQ(segment->GetStructElementOffsets(field), offsets);
@@ -920,12 +918,11 @@ TEST(test_chunk_segment, EagerStructOffsetsUseCapturedColumnGeneration) {
         final,
         [&] {
             EXPECT_NE(runtime->struct_element_offsets_map.at(label), old_entry);
-            EXPECT_EQ(old_read->GetStructElementOffsets(label, nullptr),
-                      old_entry);
+            EXPECT_EQ(old_read->GetStructElementOffsets(label), old_entry);
         });
 
     // Both generations were built before publication; query access is read-only.
-    auto old_offsets = old_read->GetStructElementOffsets(label, nullptr);
+    auto old_offsets = old_read->GetStructElementOffsets(label);
     auto new_offsets = segment->GetStructElementOffsets(label);
     ASSERT_NE(old_offsets, nullptr);
     ASSERT_NE(new_offsets, nullptr);

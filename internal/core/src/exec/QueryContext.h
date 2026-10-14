@@ -299,9 +299,8 @@ class QueryContext : public Context {
     std::shared_ptr<const IStructElementOffsets>
     get_struct_element_offsets(FieldId field_id) const {
         return read_snapshot_
-                   ? read_snapshot_->GetStructElementOffsets(field_id,
-                                                             op_context_)
-                   : segment_->GetStructElementOffsets(field_id, op_context_);
+                   ? read_snapshot_->GetStructElementOffsets(field_id)
+                   : segment_->GetStructElementOffsets(field_id);
     }
 
     SchemaPtr

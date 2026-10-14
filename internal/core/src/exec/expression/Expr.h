@@ -601,8 +601,8 @@ class SegmentExpr : public Expr {
 
     std::shared_ptr<const IStructElementOffsets>
     GetStructElementOffsets(FieldId field_id) const {
-        return snapshot_ ? snapshot_->GetStructElementOffsets(field_id, op_ctx_)
-                         : segment_->GetStructElementOffsets(field_id, op_ctx_);
+        return snapshot_ ? snapshot_->GetStructElementOffsets(field_id)
+                         : segment_->GetStructElementOffsets(field_id);
     }
 
     // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
