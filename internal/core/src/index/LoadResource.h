@@ -28,6 +28,11 @@
 #include "common/resource_c.h"
 #include "storage/FileManager.h"
 #include "cachinglayer/LoadingOverhead.h"
+#include "folly/coro/Task.h"
+
+namespace milvus::storage {
+class V1RemoteSource;
+}
 
 namespace milvus::index {
 
@@ -61,6 +66,24 @@ struct ScalarIndexLoadResources {
     LoadResourceRequest request;
     std::optional<cachinglayer::LoadingOverheadConfig> overhead;
 };
+
+// Borrow an opened legacy source so inspection can be reused by its first load.
+// The caller binds token/priority and keeps the source alive through the task.
+folly::coro::Task<LoadResourceRequest>
+LegacyScalarIndexLoadResourceAsync(
+    DataType field_type,
+    uint64_t index_size,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    storage::V1RemoteSource& source);
+
+// Inspect only eagerly loaded vector entries on the caller's bound source.
+folly::coro::Task<LoadResourceRequest>
+LegacyVectorFileLoadResourceAsync(LoadResourceRequest request,
+                                  bool disk_family,
+                                  const storage::LoadOptions& options,
+                                  storage::V1RemoteSource& source);
 
 // op_ctx is borrowed only through metadata inspection; estimates retain no context.
 ScalarIndexLoadResources

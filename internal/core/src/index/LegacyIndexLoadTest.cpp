@@ -36,6 +36,8 @@
 #include "index/scalar/bitmap/BitmapIndexLoader.h"
 #include "index/LegacyIndexLoad.h"
 #include "index/LoadResource.h"
+#include "segcore/Types.h"
+#include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorDiskLoader.h"
 #include "storage/artifact/DiskEngineFileHandle.h"
@@ -234,6 +236,109 @@ class LegacyIndexLoadTest : public ::testing::Test {
     size_t old_slots_{};
     milvus::test::ScopedLoadTransientBudget budget_{64 * 1024 * 1024};
 };
+
+TEST_F(LegacyIndexLoadTest, TranslatorConsumesInspectedMetadataOnFirstLoad) {
+    for (const bool vector : {false, true}) {
+        SCOPED_TRACE(vector);
+        if (vector) {
+            auto adapted = AdaptIndexType({
+                .index_type = "FLAT",
+                .field_type = DataType::VECTOR_FLOAT,
+                .element_type = DataType::NONE,
+                .index_engine_version =
+                    knowhere::Version::GetCurrentVersion().VersionNumber(),
+                .params = {{METRIC_TYPE, "L2"}, {DIM_KEY, 4}},
+            });
+            auto builder =
+                BuilderRegistry<VectorBuildInput<float>>::Instance().Create(
+                    adapted.family, adapted.params);
+            const std::vector<float> values(16, 1);
+            Persist(*std::move(*builder).Build({.physical_values = values,
+                                                .logical_rows = 4,
+                                                .physical_rows = 4,
+                                                .dim = 4}));
+        } else {
+            PersistSorted();
+        }
+        segcore::LoadIndexInfo info{};
+        info.field_type = vector ? DataType::VECTOR_FLOAT : DataType::VARCHAR;
+        info.element_type = DataType::NONE;
+        info.field_id = 100;
+        info.segment_id = 3;
+        info.index_id = 1000;
+        info.index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        info.num_rows = 4;
+        info.dim = vector ? 4 : 0;
+        info.index_files = paths_;
+        info.index_size = PhysicalBytes();
+        info.mmap_dir_path = staging_;
+        info.warmup_policy = "disable";
+        info.index_params = {{INDEX_TYPE, vector ? "FLAT" : ASCENDING_SORT},
+                             {METRIC_TYPE, "L2"},
+                             {SCALAR_INDEX_ENGINE_VERSION, "1"},
+                             {"nullable", vector ? "false" : "true"}};
+        // Normal load, pre-cancelled load, and an injected scalar payload error.
+        for (const int failure : {0, 1, 2}) {
+            if (vector && failure == 2) {
+                continue;
+            }
+            SCOPED_TRACE(failure);
+            folly::CancellationSource construction;
+            OpContext creation(construction.getToken());
+            segcore::storagev1translator::SealedIndexTranslator translator(
+                &info,
+                tracer::TraceContext{},
+                context_,
+                Config(info.index_params),
+                &creation);
+            construction.requestCancellation();
+            const auto probes = [&] {
+                size_t count = 0;
+                for (const auto& [_, file] : fs_->files) {
+                    const auto size = file->GetSize().ValueOrDie();
+                    for (const auto& call : file->DirectReadCalls())
+                        count += call.position == 0 && call.nbytes < size;
+                }
+                return count;
+            };
+            const auto inspected = probes();
+            ASSERT_GT(inspected, 0);
+            if (failure == 1) {
+                folly::CancellationSource cancelled;
+                cancelled.requestCancellation();
+                OpContext rejected(cancelled.getToken());
+                ExpectError(FollyCancel,
+                            [&] { translator.get_cells(&rejected, {0}); });
+                EXPECT_EQ(probes(), inspected);
+            } else if (failure == 2) {
+                auto file = DataFile();
+                ASSERT_NE(file, nullptr);
+                file->SetNextCompletion(
+                    arrow::Status::IOError("payload read failed"));
+                OpContext failed;
+                ExpectError(StorageError,
+                            [&] { translator.get_cells(&failed, {0}); });
+                EXPECT_EQ(probes(), inspected);
+            }
+            OpContext load;
+            auto cells = translator.get_cells(&load, {0});
+            ASSERT_EQ(cells.size(), 1);
+            EXPECT_EQ(cells.front().second->Count(), 4);
+            if (failure != 0) {
+                EXPECT_GT(probes(), inspected);
+            } else {
+                EXPECT_EQ(probes(), inspected);
+            }
+            cells.clear();
+            // The preparation source ends with the first load, so eviction/reload
+            // does not retain its metadata outside the reader's cache lifetime.
+            cells = translator.get_cells(&load, {0});
+            EXPECT_EQ(cells.front().second->Count(), 4);
+            EXPECT_GT(probes(), inspected);
+        }
+    }
+}
 
 // Counts actual sync transport bytes; size inspection must not fetch payloads.
 class CountingLegacyChunkManager final : public storage::LocalChunkManager {

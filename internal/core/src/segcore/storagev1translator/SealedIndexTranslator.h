@@ -98,6 +98,8 @@ class SealedIndexTranslator : public IndexReaderTranslator {
     std::string index_key_;
     IndexLoadInfo index_load_info_;
     LoadResourceRequest load_resource_request_{};
+    // Consumed by the first get_cells attempt; never retained across eviction.
+    std::shared_ptr<storage::V1RemoteSource> prepared_legacy_source_;
     bool lazy_load_{false};
     milvus::cachinglayer::Meta meta_;
 };

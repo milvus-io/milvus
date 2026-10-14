@@ -17,6 +17,7 @@
 #include "index/LoadResource.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
+#include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
@@ -61,7 +62,7 @@ UsesV1DiskLayout(const index::IndexFamily& family) {
            family == index::families::kHybrid;
 }
 
-std::unique_ptr<storage::FileSource>
+std::unique_ptr<storage::V1RemoteSource>
 MakeRemoteSource(const index::IndexFamily& requested_family,
                  const storage::FileManagerContext& context,
                  const std::vector<std::string>& remote_paths,
@@ -195,6 +196,12 @@ SealedIndexTranslator::SealedIndexTranslator(
     metadata_options.estimated_bytes = index_load_info_.index_size;
     auto resolved_family = adapted.family;
     std::optional<index::PackedIndexSource> packed_source;
+    auto detach = folly::makeGuard([&] {
+        if (prepared_legacy_source_) {
+            prepared_legacy_source_->SetLoadContext(
+                proto::common::LoadPriority::HIGH, {});
+        }
+    });
     if (packed_v3) {
         packed_source = index::InspectPackedIndexFile(
             index_load_info_.index_files,
@@ -210,10 +217,11 @@ SealedIndexTranslator::SealedIndexTranslator(
                 packed_source->Metadata());
         }
     } else {
-        auto source = MakeRemoteSource(adapted.family,
-                                       file_manager_context_,
-                                       index_load_info_.index_files,
-                                       metadata_options);
+        prepared_legacy_source_ = MakeRemoteSource(adapted.family,
+                                                   file_manager_context_,
+                                                   index_load_info_.index_files,
+                                                   metadata_options);
+        auto& source = prepared_legacy_source_;
         if (*file_manager_context_.use_async_load) {
             resolved_family =
                 folly::coro::blockingWait(folly::coro::co_withExecutor(
@@ -240,26 +248,44 @@ SealedIndexTranslator::SealedIndexTranslator(
 
     if (!IsVectorDataType(index_load_info_.field_type)) {
         // Family selection and resource accounting share the same inspection.
-        auto resources = packed_source
-                             ? index::PackedScalarIndexLoadResource(
-                                   index_load_info_.field_type,
-                                   index_load_info_.index_size,
-                                   index_load_info_.index_params,
-                                   index_load_info_.enable_mmap,
-                                   index_load_info_.num_rows,
-                                   index_load_info_.index_files,
-                                   *packed_source,
-                                   *file_manager_context_.use_async_load)
-                             : index::ScalarIndexFileLoadResource(
-                                   index_load_info_.field_type,
-                                   index_load_info_.index_size,
-                                   index_load_info_.index_params,
-                                   index_load_info_.enable_mmap,
-                                   index_load_info_.num_rows,
-                                   index_load_info_.index_files,
-                                   file_manager_context_,
-                                   storage::ArtifactStorageNamespace::Index,
-                                   &metadata_ctx.ctx);
+        index::ScalarIndexLoadResources resources;
+        if (packed_source) {
+            resources = index::PackedScalarIndexLoadResource(
+                index_load_info_.field_type,
+                index_load_info_.index_size,
+                index_load_info_.index_params,
+                index_load_info_.enable_mmap,
+                index_load_info_.num_rows,
+                index_load_info_.index_files,
+                *packed_source,
+                *file_manager_context_.use_async_load);
+        } else if (*file_manager_context_.use_async_load &&
+                   file_manager_context_.Valid() &&
+                   !index_load_info_.index_files.empty()) {
+            resources.request =
+                folly::coro::blockingWait(folly::coro::co_withExecutor(
+                    storage::ResolveAsyncLoadExecutor(
+                        storage::LocalFileIOPool::GetInstance().GetExecutor(),
+                        priority),
+                    index::LegacyScalarIndexLoadResourceAsync(
+                        index_load_info_.field_type,
+                        index_load_info_.index_size,
+                        index_load_info_.index_params,
+                        index_load_info_.enable_mmap,
+                        index_load_info_.num_rows,
+                        *prepared_legacy_source_)));
+        } else {
+            resources = index::ScalarIndexFileLoadResource(
+                index_load_info_.field_type,
+                index_load_info_.index_size,
+                index_load_info_.index_params,
+                index_load_info_.enable_mmap,
+                index_load_info_.num_rows,
+                index_load_info_.index_files,
+                file_manager_context_,
+                storage::ArtifactStorageNamespace::Index,
+                &metadata_ctx.ctx);
+        }
         load_resource_request_ = resources.request;
         meta_.loading_overhead_config = std::move(resources.overhead);
     } else {
@@ -277,17 +303,24 @@ SealedIndexTranslator::SealedIndexTranslator(
         *file_manager_context_.use_async_load) {
         metadata_options.params = config_;
         metadata_options.enable_mmap = index_load_info_.enable_mmap;
-        load_resource_request_ = index::LegacyVectorFileLoadResource(
-            load_resource_request_,
-            Family() == index::families::kVectorDisk,
-            metadata_options,
-            index_load_info_.index_files,
-            file_manager_context_);
+        load_resource_request_ =
+            folly::coro::blockingWait(folly::coro::co_withExecutor(
+                storage::ResolveAsyncLoadExecutor(
+                    storage::LocalFileIOPool::GetInstance().GetExecutor(),
+                    priority),
+                index::LegacyVectorFileLoadResourceAsync(
+                    load_resource_request_,
+                    Family() == index::families::kVectorDisk,
+                    metadata_options,
+                    *prepared_legacy_source_)));
     }
     if (index_load_info_.load_resource_request.has_value()) {
         load_resource_request_ = *index_load_info_.load_resource_request;
     }
     storage::ThrowIfCancelled(token, "inspect sealed index metadata");
+    if (!*file_manager_context_.use_async_load) {
+        prepared_legacy_source_.reset();
+    }
 }
 
 size_t
@@ -327,6 +360,8 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IIndexReaderBase>>>
 SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                                  const std::vector<cid_t>& cids) {
+    // Release preparation metadata after this attempt, including early failure.
+    auto prepared_source = std::move(prepared_legacy_source_);
     int64_t segment_id = std::stoll(index_load_info_.segment_id);
 
     storage::LoadOptions options;
@@ -382,6 +417,11 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                                {index_load_info_.index_files.front()},
                                index::PackedIndexStorageConfig{
                                    storage::ArtifactStorageNamespace::Index}},
+             options});
+    } else if (prepared_source) {
+        reader = loader_entry.Load(
+            {index::OpenedIndexSource{
+                 index::LegacyIndexSource{std::move(prepared_source), true}},
              options});
     } else {
         const auto layout = UsesV1DiskLayout(source_family_)

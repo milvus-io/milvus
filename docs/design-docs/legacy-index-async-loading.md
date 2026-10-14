@@ -80,8 +80,17 @@ The registry only selects the factory and capability inspector.
 
 ## Loader lifetime
 
-The current translator opens and loads within each cache-cell request. The
-internal loader owns its source and does not retain the creation operation
+For legacy async loading, SealedIndexTranslator shares one source across family
+selection, resource estimation and the first cache-cell load. It detaches the
+construction context after inspection and consumes the source at the start of
+the first load attempt, including cancellation or failure. Later loads open a
+fresh source. This retains directory/envelope metadata, not payload buffers;
+metadata remains allocated until that first attempt or translator destruction
+when warmup is disabled. It is included in the load's transient estimate, but
+has no separate resident cache charge while waiting for that first attempt.
+Packed and synchronous loads still open within each cache-cell request.
+
+The internal loader owns its source and does not retain the creation operation
 context or cancellation token after Create completes. Each Load binds its own
 context and owns its targets; sequential repeated loads are supported, but
 concurrent loads on the same loader are not. Borrowed-source adapters require
