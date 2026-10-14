@@ -158,7 +158,19 @@ func (s *Server) balanceSegments(ctx context.Context,
 	}
 
 	if sync {
-		err := task.Wait(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
+		// This bound exists for a different reason than the task's own
+		// deadline: a task only gets its real deadline once it's actually
+		// admitted by the executor (see Task.ActivateDeadline). If the target
+		// node's executor stays saturated, the task can sit rejected in the
+		// queue indefinitely without ever being admitted, and callers commonly
+		// pass no deadline of their own (e.g. pymilvus defaults to
+		// timeout=None) -- so without a bound here, this handler could hang
+		// forever. SegmentTaskTimeout is a reasonable ceiling for "how long
+		// this synchronous call is willing to wait" independent of whether it
+		// matches the task's own execution budget.
+		waitCtx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+		defer cancel()
+		err := task.Wait(waitCtx, tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))
@@ -236,7 +248,10 @@ func (s *Server) balanceChannels(ctx context.Context,
 	}
 
 	if sync {
-		err := task.Wait(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
+		// See the matching comment in balanceSegments.
+		waitCtx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond))
+		defer cancel()
+		err := task.Wait(waitCtx, tasks...)
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			mlog.Warn(ctx, msg, mlog.Err(err))
