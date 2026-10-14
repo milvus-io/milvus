@@ -27,6 +27,8 @@
 #include <string_view>
 #include <utility>
 
+#include <unistd.h>
+
 #include "common/EasyAssert.h"
 
 namespace milvus::storage {
