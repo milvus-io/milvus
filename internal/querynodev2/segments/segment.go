@@ -80,8 +80,9 @@ type IndexedFieldInfo struct {
 }
 
 type baseSegment struct {
-	collection *Collection
-	version    *atomic.Int64
+	collection     *Collection
+	sealedMetadata *sealedRuntimeMetadata
+	version        *atomic.Int64
 
 	segmentType   SegmentType
 	pkCandidate   pkoracle.Candidate // PK candidate: BloomFilterSet for regular collections, ExternalSegmentCandidate for external collections
@@ -132,10 +133,16 @@ func (s *baseSegment) Partition() int64 {
 }
 
 func (s *baseSegment) DatabaseName() string {
+	if s.sealedMetadata != nil {
+		return s.sealedMetadata.database
+	}
 	return s.collection.GetDBName()
 }
 
 func (s *baseSegment) ResourceGroup() string {
+	if s.sealedMetadata != nil {
+		return s.sealedMetadata.resourceGroup
+	}
 	return s.collection.GetResourceGroup()
 }
 

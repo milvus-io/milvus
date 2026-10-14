@@ -27,6 +27,8 @@ func TestCollectionLoadScopesShareNativeSchema(t *testing.T) {
 	defer DeleteCollection(owner)
 	left := owner.WithLoadScope([]int64{10}, []int64{100, 101})
 	right := owner.WithLoadScope([]int64{20}, []int64{100, 102})
+	empty := owner.WithLoadScope(nil, nil)
+	require.Empty(t, empty.loadFields.Collect())
 	require.Same(t, left.GetCCollection(), right.GetCCollection())
 	require.Same(t, owner.GetCCollection(), left.GetCCollection())
 	require.ElementsMatch(t, []int64{100, 101}, left.loadFields.Collect())
@@ -39,6 +41,7 @@ func TestCollectionLoadScopesShareNativeSchema(t *testing.T) {
 	var captured []int64
 	patch := mockey.Mock(segcore.CreateCSegment).To(func(req *segcore.CreateCSegmentRequest) (segcore.CSegment, error) {
 		require.Same(t, owner.GetCCollection(), req.Collection)
+		require.True(t, req.ExplicitLoadScope)
 		captured = append([]int64(nil), req.LoadFields...)
 		return nil, nil
 	}).Build()

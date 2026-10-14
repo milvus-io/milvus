@@ -415,6 +415,7 @@ func (c *Collection) CreateCSegment(req *segcore.CreateCSegmentRequest) (segcore
 	}
 	req.Collection = c.ccollection
 	req.LoadFields = c.loadFields.Collect()
+	req.ExplicitLoadScope = c.schemaOwner != nil
 	return segcore.CreateCSegment(req)
 }
 
@@ -724,9 +725,6 @@ func (c *Collection) WithLoadScope(partitions, fields []int64) *Collection {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	loadFields := typeutil.NewSet(fields...)
-	if len(fields) == 0 {
-		loadFields = typeutil.NewSet(c.loadFields.Collect()...)
-	}
 	view := &Collection{
 		ccollection:   c.ccollection,
 		schemaOwner:   c,

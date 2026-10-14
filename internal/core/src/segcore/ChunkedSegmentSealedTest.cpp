@@ -11,6 +11,7 @@
 
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -52,6 +53,8 @@
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -556,6 +559,94 @@ TEST(test_chunk_segment, ViewReadStateRetainsColumnsAndSharesDeletes) {
     primary->Delete(1, &ids, &delete_ts);
     EXPECT_EQ(primary->get_deleted_count(), 1);
     EXPECT_EQ(retained->get_deleted_count(), 1);
+}
+
+TEST(test_chunk_segment, ViewScopeDoesNotExposePhysicalTTLDependency) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto ttl = schema->AddDebugField("ttl", DataType::TIMESTAMPTZ);
+    auto value = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_ttl_field_id(ttl);
+    auto layout = std::make_shared<const segcore::SealedFieldLayout>(
+        schema.get(), segcore::LoadScope({pk.get(), value.get()}));
+    segcore::ChunkedSegmentSealedImpl physical(
+        layout, nullptr, segcore::SegcoreConfig::default_config(), 1);
+    auto read = physical.PinReadState();
+    EXPECT_TRUE(layout->ShouldLoadField(ttl));
+    EXPECT_NO_THROW(read->ValidateLogicalFields({pk, value}));
+    EXPECT_THROW(read->ValidateLogicalFields({ttl}), SegcoreError);
+
+    // Sharing physical columns must not select the query's TTL policy.
+    auto no_ttl = std::make_shared<Schema>();
+    no_ttl->AddDebugField("pk", DataType::INT64);
+    no_ttl->AddDebugField("ttl", DataType::TIMESTAMPTZ);
+    no_ttl->AddDebugField("value", DataType::INT64);
+    no_ttl->set_primary_field_id(pk);
+    exec::QueryContext old_view("old", read.get(), 0, 100);
+    exec::QueryContext new_view("new", read.get(), 0, 100);
+    old_view.set_read_schema(no_ttl);
+    new_view.set_read_schema(schema);
+    EXPECT_EQ(exec::CreateTTLFieldFilterExpression(&old_view), nullptr);
+    EXPECT_NE(exec::CreateTTLFieldFilterExpression(&new_view), nullptr);
+}
+
+TEST(test_chunk_segment, SealedResourcesOutlivePreparingSchema) {
+    auto previous_snapshot_setting =
+        ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.exchange(true);
+    auto restore_snapshot_setting = folly::makeGuard([&] {
+        ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(
+            previous_snapshot_setting);
+    });
+    auto preparing = std::make_shared<Schema>();
+    auto pk = preparing->AddDebugField("pk", DataType::INT64);
+    auto vector = preparing->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    preparing->set_primary_field_id(pk);
+    auto query_schema = std::make_shared<Schema>(*preparing);
+    std::weak_ptr<Schema> retired = preparing;
+    auto segment = CreateColdVectorOutputSegment(preparing, vector, 16);
+    auto* physical =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto read = physical->PinReadState();
+    preparing.reset();
+    ASSERT_TRUE(retired.expired());
+
+    query::Plan plan(query_schema);
+    plan.target_entries_ = {pk};
+    auto result = MakeSearchResult({0});
+    read->TestFillTargetEntry(&plan, result);
+    proto::schema::IDs ids;
+    ids.mutable_int_id()->add_data(
+        result.output_fields_data_.at(pk)->scalars().long_data().data(0));
+    auto timestamp = physical->get_max_timestamp() + 100;
+    physical->Delete(1, &ids, &timestamp);
+    EXPECT_EQ(physical->get_real_count(), 15);
+    EXPECT_EQ(read->get_real_count(), 15);
+    // Replayed or repeated deletes count physical row offsets only once.
+    physical->Delete(1, &ids, &timestamp);
+    ++timestamp;
+    physical->Delete(1, &ids, &timestamp);
+    EXPECT_EQ(physical->get_real_count(), 15);
+    EXPECT_EQ(read->get_real_count(), 15);
+    EXPECT_TRUE(retired.expired());
+
+    // Historical replay after a streaming delete must be included immediately,
+    // even if a timestamped query bitmap snapshot predates the replay.
+    auto next = MakeSearchResult({1});
+    read->TestFillTargetEntry(&plan, next);
+    proto::schema::IDs historical;
+    historical.mutable_int_id()->add_data(
+        next.output_fields_data_.at(pk)->scalars().long_data().data(0));
+    LoadDeletedRecordInfo replay{&timestamp, &historical, 1};
+    physical->LoadDeletedRecord(replay);
+    physical->LoadDeletedRecord(replay);
+    EXPECT_EQ(physical->get_real_count(), 14);
+    EXPECT_EQ(read->get_real_count(), 14);
+
+    physical->ClearData();
+    EXPECT_EQ(physical->get_real_count(), 0);
+    EXPECT_EQ(read->get_real_count(), 14);
 }
 
 TEST(test_chunk_segment, ReadStateForkPreparesEarlierSchemaIndependently) {
@@ -1748,7 +1839,8 @@ TEST_P(TestChunkSegment, TestPkRange) {
     using namespace milvus::segcore;
     using namespace milvus::test::consumer;
     bool pk_is_string = GetParam();
-    auto segment_impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    auto segment_impl =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
     // Test cases for sorted PK

@@ -226,6 +226,22 @@ class SegmentInterface {
     virtual SchemaPtr
     get_schema_snapshot() const = 0;
 
+    virtual bool
+    RequiresExplicitReadSchema() const {
+        return false;
+    }
+
+    // Physical descriptors do not select a logical query schema.
+    virtual FieldMeta
+    get_field_meta(FieldId id) const {
+        return get_schema_snapshot()->operator[](id);
+    }
+
+    virtual bool
+    is_primary_field(FieldId id) const {
+        return get_schema_snapshot()->get_primary_field_id() == id;
+    }
+
     virtual int64_t
     get_deleted_count() const = 0;
 

@@ -358,6 +358,8 @@ class QueryContext : public Context {
 
     SchemaPtr
     get_read_schema() const {
+        AssertInfo(read_schema_ || !segment_->RequiresExplicitReadSchema(),
+                   "sealed View query requires an explicit read schema");
         return read_schema_ ? read_schema_ : segment_->get_schema_snapshot();
     }
 

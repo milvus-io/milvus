@@ -159,6 +159,12 @@ func (l realQVSegmentLoader) FinalizeLoad(segment qvLoadedSegment) error {
 		return err
 	}
 	segments.FinalizeLoad(local.segment)
+	if err := local.segment.(*segments.LocalSegment).DetachPreparingCollection(); err != nil {
+		return err
+	}
+	local.collection = nil
+	local.unpinCollection()
+	local.unpinCollection = nil
 	return nil
 }
 

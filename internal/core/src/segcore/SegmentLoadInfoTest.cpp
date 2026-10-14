@@ -3953,3 +3953,62 @@ TEST(IndexFactoryRawDataTest,
     EXPECT_FALSE(
         milvus::index::CanUseIndexRawDataForField(DataType::JSON, false));
 }
+
+TEST(SealedFieldLayoutTest, OwnsMetadataAfterSchemaRetires) {
+    auto schema = std::make_shared<Schema>();
+    auto id = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(id);
+    std::weak_ptr<Schema> weak = schema;
+    proto::segcore::SegmentLoadInfo info;
+    SegmentLoadInfo load(info, schema.get(), LoadScope({id.get()}));
+    load.RestrictToLoadFields();
+    schema.reset();
+    EXPECT_TRUE(weak.expired());
+    EXPECT_TRUE(load.HasFieldInSchema(id));
+    EXPECT_FALSE(load.HasFieldInSchema(FieldId(id.get() + 1)));
+    auto retained = load;
+    EXPECT_TRUE(retained.HasFieldInSchema(id));
+}
+
+TEST(SealedFieldLayoutTest, ExplicitEmptyScopeDoesNotLoadAllFields) {
+    auto schema = std::make_shared<Schema>();
+    auto id = schema->AddDebugField("value", DataType::INT64);
+    SealedFieldLayout empty(schema.get(), LoadScope({}));
+    SealedFieldLayout selected(schema.get(), LoadScope({id.get()}));
+    EXPECT_FALSE(empty.IsFieldInLoadScope(id));
+    EXPECT_FALSE(empty.ShouldLoadField(id));
+    EXPECT_TRUE(selected.IsFieldInLoadScope(id));
+    EXPECT_TRUE(selected.ShouldLoadField(id));
+    EXPECT_TRUE(schema->IsFieldInLoadScope(id));
+}
+
+TEST(SealedFieldLayoutTest, ExplicitScopeIsIndependentOfLegacySchemaScope) {
+    auto schema = std::make_shared<Schema>();
+    auto a = schema->AddDebugField("a", DataType::INT64);
+    auto b = schema->AddDebugField("b", DataType::INT64);
+    schema->UpdateLoadFields({a.get()});
+    SealedFieldLayout selected(schema.get(), LoadScope({b.get()}));
+    EXPECT_FALSE(selected.IsFieldInLoadScope(a));
+    EXPECT_FALSE(selected.has_field(a));
+    EXPECT_EQ(selected.get_fields().size(), 1);
+    EXPECT_TRUE(selected.ShouldLoadField(b));
+    EXPECT_FALSE(schema->IsFieldInLoadScope(b));
+}
+
+TEST(SealedFieldLayoutTest, PhysicalDependenciesDoNotGrantLogicalAccess) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto ttl = schema->AddDebugField("expires", DataType::INT64);
+    auto value = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_ttl_field_id(ttl);
+    auto scope = LoadScope({value.get()}).WithDependencies(*schema);
+    EXPECT_FALSE(scope.Contains(pk));
+    EXPECT_FALSE(scope.Contains(ttl));
+    EXPECT_TRUE(scope.Requires(pk));
+    EXPECT_TRUE(scope.Requires(ttl));
+    SealedFieldLayout layout(schema.get(), scope);
+    EXPECT_TRUE(layout.ShouldLoadField(pk));
+    EXPECT_TRUE(layout.ShouldLoadField(ttl));
+    EXPECT_TRUE(layout.ShouldLoadField(value));
+}

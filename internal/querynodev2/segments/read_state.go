@@ -74,8 +74,9 @@ func (s *sealedReadState) RowNum() int64 {
 }
 
 // PrepareReadState builds a private successor, sharing unchanged native resources.
-// Neither the source read state nor the physical segment's schema is modified.
-// The caller pins reuse for the duration of this operation.
+// Neither the source read state nor the Collection Schema is modified.
+// The caller pins reuse and collection until this operation completes, including
+// waiting for native execution to finish after cancellation.
 func (s *LocalSegment) PrepareReadState(ctx context.Context, reuse ReadState, info *querypb.SegmentLoadInfo, collection *Collection) (ReadState, error) {
 	if err := s.PinIfNotReleased(); err != nil {
 		return nil, err
@@ -100,7 +101,7 @@ func (s *LocalSegment) PrepareReadState(ctx context.Context, reuse ReadState, in
 		read.ReleaseReadState()
 		return nil, err
 	}
-	if err := native.Reopen(ctx, &segcore.ReopenRequest{LoadInfo: info, Schema: collection.Schema(), SchemaVersion: uint64(collection.Schema().GetVersion()), LoadFields: collection.loadFields.Collect()}); err != nil {
+	if err := native.Reopen(ctx, &segcore.ReopenRequest{LoadInfo: info, Collection: collection.GetCCollection(), LoadFields: collection.loadFields.Collect()}); err != nil {
 		read.ReleaseReadState()
 		return nil, err
 	}

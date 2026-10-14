@@ -86,66 +86,21 @@ execution; the ownership transfer changes no RPC fields or query semantics.
 
 ### Schema handoff
 
-The agreed refactor is [Versioned Schema and QueryView Handoff](schema_evolution.md).
-It separates WAL write schema from published read schema: Proxy/workers fetch
-schemas from SN, DataCoord and QueryView planning consume Broadcaster's target,
-and RootCoord publishes the read schema after complete target handoff. It also
-defines exact-schema routing, column resource sharing and recoverable LoadInfo.
-All GC changes are deferred to that document's unified TODO. Implementation is
-pending; the following describes the current, pre-refactor behavior.
+[Versioned Schema and QueryView Handoff](schema_evolution.md) defines the schema
+publication and exact-version routing contract. WAL establishes write schema;
+Broadcaster exposes the target to DataCoord and QueryView planning; RootCoord
+publishes the read schema after complete target handoff. Proxy and workers resolve
+exact schemas through `streaming.WAL().SchemaClient()`.
 
-Each QueryView carries `schema_version`, sampled from the latest published
-`CollectionSchema.version` when Coord plans the view. Coord only serves the
-latest schema; this field does not identify a retrievable historical snapshot.
-Schema is not part of durable LoadConfig or its LoadInfoVersion. Legacy schema
-fields in load-config protos are ignored and retained only for wire compatibility.
-
-Changing `ttl_field` also advances the schema version, even when the field
-list is unchanged: the property changes the runtime query schema. Setting,
-switching and removing the property use this handoff; repeating the same value
-does not advance the version.
-
-The AlterCollection acknowledgement follows this order:
-
-1. RootCoord persists and publishes the new schema in MetaTable.
-2. RootCoord refreshes DataCoord metadata and applies bound index metadata.
-3. RootCoord requests schema handoff through `UpdateLoadConfig.schema_version`.
-   The schema revision is a reconciliation notification and completion lower
-   bound. Newly added bound function outputs additionally carry an explicit
-   field/index delta: QueryCoord persists eligible additions before handoff,
-   preserving other unloaded fields. Schema-only changes do not write load
-   configuration. Neither path acquires another collection broadcast lock.
-4. Balancer reads the latest schema revision per affected collection for the
-   planning pass. A newer revision forces a new QueryVersion even with unchanged
-   DataView, load configuration and placement. It supersedes an older Preparing
-   view without waiting for that view to become Up. Startup and periodic passes
-   use the same latest-metadata read, so notification loss across restart cannot
-   strand an old schema. Metadata lookup failure preserves views and retries.
-5. QN calls DescribeCollection and checks the target revision before acquiring
-   resources. If metadata is older, preparation can retry; if metadata is newer,
-   the obsolete view is Unrecoverable and Coord builds its replacement from the
-   latest schema. QN never waits for an unavailable historical schema.
-   SN applies AlterCollection on its serialized WAL path; an event barrier and
-   applied-version check precede SN Ready.
-6. RootCoord waits until every expected vchannel/replica has a current-load-config
-   Up view whose schema revision is at least the DDL's revision, then completes
-   acknowledgement and expires Proxy caches. A released collection has no serving
-   obligation; a subsequent load generates views from current metadata.
-
-`GetQueryViewLoadInfo` remains a load-configuration API and does not return
-Schema. QN obtains Schema separately through DescribeCollection. This minimal
-scheme is not historical-schema serving: a newer publication may supersede work
-already in flight.
-
-New Search/Retrieve plans carry their schema version. Phase 1 rejects an Up view
-whose schema requirement is older, allowing the existing view retry path to wait
-for handoff. WAL consumption itself never waits for this handoff: Flush and
-resource events needed to prepare the new view must continue to advance.
-
-This reuses legacy collection/segcore schema transitions and lazy segment reopen.
-It does not introduce immutable physical schema resources for every retained
-QueryView. Field-removal MVCC boundary handling and runtime BM25 function changes
-need separate validation; a version requirement alone is not proof of either.
+QueryNode CCollection owns immutable Schema per CollectionID/SchemaVersion, with
+independent View LoadScope. SealedSegment operations borrow Schema under an
+operation-owned collection pin and use a pinned physical ReadState. Segment,
+Reopen and physical caches do not maintain a current logical Schema. ReadStates
+share compatible columns/readers while retaining physical generations through
+query completion. See [QN resource preparation](qnview/querynode_queryview_resource_preparation.md)
+for preparation, borrowing, asynchronous lifetime and compatibility. This native
+ownership refactor covers QN and SealedSegment; SN/GrowingSegment retain their
+separate resource model.
 
 ### Advantages
 

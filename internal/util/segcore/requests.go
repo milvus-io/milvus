@@ -125,6 +125,8 @@ func (req *cLoadFieldDataRequest) Release() {
 }
 
 type ReopenRequest struct {
+	// Collection is borrowed under the caller's operation pin.
+	Collection    *CCollection
 	LoadFields    []int64
 	LoadInfo      *querypb.SegmentLoadInfo
 	Schema        *schemapb.CollectionSchema

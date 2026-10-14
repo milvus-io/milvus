@@ -6,11 +6,34 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func (suite *SegmentSuite) TestViewExplicitEmptyCreateLoadsOnlyDependencies() {
+	ctx := suite.T().Context()
+	local := suite.sealed.(*LocalSegment)
+	binlogs, _, err := mock_segcore.SaveBinLog(ctx, suite.collectionID, suite.partitionID,
+		suite.segmentID, 100, suite.collection.Schema(), suite.chunkManager)
+	suite.Require().NoError(err)
+	info := proto.Clone(local.LoadInfo()).(*querypb.SegmentLoadInfo)
+	info.BinlogPaths = binlogs
+	physical, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
+		Collection: suite.collection.GetCCollection(), SegmentID: suite.segmentID,
+		SegmentType: segcore.SegmentTypeSealed, LoadInfo: info, ExplicitLoadScope: true,
+	})
+	suite.Require().NoError(err)
+	defer physical.Release()
+	suite.Require().NoError(physical.Load(ctx))
+	suite.True(physical.HasFieldData(GetPkField(suite.collection.Schema()).GetFieldID()))
+	suite.False(physical.HasFieldData(106), "an empty explicit scope cannot load all user columns")
+	suite.True(local.csegment.HasFieldData(106), "another scope keeps its own column")
+	suite.Equal(int64(100), physical.RowNum())
+}
 
 func (suite *SegmentSuite) TestViewReadStateSurvivesReopenAndSharesDeletes() {
 	ctx := suite.T().Context()
@@ -58,6 +81,55 @@ func (suite *SegmentSuite) TestViewReadStateSurvivesReopenAndSharesDeletes() {
 	suite.Require().NoError(local.Delete(ctx, pks, []uint64{1000, 1000}))
 	suite.Equal(int64(98), read.RowNum())
 	suite.Equal(read.RowNum(), newRead.RowNum(), "all read states observe the same applied deletes")
+}
+
+func (suite *SegmentSuite) TestViewBorrowedCollectionReopenOutlivesPreparingOwner() {
+	ctx := suite.T().Context()
+	local := suite.sealed.(*LocalSegment)
+	read, err := local.PinReadState()
+	suite.Require().NoError(err)
+	defer read.ReleaseReadState()
+	schema := suite.collection.Schema()
+	owner, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID: local.Collection(), Schema: schema,
+	})
+	suite.Require().NoError(err)
+	defer func() {
+		if owner != nil {
+			owner.Release()
+		}
+	}()
+	const removedField = int64(106)
+	var fields []int64
+	for _, field := range schema.Fields {
+		if field.FieldID != removedField {
+			fields = append(fields, field.FieldID)
+		}
+	}
+	suite.Require().NoError(read.(*sealedReadState).native.Reopen(ctx, &segcore.ReopenRequest{
+		LoadInfo: local.LoadInfo(), Collection: owner, LoadFields: fields,
+	}))
+	// Preparation has completed. Its owner can disappear while the physical
+	// result remains usable by an independently pinned query collection.
+	owner.Release()
+	owner = nil
+	suite.False(read.(*sealedReadState).native.HasFieldData(removedField))
+	suite.True(local.csegment.HasFieldData(removedField))
+	query, err := proto.Marshal(&planpb.PlanNode{
+		Node:           &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}},
+		OutputFieldIds: []int64{GetPkField(schema).GetFieldID()},
+	})
+	suite.Require().NoError(err)
+	plan, err := segcore.NewRetrievePlan(suite.collection.GetCCollection(), query, typeutil.MaxTimestamp, 100, 0, 0, 0)
+	suite.Require().NoError(err)
+	defer plan.Delete()
+	offsets := &segcore.RetrievePlanWithOffsets{RetrievePlan: plan, Offsets: []int64{0, 3}}
+	expected, err := local.RetrieveByOffsets(ctx, offsets)
+	suite.Require().NoError(err)
+	actual, err := read.RetrieveByOffsets(ctx, offsets)
+	suite.Require().NoError(err)
+	suite.True(proto.Equal(expected, actual))
+	suite.Equal(local.RowNum(), read.RowNum())
 }
 
 func (suite *SegmentSuite) TestViewReadStateLoadScopeReleasesBaseReferences() {

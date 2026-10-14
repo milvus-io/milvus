@@ -1381,14 +1381,17 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		})
 	}
 
-	collection := loader.manager.Collection.Get(segment.Collection())
-	if local, ok := segment.(*LocalSegment); ok {
-		collection = local.GetCollection()
+	var metadata deltaStorageMetadata
+	if local, ok := segment.(*LocalSegment); ok && local.sealedMetadata != nil {
+		metadata = local.sealedMetadata.delta
+	} else {
+		collection := loader.manager.Collection.Get(segment.Collection())
+		if local, ok := segment.(*LocalSegment); ok {
+			collection = local.GetCollection()
+		}
+		metadata = newDeltaStorageMetadata(collection.Schema())
 	}
-
-	helper, _ := typeutil.CreateSchemaHelper(collection.Schema())
-	pkField, _ := helper.GetPrimaryKeyField()
-	deltaData, err := storage.NewDeltaDataWithPkType(rowNums, pkField.DataType)
+	deltaData, err := storage.NewDeltaDataWithPkType(rowNums, metadata.primaryKeyType)
 	if err != nil {
 		return err
 	}
@@ -1406,7 +1409,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 
 			for i := 0; i < dl.Len(); i++ {
 				var pk storage.PrimaryKey
-				switch pkField.DataType {
+				switch metadata.primaryKeyType {
 				case schemapb.DataType_Int64:
 					pk = storage.NewInt64PrimaryKey(dl.Column(0).(*array.Int64).Value(i))
 				case schemapb.DataType_VarChar:
@@ -1422,20 +1425,17 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return nil
 	}
 
-	schema := collection.Schema()
-	isExternalCollection := typeutil.IsExternalCollection(schema)
-	resolver := typeutil.NewStorageColumnResolver(schema)
-	if isExternalCollection && !resolver.IsMilvusTable() {
+	if metadata.external && !metadata.milvusTable {
 		mlog.Info(context.TODO(), "skip loading delta logs for non-milvus-table external collection")
 		return nil
 	}
-	isMilvusTableRealPK := resolver.IsMilvusTable() && HasExternalPrimaryKey(schema)
+	isMilvusTableRealPK := metadata.milvusTableRealPK
 	useExplicitDeltalogs := isMilvusTableRealPK && len(deltaLogs) > 0
 	readPaths := func(paths []string, opts ...storage.RwOption) error {
 		if len(paths) == 0 {
 			return nil
 		}
-		reader, err := storage.NewDeltalogReader(ctx, pkField.DataType, paths, opts...)
+		reader, err := storage.NewDeltalogReader(ctx, metadata.primaryKeyType, paths, opts...)
 		if err != nil {
 			return err
 		}
@@ -1449,9 +1449,9 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 			// Real-PK milvus-table manifests keep source deltalogs. Target-owned
 			// deltalogs are only valid for virtual-PK translation.
 			extfs := packed.ExternalSpecContext{
-				CollectionID: collection.ID(),
-				Source:       schema.GetExternalSource(),
-				Spec:         schema.GetExternalSpec(),
+				CollectionID: segment.Collection(),
+				Source:       metadata.source,
+				Spec:         metadata.spec,
 			}
 			sourceDeltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(
 				manifestPath,
@@ -1479,7 +1479,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				if len(storageV3Paths) > 0 {
 					reader, err := storage.NewDeltalogReader(
 						ctx,
-						pkField.DataType,
+						metadata.primaryKeyType,
 						storageV3Paths,
 						storage.WithVersion(storage.StorageV3),
 						storage.WithStorageConfig(createStorageConfig()),
@@ -1495,7 +1495,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				if len(legacyPaths) > 0 {
 					reader, err := storage.NewDeltalogReader(
 						ctx,
-						pkField.DataType,
+						metadata.primaryKeyType,
 						legacyPaths,
 						storage.WithVersion(storage.StorageV1),
 						storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {

@@ -246,63 +246,107 @@ Readiness is capability-based: ordinary missing nullable/default columns can
 use supported projections; BM25/MinHash outputs require their actual derived
 values and required statistics/indexes. A schema number is not proof of either.
 
-### 6.1 Multiple schemas and load scopes
+### 6.1 Schema, LoadScope and physical ReadState
 
-CCollection is identified only by `(CollectionID, SchemaVersion)`. LoadInfoVersion
-is not part of this native identity. Views with the same schema share planning
-resources and current compatible index metadata; their immutable Go load scopes
-carry the required fields and partitions separately. Each View, physical Segment
-and active query pins the owning collection for the lifetime of its borrowed
-scope. A scope wrapper cannot release the native collection itself.
-Since LoadInfo index metadata is filtered by field scope, a refresh replaces
-only that scope's entries on the shared schema owner, under the owner's lock.
-It cannot erase index metadata still used by another scope. A dropped index is
-removed within the refreshed scope; index versions remain unbound to Views.
+This resource model applies to QueryNode and SealedSegment. It does not change
+StreamingNode/GrowingSegment ownership. Shared native entry points preserve
+those callers through explicit compatibility adapters.
 
-Initial Segment creation copies the collection schema before applying its field
-scope. Reopen likewise prepares a private schema; neither operation changes the
-shared CCollection's load fields. StructArray offsets belong to the read state:
-when no child is in its load scope, both the per-child aliases and the struct-name
-entry are removed. Older pinned read states retain their own offsets.
+CCollection owns one immutable logical Schema per `(CollectionID, SchemaVersion)`.
+LoadInfoVersion and loaded fields are not part of that identity. Published schema
+content cannot change through another mutable alias. Equivalent derived caches
+may be initialized with synchronization. Current compatible index metadata is
+separate from immutable schema content; QueryView never binds an IndexID.
 
-Private read-state Reopen preserves the physical row domain. It updates only its
-private row-count metadata and never initializes or resizes the shared delete
-bitmap. Transform application continues through the physical base while these
-private columns prepare.
+Segment operations borrow `const Schema*` from their operation context. A sealed
+Segment does not store a current logical Schema, copy the complete collection
+Schema, or replace its Schema during Reopen. A query context binds:
 
-Each View binds its own immutable read schema and compatible ReadState. Index
-refresh follows current metadata without creating a new QueryView. Existing
-queries retain their acquired resources while later queries use a prepared successor. Native
-Reopen publishes staged resources; pinned ReadStates share unchanged columns,
-indexes and storage readers while retaining their own required content. Queries
-retain the selected ReadState independently of the View's lifetime.
+```text
+borrowed Schema + immutable LoadScope + pinned physical ReadState + MVCC
+```
 
-The physical transform base retains one read state that is still owned by a
-binding. Reconciliation changes that reference when a scope is released; the
-base must not keep its initial full load scope forever. Private native forks
-filter the load-info diff by the exact requested field set, independently of
-the raw-data eager/lazy policy. In particular, a BM25 output can need an index
-without eagerly loading its raw column. Releasing a cached ReadState drops only
-its references; in-flight queries continue to own their selected state.
+The plan and View must agree on the logical schema. Queries never fall back to a
+Segment's latest schema or invoke LazyCheckSchema to mutate shared resources.
+Preparation establishes the required capabilities before Ready; execution can
+use supported default/NULL projections but cannot replace missing Function
+materialization with such projections.
+
+LoadScope is independent of Schema. It distinguishes the logical field set a View
+may access, supporting physical dependencies, and eager/lazy loading policy.
+Having a cached physical column does not authorize a View to access it. An empty
+explicit field set is empty, not an implicit request for all fields. Legacy
+all-fields selection is normalized explicitly by its adapter. PK, TTL inputs,
+StructArray offsets/validity and Function dependencies are included as required;
+BM25 output availability does not imply eagerly loading its raw column.
+Partition selection remains at the View/task layer.
+Physical RowNum statistics count inserted rows minus Delete and do not interpret
+View TTL. Sealed delete application deduplicates fixed row offsets; statistics
+use the deletion container's atomic cardinality in O(1), without allocating a
+query bitmap. Public `count(*)` uses the query's bound Schema, MVCC and TTL.
+The physical segment keeps independent PK/delete-storage metadata and finalized
+resource estimates; it releases the initial preparing Collection before becoming
+available to Views. Subsequent operations pin their own exact Collection.
 
 
-For A requiring `{x, y}` and B requiring `{x, z}`, x can be shared, A retains y,
-and B prepares z. B becoming Ready does not require immediate physical removal
-of y. The resource reconciles all bindings rather than reducing them to one
-numerically greatest schema or load identity.
+Physical ReadStates retain immutable resource generations: columns, indexes,
+readers, row-domain metadata and independently owned descriptions of the required
+physical fields/groups. Manifest discovery may keep lightweight storage-name
+mappings for unselected columns; it does not copy their full field descriptions.
+PublishedSegmentState and stored SegmentLoadInfo do not retain a borrowed logical
+Schema, directly or through an alias. Reopen consumes the borrowed schema and
+scope to prepare a successor and publishes only its physical resources and
+necessary independently owned metadata. A retained successful result remains
+valid after its preparing View and operation have disappeared.
 
-ReadState preparation builds a private fork from compatible retained resources.
-The target schema may precede another prepared schema: arrival order does not
-constrain preparation order. Published read states are never mutated to serve a
-different schema or loading scope. A fork shares unchanged columns/readers and
-prepares missing capabilities before publication; it does not reload a whole
-Segment just because SchemaVersion differs.
+For A requiring `{x, y}` and B requiring `{x, z}`, unchanged x can be shared,
+A retains y, and B prepares z. B becoming Ready does not wait for y to be removed.
+A later or earlier SchemaVersion is not itself evidence of physical compatibility.
+Reuse checks content/base revision, field encoding, row domain and projection
+semantics. Same SegmentID, equal row count or a greater Manifest number alone
+is not a universal compatibility proof. Default projections retain their value
+and type semantics; StructArray generation identity must survive name reuse.
 
-A compatible newer Manifest may satisfy a base requirement only when its data
-domain, fields, indexes and MVCC semantics remain valid for that binding. A
-ReadState already published to a View remains valid across later Reopens. If a
-required base cannot be served, preparation reports that failure instead of
-silently substituting incompatible data.
+ReadState preparation stages missing resources without mutating a published
+state. Old queries retain their selected resources across Manifest or latest-index
+refresh. Compatible latest indexes are pinned during execution, independently of
+QueryView version. Physical mutation remains serialized by the resource owner.
+Private column preparation preserves the physical row domain and never resizes
+the continuously updated shared delete bitmap.
+
+### 6.2 Borrowing and asynchronous lifetime
+
+Each View and derived operation owns a reference to the exact CCollection and
+physical resources it uses. The QueryView object itself need not remain alive
+once independent operation handles have been acquired. Registry removal, Down,
+Release and cancellation are not proof that native dependencies can be freed.
+
+```text
+acquire dependency handles
+  -> enqueue / execute / complete asynchronous children
+  -> reduce / refill fields / finish zero-copy result consumption
+  -> destroy objects still borrowing dependencies
+  -> release dependency handles
+```
+
+Pin acquisition precedes queueing. Queued cancellation, execution failure and
+running cancellation release each reference exactly once after actual completion.
+A task that continues independently acquires its own pin before detaching, or
+owns all physical metadata it needs. Future completion certifies only work whose
+completion is actually joined by that future.
+
+Long-lived Reader/Translator/cache resources own necessary physical metadata;
+they do not borrow FieldMeta references from a collection schema. Copying a field
+or column-group descriptor is allowed and does not justify copying a complete
+collection Schema. Cached preparation results follow the same ownership rule.
+Any unavoidable schema-dependent derived object must explicitly retain its owner
+for its full lifetime rather than rely on the original preparing operation.
+
+The physical Segment does not pin its initial collection merely because that
+collection created it. Its Delete/PK bookkeeping and physical preparation use
+independent metadata. All existing physical dependencies must be detached before
+removing that initial pin. Runtime destruction releases dependent objects before
+their schema/physical owner handles, including exception and cancellation paths.
 
 ## 7. Metadata subscription ownership
 
@@ -472,7 +516,10 @@ false Ready or silent indefinite waiting.
 | Old transform drain exits after a new registration | New registration is unaffected; no false catch-up success |
 | Inputs change while a reconcile/task runs | A successor pass uses current requirements and metadata |
 | One requirement lacks a Manifest, another is executable | Executable compatible work makes progress |
-| Multiple schemas/scopes share a Segment | Correct fields/results per View, reuse of unchanged resources |
+| Multiple schemas/scopes share a Segment | Correct fields/results per View, shared immutable CCollection, reuse of unchanged resources |
+| Schema owner retires while physical caches remain | Cache eviction/reload and Delete use independent physical metadata |
+| Original View exits before preparation completes | Reusable result has no dangling logical-schema borrow |
+| Result outlives native execution | Reduce, refill and zero-copy consumption retain all dependencies |
 | Same-ID Manifest update | Required content and deltas are applied before readiness |
 | Query outlives View release and same-ID reconstruction | Its handles retain the exact resources and release their own owner |
 | Queued cancellation, running cancellation and shutdown | No leaked operation references or unresolved release completion |

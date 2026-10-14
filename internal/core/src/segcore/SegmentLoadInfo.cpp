@@ -89,7 +89,7 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     load_index_info.shard = GetInsertChannel();
 
     // Get field type from schema
-    const auto& field_meta = schema_->operator[](field_id);
+    const auto& field_meta = fields_->operator[](field_id);
     load_index_info.field_type = field_meta.get_data_type();
     load_index_info.element_type = field_meta.get_element_type();
 
@@ -174,7 +174,7 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
         info->add_files(f);
     }
 
-    const auto& field_meta = schema_->operator[](field_id);
+    const auto& field_meta = fields_->operator[](field_id);
     *info->mutable_schema() = field_meta.ToProto();
 
     info->set_collectionid(GetCollectionID());
@@ -184,7 +184,7 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
     // Text match index mmap config is based on the scalar field mmap
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
     auto [field_has_setting, field_mmap_enabled] =
-        schema_->MmapEnabled(field_id);
+        fields_->MmapEnabled(field_id);
     bool enable_mmap = field_has_setting
                            ? field_mmap_enabled
                            : mmap_config.GetScalarFieldEnableMmap();
@@ -194,7 +194,7 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
         text_index_stats.current_scalar_index_version());
 
     // Text match index warmup policy based on scalar field's warmup
-    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+    auto [field_has_warmup, field_warmup_policy] = fields_->WarmupPolicy(
         field_id, /*is_vector=*/false, /*is_index=*/false);
     if (field_has_warmup) {
         info->set_warmup_policy(field_warmup_policy);
@@ -221,7 +221,7 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
         info->add_files(f);
     }
 
-    const auto& field_meta = schema_->operator[](field_id);
+    const auto& field_meta = fields_->operator[](field_id);
     *info->mutable_schema() = field_meta.ToProto();
 
     info->set_collectionid(GetCollectionID());
@@ -233,7 +233,7 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
     info->set_enable_mmap(mmap_config.GetJsonStatsEnableMmap());
     info->set_mmap_dir_path(mmap_config.GetJsonStatsMmapPath());
 
-    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+    auto [field_has_warmup, field_warmup_policy] = fields_->WarmupPolicy(
         field_id, /*is_vector=*/false, /*is_index=*/false);
     if (field_has_warmup) {
         info->set_warmup_policy(field_warmup_policy);
@@ -284,7 +284,7 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     for (const auto& [field_id, load_index_infos] :
          new_info.converted_field_index_cache_) {
         // Schema-driven: skip indexes for fields not in current schema.
-        // Use new_info's schema (the latest) since this->schema_ may still
+        // Use new_info's schema (the latest) since this->fields_ may still
         // contain dropped fields from a prior load.
         if (!new_info.HasFieldInSchema(field_id)) {
             continue;
@@ -530,7 +530,7 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             bool index_has_raw_data =
                 new_info.field_index_has_raw_data_.count(fid) > 0;
             bool is_vector_field = IsVectorDataType(
-                new_info.schema_->operator[](fid).get_data_type());
+                new_info.fields_->operator[](fid).get_data_type());
             // When a VECTOR field's index already carries the raw data
             // (IVF_FLAT / DiskANN / HNSW-with-raw), the separate raw vector
             // column is redundant and must NOT be made resident — neither eager
@@ -559,7 +559,7 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             // (we want to keep field data alongside index, OR index can't serve raw).
             bool should_eager_load =
                 field_id < START_USER_FIELDID ||
-                (new_info.schema_->ShouldLoadField(fid) &&
+                (new_info.fields_->ShouldLoadField(fid) &&
                  (prefer_field_data || !index_has_raw_data));
             if (is_new_field) {
                 // Field not in current and not default-filled → new load
@@ -672,7 +672,7 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
             }
         }
     } else {
-        if (schema_->is_external_collection()) {
+        if (fields_->is_external_collection()) {
             diff.load_external_manifest = true;
         } else {
             // Manifest mode: collect fields per column group, emplace each
@@ -735,8 +735,8 @@ SegmentLoadInfo::CollectDataFields() const {
 std::set<FieldId>
 SegmentLoadInfo::GetDefaultFilledFieldsForNewInfo(
     const SegmentLoadInfo& new_info) const {
-    if (schema_->is_external_collection() ||
-        new_info.schema_->is_external_collection()) {
+    if (fields_->is_external_collection() ||
+        new_info.fields_->is_external_collection()) {
         return {};
     }
 
@@ -768,7 +768,7 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
                            fields_filled_with_default_.end());
 
     // Compute: new schema fields - new_info_fields - current_handled
-    for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
+    for (const auto& [field_id, field_meta] : new_info.fields_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID ||
             !new_info.HasFieldInSchema(field_id)) {
             continue;
@@ -782,7 +782,7 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
             continue;
         }
 
-        if (new_info.schema_->is_function_output(field_id)) {
+        if (new_info.fields_->is_function_output(field_id)) {
             continue;
         }
 
@@ -867,7 +867,7 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
     }
 
     // Find text indexes to create: enable_match fields without pre-built index
-    for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
+    for (const auto& [field_id, field_meta] : new_info.fields_->get_fields()) {
         if (!field_meta.enable_match() ||
             !new_info.HasFieldInSchema(field_id)) {
             continue;
@@ -1008,11 +1008,12 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
             diff.manifest_updated = true;
             diff.new_manifest_path = new_info.GetManifestPath();
         }
-        if (schema_->is_external_collection()) {
+        if (fields_->is_external_collection()) {
             if (diff.manifest_updated) {
                 diff.load_external_manifest = true;
             }
-            for (const auto& [field_id, field] : new_info.schema_->get_fields()) {
+            for (const auto& [field_id, field] :
+                 new_info.fields_->get_fields()) {
                 if (new_info.HasFieldInSchema(field_id) &&
                     !HasFieldInSchema(field_id)) {
                     diff.load_external_manifest = true;
@@ -1030,7 +1031,7 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     }
 
     // Compute fields that need default value filling (schema evolution)
-    if (!schema_->is_external_collection()) {
+    if (!fields_->is_external_collection()) {
         ComputeDiffDefaultFields(diff, new_info);
     }
 
@@ -1054,7 +1055,7 @@ SegmentLoadInfo::GetLoadDiff() {
 
     milvus::proto::segcore::SegmentLoadInfo empty_load_info;
 
-    SegmentLoadInfo empty_info(empty_load_info, schema_);
+    SegmentLoadInfo empty_info(empty_load_info, fields_);
 
     // Handle index changes
     empty_info.ComputeDiffIndexes(diff, *this);
@@ -1071,7 +1072,7 @@ SegmentLoadInfo::GetLoadDiff() {
     // - manifest -> manifest
     // Cross-category changes are not supported.
     if (HasManifestPath()) {
-        if (schema_->is_external_collection()) {
+        if (fields_->is_external_collection()) {
             // External collections use parquet field names (e.g., "id",
             // "value") as column group column names, not numeric field IDs.
             // ComputeDiffColumnGroups calls std::stoll which would crash.
@@ -1092,7 +1093,7 @@ SegmentLoadInfo::GetLoadDiff() {
     // Skip for external collections: collect_data_fields() calls std::stoll
     // on column group names, and external collections don't need default fills
     // (all fields are either external or virtual PK).
-    if (!schema_->is_external_collection()) {
+    if (!fields_->is_external_collection()) {
         empty_info.ComputeDiffDefaultFields(diff, *this);
     }
 

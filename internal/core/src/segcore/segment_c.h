@@ -74,6 +74,19 @@ NewSegmentWithLoadInfoAndLoadFields(CCollection collection,
                                     const int64_t* load_fields,
                                     int64_t load_field_count);
 
+// Borrows CCollection for this call. The explicit empty scope loads no user
+// fields except required physical dependencies. Existing constructors retain
+// their legacy all-fields interpretation.
+CStatus
+NewSealedSegmentWithCollection(CCollection collection,
+                               int64_t segment_id,
+                               CSegmentInterface* output,
+                               bool sorted,
+                               const uint8_t* load_blob,
+                               int64_t load_length,
+                               const int64_t* load_fields,
+                               int64_t field_count);
+
 /**
  * @brief Dispatch a segment manage load task.
  * This function make segment itself load index & field data according to load info previously set.
@@ -155,7 +168,18 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const int64_t schema_length,
                    const uint64_t schema_version);
 
-// Prepare an explicit loading scope while preserving the existing reopen ABI.
+// Borrows collection Schema until this Future actually completes (including
+// cancellation). The caller must pin both collection and segment for that
+// duration. Input blobs/field lists are copied before this function returns.
+CFuture*
+AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
+                                       CSegmentInterface segment,
+                                       CCollection collection,
+                                       const uint8_t* load_blob,
+                                       int64_t load_length,
+                                       const int64_t* load_fields,
+                                       int64_t load_field_count);
+
 CFuture*
 AsyncReopenSegmentWithLoadFields(CTraceContext c_trace,
                                  CSegmentInterface c_segment,

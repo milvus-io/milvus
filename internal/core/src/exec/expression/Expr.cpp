@@ -727,7 +727,9 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     // Rewrite same-column geometry predicates into Coarse + Refine nodes before
     // bucketing, so the buckets below schedule coarse early / refine last.
     SplitFuseGISConjunct(expr, context);
-    auto schema = segment->get_schema_snapshot();
+    auto schema = segment->type() == SegmentType::Growing
+                      ? segment->get_schema_snapshot()
+                      : context->get_query_context()->get_read_schema();
     auto namespace_field_id = schema->get_namespace_field_id();
     std::vector<size_t> reorder;
     std::vector<size_t> numeric_expr;

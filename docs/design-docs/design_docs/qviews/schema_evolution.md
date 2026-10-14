@@ -1,12 +1,9 @@
 # AlterCollection: Versioned Schema and QueryView Handoff
 
-Status: agreed target design, 2026-10-13. Implementation is pending.
-
-This document defines the refactor agreed after reviewing the qv implementation
-at `885ddfff27`. It supersedes the **target** schema-handoff contract in
-[README](README.md#schema-handoff). The older documents describe the existing
-implementation unless explicitly marked otherwise; this document does not claim
-that historical-schema serving or column resource isolation is implemented.
+This document defines schema publication and QueryView handoff. QueryNode's
+SealedSegment resource ownership follows the
+[resource preparation design](qnview/querynode_queryview_resource_preparation.md).
+StreamingNode/GrowingSegment ownership is outside that resource refactor.
 
 ## 1. Decisions and scope
 
@@ -357,16 +354,25 @@ or Function identity. SegmentID alone is insufficient for reuse.
 
 For QN:
 
-- Preserve staged native Reopen/snapshot publication, but make acquisition return
-  resources compatible with the requesting view, rather than one mutable latest
-  collection/segment binding shared by all schemas.
-- Reuse unchanged columns/indexes. Manifest changes on the same ID invalidate
-  affected requirements and trigger update. Publish readiness only after success.
-- A compatible newer Manifest can satisfy an older physical requirement when
-  data/MVCC and required columns remain valid. Do not require duplicate full
-  Segment loads solely because schema versions differ.
-- Drop removes references from the new view; physical release waits for old view
-  and executing-task handles. Durable object GC is deferred to section 8.2.
+- CCollection owns immutable Schema by `(CollectionID, SchemaVersion)`. A View
+  owns independent immutable LoadScope; load fields never mutate that Schema.
+- Sealed Segment APIs borrow `const Schema*` from an operation that pins the
+  owning CCollection. Segment and physical ReadState do not retain a current
+  logical schema. The operation binds Schema, LoadScope, ReadState and MVCC.
+- Preparation publishes immutable physical resource generations and independent
+  field/group metadata. Reuse unchanged columns/readers; same-ID Manifest changes
+  prepare affected resources before readiness. Queries do not perform lazy schema
+  mutation. Physical compatibility is not inferred from schema version order.
+- Old and new Views can read the same physical Segment with different logical
+  schemas and scopes. Drop removes the new View's references; executing handles
+  and older Views retain their own resources through actual completion, including
+  asynchronous work, result reduction and field refill.
+- Readers, Translators and cached preparation results own physical metadata and
+  cannot implicitly borrow a retired Schema. Supported default projections are
+  distinct from Function outputs requiring materialization.
+- IndexID remains zero/latest-compatible, with execution-time resource pins.
+  Durable object GC remains deferred to section 8.2. The complete QN ownership
+  and execution contract is [QN resource preparation](qnview/querynode_queryview_resource_preparation.md).
 
 For SN:
 
