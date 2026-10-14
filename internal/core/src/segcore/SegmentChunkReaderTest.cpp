@@ -403,7 +403,7 @@ class ReaderStringSnapshot : public SegmentReadSnapshot {
         return {column_, FieldSkipMetricsView{}};
     }
     std::shared_ptr<const IStructElementOffsets>
-    GetStructElementOffsets(FieldId, OpContext*) const override {
+    GetStructElementOffsets(FieldId) const override {
         ThrowInfo(ErrorCode::Unsupported,
                   "string test snapshot does not support struct offsets");
     }
