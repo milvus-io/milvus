@@ -26,7 +26,9 @@ file format or gratuitously renaming current public request parameters.
   `ValidateIndexParams -> IndexStaticFaced::ConfigCheck`.
 - Milvus base `73d056c78d` pins Knowhere `16e873b1`. Its sparse config already validates
   `inverted_index_algo`; the corresponding Go whitelist duplicates it. The Go
-  comment saying Knowhere no longer validates this parameter is stale.
+  comment saying Knowhere no longer validates this parameter is stale. Removing
+  that whitelist also adopts Knowhere's existing acceptance of explicit empty
+  strings and case-insensitive algorithm names; unknown names still fail.
 - DiskANN config already derives PQ and cache budgets during TRAIN. The load
   path still needs an audit of derived budgets and their actual consumers.
 - The pinned DiskANN Deserialize implementation uses the global Knowhere search

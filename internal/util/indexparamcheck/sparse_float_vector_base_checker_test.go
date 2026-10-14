@@ -46,16 +46,11 @@ func Test_sparseFloatVectorBaseChecker_StaticCheck(t *testing.T) {
 
 	t.Run("invalid inverted_index_algo", func(t *testing.T) {
 		for _, algo := range []string{
-			"INVALID_ALGO",       // completely unknown
-			"",                   // empty string
-			"taat_naive",         // lowercase of valid value
-			"DAAT_WAND_EXTRA",    // valid prefix with extra suffix
-			"BLOCK_MAX",          // partial name of new algo
-			"sindi",              // lowercase of new algo
-			"block_max_maxscore", // lowercase of new algo
-			"BLOCK_MAX_MAXSCOR",  // new algo with typo
-			"BLOCK_MAX_WAND_",    // new algo with trailing underscore
-			"Sindi",              // new algo with mixed case
+			"INVALID_ALGO",      // completely unknown
+			"DAAT_WAND_EXTRA",   // valid prefix with extra suffix
+			"BLOCK_MAX",         // partial name of new algo
+			"BLOCK_MAX_MAXSCOR", // new algo with typo
+			"BLOCK_MAX_WAND_",   // new algo with trailing underscore
 		} {
 			params := map[string]string{
 				common.IndexTypeKey:   "SPARSE_INVERTED_INDEX",
@@ -64,6 +59,23 @@ func Test_sparseFloatVectorBaseChecker_StaticCheck(t *testing.T) {
 			}
 			err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
 			assert.Error(t, err, "algo %q should be rejected", algo)
+		}
+	})
+
+	t.Run("Knowhere accepts empty and case insensitive algorithms", func(t *testing.T) {
+		// Knowhere owns algorithm validation and normalization. Milvus must
+		// preserve the supplied value, including an explicitly empty string.
+		for _, algo := range []string{"", "taat_naive", "sindi", "block_max_maxscore", "Sindi"} {
+			params := map[string]string{
+				common.IndexTypeKey:   "SPARSE_INVERTED_INDEX",
+				Metric:                "IP",
+				"inverted_index_algo": algo,
+			}
+			assert.NoError(t, c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params), "algo %q", algo)
+			assert.NoError(t, c.CheckTrain(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params), "algo %q", algo)
+			value, exists := params["inverted_index_algo"]
+			assert.True(t, exists)
+			assert.Equal(t, algo, value)
 		}
 	})
 
