@@ -120,7 +120,7 @@ func TestSplitShardOnSourceFencesAndSealsGrowing(t *testing.T) {
 	// is also where the key has to go back. Waiting for the retire would leak
 	// it across a WAL close in between: Close releases by REGISTERED vchannel,
 	// and this one no longer has a registration to be found under.
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	require.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{}))
 
 	ctx, extraResult := newSplitAppendContext()
@@ -272,7 +272,7 @@ func TestSplitShardOnTargetRegistersTheGenesis(t *testing.T) {
 	// stayed up, even though it declares no function at all.
 	collectionID := int64(99101)
 	vchannel := "by-dev-rootcoord-dml_9_99101v2"
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	schema := &schemapb.CollectionSchema{
 		Version: 3,
 		Fields: []*schemapb.FieldSchema{
@@ -394,7 +394,7 @@ func TestSplitShardOnTargetNotRegisteredSkipsFunctionRunner(t *testing.T) {
 	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
 
 	_, err = function.GetManager().Materialize(context.Background(), collectionID,
-		walFunctionRunnerKey(vchannel), 0, &stubInsertMessage{body: &msgpb.InsertRequest{}})
+		WALFunctionRunnerKey(vchannel), 0, &stubInsertMessage{body: &msgpb.InsertRequest{}})
 	assert.Error(t, err, "an unregistered genesis must not leak a function runner key")
 }
 
@@ -540,7 +540,7 @@ func TestAlterCollectionRetireIsAppendedWithoutEffect(t *testing.T) {
 	// apply from running.
 	i, shardManager := newTestShardInterceptor(t)
 	shardManager.EXPECT().CheckIfVChannelCanBeWritten(collectionID, vchannel).Return(nil).Once()
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	require.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{}))
 	defer function.GetManager().Release(collectionID, key)
 

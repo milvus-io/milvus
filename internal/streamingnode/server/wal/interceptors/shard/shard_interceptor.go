@@ -401,7 +401,7 @@ func (impl *shardInterceptor) appendDropCollectionWithoutEffect(ctx context.Cont
 		return msgID, err
 	}
 	collectionID := message.MustAsMutableDropCollectionMessageV1(msg).Header().GetCollectionId()
-	function.GetManager().Release(collectionID, walFunctionRunnerKey(msg.VChannel()))
+	function.GetManager().Release(collectionID, WALFunctionRunnerKey(msg.VChannel()))
 	return msgID, nil
 }
 
@@ -673,7 +673,7 @@ func (impl *shardInterceptor) handleSplitShardOnSource(ctx context.Context, msg 
 		reportSplitSwitchTimeTick(ctx, msg, fence.TimeTick)
 		// Idempotent; the first attempt released it already unless this node
 		// restarted since, when a SPLITTED vchannel holds no key to release.
-		function.GetManager().Release(collectionID, walFunctionRunnerKey(msg.VChannel()))
+		function.GetManager().Release(collectionID, WALFunctionRunnerKey(msg.VChannel()))
 		return appendOp(ctx, msg)
 	}
 	// Auto-flush every growing segment of the vchannel as of the fence time
@@ -721,7 +721,7 @@ func (impl *shardInterceptor) handleSplitShardOnSource(ctx context.Context, msg 
 	// REGISTERED vchannel, and a fenced source has no registration left to be
 	// found under. Release is idempotent, so a re-driven fence releasing again
 	// costs nothing.
-	function.GetManager().Release(collectionID, walFunctionRunnerKey(msg.VChannel()))
+	function.GetManager().Release(collectionID, WALFunctionRunnerKey(msg.VChannel()))
 	return appendOp(ctx, msg)
 }
 
