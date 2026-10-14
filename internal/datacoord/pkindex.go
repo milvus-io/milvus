@@ -37,13 +37,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// metaKVPointers is the manifest pointer store on the datacoord meta kv. Its
-// keys are relative to the root path of the meta kv.
-type metaKVPointers struct{ kv kv.MetaKv }
+// metaKVStore is the primary key index meta store on the datacoord meta kv.
+// Its keys are relative to the root path of the meta kv.
+type metaKVStore struct{ kv kv.MetaKv }
 
-var _ manifestmanager.PointerStore = metaKVPointers{}
+var _ manifestmanager.MetaStore = metaKVStore{}
 
-func (p metaKVPointers) Load(ctx context.Context, key string) (string, bool, error) {
+func (p metaKVStore) Load(ctx context.Context, key string) (string, bool, error) {
 	v, err := p.kv.Load(ctx, key)
 	if errors.Is(err, merr.ErrIoKeyNotFound) {
 		return "", false, nil
@@ -56,7 +56,7 @@ func (p metaKVPointers) Load(ctx context.Context, key string) (string, bool, err
 
 // MultiLoad reads keys in one meta kv call. A key is missing when the meta kv
 // returns an empty value for it; a stored pointer or claim record is never empty.
-func (p metaKVPointers) MultiLoad(ctx context.Context, keys []string) ([]string, []bool, error) {
+func (p metaKVStore) MultiLoad(ctx context.Context, keys []string) ([]string, []bool, error) {
 	values, err := p.kv.MultiLoad(ctx, keys)
 	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 		return nil, nil, err
@@ -71,22 +71,14 @@ func (p metaKVPointers) MultiLoad(ctx context.Context, keys []string) ([]string,
 	return values, found, nil
 }
 
-// Save writes saves in one meta kv transaction under the predicates of conds.
-func (p metaKVPointers) Save(ctx context.Context, saves map[string]string, conds ...manifest.Cond) error {
-	preds := make([]predicates.Predicate, 0, len(conds))
-	for _, c := range conds {
-		if c.Absent {
-			preds = append(preds, predicates.KeyNotExist(c.Key))
-		} else {
-			preds = append(preds, predicates.ValueEqual(c.Key, c.Value))
-		}
-	}
+// Save writes saves in one meta kv transaction under preds.
+func (p metaKVStore) Save(ctx context.Context, saves map[string]string, preds ...predicates.Predicate) error {
 	return p.kv.MultiSaveAndRemove(ctx, saves, nil, preds...)
 }
 
 // List returns the keys under prefix without the root path of the meta kv,
 // which LoadWithPrefix includes.
-func (p metaKVPointers) List(ctx context.Context, prefix string) ([]string, []string, error) {
+func (p metaKVStore) List(ctx context.Context, prefix string) ([]string, []string, error) {
 	keys, values, err := p.kv.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, nil, err
@@ -131,7 +123,7 @@ func (s chunkManagerStore) MultiRemove(ctx context.Context, keys []string) error
 // kv and cm, and gives the manager to the service. An invalid GC configuration
 // leaves s.pkindexGC nil and does not stop the manager.
 func (s *Server) initPKIndex(cm storage.ChunkManager) {
-	pointers := metaKVPointers{kv: s.kv}
+	meta := metaKVStore{kv: s.kv}
 	store := chunkManagerStore{cm: cm}
 	layout := manifest.Layout{RootPath: cm.RootPath()}
 	cfg := pkindexgc.Config{
@@ -140,7 +132,7 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 		RetainVersions: Params.DataCoordCfg.PKIndexManifestRetainVersions.GetAsInt(),
 		RetainDuration: Params.DataCoordCfg.PKIndexManifestRetainDuration.GetAsDuration(time.Second),
 	}
-	gc, err := pkindexgc.New(pointers, store, layout, cfg,
+	gc, err := pkindexgc.New(meta, store, layout, cfg,
 		// TODO: pass the outputs of the in-flight compactions of the primary
 		// key index SSTs when that compaction exists.
 		// TODO: add to the live set the tables that a streaming node still
@@ -151,7 +143,7 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 	} else {
 		s.pkindexGC = gc
 	}
-	s.pkindexService.SetManager(manifestmanager.New(pointers, store, layout))
+	s.pkindexService.SetManager(manifestmanager.New(meta, store, layout))
 }
 
 // RegisterPKIndexCoordGRPCService registers the primary key index manifest service on server.

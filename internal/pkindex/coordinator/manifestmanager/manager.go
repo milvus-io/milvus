@@ -29,24 +29,25 @@ import (
 
 	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
-// PointerStore is the metadata store of the manifest pointers and the
-// pchannel claim records.
-type PointerStore interface {
+// MetaStore is the metadata store of the manifest pointers and the pchannel
+// claim records.
+type MetaStore interface {
 	// Load returns the value of key and whether key exists.
 	Load(ctx context.Context, key string) (value string, found bool, err error)
 	// MultiLoad returns the value of each key and whether it exists, in the
 	// order of keys, from one read. An error applies to all keys.
 	MultiLoad(ctx context.Context, keys []string) (values []string, found []bool, err error)
-	// Save writes all saves in one transaction, only when every condition
-	// holds. A condition on a key that is not in saves must still conflict
+	// Save writes all saves in one transaction, only when every predicate
+	// holds. A predicate on a key that is not in saves must still conflict
 	// with a concurrent write of that key. An error does not tell whether the
 	// write took effect.
-	Save(ctx context.Context, saves map[string]string, conds ...manifest.Cond) error
+	Save(ctx context.Context, saves map[string]string, preds ...predicates.Predicate) error
 	// List returns all keys with prefix and their values. Keys are relative to
 	// the store root, in the same form as the keys passed to Load.
 	List(ctx context.Context, prefix string) (keys, values []string, err error)
@@ -62,108 +63,66 @@ const pointerBatchSize = 128
 // result is not known.
 const readBackTimeout = 5 * time.Second
 
-// entry is the current version of one vchannel and the stored pointer value
-// that names it.
-type entry struct {
-	manifest *pkindexpb.Manifest
-	pointer  string
-}
-
-// claimEntry is the claim record of one pchannel and its stored value.
-type claimEntry struct {
-	claim *pkindexpb.PChannelClaim
-	value string
+// vchannelManifest is the current version of the manifest of one vchannel.
+// pointer is the pointer to it as it is stored in the meta store.
+type vchannelManifest struct {
+	pb      *pkindexpb.Manifest
+	pointer string
 }
 
 // Manager is the only writer of the manifests and the pchannel claim records.
 // It applies the edits of one vchannel one at a time. The manifests it
 // returns are shared with its cache; the caller must not change them.
 //
-// The cache of a vchannel or a pchannel is filled on its first use and is
-// refreshed only after a failed write; a flush also reloads the claim record
-// when its term is above the cached term. The cached claim term only goes up.
-// LoadPointers does not use the cache. Until then, Get does not see the
-// commits of another coordinator. The conditions of each write keep commits
-// safe when the cache is stale: a flush writes on the condition that the
-// claim record still holds the flush term.
+// The cache of a vchannel is filled on its first use and is refreshed only
+// after a failed write. LoadPointers does not use the cache. Until then, Get
+// does not see the commits of another coordinator. The predicates of each
+// write keep commits safe when the cache is stale: a flush writes on the
+// predicate that the claim record still holds the flush term.
 type Manager struct {
-	pointers PointerStore
-	store    manifest.ObjectStore
-	layout   manifest.Layout
-	locks    *lock.KeyLock[string]
+	claims *pchannelClaims
+	meta   MetaStore
+	store  manifest.ObjectStore
+	layout manifest.Layout
+	locks  *lock.KeyLock[string]
 
-	mu     sync.Mutex
-	cache  map[string]*entry      // by pointer key
-	claims map[string]*claimEntry // by pchannel
+	mu        sync.Mutex
+	manifests map[string]*vchannelManifest // by pointer key
 }
 
-// New returns a Manager that keeps the pointers and the claim records in
-// pointers and the manifest bodies in store, at the keys of layout.
-func New(pointers PointerStore, store manifest.ObjectStore, layout manifest.Layout) *Manager {
+// New returns a Manager that keeps the pointers and the claim records in meta
+// and the manifest bodies in store, at the keys of layout.
+func New(meta MetaStore, store manifest.ObjectStore, layout manifest.Layout) *Manager {
 	return &Manager{
-		pointers: pointers,
-		store:    store,
-		layout:   layout,
-		locks:    lock.NewKeyLock[string](),
-		cache:    map[string]*entry{},
-		claims:   map[string]*claimEntry{},
+		claims:    newPChannelClaims(meta),
+		meta:      meta,
+		store:     store,
+		layout:    layout,
+		locks:     lock.NewKeyLock[string](),
+		manifests: map[string]*vchannelManifest{},
 	}
 }
 
 // ClaimPChannel claims a pchannel for term with manifest.ApplyPChannelClaim.
-// It reads the claim record from the store, not from the cache.
+// It reads the claim record from the meta store, not from the cache.
 func (m *Manager) ClaimPChannel(ctx context.Context, pchannel string, term int64) error {
-	key := manifest.ClaimKey(pchannel)
-	m.locks.Lock(key)
-	defer m.locks.Unlock(key)
-
-	cur, err := m.loadClaim(ctx, pchannel)
-	if err != nil {
-		return err
-	}
-	next, changed, err := manifest.ApplyPChannelClaim(cur.get(), pchannel, term)
-	if err != nil {
-		return err
-	}
-	if !changed {
-		m.rememberClaim(pchannel, cur)
-		return nil
-	}
-	b, err := marshal.Marshal(next)
-	if err != nil {
-		return errors.Wrapf(err, "marshal claim record of %s", pchannel)
-	}
-	value := string(b)
-	cond := manifest.KeyAbsent(key)
-	if cur != nil {
-		cond = manifest.ValueIs(key, cur.value)
-	}
-	if err := m.pointers.Save(ctx, map[string]string{key: value}, cond); err != nil {
-		// the write may have taken effect: the stored record decides
-		if err := m.decideByReadBack(ctx, key, value, err); err != nil {
-			m.forgetClaim(pchannel)
-			return markUnavailable(err, "write claim record %s term %d", key, term)
-		}
-	}
-	m.rememberClaim(pchannel, &claimEntry{claim: next, value: value})
-	return nil
+	return m.claims.claim(ctx, pchannel, term)
 }
 
 // CommitFlush applies a flush with manifest.ApplyFlush and returns the
 // resulting version. The pchannel of the flush is the pchannel of the
 // vchannel name. The flush term must equal the term of the claim record of
-// that pchannel (manifest.CheckFlushTerm), and the pointer write is
-// conditional on the claim record still holding it. The first version of a
+// that pchannel (manifest.CheckFlushTerm), and the pointer write has the
+// predicate that the claim record still holds it. The first version of a
 // vchannel gets the SST base path of the layout.
 func (m *Manager) CommitFlush(ctx context.Context, collectionID int64, vchannel string, f manifest.Flush) (*pkindexpb.Manifest, error) {
-	pchannel := funcutil.ToPhysicalChannel(vchannel)
-	claim, err := m.flushClaim(ctx, pchannel, f.PChannelTerm)
+	cp, err := m.claims.checkFlush(ctx, funcutil.ToPhysicalChannel(vchannel), f.PChannelTerm)
 	if err != nil {
 		return nil, err
 	}
 	f.CollectionID, f.VChannel = collectionID, vchannel
 	f.SSTBasePath = m.layout.SSTBasePath(collectionID, vchannel)
-	return m.commit(ctx, collectionID, vchannel, &guard{pchannel: pchannel, claim: claim}, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, bool, error) {
+	return m.commit(ctx, collectionID, vchannel, cp, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, bool, error) {
 		return manifest.ApplyFlush(cur, f)
 	})
 }
@@ -182,11 +141,11 @@ func (m *Manager) Get(ctx context.Context, collectionID int64, vchannel string) 
 	key := manifest.PointerKey(collectionID, vchannel)
 	m.locks.Lock(key)
 	defer m.locks.Unlock(key)
-	e, err := m.load(ctx, key)
-	if err != nil || e == nil {
+	cur, err := m.load(ctx, key)
+	if err != nil || cur == nil {
 		return nil, false, err
 	}
-	return e.manifest, true, nil
+	return cur.pb, true, nil
 }
 
 // Target names the manifest of one vchannel.
@@ -215,9 +174,9 @@ func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerR
 		for _, t := range targets[start:end] {
 			keys = append(keys, manifest.PointerKey(t.CollectionID, t.VChannel))
 		}
-		values, found, err := m.pointers.MultiLoad(ctx, keys)
+		values, found, err := m.meta.MultiLoad(ctx, keys)
 		if err == nil && (len(values) != len(keys) || len(found) != len(keys)) {
-			err = errors.Newf("pointer store returned %d values and %d flags for %d keys", len(values), len(found), len(keys))
+			err = errors.Newf("meta store returned %d values and %d flags for %d keys", len(values), len(found), len(keys))
 		}
 		for i, key := range keys {
 			r := &results[start+i]
@@ -233,40 +192,12 @@ func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerR
 	return results
 }
 
-// guard is the claim record that a flush writes under.
-type guard struct {
-	pchannel string
-	claim    *claimEntry
-}
-
-// flushClaim returns the claim record of pchannel when its term equals term.
-// It reads the cached record, and reads the store when the cache has no
-// record or term is above the cached term, because a claim through another
-// coordinator may have raised the stored record.
-func (m *Manager) flushClaim(ctx context.Context, pchannel string, term int64) (*claimEntry, error) {
-	c := m.cachedClaim(pchannel)
-	if c == nil || term > c.claim.GetPchannelTerm() {
-		var err error
-		if c, err = m.loadClaim(ctx, pchannel); err != nil {
-			return nil, err
-		}
-		if c != nil {
-			m.rememberClaim(pchannel, c)
-		}
-	}
-	if err := manifest.CheckFlushTerm(c.get(), pchannel, term); err != nil {
-		return nil, err
-	}
-	return c, nil
-}
-
 // commit applies one edit to the current version of a vchannel. When the edit
 // changes the manifest, it writes the new body under a unique key, then
-// writes the pointer on the condition that the stored pointer is still the
-// one it loaded, or does not exist for the first version. With a guard, the
-// same write also requires the claim record to hold the guard value; it does
-// not write the claim record.
-func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel string, g *guard,
+// writes the pointer on the predicate that the stored pointer is still the
+// one it loaded, or does not exist for the first version. With cp, the same
+// write also requires cp.pred; it does not write the claim record.
+func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel string, cp *pchannelClaimPred,
 	apply func(*pkindexpb.Manifest) (*pkindexpb.Manifest, bool, error),
 ) (*pkindexpb.Manifest, error) {
 	key := manifest.PointerKey(collectionID, vchannel)
@@ -279,7 +210,7 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 	}
 	var curManifest *pkindexpb.Manifest
 	if cur != nil {
-		curManifest = cur.manifest
+		curManifest = cur.pb
 	}
 	next, changed, err := apply(curManifest)
 	if err != nil {
@@ -303,36 +234,35 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 	}
 	ptr := string(ptrBytes)
 
-	saves := map[string]string{key: ptr}
-	conds := []manifest.Cond{manifest.KeyAbsent(key)}
+	preds := []predicates.Predicate{predicates.KeyNotExist(key)}
 	if cur != nil {
-		conds[0] = manifest.ValueIs(key, cur.pointer)
+		preds[0] = predicates.ValueEqual(key, cur.pointer)
 	}
-	if g != nil {
-		conds = append(conds, manifest.ValueIs(manifest.ClaimKey(g.pchannel), g.claim.value))
+	if cp != nil {
+		preds = append(preds, cp.pred)
 	}
-	if err := m.pointers.Save(ctx, saves, conds...); err != nil {
+	if err := m.meta.Save(ctx, map[string]string{key: ptr}, preds...); err != nil {
 		// the write may have taken effect: the stored pointer decides
-		if err := m.decideByReadBack(ctx, key, ptr, err); err != nil {
+		if err := decideByReadBack(ctx, m.meta, key, ptr, err); err != nil {
 			m.forget(key)
-			if g != nil {
-				m.forgetClaim(g.pchannel)
+			if cp != nil {
+				m.claims.forget(cp.pchannel)
 			}
 			return nil, markUnavailable(err, "write manifest pointer %s version %d", key, next.GetVersion())
 		}
 	}
-	m.remember(key, &entry{manifest: next, pointer: ptr})
+	m.remember(key, &vchannelManifest{pb: next, pointer: ptr})
 	return next, nil
 }
 
-// decideByReadBack reads key after a write of value that returned writeErr,
-// whose result is not known. It returns nil when key holds value, and
-// otherwise writeErr with the read error, if any, attached. The read does not
-// use the cancellation of ctx, and it stops after readBackTimeout.
-func (m *Manager) decideByReadBack(ctx context.Context, key, value string, writeErr error) error {
+// decideByReadBack reads key from meta after a write of value that returned
+// writeErr, whose result is not known. It returns nil when key holds value,
+// and otherwise writeErr with the read error, if any, attached. The read does
+// not use the cancellation of ctx, and it stops after readBackTimeout.
+func decideByReadBack(ctx context.Context, meta MetaStore, key, value string, writeErr error) error {
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readBackTimeout)
 	defer cancel()
-	got, found, err := m.pointers.Load(rctx, key)
+	got, found, err := meta.Load(rctx, key)
 	if err != nil {
 		return errors.WithSecondaryError(writeErr, err)
 	}
@@ -342,16 +272,16 @@ func (m *Manager) decideByReadBack(ctx context.Context, key, value string, write
 	return nil
 }
 
-// load returns the cached entry, or reads it from the stores. It returns nil
-// when the vchannel has no manifest.
-func (m *Manager) load(ctx context.Context, key string) (*entry, error) {
+// load returns the cached manifest of the pointer key, or reads it from the
+// stores. It returns nil when the vchannel has no manifest.
+func (m *Manager) load(ctx context.Context, key string) (*vchannelManifest, error) {
 	m.mu.Lock()
-	e := m.cache[key]
+	cur := m.manifests[key]
 	m.mu.Unlock()
-	if e != nil {
-		return e, nil
+	if cur != nil {
+		return cur, nil
 	}
-	ptr, found, err := m.pointers.Load(ctx, key)
+	ptr, found, err := m.meta.Load(ctx, key)
 	if err != nil {
 		return nil, markUnavailable(err, "load manifest pointer %s", key)
 	}
@@ -373,9 +303,9 @@ func (m *Manager) load(ctx context.Context, key string) (*entry, error) {
 	if mf.GetVersion() != p.GetVersion() {
 		return nil, errors.Mark(errors.Newf("manifest body %s has version %d, pointer has %d", p.GetBodyKey(), mf.GetVersion(), p.GetVersion()), pkerr.ErrCorrupted)
 	}
-	e = &entry{manifest: &mf, pointer: ptr}
-	m.remember(key, e)
-	return e, nil
+	cur = &vchannelManifest{pb: &mf, pointer: ptr}
+	m.remember(key, cur)
+	return cur, nil
 }
 
 // decodePointer decodes the stored value of the pointer key. It returns an
@@ -392,35 +322,6 @@ func decodePointer(key, value string) (*pkindexpb.ManifestPointer, error) {
 	return &p, nil
 }
 
-// loadClaim reads the claim record of pchannel from the store. It returns nil
-// when the pchannel has no claim record.
-func (m *Manager) loadClaim(ctx context.Context, pchannel string) (*claimEntry, error) {
-	key := manifest.ClaimKey(pchannel)
-	value, found, err := m.pointers.Load(ctx, key)
-	if err != nil {
-		return nil, markUnavailable(err, "load claim record %s", key)
-	}
-	if !found {
-		return nil, nil
-	}
-	var c pkindexpb.PChannelClaim
-	if err := proto.Unmarshal([]byte(value), &c); err != nil {
-		return nil, errors.Mark(errors.Wrapf(err, "decode claim record %s", key), pkerr.ErrCorrupted)
-	}
-	if c.GetPchannelTerm() <= 0 {
-		return nil, errors.Mark(errors.Newf("claim record %s has term %d", key, c.GetPchannelTerm()), pkerr.ErrCorrupted)
-	}
-	return &claimEntry{claim: &c, value: value}, nil
-}
-
-// get returns the claim record of c, or nil when c is nil.
-func (c *claimEntry) get() *pkindexpb.PChannelClaim {
-	if c == nil {
-		return nil
-	}
-	return c.claim
-}
-
 // markUnavailable adds context to a failure of a remote store and marks it as
 // pkerr.ErrUnavailable. A mark that err already has, such as pkerr.ErrCorrupted
 // for a missing object, stays.
@@ -428,36 +329,14 @@ func markUnavailable(err error, format string, args ...any) error {
 	return errors.Mark(errors.Wrapf(err, format, args...), pkerr.ErrUnavailable)
 }
 
-func (m *Manager) remember(key string, e *entry) {
+func (m *Manager) remember(key string, v *vchannelManifest) {
 	m.mu.Lock()
-	m.cache[key] = e
+	m.manifests[key] = v
 	m.mu.Unlock()
 }
 
 func (m *Manager) forget(key string) {
 	m.mu.Lock()
-	delete(m.cache, key)
-	m.mu.Unlock()
-}
-
-func (m *Manager) cachedClaim(pchannel string) *claimEntry {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.claims[pchannel]
-}
-
-// rememberClaim caches c when the cache has no record of pchannel or a lower
-// term, so that a concurrent read of an older record does not lower it.
-func (m *Manager) rememberClaim(pchannel string, c *claimEntry) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if cur := m.claims[pchannel]; cur == nil || c.claim.GetPchannelTerm() > cur.claim.GetPchannelTerm() {
-		m.claims[pchannel] = c
-	}
-}
-
-func (m *Manager) forgetClaim(pchannel string) {
-	m.mu.Lock()
-	delete(m.claims, pchannel)
+	delete(m.manifests, key)
 	m.mu.Unlock()
 }
