@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -31,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -48,7 +49,7 @@ func isSegmentIndexRollbackRetained(segment *SegmentInfo) bool {
 // rollbackSegmentIndexes restores selected in-memory records to etcd. The
 // segment lock protects the source manifest through publication; BuildID locks
 // in the commit revalidate the records before changing their durable placement.
-func (m *meta) rollbackSegmentIndexes(ctx context.Context, segmentID int64, selectedBuilds ...int64) (int, error) {
+func (m *meta) rollbackSegmentIndexes(ctx context.Context, io *packed.ManifestIOContext, segmentID int64, selectedBuilds ...int64) (int, error) {
 	locks := m.getSegmentManifestLocks()
 	lockStart := time.Now()
 	locks.Lock(segmentID)
@@ -74,7 +75,7 @@ func (m *meta) rollbackSegmentIndexes(ctx context.Context, segmentID int64, sele
 		return 0, merr.Wrapf(merr.ErrDataIntegrity, "segment %d has an unsupported manifest index placement", segmentID)
 	}
 	cfg := createStorageConfig()
-	entries, err := m.readManifestIndexes(ctx, segment.GetManifestPath(), cfg)
+	entries, err := m.readManifestIndexesWithIO(ctx, io, segment.GetManifestPath(), cfg)
 	if err != nil {
 		return 0, merr.Wrap(err, "read manifest indexes for rollback")
 	}
@@ -126,7 +127,7 @@ func (m *meta) rollbackSegmentIndexes(ctx context.Context, segmentID int64, sele
 	err = m.commitSegmentManifestLocked(ctx, SegmentManifestCommit{
 		SegmentID: segmentID, StorageConfig: cfg,
 		Mutation:        mutation,
-		CatalogMutation: SegmentCatalogMutation{SegmentIndexes: mutations},
+		CatalogMutation: SegmentCatalogMutation{SegmentIndexes: mutations, manifestHasIndex: proto.Bool(len(entries) > 0)},
 	}, segment.GetManifestPath(), lockWait)
 	if err != nil {
 		return 0, err
@@ -271,18 +272,25 @@ func (i *manifestIndexRollbackInspector) runOnce(ctx context.Context) bool {
 	sort.Slice(work, func(a, b int) bool { return work[a].segment.GetID() < work[b].segment.GetID() })
 	start := sort.Search(len(work), func(idx int) bool { return work[idx].segment.GetID() > i.cursor })
 	limit := min(len(work), max(1, Params.DataCoordCfg.ManifestIndexRollbackBatchSize.GetAsInt()))
-	pool := conc.NewPool[int](min(limit, max(1, Params.DataCoordCfg.ManifestIndexRollbackConcurrency.GetAsInt())))
-	defer pool.Release()
-	futures := make([]*conc.Future[int], 0, limit)
+	concurrency := min(limit, max(1, Params.DataCoordCfg.ManifestIndexRollbackConcurrency.GetAsInt()))
+	// One owner per scan, shared by all segment reads and closed only after
+	// every accepted read and commit has drained. Commits lease meta's executor.
+	io := packed.NewManifestIOContext(concurrency)
+	defer io.Close()
+	var workers errgroup.Group
+	workers.SetLimit(concurrency)
 	for offset := 0; offset < limit; offset++ {
+		if ctx.Err() != nil {
+			break
+		}
 		item := work[(start+offset)%len(work)]
 		segment := item.segment
 		i.cursor = segment.GetID()
-		futures = append(futures, pool.Submit(func() (int, error) {
+		workers.Go(func() error {
 			if ctx.Err() != nil {
-				return 0, nil
+				return nil
 			}
-			n, err := i.meta.rollbackSegmentIndexes(ctx, segment.GetID(), item.buildIDs...)
+			_, err := i.meta.rollbackSegmentIndexes(ctx, io, segment.GetID(), item.buildIDs...)
 			status := "success"
 			if err != nil {
 				status = "failed"
@@ -292,9 +300,9 @@ func (i *manifestIndexRollbackInspector) runOnce(ctx context.Context) bool {
 				mlog.RatedWarn(ctx, 1, "manifest index rollback will retry", mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
 			}
 			metrics.DataCoordManifestIndexRollbackAttempts.WithLabelValues(status).Inc()
-			return n, nil
-		}))
+			return nil
+		})
 	}
-	_ = conc.BlockOnAll(futures...)
+	_ = workers.Wait()
 	return true
 }

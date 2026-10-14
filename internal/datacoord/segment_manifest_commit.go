@@ -328,7 +328,11 @@ func (m *meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 	}
 
 	manifestPath := result.ManifestPath
-	commit.CatalogMutation.manifestHasIndex = result.HasIndexes
+	// A rollback Noop already proved index presence in its locked source read.
+	// A structured mutation instead supplies the marker of its committed result.
+	if result.HasIndexes != nil {
+		commit.CatalogMutation.manifestHasIndex = result.HasIndexes
+	}
 
 	// Release the executor before publication, which may enter other meta paths.
 	releaseIO()
@@ -343,7 +347,8 @@ func (m *meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 	// MarkIndexAsDeleted, RemoveIndex) holds that lock's write side across an
 	// etcd round trip; sync.RWMutex is writer-preferring, so acquiring it inside
 	// segMu would park this commit — segMu held — behind that round trip and
-	// stall every segment reader. No lock is acquired inside segMu.
+	// stall every segment reader. Only the short index-map lock is taken inside
+	// segMu; it never performs I/O or acquires another metadata lock.
 	var deferredIndexMetrics []func()
 	if err := func() error {
 		m.segMu.Lock()

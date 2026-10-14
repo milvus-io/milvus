@@ -67,6 +67,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 				}, nil)
 				m, err := newMeta(ctx, catalog, storage.NewLocalChunkManager(objectstorage.RootPath(root)), b)
 				require.NoError(t, err)
+				t.Cleanup(m.closeManifestCommitExecutor)
 				return m
 			}
 			m := boot()
@@ -115,13 +116,13 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			require.Len(t, oldEntries, 3)
 			withManifestIndexRollback(t, true)
 			setRollbackTestParam(t, &Params.MetaStoreCfg.MaxEtcdTxnNum, "2")
-			n, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID, restartBuildID+1, restartBuildID+2)
+			n, err := m.rollbackSegmentIndexes(ctx, newGCManifestReadIO(t), restartSegID, restartBuildID, restartBuildID+1, restartBuildID+2)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n)
 			partial := m.GetSegment(ctx, restartSegID).GetManifestPath()
 			assert.True(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
 			kv.failAtomicUpdate = true
-			_, err = m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID, restartBuildID+1, restartBuildID+2)
+			_, err = m.rollbackSegmentIndexes(ctx, newGCManifestReadIO(t), restartSegID, restartBuildID, restartBuildID+1, restartBuildID+2)
 			require.Error(t, err)
 			assert.Equal(t, partial, m.GetSegment(ctx, restartSegID).GetManifestPath())
 			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
@@ -130,7 +131,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			kv.failAtomicUpdate = false
 			m = boot()
 			for range 2 {
-				n, err = m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID, restartBuildID+1, restartBuildID+2)
+				n, err = m.rollbackSegmentIndexes(ctx, newGCManifestReadIO(t), restartSegID, restartBuildID, restartBuildID+1, restartBuildID+2)
 				require.NoError(t, err)
 				assert.Equal(t, 1, n)
 			}
@@ -151,7 +152,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 				assert.Equal(t, []byte("artifact"), data)
 			}
 			// Fully migrated records recover from their catalog rows.
-			noRead := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, merr.ErrIoTooManyRequests).Build()
+			noRead := mockey.Mock(packed.SubmitManifestIndexInfos).Return(merr.ErrIoTooManyRequests).Build()
 			t.Cleanup(func() { noRead.UnPatch() })
 			restarted := boot()
 			assert.Zero(t, noRead.Times())
@@ -240,7 +241,7 @@ func TestManifestIndexRollbackRejectsLateCleanedCopyResult(t *testing.T) {
 func TestManifestIndexRollbackIgnoresEmptyMarkerAndUnpublishedCopy(t *testing.T) {
 	m, catalog, store, _ := rollbackFixture(t)
 	ctx := context.TODO()
-	_, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
+	_, err := m.rollbackSegmentIndexes(ctx, newGCManifestReadIO(t), restartSegID, restartBuildID)
 	require.NoError(t, err)
 	before := m.GetSegment(ctx, restartSegID).GetManifestPath()
 	require.Empty(t, store.backfillEntriesAt(before))
@@ -268,7 +269,7 @@ func TestManifestIndexRollbackBoundedShutdown(t *testing.T) {
 	entered := make(chan struct{}, 4)
 	release := make(chan struct{})
 	var once sync.Once
-	patch := mockey.Mock(commitManifestMutation).When(func(_ string, _ SegmentManifestCommit) bool {
+	patch := mockey.Mock((*meta).commitManifestMutation).When(func(_ *meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ SegmentManifestCommit) bool {
 		entered <- struct{}{}
 		<-release
 		return false
@@ -318,7 +319,7 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	patch := mockey.Mock(commitManifestMutation).When(func(_ string, _ SegmentManifestCommit) bool {
+	patch := mockey.Mock((*meta).commitManifestMutation).When(func(_ *meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ SegmentManifestCommit) bool {
 		close(entered)
 		<-release
 		return false
@@ -336,7 +337,7 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		_, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
+		_, err := m.rollbackSegmentIndexes(ctx, newGCManifestReadIO(t), restartSegID, restartBuildID)
 		rolled <- err
 	}()
 	t.Cleanup(func() {
@@ -353,7 +354,7 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		gc.recycleDroppedSegment(ctx, restartSegID)
+		gc.recycleDroppedSegment(ctx, newGCManifestReadIO(t), restartSegID)
 	}()
 	select {
 	case <-deleted:
@@ -585,7 +586,7 @@ func TestManifestIndexRollbackRevalidatesSelectedRecord(t *testing.T) {
 			record, _ := m.indexMeta.GetIndexJob(restartBuildID)
 			// Change the selected record after selection but before staging
 			// takes its BuildID lock. No manifest revision should be published.
-			patch := mockey.Mock((*meta).readManifestIndexes).When(func(_ *meta, _ context.Context, _ string, _ *indexpb.StorageConfig) bool {
+			patch := mockey.Mock((*meta).readManifestIndexesWithIO).When(func(_ *meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig) bool {
 				if retire {
 					require.NoError(t, m.indexMeta.RemoveSegmentIndex(ctx, restartBuildID))
 				} else {
@@ -594,7 +595,7 @@ func TestManifestIndexRollbackRevalidatesSelectedRecord(t *testing.T) {
 				return false
 			}).Build()
 			t.Cleanup(func() { patch.UnPatch() })
-			n, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
+			n, err := m.rollbackSegmentIndexes(ctx, newGCManifestReadIO(t), restartSegID, restartBuildID)
 			require.ErrorIs(t, err, errSegmentIndexRollbackSkipped)
 			assert.Zero(t, n)
 			assert.Equal(t, commits, store.commitCount)

@@ -156,13 +156,13 @@ func TestManifestIndexBackfillPublicationPreservesReplacement(t *testing.T) {
 
 	// The old build is staged and locked. A new build can still take over its
 	// (segment, index) slot under a different BuildID lock during manifest I/O.
-	var original func(string, SegmentManifestCommit) (string, error)
-	patch := mockey.Mock(commitManifestMutation).Origin(&original).To(
-		func(base string, commit SegmentManifestCommit) (string, error) {
+	var original func(*meta, context.Context, *packed.ManifestIOContext, string, SegmentManifestCommit) (packed.ManifestUpdateResult, error)
+	patch := mockey.Mock((*meta).commitManifestMutation).Origin(&original).To(
+		func(m *meta, callCtx context.Context, io *packed.ManifestIOContext, base string, commit SegmentManifestCommit) (packed.ManifestUpdateResult, error) {
 			if err := m.indexMeta.AddSegmentIndex(ctx, replacement); err != nil {
-				return "", err
+				return packed.ManifestUpdateResult{}, err
 			}
-			return original(base, commit)
+			return original(m, callCtx, io, base, commit)
 		}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
 	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, restartBuildID))
@@ -189,14 +189,14 @@ func TestManifestIndexBackfillFailureDuringManifestIO(t *testing.T) {
 			seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
 			base := m.GetSegment(ctx, restartSegID).GetManifestPath()
 			withSegmentIndexManifestWrites(t, true)
-			var original func(string, SegmentManifestCommit) (string, error)
+			var original func(*meta, context.Context, *packed.ManifestIOContext, string, SegmentManifestCommit) (packed.ManifestUpdateResult, error)
 			inject := true
-			patch := mockey.Mock(commitManifestMutation).Origin(&original).To(
-				func(base string, commit SegmentManifestCommit) (string, error) {
+			patch := mockey.Mock((*meta).commitManifestMutation).Origin(&original).To(
+				func(m *meta, callCtx context.Context, io *packed.ManifestIOContext, base string, commit SegmentManifestCommit) (packed.ManifestUpdateResult, error) {
 					if inject && scenario == "write fails" {
-						return "", merr.ErrIoTooManyRequests
+						return packed.ManifestUpdateResult{}, merr.ErrIoTooManyRequests
 					}
-					result, err := original(base, commit)
+					result, err := original(m, callCtx, io, base, commit)
 					if err != nil || !inject {
 						return result, err
 					}
@@ -298,7 +298,7 @@ func TestManifestIndexBackfillConcurrencyAndShutdown(t *testing.T) {
 	// A false condition forwards to the original function after the barrier.
 	// Avoid Origin: mockey 1.4.6 writes shared call arguments in that adapter,
 	// which races when multiple segment workers enter it concurrently.
-	patch := mockey.Mock(commitManifestMutation).When(func(_ string, _ SegmentManifestCommit) bool {
+	patch := mockey.Mock((*meta).commitManifestMutation).When(func(_ *meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ SegmentManifestCommit) bool {
 		entered <- struct{}{}
 		<-release
 		return false
@@ -372,6 +372,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 				}, nil)
 				m, err := newMeta(ctx, catalog, storage.NewLocalChunkManager(objectstorage.RootPath(root)), b)
 				require.NoError(t, err)
+				t.Cleanup(m.closeManifestCommitExecutor)
 				return m
 			}
 			m := boot()

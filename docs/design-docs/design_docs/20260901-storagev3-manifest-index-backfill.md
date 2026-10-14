@@ -1,7 +1,7 @@
 # StorageV3 Manifest Index Backfill and Rollback
 
 - **Created:** 2026-09-01
-- **Updated:** 2026-09-29
+- **Updated:** 2026-10-14
 - **Status:** Under Review; design and implementation in one PR
 - **Component:** DataCoord, StorageV3
 - **Depends on:** [StorageV3 Manifest Index Publication](20260811-storagev3-manifest-index-publication.md),
@@ -158,7 +158,7 @@ slot still belongs to that BuildID, preserving a newer occupant.
 All selected indexes of a segment are published together when they fit in one
 transaction. Only groups exceeding `maxEtcdTxnNum - 1` records are split into
 sequential batches, reserving one operation for the healthy segment pointer PUT.
-Different segments use a bounded worker pool. A failed batch publishes none of
+Different segments use bounded Go goroutines. A failed batch publishes none of
 its catalog mutations or in-memory placement flags and is retried on a later
 scan; other batches and segments can continue. Every record is revalidated
 under its BuildID lock before manifest I/O. Mixed foreground/backfill mutations
@@ -258,8 +258,8 @@ dataCoord:
 `batchSize` is a target record budget, while `concurrency` counts segments.
 Selection always includes a whole segment, so the final selected segment may
 exceed the remaining record budget. Both are clamped to at least one;
-concurrency is also capped at `MaxInt32`, matching the
-pool backend. Interval, batch size, and concurrency are refreshable. Enabling
+concurrency retains its existing `MaxInt32` configuration cap and is bounded
+by the number of selected segments. Interval, batch size, and concurrency are refreshable. Enabling
 the inspector and choosing manifest publication require a DataCoord restart.
 
 Candidate groups are sorted by SegmentID and each scan starts after the last
@@ -385,7 +385,8 @@ both IndexID and ExpectedBuildID. Do not delete any artifact files. Reuse the
 manifest commit framework for final publication:
 
 1. Create the immutable revision from the locked source pointer.
-2. Read back the resulting index section to determine `manifest_has_index`.
+2. Use the async commit result to determine `manifest_has_index` from the
+   loaded source and staged mutations; do not reopen the committed revision.
 3. Under `segMu`, recheck source pointer, segment identity and retained state.
 4. Atomically publish the segment pointer/marker and PUT all selected
    `SegmentIndex` records with `catalog.Update`.
@@ -398,7 +399,8 @@ a replacement has removed their entry from the current manifest. Group these
 records by segment and prove their absence in the same locked source read. If
 the batch has no manifest entries to retract, a private Noop commit atomically
 PUTs the records and the unchanged segment pointer, with the same source-pointer
-checks. Public Noop commits continue to reject index-record mutations. This also
+checks. The already-loaded source supplies the marker for this Noop path too.
+Public Noop commits continue to reject index-record mutations. This also
 covers catalog-absent records on segments whose current marker is already false.
 
 The rollback entry point prepares its retractions from a manifest read inside
@@ -539,13 +541,17 @@ Additional failure-driven coverage:
 - bounded segment concurrency and cancellation/draining on shutdown.
 
 Shutdown cancels new segment groups and drains every started group before
-returning. Native manifest calls already in progress are synchronous and cannot
-be interrupted by the Go context; shutdown waits for those calls to return.
+returning. Manifest Open/Commit use the caller-owned async API from #54044. Cancellation
+requests native cancellation and drains terminal callbacks before releasing
+segment locks or executors. Already executing backend I/O remains subject to
+backend timeouts; cancellation does not imply that a commit did not happen.
 
 ### Rollback
 
 Cover source read failure, invalid paths/identity, manifest write failure,
-read-back failure, catalog transaction failure and transaction-size rejection.
+absence of post-commit reads, catalog transaction failure and transaction-size
+rejection. Preserve NOT_COMMITTED and UNKNOWN outcomes without publishing an
+unconfirmed pointer or replaying a consumed transaction.
 At every failure, check both the durable pointer and every involved catalog
 row, then retry or restart. Test source pointer advancement and segment drop
 during I/O; conditional build replacement; existing catalog rows with newer
@@ -564,11 +570,25 @@ disabled after all records in the fixture have migrated.
 
 ## Base and PR Dependency Order
 
-This design targets merged [PR #53048](https://github.com/milvus-io/milvus/pull/53048),
-merge commit `240b9c0a916f9633da53230e58854da08d8412f8`, on master snapshot
-`2e36c6ff0151b32c187e4c32d40f76cbc8dd6379`. Its `SegmentIndexes` mutation slice,
-batched GC retractions, bounded recovery, verified marker clearing, and durable
-copy cleanup are the baseline.
+This design builds on merged [PR #53048](https://github.com/milvus-io/milvus/pull/53048)
+and [PR #54044](https://github.com/milvus-io/milvus/pull/54044), rebased onto
+master `865c85105a`. The latter supplies caller-owned async manifest readers and
+commits, marker projection and callback draining.
+
+Both inspectors bound the number of segment protocols with Go goroutines;
+finishing one immediately admits another, without waiting for a fixed batch.
+These goroutines own segment/BuildID locks and the existing catalog transaction.
+They call async manifest interfaces and wait in Go for terminal results; they
+never move blocking catalog publication into a native callback. A segment failure
+leaves that segment pending while independent segments continue.
+
+Rollback owns one read `ManifestIOContext` per scan, shares the process-wide
+manifest-read budget, and closes it after every started segment finishes.
+Both directions use `meta`'s independent long-lived commit executor, bounded by
+`dataCoord.manifestCommitConcurrency`. There is no per-record executor and no
+synchronous manifest Open/Commit in either migration direction. The etcd catalog
+transaction remains awaited before in-memory installation; no etcd API, atomicity
+or schema change is introduced.
 
 The complete change is delivered in one PR targeting `master`:
 [PR #53479](https://github.com/milvus-io/milvus/pull/53479), on

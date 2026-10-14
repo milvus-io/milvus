@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -32,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -276,23 +276,25 @@ func (i *manifestIndexBackfillInspector) execute(ctx context.Context, work []seg
 	if len(work) == 0 {
 		return 0
 	}
-	pool := conc.NewPool[int](max(1, min(len(work), Params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())))
-	defer pool.Release()
-
-	futures := make([]*conc.Future[int], 0, len(work))
-	for idx := range work {
-		item := work[idx]
-		futures = append(futures, pool.Submit(func() (int, error) {
-			return i.backfillSegment(ctx, item), nil
-		}))
+	var workers errgroup.Group
+	workers.SetLimit(max(1, min(len(work), Params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())))
+	results := make([]int, len(work))
+	for idx, item := range work {
+		if ctx.Err() != nil {
+			break
+		}
+		workers.Go(func() error {
+			results[idx] = i.backfillSegment(ctx, item)
+			return nil
+		})
 	}
-	// BlockOnAll drains every started segment group before Release closes the
-	// pool. Failed batches are classified below and never abort other segments.
-	_ = conc.BlockOnAll(futures...)
-
+	// Each goroutine owns its segment protocol, including locks and catalog
+	// publication. Manifest I/O uses the shared async commit executor. Wait
+	// for accepted native operations before the inspector can stop.
+	_ = workers.Wait()
 	succeeded := 0
-	for _, future := range futures {
-		succeeded += future.Value()
+	for _, n := range results {
+		succeeded += n
 	}
 	return succeeded
 }

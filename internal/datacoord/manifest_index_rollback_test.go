@@ -139,13 +139,13 @@ func TestManifestIndexRollbackIndependentSwitch(t *testing.T) {
 }
 
 func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
-	for _, scenario := range []string{"read", "write", "read back", "catalog", "pointer advances", "segment drops", "invalid entry"} {
+	for _, scenario := range []string{"read", "write", "no read back", "catalog", "pointer advances", "segment drops", "invalid entry"} {
 		t.Run(scenario, func(t *testing.T) {
 			m, catalog, store, kv := rollbackFixture(t)
 			ctx := context.TODO()
 			before := m.GetSegment(ctx, restartSegID).GetManifestPath()
 			originalRecord, _ := m.indexMeta.GetIndexJob(restartBuildID)
-			var original func(string, SegmentManifestCommit) (string, error)
+			var original func(*meta, context.Context, *packed.ManifestIOContext, string, SegmentManifestCommit) (packed.ManifestUpdateResult, error)
 			var patch *mockey.Mocker
 			switch scenario {
 			case "read":
@@ -155,22 +155,22 @@ func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
 			case "invalid entry":
 				store.revisions[before][0].Path = "/invalid/index/path"
 			default:
-				patch = mockey.Mock(commitManifestMutation).Origin(&original).To(func(base string, commit SegmentManifestCommit) (string, error) {
+				patch = mockey.Mock((*meta).commitManifestMutation).Origin(&original).To(func(m *meta, callCtx context.Context, io *packed.ManifestIOContext, base string, commit SegmentManifestCommit) (packed.ManifestUpdateResult, error) {
 					if scenario == "write" {
-						return "", merr.ErrIoTooManyRequests
+						return packed.ManifestUpdateResult{}, merr.ErrIoTooManyRequests
 					}
-					next, err := original(base, commit)
+					next, err := original(m, callCtx, io, base, commit)
 					if err != nil {
 						return next, err
 					}
 					switch scenario {
-					case "read back":
+					case "no read back":
 						store.failReadsFrom()
 					case "pointer advances":
 						// Model a new source revision with the same artifact.
 						basePath, _, parseErr := packed.UnmarshalManifestPath(base)
 						if parseErr != nil {
-							return "", parseErr
+							return packed.ManifestUpdateResult{}, parseErr
 						}
 						pointer := packed.MarshalManifestPath(basePath, 50)
 						store.revisions[pointer] = store.backfillEntriesAt(base)
@@ -182,7 +182,16 @@ func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
 				}).Build()
 				t.Cleanup(func() { patch.UnPatch() })
 			}
-			n, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
+			n, err := m.rollbackSegmentIndexes(ctx, newGCManifestReadIO(t), restartSegID, restartBuildID)
+			if scenario == "no read back" {
+				require.NoError(t, err, "the async commit result supplies the marker without reopening the revision")
+				assert.Equal(t, 1, n)
+				assert.False(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
+				rows, listErr := catalog.ListSegmentIndexes(ctx, restartCollID)
+				require.NoError(t, listErr)
+				assert.Len(t, rows, 1)
+				return
+			}
 			if scenario == "segment drops" {
 				require.NoError(t, err)
 				assert.Equal(t, 1, n)
@@ -214,7 +223,7 @@ func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
 				require.NoError(t, buildErr)
 				store.revisions[before] = []packed.ManifestIndexInfo{entry}
 			}
-			n, err = m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
+			n, err = m.rollbackSegmentIndexes(ctx, newGCManifestReadIO(t), restartSegID, restartBuildID)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n)
 			rows, listErr = catalog.ListSegmentIndexes(ctx, restartCollID)
@@ -238,7 +247,7 @@ func TestManifestIndexRollbackPreservesCatalogAndReplacement(t *testing.T) {
 			}
 			require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, current))
 			current.ManifestPublished = false
-			n, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
+			n, err := m.rollbackSegmentIndexes(ctx, newGCManifestReadIO(t), restartSegID, restartBuildID)
 			require.NoError(t, err)
 			if replacement {
 				assert.Equal(t, 1, n)
