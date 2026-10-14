@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ClusterGroup contains indivisible Analyze offsets. Its position in Groups is
@@ -77,22 +78,55 @@ func (p *LayoutPlan) Validate() error {
 	return nil
 }
 
-// ValidateCentroids validates the current FP32 description contract. Half
-// precision admission belongs to PR5; scalar mapping is a separate extension.
+// VectorElementBytes returns the dense floating vector element width, or zero
+// for types outside the clustering pipeline (including binary/sparse/Int8).
+func VectorElementBytes(t schemapb.DataType) int64 {
+	switch t {
+	case schemapb.DataType_FloatVector:
+		return 4
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return 2
+	default:
+		return 0
+	}
+}
+
+// ValidateCentroids checks schema type, oneof, byte width and finite values.
 func ValidateCentroids(stats *clusteringpb.ClusteringCentroidsStats, fieldType schemapb.DataType, dim int64) error {
-	if fieldType != schemapb.DataType_FloatVector {
+	width := VectorElementBytes(fieldType)
+	if width == 0 {
 		return merr.Wrapf(merr.ErrServiceUnimplemented, "clustering planner field type %s", fieldType)
 	}
-	if stats == nil || len(stats.GetCentroids()) == 0 || uint64(len(stats.GetCentroids())) > math.MaxUint32 || dim <= 0 {
+	if stats == nil || len(stats.GetCentroids()) == 0 || uint64(len(stats.GetCentroids())) > math.MaxUint32 || dim <= 0 || dim > math.MaxInt64/width {
 		return merr.WrapErrDataIntegrityMsg("invalid clustering centroid shape")
 	}
-	for _, centroid := range stats.GetCentroids() {
-		if centroid == nil || centroid.GetDim() != dim || centroid.GetFloatVector() == nil || int64(len(centroid.GetFloatVector().GetData())) != dim {
-			return merr.WrapErrDataIntegrityMsg("clustering centroid type or dimension mismatch")
+	for _, c := range stats.GetCentroids() {
+		if c == nil || c.GetDim() != dim {
+			return merr.WrapErrDataIntegrityMsg("clustering centroid dimension mismatch")
 		}
-		for _, value := range centroid.GetFloatVector().GetData() {
-			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-				return merr.WrapErrDataIntegrityMsg("non-finite clustering centroid")
+		switch fieldType {
+		case schemapb.DataType_FloatVector:
+			if c.GetFloatVector() == nil || int64(len(c.GetFloatVector().Data)) != dim {
+				return merr.WrapErrDataIntegrityMsg("invalid FP32 centroid payload")
+			}
+			for _, v := range c.GetFloatVector().Data {
+				if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+					return merr.WrapErrDataIntegrityMsg("non-finite clustering centroid")
+				}
+			}
+		case schemapb.DataType_Float16Vector:
+			if int64(len(c.GetFloat16Vector())) != dim*width {
+				return merr.WrapErrDataIntegrityMsg("invalid FP16 centroid payload")
+			}
+			if err := typeutil.VerifyFloats16(c.GetFloat16Vector()); err != nil {
+				return merr.WrapErrDataIntegrity(err, "non-finite FP16 centroid")
+			}
+		case schemapb.DataType_BFloat16Vector:
+			if int64(len(c.GetBfloat16Vector())) != dim*width {
+				return merr.WrapErrDataIntegrityMsg("invalid BF16 centroid payload")
+			}
+			if err := typeutil.VerifyBFloats16(c.GetBfloat16Vector()); err != nil {
+				return merr.WrapErrDataIntegrity(err, "non-finite BF16 centroid")
 			}
 		}
 	}

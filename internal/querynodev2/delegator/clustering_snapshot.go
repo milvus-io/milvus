@@ -166,7 +166,7 @@ func clusteringCandidateRanges(ctx context.Context, bindings map[int64]*partitio
 		return nil
 	}
 	queries := placeholders.GetPlaceholders()[0]
-	if queries.GetType() != commonpb.PlaceholderType_FloatVector || len(queries.GetValues()) == 0 || int64(len(queries.GetValues())) != req.GetNq() {
+	if len(queries.GetValues()) == 0 || int64(len(queries.GetValues())) != req.GetNq() {
 		return nil
 	}
 	eligible := make(map[int64][]int64)
@@ -182,7 +182,18 @@ func clusteringCandidateRanges(ctx context.Context, bindings map[int64]*partitio
 			continue
 		}
 		c := binding.stats.ClusteringStats
-		if c == nil || c.GetFieldId() != req.GetFieldId() || c.GetDataType() != schemapb.DataType_FloatVector || c.GetDim() <= 0 || c.GetDim() > math.MaxInt/4 {
+		if c == nil || c.GetFieldId() != req.GetFieldId() || clustercompaction.VectorElementBytes(c.GetDataType()) == 0 || c.GetDim() <= 0 {
+			continue
+		}
+		width := clustercompaction.VectorElementBytes(c.GetDataType())
+		placeholderType := commonpb.PlaceholderType_FloatVector
+		switch c.GetDataType() {
+		case schemapb.DataType_Float16Vector:
+			placeholderType = commonpb.PlaceholderType_Float16Vector
+		case schemapb.DataType_BFloat16Vector:
+			placeholderType = commonpb.PlaceholderType_BFloat16Vector
+		}
+		if queries.GetType() != placeholderType || c.GetDim() > math.MaxInt/width {
 			continue
 		}
 		params := funcutil.KeyValuePair2Map(c.GetClusteringIndex().GetIndexParams())
@@ -192,7 +203,7 @@ func clusteringCandidateRanges(ctx context.Context, bindings map[int64]*partitio
 		var vectors []byte
 		valid := true
 		for _, q := range queries.GetValues() {
-			if len(q) != int(c.GetDim()*4) {
+			if len(q) != int(c.GetDim()*width) {
 				valid = false
 				break
 			}

@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func plannerCentroids(k int) *clusteringpb.ClusteringCentroidsStats {
@@ -77,4 +78,30 @@ func TestBuildCompactionPlanFailures(t *testing.T) {
 	}
 	_, err = BuildCompactionPlan(context.Background(), stats, schemapb.DataType_FloatVector, []int64{1, 1}, "CARDINAL_KMEANS", map[string]string{"compaction_neighbor_k": "0"}, 10)
 	require.Error(t, err)
+}
+
+func TestBuildHalfCompactionPlan(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			stats := plannerCentroids(4096)
+			for _, c := range stats.Centroids {
+				data, err := typeutil.ConvertFloat32ToFP16BF16Bytes(c.GetFloatVector().Data, dtype)
+				require.NoError(t, err)
+				if dtype == schemapb.DataType_Float16Vector {
+					c.Data = &schemapb.VectorField_Float16Vector{Float16Vector: data}
+				} else {
+					c.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: data}
+				}
+			}
+			counts := make([]int64, 4096)
+			for i := range counts {
+				counts[i] = 2
+			}
+			counts[0] = 0
+			plan, err := BuildCompactionPlan(context.Background(), stats, dtype, counts, "CARDINAL_KMEANS", map[string]string{"random_state": "42"}, 512)
+			require.NoError(t, err)
+			require.NoError(t, plan.Validate())
+			require.Equal(t, counts, plan.Counts)
+		})
+	}
 }
