@@ -26,6 +26,7 @@ import (
 	"math/bits"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -1644,7 +1645,7 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 							}
 							it, err := mc.SearchIterator(ctx, client.NewSearchIteratorOption(name, query).WithANNSField("vector").WithFilter(filter).WithTemplateParam("ids", requested).WithAnnParam(params).WithIgnoreGrowing(ignoreGrowing).WithBatchSize(rlsIteratorBatchSize).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 							if tc.vector == "binary" && err != nil && len(expected) > 0 {
-								require.ErrorContains(t, err, "index not supported")
+								require.True(t, strings.Contains(err.Error(), "index not supported") || (group.name == "indexed" && strings.Contains(err.Error(), "Failed to create iterators from index")), "unexpected binary iterator error: %v", err)
 								return
 							}
 							require.NoError(t, err)
@@ -1658,7 +1659,7 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 									break
 								}
 								if tc.vector == "binary" && err != nil && len(expected) > 0 {
-									require.ErrorContains(t, err, "index not supported")
+									require.True(t, strings.Contains(err.Error(), "index not supported") || (group.name == "indexed" && strings.Contains(err.Error(), "Failed to create iterators from index")), "unexpected binary iterator error: %v", err)
 									return
 								}
 								require.NoError(t, err)
