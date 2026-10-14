@@ -337,7 +337,7 @@ func createMilvusTableManifest(
 	// updates append, even with OVERWRITE; opening the old version would retain
 	// its stale deletes. Version allocation still advances past existing files.
 	var handle C.LoonTransactionHandle
-	if err := HandleLoonFFIResult(C.loon_transaction_begin(cBasePath, cProperties,
+	if err := HandleLoonFFIResult(C.loon_transaction_open(cBasePath, cProperties,
 		C.int64_t(ManifestEarliest), C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)); err != nil {
 		return "", merr.WrapErrStorage(err, "begin milvus-table manifest")
