@@ -26,7 +26,7 @@ var (
 type timeTickAppendInterceptor struct {
 	operator   *timeTickSyncOperator
 	txnManager *txn.TxnManager
-	// Builders run in chain order; a later builder can install the shared guard.
+	// Builders run in chain order; a later builder can install the row-lock hook.
 	buildParam *interceptors.InterceptorBuildParam
 }
 
@@ -36,10 +36,10 @@ func (impl *timeTickAppendInterceptor) Name() string {
 
 // Do implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
-	var releaseWriteGuard func()
+	var releaseRowLock func()
 	defer func() {
-		if releaseWriteGuard != nil {
-			releaseWriteGuard()
+		if releaseRowLock != nil {
+			releaseRowLock()
 		}
 	}()
 	cm := impl.operator.MVCCManager()
@@ -55,9 +55,10 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	var immutableMsg message.ImmutableMessage
 	var provisionalAcker *ack.Acker
 	var acker *ack.Acker
-	// Keep a provisional commit timestamp outstanding while waiting for the
-	// transaction bodies and its write guard. This prevents the cleanup watermark
-	// from overtaking the session before the final commit timestamp is allocated.
+	// Keep a provisional commit timestamp outstanding while freezing and draining
+	// transaction bodies, so cleanup cannot overtake their preparation. Once the
+	// body is drained, row-lock waits may expire the session; the final timestamp's
+	// lease check rejects those commits before WAL append.
 	defer func() {
 		if provisionalAcker != nil {
 			provisionalAcker.Ack(ack.OptSync())
@@ -74,12 +75,12 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 		acker.Ack(ack.OptImmutableMessage(immutableMsg), ack.OptTxnSession(txnSession))
 	}()
 
-	var writeGuard interceptors.MessageWriteGuard
+	var rowLock interceptors.MessageRowLock
 	if impl.buildParam != nil {
-		writeGuard = impl.buildParam.WriteGuard
+		rowLock = impl.buildParam.RowLock
 	}
 	preparedCommit := false
-	if writeGuard != nil && msg.MessageType() == message.MessageTypeCommitTxn {
+	if rowLock != nil && msg.MessageType() == message.MessageTypeCommitTxn {
 		if provisionalAcker, err = allocateMessageAcker(ctx, ackManager, msg); err != nil {
 			return nil, err
 		}
@@ -95,9 +96,13 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			}
 			txnSession.CommitDone()
 		}()
+		// A prepared commit has no more body appends to protect. Waiting for its
+		// row locks must not hold back confirmation for the entire PChannel.
+		provisionalAcker.Ack(ack.OptSync())
+		provisionalAcker = nil
 	}
-	if writeGuard != nil {
-		ctx, releaseWriteGuard, err = writeGuard.Acquire(ctx, msg)
+	if rowLock != nil {
+		ctx, releaseRowLock, err = rowLock.Acquire(ctx, msg)
 		if err != nil {
 			if preparedCommit {
 				err = txn.MarkCommitAdmissionRejected(err)

@@ -1,0 +1,74 @@
+package partialupdate
+
+import (
+	"context"
+	"sync"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+)
+
+func TestPartialUpdateChainNewInsertBlocksSamePKCASUntilPublication(t *testing.T) {
+	for _, mode := range []string{"auto_commit", "transaction", "recovered_transaction"} {
+		t.Run(mode, func(t *testing.T) {
+			insert := newInsertMessage([]*schemapb.FieldData{int64PKFieldData(10)})
+			var builders map[message.TxnID]*message.ImmutableTxnMessageBuilder
+			if mode == "recovered_transaction" {
+				builders = recoveredRowLockBuilders(t, insert)
+			}
+			env := newPartialUpdateChainTestEnvWithBuilders(t, builders)
+			if mode == "recovered_transaction" {
+				// The test allocator starts at 1, already owned by the fixture.
+				_, err := resource.Resource().IDAllocator().Allocate(context.Background())
+				require.NoError(t, err)
+			}
+			readTS := env.allocateReadTS(t)
+			cas := env.prepareCASTxn(t, readTS, 10)
+			write := insert
+			if mode == "transaction" {
+				begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
+					WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable()
+				result, err := env.append(begin, nil)
+				require.NoError(t, err)
+				_, err = env.append(insert.WithTxnContext(*result.TxnCtx), nil)
+				require.NoError(t, err)
+				write = newCommitTxnMessage("v1", result.TxnCtx.TxnID, 0)
+			} else if mode == "recovered_transaction" {
+				write = newCommitTxnMessage("v1", 1, 0)
+			}
+			atWAL, resume := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			defer once.Do(func() { close(resume) })
+			writerDone := make(chan error, 1)
+			go func() {
+				_, err := env.append(write, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+					close(atWAL)
+					<-resume
+					return env.nextMessageID(), nil
+				})
+				writerDone <- err
+			}()
+			receiveCommitValue(t, atWAL)
+			key := pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: 10}
+			require.False(t, env.partial.state.rowLocks.pks.TryLock(key), "new insert did not hold its PK lock through WAL append")
+			require.True(t, env.partial.state.rowLocks.pks.TryRLock(key), "ordinary insert must take a shared PK lock")
+			env.partial.state.rowLocks.pks.RUnlock(key)
+			casDone := make(chan error, 1)
+			go func() {
+				_, err := env.append(newChainTestCASCommit(t, cas), nil)
+				casDone <- err
+			}()
+			waitForTestPKWriter(t, env.partial.state.rowLocks, "v1", 10)
+			once.Do(func() { close(resume) })
+			require.NoError(t, receiveCommitValue(t, writerDone))
+			requirePartialUpdateRetryable(t, receiveCommitValue(t, casDone))
+			require.True(t, env.hasPKVersionAfter("v1", 10, readTS))
+			requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10)
+		})
+	}
+}

@@ -152,7 +152,7 @@ func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64) 
 }
 
 // ValidateCommitTimeTick rechecks the lease after a prepared commit has acquired
-// its write guard and received its final timestamp, without admitting new bodies.
+// its row lock and received its final timestamp, without admitting new bodies.
 func (s *TxnSession) ValidateCommitTimeTick(timetick uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

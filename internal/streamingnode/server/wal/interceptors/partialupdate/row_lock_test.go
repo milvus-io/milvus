@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func TestPartialUpdateChainCommitDrainsBodyBeforeTakingPKGuard(t *testing.T) {
+func TestPartialUpdateChainCommitDrainsBodyBeforeTakingPKLock(t *testing.T) {
 	env := newPartialUpdateChainTestEnv(t)
 	readTS := env.allocateReadTS(t)
 	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
@@ -58,14 +58,14 @@ func TestPartialUpdateChainCommitDrainsBodyBeforeTakingPKGuard(t *testing.T) {
 	require.True(t, env.hasPKVersionAfter("v1", 20, readTS))
 }
 
-func TestPartialUpdateChainRecoveredCommitPublishesFenceBeforeCAS(t *testing.T) {
+func TestPartialUpdateChainRecoveredCommitPublishesPKBeforeCAS(t *testing.T) {
 	env := newPartialUpdateChainTestEnvWithRecoveredTxn(t, false)
 	// The mock allocator starts at 1, which is already owned by the recovered
 	// fixture. Production allocators never reuse a recovered transaction ID.
 	_, err := resource.Resource().IDAllocator().Allocate(context.Background())
 	require.NoError(t, err)
 	readTS := env.allocateReadTS(t)
-	cas := env.prepareCASTxn(t, readTS, 20)
+	cas := env.prepareCASTxn(t, readTS, 10)
 	atWAL := make(chan struct{})
 	release := make(chan struct{})
 	writerDone := make(chan error, 1)
@@ -89,7 +89,7 @@ func TestPartialUpdateChainRecoveredCommitPublishesFenceBeforeCAS(t *testing.T) 
 	select {
 	case err := <-casDone:
 		close(release)
-		t.Fatalf("CAS bypassed an incomplete recovered write set: %v", err)
+		t.Fatalf("CAS bypassed the recovered ordinary transaction PK lock: %v", err)
 	default:
 	}
 	close(release)
@@ -176,7 +176,7 @@ func TestPartialUpdateChainDisjointOrdinaryWriterDoesNotBlockCAS(t *testing.T) {
 	require.NoError(t, <-writerDone)
 }
 
-func TestPartialUpdateChainOrdinaryTxnCommitParticipatesInPKGuard(t *testing.T) {
+func TestPartialUpdateChainOrdinaryTxnCommitParticipatesInPKLock(t *testing.T) {
 	env := newPartialUpdateChainTestEnv(t)
 	readTS := env.allocateReadTS(t)
 	cas := env.prepareCASTxn(t, readTS, 10)
@@ -209,7 +209,7 @@ func TestPartialUpdateChainOrdinaryTxnCommitParticipatesInPKGuard(t *testing.T) 
 		_, err := env.append(newChainTestCASCommit(t, cas), nil)
 		casDone <- err
 	}()
-	waitForTestCASReservation(t, env.partial.state.writeGuards, "v1", 10)
+	waitForTestPKWriter(t, env.partial.state.rowLocks, "v1", 10)
 	select {
 	case err := <-casDone:
 		close(release)
@@ -241,50 +241,25 @@ func TestPartialUpdateChainMultiPKCASDeduplicatesWriteSet(t *testing.T) {
 	require.True(t, env.hasPKVersionAfter("v1", 20, readTS))
 }
 
-func TestWriteGuardsUnknownWriteSetExcludesExactPKAdmission(t *testing.T) {
-	g := newWriteGuards()
-	unknownRelease := acquireTestWriteGuard(t, g, "v1", primarykey.Keys{}, false, true)
-	entered := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		release := acquireTestWriteGuard(t, g, "v1", primarykey.Keys{Int64Values: []int64{10}}, true, false)
-		close(entered)
-		release()
-		close(done)
-	}()
-	// The admission barrier itself must reject exact-PK admission while the
-	// unknown writer holds it. This checks the blocking condition directly.
-	if g.admission.TryRLock("v1") {
-		g.admission.RUnlock("v1")
-		t.Fatal("unknown write did not hold the exact-PK admission barrier")
-	}
-	select {
-	case <-entered:
-		unknownRelease()
-		t.Fatal("CAS bypassed an incomplete write-set fence")
-	default:
-	}
-	// A fence on v1 must not block an unrelated vchannel.
-	other := acquireTestWriteGuard(t, g, "v2", primarykey.Keys{Int64Values: []int64{10}}, true, false)
-	other()
-	unknownRelease()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("CAS did not resume after the unknown writer published")
-	}
+func TestRowLocksEmptyWriteSetDoesNotBlockExactPKWrites(t *testing.T) {
+	g := newRowLockManager()
+	emptyRelease := acquireTestRowLock(t, g, "v1", primarykey.Keys{}, false)
+	defer emptyRelease()
+	release := acquireTestRowLock(t, g, "v1", primarykey.Keys{Int64Values: []int64{10}}, true)
+	release()
+	requireTestRowLocksAvailable(t, g, "v1", 10)
 }
 
-func TestWriteGuardsOrderAndSeparateTypedPKs(t *testing.T) {
-	g := newWriteGuards()
+func TestRowLocksOrderAndSeparateTypedPKs(t *testing.T) {
+	g := newRowLockManager()
 	intPKs := primarykey.Keys{Int64Values: []int64{20, 10, 20}}
-	release := acquireTestWriteGuard(t, g, "v1", intPKs, true, false)
+	release := acquireTestRowLock(t, g, "v1", intPKs, true)
 	// String "10" is distinct from integer 10 even within the same vchannel.
-	stringRelease := acquireTestWriteGuard(t, g, "v1", primarykey.Keys{StringValues: []string{"10", "10"}}, true, false)
+	stringRelease := acquireTestRowLock(t, g, "v1", primarykey.Keys{StringValues: []string{"10", "10"}}, true)
 	stringRelease()
 	done := make(chan struct{})
 	go func() {
-		secondRelease := acquireTestWriteGuard(t, g, "v1", primarykey.Keys{Int64Values: []int64{10, 20}}, true, false)
+		secondRelease := acquireTestRowLock(t, g, "v1", primarykey.Keys{Int64Values: []int64{10, 20}}, true)
 		secondRelease()
 		close(done)
 	}()
@@ -296,50 +271,50 @@ func TestWriteGuardsOrderAndSeparateTypedPKs(t *testing.T) {
 	}
 }
 
-func TestWriteGuardsOrdinaryBatchesDoNotAcquirePKLocks(t *testing.T) {
-	g := newWriteGuards()
+func TestRowLockManagerOrdinaryWritesTakeSharedPKLocks(t *testing.T) {
+	g := newRowLockManager()
 	pks := primarykey.Keys{Int64Values: []int64{20, 10, 20}, StringValues: []string{"20", "10", "20"}}
-	first := acquireTestWriteGuard(t, g, "v1", pks, false, false)
-	second := acquireTestWriteGuard(t, g, "v1", pks, false, false)
-	// Even overlapping ordinary batches must not create PK read locks.
+	first := acquireTestRowLock(t, g, "v1", pks, false)
+	second := acquireTestRowLock(t, g, "v1", pks, false)
 	for _, key := range []pkLockKey{
 		{vchannel: "v1", kind: primarykey.KindInt64, int64Value: 10},
 		{vchannel: "v1", kind: primarykey.KindString, stringValue: "10"},
 	} {
-		require.True(t, g.pks.TryLock(key))
-		g.pks.Unlock(key)
+		require.False(t, g.pks.TryLock(key))
+		require.True(t, g.pks.TryRLock(key))
+		g.pks.RUnlock(key)
 	}
 	require.Equal(t, []int64{20, 10, 20}, pks.Int64Values)
 	require.Equal(t, []string{"20", "10", "20"}, pks.StringValues)
 	first()
 	second()
-	requireWriteGuardRegistriesEmpty(t, g)
+	requireTestRowLocksAvailable(t, g, "v1", 10, 20)
 }
 
-func TestWriteGuardsCASReservationDrainsEarlierAndBlocksLaterOrdinaryBatches(t *testing.T) {
-	g := newWriteGuards()
-	earlier := acquireTestWriteGuard(t, g, "v1", primarykey.Keys{Int64Values: []int64{10, 20}}, false, false)
-	casCtx := newWriteGuardWaitContext(context.Background())
-	casResult := startTestWriteGuard(g, casCtx, "v1", primarykey.Keys{Int64Values: []int64{10, 10}}, true)
-	waitForTestWriteGuardWait(t, casCtx)
-	// The earlier ordinary batch is still active, and CAS has atomically
-	// reserved its PK before waiting for that batch's completion.
+func TestRowLockManagerCASWaitsForReadersAndBlocksLaterReaders(t *testing.T) {
+	g := newRowLockManager()
+	pks := primarykey.Keys{Int64Values: []int64{10, 20}}
+	first := acquireTestRowLock(t, g, "v1", pks, false)
+	second := acquireTestRowLock(t, g, "v1", pks, false)
+	casResult := startTestRowLock(g, context.Background(), "v1", primarykey.Keys{Int64Values: []int64{10, 10}}, true)
+	waitForTestPKWriter(t, g, "v1", 10)
+	laterResult := startTestRowLock(g, context.Background(), "v1", primarykey.Keys{Int64Values: []int64{5, 10}}, false)
+	waitForTestPKHeld(t, g, "v1", 5)
+	first()
 	select {
 	case result := <-casResult:
 		if result.release != nil {
 			result.release()
 		}
-		t.Fatalf("CAS bypassed its earlier ordinary batch: %v", result.err)
+		t.Fatalf("CAS bypassed the remaining shared holder: %v", result.err)
 	default:
 	}
-	laterCtx := newWriteGuardWaitContext(context.Background())
-	laterResult := startTestWriteGuard(g, laterCtx, "v1", primarykey.Keys{Int64Values: []int64{10}}, false)
-	waitForTestWriteGuardWait(t, laterCtx)
-	// Other PKs and typed keys are unaffected by the reservation.
-	disjoint := acquireTestWriteGuard(t, g, "v1", primarykey.Keys{Int64Values: []int64{30}, StringValues: []string{"10"}}, false, false)
+	disjoint := acquireTestRowLock(t, g, "v1", primarykey.Keys{Int64Values: []int64{30}, StringValues: []string{"10"}}, false)
 	disjoint()
-	earlier()
-	cas := awaitTestWriteGuard(t, casResult)
+	otherChannel := acquireTestRowLock(t, g, "v2", primarykey.Keys{Int64Values: []int64{10}}, true)
+	otherChannel()
+	second()
+	cas := awaitTestRowLock(t, casResult)
 	require.NoError(t, cas.err)
 	require.NotNil(t, cas.release)
 	select {
@@ -348,66 +323,100 @@ func TestWriteGuardsCASReservationDrainsEarlierAndBlocksLaterOrdinaryBatches(t *
 			result.release()
 		}
 		cas.release()
-		t.Fatalf("ordinary batch bypassed the active CAS: %v", result.err)
+		t.Fatalf("ordinary write bypassed the queued CAS: %v", result.err)
 	default:
 	}
 	cas.release()
-	later := awaitTestWriteGuard(t, laterResult)
+	later := awaitTestRowLock(t, laterResult)
 	require.NoError(t, later.err)
 	later.release()
-	requireWriteGuardRegistriesEmpty(t, g)
+	requireTestRowLocksAvailable(t, g, "v1", 5, 10, 20, 30)
 }
 
-func TestWriteGuardsCancelCASReservationReleasesPendingOrdinaryBatch(t *testing.T) {
-	g := newWriteGuards()
-	earlier := acquireTestWriteGuard(t, g, "v1", primarykey.Keys{Int64Values: []int64{10}}, false, false)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	casCtx := newWriteGuardWaitContext(ctx)
-	casResult := startTestWriteGuard(g, casCtx, "v1", primarykey.Keys{Int64Values: []int64{10}}, true)
-	waitForTestWriteGuardWait(t, casCtx)
-	laterCtx := newWriteGuardWaitContext(context.Background())
-	laterResult := startTestWriteGuard(g, laterCtx, "v1", primarykey.Keys{Int64Values: []int64{10}}, false)
-	waitForTestWriteGuardWait(t, laterCtx)
-	cancel()
-	cas := awaitTestWriteGuard(t, casResult)
-	require.ErrorIs(t, cas.err, context.Canceled)
-	require.Nil(t, cas.release)
-	// Cancellation must release the reservation even though the earlier
-	// ordinary batch has not completed; ordinary batches remain concurrent.
-	later := awaitTestWriteGuard(t, laterResult)
-	require.NoError(t, later.err)
-	later.release()
-	key := pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: 10}
-	require.True(t, g.pks.TryLock(key))
-	g.pks.Unlock(key)
-	earlier()
-	requireWriteGuardRegistriesEmpty(t, g)
-	require.True(t, g.admission.TryLock("v1"))
-	g.admission.Unlock("v1")
+func TestRowLockManagerCancellationReleasesPartiallyAcquiredPKs(t *testing.T) {
+	for _, exclusive := range []bool{false, true} {
+		name := "shared"
+		if exclusive {
+			name = "exclusive"
+		}
+		t.Run(name, func(t *testing.T) {
+			g := newRowLockManager()
+			blocker := acquireTestRowLock(t, g, "v1", primarykey.Keys{Int64Values: []int64{20}}, true)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := startTestRowLock(g, ctx, "v1", primarykey.Keys{Int64Values: []int64{20, 10, 20}}, exclusive)
+			// Acquiring 10 first despite the input order proves that cancellation
+			// below must release a partially acquired sorted write set.
+			waitForTestPKHeld(t, g, "v1", 10)
+			cancel()
+			// KeyLock itself is not cancellable. Release its blocker so acquire
+			// can observe cancellation and unwind all acquired PKs.
+			blocker()
+			acquired := awaitTestRowLock(t, result)
+			require.ErrorIs(t, acquired.err, context.Canceled)
+			require.Nil(t, acquired.release)
+			requireTestRowLocksAvailable(t, g, "v1", 10, 20)
+		})
+	}
 }
 
-func TestWriteGuardsCancelOrdinaryReservationWaitCleansUpAdmission(t *testing.T) {
-	g := newWriteGuards()
-	cas := acquireTestWriteGuard(t, g, "v1", primarykey.Keys{Int64Values: []int64{10}}, true, false)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ordinaryCtx := newWriteGuardWaitContext(ctx)
-	ordinaryResult := startTestWriteGuard(g, ordinaryCtx, "v1", primarykey.Keys{Int64Values: []int64{10}}, false)
-	waitForTestWriteGuardWait(t, ordinaryCtx)
-	cancel()
-	ordinary := awaitTestWriteGuard(t, ordinaryResult)
-	require.ErrorIs(t, ordinary.err, context.Canceled)
-	require.Nil(t, ordinary.release)
-	cas()
-	requireWriteGuardRegistriesEmpty(t, g)
-	require.True(t, g.admission.TryLock("v1"))
-	g.admission.Unlock("v1")
+func TestRowLockManagerDuplicateSharedPKDoesNotDeadlockQueuedCAS(t *testing.T) {
+	g := newRowLockManager()
+	ctx := &pauseAfterFirstPKContext{
+		Context: context.Background(), manager: g,
+		key:    pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: 10},
+		locked: make(chan struct{}), resume: make(chan struct{}),
+	}
+	var resumeOnce sync.Once
+	resume := func() { resumeOnce.Do(func() { close(ctx.resume) }) }
+	t.Cleanup(resume)
+	ordinaryResult := startTestRowLock(g, ctx, "v1", primarykey.Keys{Int64Values: []int64{20, 10, 10}}, false)
+	select {
+	case <-ctx.locked:
+	case <-time.After(time.Second):
+		t.Fatal("ordinary write did not acquire its first PK")
+	}
+	casResult := startTestRowLock(g, context.Background(), "v1", primarykey.Keys{Int64Values: []int64{10}}, true)
+	waitForTestPKWriter(t, g, "v1", 10)
+	resume()
+	// A second RLock(10) would wait behind CAS while still holding the first
+	// RLock(10), so this cannot finish unless the shared set is deduplicated.
+	ordinary := awaitTestRowLock(t, ordinaryResult)
+	require.NoError(t, ordinary.err)
+	ordinary.release()
+	cas := awaitTestRowLock(t, casResult)
+	require.NoError(t, cas.err)
+	cas.release()
+	requireTestRowLocksAvailable(t, g, "v1", 10, 20)
 }
 
-func acquireTestWriteGuard(t *testing.T, g *writeGuards, vchannel string, pks primarykey.Keys, exclusive, unknown bool) func() {
+type pauseAfterFirstPKContext struct {
+	context.Context
+	manager *rowLockManager
+	key     pkLockKey
+	once    sync.Once
+	locked  chan struct{}
+	resume  chan struct{}
+}
+
+func (ctx *pauseAfterFirstPKContext) Err() error {
+	if err := ctx.Context.Err(); err != nil {
+		return err
+	}
+	if ctx.manager.pks.TryLock(ctx.key) {
+		ctx.manager.pks.Unlock(ctx.key)
+		return nil
+	}
+	ctx.once.Do(func() {
+		close(ctx.locked)
+		<-ctx.resume
+	})
+	return ctx.Context.Err()
+}
+
+func acquireTestRowLock(t *testing.T, g *rowLockManager, vchannel string, pks primarykey.Keys, exclusive bool) func() {
 	t.Helper()
-	release, err := g.acquire(context.Background(), vchannel, pks, exclusive, unknown)
+	release, err := g.acquire(context.Background(), vchannel, pks, exclusive)
 	require.NoError(t, err)
 	var once sync.Once
 	done := func() { once.Do(release) }
@@ -415,77 +424,62 @@ func acquireTestWriteGuard(t *testing.T, g *writeGuards, vchannel string, pks pr
 	return done
 }
 
-// Calling Done identifies the actual reservation/batch wait, rather than
-// guessing whether another goroutine reached it after a short sleep.
-type writeGuardWaitContext struct {
-	context.Context
-	once    sync.Once
-	waiting chan struct{}
-}
-
-func newWriteGuardWaitContext(ctx context.Context) *writeGuardWaitContext {
-	return &writeGuardWaitContext{Context: ctx, waiting: make(chan struct{})}
-}
-
-func (ctx *writeGuardWaitContext) Done() <-chan struct{} {
-	ctx.once.Do(func() { close(ctx.waiting) })
-	return ctx.Context.Done()
-}
-
-type testWriteGuardResult struct {
+type testRowLockResult struct {
 	release func()
 	err     error
 }
 
-func startTestWriteGuard(g *writeGuards, ctx context.Context, vchannel string, pks primarykey.Keys, exclusive bool) <-chan testWriteGuardResult {
-	result := make(chan testWriteGuardResult, 1)
+func startTestRowLock(g *rowLockManager, ctx context.Context, vchannel string, pks primarykey.Keys, exclusive bool) <-chan testRowLockResult {
+	result := make(chan testRowLockResult, 1)
 	go func() {
-		release, err := g.acquire(ctx, vchannel, pks, exclusive, false)
-		result <- testWriteGuardResult{release: release, err: err}
+		release, err := g.acquire(ctx, vchannel, pks, exclusive)
+		result <- testRowLockResult{release: release, err: err}
 	}()
 	return result
 }
 
-func awaitTestWriteGuard(t *testing.T, result <-chan testWriteGuardResult) testWriteGuardResult {
+func awaitTestRowLock(t *testing.T, result <-chan testRowLockResult) testRowLockResult {
 	t.Helper()
 	select {
 	case acquired := <-result:
 		return acquired
 	case <-time.After(time.Second):
-		t.Fatal("write guard did not finish after its blocker completed")
-		return testWriteGuardResult{}
+		t.Fatal("row lock did not finish after its blocker completed")
+		return testRowLockResult{}
 	}
 }
 
-func waitForTestWriteGuardWait(t *testing.T, ctx *writeGuardWaitContext) {
+func waitForTestPKWriter(t *testing.T, g *rowLockManager, vchannel string, pk int64) {
 	t.Helper()
-	select {
-	case <-ctx.waiting:
-	case <-time.After(time.Second):
-		t.Fatal("write guard did not reach the expected reservation wait")
-	}
-}
-
-func requireWriteGuardRegistriesEmpty(t *testing.T, g *writeGuards) {
-	t.Helper()
-	g.registryMu.Lock()
-	defer g.registryMu.Unlock()
-	require.Empty(t, g.registries)
-}
-
-func waitForTestCASReservation(t *testing.T, g *writeGuards, vchannel string, pk int64) {
-	t.Helper()
+	key := pkLockKey{vchannel: vchannel, kind: primarykey.KindInt64, int64Value: pk}
 	require.Eventually(t, func() bool {
-		g.registryMu.Lock()
-		defer g.registryMu.Unlock()
-		registry := g.registries[vchannel]
-		if registry == nil {
+		if g.pks.TryRLock(key) {
+			g.pks.RUnlock(key)
 			return false
 		}
-		registry.mu.Lock()
-		defer registry.mu.Unlock()
-		return registry.cas[pkLockKey{vchannel: vchannel, kind: primarykey.KindInt64, int64Value: pk}] != nil
+		return true
 	}, time.Second, time.Millisecond)
+}
+
+func waitForTestPKHeld(t *testing.T, g *rowLockManager, vchannel string, pk int64) {
+	t.Helper()
+	key := pkLockKey{vchannel: vchannel, kind: primarykey.KindInt64, int64Value: pk}
+	require.Eventually(t, func() bool {
+		if g.pks.TryLock(key) {
+			g.pks.Unlock(key)
+			return false
+		}
+		return true
+	}, time.Second, time.Millisecond)
+}
+
+func requireTestRowLocksAvailable(t *testing.T, g *rowLockManager, vchannel string, pks ...int64) {
+	t.Helper()
+	for _, pk := range pks {
+		key := pkLockKey{vchannel: vchannel, kind: primarykey.KindInt64, int64Value: pk}
+		require.True(t, g.pks.TryLock(key))
+		g.pks.Unlock(key)
+	}
 }
 
 func newGuardTestDelete(pks ...int64) message.MutableMessage {
