@@ -1272,9 +1272,7 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	}
 	defer s.ptrLock.Unpin()
 
-	// Reopen forwards the SegmentLoadInfo straight to segcore, so it must inject
-	// the QueryNode-local index load params (e.g. DISKANN num_load_thread) that
-	// the full-load path injects; otherwise segcore asserts on load. See #51249.
+	// Reopen applies the same live deployment load defaults as a full load.
 	if err := prepareIndexLoadParams(newLoadInfo.GetIndexInfos()); err != nil {
 		return err
 	}

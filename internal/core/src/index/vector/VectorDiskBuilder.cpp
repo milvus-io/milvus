@@ -42,7 +42,6 @@
 #include "index/vector/VectorDiskBuildFileManager.h"
 #include "index/vector/VectorBuilderUtils.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
-#include "index/vector/VectorParamUtils.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "storage/artifact/LocalFileUtils.h"
 #include "knowhere/binaryset.h"
@@ -261,20 +260,6 @@ EncodeEmptyEmbeddingOffsets(int64_t dim, const std::vector<size_t>& offsets) {
     return bytes;
 }
 
-void
-NormalizeDiskAnnBuildThreads(Config& config, const IndexType& index_type) {
-    if (index_type != knowhere::IndexEnum::INDEX_DISKANN) {
-        return;
-    }
-    if (!config.contains(DISK_ANN_BUILD_THREAD_NUM)) {
-        ThrowInfo(ConfigInvalid,
-                  "DiskANN build requires {}",
-                  DISK_ANN_BUILD_THREAD_NUM);
-    }
-    config[DISK_ANN_THREADS_NUM] = vector_params::ParsePositiveInt32(
-        config.at(DISK_ANN_BUILD_THREAD_NUM), DISK_ANN_BUILD_THREAD_NUM);
-}
-
 }  // namespace
 
 template <typename T>
@@ -447,8 +432,6 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
             } else {
                 config.erase(EMB_LIST_OFFSETS_PATH);
             }
-            NormalizeDiskAnnBuildThreads(config, engine_->KnowhereIndexType());
-
             const auto status = engine_->native_index.Build({}, config);
             file_manager_->RethrowFirstFailure();
             if (status != knowhere::Status::success) {

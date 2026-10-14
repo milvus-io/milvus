@@ -95,11 +95,11 @@ class VectorSideInputFixture : public ::testing::Test {
                          {VEC_OPT_FIELDS, OptionalFields()},
                          {"mv_build_minimum_category_size", 128}};
         if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-            params[DISK_ANN_MAX_DEGREE] = "24";
-            params[DISK_ANN_SEARCH_LIST_SIZE] = "56";
-            params[DISK_ANN_PQ_CODE_BUDGET] = "0.001";
-            params[DISK_ANN_BUILD_DRAM_BUDGET] = "2";
-            params[DISK_ANN_BUILD_THREAD_NUM] = "2";
+            params["max_degree"] = "24";
+            params["search_list_size"] = "56";
+            params["pq_code_budget_gb"] = "0.001";
+            params["build_dram_budget_gb"] = "2";
+            params["num_build_thread"] = "2";
         } else {
             params[knowhere::indexparam::M] = 16;
             params[knowhere::indexparam::EFCONSTRUCTION] = 96;
@@ -147,7 +147,7 @@ class VectorSideInputFixture : public ::testing::Test {
             .topk_ = 3,
         };
         if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-            params.search_params_[DISK_ANN_QUERY_LIST] = 64;
+            params.search_params_["search_list"] = 64;
         } else {
             params.search_params_[knowhere::indexparam::EF] = 64;
         }

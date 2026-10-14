@@ -124,11 +124,6 @@ func buildCLoadIndexInfo(field *schemapb.FieldSchema, segment *querypb.SegmentLo
 	if indexType == "" {
 		return nil, merr.WrapErrServiceInternalMsg("index type is empty")
 	}
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, index.GetNumRows()); err != nil {
-			return nil, err
-		}
-	}
 	if indexType == indexparamcheck.IndexBitmap {
 		indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
 	}

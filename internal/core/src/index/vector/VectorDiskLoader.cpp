@@ -23,11 +23,9 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -39,9 +37,7 @@
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorIndexReader.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
-#include "index/vector/VectorDiskAnnUtils.h"
 #include "index/vector/VectorLoadResource.h"
-#include "index/vector/VectorParamUtils.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "nlohmann/json.hpp"
@@ -61,54 +57,8 @@ using vector_load_params::ValidateLoadedDimension;
 using vector_load_params::ValidateLoadedShape;
 
 constexpr const char* kEnableDiskMmap = "enable_disk_mmap";
-constexpr uint32_t kDefaultBeamwidth = 8;
-
-// Range-check a normalized integer before narrowing to a disk-backend option.
-uint32_t
-ParseUint32(const nlohmann::json& value, std::string_view key) {
-    const auto parsed =
-        ParseInt64Param(value, key, "normalized vector parameter");
-    if (parsed < 0 ||
-        static_cast<uint64_t>(parsed) >
-            static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
-        ThrowInfo(UnexpectedError,
-                  "normalized vector parameter {} is outside uint32",
-                  key);
-    }
-    return static_cast<uint32_t>(parsed);
-}
 
 using RuntimeParams = NormalizedLoadMetadata;
-
-/**
- * @brief Validated disk-backend initialization knobs, separate from transport.
- */
-struct DiskOpenOptions {
-    uint32_t beamwidth{kDefaultBeamwidth};
-    std::optional<int32_t> load_threads;
-};
-
-// Validate DiskANN-specific initialization settings; other backends use
-// defaults.
-DiskOpenOptions
-ParseOpenOptions(const Config& params, const RuntimeParams& runtime) {
-    DiskOpenOptions result;
-    if (runtime.index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-        if (params.contains(DISK_ANN_QUERY_BEAMWIDTH)) {
-            result.beamwidth = ParseUint32(params.at(DISK_ANN_QUERY_BEAMWIDTH),
-                                           DISK_ANN_QUERY_BEAMWIDTH);
-        }
-        vector_disk_ann::ValidateBeamwidth(result.beamwidth);
-        if (!params.contains(DISK_ANN_LOAD_THREAD_NUM)) {
-            ThrowInfo(ConfigInvalid,
-                      "DiskANN load requires {}",
-                      DISK_ANN_LOAD_THREAD_NUM);
-        }
-        result.load_threads = vector_params::ParsePositiveInt32(
-            params.at(DISK_ANN_LOAD_THREAD_NUM), DISK_ANN_LOAD_THREAD_NUM);
-    }
-    return result;
-}
 
 // Require disk-load routing and normalize vector shape metadata.
 RuntimeParams
@@ -274,7 +224,6 @@ DecodeEmptyEmbeddingList(bool use_async, storage::FileSource& source) {
 void
 PrepareCommonLoadConfig(Config& config,
                         const RuntimeParams& params,
-                        const DiskOpenOptions& open_options,
                         const std::string& prefix,
                         bool stream_backend,
                         bool enable_mmap) {
@@ -286,14 +235,6 @@ PrepareCommonLoadConfig(Config& config,
         config[kEnableDiskMmap] = enable_mmap;
     }
     config[DISK_ANN_PREFIX_PATH] = prefix;
-    if (params.index_type != knowhere::IndexEnum::INDEX_DISKANN) {
-        return;
-    }
-    config[DISK_ANN_PREPARE_WARM_UP] = false;
-    config[DISK_ANN_PREPARE_USE_BFS_CACHE] = false;
-    AssertInfo(open_options.load_threads.has_value(),
-               "validated DiskANN load thread count is missing");
-    config[DISK_ANN_THREADS_NUM] = *open_options.load_threads;
 }
 
 // Create the backend mmap prefix, reporting filesystem failures before
@@ -342,7 +283,6 @@ folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
 OpenIndex(bool use_async,
           storage::FileSource& source,
           const RuntimeParams& params,
-          const DiskOpenOptions& open_options,
           const EntryPlan& plan,
           const storage::LoadOptions& opts) {
     const auto priority =
@@ -473,7 +413,7 @@ OpenIndex(bool use_async,
 
         auto config = params.knowhere_config;
         PrepareCommonLoadConfig(
-            config, params, open_options, prefix, stream_backend, enable_mmap);
+            config, params, prefix, stream_backend, enable_mmap);
         {
             auto local_io = [&] {
                 const auto status = engine.native_index.Deserialize(
@@ -502,8 +442,8 @@ OpenIndex(bool use_async,
     }
 
     ValidateLoadedShape(params, plan.state, engine, LoadBackend::Disk);
-    co_return std::make_unique<VectorIndexReader>(open_options.beamwidth,
-                                                  std::move(engine));
+    co_return std::make_unique<VectorIndexReader>(
+        std::move(engine), VectorIndexReader::Backend::Disk);
 }
 
 }  // namespace
@@ -518,7 +458,6 @@ VectorDiskLoader::Create(OpenedIndexSource source,
     auto loader = std::unique_ptr<VectorDiskLoader>(new VectorDiskLoader(
         std::get<LegacyIndexSource>(std::move(source)), std::move(options)));
     const auto runtime = ParseRuntimeParams(loader->options_.params);
-    (void)ParseOpenOptions(loader->options_.params, runtime);
     (void)PlanEntries(*loader->source_.source, runtime);
     co_return loader;
 }
@@ -541,15 +480,13 @@ VectorDiskLoader::LoadLegacy(storage::FileSource& source,
                              const storage::LoadOptions& opts,
                              bool use_async) {
     auto params = ParseDiskLoadMetadata(opts.params);
-    const auto open_options = ParseOpenOptions(opts.params, params);
     ParseIdMapMmapMetadata(opts.params, params);
     if (source.Gen() != storage::Generation::V1V2) {
         ThrowInfo(Unsupported,
                   "disk vector indexes have no V3 persisted format");
     }
     const auto plan = PlanEntries(source, params);
-    co_return co_await OpenIndex(
-        use_async, source, params, open_options, plan, opts);
+    co_return co_await OpenIndex(use_async, source, params, plan, opts);
 }
 
 std::vector<std::string>

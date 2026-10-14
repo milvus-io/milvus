@@ -48,13 +48,12 @@ HnswParams() {
 Config
 DiskParams() {
     return {{knowhere::meta::METRIC_TYPE, knowhere::metric::MAX_SIM_L2},
-            {index::DISK_ANN_MAX_DEGREE, 24},
-            {index::DISK_ANN_SEARCH_LIST_SIZE, 56},
-            {index::DISK_ANN_PQ_CODE_BUDGET, 0.001},
-            {index::DISK_ANN_BUILD_DRAM_BUDGET, 2},
-            {index::DISK_ANN_BUILD_THREAD_NUM, 2},
-            {index::DISK_ANN_LOAD_THREAD_NUM, 2},
-            {index::DISK_ANN_SEARCH_CACHE_BUDGET, 0.0}};
+            {"max_degree", 24},
+            {"search_list_size", 56},
+            {"pq_code_budget_gb", 0.001},
+            {"build_dram_budget_gb", 2},
+            {"num_build_thread", 2},
+            {"search_cache_budget_gb", 0.0}};
 }
 
 knowhere::DataSetPtr
@@ -366,7 +365,7 @@ TEST_F(VectorArrayBuildSessionTest, DiskAnnNonemptyListsFromBinlog) {
     params.metric_type_ = knowhere::metric::MAX_SIM_L2;
     params.search_params_ =
         Config{{knowhere::meta::METRIC_TYPE, params.metric_type_},
-               {index::DISK_ANN_QUERY_LIST, topk * 2}};
+               {"search_list", topk * 2}};
     SearchResult result;
     reader->Search(queries, params, nullptr, nullptr, result);
     EXPECT_EQ(result.total_nq_, 2);

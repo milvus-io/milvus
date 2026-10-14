@@ -434,12 +434,6 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 				return err
 			}
 		}
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-			err := indexparams.FillDiskIndexParams(paramtable.Get(), indexParamsMap)
-			if err != nil {
-				return err
-			}
-		}
 		metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 		if !metricTypeExist {
 			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "metric type not set for vector index")

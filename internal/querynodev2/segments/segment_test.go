@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -24,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -914,13 +914,11 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 	assert.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
 }
 
-// TestLocalSegmentReopenInjectsDiskIndexLoadParams reproduces issue #51249:
-// the Reopen path must inject QueryNode-local index load params (e.g. DISKANN
-// num_load_thread) before handing the load info to segcore. Without the fix,
-// the DISKANN index params reaching segcore lack num_load_thread and segcore
-// asserts "param num_load_thread is empty".
-func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
+// TestLocalSegmentReopenAppliesLiveLoadDefaults covers the real Reopen request.
+func TestLocalSegmentReopenAppliesLiveLoadDefaults(t *testing.T) {
 	paramtable.Init()
+	paramtable.Get().Save("knowhere.DISKANN.load.search_cache_budget_gb_ratio", "0.25")
+	defer paramtable.Get().Remove("knowhere.DISKANN.load.search_cache_budget_gb_ratio")
 
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
@@ -946,8 +944,7 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 		})).
 		Return(nil)
 
-	// DISKANN index carrying build-time params but NOT the QueryNode-local
-	// num_load_thread (the exact shape QueryCoord sends on a Reopen task).
+	// Metadata has no explicit cache choice, so the live load override applies.
 	newLoadInfo := &querypb.SegmentLoadInfo{
 		CollectionID:  10,
 		SegmentID:     20,
@@ -979,14 +976,25 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
 	}
 
-	require.NoError(t, segment.Reopen(context.Background(), newLoadInfo))
-	require.NotNil(t, captured)
-	require.Len(t, captured.GetIndexInfos(), 1)
+	metadata := proto.Clone(newLoadInfo).(*querypb.SegmentLoadInfo)
+	for _, ratio := range []string{"0.25", "0.5"} {
+		paramtable.Get().Save("knowhere.DISKANN.load.search_cache_budget_gb_ratio", ratio)
+		// The full-load preparation must use the same live override on a fresh request.
+		fullLoad := proto.Clone(metadata).(*querypb.SegmentLoadInfo)
+		require.NoError(t, prepareIndexLoadParams(fullLoad.GetIndexInfos()))
+		fullRatio, ok := getParam(fullLoad.GetIndexInfos()[0].GetIndexParams(), "search_cache_budget_gb_ratio")
+		require.True(t, ok)
+		require.Equal(t, ratio, fullRatio)
 
-	// The load info handed to segcore must now carry num_load_thread.
-	numLoadThread, ok := getParam(captured.GetIndexInfos()[0].GetIndexParams(), indexparams.NumLoadThreadKey)
-	assert.True(t, ok, "num_load_thread must be injected into DISKANN index params on Reopen")
-	assert.NotEmpty(t, numLoadThread)
+		require.NoError(t, segment.Reopen(context.Background(), proto.Clone(metadata).(*querypb.SegmentLoadInfo)))
+		require.NotNil(t, captured)
+		require.Len(t, captured.GetIndexInfos(), 1)
+		cacheRatio, ok := getParam(captured.GetIndexInfos()[0].GetIndexParams(), "search_cache_budget_gb_ratio")
+		assert.True(t, ok)
+		assert.Equal(t, ratio, cacheRatio)
+		_, derivedThread := getParam(captured.GetIndexInfos()[0].GetIndexParams(), "num_load_thread")
+		assert.False(t, derivedThread)
+	}
 }
 
 // TestBaseSegment_SkipGrowingBF tests that skipGrowingBF bypasses PK candidate checks.

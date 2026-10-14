@@ -475,3 +475,40 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 func TestAnalyzeTaskSuite(t *testing.T) {
 	suite.Run(t, new(AnalyzeTaskSuite))
 }
+
+func (suite *IndexBuildTaskSuite) TestBuildResourcesIndependentOfDeploymentDefaults() {
+	params := paramtable.Get()
+	params.Save(params.KnowhereConfig.Enable.Key, "false")
+	defer params.Reset(params.KnowhereConfig.Enable.Key)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var captured *indexcgopb.BuildIndexInfo
+	patch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+		captured = info
+		return nil, nil
+	}).Build()
+	defer patch.UnPatch()
+	for _, indexType := range []string{"DISKANN", "AISAQ", "FLAT"} {
+		req := &workerpb.CreateJobRequest{
+			CollectionID: 1, BuildID: 1, SegmentID: 1, NumRows: 1024, Dim: 128,
+			Field:         &schemapb.FieldSchema{FieldID: 102, DataType: schemapb.DataType_FloatVector},
+			TypeParams:    []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+			IndexParams:   []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexType}, {Key: common.MetricTypeKey, Value: "L2"}, {Key: "pq_code_budget_gb_ratio", Value: "0"}, {Key: "search_cache_budget_gb_ratio", Value: "0"}},
+			StorageConfig: &indexpb.StorageConfig{StorageType: "local"},
+		}
+		task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(ctx), nil)
+		suite.Require().NoError(task.PreExecute(ctx))
+		suite.Require().NoError(task.Execute(ctx))
+		suite.Require().NotNil(captured)
+		values := make(map[string]string)
+		for _, kv := range captured.GetIndexParams() {
+			values[kv.GetKey()] = kv.GetValue()
+		}
+		suite.Equal("0.000488", values[paramtable.VecFieldSizeKey])
+		suite.NotEmpty(values[paramtable.BuildDramBudgetKey])
+		suite.Equal("0", values["pq_code_budget_gb_ratio"])
+		suite.Equal("0", values["search_cache_budget_gb_ratio"])
+		suite.NotContains(values, "num_build_thread")
+		suite.NotContains(values, "pq_code_budget_gb")
+	}
+}

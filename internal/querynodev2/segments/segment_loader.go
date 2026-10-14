@@ -50,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
-	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1981,26 +1980,15 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	}, nil
 }
 
-// prepareIndexLoadParams injects QueryNode-local index load parameters into each
-// index's IndexParams in place. These params (e.g. DISKANN num_load_thread) are
-// derived from local QueryNode resources/config and are never persisted in the
-// index metadata, so they must be re-injected on every load path before the load
-// info reaches segcore. Both full-load (Load) and Reopen call this; skipping it
-// on Reopen was the root cause of issue #51249 (segcore asserts
-// "param num_load_thread is empty" while loading a DISKANN index).
+// prepareIndexLoadParams applies QueryNode-local deployment load defaults to a
+// fresh metadata request. Full load and Reopen share this preparation; none of
+// these defaults is persisted as an explicit index choice.
 func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
 	for _, indexInfo := range indexInfos {
 		if indexInfo == nil {
 			continue
 		}
 		indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
-
-		// some build params also exist in indexParams, which are useless during loading process
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
-			if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
-				return err
-			}
-		}
 
 		// set whether enable offset cache for bitmap index
 		if indexParams["index_type"] == indexparamcheck.IndexBitmap {
