@@ -332,8 +332,8 @@ TEST(RegexIndexPlan, OnlyExactZeroCountsProveEmpty) {
     EXPECT_EQ(nonempty.occurrences, 100);
     EXPECT_FALSE(ShouldUseRegexIndexPlan(nonempty, model.rows, 8192, 8192));
 
-    const auto all_zero =
-        PrepareRegexIndexPlan(nonzero_or, [](const auto&) { return 0; }, model);
+    const auto all_zero = PrepareRegexIndexPlan(
+        nonzero_or, [](const auto&) { return 0; }, model);
     EXPECT_TRUE(all_zero.empty_result);
     EXPECT_TRUE(ShouldUseRegexIndexPlan(all_zero, model.rows, 1, 8192));
 }
