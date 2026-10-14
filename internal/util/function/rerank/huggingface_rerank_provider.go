@@ -80,14 +80,17 @@ func newHuggingFaceProvider(params []*commonpb.KeyValuePair, conf map[string]str
 	return &provider, nil
 }
 
-func (provider *huggingFaceProvider) Rerank(_ context.Context, query string, docs []string) ([]float32, error) {
+func (provider *huggingFaceProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
 	scores := make([]float32, 0, len(docs))
 	for i := 0; i < len(docs); i += provider.batchSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		end := i + provider.batchSize
 		if end > len(docs) {
 			end = len(docs)
 		}
-		resp, err := provider.client.SentenceSimilarity(provider.hfProvider, provider.modelName, query, docs[i:end], provider.timeoutMs)
+		resp, err := provider.client.SentenceSimilarity(ctx, provider.hfProvider, provider.modelName, query, docs[i:end], provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

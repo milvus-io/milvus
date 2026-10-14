@@ -17,6 +17,7 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -97,7 +98,7 @@ func TestEmbeddingOK(t *testing.T) {
 		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		ret, err := c.Embedding(context.Background(), "text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)
 		assert.Equal(t, ret.Data[1].Index, 1)
@@ -106,7 +107,7 @@ func TestEmbeddingOK(t *testing.T) {
 		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		ret, err := c.Embedding(context.Background(), "text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)
 		assert.Equal(t, ret.Data[1].Index, 1)
@@ -159,7 +160,7 @@ func TestEmbeddingRetry(t *testing.T) {
 		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		ret, err := c.Embedding(context.Background(), "text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Usage, res.Usage)
 		assert.Equal(t, ret.Object, res.Object)
@@ -173,7 +174,7 @@ func TestEmbeddingRetry(t *testing.T) {
 		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		ret, err := c.Embedding(context.Background(), "text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Usage, res.Usage)
 		assert.Equal(t, ret.Object, res.Object)
@@ -200,7 +201,7 @@ func TestEmbeddingFailed(t *testing.T) {
 		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		_, err = c.Embedding(context.Background(), "text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err != nil)
 		assert.Equal(t, atomic.LoadInt32(&count), int32(3))
 	}
@@ -209,7 +210,7 @@ func TestEmbeddingFailed(t *testing.T) {
 		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		_, err = c.Embedding(context.Background(), "text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err != nil)
 		assert.Equal(t, atomic.LoadInt32(&count), int32(3))
 	}
@@ -231,7 +232,7 @@ func TestTimeoutAndRetry(t *testing.T) {
 		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 1000)
+		_, err = c.Embedding(context.Background(), "text-embedding-3-small", []string{"sentence"}, 0, "", 1000)
 		assert.True(t, err != nil)
 		assert.Equal(t, atomic.LoadInt32(&st), int32(0))
 		time.Sleep(2 * time.Second)
@@ -243,7 +244,7 @@ func TestTimeoutAndRetry(t *testing.T) {
 		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 14000)
+		_, err = c.Embedding(context.Background(), "text-embedding-3-small", []string{"sentence"}, 0, "", 14000)
 		assert.True(t, err != nil)
 		assert.Equal(t, atomic.LoadInt32(&st), int32(3))
 	}
