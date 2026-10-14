@@ -1891,9 +1891,13 @@ func TestRLSSchemaKeys(t *testing.T) {
 				}
 				sealed := maps.Clone(all)
 				maps.DeleteFunc(sealed, func(id any, _ rlsSchemaRow) bool { return id.(int64) > int64(3500*copies) })
-				t.Run("reads", func(t *testing.T) { checkRLSKeyReads(ctx, t, mc, name, tc, all, sealed) })
+				// Bound each phase independently; the combined matrix can exceed one shared deadline.
+				t.Run("reads", func(t *testing.T) {
+					checkRLSKeyReads(hp.CreateContext(t, 10*time.Minute), t, mc, name, tc, all, sealed)
+				})
 				for stageIndex, stage := range []string{"full_column", "full_row", "partial_column", "partial_row", "delete_ids", "delete_filter", "delete_template", "insert_column", "insert_row", "upsert_new"} {
 					if !t.Run(stage, func(t *testing.T) {
+						ctx := hp.CreateContext(t, 3*time.Minute)
 						for ownerIndex, owner := range []string{"alice", "bob"} {
 							for _, start := range []int{0, 3000 * copies, 3500 * copies} {
 								// Four consecutive IDs contain both owners in both key buckets.
@@ -1961,10 +1965,13 @@ func TestRLSSchemaKeys(t *testing.T) {
 						return
 					}
 				}
-				checkRLSMixedSegments(ctx, t, mc, name, copies)
-				t.Run("reads_after_writes", func(t *testing.T) { checkRLSKeyReads(ctx, t, mc, name, tc, all, sealed) })
+				checkRLSMixedSegments(hp.CreateContext(t, 2*time.Minute), t, mc, name, copies)
+				t.Run("reads_after_writes", func(t *testing.T) {
+					checkRLSKeyReads(hp.CreateContext(t, 10*time.Minute), t, mc, name, tc, all, sealed)
+				})
 				if tc.clusteringKey != "" {
 					t.Run("clustering_compaction", func(t *testing.T) {
+						ctx := hp.CreateContext(t, 15*time.Minute)
 						rlsFlush(ctx, t, mc, name)
 						// Flush can leave asynchronous sorting work even with automatic compaction disabled.
 						require.EventuallyWithT(t, func(c *assert.CollectT) {
