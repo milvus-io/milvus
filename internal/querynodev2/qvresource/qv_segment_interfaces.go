@@ -43,8 +43,6 @@ type qvPKCandidateSegment interface {
 type qvSegmentLoader interface {
 	NewSegment(ctx context.Context, collection qnview.CollectionRuntime, info *querypb.SegmentLoadInfo) (qvLoadedSegment, error)
 	LoadSegment(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error
-	ReopenSegment(ctx context.Context, segment qvLoadedSegment, collection qnview.CollectionRuntime, info *querypb.SegmentLoadInfo) error
-	LoadIndex(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo, version int64) error
 	LoadDeltaLogs(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error
 	LoadPKCandidate(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error
 	FinalizeLoad(segment qvLoadedSegment) error

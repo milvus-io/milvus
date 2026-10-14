@@ -229,6 +229,27 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const void* schema_blob,
                    const int64_t schema_length,
                    const uint64_t schema_version) {
+    return AsyncReopenSegmentWithLoadFields(c_trace,
+                                            c_segment,
+                                            load_info_blob,
+                                            load_info_length,
+                                            schema_blob,
+                                            schema_length,
+                                            schema_version,
+                                            nullptr,
+                                            0);
+}
+
+CFuture*
+AsyncReopenSegmentWithLoadFields(CTraceContext c_trace,
+                                 CSegmentInterface c_segment,
+                                 const uint8_t* load_info_blob,
+                                 const int64_t load_info_length,
+                                 const void* schema_blob,
+                                 const int64_t schema_length,
+                                 const uint64_t schema_version,
+                                 const int64_t* load_fields,
+                                 int64_t load_field_count) {
     try {
         AssertInfo(load_info_blob, "load info is null");
         milvus::proto::segcore::SegmentLoadInfo load_info;
@@ -236,6 +257,11 @@ AsyncReopenSegment(CTraceContext c_trace,
         AssertInfo(suc, "unmarshal load info failed");
         auto schema =
             ParseReopenSchema(schema_blob, schema_length, schema_version);
+        if (load_field_count > 0) {
+            AssertInfo(load_fields != nullptr, "load fields are null");
+            schema->UpdateLoadFields(std::vector<int64_t>(
+                load_fields, load_fields + load_field_count));
+        }
 
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -357,6 +383,24 @@ AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
         milvus::futures::PoolType::kLoad);
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
+}
+
+CStatus
+AdoptSealedSegmentReadState(CSegmentInterface c_segment,
+                            CSegmentInterface read_segment) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        auto* segment =
+            dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                static_cast<milvus::segcore::SegmentInterface*>(c_segment));
+        auto* read = dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+            static_cast<milvus::segcore::SegmentInterface*>(read_segment));
+        AssertInfo(segment != nullptr && read != nullptr,
+                   "read-state adoption requires sealed segments");
+        segment->AdoptReadState(*read);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus

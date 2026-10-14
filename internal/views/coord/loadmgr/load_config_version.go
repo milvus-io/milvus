@@ -36,7 +36,7 @@ func loadInfoVersion(config *LoadConfig) uint64 {
 	add(int64(len(cfg.LoadFields)))
 	for _, field := range cfg.LoadFields {
 		add(field.FieldId)
-		add(field.IndexId)
+		add(0) // QueryView always follows current indexes; only loading scope is versioned.
 	}
 	add(int64(len(cfg.Replicas)))
 	for _, replica := range cfg.Replicas {

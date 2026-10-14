@@ -126,6 +126,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // deletes still use its shared record and PK lookup callback.
     std::unique_ptr<ChunkedSegmentSealedImpl>
     PinReadState() const;
+
+    // Retain the resources of a live fork instead of the original load scope.
+    void
+    AdoptReadState(const ChunkedSegmentSealedImpl& read);
     void
     LoadIndex(LoadIndexInfo& info) override;
     void
@@ -2236,6 +2240,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ChunkedSegmentSealedImpl(
         const ChunkedSegmentSealedImpl& source,
         std::shared_ptr<const PublishedSegmentState> state);
+
+    // Private read-state forks can prepare an exact schema independently of
+    // the source segment's monotonic WAL/schema progression.
+    bool read_state_fork_ = false;
 
     // deleted pks
     std::shared_ptr<DeletedRecord<true>> deleted_record_;

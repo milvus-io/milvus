@@ -5,8 +5,6 @@ package qnview
 import (
 	"context"
 	"sync"
-	"sync/atomic"
-	"testing"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -17,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 type fakeTransformSegment struct {
@@ -117,7 +114,7 @@ type fakeTransformLogBuffer struct {
 	regs             []*fakeTransformRegistration
 }
 
-func (b *fakeTransformLogBuffer) Acquire(_ context.Context, view *qviews.QueryViewAtQueryNode) (TransformLogGuard, error) {
+func (b *fakeTransformLogBuffer) Bind(view *qviews.QueryViewAtQueryNode) (TransformLogGuard, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.acquireView = view
@@ -240,21 +237,6 @@ func (g *fakeCollectionRuntimeGuard) UpdateIndexMeta(_ context.Context, indexes 
 	return g.updateErr
 }
 
-type fakePhysicalSegmentManager struct {
-	acquire func(AcquirePhysicalSegments)
-	release func(ReleaseSegments)
-}
-
-func (m fakePhysicalSegmentManager) Acquire(req AcquirePhysicalSegments) {
-	m.acquire(req)
-}
-
-func (m fakePhysicalSegmentManager) Release(req ReleaseSegments) {
-	m.release(req)
-}
-
-func (m fakePhysicalSegmentManager) ApplyLoadInfoSnapshot(context.Context, SegmentLoadInfoSnapshot) {}
-
 type instantTransformRegistration struct{}
 
 func (instantTransformRegistration) WaitCatchup(context.Context) error {
@@ -329,185 +311,20 @@ func (p *fakeQueryViewLoadMetadataProvider) GetQueryViewLoadInfo(context.Context
 	return QueryViewLoadInfo{IndexInfos: p.loadIndexInfos}, p.err
 }
 
-type fakePhysicalLoader struct {
-	mu                sync.Mutex
-	loadInfos         []*querypb.SegmentLoadInfo
-	collections       []CollectionRuntime
-	updateSnapshots   []SegmentLoadInfoSnapshot
-	updateActions     []SegmentUpdateAction
-	released          []int64
-	loaded            TransformSegment
-	loadErr           error
-	updateErr         error
-	releaseErr        error
-	loadFn            func(info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error)
-	loadFnWithContext func(context.Context, *querypb.SegmentLoadInfo, CollectionRuntime) (TransformSegment, error)
-	updateFn          func(segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error
+func (g *fakeTransformLogGuard) Prepare(context.Context) (bool, error) { return false, nil }
+func (instantTransformGuard) Prepare(context.Context) (bool, error)    { return false, nil }
+
+func (instantTransformRegistration) WaitTransformVisible(context.Context, uint64) error { return nil }
+func (r *fakeTransformRegistration) WaitTransformVisible(ctx context.Context, _ uint64) error {
+	return r.WaitCatchup(ctx)
 }
 
-func (l *fakePhysicalLoader) Load(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error) {
-	l.mu.Lock()
-	l.loadInfos = append(l.loadInfos, info)
-	l.collections = append(l.collections, collection)
-	l.mu.Unlock()
-	if l.loadFnWithContext != nil {
-		return l.loadFnWithContext(ctx, info, collection)
-	}
-	if l.loadFn != nil {
-		return l.loadFn(info, collection)
-	}
-	return l.loaded, l.loadErr
+func (instantTransformRegistration) WaitFailure(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
 }
 
-func (l *fakePhysicalLoader) Update(_ context.Context, segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error {
-	l.mu.Lock()
-	l.updateSnapshots = append(l.updateSnapshots, snapshot)
-	l.updateActions = append(l.updateActions, action)
-	l.collections = append(l.collections, collection)
-	l.mu.Unlock()
-	if l.updateFn != nil {
-		return l.updateFn(segment, collection, snapshot, action)
-	}
-	return l.updateErr
-}
-
-func (l *fakePhysicalLoader) Release(_ context.Context, segmentIDs []int64) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.released = append(l.released, segmentIDs...)
-	return l.releaseErr
-}
-
-func newTestNodeScheduler(t *testing.T) nodescheduler.Scheduler {
-	nodeScheduler := nodescheduler.New(4)
-	t.Cleanup(nodeScheduler.Close)
-	return nodeScheduler
-}
-
-func submitTestSegmentLoadTask(t *testing.T, loader PhysicalSegmentLoader, task SegmentLoadTask, estimators ...SegmentResourceEstimator) nodescheduler.TaskHandle {
-	var estimator SegmentResourceEstimator
-	if len(estimators) > 0 {
-		estimator = estimators[0]
-	}
-	return newTestNodeScheduler(t).Submit(newSegmentLoadTask(loader, estimator, task))
-}
-
-func submitTestSegmentUpdateTask(t *testing.T, loader PhysicalSegmentLoader, task SegmentUpdateTask) nodescheduler.TaskHandle {
-	return newTestNodeScheduler(t).Submit(newSegmentUpdateTask(loader, task))
-}
-
-type fakeResourceReservation struct {
-	released bool
-}
-
-func (r *fakeResourceReservation) Release() {
-	r.released = true
-}
-
-type fakeSegmentResourceEstimator struct {
-	infos        []*querypb.SegmentLoadInfo
-	collections  []CollectionRuntime
-	reservations []*fakeResourceReservation
-	err          error
-}
-
-func (e *fakeSegmentResourceEstimator) Reserve(_ context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (ResourceReservation, error) {
-	e.infos = append(e.infos, info)
-	e.collections = append(e.collections, collection)
-	if e.err != nil {
-		return nil, e.err
-	}
-	reservation := &fakeResourceReservation{}
-	e.reservations = append(e.reservations, reservation)
-	return reservation, nil
-}
-
-type fakeNodeScheduler struct {
-	mu      sync.Mutex
-	tasks   []*SegmentLoadTask
-	updates []*SegmentUpdateTask
-}
-
-func (s *fakeNodeScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
-	switch task := task.(type) {
-	case schedulerTaskFunc:
-		_ = task.Execute(context.Background())
-	case *SegmentLoadTask:
-		s.mu.Lock()
-		s.tasks = append(s.tasks, task)
-		s.mu.Unlock()
-	case *SegmentUpdateTask:
-		s.mu.Lock()
-		s.updates = append(s.updates, task)
-		s.mu.Unlock()
-	}
-	return noopNodeTaskHandle{}
-}
-
-func newTestQueryViewSegmentReadinessManager(t *testing.T, physical PhysicalSegmentManager, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentReadinessManager {
-	t.Helper()
-	scheduler := nodescheduler.New(4)
-	t.Cleanup(scheduler.Close)
-	return NewQueryViewSegmentReadinessManagerWithScheduler(scheduler, physical, buffer, 4, collections...)
-}
-
-func newTestViewScopedPhysicalSegmentManager(t *testing.T, scheduler nodescheduler.Scheduler, streams ...SegmentLoadInfoStream) *ViewScopedPhysicalSegmentManager {
-	t.Helper()
-	if len(streams) > 0 {
-		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(scheduler, &fakePhysicalLoader{}, streams[0])
-	}
-	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(scheduler, &fakePhysicalLoader{})
-}
-
-func newTestViewScopedPhysicalSegmentManagerWithLoader(t *testing.T, loader PhysicalSegmentLoader, streams ...SegmentLoadInfoStream) *ViewScopedPhysicalSegmentManager {
-	t.Helper()
-	nodeScheduler := newTestNodeScheduler(t)
-	if len(streams) > 0 {
-		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(nodeScheduler, loader, streams[0])
-	}
-	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, loader)
-}
-
-type fakeSegmentLoadInfoStream struct {
-	subscriptions []*fakeSegmentLoadInfoSubscription
-}
-
-func (s *fakeSegmentLoadInfoStream) Subscribe(option SegmentLoadInfoSubscriptionOption) SegmentLoadInfoSubscription {
-	sub := &fakeSegmentLoadInfoSubscription{option: option}
-	s.subscriptions = append(s.subscriptions, sub)
-	return sub
-}
-
-func (s *fakeSegmentLoadInfoStream) Emit(snapshot SegmentLoadInfoSnapshot) error {
-	for i := len(s.subscriptions) - 1; i >= 0; i-- {
-		sub := s.subscriptions[i]
-		if !sub.closed.Load() && sub.option.CollectionID == snapshot.CollectionID && sub.option.SegmentID == snapshot.SegmentID {
-			return sub.option.Handler.Handle(snapshot)
-		}
-	}
-	return nil
-}
-
-func (*fakeSegmentLoadInfoStream) Close() {}
-
-type fakeSegmentLoadInfoSubscription struct {
-	option SegmentLoadInfoSubscriptionOption
-	closed atomic.Bool
-}
-
-func (s *fakeSegmentLoadInfoSubscription) CollectionID() int64 { return s.option.CollectionID }
-func (s *fakeSegmentLoadInfoSubscription) SegmentID() int64    { return s.option.SegmentID }
-func (*fakeSegmentLoadInfoSubscription) Error() error          { return nil }
-func (s *fakeSegmentLoadInfoSubscription) Close()              { s.closed.Store(true) }
-
-func (s *fakeNodeScheduler) Tasks() []*SegmentLoadTask {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]*SegmentLoadTask(nil), s.tasks...)
-}
-
-func (s *fakeNodeScheduler) Updates() []*SegmentUpdateTask {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]*SegmentUpdateTask(nil), s.updates...)
+func (*fakeTransformRegistration) WaitFailure(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
 }

@@ -143,7 +143,23 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const int64_t schema_length,
                    const uint64_t schema_version);
 
+// Prepare an explicit loading scope while preserving the existing reopen ABI.
+CFuture*
+AsyncReopenSegmentWithLoadFields(CTraceContext c_trace,
+                                 CSegmentInterface c_segment,
+                                 const uint8_t* load_info_blob,
+                                 int64_t load_info_length,
+                                 const void* schema_blob,
+                                 int64_t schema_length,
+                                 uint64_t schema_version,
+                                 const int64_t* load_fields,
+                                 int64_t load_field_count);
+
 // Return a read-only sealed facade. Retain c_segment until deleting the facade.
+CStatus
+AdoptSealedSegmentReadState(CSegmentInterface c_segment,
+                            CSegmentInterface read_segment);
+
 CStatus
 PinSealedSegmentReadState(CSegmentInterface c_segment,
                           CSegmentInterface* read_segment);

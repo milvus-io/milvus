@@ -559,6 +559,11 @@ class Schema {
         if (it != fields_.end() && !it->second.NeedLoad()) {
             return false;
         }
+        return IsFieldInLoadScope(field_id);
+    }
+
+    bool
+    IsFieldInLoadScope(FieldId field_id) const {
         return load_fields_.empty() || load_fields_.count(field_id) > 0;
     }
 

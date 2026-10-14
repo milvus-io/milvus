@@ -85,12 +85,12 @@ func (f queryNodeTaskFunc) Execute(ctx context.Context) error {
 	return f(ctx)
 }
 
-func (m *lazyQNSegmentManager) AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode) ([]qnview.SealedSegmentHandle, error) {
+func (m *lazyQNSegmentManager) AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode, timetick uint64) ([]qnview.SealedSegmentHandle, error) {
 	manager := m.get()
 	if manager == nil {
 		return nil, merr.WrapErrServiceUnavailable("query view segment manager is not initialized")
 	}
-	return manager.AcquireSealedSegmentHandles(ctx, key, view)
+	return manager.AcquireSealedSegmentHandles(ctx, key, view, timetick)
 }
 
 func (m *lazyQNSegmentManager) WaitTransformVisible(ctx context.Context, key qviews.QueryViewKey, timetick uint64) error {

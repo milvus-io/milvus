@@ -391,9 +391,13 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	}
 	defer runtime.KeepAlive(schemaBlob)
 
+	var loadFields *C.int64_t
+	if len(req.LoadFields) != 0 {
+		loadFields = (*C.int64_t)(unsafe.Pointer(&req.LoadFields[0]))
+	}
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
+			return (cgo.CFuturePtr)(C.AsyncReopenSegmentWithLoadFields(
 				traceCtx.ctx,
 				s.ptr,
 				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
@@ -401,6 +405,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 				unsafe.Pointer(&schemaBlob[0]),
 				C.int64_t(len(schemaBlob)),
 				C.uint64_t(req.SchemaVersion),
+				loadFields, C.int64_t(len(req.LoadFields)),
 			))
 		},
 		cgo.WithName("segment-reopen"),
@@ -691,4 +696,11 @@ func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats, basePaths map[int64
 		}
 	}
 	return result
+}
+
+// AdoptSealedReadState moves the base's resource references to a live read scope.
+// The caller verifies that read shares this base's row domain and delete record.
+func AdoptSealedReadState(base, read CSegment) error {
+	status := C.AdoptSealedSegmentReadState(C.CSegmentInterface(base.RawPointer()), C.CSegmentInterface(read.RawPointer()))
+	return ConsumeCStatusIntoError(&status)
 }

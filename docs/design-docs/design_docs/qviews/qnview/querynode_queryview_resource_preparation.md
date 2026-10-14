@@ -34,7 +34,9 @@ A View requirement contains:
 
 Schema is resolved through `streaming.WAL().SchemaClient()` using the VChannel
 and exact SchemaVersion. `GetQueryViewLoadInfo` resolves the exact retained
-LoadInfo identity, including fields, partitions and index requirements. A
+LoadInfo identity, including fields and partitions. LoadInfo IndexID is always
+zero: QueryViews do not bind an index version. Physical preparation uses the latest
+available compatible indexes from current Segment metadata. A
 pending dependency is represented explicitly; preparation never substitutes
 latest schema or load configuration for an unavailable required identity.
 
@@ -246,15 +248,33 @@ values and required statistics/indexes. A schema number is not proof of either.
 
 ### 6.1 Multiple schemas and load scopes
 
-Each View binds its own immutable read schema and compatible ReadState. Native
+Each View binds its own immutable read schema and compatible ReadState. Index
+refresh follows current metadata without creating a new QueryView. Existing
+queries retain their acquired resources while later queries use a prepared successor. Native
 Reopen publishes staged resources; pinned ReadStates share unchanged columns,
 indexes and storage readers while retaining their own required content. Queries
 retain the selected ReadState independently of the View's lifetime.
+
+The physical transform base retains one read state that is still owned by a
+binding. Reconciliation changes that reference when a scope is released; the
+base must not keep its initial full load scope forever. Private native forks
+filter the load-info diff by the exact requested field set, independently of
+the raw-data eager/lazy policy. In particular, a BM25 output can need an index
+without eagerly loading its raw column. Releasing a cached ReadState drops only
+its references; in-flight queries continue to own their selected state.
+
 
 For A requiring `{x, y}` and B requiring `{x, z}`, x can be shared, A retains y,
 and B prepares z. B becoming Ready does not require immediate physical removal
 of y. The resource reconciles all bindings rather than reducing them to one
 numerically greatest schema or load identity.
+
+ReadState preparation builds a private fork from compatible retained resources.
+The target schema may precede another prepared schema: arrival order does not
+constrain preparation order. Published read states are never mutated to serve a
+different schema or loading scope. A fork shares unchanged columns/readers and
+prepares missing capabilities before publication; it does not reload a whole
+Segment just because SchemaVersion differs.
 
 A compatible newer Manifest may satisfy a base requirement only when its data
 domain, fields, indexes and MVCC semantics remain valid for that binding. A
@@ -318,6 +338,13 @@ for this physical instance. Cancellation, replacement or absence from a pending
 map is not a successful result. Shared transport progress alone cannot certify
 a Segment that has not applied its required history.
 
+A registration captures its catch-up frontier once SyncUp is available. Replay
+can continue after this finite frontier is completed, using the same ordered
+registration until it joins synchronous live application. Each registration
+maintains an applied watermark, including certified empty intervals. A terminal
+failure remains observable after the catch-up result and invalidates dependent
+Views through reconciliation.
+
 Ready is a preparation boundary, not a promise of zero lag after future writes.
 Queries wait for their own Transform MVCC; that check must prove application
 for their selected physical resources, not only remote receipt.
@@ -341,6 +368,11 @@ are idempotent. Prepared resources remain protected until their owning reference
 are released.
 
 ## 9. Queries, release and reconstruction
+
+A query acquires handles from the selected Ready View and waits for the required
+transform watermark on those exact registrations before executing. Waiting on
+a binding and then looking it up again would permit a concurrent base refresh
+to substitute an instance whose application was never checked.
 
 A query acquires handles from the selected Ready View. Each handle owns its
 exact CollectionRuntime, ReadState and physical resource instance, together with

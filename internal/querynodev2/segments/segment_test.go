@@ -47,6 +47,7 @@ type SegmentSuite struct {
 
 func (suite *SegmentSuite) SetupSuite() {
 	paramtable.Init()
+	initcore.InitExecExpressionFunctionFactory()
 }
 
 func (suite *SegmentSuite) SetupTest() {

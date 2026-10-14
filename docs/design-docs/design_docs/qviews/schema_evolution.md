@@ -197,8 +197,9 @@ unchanged LoadInfoVersion. New fields follow the collection's loading intent:
 full-load and explicit partial-load behavior must be distinguished. Required
 Function input/output dependencies are resolved without adding unrelated fields.
 
-Each view pins the immutable LoadInfo it was created with, including index
-descriptors needed after restart. GetQueryViewLoadInfo must resolve a retained
+Each view pins the immutable LoadInfo field/partition scope it was created with.
+Its IndexID is always zero, meaning the latest available index; index descriptors
+are resolved from current metadata and are not historical View requirements. GetQueryViewLoadInfo must resolve a retained
 exact identity, not require that it equal the latest configuration. Persist
 versioned load snapshots with view-owned references; the latest desired config
 remains the LoadConfigStore's responsibility. Schema is fetched separately and

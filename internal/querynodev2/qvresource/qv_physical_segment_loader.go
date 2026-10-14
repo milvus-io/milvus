@@ -53,41 +53,6 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 	return newQueryViewTransformSegment(loaded, l.segments, qvSegmentVChannel(info), qvSegmentTransformStartAfter(info)), nil
 }
 
-func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnview.TransformSegment, collection qnview.CollectionRuntime, snapshot qnview.SegmentLoadInfoSnapshot, action qnview.SegmentUpdateAction) error {
-	if segment == nil {
-		return merr.WrapErrServiceInternalMsg("query view transform segment is nil")
-	}
-	if snapshot.LoadInfo == nil {
-		return merr.WrapErrServiceInternalMsg("query view segment load info is nil")
-	}
-	segment = qnview.UnwrapTransformSegment(segment)
-	transform, ok := segment.(*queryViewTransformSegment)
-	if !ok {
-		return merr.WrapErrServiceInternalMsg("unexpected query view transform segment type %T", segment)
-	}
-	info, err := segments.PrepareSegmentLoadInfo(snapshot.LoadInfo, collection.Schema())
-	if err != nil {
-		return err
-	}
-	if action.Has(qnview.SegmentUpdateReopen) {
-		// Reopen applies the complete load-info diff, including index changes.
-		if err := l.loader.ReopenSegment(ctx, transform.segment, collection, info); err != nil {
-			return err
-		}
-		// Native Reopen updates fields/indexes, but does not apply historical
-		// deltalogs. A refreshed milvus-table base may carry new source deletes.
-		return l.loader.LoadDeltaLogs(ctx, transform.segment, info)
-	}
-	if action.Has(qnview.SegmentUpdateLoadIndex) {
-		// SegmentLoadInfoRevision is a content hash used only for equality. It is
-		// intentionally not forwarded as the loader's ordered version.
-		if err := l.loader.LoadIndex(ctx, transform.segment, info, 0); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func qvSegmentVChannel(info *querypb.SegmentLoadInfo) string {
 	if info != nil && info.GetInsertChannel() != "" {
 		return info.GetInsertChannel()
@@ -140,26 +105,6 @@ func (l realQVSegmentLoader) LoadSegment(ctx context.Context, segment qvLoadedSe
 		return err
 	}
 	return local.segment.(*segments.LocalSegment).ValidateQueryViewFields(local.collection)
-}
-
-func (l realQVSegmentLoader) ReopenSegment(ctx context.Context, segment qvLoadedSegment, collection qnview.CollectionRuntime, info *querypb.SegmentLoadInfo) error {
-	local, err := asQVLocalSegment(segment)
-	if err != nil {
-		return err
-	}
-	physical := local.segment.(*segments.LocalSegment)
-	if err := physical.ReopenWithSchema(ctx, info, collection.Schema(), uint64(collection.SchemaVersion())); err != nil {
-		return err
-	}
-	return physical.ValidateQueryViewFields(collection.PinnedCollection())
-}
-
-func (l realQVSegmentLoader) LoadIndex(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo, version int64) error {
-	local, err := asQVLocalSegment(segment)
-	if err != nil {
-		return err
-	}
-	return l.loader.LoadIndex(ctx, local.segment, info, version)
 }
 
 func (l realQVSegmentLoader) LoadDeltaLogs(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
@@ -269,4 +214,23 @@ func asQVLocalSegment(segment qvLoadedSegment) (*qvLocalSegment, error) {
 		return nil, merr.WrapErrServiceInternalMsg("expected *qvLocalSegment, got %T", segment)
 	}
 	return local, nil
+}
+
+// PrepareReadState stages a view's exact read schema and scope on shared columns.
+func (l *queryViewPhysicalSegmentLoader) PrepareReadState(ctx context.Context, segment qnview.TransformSegment, reuse segments.ReadState, collection qnview.CollectionRuntime, snapshot qnview.SegmentLoadInfoSnapshot) (segments.ReadState, error) {
+	transform := qnview.UnwrapTransformSegment(segment).(*queryViewTransformSegment)
+	info, err := segments.PrepareSegmentLoadInfo(snapshot.LoadInfo, collection.Schema())
+	if err != nil {
+		return nil, err
+	}
+	// Historical deltas must be visible before publishing the new read state.
+	if err := l.loader.LoadDeltaLogs(ctx, transform.segment, info); err != nil {
+		return nil, err
+	}
+	return transform.QuerySegment().(*segments.LocalSegment).PrepareReadState(ctx, reuse, info, collection.PinnedCollection())
+}
+
+func (l *queryViewPhysicalSegmentLoader) AdoptReadState(segment qnview.TransformSegment, read segments.ReadState) error {
+	transform := qnview.UnwrapTransformSegment(segment).(*queryViewTransformSegment)
+	return transform.QuerySegment().(*segments.LocalSegment).AdoptReadState(read)
 }

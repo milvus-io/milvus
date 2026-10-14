@@ -57,7 +57,7 @@ func (m *mockSegmentManager) Release(req ReleaseSegments) {
 	m.releaseCallback[req.Key] = req.OnDropped
 }
 
-func (m *mockSegmentManager) AcquireSealedSegmentHandles(_ context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode) ([]SealedSegmentHandle, error) {
+func (m *mockSegmentManager) AcquireSealedSegmentHandles(_ context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode, _ uint64) ([]SealedSegmentHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.beforeQuery != nil {

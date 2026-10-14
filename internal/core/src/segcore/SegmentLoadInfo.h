@@ -437,6 +437,7 @@ class SegmentLoadInfo {
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
           schema_(other.schema_),
+          restrict_load_fields_(other.restrict_load_fields_),
           converted_field_index_cache_(other.converted_field_index_cache_),
           field_index_id_cache_(other.field_index_id_cache_),
           json_index_path_cache_(other.json_index_path_cache_),
@@ -453,6 +454,7 @@ class SegmentLoadInfo {
     SegmentLoadInfo(SegmentLoadInfo&& other) noexcept
         : info_(std::move(other.info_)),
           schema_(std::move(other.schema_)),
+          restrict_load_fields_(other.restrict_load_fields_),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
           field_index_id_cache_(std::move(other.field_index_id_cache_)),
@@ -475,6 +477,7 @@ class SegmentLoadInfo {
         if (this != &other) {
             info_ = other.info_;
             schema_ = other.schema_;
+            restrict_load_fields_ = other.restrict_load_fields_;
             converted_field_index_cache_ = other.converted_field_index_cache_;
             field_index_id_cache_ = other.field_index_id_cache_;
             json_index_path_cache_ = other.json_index_path_cache_;
@@ -495,6 +498,7 @@ class SegmentLoadInfo {
         if (this != &other) {
             info_ = std::move(other.info_);
             schema_ = std::move(other.schema_);
+            restrict_load_fields_ = other.restrict_load_fields_;
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
             field_index_id_cache_ = std::move(other.field_index_id_cache_);
@@ -605,8 +609,18 @@ class SegmentLoadInfo {
     [[nodiscard]] bool
     HasFieldInSchema(FieldId field_id) const {
         return field_id.get() < START_USER_FIELDID ||
-               schema_->get_fields().find(field_id) !=
-                   schema_->get_fields().end();
+               (schema_->get_fields().find(field_id) !=
+                    schema_->get_fields().end() &&
+                (!restrict_load_fields_ ||
+                 schema_->IsFieldInLoadScope(field_id)));
+    }
+
+    // QueryView forks own an exact load scope; ordinary segments retain their
+    // existing lazy-column behavior.
+    void
+    RestrictToLoadFields() {
+        restrict_load_fields_ = true;
+        PruneRuntimeStateNotInSchema();
     }
 
     [[nodiscard]] int64_t
@@ -1240,6 +1254,7 @@ class SegmentLoadInfo {
     ProtoType info_;
 
     SchemaPtr schema_;
+    bool restrict_load_fields_{false};
 
     // Cache for quick field -> converted LoadIndexInfo lookup
     std::unordered_map<FieldId, std::vector<LoadIndexInfo>>

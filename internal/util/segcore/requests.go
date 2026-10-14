@@ -125,6 +125,7 @@ func (req *cLoadFieldDataRequest) Release() {
 }
 
 type ReopenRequest struct {
+	LoadFields    []int64
 	LoadInfo      *querypb.SegmentLoadInfo
 	Schema        *schemapb.CollectionSchema
 	SchemaVersion uint64

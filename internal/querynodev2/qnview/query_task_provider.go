@@ -36,7 +36,7 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err := h.segMgr.WaitTransformVisible(ctx, key, mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view)
+	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view, mvcc.GetTransformingTimetick())
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 	if err := h.segMgr.WaitTransformVisible(ctx, key, mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view)
+	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view, mvcc.GetTransformingTimetick())
 	if err != nil {
 		return nil, err
 	}

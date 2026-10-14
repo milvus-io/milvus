@@ -28,8 +28,9 @@ func TestLoadInfoVersionCanonicalPersistedIdentity(t *testing.T) {
 	require.Equal(t, version, loadInfoVersion(reordered))
 	reordered.Replicas[0].Priority = commonpb.LoadPriority_LOW
 	require.Equal(t, version, loadInfoVersion(reordered), "unpersisted scheduling priority is not load identity")
+	reordered.LoadFields[0].IndexId++
+	require.Equal(t, version, loadInfoVersion(reordered), "index replacement does not change view loading scope")
 	for name, change := range map[string]func(*LoadConfig){
-		"index":          func(c *LoadConfig) { c.LoadFields[0].IndexId++ },
 		"field":          func(c *LoadConfig) { c.LoadFields[0].FieldId++ },
 		"partition":      func(c *LoadConfig) { c.PartitionIDs[0]++ },
 		"replica":        func(c *LoadConfig) { c.Replicas[0].ReplicaID++ },
@@ -88,7 +89,7 @@ func TestLoadInfoVersionSurvivesCatalogRecoveryAndDoesNotAlias(t *testing.T) {
 	recovered, err := RecoverLoadConfigStore(t.Context(), catalog)
 	require.NoError(t, err)
 	require.Equal(t, oldVersion, recovered.Snapshot().ConfigVersion(cfg.CollectionID))
-	cfg.LoadFields[0].IndexId++ // First Put after restart must not reuse the old identity.
+	cfg.LoadFields[0].FieldId++ // First Put after restart must not reuse the old identity.
 	require.NoError(t, recovered.Put(t.Context(), cfg))
 	newVersion := recovered.Snapshot().ConfigVersion(cfg.CollectionID)
 	require.NotEqual(t, oldVersion, newVersion)

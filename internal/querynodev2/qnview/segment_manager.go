@@ -77,8 +77,9 @@ type SegmentManager interface {
 	Release(req ReleaseSegments)
 
 	// AcquireSealedSegmentHandles acquires query lifecycle refs for selected
-	// sealed segments that already reached QueryView transform readiness.
-	AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode) ([]SealedSegmentHandle, error)
+	// sealed segments that already reached QueryView transform readiness, then
+	// waits for timetick on those exact instances before returning.
+	AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode, timetick uint64) ([]SealedSegmentHandle, error)
 
 	// WaitTransformVisible waits until the view-scoped TransformLogBuffer can
 	// serve the QueryPlan transforming timetick boundary.

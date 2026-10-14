@@ -26,7 +26,7 @@ func (*loadInfoTestCatalog) SaveLoadInfo(context.Context, *querypb.GetQueryViewL
 }
 
 func TestLoadInfoHistorySurvivesConfigChangeAndRestart(t *testing.T) {
-	mockey.PatchConvey("exact load snapshots retain historical index descriptors", t, func() {
+	mockey.PatchConvey("load scopes survive restart while indexes follow current metadata", t, func() {
 		durable := make(map[loadInfoKey]*querypb.GetQueryViewLoadInfoResponse)
 		mockey.Mock((*loadInfoTestCatalog).GetLoadInfo).To(func(_ *loadInfoTestCatalog, _ context.Context, id int64, version uint64) (*querypb.GetQueryViewLoadInfoResponse, error) {
 			if info := durable[loadInfoKey{id, version}]; info != nil {
@@ -45,7 +45,7 @@ func TestLoadInfoHistorySurvivesConfigChangeAndRestart(t *testing.T) {
 		ctx := context.Background()
 		require.NoError(t, store.Ensure(ctx, cfg))
 		oldVersion := loadInfoVersion(cfg)
-		indexes = []*indexpb.IndexInfo{{FieldID: 101, IndexID: 201, IndexName: "new"}}
+		indexes = []*indexpb.IndexInfo{{FieldID: 100, IndexID: 201, IndexName: "new"}, {FieldID: 101, IndexID: 202, IndexName: "another"}}
 		require.NoError(t, store.Ensure(ctx, cfg), "existing identity must not read current indexes")
 		require.Equal(t, 1, saves.Times())
 		cfg.PartitionIDs[0] = 11
@@ -54,15 +54,15 @@ func TestLoadInfoHistorySurvivesConfigChangeAndRestart(t *testing.T) {
 		old, err := store.Get(ctx, 1, oldVersion)
 		require.NoError(t, err)
 		require.Equal(t, []int64{10}, old.PartitionIDs)
-		require.Equal(t, "old", old.IndexInfoList[0].IndexName)
+		require.Equal(t, "new", old.IndexInfoList[0].IndexName)
 		old.IndexInfoList[0].IndexName = "caller mutation"
 		again, err := store.Get(ctx, 1, oldVersion)
 		require.NoError(t, err)
-		require.Equal(t, "old", again.IndexInfoList[0].IndexName)
+		require.Equal(t, "new", again.IndexInfoList[0].IndexName)
 		restarted := NewLoadInfoStore(&loadInfoTestCatalog{}, source)
 		old, err = restarted.Get(ctx, 1, oldVersion)
 		require.NoError(t, err)
-		require.Equal(t, "old", old.IndexInfoList[0].IndexName)
+		require.Equal(t, "new", old.IndexInfoList[0].IndexName)
 		require.NoError(t, restarted.Ensure(ctx, cfg))
 		require.Equal(t, 2, saves.Times(), "recovery must not replace durable snapshots")
 		_, err = restarted.Get(ctx, 1, 123)
@@ -70,14 +70,17 @@ func TestLoadInfoHistorySurvivesConfigChangeAndRestart(t *testing.T) {
 	})
 }
 
-func TestLoadInfoSnapshotRequiresMatchingIndex(t *testing.T) {
-	mockey.PatchConvey("missing index descriptors cannot publish a config", t, func() {
+func TestLoadInfoSnapshotDoesNotBindIndex(t *testing.T) {
+	mockey.PatchConvey("field scope can publish before current indexes are ready", t, func() {
 		mockey.Mock((*loadInfoTestCatalog).GetLoadInfo).Return(nil, nil).Build()
 		saves := mockey.Mock((*loadInfoTestCatalog).SaveLoadInfo).Return(nil).Build()
 		store := NewLoadInfoStore(&loadInfoTestCatalog{}, func(int64) []*indexpb.IndexInfo { return []*indexpb.IndexInfo{{FieldID: 101, IndexID: 200}} })
 		cfg := &LoadConfig{CollectionID: 1, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 200}}}
-		require.ErrorIs(t, store.Ensure(context.Background(), cfg), merr.ErrServiceNotReady)
-		require.Zero(t, saves.Times())
+		require.NoError(t, store.Ensure(context.Background(), cfg))
+		info, err := store.Get(context.Background(), cfg.CollectionID, loadInfoVersion(cfg))
+		require.NoError(t, err)
+		require.Zero(t, info.LoadFields[0].IndexId)
+		require.Empty(t, info.IndexInfoList)
 		cfg.LoadFields[0].IndexId = 0
 		require.NoError(t, store.Ensure(context.Background(), cfg), "raw field loading requires no index")
 		require.Equal(t, 1, saves.Times())

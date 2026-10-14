@@ -18,8 +18,9 @@ type loadInfoKey struct {
 	version      uint64
 }
 
-// LoadInfoStore serves exact persisted snapshots independently of the latest
-// desired configuration. A QueryView's LoadInfoVersion is its durable reference.
+// LoadInfoStore persists exact field/partition scopes independently of the latest
+// desired configuration. Index descriptors are resolved from current metadata
+// on every read; a QueryView does not retain an index identity.
 // There is no history deletion in this refactor.
 type LoadInfoStore struct {
 	catalog queryview.LoadInfoCatalog
@@ -35,7 +36,7 @@ func NewLoadInfoStore(catalog queryview.LoadInfoCatalog, indexes func(int64) []*
 func (s *LoadInfoStore) Get(ctx context.Context, collectionID int64, version uint64) (*querypb.GetQueryViewLoadInfoResponse, error) {
 	key := loadInfoKey{collectionID, version}
 	if cached, ok := s.cache.Load(key); ok {
-		return proto.Clone(cached.(*querypb.GetQueryViewLoadInfoResponse)).(*querypb.GetQueryViewLoadInfoResponse), nil
+		return s.withCurrentIndexes(cached.(*querypb.GetQueryViewLoadInfoResponse)), nil
 	}
 	info, err := s.catalog.GetLoadInfo(ctx, collectionID, version)
 	if err != nil {
@@ -45,11 +46,11 @@ func (s *LoadInfoStore) Get(ctx context.Context, collectionID int64, version uin
 		return nil, merr.WrapErrServiceNotReadyMsg("query view load snapshot %d for collection %d is unavailable", version, collectionID)
 	}
 	s.cache.Store(key, info)
-	return proto.Clone(info).(*querypb.GetQueryViewLoadInfoResponse), nil
+	return s.withCurrentIndexes(info), nil
 }
 
 // Ensure persists a snapshot before its config can drive creation of a view.
-// Existing snapshots are never refreshed from mutable index metadata.
+// Only the field/partition scope is retained; indexes are resolved when read.
 func (s *LoadInfoStore) Ensure(ctx context.Context, cfg *LoadConfig) error {
 	key := loadInfoKey{cfg.CollectionID, loadInfoVersion(cfg)}
 	s.locks.Lock(key)
@@ -67,23 +68,30 @@ func (s *LoadInfoStore) Ensure(ctx context.Context, cfg *LoadConfig) error {
 	}
 	owned := cfg.Clone()
 	info := &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: cfg.CollectionID, Version: key.version, PartitionIDs: owned.PartitionIDs, LoadFields: owned.LoadFields}
-	available := make(map[int64]*indexpb.IndexInfo)
-	for _, index := range s.indexes(cfg.CollectionID) {
-		available[index.GetIndexID()] = index
-	}
-	for _, field := range cfg.LoadFields {
-		if field.GetIndexId() == 0 {
-			continue
-		}
-		index := available[field.GetIndexId()]
-		if index == nil || index.GetFieldID() != field.GetFieldId() {
-			return merr.WrapErrServiceNotReadyMsg("index %d for query view field %d is not ready", field.GetIndexId(), field.GetFieldId())
-		}
-		info.IndexInfoList = append(info.IndexInfoList, proto.Clone(index).(*indexpb.IndexInfo))
+	for _, field := range info.LoadFields {
+		field.IndexId = 0
 	}
 	if err := s.catalog.SaveLoadInfo(ctx, info); err != nil {
 		return err
 	}
 	s.cache.Store(key, info)
 	return nil
+}
+
+// QueryViews retain loading scope, never an index identity. IndexID zero means
+// the newest available index; no index metadata is persisted in this history.
+func (s *LoadInfoStore) withCurrentIndexes(stored *querypb.GetQueryViewLoadInfoResponse) *querypb.GetQueryViewLoadInfoResponse {
+	info := proto.Clone(stored).(*querypb.GetQueryViewLoadInfoResponse)
+	fields := make(map[int64]struct{}, len(info.LoadFields))
+	for _, field := range info.LoadFields {
+		field.IndexId = 0
+		fields[field.FieldId] = struct{}{}
+	}
+	info.IndexInfoList = nil
+	for _, index := range s.indexes(info.CollectionID) {
+		if _, loaded := fields[index.GetFieldID()]; loaded || len(fields) == 0 {
+			info.IndexInfoList = append(info.IndexInfoList, proto.Clone(index).(*indexpb.IndexInfo))
+		}
+	}
+	return info
 }

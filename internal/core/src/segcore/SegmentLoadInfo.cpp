@@ -345,7 +345,9 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         }
 
         for (auto child_id : child_fields) {
-            current_fields[child_id] = field_binlog.fieldid();
+            if (HasFieldInSchema(FieldId(child_id))) {
+                current_fields[child_id] = field_binlog.fieldid();
+            }
         }
     }
 
@@ -468,7 +470,9 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         }
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            cur_field_to_files[field_id] = &cg->files;
+            if (HasFieldInSchema(FieldId(field_id))) {
+                cur_field_to_files[field_id] = &cg->files;
+            }
         }
     }
 
@@ -765,7 +769,8 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
 
     // Compute: new schema fields - new_info_fields - current_handled
     for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
-        if (field_id.get() < START_USER_FIELDID) {
+        if (field_id.get() < START_USER_FIELDID ||
+            !new_info.HasFieldInSchema(field_id)) {
             continue;
         }
 
@@ -826,7 +831,9 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
     // Build current text indexed fields (fields with loaded text index stats)
     std::set<FieldId> current_text_indexed;
     for (const auto& [field_id, stats] : GetTextStatsLogs()) {
-        current_text_indexed.insert(FieldId(field_id));
+        if (HasFieldInSchema(FieldId(field_id))) {
+            current_text_indexed.insert(FieldId(field_id));
+        }
     }
     // Also include text indexes created from raw data
     for (const auto& field_id : created_text_indexes_) {
@@ -861,7 +868,8 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
 
     // Find text indexes to create: enable_match fields without pre-built index
     for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
-        if (!field_meta.enable_match()) {
+        if (!field_meta.enable_match() ||
+            !new_info.HasFieldInSchema(field_id)) {
             continue;
         }
         // Skip if has pre-built index in new_info
@@ -896,7 +904,9 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
     const auto expected_format = CurrentJsonStatsDataFormatVersion();
     std::set<FieldId> current_fields;
     for (const auto& [field_id, stats] : GetJsonKeyStatsLogs()) {
-        current_fields.insert(FieldId(field_id));
+        if (HasFieldInSchema(FieldId(field_id))) {
+            current_fields.insert(FieldId(field_id));
+        }
     }
 
     std::set<FieldId> new_fields;
@@ -906,7 +916,9 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
             continue;
         }
         new_fields.insert(fid);
-        auto current_stats = GetJsonKeyStatsLog(field_id);
+        auto current_stats = HasFieldInSchema(fid)
+                                 ? GetJsonKeyStatsLog(field_id)
+                                 : nullptr;
         if (stats.json_key_stats_data_format() != expected_format) {
             LOG_WARN(
                 "skip json key stats diff because data format is invalid, "
@@ -1000,6 +1012,13 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
             if (diff.manifest_updated) {
                 diff.load_external_manifest = true;
             }
+            for (const auto& [field_id, field] : new_info.schema_->get_fields()) {
+                if (new_info.HasFieldInSchema(field_id) &&
+                    !HasFieldInSchema(field_id)) {
+                    diff.load_external_manifest = true;
+                    break;
+                }
+            }
         } else {
             ComputeDiffColumnGroups(diff, new_info);
         }
@@ -1013,6 +1032,12 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     // Compute fields that need default value filling (schema evolution)
     if (!schema_->is_external_collection()) {
         ComputeDiffDefaultFields(diff, new_info);
+    }
+
+    for (auto field_id : fields_filled_with_default_) {
+        if (!new_info.HasFieldInSchema(field_id)) {
+            diff.field_data_to_drop.insert(field_id);
+        }
     }
 
     return diff;

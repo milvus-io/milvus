@@ -3,6 +3,7 @@ package transformlogbuffer
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 
@@ -16,7 +17,8 @@ import (
 )
 
 type Buffer struct {
-	streams wal.TransformLogStreamManager
+	streamMu sync.Mutex
+	streams  wal.TransformLogStreamManager
 
 	mu                sync.Mutex
 	streamsByPChannel map[string]*streamState
@@ -41,43 +43,39 @@ func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
 	return b
 }
 
-func (b *Buffer) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (qnview.TransformLogGuard, error) {
+// Bind records a range reference without opening a stream or doing I/O.
+func (b *Buffer) Bind(view *qviews.QueryViewAtQueryNode) (qnview.TransformLogGuard, error) {
 	if view == nil {
 		return nil, wal.ErrTransformLogInvalidReadOption
 	}
 	meta := view.IntoProto().GetMeta()
-	vchannel := meta.GetVchannel()
-	startFrom := meta.GetTransformStartAfterTimetick()
-	if vchannel == "" {
+	channel, start := meta.GetVchannel(), meta.GetTransformStartAfterTimetick()
+	if channel == "" {
 		return nil, wal.ErrTransformLogInvalidReadOption
 	}
-	pchannel := funcutil.ToPhysicalChannel(vchannel)
-
 	b.mu.Lock()
-	buf := b.channels[vchannel]
+	defer b.mu.Unlock()
+	buf := b.channels[channel]
 	if buf == nil {
-		stream, err := b.getOrCreateStreamLocked(ctx, pchannel)
-		if err != nil {
-			b.mu.Unlock()
-			return nil, err
-		}
-		buf = newVChannelBuffer(b, pchannel, vchannel, startFrom)
-		b.channels[vchannel] = buf
-		stream.refs[vchannel] = buf
+		buf = newVChannelBuffer(b, funcutil.ToPhysicalChannel(channel), channel, start)
+		b.channels[channel] = buf
 	}
-	if err := buf.acquireLocked(startFrom); err != nil {
-		b.mu.Unlock()
+	if err := buf.acquireLocked(start); err != nil {
 		return nil, err
 	}
-	stream := b.streamsByPChannel[pchannel]
-	b.mu.Unlock()
-	if stream != nil {
-		if err := buf.ensureSubscribed(ctx, stream.stream); err != nil {
-			buf.releaseGuard(startFrom)
-			return nil, err
-		}
+	return &guard{buffer: buf, startFrom: start}, nil
+}
+
+func (b *Buffer) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (qnview.TransformLogGuard, error) {
+	g, err := b.Bind(view)
+	if err != nil {
+		return nil, err
 	}
-	return &guard{buffer: buf, startFrom: startFrom}, nil
+	if _, err := g.Prepare(ctx); err != nil {
+		g.Release()
+		return nil, err
+	}
+	return g, nil
 }
 
 func (b *Buffer) RegisterSegment(ctx context.Context, segment qnview.TransformSegment) (qnview.TransformRegistration, error) {
@@ -118,7 +116,9 @@ func (b *Buffer) getOrCreateStreamLocked(ctx context.Context, pchannel string) (
 		case <-state.stream.Done():
 			if len(state.refs) == 0 {
 				delete(b.streamsByPChannel, pchannel)
+				b.mu.Unlock()
 				_ = state.stream.Close()
+				b.mu.Lock()
 			} else {
 				return state, nil
 			}
@@ -129,7 +129,9 @@ func (b *Buffer) getOrCreateStreamLocked(ctx context.Context, pchannel string) (
 	if b.streams == nil {
 		return nil, wal.ErrTransformLogInvalidReadOption
 	}
+	b.mu.Unlock()
 	stream, err := b.streams.AcquireStream(ctx, pchannel)
+	b.mu.Lock()
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +211,26 @@ type guard struct {
 	startFrom uint64
 }
 
+func (g *guard) Prepare(ctx context.Context) (bool, error) {
+	b := g.buffer.owner
+	b.streamMu.Lock()
+	b.mu.Lock()
+	stream, err := b.getOrCreateStreamLocked(ctx, g.buffer.pchannel)
+	if err == nil {
+		stream.refs[g.buffer.vchannel] = g.buffer
+	}
+	b.mu.Unlock()
+	b.streamMu.Unlock()
+	if err != nil {
+		return true, err
+	}
+	err = g.buffer.ensureSubscribed(ctx, stream.stream)
+	g.buffer.mu.Lock()
+	retryable := g.buffer.err == nil
+	g.buffer.mu.Unlock()
+	return retryable, err
+}
+
 func (g *guard) Release() {
 	g.once.Do(func() {
 		g.buffer.releaseGuard(g.startFrom)
@@ -233,8 +255,8 @@ type vchannelBuffer struct {
 	visibilityNotify chan struct{}
 	guards           map[uint64]int
 	entries          []*streamingpb.TransformLogEntry
-	live             map[int64]*registration
-	pending          map[int64]*registration
+	live             map[*registration]*registration
+	pending          map[*registration]*registration
 	syncUp           bool
 	err              error
 }
@@ -248,8 +270,8 @@ func newVChannelBuffer(owner *Buffer, pchannel string, vchannel string, startFro
 		visibleTimeTick:  startFrom,
 		visibilityNotify: make(chan struct{}),
 		guards:           make(map[uint64]int),
-		live:             make(map[int64]*registration),
-		pending:          make(map[int64]*registration),
+		live:             make(map[*registration]*registration),
+		pending:          make(map[*registration]*registration),
 	}
 }
 
@@ -370,7 +392,7 @@ func (b *vchannelBuffer) registerSegment(ctx context.Context, segment qnview.Tra
 		return nil, merr.WrapErrServiceInternalMsg("transform log buffer range starts from %d, cannot serve segment %d from %d", b.retentionStart, segment.ID(), startFrom)
 	}
 	reg := newRegistration(b, segment)
-	b.pending[segment.ID()] = reg
+	b.pending[reg] = reg
 	mlog.Debug(ctx, "querynode transform log buffer registered segment",
 		mlog.FieldPChannel(b.pchannel),
 		mlog.FieldVChannel(b.vchannel),
@@ -391,7 +413,7 @@ func (b *vchannelBuffer) registerSegment(ctx context.Context, segment qnview.Tra
 
 func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registration) error {
 	for {
-		batch, done, notify, err := b.nextCatchupBatch(reg)
+		batch, frontier, done, notify, err := b.nextCatchupBatch(reg)
 		if err != nil || done {
 			return err
 		}
@@ -415,40 +437,44 @@ func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registratio
 				mlog.FieldSegmentID(reg.segment.ID()),
 				mlog.Uint64("timeTick", entry.GetTimeTick()),
 			)
-			if err := reg.segment.ApplyTransform(ctx, entry); err != nil {
+			if err := reg.apply(ctx, entry); err != nil {
 				return err
 			}
-			if entry.GetTimeTick() > reg.drainedTo {
-				reg.drainedTo = entry.GetTimeTick()
-			}
 		}
+		// Receipt through an empty interval is progress only after this batch
+		// has been applied to the concrete physical instance.
+		reg.publishProgress(frontier)
 	}
 }
 
-func (b *vchannelBuffer) nextCatchupBatch(reg *registration) ([]*streamingpb.TransformLogEntry, bool, <-chan struct{}, error) {
+func (b *vchannelBuffer) nextCatchupBatch(reg *registration) ([]*streamingpb.TransformLogEntry, uint64, bool, <-chan struct{}, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.err != nil {
-		return nil, false, nil, b.err
+		return nil, 0, false, nil, b.err
 	}
-	if b.pending[reg.segment.ID()] != reg {
-		return nil, true, nil, nil
+	if b.pending[reg] != reg {
+		return nil, 0, false, nil, context.Canceled
+	}
+	if b.syncUp {
+		reg.setCatchupFrontier(b.visibleTimeTick)
 	}
 	batch := make([]*streamingpb.TransformLogEntry, 0)
 	for _, entry := range b.entries {
-		if entry.GetTimeTick() > reg.drainedTo {
+		if entry.GetTimeTick() > reg.drainedTo.Load() {
 			batch = append(batch, entry)
 		}
 	}
 	if len(batch) == 0 {
 		if !b.syncUp {
-			return nil, false, b.visibilityNotify, nil
+			return nil, 0, false, b.visibilityNotify, nil
 		}
-		delete(b.pending, reg.segment.ID())
-		b.live[reg.segment.ID()] = reg
-		return nil, true, nil, nil
+		delete(b.pending, reg)
+		b.live[reg] = reg
+		reg.publishProgress(b.visibleTimeTick)
+		return nil, b.visibleTimeTick, true, nil, nil
 	}
-	return batch, false, nil, nil
+	return batch, b.visibleTimeTick, false, nil, nil
 }
 
 func (b *vchannelBuffer) waitTransformVisible(ctx context.Context, timetick uint64) error {
@@ -513,9 +539,9 @@ func (b *vchannelBuffer) unregister(reg *registration) {
 func (b *vchannelBuffer) removeRegistration(reg *registration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.pending, reg.segment.ID())
-	if b.live[reg.segment.ID()] == reg {
-		delete(b.live, reg.segment.ID())
+	delete(b.pending, reg)
+	if b.live[reg] == reg {
+		delete(b.live, reg)
 	}
 }
 
@@ -594,9 +620,11 @@ func (b *vchannelBuffer) onEntry(entry *streamingpb.TransformLogEntry) {
 			mlog.FieldSegmentID(reg.segment.ID()),
 			mlog.Uint64("timeTick", entry.GetTimeTick()),
 		)
-		if err := reg.segment.ApplyTransform(context.Background(), entry); err != nil {
-			b.fail(err)
-			return
+		if err := reg.apply(reg.ctx, entry); err != nil {
+			if reg.ctx.Err() == nil {
+				b.fail(err)
+				return
+			}
 		}
 	}
 
@@ -626,6 +654,9 @@ func (b *vchannelBuffer) onSyncUp(timeTick uint64) {
 		mlog.FieldVChannel(b.vchannel),
 		mlog.Uint64("visibleTimeTick", b.visibleTimeTick),
 	)
+	for _, reg := range b.live {
+		reg.publishProgress(timeTick)
+	}
 	b.notifyVisibilityLocked()
 	b.mu.Unlock()
 }
@@ -658,30 +689,36 @@ func (b *vchannelBuffer) notifyVisibilityLocked() {
 }
 
 type registration struct {
-	buffer     *vchannelBuffer
-	segment    qnview.TransformSegment
-	startFrom  uint64
-	drainedTo  uint64
-	ctx        context.Context
-	cancel     context.CancelFunc
-	done       chan struct{}
-	err        error
-	errMu      sync.Mutex
-	once       sync.Once
-	finishOnce sync.Once
+	applyMu         sync.Mutex
+	buffer          *vchannelBuffer
+	segment         qnview.TransformSegment
+	startFrom       uint64
+	drainedTo       atomic.Uint64
+	ctx             context.Context
+	cancel          context.CancelFunc
+	done            chan struct{}
+	err             error
+	errMu           sync.Mutex
+	once            sync.Once
+	finishOnce      sync.Once
+	catchupFrontier uint64
+	hasFrontier     bool
+	progressNotify  chan struct{}
 }
 
 func newRegistration(buffer *vchannelBuffer, segment qnview.TransformSegment) *registration {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel ownership transfers to registration.Unregister.
-	return &registration{
-		buffer:    buffer,
-		segment:   segment,
-		startFrom: segment.TransformStartAfterTimeTick(),
-		drainedTo: segment.TransformStartAfterTimeTick(),
-		ctx:       ctx,
-		cancel:    cancel,
-		done:      make(chan struct{}),
+	reg := &registration{
+		buffer:         buffer,
+		segment:        segment,
+		startFrom:      segment.TransformStartAfterTimeTick(),
+		ctx:            ctx,
+		cancel:         cancel,
+		done:           make(chan struct{}),
+		progressNotify: make(chan struct{}),
 	}
+	reg.drainedTo.Store(segment.TransformStartAfterTimeTick())
+	return reg
 }
 
 func (r *registration) WaitCatchup(ctx context.Context) error {
@@ -695,7 +732,7 @@ func (r *registration) WaitCatchup(ctx context.Context) error {
 				mlog.FieldVChannel(r.buffer.vchannel),
 				mlog.FieldSegmentID(r.segment.ID()),
 				mlog.Uint64("startAfterTimeTick", r.startFrom),
-				mlog.Uint64("drainedTo", r.drainedTo),
+				mlog.Uint64("drainedTo", r.drainedTo.Load()),
 				mlog.Err(r.err),
 			)
 		}
@@ -706,7 +743,7 @@ func (r *registration) WaitCatchup(ctx context.Context) error {
 			mlog.FieldVChannel(r.buffer.vchannel),
 			mlog.FieldSegmentID(r.segment.ID()),
 			mlog.Uint64("startAfterTimeTick", r.startFrom),
-			mlog.Uint64("drainedTo", r.drainedTo),
+			mlog.Uint64("drainedTo", r.drainedTo.Load()),
 			mlog.Err(ctx.Err()),
 		)
 		return ctx.Err()
@@ -717,14 +754,96 @@ func (r *registration) Unregister() {
 	r.once.Do(func() {
 		r.cancel()
 		r.buffer.unregister(r)
+		// Drain/application may already hold a reference copied from the live set.
+		r.applyMu.Lock()
+		r.applyMu.Unlock() //nolint:staticcheck // Wait for the last in-flight application before freeing the physical segment.
 	})
 }
 
 func (r *registration) finish(err error) {
-	r.finishOnce.Do(func() {
-		r.errMu.Lock()
+	r.errMu.Lock()
+	if err != nil {
 		r.err = err
+		close(r.progressNotify)
+		r.progressNotify = make(chan struct{})
+	}
+	r.finishOnce.Do(func() { close(r.done) })
+	r.errMu.Unlock()
+}
+
+func (r *registration) setCatchupFrontier(tick uint64) {
+	r.errMu.Lock()
+	if !r.hasFrontier {
+		r.catchupFrontier, r.hasFrontier = tick, true
+	}
+	if r.drainedTo.Load() >= r.catchupFrontier {
+		r.finishOnce.Do(func() { close(r.done) })
+	}
+	r.errMu.Unlock()
+}
+
+func (r *registration) publishProgress(tick uint64) {
+	r.errMu.Lock()
+	if tick > r.drainedTo.Load() {
+		r.drainedTo.Store(tick)
+		close(r.progressNotify)
+		r.progressNotify = make(chan struct{})
+	}
+	if r.hasFrontier && r.drainedTo.Load() >= r.catchupFrontier {
+		r.finishOnce.Do(func() { close(r.done) })
+	}
+	r.errMu.Unlock()
+}
+
+func (r *registration) WaitTransformVisible(ctx context.Context, tick uint64) error {
+	for {
+		r.errMu.Lock()
+		err, applied, notify := r.err, r.drainedTo.Load(), r.progressNotify
 		r.errMu.Unlock()
-		close(r.done)
-	})
+		if err != nil {
+			return err
+		}
+		if applied >= tick {
+			return nil
+		}
+		select {
+		case <-notify:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.ctx.Done():
+			return r.ctx.Err()
+		}
+	}
+}
+
+func (r *registration) apply(ctx context.Context, entry *streamingpb.TransformLogEntry) error {
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+	if err := r.ctx.Err(); err != nil {
+		return err
+	}
+	if err := r.segment.ApplyTransform(ctx, entry); err != nil {
+		return err
+	}
+	r.publishProgress(entry.GetTimeTick())
+	return nil
+}
+
+// WaitFailure observes failures after initial catch-up as well as during replay.
+func (r *registration) WaitFailure(ctx context.Context) error {
+	for {
+		r.errMu.Lock()
+		err, notify := r.err, r.progressNotify
+		r.errMu.Unlock()
+		if err != nil {
+			return err
+		}
+		select {
+		case <-notify:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.ctx.Done():
+			return r.ctx.Err()
+		}
+	}
 }

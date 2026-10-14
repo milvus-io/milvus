@@ -12,19 +12,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // TransformLogBuffer gates QueryView readiness on transform-log continuity and
 // segment catch-up.
 type TransformLogBuffer interface {
-	Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (TransformLogGuard, error)
+	Bind(view *qviews.QueryViewAtQueryNode) (TransformLogGuard, error)
 	RegisterSegment(ctx context.Context, segment TransformSegment) (TransformRegistration, error)
 }
 
 // TransformLogGuard pins a local TransformLog buffer range for one QueryView
 // lifetime.
 type TransformLogGuard interface {
+	Prepare(ctx context.Context) (retryable bool, err error)
 	WaitTransformVisible(ctx context.Context, timetick uint64) error
 	Release()
 }
@@ -32,6 +32,8 @@ type TransformLogGuard interface {
 // TransformRegistration is a live segment registration in the TransformLogBuffer.
 type TransformRegistration interface {
 	WaitCatchup(ctx context.Context) error
+	WaitFailure(ctx context.Context) error
+	WaitTransformVisible(ctx context.Context, timetick uint64) error
 	Unregister()
 }
 
@@ -93,37 +95,6 @@ func UnwrapTransformSegment(segment TransformSegment) TransformSegment {
 		}
 		segment = wrapped.UnwrapTransformSegment()
 	}
-}
-
-// PhysicalSegmentManager owns metadata fetch, load planning, physical load, and
-// physical ref-counted release.
-type PhysicalSegmentManager interface {
-	Acquire(req AcquirePhysicalSegments)
-	Release(req ReleaseSegments)
-	ApplyLoadInfoSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot)
-}
-
-// PhysicalSegmentReferenceRetainer pins existing resources before asynchronous
-// collection preparation, so an old view cannot close their subscription.
-type PhysicalSegmentReferenceRetainer interface {
-	Retain(req AcquirePhysicalSegments)
-}
-
-type PhysicalSegmentResetter interface {
-	ResetSegment(segmentID int64)
-}
-
-// AcquirePhysicalSegments is the physical manager request wrapped by
-// QueryViewSegmentReadinessManager.
-type AcquirePhysicalSegments struct {
-	Key        qviews.QueryViewKey
-	Meta       *viewpb.QueryViewMeta
-	View       *viewpb.QueryViewOfQueryNode
-	Collection CollectionRuntime
-
-	OnLoaded               func(loaded []TransformSegment)
-	OnSegmentUnrecoverable func(segmentID int64, err error)
-	OnUnrecoverable        func()
 }
 
 type QueryViewLoadMetadataProvider interface {
@@ -192,21 +163,10 @@ type SegmentLoadInfoStreamFactory interface {
 	NewSegmentLoadInfoStream(ctx context.Context) SegmentLoadInfoStream
 }
 
-type SegmentUpdateAction uint8
-
-const (
-	SegmentUpdateNone   SegmentUpdateAction = 0
-	SegmentUpdateReopen SegmentUpdateAction = 1 << iota
-	SegmentUpdateLoadIndex
-)
-
-func (a SegmentUpdateAction) Has(flag SegmentUpdateAction) bool {
-	return a&flag != 0
-}
-
 type PhysicalSegmentLoader interface {
 	Load(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error)
-	Update(ctx context.Context, segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error
+	PrepareReadState(context.Context, TransformSegment, segments.ReadState, CollectionRuntime, SegmentLoadInfoSnapshot) (segments.ReadState, error)
+	AdoptReadState(TransformSegment, segments.ReadState) error
 }
 
 type SegmentResourceEstimator interface {
@@ -215,37 +175,4 @@ type SegmentResourceEstimator interface {
 
 type ResourceReservation interface {
 	Release()
-}
-
-type SegmentLoadTask struct {
-	loader    PhysicalSegmentLoader
-	estimator SegmentResourceEstimator
-
-	Context                     context.Context
-	SegmentID                   int64
-	Collection                  CollectionRuntime
-	TransformStartAfterTimeTick uint64
-	Snapshot                    SegmentLoadInfoSnapshot
-
-	OnLoaded        func(segment TransformSegment)
-	OnUnrecoverable func(error)
-	OnFinished      func()
-}
-
-type SegmentUpdateTask struct {
-	loader    PhysicalSegmentLoader
-	estimator SegmentResourceEstimator
-
-	Context     context.Context
-	Segment     TransformSegment
-	Collection  CollectionRuntime
-	Snapshot    SegmentLoadInfoSnapshot
-	Current     SegmentLoadInfoRevision
-	ForceReopen bool
-
-	OnUpdated func(SegmentLoadInfoRevision)
-	OnFailed  func(error)
-	// OnRetry transfers a failed attempt to newer requirements when available.
-	// Returning true completes this task without retrying its obsolete snapshot.
-	OnRetry func() bool
 }

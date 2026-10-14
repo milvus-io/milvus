@@ -556,6 +556,27 @@ TEST(test_chunk_segment, ViewReadStateRetainsColumnsAndSharesDeletes) {
     EXPECT_EQ(retained->get_deleted_count(), 1);
 }
 
+TEST(test_chunk_segment, ReadStateForkPreparesEarlierSchemaIndependently) {
+    auto newer = std::make_shared<Schema>();
+    auto pk = newer->AddDebugField("pk", DataType::INT64);
+    auto vec = newer->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    newer->set_primary_field_id(pk);
+    newer->set_schema_version(2);
+    auto segment = CreateColdVectorOutputSegment(newer, vec, 16);
+    auto* primary =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto retained = primary->PinReadState();
+    auto fork = retained->PinReadState();
+    auto older = std::make_shared<Schema>(*newer);
+    older->set_schema_version(1);
+    fork->Reopen(older);
+    EXPECT_EQ(fork->get_schema_snapshot()->get_schema_version(), 1);
+    EXPECT_EQ(retained->get_schema_snapshot()->get_schema_version(), 2);
+    EXPECT_EQ(primary->get_schema_snapshot()->get_schema_version(), 2);
+    EXPECT_EQ(fork->get_row_count(), primary->get_row_count());
+}
+
 TEST(test_chunk_segment, OlderPlanChecksOnlyItsOwnFieldRange) {
     struct ReadinessSegment : segcore::ChunkedSegmentSealedImpl {
         using ChunkedSegmentSealedImpl::check_search;

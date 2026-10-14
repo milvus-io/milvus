@@ -10,8 +10,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
@@ -62,51 +62,6 @@ func TestQueryViewLoadPreparesPrivateInfoBeforeConstruction(t *testing.T) {
 	}
 }
 
-func TestQueryViewUpdatePreparesPrivateInfo(t *testing.T) {
-	paramtable.Init()
-	key := paramtable.Get().QueryNodeCfg.ExternalCollectionUseTakeForOutput.Key
-	require.NoError(t, paramtable.Get().Save(key, "true"))
-	t.Cleanup(func() { paramtable.Get().Reset(key) })
-	for _, action := range []qnview.SegmentUpdateAction{qnview.SegmentUpdateReopen, qnview.SegmentUpdateLoadIndex, qnview.SegmentUpdateReopen | qnview.SegmentUpdateLoadIndex} {
-		t.Run(actionName(action), func(t *testing.T) {
-			info := diskANNLoadInfo()
-			original := proto.Clone(info)
-			loader := &fakeQVLoader{}
-			patch := mockey.Mock((*fakeQVLoader).ReopenSegment).To(func(_ *fakeQVLoader, _ context.Context, _ qvLoadedSegment, _ qnview.CollectionRuntime, prepared *querypb.SegmentLoadInfo) error {
-				require.NotSame(t, info, prepared)
-				require.True(t, prepared.GetUseTakeForOutput())
-				require.NotEmpty(t, funcutil.KeyValuePair2Map(prepared.IndexInfos[0].IndexParams)[indexparams.NumLoadThreadKey])
-				// Reopen currently modifies its argument. This must not reach the watch snapshot.
-				prepared.IndexInfos[0].IndexParams = append(prepared.IndexInfos[0].IndexParams, &commonpb.KeyValuePair{Key: "local", Value: "value"})
-				return nil
-			}).Build()
-			t.Cleanup(func() { patch.UnPatch() })
-			physical := newQueryViewPhysicalSegmentLoader(nil, loader)
-			segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10}, nil, "v1", 50)
-			err := physical.Update(context.Background(), segment, fakeQVCollectionRuntime{schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{{FieldID: 101, ExternalField: "vector"}},
-			}}, qnview.SegmentLoadInfoSnapshot{LoadInfo: info}, action)
-			require.NoError(t, err)
-			require.True(t, proto.Equal(original, info))
-			if action == qnview.SegmentUpdateLoadIndex {
-				require.Len(t, loader.infos, 1)
-				require.True(t, loader.infos[0].GetUseTakeForOutput())
-				require.NotEmpty(t, funcutil.KeyValuePair2Map(loader.infos[0].IndexInfos[0].IndexParams)[indexparams.NumLoadThreadKey])
-			}
-		})
-	}
-}
-
-func actionName(action qnview.SegmentUpdateAction) string {
-	if action == qnview.SegmentUpdateReopen {
-		return "reopen"
-	}
-	if action == qnview.SegmentUpdateLoadIndex {
-		return "index"
-	}
-	return "reopen_and_index"
-}
-
 func TestQueryViewLoadPreparationFailurePreservesSnapshot(t *testing.T) {
 	paramtable.Init()
 	info := diskANNLoadInfo()
@@ -117,11 +72,6 @@ func TestQueryViewLoadPreparationFailurePreservesSnapshot(t *testing.T) {
 	_, err := physical.Load(context.Background(), info, fakeQVCollectionRuntime{})
 	require.Error(t, err)
 	require.False(t, loader.newCalled)
-	require.True(t, proto.Equal(original, info))
-	segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10}, nil, "v1", 50)
-	err = physical.Update(context.Background(), segment, fakeQVCollectionRuntime{}, qnview.SegmentLoadInfoSnapshot{LoadInfo: info}, qnview.SegmentUpdateReopen)
-	require.Error(t, err)
-	require.False(t, loader.reopenCalled)
 	require.True(t, proto.Equal(original, info))
 }
 
@@ -149,18 +99,33 @@ func TestQueryViewPhysicalLoadFailureReleasesSegment(t *testing.T) {
 	}
 }
 
-func TestQueryViewPhysicalUpdateFailurePreservesSnapshot(t *testing.T) {
-	paramtable.Init()
-	for _, action := range []qnview.SegmentUpdateAction{qnview.SegmentUpdateReopen, qnview.SegmentUpdateLoadIndex} {
-		t.Run(actionName(action), func(t *testing.T) {
-			loader := &fakeQVLoader{err: assert.AnError}
-			physical := newQueryViewPhysicalSegmentLoader(nil, loader)
-			info := diskANNLoadInfo()
-			original := proto.Clone(info)
-			segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10}, nil, "v1", 50)
-			err := physical.Update(context.Background(), segment, fakeQVCollectionRuntime{}, qnview.SegmentLoadInfoSnapshot{LoadInfo: info}, action)
-			require.ErrorIs(t, err, assert.AnError)
-			require.True(t, proto.Equal(original, info))
-		})
-	}
+func TestQueryViewReadPreparationOwnsMetadataAndAppliesHistoricalDeletes(t *testing.T) {
+	mockey.PatchConvey("private preparation uses exact runtime after applying deltalogs", t, func() {
+		paramtable.Init()
+		info := diskANNLoadInfo()
+		original := proto.Clone(info)
+		loader := &fakeQVLoader{}
+		physical := newQueryViewPhysicalSegmentLoader(nil, loader)
+		base := newQueryViewTransformSegment(&qvLocalSegment{segment: &segments.LocalSegment{}}, nil, "v1", 50)
+		wrapper := &testTransformSegmentWrapper{TransformSegment: base}
+		var calls int
+		mockey.Mock((*segments.LocalSegment).PrepareReadState).To(func(_ *segments.LocalSegment, _ context.Context, _ segments.ReadState, prepared *querypb.SegmentLoadInfo, _ *segments.Collection) (segments.ReadState, error) {
+			calls++
+			require.True(t, loader.deltaCalled)
+			require.NotSame(t, info, prepared)
+			require.NotEmpty(t, funcutil.KeyValuePair2Map(prepared.IndexInfos[0].IndexParams)[indexparams.NumLoadThreadKey])
+			prepared.IndexInfos[0].IndexParams = nil
+			return nil, nil
+		}).Build()
+		_, err := physical.PrepareReadState(t.Context(), wrapper, nil, fakeQVCollectionRuntime{}, qnview.SegmentLoadInfoSnapshot{LoadInfo: info})
+		require.NoError(t, err)
+		require.Equal(t, 1, calls)
+		require.True(t, proto.Equal(original, info))
+		failure := mockey.Mock((*fakeQVLoader).LoadDeltaLogs).Return(assert.AnError).Build()
+		_, err = physical.PrepareReadState(t.Context(), wrapper, nil, fakeQVCollectionRuntime{}, qnview.SegmentLoadInfoSnapshot{LoadInfo: info})
+		require.ErrorIs(t, err, assert.AnError)
+		require.Equal(t, 1, calls, "failed deltalog preparation must not publish a read state")
+		require.True(t, proto.Equal(original, info))
+		failure.UnPatch()
+	})
 }

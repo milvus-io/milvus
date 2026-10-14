@@ -24,33 +24,17 @@ func NewQueryViewPhysicalSegmentLoader(manager *segments.Manager, loader segment
 	})
 }
 
-func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, loader segments.Loader, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager, streamFactories ...qnview.SegmentLoadInfoStreamFactory) qnview.SegmentManager {
-	if manager == nil || loader == nil || meta == nil || streams == nil {
+func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, loader segments.Loader, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager, streamFactory qnview.SegmentLoadInfoStreamFactory) qnview.SegmentManager {
+	if manager == nil || loader == nil || meta == nil || streams == nil || streamFactory == nil {
 		return nil
 	}
 	physicalLoader := NewQueryViewPhysicalSegmentLoader(manager, loader)
 	nodeScheduler := nodescheduler.Get()
-	var segmentLoadInfoStream qnview.SegmentLoadInfoStream
-	if len(streamFactories) > 0 && streamFactories[0] != nil {
-		segmentLoadInfoStream = streamFactories[0].NewSegmentLoadInfoStream(ctx)
-	}
-	physicalManager := qnview.NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(
-		nodeScheduler,
-		physicalLoader,
-		segmentLoadInfoStream,
-		newQueryViewSegmentResourceEstimator(loader),
-	)
+	segmentLoadInfoStream := streamFactory.NewSegmentLoadInfoStream(ctx)
 	collectionRuntime := newQueryViewCollectionRuntimeManager(meta, streaming.WAL().SchemaClient())
-	return qnview.NewQueryViewSegmentReadinessManagerWithScheduler(
-		nodeScheduler,
-		physicalManager,
-		qvtransformlogbuffer.New(
-			streams,
-			paramtable.Get().QueryNodeCfg.QueryViewTransformLogDrainConcurrency.GetAsInt(),
-		),
-		paramtable.Get().QueryNodeCfg.QueryViewSegmentCatchupConcurrency.GetAsInt(),
-		collectionRuntime,
-	)
+	return qnview.NewSegmentResourceManager(ctx, nodeScheduler, physicalLoader,
+		newQueryViewSegmentResourceEstimator(loader), segmentLoadInfoStream,
+		qvtransformlogbuffer.New(streams, paramtable.Get().QueryNodeCfg.QueryViewTransformLogDrainConcurrency.GetAsInt()), collectionRuntime)
 }
 
 func newQueryViewPhysicalSegmentLoader(segments qvSegmentManager, loader qvSegmentLoader) *queryViewPhysicalSegmentLoader {

@@ -141,19 +141,6 @@ func (l *fakeQVLoader) LoadSegment(_ context.Context, segment qvLoadedSegment, i
 	return l.err
 }
 
-func (l *fakeQVLoader) ReopenSegment(_ context.Context, segment qvLoadedSegment, _ qnview.CollectionRuntime, info *querypb.SegmentLoadInfo) error {
-	l.reopenCalled = true
-	l.infos = append(l.infos, info)
-	return l.err
-}
-
-func (l *fakeQVLoader) LoadIndex(_ context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo, version int64) error {
-	l.loadIndexCalled = true
-	l.version = version
-	l.infos = append(l.infos, info)
-	return l.err
-}
-
 func (l *fakeQVLoader) LoadDeltaLogs(_ context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
 	l.deltaCalled = true
 	l.infos = append(l.infos, info)

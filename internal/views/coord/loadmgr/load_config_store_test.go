@@ -38,7 +38,7 @@ func TestLoadConfigGetPreservesConfigVersionDuringPut(t *testing.T) {
 	put := func(revision int64) error {
 		return store.Put(context.Background(), &LoadConfig{
 			CollectionID: 1,
-			LoadFields:   []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: revision}},
+			LoadFields:   []*messagespb.LoadFieldConfig{{FieldId: 100 + revision}},
 		})
 	}
 	require.NoError(t, put(1))
@@ -89,7 +89,7 @@ reading:
 	}
 	final := store.Get(1)
 	require.NotEqual(t, initialVersion, final.ConfigVersion)
-	require.EqualValues(t, updates+1, final.Config.LoadFields[0].IndexId)
+	require.EqualValues(t, 100+updates+1, final.Config.LoadFields[0].FieldId)
 	require.Equal(t, loadInfoVersion(final.Config), final.ConfigVersion)
 
 	catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(1)).Return(nil).Once()

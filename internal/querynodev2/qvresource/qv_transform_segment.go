@@ -65,10 +65,6 @@ func (s *queryViewTransformSegment) Collection() *segments.Collection {
 	return readable.Collection()
 }
 
-func (s *queryViewTransformSegment) PinReadState() (segments.ReadState, error) {
-	return s.QuerySegment().(*segments.LocalSegment).PinReadState()
-}
-
 func (s *queryViewTransformSegment) TransformStartAfterTimeTick() uint64 {
 	return s.startAfter
 }

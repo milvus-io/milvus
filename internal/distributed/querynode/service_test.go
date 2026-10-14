@@ -399,7 +399,7 @@ func (noopQNSegmentManager) Acquire(qnview.AcquireSegments) {}
 
 func (noopQNSegmentManager) Release(qnview.ReleaseSegments) {}
 
-func (noopQNSegmentManager) AcquireSealedSegmentHandles(context.Context, qviews.QueryViewKey, *viewpb.QueryViewOfQueryNode) ([]qnview.SealedSegmentHandle, error) {
+func (noopQNSegmentManager) AcquireSealedSegmentHandles(context.Context, qviews.QueryViewKey, *viewpb.QueryViewOfQueryNode, uint64) ([]qnview.SealedSegmentHandle, error) {
 	return nil, nil
 }
 
