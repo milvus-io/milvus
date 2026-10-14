@@ -264,8 +264,8 @@ func (m *Manager) flushClaim(ctx context.Context, pchannel string, term int64) (
 // changes the manifest, it writes the new body under a unique key, then
 // writes the pointer on the condition that the stored pointer is still the
 // one it loaded, or does not exist for the first version. With a guard, the
-// same transaction requires the claim record to hold the guard value and
-// writes that value back, so that a concurrent claim conflicts with it.
+// same write also requires the claim record to hold the guard value; it does
+// not write the claim record.
 func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel string, g *guard,
 	apply func(*pkindexpb.Manifest) (*pkindexpb.Manifest, bool, error),
 ) (*pkindexpb.Manifest, error) {
@@ -309,9 +309,7 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 		conds[0] = manifest.ValueIs(key, cur.pointer)
 	}
 	if g != nil {
-		claimKey := manifest.ClaimKey(g.pchannel)
-		saves[claimKey] = g.claim.value
-		conds = append(conds, manifest.ValueIs(claimKey, g.claim.value))
+		conds = append(conds, manifest.ValueIs(manifest.ClaimKey(g.pchannel), g.claim.value))
 	}
 	if err := m.pointers.Save(ctx, saves, conds...); err != nil {
 		// the write may have taken effect: the stored pointer decides
