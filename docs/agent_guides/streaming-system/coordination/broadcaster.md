@@ -52,7 +52,9 @@ Import, CommitImport, and RollbackImport include CChannel alongside the business
 VChannels so replicated callbacks share an ordered copy. CommitImport uses
 FastAck and completes in the DataCoord callback: persist Committing to protect
 against timeout, update segment visibility with each business VChannel's own
-commit TimeTick, then persist Completed. Failures keep the broadcast task
+commit TimeTick, synchronously publish the resulting DataView, then persist
+Completed. QueryView readiness is waited by Load/Refresh, not this callback.
+Failures keep the broadcast task
 retryable. New Import jobs persist `commit_by_coordinator=true`; no StreamingNode
 per-channel RPC or L0 materialization is required for these jobs. Absent/false
 flags retain legacy completion: BroadcastAckModule calls HandleCommitVchannel

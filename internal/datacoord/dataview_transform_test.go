@@ -196,3 +196,32 @@ func TestPendingTransformBoundsWithoutCollectionCacheOrCheckpoint(t *testing.T) 
 	_, err = pendingTransformBounds(t.Context(), metadata, nil, view)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 }
+
+func TestPendingImportFreezesWWithoutBlockingPublication(t *testing.T) {
+	ctx := t.Context()
+	metadata := &meta{ctx: ctx, segments: NewSegmentsInfo()}
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Importing,
+	}}
+	imports := &importMeta{jobs: map[int64]ImportJob{1: job}}
+	view := &viewpb.DataViewOfCollection{CollectionId: 100, Shards: []*viewpb.DataViewOfShard{
+		{Vchannel: "v1", GrowingTransformStartAfterTimetick: 100, CompactedTransformStartAfterTimetick: 50},
+		{Vchannel: "v2", GrowingTransformStartAfterTimetick: 200, CompactedTransformStartAfterTimetick: 200},
+	}}
+	metadata.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, IsImporting: true,
+	}))
+	bounds, err := pendingTransformBounds(ctx, metadata, imports, view)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 100, "v2": 200}, bounds, "missing commit fences must freeze W, not wait for a future broadcast")
+	// One Ack must not invent a fence for another channel. Its accepted W stays
+	// protected until that channel's Ack durably installs its own commit fence.
+	job.TransformCommitTimeticks = map[string]uint64{"v1": 300}
+	bounds, err = pendingTransformBounds(ctx, metadata, imports, view)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 300, "v2": 200}, bounds)
+	job.TransformCommitTimeticks["v2"] = 400
+	bounds, err = pendingTransformBounds(ctx, metadata, imports, view)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 300, "v2": 400}, bounds)
+}

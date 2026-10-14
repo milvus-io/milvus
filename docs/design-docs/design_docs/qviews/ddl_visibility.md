@@ -174,3 +174,23 @@ pkg/streaming/util/message/messageutil/transform_log.go;
 internal/streamingnode/server/wal/vchannel/growingruntime/{live,dispatch,segment}.go;
 internal/rootcoord/ddl_callbacks_{truncate_collection,drop_partition}.go;
 internal/views/coord/resource/resource.go; internal/views/coord/loadstatus/wait.go.
+
+## Import completion and serving readiness
+
+CommitImport completes the storage publication, not the query-node load. Its full
+ACK callback persists Committing, applies each business channel's commit TimeTick
+to the imported segments, synchronously publishes their DataView, then persists
+Completed. The existing collection broadcast resource lock serializes these
+publications. Persistence failures retry in Committing; no QueryView Up wait is
+performed while holding this lock.
+
+A subsequent initial Load starts from the already published DataView. On an
+already loaded collection, clients use refresh-load to wait for serving views
+that cover the committed DataVersion. Import Completed alone is not a statement
+that an existing serving view has already handed off. This matches the existing
+separation between import completion and Load/Refresh readiness.
+
+Pending imports without a CommitImport position freeze their channel's accepted
+W; they do not block publication of another committed import. See
+[Transform start frontier](transform_start_after_timetick.md) for the constraint
+handoff from pending jobs to committed segment bases.

@@ -172,7 +172,16 @@ data mutation, not as an independent checkpoint-driven version.
 
 Import jobs and other asynchronous publication paths must not fall through the
 WAL-L1 proof. Pending CommitImport positions remain constraints until selected
-Segment bases carry the matching C. Unknown coverage remains not-ready. A stale
+Segment bases carry the matching C. Before a pending ImportJob has a channel's
+CommitImport position, constrain that channel's next W certificate to its previous
+persisted W. This freezes advancement, without blocking other committed membership
+publications or requiring a later CommitImport to acquire the same broadcast lock.
+The pending projector reads W before the manager applies the incoming Flush
+certificate. AckOnce durably installs the actual per-channel commit fence before
+the full callback; Segment commit then transfers coverage to the selected base.
+Uncommitted IsImporting Segments are excluded from membership and covered by job
+constraints, rather than requiring their as-yet nonexistent Segment commit cursor.
+Missing legacy W and missing commit fences still mean coverage is not ready. A stale
 Compaction output cannot inherit coverage from a newer parent base it did not
 read. QueryView continues to consume TransformLog only, never L0 as a replay
 fallback.

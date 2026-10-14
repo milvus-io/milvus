@@ -198,6 +198,16 @@ The binding survives DataView snapshot GC while SegmentMeta exists. Full QueryVi
 integration must additionally protect Segment records and objects needed by old
 views or unacknowledged publications; this change does not enable that GC protocol.
 
+## Import publication
+
+Coordinator-owned CommitImport callbacks synchronously reconcile the committed
+SegmentMeta projection before marking ImportJob Completed. The collection broadcast
+resource lock orders commits through this durable publication. Failure leaves the
+job Committing and retries idempotently. Load/Refresh owns QueryView Up waiting;
+import completion itself is independent of QN readiness. Pending uncommitted
+imports constrain W advancement without blocking membership publication; see the
+[Transform frontier contract](transform_start_after_timetick.md).
+
 ## Async reconciliation
 
 TODO: `Recompute` is a stopgap. It rebuilds the whole snapshot from the
@@ -207,10 +217,9 @@ DataCoord offline side (compact/index pipelines) is refactored, those owners
 should update the DataView directly through specific DataView events, and this
 projection-based reconciliation can be retired.
 
-Compaction (mix/clustering/L0/sort/bump-schema-version), import commit, copy
-completion, external refresh, drop partition, and truncate do not publish
-membership events. Instead, after their SegmentMeta mutation commits, the owner
-requests an asynchronous reconciliation by calling
+Compaction (mix/clustering/L0/sort/bump-schema-version), copy completion and
+background SegmentMeta updates request asynchronous reconciliation after their
+metadata mutation commits by calling
 `Manager.Recompute(ctx, collectionID)`. Two additional SegmentMeta mutations
 advance a segment's Manifest version without changing membership and also
 request a recompute: a stats task (e.g. sort) that records a new manifest, and

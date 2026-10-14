@@ -410,8 +410,9 @@ func (c *DDLCallbacks) registerImportCallbacks() {
 
 // commitImportV2AckCallback handles the ack callback for the CommitImport WAL message.
 // For coordinator-owned jobs it makes all segments visible (commit timestamp and is_importing=false)
-// and transitions the job to Completed. Committing durably protects retries from
-// timeout/cleanup between these writes.
+// synchronously publishes their DataView before transitioning to Completed.
+// QueryView readiness belongs to Load/Refresh. Committing durably protects
+// retries from timeout/cleanup between these writes.
 // Concurrency safety is guaranteed by the broadcaster framework's resource key lock
 // (exclusive collection-level lock), so no CAS is needed here.
 func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result message.BroadcastResultCommitImportMessageV2) error {
@@ -438,6 +439,11 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	case internalpb.ImportJobState_Committing:
 		// Retry the same callback after an interrupted commit.
 	case internalpb.ImportJobState_Completed:
+		if header.GetCommitByCoordinator() {
+			// Also repair a replay of a job completed by the asynchronous producer.
+			_, err := c.RefreshDataView(ctx, job.GetCollectionID())
+			return err
+		}
 		if c.meta != nil {
 			c.meta.recomputeDataView(ctx, job.GetCollectionID())
 		}
@@ -493,10 +499,12 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		}
 	}
 
-	// Import visibility now commits in this callback rather than the legacy
-	// per-channel RPC. Preserve DataView reconciliation after SegmentMeta.
-	if c.meta != nil {
-		c.meta.recomputeDataView(ctx, job.GetCollectionID())
+	// Keep the collection broadcast lock until the committed membership is
+	// durable. A subsequent Load/Refresh must not observe a pre-import DataView
+	// after GetImportProgress reports Completed. Do not wait for QueryView Up:
+	// query-node availability is a Load/Refresh obligation, not import commit.
+	if _, err := c.RefreshDataView(ctx, job.GetCollectionID()); err != nil {
+		return err
 	}
 
 	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
@@ -675,10 +683,10 @@ func (c *DDLCallbacks) updateImportAckCallback(ctx context.Context, result messa
 	return nil
 }
 
-// commitImportV2AckOnceCallback bridges checkpoint completeness to the async
-// import callback. The SN owns this WAL message until Ack returns, so K cannot
-// pass its timestamp until the constraint below is durable. This also covers
-// replicated commits arriving before local import tasks finish.
+// commitImportV2AckOnceCallback durably installs each channel's commit fence
+// before FastAck/consumer Ack allows the full publication callback to run.
+// Before this fence is known, pendingTransformBounds freezes the accepted W.
+// This also covers replicated commits arriving before local tasks finish.
 func (c *DDLCallbacks) commitImportV2AckOnceCallback(ctx context.Context, result message.AckResultCommitImportMessageV2) error {
 	msg := result.Message
 	if funcutil.IsControlChannel(msg.VChannel()) {

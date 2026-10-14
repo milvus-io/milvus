@@ -118,6 +118,16 @@ func transformFrontierBounds(ctx context.Context, metadata *meta, imports Import
 // by the candidate View. Ordinary WAL completeness comes from the SN's W proof;
 // this projection neither reads checkpoints nor requires the collection cache.
 func pendingTransformBounds(ctx context.Context, metadata *meta, imports ImportMeta, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+	// These are the previous snapshot's W values: the manager calls this
+	// projector before applying the new Flush certificate or recalculating A.
+	// An import without a CommitImport fence freezes W rather than blocking
+	// unrelated membership publication. Its future commit cannot precede this
+	// already accepted WAL prefix; once AckOnce records the actual fence, that
+	// fence protects publication instead. This also survives coordinator restart.
+	previousW := make(map[string]uint64, len(view.GetShards()))
+	for _, shard := range view.GetShards() {
+		previousW[shard.GetVchannel()] = shard.GetGrowingTransformStartAfterTimetick()
+	}
 	bounds := make(map[string]uint64)
 	pin := func(channel string, start uint64) {
 		if old, ok := bounds[channel]; !ok || start < old {
@@ -129,7 +139,10 @@ func pendingTransformBounds(ctx context.Context, metadata *meta, imports ImportM
 			for _, channel := range job.GetVchannels() {
 				start := job.(*importJob).GetTransformCommitTimeticks()[channel]
 				if start == 0 {
-					return nil, merr.WrapErrServiceNotReadyMsg("import job %d Transform fence for %s is not ready", job.GetJobID(), channel)
+					start = previousW[channel]
+					if start == 0 {
+						return nil, merr.WrapErrServiceNotReadyMsg("import job %d has neither a commit fence nor a published WAL frontier for %s", job.GetJobID(), channel)
+					}
 				}
 				pin(channel, start)
 			}
@@ -149,9 +162,15 @@ func pendingTransformBounds(ctx context.Context, metadata *meta, imports ImportM
 		if _, ok := selected[segment.GetID()]; ok || segment.GetLevel() == datapb.SegmentLevel_L0 || !isSegmentHealthy(segment) {
 			continue
 		}
+		if segment.GetIsImporting() {
+			// ImportJob owns the constraint until commit installs the exact
+			// Segment cursor and clears IsImporting. Failed-job leftovers cannot
+			// become visible; they must not block other commits either.
+			continue
+		}
 		start := segmentTransformStart(segment)
 		if start == 0 {
-			if !segment.GetIsImporting() && !segment.GetCreatedByCompaction() &&
+			if !segment.GetCreatedByCompaction() &&
 				(segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed) {
 				// SN's certificate includes even a first pack not registered here.
 				continue
