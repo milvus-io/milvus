@@ -59,6 +59,28 @@ Encode(const std::vector<uint8_t>& payload,
     return codec->serialize_to_remote_file(std::move(encryption));
 }
 
+std::vector<uint8_t>
+EncodeLargeDescriptor() {
+    const auto original = Encode({1, 2, 3});
+    auto buffer = std::shared_ptr<uint8_t[]>(new uint8_t[original.size()]);
+    std::memcpy(buffer.get(), original.data(), original.size());
+    auto reader = std::make_shared<BinlogReader>(buffer, original.size());
+    ReadMediumType(reader);
+    DescriptorEvent descriptor(reader);
+    const auto old_offset = reader->Tell();
+    EventHeader event(reader);
+    descriptor.event_data.extras["padding"] = std::string(64 * 1024, 'x');
+    auto result = descriptor.Serialize();
+    const auto new_offset = result.size();
+    result.insert(result.end(), original.begin() + old_offset, original.end());
+    if (event.next_position_ != 0)
+        event.next_position_ += static_cast<int32_t>(new_offset - old_offset);
+    const auto event_header = event.Serialize();
+    std::copy(
+        event_header.begin(), event_header.end(), result.begin() + new_offset);
+    return result;
+}
+
 class LegacyIndexFileIOTest : public ::testing::Test {
  protected:
     void
@@ -266,6 +288,90 @@ TEST_F(LegacyIndexFileIOTest, PayloadAdmissionRemainsCancellable) {
     cancel.requestCancellation();
     EXPECT_THROW(task.get(), SegcoreError);
     EXPECT_TRUE(file_->DirectReadCalls().empty());
+}
+
+TEST_F(LegacyIndexFileIOTest, SmallMetadataBypassesPayloadAdmission) {
+    auto lease = Run([&]() -> folly::coro::Task<LoadAdmissionLease> {
+        co_return co_await budget_.AcquireAsync({1, 1},
+                                                LoadAdmissionPriority::High);
+    }());
+    auto input = Open(Encode({1, 2, 3}));
+    const auto info = Run(InspectLegacyIndexFileAsync(*input, kPriority));
+    EXPECT_EQ(info.payload_bytes, 3);
+}
+
+TEST_F(LegacyIndexFileIOTest, LargeDescriptorWaitIsCancellable) {
+    auto lease = Run([&]() -> folly::coro::Task<LoadAdmissionLease> {
+        co_return co_await budget_.AcquireAsync({1, 1},
+                                                LoadAdmissionPriority::High);
+    }());
+    auto input = Open(EncodeLargeDescriptor());
+    folly::CancellationSource cancel;
+    auto task = std::async(std::launch::async, [&] {
+        return Run(
+            InspectLegacyIndexFileAsync(*input, kPriority, cancel.getToken()));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        lease.Release();
+        if (task.valid())
+            task.wait();
+    });
+    ASSERT_TRUE(file_->WaitForCallCount(1));
+    EXPECT_EQ(task.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    cancel.requestCancellation();
+    EXPECT_THROW(task.get(), SegcoreError);
+    cleanup.dismiss();
+    EXPECT_EQ(file_->DirectReadCalls().size(), 1);
+    lease.Release();
+    EXPECT_EQ(Run(InspectLegacyIndexFileAsync(*input, kPriority)).payload_bytes,
+              3);
+}
+
+TEST_F(LegacyIndexFileIOTest, LargeDescriptorCancellationDrainsRead) {
+    auto input = Open(EncodeLargeDescriptor());
+    file_->SetAutoComplete(false);
+    folly::CancellationSource cancel;
+    auto task = std::async(std::launch::async, [&] {
+        return Run(
+            InspectLegacyIndexFileAsync(*input, kPriority, cancel.getToken()));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        file_->SetAutoComplete(true);
+        for (size_t i = 0; i < file_->DirectReadCalls().size(); ++i)
+            file_->Complete(i);
+        if (task.valid())
+            task.wait();
+    });
+    ASSERT_TRUE(file_->WaitForCallCount(1));
+    file_->Complete(0);
+    ASSERT_TRUE(file_->WaitForCallCount(2));
+    ExpectReserved();
+    cancel.requestCancellation();
+    EXPECT_EQ(task.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    file_->Complete(1);
+    EXPECT_THROW(task.get(), SegcoreError);
+}
+
+TEST_F(LegacyIndexFileIOTest, LargeDescriptorParseFailureReleasesAdmission) {
+    auto encoded = EncodeLargeDescriptor();
+    EventHeader header;
+    const auto json_offset = sizeof(MAGIC_NUM) + GetEventHeaderSize(header) +
+                             GetEventFixPartSize(EventType::DescriptorEvent) +
+                             static_cast<size_t>(EventType::EventTypeEnd) +
+                             sizeof(int32_t);
+    encoded[json_offset] = '!';
+    auto input = Open(std::move(encoded));
+    try {
+        Run(InspectLegacyIndexFileAsync(*input, kPriority));
+        FAIL() << "expected malformed descriptor JSON";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+    }
+    // TearDown also verifies that no admission lease remains held.
 }
 
 TEST_F(LegacyIndexFileIOTest, CancellationDrainsIssuedRead) {

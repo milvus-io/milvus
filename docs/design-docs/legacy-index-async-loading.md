@@ -39,9 +39,14 @@ existing order into logical entries, memory targets or positioned file targets.
 Synchronous unsliced entry reads validate the envelope in the downloaded buffer
 and allocate the result from its decoded size, without separate remote probes.
 Explicit size queries and multi-slice entries without a known total still inspect
-envelopes before allocating. Envelope inspection, including open/size requests,
-bypasses payload admission in both modes. Async inspection still bounds concurrent
-objects per batch by the configured slot capacity and drains issued I/O on failure.
+envelopes before allocating. Open/size requests and descriptors up to 64 KiB
+bypass payload admission in both modes. Larger descriptors reserve their estimated
+wire/parse scratch through the existing admission controller before allocation,
+and hold that lease until reading and parsing finish, including failure draining.
+This threshold changes resource handling, not the accepted storage format.
+Async inspection bounds concurrent objects per batch by the configured slot
+capacity and drains issued I/O on failure. That window is not a process-wide
+metadata concurrency limit; no separate metadata byte/slot budget is introduced.
 
 Synchronous file materialization decodes bounded batches directly into the target
 staging file, including concatenated entries and directory outputs. It does not

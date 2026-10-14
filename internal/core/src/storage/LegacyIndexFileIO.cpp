@@ -445,6 +445,13 @@ InspectLegacyIndexFileImpl(milvus::InputStream& input,
     }
     LegacyIndexFileInfo info;
     {
+        // Small headers bypass admission; variable-size descriptors need a budget.
+        constexpr size_t kUnadmittedDescriptorBytes = 64 * 1024;
+        LoadAdmissionLease descriptor_lease;
+        if (descriptor_bytes > kUnadmittedDescriptorBytes) {
+            descriptor_lease = co_await Admit(
+                MetadataScratchBytes(descriptor_bytes), priority, token);
+        }
         auto descriptor =
             std::shared_ptr<uint8_t[]>(new uint8_t[descriptor_bytes]);
         co_await ReadRange(input,
