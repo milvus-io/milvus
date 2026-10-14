@@ -56,9 +56,22 @@ following the same pattern as `StreamingCode` / `StreamingError`. Key error code
 
 - **VIEW_INVALIDATED**: View version is no longer valid (Down/Dropped) → retry from Phase 1.
 - **VIEW_NOT_FOUND**: View version not found on this node → retry from Phase 1.
-- **ON_SHUTDOWN**: Node is shutting down → retry from Phase 1 (SN may have moved).
-- **NOT_PRIMARY**: Node is not the primary replica for this shard → Proxy refreshes
-  primary mapping and retries (see Section 2.5).
+- **ON_SHUTDOWN / NOT_PRIMARY on SN**: QueryViewClient waits for the assigned
+  WAL to become ready using the WAL HandlerClient's assignment watch and
+  exponential backoff. Each attempt resolves the current node and channel term.
+  Transport `Unavailable` follows the same path. Waiting is bounded by the
+  original request context, rather than the shard's view-retry count.
+- **VIEW_INVALIDATED / VIEW_NOT_FOUND after readiness**: Return to the query
+  orchestrator immediately; these require replanning, not waiting for the same
+  retired view. Input errors and unsupported RPCs also return immediately.
+
+Both services also use the WAL gRPC `waitForReady` and transport retry policy;
+transport readiness alone does not prove that an assigned WAL is available.
+The readiness flow covers both Phase 1 (`GetQueryPlan`, `GetMVCCTimestamp`) and
+SN Phase 2 (`SearchOnView`, `QueryOnView`, `RequeryOnView`). A Phase 2 retry keeps
+the original request, including its View version and MVCC. It never substitutes
+a new snapshot. If the current SN cannot serve that version, the normal view
+error returns control to Phase 1. QN execution keeps its own node-client path.
 
 ### 2.3 Plan Reuse
 
@@ -343,6 +356,10 @@ Query(req):
 - **Max retries**: Configurable (default 3).
 - **Timeout**: Shared with the overall request context.
 - **On retry**: `ResetShard` discards stale results before re-executing.
+- **SN readiness**: QueryViewClient absorbs assignment/WAL availability gaps
+  through the shared WAL readiness loop before a shard attempt completes. View
+  errors still consume the bounded shard retry budget; readiness waiting does
+  not consume it or reset the original request deadline.
 
 ## 5. Node-Side Implementation
 
