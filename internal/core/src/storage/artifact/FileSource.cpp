@@ -554,8 +554,7 @@ class V1RemoteSource::Impl {
                               total_length,
                               logical_name);
                 }
-                if (!slice_meta_entries.insert(logical_name).second ||
-                    !entry_sizes
+                if (!entry_sizes
                          .emplace(logical_name,
                                   static_cast<int64_t>(total_length))
                          .second) {
@@ -957,7 +956,6 @@ class V1RemoteSource::Impl {
     std::shared_ptr<MemFileManagerImpl> memory_manager;
     std::map<std::string, std::vector<std::string>> logical_entries;
     std::unordered_map<std::string, LegacyIndexFileInfo> file_infos;
-    std::set<std::string> slice_meta_entries;
     mutable std::unordered_map<std::string, int64_t> entry_sizes;
 };
 
