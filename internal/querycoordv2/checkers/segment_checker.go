@@ -50,6 +50,14 @@ type collectionVersionCache struct {
 	channelDistVersion int64
 }
 
+type segmentCollectionVersionCache struct {
+	collectionVersionCache
+	currentTargetVersion int64
+	// ReplicaManager publishes immutable snapshots. Replica additions and node
+	// or RG changes must invalidate convergence even when distribution is idle.
+	replicas map[int64]*meta.Replica
+}
+
 type SegmentChecker struct {
 	*checkerActivation
 	meta         *meta.Meta
@@ -60,7 +68,7 @@ type SegmentChecker struct {
 	assignPolicy assign.AssignPolicy
 
 	// version cache for fast skip when nothing changed
-	versionCache  map[int64]*collectionVersionCache
+	versionCache  map[int64]*segmentCollectionVersionCache
 	deferredLoads map[int64]bool
 }
 
@@ -83,7 +91,7 @@ func NewSegmentChecker(
 		nodeMgr:           nodeMgr,
 		scheduler:         scheduler,
 		assignPolicy:      assignPolicy,
-		versionCache:      make(map[int64]*collectionVersionCache),
+		versionCache:      make(map[int64]*segmentCollectionVersionCache),
 	}
 }
 
@@ -103,12 +111,22 @@ func (c *SegmentChecker) readyToCheck(ctx context.Context, collectionID int64) b
 }
 
 func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
+	tasks, _ := c.CheckWithRecovery(ctx)
+	return tasks
+}
+
+// CheckWithRecovery reports actual target/distribution deficits independently
+// of task admission. A missing segment remains recovery work while it waits
+// for its shard leader, resources, or an already accepted load to appear in
+// distribution. Ordinary balance Moves with an existing source are not gaps.
+func (c *SegmentChecker) CheckWithRecovery(ctx context.Context) ([]task.Task, map[string]struct{}) {
 	if !c.IsActive() {
-		return nil
+		return nil, nil
 	}
 	if !c.nodeMgr.LoadReportSyncReady() {
-		return nil
+		return nil, nil
 	}
+	recoveryRGs := make(map[string]struct{})
 	c.deferredLoads = make(map[int64]bool)
 	ctx = assign.WithPlanningLedgerFactory(ctx, func() *assign.PlanningLedger {
 		return assign.NewPlanningLedger(c.nodeMgr, c.dist, c.scheduler, Params.QueryCoordCfg.BalanceMaxPendingLoads.GetAsInt())
@@ -119,17 +137,23 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	for _, cid := range collectionIDs {
 		if c.readyToCheck(ctx, cid) {
 			// Fast path: skip if target and dist versions unchanged
-			currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, cid, meta.NextTarget)
+			nextTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, cid, meta.NextTarget)
+			currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, cid, meta.CurrentTarget)
 			currentSegmentDistVersion := c.dist.SegmentDistManager.GetVersion()
 			currentChannelDistVersion := c.dist.ChannelDistManager.GetVersion()
-			if c.isCollectionSynced(cid, currentTargetVersion, currentSegmentDistVersion, currentChannelDistVersion) {
+			replicas := c.meta.GetByCollection(ctx, cid)
+			if c.isCollectionSynced(cid, nextTargetVersion, currentTargetVersion, currentSegmentDistVersion, currentChannelDistVersion, replicas) {
 				continue
 			}
 
-			replicas := c.meta.GetByCollection(ctx, cid)
 			hasTask := false
+			hasRecovery := false
 			for _, r := range replicas {
-				tasks := c.checkReplica(ctx, r)
+				tasks, needsRecovery := c.checkReplicaWithRecovery(ctx, r)
+				if needsRecovery {
+					recoveryRGs[r.GetResourceGroup()] = struct{}{}
+					hasRecovery = true
+				}
 				// Add tasks immediately after checking each replica to reduce
 				// the time window between task generation and addition.
 				// This prevents duplicate segment loading when dist updates
@@ -147,8 +171,8 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 
 			// Only update version cache if no tasks were generated
 			// If tasks were generated, we need to re-check next time
-			if !hasTask && !c.deferredLoads[cid] {
-				c.updateVersionCache(cid, currentTargetVersion, currentSegmentDistVersion, currentChannelDistVersion)
+			if !hasTask && !hasRecovery && !c.deferredLoads[cid] {
+				c.updateVersionCache(cid, nextTargetVersion, currentTargetVersion, currentSegmentDistVersion, currentChannelDistVersion, replicas)
 			}
 		}
 	}
@@ -181,27 +205,43 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 
-	return results
+	return results, recoveryRGs
 }
 
 // isCollectionSynced checks if target and dist versions are unchanged since last check
-func (c *SegmentChecker) isCollectionSynced(collectionID int64, targetVersion, segmentDistVersion, channelDistVersion int64) bool {
+func (c *SegmentChecker) isCollectionSynced(collectionID int64, targetVersion, currentTargetVersion, segmentDistVersion, channelDistVersion int64, replicas []*meta.Replica) bool {
 	cache, ok := c.versionCache[collectionID]
 	if !ok {
 		return false
 	}
-	return cache.targetVersion == targetVersion &&
-		cache.segmentDistVersion == segmentDistVersion &&
-		cache.channelDistVersion == channelDistVersion
+	if cache.targetVersion != targetVersion || cache.currentTargetVersion != currentTargetVersion ||
+		cache.segmentDistVersion != segmentDistVersion || cache.channelDistVersion != channelDistVersion ||
+		len(cache.replicas) != len(replicas) {
+		return false
+	}
+	for _, replica := range replicas {
+		if cache.replicas[replica.GetID()] != replica {
+			return false
+		}
+	}
+	return true
 }
 
 // updateVersionCache updates the version cache for a collection
-func (c *SegmentChecker) updateVersionCache(collectionID int64, targetVersion, segmentDistVersion, channelDistVersion int64) {
-	c.versionCache[collectionID] = &collectionVersionCache{
-		targetVersion:      targetVersion,
-		segmentDistVersion: segmentDistVersion,
-		channelDistVersion: channelDistVersion,
+func (c *SegmentChecker) updateVersionCache(collectionID int64, targetVersion, currentTargetVersion, segmentDistVersion, channelDistVersion int64, replicas []*meta.Replica) {
+	cache := &segmentCollectionVersionCache{
+		collectionVersionCache: collectionVersionCache{
+			targetVersion:      targetVersion,
+			segmentDistVersion: segmentDistVersion,
+			channelDistVersion: channelDistVersion,
+		},
+		currentTargetVersion: currentTargetVersion,
+		replicas:             make(map[int64]*meta.Replica, len(replicas)),
 	}
+	for _, replica := range replicas {
+		cache.replicas[replica.GetID()] = replica
+	}
+	c.versionCache[collectionID] = cache
 }
 
 // cleanVersionCache removes entries for collections that no longer exist.
@@ -222,6 +262,11 @@ func (c *SegmentChecker) cleanVersionCache(activeCollections []int64) {
 }
 
 func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
+	tasks, _ := c.checkReplicaWithRecovery(ctx, replica)
+	return tasks
+}
+
+func (c *SegmentChecker) checkReplicaWithRecovery(ctx context.Context, replica *meta.Replica) ([]task.Task, bool) {
 	ret := make([]task.Task, 0)
 
 	replicaSegmentDist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
@@ -264,7 +309,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
-	return ret
+	return ret, len(lacks) > 0
 }
 
 // GetGrowingSegmentDiff get streaming segment diff between leader view and target
@@ -392,8 +437,14 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	// still observed.
 	collection := c.meta.GetCollection(ctx, collectionID)
 
-	// Segment which exist on next target, but not on dist
-	for _, segment := range nextTargetMap {
+	// Next target controls desired placement when present. After promotion (or
+	// recovery of persisted metadata), only Current may exist; its missing
+	// segments must still be loaded. Never merge old Current objects into Next.
+	loadTarget := nextTargetMap
+	if !nextTargetExist && currentTargetExist {
+		loadTarget = currentTargetMap
+	}
+	for _, segment := range loadTarget {
 		if isSegmentLack(segment) {
 			if currentTargetExist {
 				_, existOnCurrent := currentTargetMap[segment.GetID()]

@@ -917,7 +917,7 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		// Set autoBalanceTs to allow normal balance
 		checker.autoBalanceTs = time.Time{}
 
-		// Pre-populate stopping balance queue to verify it gets cleared
+		// Pre-populate stopping balance queue to verify ordinary work retains it
 		checker.stoppingBalanceQueue = createMockPriorityQueue()
 		checker.stoppingBalanceQueue.Push(newCollectionBalanceItem(1, 100, "byrowcount"))
 
@@ -967,7 +967,8 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		// Verify normal balance was executed
 		assert.True(t, normalBalanceCalled, "Normal balance should have been called")
 		assert.Nil(t, result, "Check should always return nil")
-		assert.Nil(t, checker.stoppingBalanceQueue, "Stopping balance queue should be cleared when normal balance generates tasks")
+		assert.NotNil(t, checker.stoppingBalanceQueue, "Ordinary work must retain pending stopping balance collections")
+		assert.Equal(t, 1, checker.stoppingBalanceQueue.Len())
 		assert.True(t, checker.autoBalanceTs.After(originalTs), "autoBalanceTs should be updated when tasks are generated")
 	})
 

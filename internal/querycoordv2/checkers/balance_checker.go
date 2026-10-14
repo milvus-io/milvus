@@ -363,10 +363,7 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 		if replica == nil {
 			continue
 		}
-		if b.epochBlocks(replica.GetResourceGroup()) {
-			continue
-		}
-		if !isStoppingBalance && b.hasPendingRecovery(replica) {
+		if b.planningBlocks(ctx, replica, isStoppingBalance) {
 			continue
 		}
 		sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
@@ -510,7 +507,7 @@ func (b *BalanceChecker) processBalanceQueue(
 				item.checkedReplicas = make(map[int64]struct{})
 				for _, rid := range getReplicasFunc(ctx, item.collectionID) {
 					replica := b.meta.Get(ctx, rid)
-					if replica != nil && b.epochBlocks(replica.GetResourceGroup()) {
+					if replica != nil && b.planningBlocks(ctx, replica, isStoppingBalance) {
 						item.checkedReplicas[rid] = struct{}{}
 					} else {
 						eligible = true
@@ -547,7 +544,7 @@ func (b *BalanceChecker) processBalanceQueue(
 				continue
 			}
 			replica := b.meta.Get(ctx, rid)
-			if replica != nil && b.epochBlocks(replica.GetResourceGroup()) {
+			if replica != nil && b.planningBlocks(ctx, replica, isStoppingBalance) {
 				blocked = append(blocked, rid)
 			} else {
 				ready = append(ready, rid)
@@ -560,7 +557,7 @@ func (b *BalanceChecker) processBalanceQueue(
 		replicasToBalance = ready
 		if len(replicasToBalance) == 0 {
 			if len(blocked) > 0 {
-				// An epoch gate did not invoke the balancer. Preserve the check
+				// A recovery/epoch gate did not invoke the balancer. Preserve the check
 				// budget for other RGs, even when its configured limit is one.
 				checkCollectionCount--
 			}
@@ -698,9 +695,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		)
 
 		if generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0 {
-			// clean up the stopping balance queue when normal balance generated tasks
-			// make sure that next time when trigger stopping balance, a new stopping balance round will be started
-			b.stoppingBalanceQueue = nil
+			// Ordinary work in another RG must not discard deferred draining
+			// collections. Only an exhausted stopping queue starts a new round.
+			if b.stoppingBalanceQueue != nil && b.stoppingBalanceQueue.Len() == 0 {
+				b.stoppingBalanceQueue = nil
+			}
 		}
 		b.autoBalanceTs = time.Now()
 	}

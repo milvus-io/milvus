@@ -63,9 +63,8 @@ func NewCheckerController(
 	scheduler task.Scheduler,
 	broker meta.Broker,
 ) *CheckerController {
-	// CheckerController runs checkers with the order,
-	// the former checker has higher priority
-	// Note: ChannelChecker and SegmentChecker now create their own RoundRobin policy internally
+	// Placement runs in one ordered loop. Index and leader maintenance keep
+	// independent timers because they do not reserve placement in this ledger.
 	checkers := map[utils.CheckerType]Checker{
 		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, nodeMgr, scheduler),
 		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, nodeMgr, scheduler),
@@ -74,10 +73,11 @@ func NewCheckerController(
 		utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
 	}
 
+	placementCheckCh := make(chan struct{}, 1)
 	manualCheckChs := map[utils.CheckerType]chan struct{}{
-		utils.ChannelChecker: make(chan struct{}, 1),
-		utils.SegmentChecker: make(chan struct{}, 1),
-		utils.BalanceChecker: make(chan struct{}, 1),
+		utils.ChannelChecker: placementCheckCh,
+		utils.SegmentChecker: placementCheckCh,
+		utils.BalanceChecker: placementCheckCh,
 	}
 
 	return &CheckerController{
@@ -97,11 +97,53 @@ func (controller *CheckerController) Start() {
 	controller.cancel = cancel
 
 	for typ := range controller.checkers {
+		if typ == utils.ChannelChecker || typ == utils.SegmentChecker || typ == utils.BalanceChecker {
+			continue
+		}
 		controller.wg.Add(1)
 		go func(checker utils.CheckerType) {
 			defer controller.wg.Done()
 			controller.startChecker(ctx, checker)
 		}(typ)
+	}
+	controller.wg.Add(1)
+	go func() {
+		defer controller.wg.Done()
+		controller.startPlacementChecker(ctx)
+	}()
+}
+
+// The two recovery checks define the placement cadence. Balance checks are
+// limited by their own configured interval, even if recovery checks run faster.
+func getPlacementInterval() time.Duration {
+	return min(getCheckerInterval(utils.ChannelChecker), getCheckerInterval(utils.SegmentChecker))
+}
+
+func (controller *CheckerController) startPlacementChecker(ctx context.Context) {
+	interval := getPlacementInterval()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	var lastBalanceCheck time.Time
+	manualCheckCh := controller.manualCheckChs[utils.ChannelChecker]
+	for {
+		manual := false
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-manualCheckCh:
+			manual = true
+		}
+		if manual || time.Since(lastBalanceCheck) >= getCheckerInterval(utils.BalanceChecker) {
+			controller.checkPlacement(ctx, true)
+			lastBalanceCheck = time.Now()
+		} else {
+			controller.checkPlacement(ctx, false)
+		}
+		if updated := getPlacementInterval(); updated != interval {
+			interval = updated
+			ticker.Reset(interval)
+		}
 	}
 }
 
@@ -168,11 +210,68 @@ func (controller *CheckerController) Stop() {
 }
 
 func (controller *CheckerController) Check() {
-	for _, checkCh := range controller.manualCheckChs {
-		select {
-		case checkCh <- struct{}{}:
-		default:
+	checkCh := controller.manualCheckChs[utils.ChannelChecker]
+	select {
+	case checkCh <- struct{}{}:
+	default:
+	}
+}
+
+// checkPlacement admits recovery in dependency order, then gives ordinary
+// balance only the resource groups with no recovery demand or unfinished work.
+// Keep planning and scheduler admission in one serialized invocation: each
+// checker takes a fresh projected snapshot of the work accepted before it.
+func (controller *CheckerController) checkPlacement(ctx context.Context, checkBalance bool) {
+	controller.planningMu.Lock()
+	defer controller.planningMu.Unlock()
+	if controller.nodeMgr != nil && !controller.nodeMgr.LoadReportSyncReady() {
+		return
+	}
+
+	blocked := make(map[string]struct{})
+	for _, kind := range []utils.CheckerType{utils.ChannelChecker, utils.SegmentChecker} {
+		checker := controller.checkers[kind]
+		if checker == nil {
+			continue
 		}
+		var works []task.Task
+		if recovery, ok := checker.(interface {
+			CheckWithRecovery(context.Context) ([]task.Task, map[string]struct{})
+		}); ok {
+			var pending map[string]struct{}
+			works, pending = recovery.CheckWithRecovery(ctx)
+			for rg := range pending {
+				blocked[rg] = struct{}{}
+			}
+		} else {
+			works = checker.Check(ctx)
+		}
+		controller.admit(works)
+	}
+	if !checkBalance {
+		return
+	}
+	if inspector, ok := controller.scheduler.(interface {
+		PendingRecoveryResourceGroups() map[string]struct{}
+	}); ok {
+		for rg := range inspector.PendingRecoveryResourceGroups() {
+			blocked[rg] = struct{}{}
+		}
+	}
+	if checker := controller.checkers[utils.BalanceChecker]; checker != nil {
+		controller.admit(checker.Check(WithRecoveryBlockedRGs(ctx, blocked)))
+	}
+}
+
+func (controller *CheckerController) admit(works []task.Task) {
+	for _, work := range works {
+		err := controller.scheduler.Add(work)
+		if err != nil {
+			assign.UndoTask(work.Context(), work)
+			work.Cancel(err)
+			continue
+		}
+		assign.CommitTask(work.Context(), work)
 	}
 }
 
@@ -191,17 +290,7 @@ func (controller *CheckerController) check(ctx context.Context, checkType utils.
 		return
 	}
 	checker := controller.checkers[checkType]
-	tasks := checker.Check(ctx)
-
-	for _, work := range tasks {
-		err := controller.scheduler.Add(work)
-		if err != nil {
-			assign.UndoTask(work.Context(), work)
-			work.Cancel(err)
-			continue
-		}
-		assign.CommitTask(work.Context(), work)
-	}
+	controller.admit(checker.Check(ctx))
 }
 
 func (controller *CheckerController) Deactivate(typ utils.CheckerType) error {

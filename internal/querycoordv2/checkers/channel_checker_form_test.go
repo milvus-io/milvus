@@ -45,7 +45,7 @@ func (suite *ChannelCheckerTestSuite) channelOnAQueryCluster(regular, streamingQ
 	streamingutil.SetStreamingServiceEnabled()
 	suite.T().Cleanup(func() { os.Unsetenv(streamingutil.MilvusStreamingServiceEnabled) })
 
-	// Feed the pchannel's WAL assignment, otherwise GetWALLocated blocks forever.
+	// Supply current WAL ownership as well as assignment notifications.
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(suite.T())
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
@@ -69,6 +69,7 @@ func (suite *ChannelCheckerTestSuite) channelOnAQueryCluster(regular, streamingQ
 	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(streamingNodes, nil).Maybe()
 	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(streamingNodes, nil).Maybe()
 	b.EXPECT().Close().Return().Maybe()
+	b.EXPECT().GetLatestWALLocated(mock.Anything, "pchannel0").Return(walNode, true).Maybe()
 	balance.Register(b)
 
 	ctx := context.Background()

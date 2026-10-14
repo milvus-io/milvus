@@ -187,7 +187,7 @@ func (b *RoundRobinBalancer) genChannelPlan(ctx context.Context, replica *meta.R
 
 	for _, node := range rwNodes {
 		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
-		channels = sortIfChannelAtWALLocated(channels)
+		channels = sortIfChannelAtWALLocated(ctx, channels)
 
 		if len(channels) <= average {
 			nodesWithLessChannel = append(nodesWithLessChannel, node)

@@ -452,9 +452,13 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	)
 	loadMeta.DbProperties = dbResp.GetProperties()
 
-	dmChannel := ex.targetMgr.GetDmChannel(ctx, task.CollectionID(), action.ChannelName(), meta.NextTarget)
+	targetScope := meta.NextTarget
+	if !ex.targetMgr.IsNextTargetExist(ctx, task.CollectionID()) {
+		targetScope = meta.CurrentTarget
+	}
+	dmChannel := ex.targetMgr.GetDmChannel(ctx, task.CollectionID(), action.ChannelName(), targetScope)
 	if dmChannel == nil {
-		msg := "channel does not exist in next target, skip it"
+		msg := "channel does not exist in recovery target, skip it"
 		mlog.Warn(ctx, msg, mlog.String("channelName", action.ChannelName()))
 		return merr.WrapErrChannelReduplicate(action.ChannelName())
 	}
@@ -465,7 +469,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		return merr.Wrapf(err, "failed to get partitions for collection=%d", task.CollectionID())
 	}
 
-	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
+	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), targetScope)
 
 	req := packSubChannelRequest(
 		task,
@@ -485,7 +489,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		return err
 	}
 
-	sealedSegments := ex.targetMgr.GetSealedSegmentsByChannel(ctx, dmChannel.CollectionID, dmChannel.ChannelName, meta.NextTarget)
+	sealedSegments := ex.targetMgr.GetSealedSegmentsByChannel(ctx, dmChannel.CollectionID, dmChannel.ChannelName, targetScope)
 	sealedSegmentRowCount := lo.MapValues(sealedSegments, func(segment *datapb.SegmentInfo, _ int64) int64 {
 		return segment.GetNumOfRows()
 	})

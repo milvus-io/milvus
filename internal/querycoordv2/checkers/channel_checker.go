@@ -41,6 +41,11 @@ import (
 )
 
 // TODO(sunby): have too much similar codes with SegmentChecker
+type channelCollectionVersionCache struct {
+	collectionVersionCache
+	currentTargetVersion int64
+}
+
 type ChannelChecker struct {
 	*checkerActivation
 	meta         *meta.Meta
@@ -51,11 +56,12 @@ type ChannelChecker struct {
 	assignPolicy assign.AssignPolicy
 
 	// version cache for fast skip when nothing changed
-	versionCache map[int64]*collectionVersionCache
+	versionCache map[int64]*channelCollectionVersionCache
+	replicaCache map[int64][]*meta.Replica
 }
 
 func NewChannelChecker(
-	meta *meta.Meta,
+	metadata *meta.Meta,
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
@@ -67,13 +73,14 @@ func NewChannelChecker(
 
 	return &ChannelChecker{
 		checkerActivation: newCheckerActivation(),
-		meta:              meta,
+		meta:              metadata,
 		dist:              dist,
 		targetMgr:         targetMgr,
 		nodeMgr:           nodeMgr,
 		scheduler:         scheduler,
 		assignPolicy:      assignPolicy,
-		versionCache:      make(map[int64]*collectionVersionCache),
+		versionCache:      make(map[int64]*channelCollectionVersionCache),
+		replicaCache:      make(map[int64][]*meta.Replica),
 	}
 }
 
@@ -93,11 +100,19 @@ func (c *ChannelChecker) readyToCheck(ctx context.Context, collectionID int64) b
 }
 
 func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
+	tasks, _ := c.CheckWithRecovery(ctx)
+	return tasks
+}
+
+// CheckWithRecovery reports missing channels independently of whether they can
+// be assigned this round. Planning a watch does not complete recovery, and an
+// unavailable WAL or destination must not make its resource group look idle.
+func (c *ChannelChecker) CheckWithRecovery(ctx context.Context) ([]task.Task, map[string]struct{}) {
 	if !c.IsActive() {
-		return nil
+		return nil, nil
 	}
 	if !c.nodeMgr.LoadReportSyncReady() {
-		return nil
+		return nil, nil
 	}
 	ctx = assign.WithPlanningLedgerFactory(ctx, func() *assign.PlanningLedger {
 		return assign.NewPlanningLedger(c.nodeMgr, c.dist, c.scheduler, Params.QueryCoordCfg.BalanceMaxPendingLoads.GetAsInt())
@@ -106,20 +121,43 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 
 	collectionIDs := c.meta.GetAll(ctx)
 	tasks := make([]task.Task, 0)
+	recovering := make(map[string]struct{})
 	for _, cid := range collectionIDs {
 		if c.readyToCheck(ctx, cid) {
 			// Fast path: skip if target and dist versions unchanged
-			currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, cid, meta.NextTarget)
+			targetScope := meta.NextTarget
+			if !c.targetMgr.IsNextTargetExist(ctx, cid) {
+				targetScope = meta.CurrentTarget
+			}
+			selectedTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, cid, targetScope)
+			currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, cid, meta.CurrentTarget)
 			currentDistVersion := c.dist.ChannelDistManager.GetVersion()
-			if c.isCollectionSynced(cid, currentTargetVersion, currentDistVersion) {
+			replicas := c.meta.GetByCollection(ctx, cid)
+			if c.isCollectionSynced(cid, selectedTargetVersion, currentTargetVersion, currentDistVersion) && c.sameReplicaSnapshot(cid, replicas) {
 				continue
 			}
 
-			replicas := c.meta.GetByCollection(ctx, cid)
 			hasTask := false
 			unplaced := false
+			hasRecovery := false
+			requiredChannels := c.targetMgr.GetDmChannelsByCollection(ctx, cid, targetScope)
 			for _, r := range replicas {
-				replicaTasks, replicaUnplaced := c.checkReplica(ctx, r)
+				replicaTasks, replicaUnplaced, needsRecovery := c.checkReplicaWithRecovery(ctx, r)
+				if !needsRecovery {
+					for channel := range requiredChannels {
+						leader := c.dist.ChannelDistManager.GetShardLeader(channel, r)
+						if leader == nil || !leader.IsServiceable() {
+							// A running delegator is reported before its query view
+							// is ready. Wait for its state; do not watch it again.
+							needsRecovery = true
+							break
+						}
+					}
+				}
+				if needsRecovery {
+					hasRecovery = true
+					recovering[r.GetResourceGroup()] = struct{}{}
+				}
 				if len(replicaTasks) > 0 {
 					hasTask = true
 					tasks = append(tasks, replicaTasks...)
@@ -139,8 +177,12 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 			// version the cache keys on. A stock binary keeps master's answer:
 			// the unplaced shape does not hold the cache open, so a replica
 			// waiting for a node there is cached like any other empty diff.
-			if versionCacheMayUpdate(hasTask, unplaced) && !unplaced {
-				c.updateVersionCache(cid, currentTargetVersion, currentDistVersion)
+			if versionCacheMayUpdate(hasTask, unplaced) && !unplaced && !hasRecovery {
+				c.updateVersionCache(cid, selectedTargetVersion, currentTargetVersion, currentDistVersion)
+				if c.replicaCache == nil {
+					c.replicaCache = make(map[int64][]*meta.Replica)
+				}
+				c.replicaCache[cid] = append([]*meta.Replica(nil), replicas...)
 			}
 		}
 	}
@@ -169,7 +211,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 			}
 		}
 	}
-	return tasks
+	return tasks, recovering
 }
 
 // versionCacheMayUpdate reports whether a tick may cache a collection's target
@@ -184,20 +226,38 @@ func versionCacheMayUpdate(hasTask, unplaced bool) bool {
 }
 
 // isCollectionSynced checks if target and dist versions are unchanged since last check
-func (c *ChannelChecker) isCollectionSynced(collectionID int64, targetVersion, channelDistVersion int64) bool {
+func (c *ChannelChecker) isCollectionSynced(collectionID int64, targetVersion, currentTargetVersion, channelDistVersion int64) bool {
 	cache, ok := c.versionCache[collectionID]
 	if !ok {
 		return false
 	}
-	return cache.targetVersion == targetVersion && cache.channelDistVersion == channelDistVersion
+	return cache.targetVersion == targetVersion && cache.currentTargetVersion == currentTargetVersion && cache.channelDistVersion == channelDistVersion
 }
 
 // updateVersionCache updates the version cache for a collection
-func (c *ChannelChecker) updateVersionCache(collectionID int64, targetVersion, channelDistVersion int64) {
-	c.versionCache[collectionID] = &collectionVersionCache{
-		targetVersion:      targetVersion,
-		channelDistVersion: channelDistVersion,
+func (c *ChannelChecker) updateVersionCache(collectionID int64, targetVersion, currentTargetVersion, channelDistVersion int64) {
+	c.versionCache[collectionID] = &channelCollectionVersionCache{
+		collectionVersionCache: collectionVersionCache{
+			targetVersion:      targetVersion,
+			channelDistVersion: channelDistVersion,
+		},
+		currentTargetVersion: currentTargetVersion,
 	}
+}
+
+// Replica metadata is immutable. New replicas, changed RG ownership, or changed
+// node membership must reopen recovery even when target/dist versions match.
+func (c *ChannelChecker) sameReplicaSnapshot(collectionID int64, replicas []*meta.Replica) bool {
+	previous := c.replicaCache[collectionID]
+	if len(previous) != len(replicas) {
+		return false
+	}
+	for i, replica := range replicas {
+		if previous[i] != replica {
+			return false
+		}
+	}
+	return true
 }
 
 // cleanVersionCache removes entries for collections that no longer exist.
@@ -213,6 +273,7 @@ func (c *ChannelChecker) cleanVersionCache(activeCollections []int64) {
 	for cid := range c.versionCache {
 		if _, ok := activeSet[cid]; !ok {
 			delete(c.versionCache, cid)
+			delete(c.replicaCache, cid)
 		}
 	}
 }
@@ -232,6 +293,11 @@ func (c *ChannelChecker) cleanVersionCache(activeCollections []int64) {
 // joins the REPLICA, which moves neither the target version nor the channel
 // distribution version - so a cached entry would never be invalidated.
 func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica) ([]task.Task, bool) {
+	tasks, unplaced, _ := c.checkReplicaWithRecovery(ctx, replica)
+	return tasks, unplaced
+}
+
+func (c *ChannelChecker) checkReplicaWithRecovery(ctx context.Context, replica *meta.Replica) ([]task.Task, bool, bool) {
 	ret := make([]task.Task, 0)
 
 	lacks, redundancies := c.getDmChannelDiff(ctx, replica.GetCollectionID(), replica.GetID())
@@ -251,7 +317,7 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// All channel related tasks should be with high priority
 	task.SetPriority(task.TaskPriorityHigh, tasks...)
-	return ret, unplaced
+	return ret, unplaced, len(lacks) > 0
 }
 
 // GetDmChannelDiff get channel diff between target and dist
@@ -282,8 +348,13 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 		}
 	}
 
-	// get channels which exists on next target, but not on dist
-	for name, channel := range nextTargetMap {
+	// Prefer Next when present; after restart Current can be the only target.
+	// Never resurrect a Current-only channel that an existing Next has removed.
+	recoveryTarget := nextTargetMap
+	if !c.targetMgr.IsNextTargetExist(ctx, collectionID) {
+		recoveryTarget = currentTargetMap
+	}
+	for name, channel := range recoveryTarget {
 		_, existOnDist := distMap[name]
 		if !existOnDist {
 			toLoad = append(toLoad, channel)

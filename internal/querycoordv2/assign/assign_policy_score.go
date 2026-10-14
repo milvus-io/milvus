@@ -357,7 +357,13 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 		// Handle WAL location for streaming service
 		targetNode = nil
 		if streamingutil.IsStreamingServiceEnabled() {
-			nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
+			if ctx.Err() != nil {
+				break
+			}
+			nodeID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, c.GetChannelName())
+			if err != nil {
+				continue
+			}
 			if item, ok := nodeItemsMap[nodeID]; ok {
 				targetNode = item
 				queue.Remove(targetNode)

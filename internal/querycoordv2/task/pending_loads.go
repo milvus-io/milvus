@@ -18,9 +18,38 @@ package task
 
 import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
+
+// PendingRecoveryResourceGroups returns resource groups with unfinished checker
+// recovery work. Balance Move tasks have their own epoch and must not be
+// mistaken for recovery merely because their Grow action is pending.
+func (scheduler *taskScheduler) PendingRecoveryResourceGroups() map[string]struct{} {
+	pending := make(map[string]struct{})
+	collect := func(work Task) {
+		if work.Source() != utils.ChannelChecker && work.Source() != utils.SegmentChecker {
+			return
+		}
+		switch work.Status() {
+		case TaskStatusSucceeded, TaskStatusFailed, TaskStatusCanceled:
+			return
+		}
+		if rg := work.ResourceGroup(); rg != "" {
+			pending[rg] = struct{}{}
+		}
+	}
+	scheduler.channelTasks.Range(func(_ replicaChannelIndex, work Task) bool {
+		collect(work)
+		return true
+	})
+	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, work Task) bool {
+		collect(work)
+		return true
+	})
+	return pending
+}
 
 // PendingSegmentLoads is an optional planning inspector. Keep it outside the
 // Scheduler interface so older schedulers can retain their aggregate-delta path.

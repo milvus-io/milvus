@@ -134,6 +134,34 @@ invocation and retain successful provisional reservations for that invocation;
 do not refresh the baseline with newly accepted scheduler deltas and count those
 plans again.
 
+Run placement checks through one ordered coordinator loop: ChannelChecker,
+then SegmentChecker, then BalanceChecker when its configured interval is due.
+The later stage snapshots already accepted work from the earlier stage. Channel
+and segment work can execute concurrently. A segment without a delegator waits
+for its own shard; other shards with a delegator remain eligible for recovery.
+An unavailable WAL assignment defers that channel without waiting inside the
+shared planning lock or selecting an unrelated WAL destination.
+Streaming balancer registration and node discovery also use bounded snapshot
+lookups; a failed node discovery briefly reuses its last snapshot. Channel
+convergence caches track both Current and Next target versions so promotion
+rechecks channels that were protected only by the old Current target.
+
+The loop's period is the shorter of the channel and segment check intervals.
+It invokes balance no more often than the balance check interval, but an
+interval shorter than the recovery period cannot start an additional balance
+round between two ordered recovery checks. At the current defaults the recovery
+period is 3 seconds while the balance check minimum is 300 milliseconds;
+stopping-drain and epoch reconciliation therefore also run at the recovery
+period. The separate automatic-balance interval remains an additional gate and
+may defer normal balance to the following ordered round.
+
+Each recovery stage reports RGs with missing target channels or sealed segments
+even when admission yields no task. The controller also accounts for unfinished
+ChannelChecker and SegmentChecker tasks. Ordinary balance admits new work only
+for RGs without either recovery demand or unfinished recovery work. Existing
+balance epochs and stopping-node drain work retain their separate handling;
+accepted work is not canceled just because a later recovery need appears.
+
 The baseline combines actual sealed/growing distribution, accepted local Grow
 tasks, and QN-reported loads. Merge the same `(node, collection, segment)` using
 maximum available estimates, rather than adding duplicate local and remote
@@ -307,6 +335,11 @@ coordinator restart during an active cold load.
   whole-epoch cancellation.
 - Keep a balance epoch active across checks; verify deferred collections retain
   their queue position and eligible replicas in other RGs continue to progress.
+- In an ordered controller round, admit channel recovery before segment
+  recovery, account for both before ordinary balance, and block only the RGs
+  with missing or unfinished recovery work. Verify zero-task deferrals due to
+  missing WAL assignment, no shard leader, or insufficient capacity, and keep
+  independent shards and other RGs moving.
 - Recover the same missing channel in multiple replicas, including an unready
   lowest-load or WAL-preferred node; verify independent replica placement on
   eligible nodes.

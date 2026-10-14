@@ -3,6 +3,7 @@ package snmanager
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -19,6 +20,11 @@ import (
 var StaticStreamingNodeManager = newStreamingNodeManager()
 
 var ErrStreamingServiceNotReady = errors.New("streaming service is not ready, may be on-upgrading from old arch")
+
+const (
+	streamingNodeSnapshotTimeout       = 100 * time.Millisecond
+	streamingNodeSnapshotRetryInterval = time.Second
+)
 
 // TODO: can be removed after streaming service fully manage all growing data.
 func newStreamingNodeManager() *StreamingNodeManager {
@@ -69,6 +75,7 @@ type StreamingNodeManager struct {
 	nodeChangedNotifier *syncutil.VersionedNotifier                         // used to notify that node in streaming node manager has been changed.
 	nodesMu             sync.Mutex                                          // protects previousNodesByRG from concurrent access.
 	previousNodesByRG   map[int64]*types.StreamingNodeInfoWithResourceGroup // used to store the previous nodes by resource group.
+	nodesRetryAfter     time.Time
 }
 
 // GetBalancer returns the balancer of the streaming node manager.
@@ -90,13 +97,17 @@ func (s *StreamingNodeManager) AllocVirtualChannels(ctx context.Context, param b
 }
 
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
-// Return -1 and an error when no WAL assignment is available or the context is canceled.
+// Return -1 and an error when the balancer or WAL assignment is unavailable, or
+// the context is canceled. This snapshot lookup does not wait for registration.
 // Missing assignment is not proof that the virtual channel has been dropped.
 func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel string) (int64, error) {
-	pchannel := funcutil.ToPhysicalChannel(vchannel)
-	balancer, err := balance.GetWithContext(ctx)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return -1, err
+	}
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	balancer, ready := balance.TryGet()
+	if !ready {
+		return -1, merr.WrapErrServiceUnavailableMsg("streaming balancer is not ready")
 	}
 	serverID, ok := balancer.GetLatestWALLocated(ctx, pchannel)
 	if !ok {
@@ -172,17 +183,27 @@ func (s *StreamingNodeManager) GetStreamingQueryNodeIDsByResourceGroup() map[str
 // fetchStreamingNodes fetches all streaming nodes from balancer, falling back to cached nodes on error.
 // The result is cached for use during shutdown when the balancer may not be available.
 func (s *StreamingNodeManager) fetchStreamingNodes() map[int64]*types.StreamingNodeInfoWithResourceGroup {
-	balancer, err := balance.GetWithContext(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	streamingNodes, err := balancer.GetAvailableStreamingNodes(context.Background())
-
+	// Coalesce concurrent requests and reuse a failed sample for a short period:
+	// a checker may query this snapshot once per replica/channel candidate group.
 	s.nodesMu.Lock()
 	defer s.nodesMu.Unlock()
+	balancer, ready := balance.TryGet()
+	var streamingNodes map[int64]*types.StreamingNodeInfoWithResourceGroup
+	var err error
+	if ready && !time.Now().Before(s.nodesRetryAfter) {
+		// The underlying resolver can wait for its first discovery result.
+		// Planning uses a bounded snapshot and retries on a later check.
+		ctx, cancel := context.WithTimeout(context.Background(), streamingNodeSnapshotTimeout)
+		streamingNodes, err = balancer.GetAvailableStreamingNodes(ctx)
+		cancel()
+	} else {
+		streamingNodes = s.previousNodesByRG
+	}
+
 	if err != nil {
-		// when the streaming coord is on shutdown, the balancer will return an error,
-		// causing panic, so we need to return the previous nodes.
+		s.nodesRetryAfter = time.Now().Add(streamingNodeSnapshotRetryInterval)
+		// During startup/shutdown, keep any previous snapshot rather than
+		// waiting for the balancer to register or treating it as an empty pool.
 		streamingNodes = s.previousNodesByRG
 	}
 	// Deep copy into cache to prevent callers from mutating the cached map.

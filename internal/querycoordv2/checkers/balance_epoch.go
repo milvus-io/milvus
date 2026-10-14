@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -38,6 +39,37 @@ type balanceEpochWork struct {
 type balanceEpoch struct {
 	id    uint64
 	works []balanceEpochWork
+}
+
+type recoveryBlockedRGsKey struct{}
+
+// WithRecoveryBlockedRGs supplies the missing-channel/segment diff from the
+// ordered recovery checks. An explicit empty set means recovery found no gaps;
+// pending balance Grow actions alone must not be classified as recovery.
+func WithRecoveryBlockedRGs(ctx context.Context, blocked map[string]struct{}) context.Context {
+	return context.WithValue(ctx, recoveryBlockedRGsKey{}, maps.Clone(blocked))
+}
+
+func recoveryBlockedRG(ctx context.Context, rg string) bool {
+	blocked, _ := ctx.Value(recoveryBlockedRGsKey{}).(map[string]struct{})
+	_, pending := blocked[rg]
+	return pending
+}
+
+func (b *BalanceChecker) planningBlocks(ctx context.Context, replica *meta.Replica, isStoppingBalance bool) bool {
+	if b.epochBlocks(replica.GetResourceGroup()) {
+		return true
+	}
+	if isStoppingBalance {
+		return false
+	}
+	if _, ordered := ctx.Value(recoveryBlockedRGsKey{}).(map[string]struct{}); ordered {
+		return recoveryBlockedRG(ctx, replica.GetResourceGroup())
+	}
+	// Older direct callers do not provide a recovery diff. Keep their
+	// conservative pending-load guard; the ordered controller always supplies
+	// an explicit set and therefore never uses this as recovery classification.
+	return b.hasPendingLoads(replica)
 }
 
 func (b *BalanceChecker) epochBlocks(rg string) bool {
@@ -92,8 +124,8 @@ func (b *BalanceChecker) advanceEpochs(now time.Time) {
 	}
 }
 
-// Recovery work is admitted by SegmentChecker ahead of new ordinary balancing.
-func (b *BalanceChecker) hasPendingRecovery(replica *meta.Replica) bool {
+// This compatibility gate cannot distinguish recovery from balance loading.
+func (b *BalanceChecker) hasPendingLoads(replica *meta.Replica) bool {
 	nodes := replica.GetNodes()
 	if inspector, ok := b.scheduler.(interface {
 		PendingSegmentLoads() map[int64][]*querypb.LoadingSegmentInfo

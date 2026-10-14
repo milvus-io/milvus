@@ -726,11 +726,11 @@ func mockHeapRegressionWALLocations(t *testing.T) {
 	t.Cleanup(func() { streaming.UnPatch() })
 	sqns := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).Return(typeutil.NewUniqueSet(1, 2, 3)).Build()
 	t.Cleanup(func() { sqns.UnPatch() })
-	wal := mockey.Mock((*snmanager.StreamingNodeManager).GetWALLocated).To(func(_ *snmanager.StreamingNodeManager, channel string) int64 {
+	wal := mockey.Mock((*snmanager.StreamingNodeManager).GetLatestWALLocated).To(func(_ *snmanager.StreamingNodeManager, _ context.Context, channel string) (int64, error) {
 		if channel == "wal_v1" || channel == "wal2_v1" {
-			return 1
+			return 1, nil
 		}
-		return 4 // Another replica owns the fallback channel's WAL node.
+		return 4, nil // Another replica owns the fallback channel's WAL node.
 	}).Build()
 	t.Cleanup(func() { wal.UnPatch() })
 }

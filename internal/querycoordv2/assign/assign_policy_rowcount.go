@@ -208,7 +208,13 @@ func (p *RowCountBasedAssignPolicy) AssignChannel(
 
 		// If streaming service is enabled, assign channel to the node where WAL is located
 		if streamingutil.IsStreamingServiceEnabled() {
-			nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
+			if ctx.Err() != nil {
+				break
+			}
+			nodeID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, c.GetChannelName())
+			if err != nil {
+				continue
+			}
 			if item, ok := nodeItems[nodeID]; ok {
 				ni = item
 				queue.Remove(ni)

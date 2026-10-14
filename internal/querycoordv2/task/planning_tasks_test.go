@@ -45,6 +45,38 @@ func TestPendingSegmentLoadsTracksQueuedGrowAndNotFinishedMove(t *testing.T) {
 	require.Empty(t, scheduler.PendingSegmentLoads(), "Reduce must not be counted as a fresh outstanding Grow")
 }
 
+func TestPendingRecoveryResourceGroupsExcludesBalanceAndTerminalTasks(t *testing.T) {
+	paramtable.Init()
+	scheduler := NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)
+	channelReplica := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 10, ResourceGroup: "channel-rg"})
+	segmentReplica := meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: 20, ResourceGroup: "segment-rg"})
+	balanceReplica := meta.NewReplica(&querypb.Replica{ID: 3, CollectionID: 30, ResourceGroup: "balance-rg"})
+
+	channel, err := NewChannelTask(context.Background(), time.Minute, utils.ChannelChecker, 10, channelReplica,
+		NewChannelAction(11, ActionTypeGrow, "channel"))
+	require.NoError(t, err)
+	segment, err := NewSegmentTask(context.Background(), time.Minute, utils.SegmentChecker, 20, segmentReplica, commonpb.LoadPriority_HIGH,
+		NewSegmentAction(22, ActionTypeGrow, "segment-shard", 200))
+	require.NoError(t, err)
+	balance, err := NewSegmentTask(context.Background(), time.Minute, utils.BalanceChecker, 30, balanceReplica, commonpb.LoadPriority_LOW,
+		NewSegmentAction(33, ActionTypeGrow, "balance-shard", 300))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		channel.Cancel(nil)
+		segment.Cancel(nil)
+		balance.Cancel(nil)
+	})
+	scheduler.channelTasks.Insert(replicaChannelIndex{channel.ReplicaID(), channel.Channel()}, channel)
+	scheduler.segmentTasks.Insert(NewReplicaSegmentIndex(segment), segment)
+	scheduler.segmentTasks.Insert(NewReplicaSegmentIndex(balance), balance)
+
+	require.Equal(t, map[string]struct{}{"channel-rg": {}, "segment-rg": {}}, scheduler.PendingRecoveryResourceGroups())
+	channel.SetStatus(TaskStatusSucceeded)
+	require.Equal(t, map[string]struct{}{"segment-rg": {}}, scheduler.PendingRecoveryResourceGroups())
+	segment.SetStatus(TaskStatusCanceled)
+	require.Empty(t, scheduler.PendingRecoveryResourceGroups())
+}
+
 func TestRecoveryQueueWaitIsBoundedBeforeExecutionStarts(t *testing.T) {
 	paramtable.Init()
 	scheduler := NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)

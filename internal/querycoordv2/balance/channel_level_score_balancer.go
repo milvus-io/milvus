@@ -288,7 +288,7 @@ func (b *ChannelLevelScoreBalancer) genChannelPlan(ctx context.Context, replica 
 		channelsToMove := make([]*meta.DmChannel, 0)
 		for _, node := range onlineNodes {
 			channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
-			channels = sortIfChannelAtWALLocated(channels)
+			channels = sortIfChannelAtWALLocated(ctx, channels)
 
 			if len(channels) <= average {
 				nodeWithLessChannel = append(nodeWithLessChannel, node)

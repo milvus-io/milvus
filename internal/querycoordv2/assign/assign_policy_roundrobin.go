@@ -151,7 +151,7 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 	plans := make([]ChannelAssignPlan, 0)
 	scoreDelta := make(map[int64]int)
 	if streamingutil.IsStreamingServiceEnabled() {
-		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(channels, nodes)
+		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(ctx, channels, nodes)
 	}
 	if ledger != nil {
 		reserved := plans[:0]
