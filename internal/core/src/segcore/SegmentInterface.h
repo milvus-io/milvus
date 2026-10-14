@@ -423,8 +423,8 @@ class SegmentInterface {
 
     // Get the shared struct-element mapping for a struct sub-field.
     // Returns nullptr if the field has no struct-element mapping.
-    // Sealed segments build it on first use, using the caller's cancellation
-    // token and normal column cache; later calls reuse the immutable metadata.
+    // Sealed segments build it during loading, before publishing the column
+    // generation. This getter only reads immutable metadata and performs no IO.
     virtual std::shared_ptr<const IArrayOffsets>
     GetArrayOffsets(FieldId field_id, OpContext* op_ctx = nullptr) const = 0;
 };

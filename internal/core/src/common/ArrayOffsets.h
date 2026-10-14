@@ -20,7 +20,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -36,7 +35,6 @@
 #include "common/OpContext.h"
 #include "common/Types.h"
 #include "folly/FBVector.h"
-#include "folly/Function.h"
 
 namespace milvus {
 
@@ -286,33 +284,6 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     const std::vector<int32_t> row_to_element_start_;
     const std::optional<TargetBitmap> row_validity_;
     int64_t resource_size_{0};
-};
-
-// Shared by all sub-fields of one struct generation. Construction does no I/O;
-// the first consumer builds immutable metadata outside segment publish locks.
-// A failed/cancelled attempt leaves the entry available for another consumer.
-class LazyArrayOffsets {
- public:
-    using Builder = folly::FunctionRef<std::shared_ptr<ArrayOffsetsSealed>()>;
-
-    explicit LazyArrayOffsets(
-        std::shared_ptr<ArrayOffsetsSealed> offsets = nullptr)
-        : offsets_(std::move(offsets)) {
-    }
-
-    std::shared_ptr<ArrayOffsetsSealed>
-    GetOrBuild(OpContext* op_ctx, Builder build) const;
-
-    std::shared_ptr<ArrayOffsetsSealed>
-    GetIfReady() const {
-        return std::atomic_load(&offsets_);
-    }
-
- private:
-    mutable std::shared_ptr<ArrayOffsetsSealed> offsets_;
-    mutable std::mutex mutex_;
-    mutable std::condition_variable ready_;
-    mutable bool building_{false};
 };
 
 // Growing-segment row -> element-start table with lock-free readers.
