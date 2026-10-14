@@ -20,7 +20,7 @@ func benchTask(ctx context.Context, nq int64) *SearchTask {
 				CollectionID:       1000,
 				MvccTimestamp:      100,
 				PartitionIDs:       []int64{1},
-				SerializedExprPlan: []byte("plan"),
+				SerializedExprPlan: testPlan(),
 			},
 			DmlChannels: []string{"channel1"},
 			SegmentIDs:  []int64{1, 2},

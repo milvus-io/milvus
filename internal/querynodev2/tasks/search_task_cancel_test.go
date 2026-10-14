@@ -25,15 +25,28 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 // newGroupMember builds a standalone search task compatible with every other
 // task built by this helper, so that Merge succeeds.
+// testPlan is a plan every group member shares. It has to be a real
+// PlanNode: canMerge decodes it to refuse merging requests that carry a
+// function chain.
+func testPlan() []byte {
+	b, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{FieldId: 100}}})
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 func newGroupMember(ctx context.Context, nq int64) *SearchTask {
 	return &SearchTask{
 		ctx:       ctx,
@@ -46,7 +59,7 @@ func newGroupMember(ctx context.Context, nq int64) *SearchTask {
 				CollectionID:       1000,
 				MvccTimestamp:      100,
 				PartitionIDs:       []int64{1},
-				SerializedExprPlan: []byte("plan"),
+				SerializedExprPlan: testPlan(),
 			},
 			DmlChannels: []string{"channel1"},
 			SegmentIDs:  []int64{1, 2},
@@ -298,7 +311,7 @@ func TestMergeWithoutContext(t *testing.T) {
 					CollectionID:       1000,
 					MvccTimestamp:      100,
 					PartitionIDs:       []int64{1},
-					SerializedExprPlan: []byte("plan"),
+					SerializedExprPlan: testPlan(),
 				},
 				DmlChannels: []string{"channel1"},
 				SegmentIDs:  []int64{1},
