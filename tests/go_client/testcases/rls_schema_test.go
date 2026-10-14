@@ -2193,6 +2193,7 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 							it, err := mc.SearchIterator(ctx, client.NewSearchIteratorOption(name, query).WithANNSField("vector").WithAnnParam(params).WithFilter(filter).WithTemplateParam("key", value).WithBatchSize(rlsIteratorBatchSize).WithIgnoreGrowing(ignoreGrowing).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 							require.NoError(t, err)
 							var got []any
+							var pageBounds []float32
 							ended := false
 							for range len(all)/rlsIteratorBatchSize + 3 {
 								r, err := it.Next(ctx)
@@ -2202,8 +2203,41 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 								}
 								require.NoError(t, err)
 								got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
+								require.Len(t, r.Scores, r.Len())
+								if len(r.Scores) > 0 {
+									pageBounds = append(pageBounds, r.Scores[len(r.Scores)-1])
+								}
 							}
 							require.True(t, ended)
+							seen := make(map[any]bool, len(got))
+							for _, id := range got {
+								if ignoreGrowing {
+									require.Contains(t, sealed, id, "iterator returned a growing row")
+								}
+								require.False(t, seen[id], "duplicate iterator ID: %v", id)
+								seen[id] = true
+							}
+							if len(got) < len(expected) {
+								missing := make(map[any]rlsSchemaRow)
+								var missingIDs []int64
+								for _, id := range expected {
+									if !seen[id] {
+										missing[id] = want[id]
+										missingIDs = append(missingIDs, id.(int64))
+									}
+								}
+								// Use server scores: FLOAT_VECTOR reductions may round differently from the oracle.
+								rs, err := mc.Search(ctx, client.NewSearchOption(name, len(missingIDs), []entity.Vector{query}).WithANNSField("vector").WithAnnParam(params).WithFilter(literalFilter+" AND id in {missing_ids}").WithTemplateParam("missing_ids", missingIDs).WithIgnoreGrowing(ignoreGrowing).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+								require.NoError(t, err)
+								require.Len(t, rs, 1)
+								recovered := checkRLSSchemaRows(t, rs[0], missing, fields)
+								checkRLSSchemaIDs(t, slices.Collect(maps.Keys(missing)), recovered)
+								require.Len(t, rs[0].Scores, len(recovered))
+								for i, id := range recovered {
+									require.Contains(t, pageBounds, rs[0].Scores[i], "missing ID is not tied at a page boundary: %v", id)
+								}
+								t.Skipf("xfail: https://github.com/milvus-io/milvus/issues/54188, SearchIterator drops page-boundary ties: %v", missingIDs)
+							}
 							checkRLSSchemaIDs(t, expected, got)
 						})
 					}
