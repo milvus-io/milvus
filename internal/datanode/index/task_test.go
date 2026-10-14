@@ -434,13 +434,16 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 	defer patch.UnPatch()
 
 	req := &workerpb.AnalyzeRequest{
-		TaskID:       suite.taskID,
-		CollectionID: suite.collectionID,
-		PartitionID:  suite.partitionID,
-		FieldID:      suite.fieldID,
-		FieldName:    "vec",
-		FieldType:    schemapb.DataType_FloatVector,
-		Dim:          128,
+		TaskID:            suite.taskID,
+		CollectionID:      suite.collectionID,
+		PartitionID:       suite.partitionID,
+		FieldID:           suite.fieldID,
+		FieldName:         "vec",
+		FieldType:         schemapb.DataType_FloatVector,
+		Dim:               128,
+		NumClusters:       16,
+		ClusterType:       "KMEANS",
+		MaxTrainSizeRatio: 0.8,
 		StorageConfig: &indexpb.StorageConfig{
 			StorageType:                 "minio",
 			RootPath:                    "files",

@@ -341,9 +341,11 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreAnalyzeTask(req.GetClusterID(), req.GetTaskID(), &index.AnalyzeTaskInfo{
-		Cancel: taskCancel,
-		State:  indexpb.JobState_JobStateInProgress,
+		Version: req.GetVersion(),
+		Cancel:  taskCancel,
+		State:   indexpb.JobState_JobStateInProgress,
 	}); oldInfo != nil {
+		taskCancel()
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeAnalyzeJob.String(),
 			fmt.Sprintf("analyze task already existed with %s-%d", req.GetClusterID(), req.GetTaskID()))
 		mlog.Warn(context.TODO(), "duplicated analyze task", mlog.Err(err))
@@ -513,6 +515,7 @@ func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJ
 				State:         info.State,
 				FailReason:    info.FailReason,
 				CentroidsFile: info.CentroidsFile,
+				Version:       info.Version,
 			})
 		}
 	}

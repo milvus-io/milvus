@@ -767,11 +767,12 @@ func (t *clusteringCompactionTask) doClean() error {
 
 		// drop partition stats if uploaded
 		partitionStatsInfo := &datapb.PartitionStatsInfo{
-			CollectionID: t.GetTaskProto().GetCollectionID(),
-			PartitionID:  t.GetTaskProto().GetPartitionID(),
-			VChannel:     t.GetTaskProto().GetChannel(),
-			Version:      t.GetTaskProto().GetPlanID(),
-			SegmentIDs:   t.GetTaskProto().GetResultSegments(),
+			CollectionID:  t.GetTaskProto().GetCollectionID(),
+			PartitionID:   t.GetTaskProto().GetPartitionID(),
+			VChannel:      t.GetTaskProto().GetChannel(),
+			Version:       t.GetTaskProto().GetPlanID(),
+			AnalyzeTaskID: t.GetTaskProto().GetAnalyzeTaskID(),
+			SegmentIDs:    t.GetTaskProto().GetResultSegments(),
 		}
 		err := t.meta.CleanPartitionStatsInfo(context.TODO(), partitionStatsInfo)
 		if err != nil {
@@ -794,20 +795,18 @@ func (t *clusteringCompactionTask) doClean() error {
 }
 
 func (t *clusteringCompactionTask) doAnalyze() error {
-	analyzeTask := &indexpb.AnalyzeTask{
-		CollectionID: t.GetTaskProto().GetCollectionID(),
-		PartitionID:  t.GetTaskProto().GetPartitionID(),
-		FieldID:      t.GetTaskProto().GetClusteringKeyField().FieldID,
-		FieldName:    t.GetTaskProto().GetClusteringKeyField().Name,
-		FieldType:    t.GetTaskProto().GetClusteringKeyField().DataType,
-		SegmentIDs:   t.GetTaskProto().GetInputSegments(),
-		TaskID:       t.GetTaskProto().GetAnalyzeTaskID(),
-		State:        indexpb.JobState_JobStateInit,
-	}
-	err := t.meta.GetAnalyzeMeta().AddAnalyzeTask(analyzeTask)
-	if err != nil {
-		mlog.Warn(context.TODO(), "failed to create analyze task", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
-		return err
+	// Add may have succeeded before saving the compaction state failed. Reuse
+	// its frozen parameters and generation rather than overwriting the task.
+	analyzeTask := t.meta.GetAnalyzeMeta().GetTask(t.GetTaskProto().GetAnalyzeTaskID())
+	if analyzeTask == nil {
+		var err error
+		analyzeTask, err = t.newAnalyzeTask()
+		if err != nil {
+			return err
+		}
+		if err = t.meta.GetAnalyzeMeta().AddAnalyzeTask(analyzeTask); err != nil {
+			return err
+		}
 	}
 
 	t.analyzeScheduler.Enqueue(newAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta.(*meta)))

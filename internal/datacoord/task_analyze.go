@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"time"
 
@@ -33,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type analyzeTask struct {
@@ -102,7 +103,7 @@ func (at *analyzeTask) UpdateVersion(nodeID int64) error {
 	if err := at.meta.analyzeMeta.UpdateVersion(at.GetTaskID(), nodeID); err != nil {
 		return err
 	}
-	at.Version++
+	at.Version = at.meta.analyzeMeta.GetTask(at.GetTaskID()).GetVersion()
 	at.NodeID = nodeID
 	return nil
 }
@@ -152,6 +153,9 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		FieldName:     task.FieldName,
 		FieldType:     task.FieldType,
 		Dim:           task.Dim,
+		NumClusters:   task.NumClusters,
+		ClusterType:   task.ClusterType,
+		ClusterParams: maps.Clone(task.ClusterParams),
 		SegmentStats:  make(map[int64]*indexpb.SegmentStats),
 		Version:       task.Version + 1,
 		StorageConfig: createStorageConfig(),
@@ -178,6 +182,10 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 			}
 			return
 		}
+		if info.GetCollectionID() != task.CollectionID || info.GetPartitionID() != task.PartitionID || info.GetNumOfRows() < 0 || info.GetNumOfRows() > math.MaxInt64-totalSegmentsRows || req.SegmentStats[segID] != nil {
+			at.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "invalid analyze segment identity or row count")
+			return
+		}
 		totalSegmentsRows += info.GetNumOfRows()
 		stats := &indexpb.SegmentStats{
 			ID:      segID,
@@ -192,38 +200,21 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		req.SegmentStats[segID] = stats
 	}
 
-	// Extract dim from schema field TypeParams for vector clustering key.
-	if at.schema != nil {
-		for _, f := range at.schema.Fields {
-			if f.FieldID == task.FieldID {
-				dim, err := storage.GetDimFromParams(f.TypeParams)
-				if err != nil {
-					at.SetState(indexpb.JobState_JobStateInit, err.Error())
-					return
-				}
-				req.Dim = int64(dim)
-
-				// Calculate the number of clusters based on total data size.
-				totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(dim) * typeutil.VectorTypeSize(task.FieldType)
-				numClusters := int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
-				if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
-					log.Info(context.TODO(), "data size is too small, skip analyze task",
-						mlog.Float64("raw data size", totalSegmentsRawDataSize),
-						mlog.Int64("num clusters", numClusters),
-						mlog.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
-					if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, ""); err != nil {
-						// State is left untouched, so the scheduler re-enqueues the task and retries.
-						log.Warn(context.TODO(), "failed to persist the finished state of the analyze task", mlog.Err(err))
-					}
-					return
-				}
-				if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {
-					numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
-				}
-				req.NumClusters = numClusters
-				break
-			}
+	// An empty input follows the existing successful-skip path. Otherwise the
+	// persisted parameters, including K, must describe the current field.
+	if totalSegmentsRows == 0 {
+		at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "")
+		return
+	}
+	for _, field := range at.schema.GetFields() {
+		if field.GetFieldID() == task.FieldID {
+			req.Field = field
+			break
 		}
+	}
+	if err := validateAnalyzeField(task, req.Field); err != nil {
+		at.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error())
+		return
 	}
 
 	req.MaxTrainSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxTrainSizeRatio.GetAsFloat()
@@ -276,6 +267,9 @@ func (at *analyzeTask) QueryTaskOnWorker(cluster session.Cluster) {
 		if result.GetTaskID() != at.GetTaskID() {
 			continue
 		}
+		if result.GetVersion() != at.GetVersion() {
+			return
+		}
 
 		state := result.GetState()
 		// Handle different task states
@@ -316,4 +310,19 @@ func (at *analyzeTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 
 func (at *analyzeTask) DropTaskOnWorker(cluster session.Cluster) {
 	at.tryDropTaskOnWorker(cluster)
+}
+
+// Reject stale/corrupt task metadata instead of silently changing its shape.
+func validateAnalyzeField(task *indexpb.AnalyzeTask, field *schemapb.FieldSchema) error {
+	if field == nil || field.GetFieldID() != task.GetFieldID() || field.GetDataType() != task.GetFieldType() || field.GetDataType() != schemapb.DataType_FloatVector || task.GetNumClusters() <= 0 || task.GetClusterType() == "" {
+		return merr.WrapErrServiceInternalMsg("analyze task does not match its clustering field")
+	}
+	dim, err := storage.GetDimFromParams(field.GetTypeParams())
+	if err != nil {
+		return merr.Wrap(err, "resolve analyze field dimension")
+	}
+	if int64(dim) != task.GetDim() || dim <= 0 {
+		return merr.WrapErrServiceInternalMsg("analyze task dimension does not match its field")
+	}
+	return nil
 }

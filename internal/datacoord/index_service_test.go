@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -51,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -357,8 +359,21 @@ func TestServer_CreateIndex(t *testing.T) {
 			},
 		}
 
-		resp, err := s.CreateIndex(ctx, req)
-		assert.Error(t, merr.CheckRPCCall(resp, err))
+		// Cardinal DISKANN supports mmap, while other providers may not.
+		// Exercise both capabilities without assuming the linked provider.
+		for _, supported := range []bool{false, true} {
+			t.Run(fmt.Sprintf("supported_%t", supported), func(t *testing.T) {
+				s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
+				feature := mockey.Mock(indexparamcheck.IsVectorMmapIndex).Return(supported).Build()
+				defer feature.UnPatch()
+				resp, err := s.CreateIndex(ctx, req)
+				if supported {
+					assert.NoError(t, merr.CheckRPCCall(resp, err))
+				} else {
+					assert.Error(t, merr.CheckRPCCall(resp, err))
+				}
+			})
+		}
 	})
 
 	t.Run("save index fail", func(t *testing.T) {

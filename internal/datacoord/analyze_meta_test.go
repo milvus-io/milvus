@@ -148,8 +148,9 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 
 	s.Run("FinishTask", func() {
 		err := am.FinishTask(1, &workerpb.AnalyzeResult{
-			TaskID: 1,
-			State:  indexpb.JobState_JobStateFinished,
+			TaskID:  1,
+			Version: am.GetTask(1).GetVersion(),
+			State:   indexpb.JobState_JobStateFinished,
 		})
 		s.NoError(err)
 		s.Equal(indexpb.JobState_JobStateFinished, am.GetTask(1).State)
@@ -227,8 +228,9 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 		s.Error(err)
 
 		err = am.FinishTask(1, &workerpb.AnalyzeResult{
-			TaskID: 1,
-			State:  indexpb.JobState_JobStateFinished,
+			TaskID:  1,
+			Version: am.GetTask(1).GetVersion(),
+			State:   indexpb.JobState_JobStateFinished,
 		})
 		s.Error(err)
 		s.Equal(indexpb.JobState_JobStateInit, am.GetTask(1).State)
