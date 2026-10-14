@@ -120,10 +120,12 @@ func (provider *YCEmbeddingProvider) headers() map[string]string {
 }
 
 func (provider *YCEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, _ models.TextEmbeddingMode) (any, error) {
-	_ = ctx
 	numRows := len(texts)
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += provider.maxBatch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
@@ -138,7 +140,7 @@ func (provider *YCEmbeddingProvider) CallEmbedding(ctx context.Context, texts []
 			req.Texts = nil
 		}
 
-		resp, err := models.PostRequest[YCEmbeddingResponse](req, provider.url, provider.headers(), provider.timeoutMs)
+		resp, err := models.PostRequest[YCEmbeddingResponse](ctx, req, provider.url, provider.headers(), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
