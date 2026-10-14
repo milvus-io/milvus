@@ -19,6 +19,7 @@ package dml
 import (
 	"context"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -386,6 +388,125 @@ func TestQueryTaskRLSModes(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, proto.Equal(expected, plan.GetQuery().GetPredicates()))
 		})
+	}
+}
+
+func TestQueryTaskRLSModesAfterCollectionInvalidation(t *testing.T) {
+	paramtable.Init()
+	const collectionID = int64(995001)
+	const collectionName = "rls_mode_transitions"
+	ctx := context.Background()
+	schema := newRLSOperationTestSchema(collectionName)
+	coord := mocks.NewMockMixCoordClient(t)
+	cache, err := metacache.NewMetaCache(coord)
+	require.NoError(t, err)
+	t.Cleanup(cache.Close)
+	node := &mockTaskNode{metaCache: cache}
+
+	rls.InvalidatePolicies(collectionID, 0)
+	rls.InvalidatePrincipalTags(collectionID, "alice", 0)
+	t.Cleanup(func() {
+		rls.InvalidatePolicies(collectionID, 0)
+		rls.InvalidatePrincipalTags(collectionID, "alice", 0)
+	})
+	require.NoError(t, rls.Init(ctx, coord))
+	coord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
+		return req.GetCollectionId() == collectionID && req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES
+	})).Return(&rootcoordpb.GetRLSMetadataResponse{
+		Status: merr.Success(), CollectionId: collectionID,
+		Policies: rlsPolicyInfos(collectionID, []*rlsutil.RowPolicy{{
+			PolicyName: "tenant", PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:   []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr: "value == $current_principal_tags['value']",
+		}}),
+	}, nil).Once()
+	coord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
+		return req.GetCollectionId() == collectionID && req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS && req.GetPrincipalName() == "alice"
+	})).Return(&rootcoordpb.GetRLSMetadataResponse{
+		Status: merr.Success(), CollectionId: collectionID,
+		Principals: []*rootcoordpb.RLSPrincipalInfo{{
+			CollectionId: collectionID, PrincipalName: "alice", Tags: `{"value":10}`,
+		}},
+	}, nil).Once()
+	coord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status: merr.Success(), PartitionIDs: []int64{10},
+		PartitionNames:       []string{paramtable.Get().CommonCfg.DefaultPartitionName.GetValue()},
+		CreatedTimestamps:    []uint64{1},
+		CreatedUtcTimestamps: []uint64{1},
+	}, nil).Maybe()
+
+	// Reuse one manager across property changes, without changing schemaVersion
+	// or invalidating policy/tag caches. Only enforced requests may load metadata.
+	for _, test := range []struct {
+		name          string
+		enabled       bool
+		mode          string
+		principal     string
+		skip          bool
+		enforce       bool
+		wantErr       error
+		metadataCalls int
+		refreshFails  bool
+	}{
+		{name: "disabled force", mode: "Force"},
+		{name: "default auto skip", enabled: true},
+		{name: "auto skip with principal loads rules", enabled: true, principal: "alice", enforce: true, metadataCalls: 2},
+		{name: "force rejects missing principal", enabled: true, mode: "Force", wantErr: merr.ErrPrivilegeNotPermitted, metadataCalls: 2},
+		{name: "force rejects explicit skip", enabled: true, mode: "Force", principal: "alice", skip: true, wantErr: merr.ErrPrivilegeNotPermitted, metadataCalls: 2},
+		{name: "force reuses rules", enabled: true, mode: "Force", principal: "alice", enforce: true, metadataCalls: 2},
+		{name: "explicit skip requires principal", enabled: true, mode: "ExplicitSkip", wantErr: merr.ErrPrivilegeNotPermitted, metadataCalls: 2},
+		{name: "explicit skip reuses rules", enabled: true, mode: "ExplicitSkip", principal: "alice", enforce: true, metadataCalls: 2},
+		{name: "auto skip ignores cached rules", enabled: true, mode: "AutoSkip", metadataCalls: 2},
+		{name: "disable ignores cached rules", mode: "Force", principal: "alice", metadataCalls: 2},
+		{name: "reenable reuses rules", enabled: true, mode: "Force", principal: "alice", enforce: true, metadataCalls: 2},
+		{name: "delete mode restores auto skip", enabled: true, metadataCalls: 2},
+		{name: "unavailable rules fail closed", enabled: true, mode: "Force", principal: "alice", refreshFails: true, wantErr: merr.ErrServiceUnavailable, metadataCalls: 3},
+		{name: "auto skip ignores unavailable rules", enabled: true, mode: "AutoSkip", metadataCalls: 3},
+	} {
+		if !t.Run(test.name, func(t *testing.T) {
+			properties := []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: strconv.FormatBool(test.enabled)}}
+			if test.mode != "" {
+				properties = append(properties, &commonpb.KeyValuePair{Key: common.RLSModeKey, Value: test.mode})
+			}
+			updatedSchema := proto.Clone(schema.CollectionSchema).(*schemapb.CollectionSchema)
+			updatedSchema.Properties = properties
+			describeCalls := 1
+			if test.wantErr == nil {
+				describeCalls++ // The partition-cache fill also describes the collection by ID.
+			}
+			coord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), CollectionID: collectionID, DbName: "default",
+				Schema: updatedSchema, Properties: properties,
+			}, nil).Times(describeCalls)
+			cache.InvalidateCollectionMeta(ctx, "default", collectionName, collectionID, false)
+			if test.refreshFails {
+				rls.InvalidatePolicies(collectionID, 0)
+				coord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnavailable).Once()
+			}
+			task := dql.NewQueryTask(ctx, node, &milvuspb.QueryRequest{
+				DbName: "default", CollectionName: collectionName, Expr: "id > 0",
+				RlsPrincipal: test.principal, SkipRls: test.skip,
+			}, nil, &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}}, cache, false)
+			require.NoError(t, task.OnEnqueue())
+			err := task.PreExecute(ctx)
+			coord.AssertNumberOfCalls(t, "GetRLSMetadata", test.metadataCalls)
+			if test.wantErr != nil {
+				require.ErrorIs(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			plan := &planpb.PlanNode{}
+			require.NoError(t, proto.Unmarshal(task.GetSerializedExprPlan(), plan))
+			expression := "id > 0"
+			if test.enforce {
+				expression += " and value == 10"
+			}
+			expected, err := planparserv2.ParseExpr(schema.SchemaHelper, expression, nil)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(expected, plan.GetQuery().GetPredicates()))
+		}) {
+			return
+		}
 	}
 }
 
