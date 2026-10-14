@@ -757,7 +757,7 @@ func TestImportTaskPreExecuteRefusesASplitCollection(t *testing.T) {
 			cache := NewMockCache(t)
 			cache.EXPECT().GetCollectionID(mock.Anything, "db", "c").Return(int64(100), nil)
 			cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(100)).Return(info, nil)
-			task := &importTask{req: &internalpb.ImportRequest{DbName: "db", CollectionName: "c"}}
+			task := &ImportTask{req: &internalpb.ImportRequest{DbName: "db", CollectionName: "c"}}
 			task.MetaCache = cache
 
 			err := task.PreExecute(context.Background())
