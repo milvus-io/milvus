@@ -50,6 +50,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "simdjson/error.h"
 
 namespace milvus {
@@ -208,6 +209,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
     segcore::IndexPin index_pin_;
     index::JsonResolvedReader json_view_;
     const index::IScalarValueReader<IndexValueType>* value_reader_{nullptr};
+    std::unique_ptr<index::JsonKeyStats::ShreddingReader> shredding_reader_;
 
     // VARCHAR and raw JSON share StringChunk storage. Keep visited chunks
     // pinned for the getter's lifetime and construct only the requested view.
@@ -253,7 +255,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
                      std::optional<std::string> json_path,
                      std::optional<DataType> json_type,
                      bool strict_cast,
-                     const segcore::SegmentReadSnapshot* snapshot = nullptr)
+                     const segcore::SegmentReadSnapshot* snapshot = nullptr,
+                     bool use_json_stats = true)
         : op_ctx_(op_ctx),
           segment_(segment),
           snapshot_(snapshot),
@@ -272,10 +275,54 @@ class SealedDataGetter : public DataGetter<OutputType> {
         this->json_path_ = json_path;
         this->specific_json_type_ = json_type.has_value();
         this->strict_cast_ = strict_cast;
+        if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
+            constexpr auto type = std::is_same_v<OutputType, std::string>
+                                      ? index::JSONType::STRING
+                                  : std::is_same_v<OutputType, bool>
+                                      ? index::JSONType::BOOL
+                                  : std::is_same_v<OutputType, int8_t> ||
+                                          std::is_same_v<OutputType, int16_t> ||
+                                          std::is_same_v<OutputType, int32_t> ||
+                                          std::is_same_v<OutputType, int64_t>
+                                      ? index::JSONType::INT64
+                                      : index::JSONType::UNKNOWN;
+            // Honor the query switch and reject unsupported paths/types before
+            // fetching stats, which could trigger deferred initialization.
+            if (use_json_stats && from_data_ && json_path.has_value() &&
+                json_type.has_value() &&
+                index::JsonKeyStats::IsShreddingReaderSupported(
+                    json_path.value(), type)) {
+                auto stats = segment_.GetJsonStats(op_ctx_, field_id_);
+                if (stats != nullptr) {
+                    shredding_reader_ = stats->CreateShreddingReader(
+                        json_path.value(),
+                        type,
+                        snapshot_ ? snapshot_->get_row_count()
+                                  : segment_.get_row_count());
+                }
+            }
+        }
     }
 
     std::optional<OutputType>
     Get(int64_t idx) const {
+        if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
+            if (shredding_reader_) {
+                auto value = shredding_reader_->Get(op_ctx_, idx);
+                if (value.has_value()) {
+                    if constexpr (std::is_same_v<OutputType, std::string> ||
+                                  std::is_same_v<OutputType, bool>) {
+                        return std::get<OutputType>(std::move(value.value()));
+                    } else {
+                        return static_cast<OutputType>(
+                            std::get<int64_t>(value.value()));
+                    }
+                }
+                // Invalid typed rows include missing paths, other JSON types
+                // and legacy empty strings. Raw parsing preserves strict_cast
+                // and null semantics; real read failures are never swallowed.
+            }
+        }
         if (from_data_) {
             auto id_offset_pair =
                 snapshot_ ? snapshot_->get_chunk_by_offset(field_id_, idx)
@@ -422,7 +469,8 @@ GetDataGetter(milvus::OpContext* op_ctx,
               std::optional<std::string> json_path = std::nullopt,
               std::optional<DataType> json_type = std::nullopt,
               bool strict_cast = false,
-              const segcore::SegmentReadSnapshot* snapshot = nullptr) {
+              const segcore::SegmentReadSnapshot* snapshot = nullptr,
+              bool use_json_stats = true) {
     if (json_path.has_value()) {
         auto json_path_tokens = milvus::parse_json_pointer(json_path.value());
         json_path = milvus::Json::pointer(json_path_tokens);
@@ -445,7 +493,8 @@ GetDataGetter(milvus::OpContext* op_ctx,
             json_path,
             json_type,
             strict_cast,
-            snapshot);
+            snapshot,
+            use_json_stats);
     } else {
         ThrowInfo(UnexpectedError,
                   "The segment used to init data getter is neither growing or "
@@ -517,7 +566,8 @@ class MultiFieldDataGetter {
         const std::optional<std::string>& json_path = std::nullopt,
         const std::optional<DataType>& json_type = std::nullopt,
         bool strict_cast = false,
-        const segcore::SegmentReadSnapshot* snapshot = nullptr);
+        const segcore::SegmentReadSnapshot* snapshot = nullptr,
+        bool use_json_stats = true);
 
     void
     GetInto(int64_t idx, CompositeGroupKey& out) const;
@@ -539,7 +589,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<size_t>& topk_per_nq_prefix_sum,
               std::vector<int32_t>* element_indices = nullptr,
               SearchResult* search_result = nullptr,
-              const segcore::SegmentReadSnapshot* snapshot = nullptr);
+              const segcore::SegmentReadSnapshot* snapshot = nullptr,
+              bool use_json_stats = true);
 
 bool
 TryStrictGroupFilteredSearch(
