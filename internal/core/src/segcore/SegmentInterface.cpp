@@ -153,7 +153,8 @@ SegmentInternalInterface::Search(
     int64_t entity_ttl_physical_time_us,
     bool filter_only,
     bool enable_expr_cache,
-    milvus::tracer::SpanPtr trace_span) const {
+    milvus::tracer::SpanPtr trace_span,
+    ClusteringRowRangesPtr clustering_ranges) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
 
@@ -168,6 +169,7 @@ SegmentInternalInterface::Search(
                                        std::move(trace_span));
     visitor.SetFilterOnly(filter_only);
     visitor.SetEnableExprCache(enable_expr_cache);
+    visitor.SetClusteringRanges(std::move(clustering_ranges));
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;

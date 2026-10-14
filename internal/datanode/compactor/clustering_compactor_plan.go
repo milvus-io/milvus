@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/internal/util/clustercompaction"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -129,48 +128,6 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, cent
 		return merr.WrapErrDataIntegrityMsg("layout centroid count mismatch")
 	}
 	t.vectorLayout = layout
-	// Grouping is independent of memory capacity. The current mapper needs one
-	// resident writer per group; reject excessive fan-out until PR4 supplies
-	// bounded spill/merge. Never combine groups to fit memory.
-	capacity := t.memoryLimit / max(int64(expectedBinlogSize), int64(t.compactionParams.BinLogMaxSize))
-	if int64(len(layout.Groups)) > capacity {
-		return merr.Wrapf(merr.ErrServiceUnimplemented, "clustering plan has %d groups, resident mapper supports %d; bounded spill mapping is required", len(layout.Groups), capacity)
-	}
-	groupIndex := make([]int, len(layout.Counts))
-	for i := range groupIndex {
-		groupIndex[i] = -1
-	}
-	for ordinal, group := range layout.Groups {
-		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.GetFieldID(), t.clusteringKeyField.GetDataType(), 0)
-		if err != nil {
-			return err
-		}
-		values := make([]storage.VectorFieldValue, len(group.Offsets))
-		for i, offset := range group.Offsets {
-			groupIndex[offset] = ordinal
-			values[i] = storage.NewVectorFieldValue(t.clusteringKeyField.GetDataType(), centroids.GetCentroids()[offset])
-		}
-		fieldStats.SetVectorCentroids(values...)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc),
-			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.GetMaxSegmentRows(),
-			t.partitionID, t.collectionID, t.plan.GetChannel(), 100, t.getWriterOpts()...)
-		if err != nil {
-			return err
-		}
-		t.clusterBuffers = append(t.clusterBuffers, newClusterBuffer(ordinal, writer, fieldStats))
-	}
-	t.offsetToBufferFunc = func(row int64, assignment []uint32) *ClusterBuffer {
-		// Assignments were validated before mapping; empty offsets never occur.
-		return t.clusterBuffers[groupIndex[assignment[row]]]
-	}
-
-	var rows, estimatedCapacity float64
-	if target := t.plan.GetMaxSegmentRows(); target > 0 {
-		for _, group := range layout.Groups {
-			rows += float64(group.Rows)
-			estimatedCapacity += math.Ceil(float64(group.Rows)/float64(target)) * float64(target)
-		}
-	}
-	mlog.Info(ctx, "clustering layout planned", mlog.Int("clusters", len(layout.Counts)), mlog.Int("groups", len(layout.Groups)), mlog.Float64("estimatedSegmentFillRatio", rows/max(1, estimatedCapacity)))
+	t.vectorCentroids = centroids
 	return nil
 }

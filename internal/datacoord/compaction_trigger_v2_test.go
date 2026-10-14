@@ -1284,6 +1284,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 }
 
 func (s *CompactionTriggerManagerSuite) TestSubmitClusteringVectorGroups() {
+	s.triggerManager.versionManager = newMockVersionManager()
 	m, view, _ := coverageMeta(s.T())
 	m.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
 	for _, id := range []int64{10, 20, 30, 40, 50} {
@@ -1303,6 +1304,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitClusteringVectorGroups() {
 	s.Equal(int64(7), submitted.GetBasePartitionStatsVersion())
 	s.Equal(int64(6), submitted.GetTotalRows())
 	s.Equal(paramtable.Get().KnowhereConfig.GetCompactionPlanParams(), submitted.GetClusteringPlanParams())
+	s.Equal(paramtable.Get().KnowhereConfig.GetClusterIndexParams(), submitted.GetClusteringIndexParams())
+	s.Equal(s.triggerManager.versionManager.ResolveVecIndexVersion(), submitted.GetClusteringIndexEngineVersion())
 	schema.Fields[0].Name = "mutated"
 	s.NotEqual("mutated", submitted.Schema.Fields[0].Name)
 }

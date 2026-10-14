@@ -140,9 +140,10 @@ var _ TriggerManager = (*CompactionTriggerManager)(nil)
 // so that when the certain TriggerType happens, the corresponding triggers can
 // trigger the correct compaction plans.
 type CompactionTriggerManager struct {
-	inspector CompactionInspector
-	handler   Handler
-	allocator allocator.Allocator
+	versionManager IndexEngineVersionManager
+	inspector      CompactionInspector
+	handler        Handler
+	allocator      allocator.Allocator
 
 	meta     *meta
 	policies map[TickerType]CompactionPolicy
@@ -163,11 +164,12 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	versionManager IndexEngineVersionManager,
 ) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
-		allocator: alloc,
-		handler:   handler,
-		inspector: inspector,
-		meta:      meta,
-		policies:  make(map[TickerType]CompactionPolicy),
+		versionManager: versionManager,
+		allocator:      alloc,
+		handler:        handler,
+		inspector:      inspector,
+		meta:           meta,
+		policies:       make(map[TickerType]CompactionPolicy),
 	}
 	// Initialize policies and keep separate pointers for frequently accessed ones
 
@@ -574,6 +576,8 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	if typeutil.IsVectorType(task.ClusteringKeyField.GetDataType()) {
 		task.BasePartitionStatsVersion = clusteringView.basePartitionStatsVersion
 		task.ClusteringPlanParams = maps.Clone(paramtable.Get().KnowhereConfig.GetCompactionPlanParams())
+		task.ClusteringIndexParams = maps.Clone(paramtable.Get().KnowhereConfig.GetClusterIndexParams())
+		task.ClusteringIndexEngineVersion = m.versionManager.ResolveVecIndexVersion()
 	}
 
 	err = m.inspector.enqueueCompaction(task)

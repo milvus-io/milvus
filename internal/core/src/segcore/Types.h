@@ -35,6 +35,24 @@ namespace milvus::segcore {
 
 // see also internal/querynode/load_index_info.go
 struct LoadIndexInfo {
+    // A snapshot owns this index when version is positive; segment IDs stay absent.
+    std::string partition_stats_channel;
+    int64_t partition_stats_version{0};
+
+    std::string
+    SnapshotIndexKey() const {
+        static constexpr char hex[] = "0123456789abcdef";
+        std::string channel;
+        for (unsigned char c : partition_stats_channel) {
+            channel += hex[c >> 4];
+            channel += hex[c & 15];
+        }
+        return "stats_" + std::to_string(collection_id) + "_" +
+               std::to_string(partition_id) + "_" + channel + "_" +
+               std::to_string(partition_stats_version) + "_" +
+               std::to_string(field_id);
+    }
+
     int64_t collection_id;
     int64_t partition_id;
     int64_t segment_id;
@@ -90,7 +108,9 @@ struct LoadIndexInfo {
     // Copy constructor - copies metadata, leaves index pointers as nullptr
     // since they are populated later during actual index loading
     LoadIndexInfo(const LoadIndexInfo& other)
-        : collection_id(other.collection_id),
+        : partition_stats_channel(other.partition_stats_channel),
+          partition_stats_version(other.partition_stats_version),
+          collection_id(other.collection_id),
           partition_id(other.partition_id),
           segment_id(other.segment_id),
           field_id(other.field_id),
@@ -123,6 +143,8 @@ struct LoadIndexInfo {
     LoadIndexInfo&
     operator=(const LoadIndexInfo& other) {
         if (this != &other) {
+            partition_stats_channel = other.partition_stats_channel;
+            partition_stats_version = other.partition_stats_version;
             collection_id = other.collection_id;
             partition_id = other.partition_id;
             segment_id = other.segment_id;

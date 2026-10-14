@@ -127,6 +127,10 @@ struct FileManagerContext {
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
+    // Set only for indexes owned by partition snapshots. Complete object prefix
+    // and a local ownership key; segment index paths keep their existing rules.
+    std::string index_remote_prefix;
+    std::string index_local_prefix;
     std::string stats_base_path;
     StorageColumnMappings storage_column_mappings;
 };
@@ -340,6 +344,9 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
+        if (!index_remote_prefix_.empty()) {
+            return index_remote_prefix_;
+        }
         boost::filesystem::path prefix = rcm_->GetRootPath();
         if (index_meta_.index_store_path_version >=
             ::milvus::proto::index::IndexStorePathVersion::
@@ -416,6 +423,8 @@ class FileManagerImpl : public milvus::FileManager {
 
     // stats base path computed by Go caller; when non-empty, overrides
     // the internally computed remote prefix for text/json stats files.
+    std::string index_remote_prefix_;
+    std::string index_local_prefix_;
     std::string stats_base_path_;
 };
 

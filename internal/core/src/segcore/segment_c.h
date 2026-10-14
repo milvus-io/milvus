@@ -186,6 +186,21 @@ AsyncSearch(CTraceContext c_trace,
             bool filter_only,
             bool enable_expr_cache);
 
+CFuture*
+AsyncSearchWithRanges(CTraceContext c_trace,
+                      CSegmentInterface c_segment,
+                      CSearchPlan c_plan,
+                      CPlaceholderGroup c_placeholder_group,
+                      uint64_t timestamp,
+                      int32_t consistency_level,
+                      uint64_t collection_ttl,
+                      uint64_t entity_ttl_physical_time_us,
+                      bool filter_only,
+                      bool enable_expr_cache,
+                      const int64_t* ranges,
+                      int64_t range_count,
+                      int64_t expected_rows);
+
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
 

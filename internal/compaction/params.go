@@ -59,9 +59,11 @@ func (p Params) MarshalLogObject(enc mlog.ObjectEncoder) error {
 // ClusteringPlanParameters is frozen by DataCoord. A nil value is valid for
 // scalar compaction only; vector workers must not consult local provider config.
 type ClusteringPlanParameters struct {
-	ClusterType string            `json:"cluster_type"`
-	Params      map[string]string `json:"params"`
-	SegmentRows map[int64]int64   `json:"segment_rows"`
+	IndexParams        map[string]string `json:"index_params"`
+	IndexEngineVersion int32             `json:"index_engine_version"`
+	ClusterType        string            `json:"cluster_type"`
+	Params             map[string]string `json:"params"`
+	SegmentRows        map[int64]int64   `json:"segment_rows"`
 }
 
 type Params struct {

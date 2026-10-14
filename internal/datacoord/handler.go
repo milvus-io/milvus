@@ -141,7 +141,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	filterWithPartition := len(validPartitions) > 0
 	validPartitionsMap := make(map[int64]bool)
-	partStatsVersions := h.s.meta.partitionStatsMeta.GetChannelPartitionsStatsVersion(channel.GetCollectionID(), channel.GetName())
+	segments, partStatsVersions := h.s.meta.clusteringRecoveryView(channel.GetCollectionID(), channel.GetName())
 	partStatsVersionsMap := make(map[int64]int64)
 	if filterWithPartition {
 		for _, partitionID := range validPartitions {
@@ -162,7 +162,6 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	)
 
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
-	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 
 	validSegmentInfos := make(map[int64]*SegmentInfo)
 	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.meta, false, segments...)

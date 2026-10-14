@@ -479,6 +479,11 @@ func (c *compactionInspector) cleanPartitionStats() error {
 	}
 	infos := c.meta.GetPartitionStatsMeta().ListAllPartitionStatsInfos()
 	for _, info := range infos {
+		// No distributed pin/lease exists yet. A count/age heuristic cannot
+		// prove that a snapshot is unused, even after a collection disappears.
+		if info.GetClusteringFormatVersion() > 0 {
+			continue
+		}
 		collInfo := c.meta.(*meta).GetCollection(info.GetCollectionID())
 		if collInfo == nil {
 			unusedPartStats = append(unusedPartStats, info)
@@ -594,6 +599,11 @@ func (c *compactionInspector) getCompactionTask(planID int64) CompactionTask {
 }
 
 func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
+	var routeErr error
+	task, routeErr = c.routeClusteringRewrite(task)
+	if routeErr != nil {
+		return routeErr
+	}
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
 	t, err := c.createCompactTask(task)
 	if err != nil {

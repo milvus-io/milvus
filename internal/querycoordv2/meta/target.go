@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"github.com/samber/lo"
@@ -113,13 +114,14 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		}
 		dmChannels[t.GetChannelName()] = &DmChannel{
 			VchannelInfo: &datapb.VchannelInfo{
-				CollectionID:        target.GetCollectionID(),
-				ChannelName:         t.GetChannelName(),
-				SeekPosition:        t.GetSeekPosition(),
-				UnflushedSegmentIds: t.GetGrowingSegmentIDs(),
-				FlushedSegmentIds:   lo.Keys(segments),
-				DroppedSegmentIds:   t.GetDroppedSegmentIDs(),
-				DeleteCheckpoint:    t.GetDeleteCheckpoint(),
+				CollectionID:           target.GetCollectionID(),
+				ChannelName:            t.GetChannelName(),
+				SeekPosition:           t.GetSeekPosition(),
+				UnflushedSegmentIds:    t.GetGrowingSegmentIDs(),
+				FlushedSegmentIds:      lo.Keys(segments),
+				DroppedSegmentIds:      t.GetDroppedSegmentIDs(),
+				DeleteCheckpoint:       t.GetDeleteCheckpoint(),
+				PartitionStatsVersions: maps.Clone(t.GetPartitionStatsVersions()),
 			},
 		}
 	}
@@ -178,12 +180,13 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 		}
 
 		channelTargets[channel.GetChannelName()] = &querypb.ChannelTarget{
-			ChannelName:       channel.GetChannelName(),
-			SeekPosition:      channel.GetSeekPosition(),
-			GrowingSegmentIDs: channel.GetUnflushedSegmentIds(),
-			DroppedSegmentIDs: channel.GetDroppedSegmentIds(),
-			PartitionTargets:  lo.Values(partitionTargets),
-			DeleteCheckpoint:  channel.GetDeleteCheckpoint(),
+			ChannelName:            channel.GetChannelName(),
+			SeekPosition:           channel.GetSeekPosition(),
+			GrowingSegmentIDs:      channel.GetUnflushedSegmentIds(),
+			DroppedSegmentIDs:      channel.GetDroppedSegmentIds(),
+			PartitionTargets:       lo.Values(partitionTargets),
+			DeleteCheckpoint:       channel.GetDeleteCheckpoint(),
+			PartitionStatsVersions: maps.Clone(channel.GetPartitionStatsVersions()),
 		}
 	}
 

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
@@ -193,4 +194,27 @@ func indexResourceUsageFromC(estimate *C.LoadResourceRequest) IndexResourceUsage
 		FinalDiskBytes:   uint64(estimate.final_disk_cost),
 		HasRawData:       bool(estimate.has_raw_data),
 	}
+}
+
+// BuildSnapshotLoadIndexInfo shares the segment loader's runtime parameter,
+// mmap and warmup policy resolution, while explicitly selecting snapshot ownership.
+func BuildSnapshotLoadIndexInfo(collection, partition int64, channel string, version int64,
+	field *schemapb.FieldSchema, index *clusteringpb.ClusteringIndexInfo, rows int64,
+) (*cgopb.LoadIndexInfo, error) {
+	if version <= 0 || channel == "" || index == nil || rows <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid snapshot index scope")
+	}
+	info, err := buildCLoadIndexInfo(field, &querypb.SegmentLoadInfo{CollectionID: collection, PartitionID: partition},
+		&querypb.FieldIndexInfo{
+			IndexParams: index.GetIndexParams(), IndexFilePaths: index.GetIndexFilePaths(),
+			CurrentIndexVersion: index.GetIndexEngineVersion(), IndexSize: index.GetIndexSize(), NumRows: rows,
+		})
+	if err != nil {
+		return nil, err
+	}
+	if _, exists := info.IndexParams[common.LoadPriorityKey]; !exists {
+		info.IndexParams[common.LoadPriorityKey] = "HIGH"
+	}
+	info.PartitionStats = &cgopb.PartitionStatsContext{Channel: channel, Version: version}
+	return info, nil
 }

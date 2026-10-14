@@ -73,7 +73,7 @@ func (s *analyzeTaskSuite) TestStaleAnalyzeResultCannotBeAdopted() {
 	s.Same(current, s.mt.analyzeMeta.GetTask(s.taskID))
 }
 
-func (s *ClusteringCompactionTaskSuite) TestFailedCompactionCleansItsAnalyzeTask() {
+func (s *ClusteringCompactionTaskSuite) TestFailedCompactionRetainsUncertainAnalyzeTask() {
 	task := s.generateBasicTask(true)
 	task.GetTaskProto().AnalyzeTaskID = 777
 	task.GetTaskProto().State = datapb.CompactionTaskState_failed
@@ -83,6 +83,6 @@ func (s *ClusteringCompactionTaskSuite) TestFailedCompactionCleansItsAnalyzeTask
 	// A different task must survive this cleanup.
 	s.Require().NoError(s.meta.analyzeMeta.AddAnalyzeTask(&indexpb.AnalyzeTask{TaskID: 778, Version: 3, State: indexpb.JobState_JobStateFinished}))
 	s.Require().True(task.Clean())
-	s.Nil(s.meta.analyzeMeta.GetTask(777))
+	s.NotNil(s.meta.analyzeMeta.GetTask(777))
 	s.NotNil(s.meta.analyzeMeta.GetTask(778))
 }

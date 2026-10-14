@@ -93,6 +93,7 @@ func (plan *SearchPlan) delete() {
 }
 
 type SearchRequest struct {
+	clusteringRanges      map[int64]*querypb.ClusteringRowRanges
 	plan                  *SearchPlan
 	cPlaceholderGroup     C.CPlaceholderGroup
 	msgID                 int64
@@ -143,6 +144,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 	cl := req.GetReq().GetConsistencyLevel()
 
 	return &SearchRequest{
+		clusteringRanges:      req.GetClusteringRanges(),
 		plan:                  plan,
 		cPlaceholderGroup:     cPlaceholderGroup,
 		msgID:                 req.GetReq().GetBase().GetMsgID(),

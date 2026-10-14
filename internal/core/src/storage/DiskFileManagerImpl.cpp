@@ -147,6 +147,8 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     plugin_context_ = fileManagerContext.plugin_context;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     stats_base_path_ = fileManagerContext.stats_base_path;
+    index_remote_prefix_ = fileManagerContext.index_remote_prefix;
+    index_local_prefix_ = fileManagerContext.index_local_prefix;
     storage_column_mappings_ = fileManagerContext.storage_column_mappings;
 }
 
@@ -372,6 +374,12 @@ DiskFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
     auto local_file_name = GetFileName(file_meta.file_path);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
+    // Streaming serializers register files without AddFileInternal. Include
+    // them in the same byte accounting used for load-resource admission.
+    auto existing = remote_paths_to_size_.find(remote_file_path);
+    added_total_file_size_ +=
+        file_meta.file_size -
+        (existing == remote_paths_to_size_.end() ? 0 : existing->second);
     remote_paths_to_size_[remote_file_path] = file_meta.file_size;
     return true;
 }
@@ -1600,6 +1608,13 @@ DiskFileManagerImpl::GetIndexIdentifier() {
 // path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
+    if (!index_local_prefix_.empty()) {
+        auto cm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        return AppendLocalPathGeneration(
+            (boost::filesystem::path(cm->GetRootPath()) / "partition_index" /
+             index_local_prefix_ / "index")
+                .string());
+    }
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     return AppendLocalPathGeneration(
@@ -1614,6 +1629,13 @@ DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
 // temporary path used during index building
 std::string
 DiskFileManagerImpl::GetLocalTempIndexObjectPrefix() {
+    if (!index_local_prefix_.empty()) {
+        auto cm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        return AppendLocalPathGeneration(
+            (boost::filesystem::path(cm->GetRootPath()) / "partition_index" /
+             index_local_prefix_ / "build")
+                .string());
+    }
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     return AppendLocalPathGeneration(
@@ -1742,6 +1764,13 @@ DiskFileManagerImpl::GetRemoteJsonStatsLogPrefix() {
 
 std::string
 DiskFileManagerImpl::GetLocalRawDataObjectPrefix() {
+    if (!index_local_prefix_.empty()) {
+        auto cm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        return AppendLocalPathGeneration(
+            (boost::filesystem::path(cm->GetRootPath()) / "partition_index" /
+             index_local_prefix_ / "raw")
+                .string());
+    }
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     return AppendLocalPathGeneration(GenFieldRawDataPathPrefix(

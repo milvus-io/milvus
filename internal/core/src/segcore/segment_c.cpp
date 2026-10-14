@@ -479,6 +479,44 @@ AsyncSearch(CTraceContext c_trace,
             uint64_t entity_ttl_physical_time_us,
             bool filter_only,
             bool enable_expr_cache) {
+    return AsyncSearchWithRanges(c_trace,
+                                 c_segment,
+                                 c_plan,
+                                 c_placeholder_group,
+                                 timestamp,
+                                 consistency_level,
+                                 collection_ttl,
+                                 entity_ttl_physical_time_us,
+                                 filter_only,
+                                 enable_expr_cache,
+                                 nullptr,
+                                 0,
+                                 0);
+}
+
+CFuture*  // Future<milvus::SearchResult*>
+AsyncSearchWithRanges(CTraceContext c_trace,
+                      CSegmentInterface c_segment,
+                      CSearchPlan c_plan,
+                      CPlaceholderGroup c_placeholder_group,
+                      uint64_t timestamp,
+                      int32_t consistency_level,
+                      uint64_t collection_ttl,
+                      uint64_t entity_ttl_physical_time_us,
+                      bool filter_only,
+                      bool enable_expr_cache,
+                      const int64_t* ranges,
+                      int64_t range_count,
+                      int64_t expected_rows) {
+    milvus::ClusteringRowRangesPtr clustering_ranges;
+    if (expected_rows > 0 && range_count >= 0 && (ranges || range_count == 0)) {
+        auto owned = std::make_shared<milvus::ClusteringRowRanges>();
+        owned->expected_rows = expected_rows;
+        for (int64_t i = 0; i < range_count; ++i) {
+            owned->ranges.emplace_back(ranges[2 * i], ranges[2 * i + 1]);
+        }
+        clustering_ranges = std::move(owned);
+    }
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
@@ -495,7 +533,8 @@ AsyncSearch(CTraceContext c_trace,
          collection_ttl,
          entity_ttl_physical_time_us,
          filter_only,
-         enable_expr_cache](folly::CancellationToken cancel_token) {
+         enable_expr_cache,
+         clustering_ranges](folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
@@ -546,7 +585,8 @@ AsyncSearch(CTraceContext c_trace,
                                                 entity_ttl_physical_time_us,
                                                 filter_only,
                                                 enable_expr_cache,
-                                                span);
+                                                span,
+                                                clustering_ranges);
             }
             search_result->read_lease_ = std::move(read_lease);
             if (!filter_only &&

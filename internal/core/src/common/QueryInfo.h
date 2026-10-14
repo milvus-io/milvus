@@ -20,6 +20,7 @@
 #include <optional>
 
 #include "StructElementOffsets.h"
+#include "common/ClusteringRowRanges.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "nlohmann/json.hpp"
@@ -53,6 +54,7 @@ struct BruteForceIndexParams {
 };
 
 struct SearchInfo {
+    ClusteringRowRangesPtr clustering_ranges;
     int64_t topk_{0};
     int64_t group_size_{1};
     bool strict_group_size_{false};

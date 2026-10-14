@@ -153,9 +153,17 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		physicalTimeUs = physicalTimeMs * 1000
 	}
 
+	var rowRanges []int64
+	var expectedRows int64
+	if hint := searchReq.clusteringRanges[s.id]; hint != nil && hint.GetSnapshotVersion() > 0 && hint.GetNumRows() > 0 {
+		expectedRows = hint.GetNumRows()
+		for _, r := range hint.GetRanges() {
+			rowRanges = append(rowRanges, r.GetRowOffset(), r.GetRowCount())
+		}
+	}
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncSearch(
+			return (cgo.CFuturePtr)(C.AsyncSearchWithRanges(
 				traceCtx.ctx,
 				s.ptr,
 				searchReq.plan.cSearchPlan,
@@ -166,6 +174,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				C.uint64_t(physicalTimeUs),
 				C.bool(searchReq.filterOnly),
 				C.bool(searchReq.enableExprCache),
+				(*C.int64_t)(unsafe.Pointer(unsafe.SliceData(rowRanges))), C.int64_t(len(rowRanges)/2), C.int64_t(expectedRows),
 			))
 		},
 		cgo.WithName("search"),
