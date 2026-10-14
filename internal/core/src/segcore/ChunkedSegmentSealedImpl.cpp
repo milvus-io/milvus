@@ -385,8 +385,7 @@ ChunkedSegmentSealedImpl::ReadTimestamp(
     // Fallback: read one row straight from the timestamp column. On current
     // master this is effectively unreachable in production — every load path
     // that publishes the timestamp column also publishes a fully-pinned
-    // zero-copy TimestampData (init_storage_v2_timestamp_index /
-    // init_storage_v1_timestamp_index) in the same atomic runtime snapshot,
+    // TimestampData together with its timestamp index in the same atomic snapshot,
     // so the short-circuit above always hits; only tests and degenerate
     // states reach here.
     //
@@ -608,40 +607,6 @@ ChunkedSegmentSealedImpl::init_storage_v2_timestamp_index(
         PublishRuntimeStateLocked(
             ToConstRuntimeState(std::move(owned_runtime)));
     }
-}
-
-void
-ChunkedSegmentSealedImpl::init_storage_v1_timestamp_index(
-    std::vector<Timestamp> timestamps,
-    size_t num_rows,
-    RuntimeResourceState* runtime) {
-    auto index = std::make_shared<const TimestampIndex>(
-        build_timestamp_index(timestamps.data(), num_rows));
-    auto timestamp_data = std::make_shared<TimestampData>();
-    timestamp_data->InitFromOwnedData(std::move(timestamps));
-
-    auto target_runtime = runtime;
-    std::shared_ptr<RuntimeResourceState> owned_runtime;
-    if (target_runtime == nullptr) {
-        owned_runtime = CloneMutableRuntimeResourceState();
-        target_runtime = owned_runtime.get();
-    }
-    target_runtime->timestamps = std::move(timestamp_data);
-    target_runtime->timestamp_index = std::move(index);
-    target_runtime->timestamp_index_slot.reset();
-
-    stats_.mem_size += sizeof(Timestamp) * num_rows;
-
-    if (owned_runtime != nullptr) {
-        PublishRuntimeStateLocked(
-            ToConstRuntimeState(std::move(owned_runtime)));
-    }
-}
-
-void
-ChunkedSegmentSealedImpl::init_storage_v1_timestamp_index(
-    std::vector<Timestamp> timestamps, size_t num_rows) {
-    init_storage_v1_timestamp_index(std::move(timestamps), num_rows, nullptr);
 }
 
 std::shared_ptr<cachinglayer::CacheSlot<storagev2translator::PkIndexCell>>
@@ -2064,18 +2029,6 @@ ChunkedSegmentSealedImpl::PublishSystemFieldStateLocked() {
 }
 
 void
-ChunkedSegmentSealedImpl::PublishFieldDataReadyLocked(
-    FieldId field_id,
-    const std::shared_ptr<const RuntimeResourceState>& runtime) {
-    MutatePublishedStateLocked([&](PublishedSegmentState& state) {
-        if (runtime != nullptr) {
-            state.runtime = runtime;
-        }
-        set_bit(state.field_data_ready_bitset, field_id, true);
-    });
-}
-
-void
 ChunkedSegmentSealedImpl::PublishIndexReadyLocked(
     FieldId field_id,
     bool has_raw_data,
@@ -3268,67 +3221,6 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                                    is_replace,
                                    committer);
         }
-    }
-}
-
-void
-ChunkedSegmentSealedImpl::load_system_field_internal(
-    FieldId field_id,
-    FieldDataInfo& data,
-    proto::common::LoadPriority load_priority,
-    RuntimeResourceState* runtime,
-    bool publish_ready) {
-    SCOPE_CGO_CALL_METRIC();
-
-    auto num_rows = data.row_count;
-    std::shared_ptr<RuntimeResourceState> owned_runtime;
-    auto* target_runtime = runtime;
-    if (target_runtime == nullptr) {
-        owned_runtime = CloneMutableRuntimeResourceState();
-        target_runtime = owned_runtime.get();
-    }
-    AssertInfo(SystemProperty::Instance().IsSystem(field_id),
-               "system field is not system field");
-    auto system_field_type =
-        SystemProperty::Instance().GetSystemFieldType(field_id);
-    if (system_field_type == SystemFieldType::Timestamp) {
-        std::vector<Timestamp> timestamps(num_rows);
-        int64_t offset = 0;
-        FieldMeta field_meta(
-            FieldName(""), FieldId(0), DataType::INT64, false, std::nullopt);
-        std::shared_ptr<milvus::ArrowDataWrapper> r;
-        while (data.arrow_reader_channel->pop(r)) {
-            auto array_vec = read_single_column_batches(r->reader);
-            auto chunk = create_chunk(field_meta, array_vec);
-            auto chunk_ptr = static_cast<FixedWidthChunk*>(chunk.get());
-            milvus::fastmem::FastMemcpy(
-                timestamps.data() + offset,
-                static_cast<const Timestamp*>(chunk_ptr->Span().data()),
-                chunk_ptr->Span().row_count() * sizeof(*timestamps.data()));
-            offset += chunk_ptr->Span().row_count();
-        }
-
-        if (commit_ts_ != 0) {
-            std::fill(timestamps.begin(), timestamps.end(), commit_ts_);
-        }
-        init_storage_v1_timestamp_index(
-            std::move(timestamps), num_rows, target_runtime);
-    } else {
-        AssertInfo(system_field_type == SystemFieldType::RowId,
-                   "System field type of id column is not RowId");
-        // Consume rowid field data but not really load it
-        // storage::CollectFieldDataChannel(data.arrow_reader_channel);
-        std::shared_ptr<milvus::ArrowDataWrapper> r;
-        while (data.arrow_reader_channel->pop(r)) {
-        }
-    }
-    {
-        std::unique_lock lck(mutex_);
-        update_row_count(*target_runtime, num_rows);
-    }
-    if (owned_runtime != nullptr && publish_ready) {
-        PublishRuntimeStateLocked(
-            ToConstRuntimeState(std::move(owned_runtime)));
     }
 }
 
