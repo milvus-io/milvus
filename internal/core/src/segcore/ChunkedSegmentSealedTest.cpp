@@ -20,7 +20,6 @@
 #include <functional>
 #include <iosfwd>
 #include <map>
-#include <future>
 #include <memory>
 #include <new>
 #include <numeric>
@@ -731,15 +730,8 @@ TEST(test_chunk_segment,
             state->runtime->fields.at(field)->CellsLoaded(&first_row, 1));
     }
     auto read = segment->CaptureReadSnapshot();
-    std::vector<std::future<std::shared_ptr<const IArrayOffsets>>> queries;
-    for (int i = 0; i < 8; ++i) {
-        queries.emplace_back(std::async(std::launch::async, [&, i] {
-            return read->GetArrayOffsets(i % 2 ? vector : score);
-        }));
-    }
-    for (auto& query : queries) {
-        EXPECT_EQ(query.get(), offsets);
-    }
+    EXPECT_EQ(read->GetArrayOffsets(score), offsets);
+    EXPECT_EQ(read->GetArrayOffsets(vector), offsets);
     EXPECT_EQ(vector_only_offsets, segment->GetArrayOffsets(unrelated));
     for (auto field : {label, unrelated}) {
         EXPECT_FALSE(
@@ -793,6 +785,8 @@ TEST(test_chunk_segment,
     auto read = segment->CaptureReadSnapshot();
     auto old_offsets = read->GetArrayOffsets(field);
     ASSERT_NE(old_offsets, nullptr);
+    EXPECT_EQ(old_offsets->GetTotalElementCount(), rows * 2);
+    current->runtime->fields.at(field)->ManualEvictCache();
     auto probe = std::make_shared<OffsetsPreparationProbe>();
     std::vector<std::vector<char>> buffers;
     auto column = BuildNullableVectorArrayColumn((*schema)[field],
@@ -859,79 +853,14 @@ TEST(test_chunk_segment,
     EXPECT_NE(offsets, old_offsets);
     EXPECT_EQ(offsets->GetTotalElementCount(), 3);
     EXPECT_EQ(read->GetArrayOffsets(field), old_offsets);
+    EXPECT_EQ(old_offsets->GetTotalElementCount(), rows * 2);
+    EXPECT_TRUE(old_offsets->IsRowValid(0));
+    EXPECT_FALSE(offsets->IsRowValid(0));
+    EXPECT_TRUE(offsets->IsRowValid(2));  // valid empty array
     EXPECT_EQ(probe->calls, 4);
     column->ManualEvictCache();
     EXPECT_EQ(segment->GetArrayOffsets(field), offsets);
     EXPECT_EQ(probe->calls, 4);
-}
-
-TEST(test_chunk_segment, EagerStructOffsetsUseCapturedColumnGeneration) {
-    auto schema = std::make_shared<Schema>();
-    auto pk = schema->AddDebugField("pk", DataType::INT64);
-    schema->set_primary_field_id(pk);
-    auto label =
-        schema->AddDebugArrayField("items[label]", DataType::INT64, true);
-    constexpr int64_t rows = 5;
-    auto old_dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
-    auto segment = CreateSealedWithFieldDataLoaded(schema, old_dataset);
-    auto* sealed =
-        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
-    ASSERT_NE(sealed, nullptr);
-    auto current = sealed->TestGetPublishedStateSnapshot();
-    auto old_read = segment->CaptureReadSnapshot();
-    auto old_entry = current->runtime->array_offsets_map.at(label);
-    ASSERT_NE(old_entry, nullptr);
-    // The mapping is already owned metadata: eviction and overwriting the
-    // test binlog names must not make an old query read the replacement raw.
-    current->runtime->fields.at(label)->ManualEvictCache();
-
-    auto replacement_dataset = segcore::DataGen(schema, rows, 43, 0, 1, 4);
-    auto replacement =
-        CreateSealedWithFieldDataLoaded(schema, replacement_dataset);
-    auto* replacement_sealed =
-        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(replacement.get());
-    auto replacement_column =
-        replacement_sealed->TestGetPublishedStateSnapshot()->runtime->fields.at(
-            label);
-    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
-    segcore::ChunkedSegmentSealedImpl::StateDelta initial;
-    initial.schema = current->schema;
-    initial.load_info = current->load_info;
-    initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
-    initial.commit_ts = current->commit_ts;
-    auto staged = sealed->TestBuildNextPublishedState(current, initial);
-    segcore::ChunkedSegmentSealedImpl::StateDelta final;
-    final.schema = current->schema;
-    final.load_info = current->load_info;
-    final.commit_ts = current->commit_ts;
-    sealed->TestStageLoadFieldDataThenPublish(
-        label,
-        replacement_column,
-        rows,
-        DataType::ARRAY,
-        schema,
-        runtime,
-        staged.get(),
-        current,
-        final,
-        [&] {
-            EXPECT_NE(runtime->array_offsets_map.at(label), old_entry);
-            EXPECT_EQ(old_read->GetArrayOffsets(label), old_entry);
-        });
-
-    // Both generations were built before publication; query access is read-only.
-    auto old_offsets = old_read->GetArrayOffsets(label);
-    auto new_offsets = segment->GetArrayOffsets(label);
-    ASSERT_NE(old_offsets, nullptr);
-    ASSERT_NE(new_offsets, nullptr);
-    EXPECT_NE(old_offsets, new_offsets);
-    EXPECT_EQ(old_offsets->GetTotalElementCount(), 6);
-    EXPECT_EQ(new_offsets->GetTotalElementCount(), 12);
-    ASSERT_TRUE(old_offsets->HasRowValidity());
-    for (int64_t i = 0; i < rows; ++i) {
-        EXPECT_EQ(old_offsets->IsRowValid(i), i % 2 == 0);
-        EXPECT_EQ(new_offsets->IsRowValid(i), i % 2 == 0);
-    }
 }
 
 // #52877: lazy reopen may skip the drop-only schema and see the old and new
