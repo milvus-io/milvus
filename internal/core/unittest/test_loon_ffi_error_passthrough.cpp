@@ -73,12 +73,12 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
         << loon_ffi_get_errmsg(&props_result);
 
     LoonTransactionHandle transaction = 0;
-    auto begin = loon_transaction_begin(base_path.c_str(),
-                                        &properties,
-                                        0,
-                                        LOON_TRANSACTION_RESOLVE_OVERWRITE,
-                                        10,
-                                        &transaction);
+    auto begin = loon_transaction_open(base_path.c_str(),
+                                       &properties,
+                                       0,
+                                       LOON_TRANSACTION_RESOLVE_OVERWRITE,
+                                       10,
+                                       &transaction);
     SCOPE_EXIT {
         loon_ffi_free_result(&begin);
         loon_transaction_destroy(transaction);
