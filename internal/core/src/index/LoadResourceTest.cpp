@@ -431,8 +431,18 @@ TEST(LegacyLoadResourceTest, SegmentMetadataPreservesFileAwareEstimates) {
             if (vector && async) {
                 storage::LoadOptions options;
                 options.params = Config(info.index_params);
-                expected = LegacyVectorFileLoadResource(
-                    generic, false, options, info.index_files, fixture.context);
+                auto estimate =
+                    [&]() -> folly::coro::Task<LoadResourceRequest> {
+                    auto source = co_await storage::V1RemoteSource::OpenAsync(
+                        fixture.context, info.index_files, options);
+                    co_return co_await LegacyVectorFileLoadResourceAsync(
+                        generic, false, options, *source);
+                };
+                expected =
+                    folly::coro::blockingWait(folly::coro::co_withExecutor(
+                        storage::ResolveAsyncLoadExecutor(
+                            {}, proto::common::LoadPriority::HIGH),
+                        estimate()));
                 EXPECT_GT(expected.max_memory_cost, generic.max_memory_cost);
             } else if (!vector) {
                 expected = ScalarIndexFileLoadResource(info.field_type,

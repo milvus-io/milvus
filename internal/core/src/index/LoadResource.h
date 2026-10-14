@@ -115,13 +115,4 @@ PackedScalarIndexLoadResource(
     const PackedIndexSource& source,
     bool use_async_load);
 
-// Add envelope/decode scratch for the entries actually prepared by async
-// vector loading. Native remote-stream engine entries remain uninspected.
-LoadResourceRequest
-LegacyVectorFileLoadResource(LoadResourceRequest request,
-                             bool disk_family,
-                             const storage::LoadOptions& options,
-                             const std::vector<std::string>& paths,
-                             const storage::FileManagerContext& context);
-
 }  // namespace milvus::index

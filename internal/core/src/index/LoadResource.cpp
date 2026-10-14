@@ -741,33 +741,6 @@ LegacyVectorFileLoadResourceAsync(LoadResourceRequest request,
     co_return request;
 }
 
-LoadResourceRequest
-LegacyVectorFileLoadResource(LoadResourceRequest request,
-                             bool disk_family,
-                             const storage::LoadOptions& options,
-                             const std::vector<std::string>& paths,
-                             const storage::FileManagerContext& context) {
-    auto estimate = [&]() -> folly::coro::Task<LoadResourceRequest> {
-        auto source = co_await storage::V1RemoteSource::OpenAsync(
-            context,
-            paths,
-            options,
-            storage::ArtifactStorageNamespace::Index,
-            disk_family ? storage::V1SourceLayout::DiskFiles
-                        : storage::V1SourceLayout::MemoryEntries);
-        co_return co_await LegacyVectorFileLoadResourceAsync(
-            request, disk_family, options, *source);
-    };
-    return folly::coro::blockingWait(folly::coro::co_withExecutor(
-        storage::ResolveAsyncLoadExecutor(
-            storage::LocalFileIOPool::GetInstance().GetExecutor(),
-            options.op_ctx &&
-                    options.op_ctx->runtime_load_priority.value_or(0) != 0
-                ? proto::common::LoadPriority::LOW
-                : proto::common::LoadPriority::HIGH),
-        estimate()));
-}
-
 ScalarIndexLoadResources
 ScalarIndexFileLoadResource(
     DataType field_type,

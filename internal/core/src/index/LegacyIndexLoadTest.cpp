@@ -546,8 +546,7 @@ TEST_F(LegacyIndexLoadTest, SyncMaterializationUsesWritePermitAndDirectIO) {
     sink.WriteEntry("b", b.data(), b.size());
     std::vector<std::string> paths;
     const auto stats = sink.Finish();
-    for (const auto& file : stats.Files())
-        paths.push_back(file.file_name);
+    for (const auto& file : stats.Files()) paths.push_back(file.file_name);
     sink.ReleaseLocalStaging();
     storage::V1RemoteSource source(context_, paths, {});
     source.SetLoadContext(proto::common::LoadPriority::LOW, {});
@@ -1512,8 +1511,10 @@ TEST_F(LegacyIndexLoadTest, VectorHeapAndMmapPreserveNullableAndAllNullRows) {
             LoadResourceRequest base{};
             base.final_memory_cost = 128;
             base.max_memory_cost = 128;
-            const auto estimate = LegacyVectorFileLoadResource(
-                base, false, options, paths_, context_);
+            auto source = Run(
+                storage::V1RemoteSource::OpenAsync(context_, paths_, options));
+            const auto estimate = Run(LegacyVectorFileLoadResourceAsync(
+                base, false, options, *source));
             EXPECT_EQ(estimate.final_memory_cost, base.final_memory_cost);
             EXPECT_GT(estimate.max_memory_cost,
                       base.max_memory_cost + values.size() * sizeof(float));
@@ -1579,8 +1580,10 @@ TEST_F(LegacyIndexLoadTest, EmptyEmbeddingListsKeepValidParentRows) {
         LoadResourceRequest base{};
         base.final_memory_cost = 64;
         base.max_memory_cost = 64;
-        const auto estimate = LegacyVectorFileLoadResource(
-            base, false, options, paths_, context_);
+        auto source =
+            Run(storage::V1RemoteSource::OpenAsync(context_, paths_, options));
+        const auto estimate = Run(
+            LegacyVectorFileLoadResourceAsync(base, false, options, *source));
         EXPECT_EQ(estimate.final_memory_cost, 64);
         EXPECT_GT(estimate.max_memory_cost,
                   64 + offsets.size() * sizeof(size_t));
@@ -1790,7 +1793,7 @@ TEST_F(LegacyIndexLoadTest,
     EXPECT_EQ(eager, streams ? std::vector<std::string>{} : names);
     for (const auto& [path, file] : fs_->files) file->ResetCounters();
     const auto estimate =
-        LegacyVectorFileLoadResource({}, true, options, paths_, context_);
+        Run(LegacyVectorFileLoadResourceAsync({}, true, options, *source));
     EXPECT_GT(estimate.max_memory_cost, 0);
     for (const auto& [path, file] : fs_->files) {
         if (std::filesystem::path(path).filename() == INDEX_FILE_SLICE_META)
