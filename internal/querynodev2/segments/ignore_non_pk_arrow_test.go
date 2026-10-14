@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/arrowconv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -52,7 +53,7 @@ import (
 // build a small retrieve plan here mirroring
 // mock_segcore.genSimpleRetrievePlanExpr but with a 3-field OutputFieldIds
 // list, and pass the exact same field order as fieldSchemas to
-// segcore.ArrowFieldsToProto (matching how query_pipeline.go's
+// arrowconv.ArrowFieldsToProto (matching how query_pipeline.go's
 // buildIgnoreNonPkPipeline builds fieldSchemas from OutputFieldsId).
 // =========================================================================
 
@@ -253,7 +254,7 @@ func (f *arrowFetchFixture) teardown() {
 // =========================================================================
 
 // TestFetchFieldsData_ArrowMatchesRetrieveByOffsets verifies that
-// fetchFieldsAsRecord (+ segcore.ArrowFieldsToProto) produces the same
+// fetchFieldsAsRecord (+ arrowconv.ArrowFieldsToProto) produces the same
 // data as per-segment RetrieveByOffsets, manually interleaved in
 // PK-sorted order (the reference path).
 func TestFetchFieldsData_ArrowMatchesRetrieveByOffsets(t *testing.T) {
@@ -267,7 +268,7 @@ func TestFetchFieldsData_ArrowMatchesRetrieveByOffsets(t *testing.T) {
 	require.Equal(t, len(fx.fieldSchemaMap), int(rec.NumCols()), "Arrow record column count must match requested output fields")
 	require.Equal(t, int64(len(fx.merged.Selections)), rec.NumRows())
 
-	arrowFieldsData, err := segcore.ArrowFieldsToProto(rec, fx.fieldSchemaMap)
+	arrowFieldsData, err := arrowconv.ArrowFieldsToProto(rec, fx.fieldSchemaMap)
 	require.NoError(t, err)
 	require.Len(t, arrowFieldsData, len(fx.fieldSchemaMap))
 
@@ -347,7 +348,7 @@ func TestFetchFieldsData_ArrowMatchesRetrieveByOffsets(t *testing.T) {
 //                        (segcore.FillRetrieveFieldsOrdered for Arrow,
 //                        the sum of per-segment Segment.RetrieveByOffsets
 //                        calls for proto).
-//   - convert-ns/op:    segcore.ArrowFieldsToProto (Arrow only).
+//   - convert-ns/op:    arrowconv.ArrowFieldsToProto (Arrow only).
 //   - interleave-ns/op: the Go-side typeutil.AppendFieldData merge loop
 //                        that reorders per-segment RetrieveByOffsets
 //                        results into PK-sorted order (proto only).
@@ -381,7 +382,7 @@ func BenchmarkFetchFieldsData_Arrow(b *testing.B) {
 		}
 
 		convertStart := time.Now()
-		fieldsData, err := segcore.ArrowFieldsToProto(rec, fx.fieldSchemaMap)
+		fieldsData, err := arrowconv.ArrowFieldsToProto(rec, fx.fieldSchemaMap)
 		convertNs += time.Since(convertStart).Nanoseconds()
 		rec.Release()
 
@@ -548,7 +549,7 @@ func BenchmarkOverheadRatio_SearchVsRetrieve(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		_, err = segcore.ArrowFieldsToProto(rec, fx.fieldSchemaMap)
+		_, err = arrowconv.ArrowFieldsToProto(rec, fx.fieldSchemaMap)
 		if err != nil {
 			b.Fatal(err)
 		}
