@@ -1243,7 +1243,7 @@ TEST(ColumnarArrayChunk, SealedStructElementOffsetsUseRecursiveRootOffsets) {
     EXPECT_TRUE(offsets->IsRowValid(4));
 }
 
-TEST(ColumnarArrayChunk, LazyStructOffsetsPropagateContextAndRetryReadFailure) {
+TEST(ColumnarArrayChunk, StructOffsetsBuildPropagatesContextAndReadFailures) {
     class FailOnceTranslator : public TestGroupChunkTranslator {
      public:
         using TestGroupChunkTranslator::TestGroupChunkTranslator;
@@ -1293,7 +1293,6 @@ TEST(ColumnarArrayChunk, LazyStructOffsetsPropagateContextAndRetryReadFailure) {
                 std::move(chunks));
         });
     ProxyChunkColumn column(group, field_id, field_meta);
-    LazyStructElementOffsets entry;
     OpContext ctx;
     ctx.runtime_load_priority = 1;
     auto build = [&] {
@@ -1301,23 +1300,21 @@ TEST(ColumnarArrayChunk, LazyStructOffsetsPropagateContextAndRetryReadFailure) {
             column, field_meta, 3, &ctx);
     };
     try {
-        entry.GetOrBuild(&ctx, build);
+        build();
         FAIL() << "expected manifest open failure";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
     }
     EXPECT_EQ(observed, &ctx);
-    EXPECT_EQ(entry.GetIfReady(), nullptr);
     EXPECT_FALSE(group->IsMaterialized());
     try {
-        entry.GetOrBuild(&ctx, build);
+        build();
         FAIL() << "expected raw chunk read failure";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FileReadFailed);
     }
     EXPECT_TRUE(group->IsMaterialized());
-    EXPECT_EQ(entry.GetIfReady(), nullptr);
-    auto offsets = entry.GetOrBuild(&ctx, build);
+    auto offsets = build();
     EXPECT_EQ(observed, &ctx);
     EXPECT_EQ(opens, 2);
     ASSERT_TRUE(offsets->HasRowValidity());
@@ -1325,7 +1322,6 @@ TEST(ColumnarArrayChunk, LazyStructOffsetsPropagateContextAndRetryReadFailure) {
     EXPECT_TRUE(offsets->IsRowValid(0));
     EXPECT_FALSE(offsets->IsRowValid(1));
     EXPECT_TRUE(offsets->IsRowValid(2));
-    EXPECT_EQ(entry.GetOrBuild(&ctx, build), offsets);
     EXPECT_EQ(opens, 2);
 }
 

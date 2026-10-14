@@ -211,6 +211,13 @@ LazyManifestTestGroupPattern(const SchemaPtr& schema) {
                                : user_fields + other_groups;
 }
 
+std::string
+PerFieldManifestTestGroupPattern(const SchemaPtr& schema) {
+    auto pattern = LazyManifestTestGroupPattern(schema);
+    std::replace(pattern.begin(), pattern.end(), '|', ',');
+    return pattern;
+}
+
 class StorageV2CellTargetGuard {
  public:
     explicit StorageV2CellTargetGuard(int64_t bytes)
@@ -346,7 +353,7 @@ class BlockingMetadataReader : public milvus_storage::api::Reader {
 };
 
 expr::TypedExprPtr
-MakeLazyStructMatchExpr(FieldId label) {
+MakeStructMatchExpr(FieldId label) {
     expr::ColumnInfo column(label, DataType::ARRAY, DataType::INT32, {}, true);
     column.element_level_ = true;
     proto::plan::GenericValue value;
@@ -958,7 +965,7 @@ TEST_P(TestLazyManifest, LazyManifestNullableVectorMaterializesOnRetrieve) {
     }
 }
 
-TEST_P(TestLazyManifest, LazyManifestStructOffsetsStayColdUntilFirstUse) {
+TEST_P(TestLazyManifest, StructOffsetsBuiltBeforePublicationAndDoNotReloadRaw) {
     LazyColumnGroupGuard lazy_group_guard(true);
     auto policies =
         cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
@@ -974,13 +981,14 @@ TEST_P(TestLazyManifest, LazyManifestStructOffsetsStayColdUntilFirstUse) {
                                        (GetParam() ? "varchar" : "int64"));
     auto fs = GetDefaultArrowFileSystem();
     StorageV2TempDirGuard dir_guard(fs, path);
-    milvus::test::V3SegmentTestData data(schema,
-                                         1,
-                                         rows,
-                                         128,
-                                         TestLocalPath,
-                                         path,
-                                         LazyManifestTestGroupPattern(schema));
+    milvus::test::V3SegmentTestData data(
+        schema,
+        1,
+        rows,
+        128,
+        TestLocalPath,
+        path,
+        PerFieldManifestTestGroupPattern(schema));
     auto segment =
         CreateV3ManifestSegment(data, 3192 + (GetParam() ? 100 : 0), 0, schema);
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
@@ -990,32 +998,25 @@ TEST_P(TestLazyManifest, LazyManifestStructOffsetsStayColdUntilFirstUse) {
         state->runtime->fields.at(label));
     ASSERT_NE(proxy, nullptr);
     EXPECT_TRUE(proxy->IsLazy());
-    EXPECT_FALSE(proxy->IsMaterialized());
+    EXPECT_TRUE(proxy->IsMaterialized());
     auto entry = state->runtime->struct_element_offsets_map.at(label);
     EXPECT_EQ(entry, state->runtime->struct_element_offsets_map.at(score));
-    EXPECT_EQ(entry->GetIfReady(), nullptr);
+    ASSERT_NE(entry, nullptr);
 
-    folly::CancellationSource cancelled;
-    cancelled.requestCancellation();
-    OpContext cancelled_ctx(cancelled.getToken());
-    try {
-        segment->CaptureReadSnapshot()->GetStructElementOffsets(label,
-                                                                &cancelled_ctx);
-        FAIL() << "expected cancellation before materializing the struct";
-    } catch (const SegcoreError& error) {
-        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
-    }
-    EXPECT_FALSE(proxy->IsMaterialized());
-    EXPECT_EQ(entry->GetIfReady(), nullptr);
-
-    OpContext ctx;
-    ctx.runtime_load_priority =
-        static_cast<int32_t>(proto::common::LoadPriority::HIGH);
-    auto offsets =
-        segment->CaptureReadSnapshot()->GetStructElementOffsets(score, &ctx);
-    ASSERT_NE(offsets, nullptr);
-    EXPECT_TRUE(proxy->IsMaterialized());
-    EXPECT_EQ(offsets, segment->GetStructElementOffsets(label));
+    auto offsets = entry;
+    const int64_t first_row = 0;
+    EXPECT_TRUE(proxy->CellsLoaded(&first_row, 1));
+    auto other = std::dynamic_pointer_cast<ProxyChunkColumn>(
+        state->runtime->fields.at(score));
+    ASSERT_NE(other, nullptr);
+    EXPECT_FALSE(other->IsMaterialized());
+    proxy->ManualEvictCache();
+    EXPECT_FALSE(proxy->CellsLoaded(&first_row, 1));
+    auto snapshot = segment->CaptureReadSnapshot();
+    EXPECT_EQ(snapshot->GetStructElementOffsets(score, nullptr), offsets);
+    EXPECT_EQ(segment->GetStructElementOffsets(label), offsets);
+    EXPECT_FALSE(proxy->CellsLoaded(&first_row, 1));
+    EXPECT_FALSE(other->IsMaterialized());
     EXPECT_EQ(offsets->GetRowCount(), rows);
     ASSERT_TRUE(offsets->HasRowValidity());
     for (int64_t i = 0; i < rows; ++i) {
@@ -1032,19 +1033,21 @@ TEST_P(TestLazyManifest, LazyManifestMatchConstructionCancellationAndRetry) {
     policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
     CacheWarmupPolicyGuard warmup_guard(policies);
     auto schema = GenChunkedSegmentTestSchema(GetParam());
+    schema->AddDebugArrayField("items[source]", DataType::INT32, true);
     auto label =
         schema->AddDebugArrayField("items[label]", DataType::INT32, true);
     constexpr int64_t rows = 64;
     auto path = UniqueManifestTestPath("lazy_match_cancel_retry");
     auto fs = GetDefaultArrowFileSystem();
     StorageV2TempDirGuard dir_guard(fs, path);
-    milvus::test::V3SegmentTestData data(schema,
-                                         1,
-                                         rows,
-                                         128,
-                                         TestLocalPath,
-                                         path,
-                                         LazyManifestTestGroupPattern(schema));
+    milvus::test::V3SegmentTestData data(
+        schema,
+        1,
+        rows,
+        128,
+        TestLocalPath,
+        path,
+        PerFieldManifestTestGroupPattern(schema));
     auto segment =
         CreateV3ManifestSegment(data, 3193 + (GetParam() ? 100 : 0), 0, schema);
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
@@ -1056,7 +1059,7 @@ TEST_P(TestLazyManifest, LazyManifestMatchConstructionCancellationAndRetry) {
     ASSERT_TRUE(proxy->IsLazy());
     ASSERT_FALSE(proxy->IsMaterialized());
     auto entry = state->runtime->struct_element_offsets_map.at(label);
-    auto match = MakeLazyStructMatchExpr(label);
+    auto match = MakeStructMatchExpr(label);
 
     folly::CancellationSource cancelled;
     cancelled.requestCancellation();
@@ -1072,17 +1075,17 @@ TEST_P(TestLazyManifest, LazyManifestMatchConstructionCancellationAndRetry) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
     }
     EXPECT_FALSE(proxy->IsMaterialized());
-    EXPECT_EQ(entry->GetIfReady(), nullptr);
+    ASSERT_NE(entry, nullptr);
 
     OpContext fresh_ctx;
     context.set_op_context(&fresh_ctx);
     auto physical = exec::CompileExpression(match, &context, {}, false);
     ASSERT_NE(physical, nullptr);
     EXPECT_TRUE(proxy->IsMaterialized());
-    // Construction only needs layout, not raw array chunks or the mapping.
+    // Construction only needs the sibling layout; the mapping was built at load.
     int64_t first_row = 0;
     EXPECT_FALSE(proxy->CellsLoaded(&first_row, 1));
-    EXPECT_EQ(entry->GetIfReady(), nullptr);
+    ASSERT_NE(entry, nullptr);
     exec::ExecContext exec_context(&context);
     exec::EvalCtx eval_context(&exec_context);
     VectorPtr result;
@@ -1096,7 +1099,7 @@ TEST_P(TestLazyManifest, LazyManifestMatchConstructionCancellationAndRetry) {
         EXPECT_EQ(values[i], i % 2 == 0);
         EXPECT_EQ(validity[i], i % 2 == 0);
     }
-    EXPECT_NE(entry->GetIfReady(), nullptr);
+    EXPECT_EQ(entry, segment->GetStructElementOffsets(label));
 }
 
 TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
@@ -1114,6 +1117,7 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
         SCOPED_TRACE(async_enabled);
         storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
         auto schema = GenChunkedSegmentTestSchema(GetParam());
+        schema->AddDebugArrayField("items[source]", DataType::INT32, true);
         auto label =
             schema->AddDebugArrayField("items[label]", DataType::INT32, true);
         constexpr int64_t rows = 64;
@@ -1127,7 +1131,7 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
             128,
             TestLocalPath,
             path,
-            LazyManifestTestGroupPattern(schema));
+            PerFieldManifestTestGroupPattern(schema));
         auto segment = CreateV3ManifestSegment(
             data,
             3194 + (GetParam() ? 100 : 0) + (async_enabled ? 1000 : 0),
@@ -1171,7 +1175,8 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
         auto runtime = sealed->TestCloneMutableRuntimeResourceState();
         // Preserve the cold column rather than using the ordinary raw-column
         // loader, whose size accounting materializes variable-length columns.
-        auto entry = std::make_shared<LazyStructElementOffsets>();
+        auto entry = current->runtime->struct_element_offsets_map.at(label);
+        ASSERT_NE(entry, nullptr);
         runtime->fields.insert_or_assign(label, column);
         runtime->struct_to_element_offsets.insert_or_assign("items", entry);
         runtime->struct_element_offsets_map.insert_or_assign(label, entry);
@@ -1185,7 +1190,7 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
             "lazy_match_open", segment.get(), rows, MAX_TIMESTAMP);
         context.set_op_context(&ctx);
         context.set_read_snapshot(read);
-        auto match = MakeLazyStructMatchExpr(label);
+        auto match = MakeStructMatchExpr(label);
         reader->Arm();
         auto started = reader->Started();
         auto compilation = std::async(std::launch::async, [&] {
@@ -1206,7 +1211,7 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
         EXPECT_EQ(reader->async_calls, async_enabled ? 1 : 0);
         EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 1);
         EXPECT_FALSE(proxy->IsMaterialized());
-        EXPECT_EQ(entry->GetIfReady(), nullptr);
+        ASSERT_NE(entry, nullptr);
 
         OpContext fresh_ctx;
         context.set_op_context(&fresh_ctx);
@@ -1214,7 +1219,7 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
         EXPECT_EQ(reader->async_calls, async_enabled ? 2 : 0);
         EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 2);
         EXPECT_TRUE(proxy->IsMaterialized());
-        EXPECT_EQ(entry->GetIfReady(), nullptr);
+        ASSERT_NE(entry, nullptr);
     }
 }
 
