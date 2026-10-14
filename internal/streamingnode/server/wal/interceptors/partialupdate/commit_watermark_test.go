@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func (g observedCommitGuard) Acquire(ctx context.Context, msg message.MutableMes
 	return g(ctx, msg)
 }
 
-// Err is first checked by writeGuards.acquire, after Acquire has captured the
+// Err is first checked by rowLocks.acquire, after Acquire has captured the
 // transaction's write set. This observes real lock admission without sleeps.
 type commitGuardContext struct {
 	context.Context
@@ -39,13 +40,13 @@ func (ctx *commitGuardContext) Err() error {
 	return ctx.Context.Err()
 }
 
-func commitAckManager(t testing.TB, env *partialUpdateChainTestEnv) *ack.AckManager {
+func commitAckManager(t *testing.T, env *partialUpdateChainTestEnv) *ack.AckManager {
 	t.Helper()
 	operator := resource.Resource().TimeTickInspector().MustGetOperator(env.buildParam.ChannelInfo)
 	return operator.(interface{ AckManager() *ack.AckManager }).AckManager()
 }
 
-func confirmedCommitTimestamp(t testing.TB, manager *ack.AckManager) uint64 {
+func confirmedCommitTimestamp(t *testing.T, manager *ack.AckManager) uint64 {
 	t.Helper()
 	details, err := manager.SyncAndGetAcknowledged(context.Background())
 	require.NoError(t, err)
@@ -58,7 +59,7 @@ func confirmedCommitTimestamp(t testing.TB, manager *ack.AckManager) uint64 {
 	return confirmed
 }
 
-func receiveCommitValue[T any](t testing.TB, ch <-chan T) T {
+func receiveCommitValue[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
 	select {
 	case value := <-ch:
@@ -74,42 +75,16 @@ func TestPartialUpdateQueuedCommitsDoNotHoldConfirmedTimeTick(t *testing.T) {
 	for _, depth := range []int{1, 8, 32} {
 		t.Run(fmt.Sprintf("N%d", depth), func(t *testing.T) {
 			env := newPartialUpdateChainTestEnv(t)
-			require.False(t, exerciseCommitWatermarkQueue(t, env, depth, func(measure func() bool) bool { return measure() }),
+			require.False(t, exerciseCommitWatermarkQueue(t, env, depth),
 				"queued provisional timestamps blocked confirmation of a disjoint ordinary write")
 		})
 	}
 }
 
-// The timed phase measures a disjoint append plus one confirmation sync while
-// N hot-PK commits wait. WAL persistence is a controlled callback, so ns/op is
-// interceptor overhead, not real WAL latency or end-to-end Strong-read latency.
-func BenchmarkPartialUpdateQueuedCommitConfirmation(b *testing.B) {
-	for _, depth := range []int{1, 8, 32} {
-		b.Run(fmt.Sprintf("N%d", depth), func(b *testing.B) {
-			env := newPartialUpdateChainTestEnv(b)
-			blocked := 0
-			b.ResetTimer()
-			b.StopTimer()
-			for i := 0; i < b.N; i++ {
-				if exerciseCommitWatermarkQueue(b, env, depth, func(measure func() bool) bool {
-					b.StartTimer()
-					obstructed := measure()
-					b.StopTimer()
-					return obstructed
-				}) {
-					blocked++
-				}
-			}
-			b.ReportMetric(float64(blocked)/float64(b.N), "watermark_blocks/op")
-		})
-	}
-}
-
 func exerciseCommitWatermarkQueue(
-	t testing.TB,
+	t *testing.T,
 	env *partialUpdateChainTestEnv,
 	depth int,
-	measure func(func() bool) bool,
 ) bool {
 	t.Helper()
 	readTS := env.allocateReadTS(t)
@@ -124,7 +99,7 @@ func exerciseCommitWatermarkQueue(
 	var walOnce, pkOnce sync.Once
 	defer walOnce.Do(func() { close(releaseWAL) })
 	defer pkOnce.Do(func() { close(releasePK) })
-	env.buildParam.WriteGuard = observedCommitGuard(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+	env.buildParam.RowLock = observedCommitGuard(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
 		if msg.MessageType() != message.MessageTypeCommitTxn {
 			return env.partial.Acquire(ctx, msg)
 		}
@@ -133,6 +108,9 @@ func exerciseCommitWatermarkQueue(
 			return env.partial.Acquire(ctx, msg)
 		}
 		guardCtx, release, err := env.partial.Acquire(ctx, msg)
+		if err != nil {
+			return guardCtx, release, err
+		}
 		return guardCtx, func() {
 			// TimeTick releases the guard after final acknowledgement and MVCC
 			// publication. Hold the real PK lock here to isolate queue obstruction
@@ -167,15 +145,13 @@ func exerciseCommitWatermarkQueue(
 	require.Less(t, confirmedCommitTimestamp(t, manager), finalTS)
 	walOnce.Do(func() { close(releaseWAL) })
 	receiveCommitValue(t, acknowledged)
-	obstructed := measure(func() bool {
-		var ordinaryTS uint64
-		_, err := env.append(newGuardTestDelete(20), func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
-			ordinaryTS = msg.TimeTick()
-			return env.nextMessageID(), nil
-		})
-		require.NoError(t, err)
-		return confirmedCommitTimestamp(t, manager) < ordinaryTS
+	var ordinaryTS uint64
+	_, err := env.append(newGuardTestDelete(20), func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		ordinaryTS = msg.TimeTick()
+		return env.nextMessageID(), nil
 	})
+	require.NoError(t, err)
+	obstructed := confirmedCommitTimestamp(t, manager) < ordinaryTS
 	pkOnce.Do(func() { close(releasePK) })
 	require.NoError(t, receiveCommitValue(t, firstDone))
 	for range waiters {
@@ -184,86 +160,92 @@ func exerciseCommitWatermarkQueue(
 		err := receiveCommitValue(t, done)
 		require.True(t, status.AsStreamingError(err).IsPartialUpdateRetryableCAS() || status.AsStreamingError(err).IsTxnExpired())
 	}
-	// Resolve completed sessions through the normal TimeTick cleanup path before
-	// the benchmark reuses this WAL, keeping its transaction registry bounded.
+	// Resolve completed sessions through the normal TimeTick cleanup path and
+	// confirm that completed attempts no longer occupy the transaction registry.
 	cleanupTS := confirmedCommitTimestamp(t, manager)
-	_, err := env.append(streamingtimetick.NewTimeTickMsg(cleanupTS, env.nextMessageID(), 0, true), nil)
+	_, err = env.append(streamingtimetick.NewTimeTickMsg(cleanupTS, env.nextMessageID(), 0, true), nil)
 	require.NoError(t, err)
 	for _, commit := range append(waiters, newChainTestCASCommit(t, first)) {
 		_, err := env.txnManager.GetSessionOfTxn(commit.TxnContext().TxnID)
 		require.True(t, status.AsStreamingError(err).IsTxnExpired())
 	}
+	requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10, 20)
 	return obstructed
 }
 
 func TestPartialUpdateCommitExpiresDuringRealGuardWait(t *testing.T) {
-	for _, barrier := range []bool{false, true} {
-		for _, cleanupFirst := range []bool{false, true} {
-			t.Run(fmt.Sprintf("admission_barrier_%t/cleanup_before_snapshot_%t", barrier, cleanupFirst), func(t *testing.T) {
-				env := newPartialUpdateChainTestEnv(t)
-				cas := env.prepareCASTxn(t, env.allocateReadTS(t), 10)
-				session, err := env.txnManager.GetSessionOfTxn(cas.TxnID)
-				require.NoError(t, err)
-				guards := env.partial.state.writeGuards
-				var unlock func()
-				if barrier {
-					guards.admission.Lock("v1")
-					unlock = func() { guards.admission.Unlock("v1") }
-				} else {
-					key := pkLockKey{vchannel: "v1", kind: primaryKeyKindInt64, int64Value: 10}
-					guards.pks.Lock(key)
-					unlock = func() { guards.pks.Unlock(key) }
-				}
-				var once sync.Once
-				defer once.Do(unlock)
-				waiting := make(chan uint64, 1)
-				resumeSnapshot := make(chan struct{})
-				var snapshotOnce sync.Once
-				defer snapshotOnce.Do(func() { close(resumeSnapshot) })
-				env.buildParam.WriteGuard = observedCommitGuard(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
-					if msg.MessageType() != message.MessageTypeCommitTxn {
-						return env.partial.Acquire(ctx, msg)
-					}
-					if cleanupFirst {
-						waiting <- msg.TimeTick()
-						<-resumeSnapshot
-						return env.partial.Acquire(ctx, msg)
-					}
-					ctx = &commitGuardContext{Context: ctx, entered: func() { waiting <- msg.TimeTick() }}
+	for _, cleanupFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cleanup_before_snapshot_%t", cleanupFirst), func(t *testing.T) {
+			env := newPartialUpdateChainTestEnv(t)
+			cas := env.prepareCASTxn(t, env.allocateReadTS(t), 10)
+			session, err := env.txnManager.GetSessionOfTxn(cas.TxnID)
+			require.NoError(t, err)
+			guards := env.partial.state.rowLocks
+			key := pkLockKey{vchannel: "v1", kind: primaryKeyKindInt64, int64Value: 10}
+			guards.pks.Lock(key)
+			unlock := func() { guards.pks.Unlock(key) }
+			var once sync.Once
+			defer once.Do(unlock)
+			waiting := make(chan uint64, 1)
+			resumeSnapshot := make(chan struct{})
+			var snapshotOnce sync.Once
+			defer snapshotOnce.Do(func() { close(resumeSnapshot) })
+			env.buildParam.RowLock = observedCommitGuard(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+				if msg.MessageType() != message.MessageTypeCommitTxn {
 					return env.partial.Acquire(ctx, msg)
-				})
-				done, wal := make(chan error, 1), make(chan struct{}, 1)
-				go func() {
-					_, err := env.append(newChainTestCASCommit(t, cas), func(context.Context, message.MutableMessage) (message.MessageID, error) {
-						wal <- struct{}{}
-						return env.nextMessageID(), nil
-					})
-					done <- err
-				}()
-				preparedTS := receiveCommitValue(t, waiting)
-				expiredTS := tsoutil.AddPhysicalDurationOnTs(preparedTS, cas.Keepalive+time.Second)
-				// Advance final timestamp deterministically, without sleeping for the
-				// transaction lease. Cleanup itself follows the real TimeTick path.
-				patch := mockey.Mock(mockey.GetMethod(resource.Resource().TSOAllocator(), "Allocate")).Return(expiredTS+1, nil).Build()
-				defer patch.UnPatch()
-				tick := streamingtimetick.NewTimeTickMsg(expiredTS, env.nextMessageID(), 0, true)
-				_, err = env.append(tick, nil)
-				require.NoError(t, err)
-				require.Nil(t, env.partial.state.getTxn(cas.TxnID))
-				_, err = env.txnManager.GetSessionOfTxn(cas.TxnID)
-				require.True(t, status.AsStreamingError(err).IsTxnExpired(), "cleaned session lookup returned: %v", err)
-				snapshotOnce.Do(func() { close(resumeSnapshot) })
-				once.Do(unlock)
-				err = receiveCommitValue(t, done)
-				require.Positive(t, patch.MockTimes(), "final timestamp allocation bypassed the expiry injection")
-				require.True(t, txn.IsCommitAdmissionRejected(err))
-				require.True(t, status.AsStreamingError(err).IsTxnExpired(), "guarded commit returned: %v", err)
-				require.Equal(t, message.TxnStateRollbacked, session.State())
-				require.Empty(t, wal)
-				requireWriteGuardRegistriesEmpty(t, guards)
+				}
+				if cleanupFirst {
+					waiting <- msg.TimeTick()
+					<-resumeSnapshot
+					return env.partial.Acquire(ctx, msg)
+				}
+				ctx = &commitGuardContext{Context: ctx, entered: func() { waiting <- msg.TimeTick() }}
+				return env.partial.Acquire(ctx, msg)
 			})
-		}
+			done, wal := make(chan error, 1), make(chan struct{}, 1)
+			go func() {
+				_, err := env.append(newChainTestCASCommit(t, cas), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+					wal <- struct{}{}
+					return env.nextMessageID(), nil
+				})
+				done <- err
+			}()
+			preparedTS := receiveCommitValue(t, waiting)
+			expiredTS := tsoutil.AddPhysicalDurationOnTs(preparedTS, cas.Keepalive+time.Second)
+			// Advance final timestamp deterministically, without sleeping for the
+			// transaction lease. Cleanup itself follows the real TimeTick path.
+			var nextTS atomic.Uint64
+			nextTS.Store(expiredTS)
+			patch := mockey.Mock(mockey.GetMethod(resource.Resource().TSOAllocator(), "Allocate")).To(func(context.Context) (uint64, error) {
+				return nextTS.Add(1), nil
+			}).Build()
+			defer patch.UnPatch()
+			confirmedTS := confirmedCommitTimestamp(t, commitAckManager(t, env))
+			require.GreaterOrEqual(t, confirmedTS, expiredTS, "waiting commit held back its own expiry watermark")
+			tick := streamingtimetick.NewTimeTickMsg(confirmedTS, env.nextMessageID(), 0, true)
+			_, err = env.append(tick, nil)
+			require.NoError(t, err)
+			require.Nil(t, env.partial.state.getTxn(cas.TxnID))
+			_, err = env.txnManager.GetSessionOfTxn(cas.TxnID)
+			require.True(t, status.AsStreamingError(err).IsTxnExpired(), "cleaned session lookup returned: %v", err)
+			allocationsBeforeResume := patch.MockTimes()
+			snapshotOnce.Do(func() { close(resumeSnapshot) })
+			once.Do(unlock)
+			err = receiveCommitValue(t, done)
+			require.True(t, txn.IsCommitAdmissionRejected(err))
+			if cleanupFirst {
+				// Missing proof state is rejected by Acquire before a final
+				// timestamp is allocated. The WAL must still remain untouched.
+				require.True(t, status.AsStreamingError(err).IsPartialUpdateRetryableCAS(), "guarded commit returned: %v", err)
+			} else {
+				require.Greater(t, patch.MockTimes(), allocationsBeforeResume, "final timestamp allocation bypassed the expiry injection")
+				require.True(t, status.AsStreamingError(err).IsTxnExpired(), "guarded commit returned: %v", err)
+			}
+			require.Equal(t, message.TxnStateRollbacked, session.State())
+			require.Empty(t, wal)
+			requireTestRowLocksAvailable(t, guards, "v1", 10)
+		})
 	}
 }
 
-var _ interceptors.MessageWriteGuard = observedCommitGuard(nil)
+var _ interceptors.MessageRowLock = observedCommitGuard(nil)

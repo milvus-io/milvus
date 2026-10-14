@@ -21,7 +21,7 @@ type partialUpdateState struct {
 	pkVersions          *pkVersionIndex
 	fences              *collectionFenceIndex
 	incompleteTxnFences *vchannelFenceIndex
-	writeGuards         *writeGuards
+	rowLocks            *rowLockManager
 	txnMu               sync.RWMutex
 	txns                map[message.TxnID]*pendingTxn
 }
@@ -41,7 +41,7 @@ func newPartialUpdateStateWithBudget(
 		pkVersions:          newPKVersionIndexWithBudget(versionIndexTTL, versionIndexBudget),
 		fences:              newCollectionFenceIndex(),
 		incompleteTxnFences: newVChannelFenceIndex(),
-		writeGuards:         newWriteGuards(),
+		rowLocks:            globalRowLockManager,
 		txns:                make(map[message.TxnID]*pendingTxn),
 	}
 }
@@ -67,27 +67,39 @@ func (s *partialUpdateState) registerTxnCleanup(session *txn.TxnSession, timetic
 	}, timetick)
 }
 
+// completeTxnWriteSet requires the recovered prefix and all runtime body PKs.
+// Local CAS proofs do not survive a WAL lifecycle change. Ordinary transactions
+// retain their original session and lease when their write set was recovered.
+func (s *partialUpdateState) completeTxnWriteSet(msg message.MutableMessage, txnID message.TxnID) (*pendingTxn, error) {
+	txnState := s.getTxn(txnID)
+	if message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil &&
+		(txnState == nil || !txnState.observedBegin || txnState.recovered) {
+		return nil, status.NewPartialUpdateRetryable(
+			"partial update transaction %d has no complete runtime proof in the current WAL lifecycle", txnID,
+		)
+	}
+	if txnState == nil || !txnState.observedBegin {
+		return nil, status.NewTransactionExpired(
+			"transaction %d write set could not be recovered; replay the full transaction", txnID,
+		)
+	}
+	return txnState, nil
+}
+
 // validateCommit snapshots a completed transaction and validates local CAS
 // proof before CommitTxn reaches the WAL.
 func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID message.TxnID) (*pendingTxn, error) {
 	if msg == nil || msg.VChannel() == "" {
 		return nil, status.NewUnrecoverableError("partial update commit vchannel is empty")
 	}
-	txnState := s.getTxn(txnID)
+	txnState, err := s.completeTxnWriteSet(msg, txnID)
+	if err != nil {
+		return nil, err
+	}
 	marker := message.HasPartialUpdateCAS(msg)
 	if txnState != nil && txnState.meta != nil && !marker {
 		return nil, status.NewUnrecoverableError("partial update transaction %d commit marker is missing", txnID)
 	}
-	if txnState == nil || !txnState.observedBegin {
-		if marker && msg.ReplicateHeader() == nil {
-			return nil, status.NewPartialUpdateRetryable(
-				"partial update transaction %d has no complete runtime proof in the current WAL lifecycle",
-				txnID,
-			)
-		}
-		return txnState, nil
-	}
-
 	if txnState.meta == nil {
 		if marker {
 			return nil, status.NewUnrecoverableError("partial update transaction %d has no CAS proof", txnID)
@@ -169,6 +181,7 @@ type pendingTxn struct {
 	casScopeSet       bool
 	fenceCollection   int64
 	observedBegin     bool
+	recovered         bool
 	cleanupRegistered bool
 }
 
@@ -282,6 +295,7 @@ func (s *partialUpdateState) getTxn(txnID message.TxnID) *pendingTxn {
 		casScopeSet:       txnState.casScopeSet,
 		fenceCollection:   txnState.fenceCollection,
 		observedBegin:     txnState.observedBegin,
+		recovered:         txnState.recovered,
 		cleanupRegistered: txnState.cleanupRegistered,
 	}
 }

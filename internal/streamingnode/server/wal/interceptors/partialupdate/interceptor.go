@@ -50,9 +50,10 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		state:              state,
 		pkDescriptorGetter: pkDescriptorGetter,
 	}
-	// Builders share this per-WAL parameter. TimeTick invokes the guard at
+	interceptor.recoverTransactions(param)
+	// Builders share this per-WAL parameter. TimeTick acquires row locks at
 	// append time, after every builder has completed, before assigning writeTS.
-	param.WriteGuard = interceptor
+	param.RowLock = interceptor
 	return interceptor
 }
 

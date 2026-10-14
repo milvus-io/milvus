@@ -38,11 +38,11 @@ writes. A local partial-update `CommitTxn` freezes and drains its transaction
 body, acquires exclusive locks on its exact PK write set, then allocates its
 final commit timestamp. It validates the observed term and read snapshot,
 appends the commit, and publishes the transaction write set before releasing
-the locks. Ordinary writers register one in-flight batch before timestamp
-allocation, without sorting or acquiring a lock for each PK. CAS reserves its
-PKs and waits for older overlapping batches to publish; a later overlapping
-ordinary batch waits for that reservation to finish. Independent PKs in the
-same vchannel can therefore commit concurrently. The existing shared vchannel
+the locks. Ordinary writers acquire shared locks on their exact PK write set
+before timestamp allocation and retain them through version publication. CAS
+uses exclusive locks on the same keys, so it waits for earlier overlapping
+ordinary writes and blocks later overlapping writes until it finishes.
+Independent PKs in the same vchannel can therefore commit concurrently. The existing shared vchannel
 lock still protects writes against exclusive DDL; a separate conservative
 admission barrier covers unknown write sets and collection fences.
 
@@ -174,7 +174,8 @@ CommitTxn keep their existing formats and transaction semantics. CAS metadata
 uses an existing properties map inside the Insert body, and the commit marker
 uses the existing outer properties map.
 
-No persistent PK index, schema migration, or restore-time gate is introduced.
+No persistent PK index or schema migration is introduced. Pending PK write sets
+are reconstructed from existing recovery bodies before accepting writes.
 
 ## Design Details
 
@@ -187,10 +188,11 @@ The design depends on seven invariants:
 2. **Exact query snapshot:** every CAS `readTS` is the nonzero snapshot
    reported by that channel's successful Strong query.
 3. **Atomic admission boundary:** local CAS validation, CommitTxn append, write
-   publication, transaction transition, acknowledgement, and MVCC publication
-   retain the same exclusive PK guards. Every ordinary or replicated logical
-   write participates through batch registration and CAS reservations, or a
-   conservative exclusive admission barrier.
+   publication, transaction transition, final acknowledgement, and MVCC
+   publication retain the same exclusive PK locks. Every ordinary or replicated logical
+   write with recoverable PKs participates through shared locks on the same PK
+   keys. Schema-less legacy Inserts retain their original acceptance and are
+   explicitly exempt from row-lock CAS protection.
 4. **Complete write coverage:** every supported WAL write that changes logical
    row data updates either exact PK versions or a conservative fence.
 5. **Fail closed:** missing history, malformed proof, or incomplete local CAS
@@ -198,13 +200,12 @@ The design depends on seven invariants:
 6. **Authoritative write identity:** a CAS Insert derives its collection and
    schema version from the Insert header and its PK field from ShardManager;
    attempt proof never supplies a competing collection or PK identity.
-7. **Timestamp order:** writers acquire their logical write guards before
+7. **Timestamp order:** writers acquire their row locks before
    allocating the final visibility timestamp. A CommitTxn freezes and drains
-   its body before selecting that guard's complete write set. Its provisional
-   acker prevents cleanup from overtaking this preparation and does not become
-   the persisted commit timestamp. It is acknowledged once the body is drained,
-   before waiting for the guard. A transaction may expire during that wait; the
-   final timestamp lease check rejects it before any CommitTxn WAL append.
+   its body before selecting the complete PK write set. Its provisional
+   acker prevents cleanup from overtaking body preparation and is acknowledged
+   before waiting for row locks. Only the final timestamp is persisted, after
+   a lease recheck that rejects transactions expired during the wait.
 
 ### Architecture and state ownership
 
@@ -216,7 +217,7 @@ flowchart LR
     Proxy -->|Delete + CAS Insert| Producer[Streaming producer]
     Producer -->|BeginTxn / body / CommitTxn| Lock[lock interceptor]
     Lock --> TimeTick[TimeTick interceptor]
-    TimeTick --> Guard[PK / conservative admission guard]
+    TimeTick --> Guard[PK row locks]
     Guard --> Shard[shard interceptor]
     Shard --> CAS[partial-update interceptor]
     CAS --> WAL[WAL backend]
@@ -228,14 +229,18 @@ flowchart LR
 | Original partial payload, attempt `readTS`, and vchannel term snapshot | Proxy `upsertTask` | One client request; rebuilt per retry | None |
 | Local transaction packaging and empty `_puc` commit marker | Producer | One vchannel message group | Standard WAL properties |
 | PChannel global lock and keyed vchannel RW locks | Lock interceptor | One WAL instance | None |
-| CAS-only exact typed PK locks, in-flight ordinary batches, CAS reservations, and vchannel admission RW locks | Partial-update interceptor, acquired by TimeTick through `WriteGuard` | One PChannel WAL term | None |
+| Shared ordinary-write and exclusive CAS locks on exact typed PKs | StreamingNode process-wide row-lock manager, acquired by TimeTick through `RowLock` | Entries live until their last acquiring or admitted operation releases them | None |
 | `pendingTxn`, PK versions, collection fences, and incomplete-txn fences | Partial-update interceptor | One PChannel WAL term | None |
 | PK-version byte budget and aggregate used/limit/missed-write metrics | Partial-update interceptor builder | One StreamingNode process | None |
 | Live and recovered transaction sessions | TxnManager | Transaction and WAL recovery lifecycle | Existing TxnBuffer recovery |
 | Collection schema and immutable PK descriptor | ShardManager | Collection lifecycle in one WAL | Existing recovery snapshot |
 
 Each WAL open creates independent PK, fence, and transaction state, while all
-WALs built by the StreamingNode share one byte budget. The interceptor does not
+WALs in the StreamingNode process share one row-lock manager and one byte budget.
+The row-lock manager keys rows by vchannel, PK type, and exact PK value; WAL term
+remains part of per-WAL proof validation. Closing a WAL or dropping a collection
+does not clear another operation's active row locks. Their final release reclaims
+the corresponding keyed-lock entries. The interceptor does not
 reconstruct row-level proof from TxnBuffer. Closing a WAL releases its maps and
 heaps and returns their estimated bytes to the node-wide budget.
 
@@ -260,9 +265,8 @@ sequenceDiagram
     R->>S: CommitTxn with empty _puc marker
     S->>S: Retain shared shard lifecycle lock
     S->>S: Reserve provisional acker; freeze and drain transaction body
-    S->>S: Acknowledge provisional acker before waiting for write guards
-    S->>S: Acquire admission read lock and sorted exclusive PK locks
-    S->>S: Reserve CAS PKs; wait for earlier overlapping ordinary batches
+    S->>S: Ack provisional timestamp before row-lock admission
+    S->>S: Acquire sorted, deduplicated exclusive PK locks
     S->>S: Allocate final commitTS; recheck transaction lease
     S->>S: Validate term / window / fences / PKs
     alt deterministic admission reject
@@ -272,8 +276,8 @@ sequenceDiagram
     else commit accepted
         S->>W: Append CommitTxn
         S->>S: Publish PK / fence state; finish transaction
-        S->>S: Ack final commit timestamp; publish MVCC
-        S->>S: Release PK / admission guards and shard lifecycle lock
+        S->>S: Ack final commit; publish MVCC
+        S->>S: Release PK row locks and shard lifecycle lock
         S-->>R: commitTS
         R-->>P: Append response
     end
@@ -293,8 +297,8 @@ to downstream consumers; QueryNode visibility continues to follow the existing
 commit and TimeTick contract.
 
 On deterministic admission rejection, StreamingNode rejects the transaction
-without appending CommitTxn or publishing its writes, then acknowledges its
-reserved timestamps and releases its guards. Proxy rebuilds a replacement
+without appending CommitTxn or publishing its writes, then acknowledges any
+remaining reserved timestamp and releases its guards. Proxy rebuilds a replacement
 attempt with a new Strong query and newly reported per-channel snapshots.
 Relative operations and unknown append outcomes retain the no-replay rules
 described below.
@@ -502,7 +506,7 @@ BeginTxn, body, or CommitTxn can be retried after a stream failure, and the
 final client outcome may be ambiguous. This proposal does not add
 transaction-level idempotency.
 
-### Interceptor ordering and admission lock
+### Interceptor ordering and row locks
 
 The append chain is:
 
@@ -525,48 +529,50 @@ A local CAS commit uses the same shared lifecycle locks as ordinary writes.
 It does not call `FailTxnAtVChannel`; that cleanup remains associated with the
 existing exclusive-DDL path.
 
-The partial-update interceptor owns an additional admission barrier and
-CAS-only exact PK locks, implemented with the existing `KeyLock` primitive.
-Ordinary writes use a short registry mutex and register one batch:
+The process-wide row-lock manager owns only exact PK read/write locks,
+implemented with existing KeyLock. No vchannel admission lock is added.
 
-| Logical write | Admission barrier | PK locks |
-|---|---|---|
-| Ordinary nontransactional Insert/Delete with exact PKs | `admission[vchannel].RLock` | No row locks; register its in-flight batch, waiting only for overlapping CAS reservations |
-| Ordinary or replicated CommitTxn with complete exact write set | `admission[vchannel].RLock` | No row locks; register the body's complete PK union as one batch |
-| Local CAS CommitTxn with complete exact write set | `admission[vchannel].RLock` | Exclusive locks on the body's PK union; reserve those PKs and drain older overlapping ordinary batches |
-| Collection fence, schema-less legacy Insert with unknown PKs, or CommitTxn without a complete observed Begin/body | `admission[vchannel].Lock` | None; the barrier covers every PK in that vchannel |
-| BeginTxn, transaction body, RollbackTxn, and messages with no logical writes | None | None |
+| Logical write | PK locks |
+|---|---|
+| Ordinary nontransactional Insert/Delete with exact PKs | Shared locks on the write set |
+| Ordinary or replicated CommitTxn with reconstructed write set | Shared locks on the known prefix and suffix PK union |
+| Local CAS CommitTxn with complete runtime proof | Exclusive locks on the complete PK union |
+| Legacy Insert without schema version and without an available PK schema | None; preserve its original acceptance |
+| TruncateCollection and exclusive DDL | Existing outer lifecycle lock only |
+| BeginTxn, transaction body, RollbackTxn | None |
 
-The admission barrier is distinct from the shard lifecycle lock. Exact-PK
-writers share it, while conservative writes hold it exclusively through fence
-publication. This prevents an unknown write set from crossing CAS validation
-without forcing every known CAS write to serialize the whole shard. DDL keeps
-its existing outer exclusion and transaction cleanup.
+Only a version-less Insert with SchemaNotFound is exempt. Other schema errors,
+missing descriptor getters, and malformed modern PKs retain their errors.
+Legacy writes publish a collection timestamp fence after successful append,
+but that record alone does not promise atomic CAS protection against legacy
+writes. Mixed transactions lock their known PKs and publish both known PK
+versions and any legacy fence. DDL retains its existing transaction cleanup.
 
 A PK lock key contains the vchannel, PK type, and exact Int64 or VarChar value.
 Each vchannel belongs to one collection. Int64 and VarChar values cannot alias,
 and no hash bucket introduces contention between distinct PKs. Before acquiring
-locks, local CAS writers sort by PK type and value and deduplicate the write set. This is
-required for overlapping multi-PK transactions and the common Delete/Insert
-duplicate: all acquisitions follow the same order, and no request tries to lock
-the same exclusive PK twice. PK locks release in reverse order before the
-admission barrier releases.
+locks, both ordinary and CAS writers sort by PK type and value and deduplicate
+the write set. Every acquisition follows the same order. Deduplication is also
+required for shared locks: a queued writer can block a second RLock on a key
+already held by the same request. This covers duplicate PKs in Delete/Insert
+transactions without allowing read-lock self-deadlock. PK locks release in
+reverse order after publication completes.
 
-Each vchannel also has a short registry mutex. Ordinary batch registration and
-CAS reservation registration plus the snapshot of existing batches occur under
-that same mutex. Every ordinary write therefore belongs to exactly one side of
-the admission boundary: an earlier registered batch is included in the CAS
-snapshot and must finish before CAS validation; a later overlapping batch sees
-the reservation and cannot register until CAS publication is complete. CAS
-scans the snapshot and waits for overlapping batches outside the registry mutex.
-New ordinary batches only inspect their PKs when CAS reservations are present;
-without CAS, registration and removal are constant-size batch operations.
-Completion closes the batch/reservation channel and removes registry entries.
-The registry mutex is never held during WAL I/O or while waiting.
+Ordinary writes and local CAS commits use the same keyed locks. A CAS commit
+waits until earlier shared holders finish publishing their versions; once its
+exclusive lock is acquired, later shared holders wait until CAS publication
+completes. The existing RWMutex writer preference prevents new ordinary readers
+from continuously bypassing a queued CAS writer. Ordinary writes do not perform
+CAS validation and retain their unconditional-write semantics.
+
+The keyed lock implementation reclaims entries after their final holder or
+waiter releases its reference. Lock waits themselves are not cancellable; after
+each acquired lock, the manager checks the append context and releases all
+acquired locks on cancellation. Close/Drop never reset live global lock entries.
 
 The append chain keeps shard validation ahead of write tracking. During WAL
-construction, `partialupdate.Build` registers its `MessageWriteGuard` through
-the shared `InterceptorBuildParam.WriteGuard`. The earlier TimeTick builder
+construction, `partialupdate.Build` registers its `MessageRowLock` through
+the shared `InterceptorBuildParam.RowLock`. The earlier TimeTick builder
 retains the shared parameter and reads this field when an append executes,
 after all builders have completed. It therefore invokes the guard before final
 timestamp allocation without moving the partial-update append interceptor
@@ -583,10 +589,7 @@ acquire glock.RLock + vchannel.RLock
   -> RequestCommitAndWait using provisional timestamp: freeze and drain body
   -> acknowledge provisional acker as sync
   -> snapshot complete durable write set
-  -> acquire admission[vchannel].RLock
   -> acquire sorted, deduplicated exclusive PK locks
-  -> atomically reserve those PKs and snapshot existing ordinary batches
-  -> wait for older overlapping batches to complete outside the registry mutex
   -> allocate final commitTS, respecting any timestamp barrier
   -> recheck transaction lease at final commitTS
   -> validate marker and runtime state
@@ -596,26 +599,32 @@ acquire glock.RLock + vchannel.RLock
   -> CommitDone or RejectCommit
   -> acknowledge final message
   -> publish successful MVCC advancement
-  -> remove reservation and notify ordinary waiters
-  -> release PK locks and admission barrier
+  -> release PK locks
 release vchannel.RLock + glock.RUnlock
 ```
 
-The provisional acker remains outstanding only while the transaction body is
-being frozen and drained, preventing cleanup from overtaking that preparation.
-It is acknowledged before guard acquisition, so waiting commits do not pin the
-PChannel confirmation watermark. Transactions may expire and be cleaned up
-during that wait, including removal of their pending write-set records. The
-final timestamp lease check must reject expired transactions before WAL append;
-cleanup cannot turn an expired CAS into an unchecked ordinary commit. Only the
-final timestamp is assigned to the persisted CommitTxn. An error in guard
-acquisition, final allocation, or the final lease check deterministically rejects
-a prepared commit. Ambiguous WAL append failures retain their existing
-transaction outcome handling.
+The provisional acker remains outstanding while a transaction freezes and drains
+its bodies. Once preparation finishes, it is acknowledged before row-lock
+admission so waiting commits do not pin the PChannel confirmation watermark.
+TimeTick cleanup may expire a prepared transaction before or during lock
+acquisition. The final timestamp lease check rejects it before WAL append,
+even if row-lock acquisition has already copied its write set. Only the final timestamp
+is assigned to the persisted CommitTxn. An error in guard acquisition, final
+allocation, or the final lease check deterministically rejects a prepared
+commit. Ambiguous WAL append failures retain their existing transaction
+outcome handling.
 
-Ordinary nontransactional writes register an in-flight batch before their write
-timestamp. Ordinary and replicated transactions freeze and drain their bodies
-before registering the complete union as one batch and allocating commitTS.
+Acknowledging the provisional timestamp is a sync-only acknowledgement: it
+neither persists CommitTxn nor marks the transaction committed. Consumer
+TxnBuffer still waits for the real commit, and LastConfirmedMessageID continues
+to retain the WAL prefix needed by unresolved transactions. The eventual commit
+receives a fresh timestamp after row-lock admission.
+
+Ordinary nontransactional writes acquire shared locks for their exact PK set
+before allocating the write timestamp and retain them through WAL append and
+PK/fence publication. Ordinary and replicated transactions freeze and drain
+their bodies before acquiring shared locks for the complete body PK union and
+allocating commitTS. Local CAS commits acquire exclusive locks for that union.
 Replicated CAS skips local proof revalidation but still participates in guard
 and publication ordering. Therefore:
 
@@ -625,10 +634,11 @@ and publication ordering. Therefore:
   timestamp after CAS releases its guard;
 - two local CAS commits with an overlapping PK serialize; different PKs in the
   same vchannel remain concurrent;
-- ordinary writers retain their existing concurrency with each other without
-  acquiring any per-PK lock;
-- a conservative fence or incomplete recovered commit excludes all exact-PK
-  writers in its vchannel until fence publication;
+- ordinary writes to the same PK can proceed concurrently while no CAS writer
+  is queued, because they hold shared PK locks; a queued CAS writer blocks new
+  shared holders until it completes;
+- recovered ordinary transactions lock the durable prefix plus runtime suffix;
+  an unreconstructable modern write set requests existing transaction replay;
 - different vchannels remain independent.
 
 Acquiring PK locks only around `validateCommit -> WAL append -> publishCommit`
@@ -741,37 +751,35 @@ warm-up period. Admission requires readTS >= historyStartTs as well as a matchin
 term. A term change or a snapshot older than the new lifecycle floor rejects
 the attempt; only eligible replacement updates are automatically retried.
 
-TxnManager preserves its existing recovery behavior. The partial-update
-interceptor uses whether it observed BeginTxn in its own lifecycle as the
-write-set completeness signal:
+TxnManager preserves existing TxnID, transaction recovery, and keepalive
+behavior. During construction, partialupdate reads InitialRecoverSnapshot.TxnBuffer
+and reconstructs the PKs of every durable transaction body. Later appends extend
+this prefix. Commit freezes and drains the session before locking the union.
 
-| Recovered path | Commit behavior | Proof publication |
-|---|---|---|
-| Ordinary transaction, complete Begin and body observed | Preserve normal commit | Exact PKs / collection fence |
-| Ordinary transaction, only body suffix or Commit observed | Preserve normal commit | Vchannel incomplete-txn fence |
-| Local CAS without a complete runtime proof | Reject before WAL append | None; Proxy rebuilds the attempt |
-| Replicated transaction, complete Begin and body observed | Preserve replicated commit | Exact PKs / collection fence |
-| Replicated transaction, incomplete replay | Preserve replicated commit | Vchannel incomplete-txn fence |
+| Recovered path | Commit behavior |
+|---|---|
+| Ordinary transaction with reconstructable prefix | Continue old TxnID and lease; lock known PKs and publish versions/fences |
+| Modern write set cannot be reconstructed | Existing TransactionExpired full producer replay; no new commit publication |
+| Local CAS from an older WAL lifecycle | PartialUpdateRetryable; Proxy rebuilds the attempt |
+| Replicated transaction with reconstructed prefix/proof | Preserve source-proof bypass; shared PK locks and publication |
+| Already committed transaction | Preserve committed recovery and existing duplicate-result behavior |
 
-The interceptor does not read `InitialRecoverSnapshot.TxnBuffer`, query
-historical schema, modify `recoveredSessions`, or delay `RecoverDone`.
+Recovered pending state registers cleanup at the original last durable activity
+TS. Recovery does not renew the lease, acquire or restore locks, change
+recoveredSessions/RecoverDone, rebuild historical PK versions, or append body
+messages again. Immutable messages use matching typed decoders. PK reconstruction
+uses the WAL-open context with a five-second deadline; a failed decode marks only
+that transaction incomplete, preserving durable data and WAL startup. The master
+keyed-transaction path keeps its existing TransactionExpired fallback when its
+buffered insert result is unavailable; this change adds no result-buffer restore.
 
 ### Replication
 
-The primary cluster has already performed CAS admission. A replicated commit
-does not revalidate the source term or `readTS` on the secondary.
-
-When CDC replays BeginTxn and the complete body, the secondary publishes exact
-PK or collection-fence state. If replay resumes from a body suffix or
-CommitTxn, the transaction preserves its existing commit semantics and
-publishes the vchannel incomplete-transaction fence.
-
-Complete replicated write sets use the same batch registration as ordinary
-writes, and incomplete replay uses the exclusive conservative admission
-barrier. Skipping source-proof validation does not bypass local ordering or
-allow a fence to cross an in-flight local CAS boundary.
-
-Promotion creates a new term and therefore a new empty per-term index.
+The primary already validated CAS. Replicated Commit does not revalidate source
+term/readTS; it reconstructs the durable prefix, merges later body writes, takes
+shared PK locks, and publishes versions. Unsupported modern prefixes request
+existing full replay. Legacy schema-less writes retain the same explicit exemption.
+Promotion creates a new term and a new empty per-term version index.
 
 ### Error and retry semantics
 
@@ -827,34 +835,29 @@ The design adds the following costs:
 - complete protobuf decoding, PK extraction, and recent-version publication
   for ordinary Insert/Delete;
 - an expiration-heap update for tracked PKs;
-- sorting and deduplicating each local CAS write set and acquiring keyed
-  exclusive locks;
-- registering and removing each ordinary in-flight batch under a short mutex;
-  ordinary writes sort no PKs and acquire no per-PK locks;
-- checking ordinary PKs against reservations only while CAS is present, and
-  scanning older ordinary batches on the CAS path outside the registry mutex;
+- sorting and deduplicating every known write set and acquiring one keyed
+  lock per distinct PK: shared for ordinary writes, exclusive for local CAS;
 - serialization of local CAS commits only when their PK sets overlap;
 - PK locks retained across WAL I/O and acknowledgement/MVCC publication;
 - a provisional acker and second timestamp allocation for each guarded
   CommitTxn, including ordinary and replicated transactions;
-- a conservative vchannel admission barrier for unknown write sets and fences;
+- decoding the durable prefix of pending transactions during WAL recovery;
 - a final-envelope size check and possible CAS Insert repacking.
 
 Different exact PK sets remain concurrent within a vchannel as well as across
-vchannels. Ordinary writes use batch registration and remain concurrent with
-each other. Query, merge, and transaction-body append hold no PK locks. A slow WAL
-commit blocks overlapping CAS/ordinary writes, while a slow conservative fence
-can still block all exact-PK writers in its vchannel. The existing shared shard
+vchannels. Ordinary writes use shared PK locks and remain concurrent with
+each other, including writes to the same PK when no CAS writer is waiting. Query, merge, and transaction-body append hold no PK locks. A slow WAL
+commit blocks overlapping CAS/ordinary writes. Legacy unknown-PK writes have
+no PK lock and do not introduce a whole-vchannel admission barrier. The existing shared shard
 lifecycle lock remains held throughout append, so existing exclusive DDL
 continues to wait for active writes.
 
-A provisional acker holds back the PChannel confirmation watermark only during
-transaction-body preparation, and is acknowledged before PK or admission guard
-waits. A commit already appending to WAL still holds its final acker until append
-and publication finish, so existing TimeTick and consumer visibility ordering
-continue to apply. Benchmarks should distinguish that active-WAL delay from
-queued guard waits, and measure confirmation delay alongside write throughput
-and tail latency.
+Prepared commits waiting for row locks hold no outstanding provisional acker.
+Unrelated acknowledged writes can advance the PChannel confirmation watermark
+during that wait. An actual in-flight WAL append still holds its final acker and
+can delay confirmation and consumer visibility across the PChannel. Benchmarks
+should distinguish lock-queue delay from this WAL persistence delay and measure
+both alongside write throughput and tail latency.
 
 The required PK-index budget is approximately:
 
@@ -877,9 +880,9 @@ Production-scale benchmarks are still required for:
 - high-conflict traffic on one PK or overlapping multi-PK batches;
 - slow WAL append with disjoint and overlapping PK sets;
 - transaction timestamp-allocation and provisional-acker overhead;
-- batch-registration overhead without CAS and reservation/snapshot scanning
-  under mixed ordinary/CAS traffic;
-- collection fences and incomplete recovered commits during ordinary/CAS load;
+- shared PK lock acquisition and sorting overhead for ordinary writes without
+  CAS, plus writer contention under mixed ordinary/CAS traffic;
+- recovered ordinary transactions and legacy schema-less writes during ordinary/CAS load;
 - high distinct-PK churn and long VarChar PKs;
 - large batches near the transport message-size limit.
 
@@ -892,11 +895,12 @@ Focused tests must verify ordering and observable concurrency, including:
   the first commit's published PK version;
 - a same-PK ordinary Insert/Delete or complete ordinary transaction excludes
   local CAS during its append/publication, while disjoint writes proceed;
-- ordinary batch registration takes no per-PK lock, sorts no PKs, and retains
-  concurrent ordinary WAL append even for overlapping PKs;
-- CAS reservation publication and the snapshot of earlier ordinary batches are
-  atomic; reservation completion or cancellation wakes later overlapping
-  ordinary batches without leaving registered state behind;
+- ordinary writes hold shared PK locks and retain concurrent WAL append even
+  for overlapping PKs; CAS waits for every earlier overlapping shared holder,
+  and a queued CAS writer blocks new shared holders of those keys;
+- both modes sort and deduplicate PKs, including duplicate shared keys while a
+  CAS writer is waiting; cancellation observed after lock acquisition releases
+  all partially acquired PK locks;
 - a writer waiting behind a same-PK CAS receives its final timestamp only after
   acquiring the guard; commitTS allocated for provisional lifetime protection
   is replaced before persistence;
@@ -905,14 +909,17 @@ Focused tests must verify ordering and observable concurrency, including:
   multi-PK requests with different input orders;
 - Int64 and VarChar lock keys remain distinct; exact PK values are used rather
   than a collision-prone hash bucket;
-- a collection fence, legacy unknown-PK insert, or incomplete recovered
-  transaction excludes exact-PK admission until its fence is published;
+- recovered transactions lock prefix plus suffix without renewing the lease;
+  schema-less legacy Inserts remain accepted without a row lock;
 - a replicated write participates in the same guards while retaining the
   existing source-proof bypass;
-- the provisional acker prevents sync acknowledgement from advancing past
-  body preparation, while PK and admission guard waits allow confirmation to
-  advance; final timestamp lease expiry, including cleanup during the wait,
-  rejects before WAL;
+- the provisional acker protects body preparation, then is acknowledged before
+  row-lock admission; queued commits at depths 1, 8, and 32 do not block
+  confirmation of a disjoint acknowledged write once the active WAL append has
+  completed;
+- TimeTick cleanup can expire a prepared commit before its write-set snapshot
+  or during a PK-lock wait; final timestamp lease validation rejects it
+  before WAL append and releases its locks;
 - guard failures reject prepared commits; successful guard release occurs only
   after transaction transition, final acknowledgement, and MVCC
   publication; ambiguous WAL errors keep their existing classification;
@@ -974,14 +981,15 @@ requires `F != 0` and `readTS >= F`. An unavailable floor fails closed as an
 internal unrecoverable error. A snapshot older than F returns the existing typed
 partial-update retryable error before appending CommitTxn. The existing PK
 conflict index, retention window, missed-write fence, and collection fence checks
-still apply under the exclusive PK guards and shared conservative admission
-barrier described above.
+still apply under the exclusive PK row locks and existing shared lifecycle
+locks described above.
 
 For example, B committed at 80 in the old lifecycle, and the new lifecycle starts
 at F=90. Its index may not contain B. A read at S=70 is rejected even if its term
 matches. A read at S>=90 includes B under the normal WAL visibility contract;
 subsequent conflicting commits are covered by the current lifecycle's index.
-Uncommitted recovered transactions retain their existing recovery fencing.
+Uncommitted ordinary transactions reconstruct known PKs and retain their
+original session and lease. Recovered local CAS remains retryable.
 Import, restore, and backfill remain subject to the original non-goals.
 
 ### Missing proofs and retries

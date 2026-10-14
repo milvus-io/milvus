@@ -62,11 +62,8 @@ func TestValidateCommitMarkerConsistency(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 
 		txnState, err := state.validateCommit(newCommitTxnMessage("v1", 1, 300), 1)
-		require.NoError(t, err)
+		require.True(t, status.AsStreamingError(err).IsTxnExpired())
 		require.Nil(t, txnState)
-		state.publishCommit(newCommitTxnMessage("v1", 1, 300), txnState)
-		requirePartialUpdateRetryable(t, state.incompleteTxnFences.Verify("v1", 299))
-		require.NoError(t, state.incompleteTxnFences.Verify("v1", 300))
 	})
 
 	t.Run("runtime CAS without marker", func(t *testing.T) {
@@ -217,7 +214,7 @@ func TestValidateCommitReplicatedCASBypassesSourceProof(t *testing.T) {
 	requirePartialUpdateRetryable(t, state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 159, 161))
 }
 
-func TestValidateCommitReplicatedCASWithoutRuntimeStateUsesFence(t *testing.T) {
+func TestValidateCommitReplicatedCASWithoutRuntimeStateRejectsIncompleteWriteSet(t *testing.T) {
 	state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
 	commit := newCASCommitTxnMessage(t, "v1", 1, 160)
 	msgID := walimplstest.NewTestMessageID(1)
@@ -230,10 +227,8 @@ func TestValidateCommitReplicatedCASWithoutRuntimeStateUsesFence(t *testing.T) {
 	})
 
 	txnState, err := state.validateCommit(commit, 1)
-	require.NoError(t, err)
+	require.True(t, status.AsStreamingError(err).IsTxnExpired())
 	require.Nil(t, txnState)
-	state.publishCommit(commit, txnState)
-	requirePartialUpdateRetryable(t, state.incompleteTxnFences.Verify("v1", 159))
 }
 
 func TestValidateCommitReplicatedCASRequiresCompleteWriteSet(t *testing.T) {
