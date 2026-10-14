@@ -256,7 +256,7 @@ SealedIndexTranslator::SealedIndexTranslator(
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
             index_load_info_.dim,
-            &index_load_info_.GetMetadataIndexParams());
+            &load_index_info->GetMetadataIndexParams());
     }
     if (!packed_v3 && IsVectorDataType(index_load_info_.field_type) &&
         *file_manager_context_.use_async_load) {
