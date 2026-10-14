@@ -64,7 +64,7 @@ class SchemaContractSnapshot : public SegmentReadSnapshot {
     }
 
     std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId, OpContext*) const override {
+    GetArrayOffsets(FieldId) const override {
         return nullptr;
     }
 

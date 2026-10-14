@@ -145,7 +145,7 @@ class SegmentReadSnapshot {
     // Returns nullptr when this field has no struct mapping in the captured
     // state. Consumers that require element-to-row conversion must check it.
     virtual std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id, OpContext* op_ctx) const = 0;
+    GetArrayOffsets(FieldId field_id) const = 0;
 
     // Must return a non-null schema from the same captured state as the columns.
     virtual SchemaPtr
@@ -426,7 +426,7 @@ class SegmentInterface {
     // Sealed segments build it during loading, before publishing the column
     // generation. This getter only reads immutable metadata and performs no IO.
     virtual std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id, OpContext* op_ctx = nullptr) const = 0;
+    GetArrayOffsets(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation
