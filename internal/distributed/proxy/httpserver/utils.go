@@ -929,8 +929,11 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 	for _, data := range dataResultArray {
 		reallyData := map[string]interface{}{}
 		if data.Type == gjson.JSON {
+			// Schema field names are literal keys. Reuse this map for dynamic fields
+			// below instead of rescanning the row for every schema field.
+			rowFields := data.Map()
 			for _, structField := range collSchema.StructArrayFields {
-				rawValue := gjson.Get(data.Raw, structField.GetName())
+				rawValue := rowFields[structField.GetName()]
 				if !rawValue.Exists() {
 					if partialUpdate {
 						continue
@@ -968,7 +971,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				}
 				fieldType := field.DataType
 				fieldName := field.Name
-				fieldValue := data.Get(fieldName)
+				fieldValue := rowFields[fieldName]
 
 				// Replacement operands are JSON values, not SQL NULL or an encoded
 				// document string. Preserve their type regardless of compatibility mode.
@@ -1069,7 +1072,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName)
 					}
 					var vectorArray []float32
-					err := json.Unmarshal([]byte(dataString), &vectorArray)
+					err := json.UnmarshalFromString(dataString, &vectorArray)
 					if err != nil {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 					}
@@ -1080,7 +1083,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					vectorStr := fieldValue.Raw
 					var vectorArray []byte
-					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
+					err := json.UnmarshalFromString(vectorStr, &vectorArray)
 					if err != nil {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 					}
@@ -1108,7 +1111,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						// `data` is a float32 vector
 						// same as `case schemapb.DataType_FloatVector`
 						var vectorArray []float32
-						err := json.Unmarshal([]byte(dataString), &vectorArray)
+						err := json.UnmarshalFromString(dataString, &vectorArray)
 						if err != nil {
 							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 						}
@@ -1118,7 +1121,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						// same as `case schemapb.DataType_BinaryVector`
 						vectorStr := fieldValue.Raw
 						var vectorArray []byte
-						err := json.Unmarshal([]byte(vectorStr), &vectorArray)
+						err := json.UnmarshalFromString(vectorStr, &vectorArray)
 						if err != nil {
 							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 						}
@@ -1131,7 +1134,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName)
 					}
 					var vectorArray []int8
-					err := json.Unmarshal([]byte(dataString), &vectorArray)
+					err := json.UnmarshalFromString(dataString, &vectorArray)
 					if err != nil {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 					}
@@ -1373,7 +1376,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 			// Two keys that differ only in a lone surrogate escape both decode to
 			// U+FFFD, so Map() collapses them and one field disappears without a
 			// word. The decoded key passes utf8.ValidString, so it has to be
-			// caught on the raw text before the map is built.
+			// caught on the raw text rather than on the decoded map keys.
 			if !compatibilityMode {
 				var keyErr error
 				data.ForEach(func(key, _ gjson.Result) bool {
@@ -1393,9 +1396,9 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 			// twice, so {"dyn": 1, "dyn": 2} silently stores 1. Duplicate keys
 			// *inside* a dynamic value are rejected, which makes the two
 			// inconsistent, but catching this one needs a scan of the whole row
-			// before the map is built and the behavior predates this change, so
+			// rather than the map and the behavior predates this change, so
 			// it is left alone deliberately.
-			for mapKey, mapValue := range data.Map() {
+			for mapKey, mapValue := range rowFields {
 				if !containsString(fieldNames, mapKey) {
 					if collSchema.EnableDynamicField {
 						if mapKey == common.MetaFieldName {
@@ -2865,15 +2868,16 @@ func vectorFieldToInterfaces(vf *schemapb.VectorField, elemType schemapb.DataTyp
 }
 
 func convertFloatVectorToArray(vector [][]float32, dim int64) ([]float32, error) {
-	floatArray := make([]float32, 0)
+	// Validate before allocating the final column, including on malformed rows.
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
 			return nil, merr.WrapErrParameterInvalidMsg("[]float32 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_FloatVector)])
 		}
-		for i := int64(0); i < dim; i++ {
-			floatArray = append(floatArray, arr[i])
-		}
+	}
+	floatArray := make([]float32, 0, len(vector)*int(dim))
+	for _, arr := range vector {
+		floatArray = append(floatArray, arr...)
 	}
 	return floatArray, nil
 }
@@ -2894,22 +2898,22 @@ func convertBinaryVectorToArray(vector [][]byte, dim int64, dataType schemapb.Da
 			return nil, merr.WrapErrParameterInvalidMsg("[]byte size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(dataType)])
 		}
-		for i := int64(0); i < bytesLen; i++ {
-			binaryArray = append(binaryArray, arr[i])
-		}
+		binaryArray = append(binaryArray, arr...)
 	}
 	return binaryArray, nil
 }
 
 func convertInt8VectorToArray(vector [][]int8, dim int64) ([]byte, error) {
-	byteArray := make([]byte, 0)
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
 			return nil, merr.WrapErrParameterInvalidMsg("[]int8 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)])
 		}
-		for i := int64(0); i < dim; i++ {
-			byteArray = append(byteArray, byte(arr[i]))
+	}
+	byteArray := make([]byte, 0, len(vector)*int(dim))
+	for _, arr := range vector {
+		for _, value := range arr {
+			byteArray = append(byteArray, byte(value))
 		}
 	}
 	return byteArray, nil

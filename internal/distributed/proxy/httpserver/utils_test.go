@@ -9220,3 +9220,120 @@ func TestBase64NullIsAValidBinaryVector(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
+
+func TestCheckAndSetDataRowLookup(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				Name: "vec", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+			},
+			{Name: "note", DataType: schemapb.DataType_VarChar, Nullable: true},
+		},
+	}
+	for _, row := range []string{
+		`{"id":1,"vec":[0.25,-0.5],"tag":"a"}`,
+		`{"tag":"a","vec":[0.25,-0.5],"id":1,"note":null}`,
+		`{"\u0069d":1,"\u0076ec":[0.25,-0.5],"tag":"a"}`,
+		`{"id":1,"id":9,"vec":[0.25,-0.5],"tag":"a"}`,
+	} {
+		t.Run(row, func(t *testing.T) {
+			rows, valid, err := checkAndSetData([]byte(`{"data":[`+row+`]}`), schema, false)
+			require.NoError(t, err)
+			require.Equal(t, []map[string]interface{}{{
+				"id": int64(1), "vec": []float32{0.25, -0.5}, "tag": "a",
+			}}, rows)
+			require.Equal(t, []bool{false}, valid["note"])
+			_, err = anyToColumns(rows, valid, schema, true, false)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestConvertFloatVectorToArray(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		rows [][]float32
+		dim  int64
+		want []float32
+	}{
+		{name: "rows", rows: [][]float32{{1, 2}, {3, 4}}, dim: 2, want: []float32{1, 2, 3, 4}},
+		{name: "empty", dim: 2, want: []float32{}},
+		{name: "zero width", rows: [][]float32{{}, {}}, want: []float32{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := convertFloatVectorToArray(test.rows, test.dim)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+	for _, rows := range [][][]float32{{{1}}, {{1, 2}, {3}}} {
+		_, err := convertFloatVectorToArray(rows, 2)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	}
+	// Reject an invalid dimension before using it to allocate a buffer.
+	_, err := convertFloatVectorToArray([][]float32{{1}}, math.MaxInt64)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestConvertInt8VectorToArray(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		rows [][]int8
+		dim  int64
+		want []byte
+	}{
+		{name: "signed rows", rows: [][]int8{{-128, -1, 0}, {1, 126, 127}}, dim: 3, want: []byte{128, 255, 0, 1, 126, 127}},
+		{name: "empty", dim: 3, want: []byte{}},
+		{name: "zero width", rows: [][]int8{{}, {}}, want: []byte{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := convertInt8VectorToArray(test.rows, test.dim)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+			require.Equal(t, len(got), cap(got), "preallocate exactly the final column size")
+			if len(got) > 0 {
+				got[0] = 42
+				require.Equal(t, int8(-128), test.rows[0][0])
+			}
+		})
+	}
+	for _, rows := range [][][]int8{{{1}}, {{1, 2}, {3}}} {
+		got, err := convertInt8VectorToArray(rows, 2)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Nil(t, got)
+	}
+}
+
+func TestConvertBinaryVectorToArray(t *testing.T) {
+	for _, test := range []struct {
+		dataType schemapb.DataType
+		dim      int64
+	}{
+		{schemapb.DataType_BinaryVector, 16},
+		{schemapb.DataType_Float16Vector, 1},
+		{schemapb.DataType_BFloat16Vector, 1},
+	} {
+		t.Run(test.dataType.String(), func(t *testing.T) {
+			rows := [][]byte{{0, 255}, {128, 1}}
+			got, err := convertBinaryVectorToArray(rows, test.dim, test.dataType)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0, 255, 128, 1}, got)
+			got[0] = 42
+			require.Equal(t, byte(0), rows[0][0])
+			for _, invalid := range [][][]byte{{{1}}, {{1, 2}, {3}}} {
+				got, err := convertBinaryVectorToArray(invalid, test.dim, test.dataType)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Nil(t, got)
+			}
+			got, err = convertBinaryVectorToArray(nil, test.dim, test.dataType)
+			require.NoError(t, err)
+			require.Equal(t, []byte{}, got)
+			got, err = convertBinaryVectorToArray([][]byte{{}, {}}, 0, test.dataType)
+			require.NoError(t, err)
+			require.Equal(t, []byte{}, got)
+		})
+	}
+}
