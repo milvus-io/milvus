@@ -43,6 +43,8 @@ type balanceEpoch struct {
 
 type recoveryBlockedRGsKey struct{}
 
+type stoppingDemandRGsKey struct{}
+
 // WithRecoveryBlockedRGs supplies the missing-channel/segment diff from the
 // ordered recovery checks. An explicit empty set means recovery found no gaps;
 // pending balance Grow actions alone must not be classified as recovery.
@@ -62,6 +64,11 @@ func (b *BalanceChecker) planningBlocks(ctx context.Context, replica *meta.Repli
 	}
 	if isStoppingBalance {
 		return false
+	}
+	if blocked, _ := ctx.Value(stoppingDemandRGsKey{}).(map[string]struct{}); blocked != nil {
+		if _, draining := blocked[replica.GetResourceGroup()]; draining {
+			return true
+		}
 	}
 	if _, ordered := ctx.Value(recoveryBlockedRGsKey{}).(map[string]struct{}); ordered {
 		return recoveryBlockedRG(ctx, replica.GetResourceGroup())

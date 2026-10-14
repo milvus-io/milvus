@@ -590,7 +590,30 @@ func (b *MultiTargetBalancer) genSegmentPlan(ctx context.Context, replica *meta.
 	for i := range plans {
 		plans[i].Replica = replica
 	}
-	return plans
+	if len(plans) == 0 {
+		return plans
+	}
+	ledger := assign.PlanningLedgerFromContext(ctx)
+	if ledger == nil {
+		return plans
+	}
+	batch := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
+	if batch <= 0 {
+		return nil
+	}
+	// Generators may merge or reverse intermediate moves. Reserve only their
+	// final plans, so rejected moves never change the shared projection.
+	admitted := make([]assign.SegmentAssignPlan, 0, min(len(plans), batch))
+	for _, plan := range plans {
+		if ledger.HasLoading(plan.Segment.GetCollectionID(), plan.Segment.GetID(), rwNodes) || !ledger.ReserveSegment(plan) {
+			continue
+		}
+		admitted = append(admitted, plan)
+		if len(admitted) >= batch {
+			break
+		}
+	}
+	return admitted
 }
 
 // genPlanByDistributions generates segment assignment plans using multiple optimization generators.

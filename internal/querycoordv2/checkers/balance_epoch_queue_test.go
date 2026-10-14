@@ -81,9 +81,15 @@ func newEpochQueueFixture(t *testing.T, batch, maxChecks int, rows map[int64]int
 		config.BalanceCheckCollectionMaxCount.Key:     strconv.Itoa(maxChecks),
 		config.EnableBalanceOnMultipleCollections.Key: "true",
 	} {
-		previous := paramtable.GetBaseTable().Get(key)
+		previous, lookupErr := paramtable.GetBaseTable().Load(key)
 		require.NoError(t, params.Save(key, value))
-		t.Cleanup(func() { require.NoError(t, params.Save(key, previous)) })
+		t.Cleanup(func() {
+			if lookupErr != nil {
+				require.NoError(t, params.Reset(key))
+			} else {
+				require.NoError(t, params.Save(key, previous))
+			}
+		})
 	}
 
 	catalog := mocks.NewQueryCoordCatalog(t)
@@ -114,10 +120,11 @@ func newEpochQueueFixture(t *testing.T, batch, maxChecks int, rows map[int64]int
 	scheduler := task.NewMockScheduler(t)
 	scheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).
 		Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
+	scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	fixture := &epochQueueFixture{balancer: &epochQueueBalancer{}}
 	scheduler.EXPECT().Add(mock.Anything).Run(func(work task.Task) {
 		fixture.accepted = append(fixture.accepted, work)
-	}).Return(nil)
+	}).Return(nil).Maybe()
 	fixture.checker = NewBalanceChecker(metadata, dist, targets, nodes, scheduler)
 	balance.ResetGlobalBalancerFactoryForTest()
 	balance.InitGlobalBalancerFactory(scheduler, nodes, dist, targets)

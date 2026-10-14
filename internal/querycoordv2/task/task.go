@@ -293,7 +293,9 @@ func (task *baseTask) Status() Status {
 }
 
 func (task *baseTask) SetStatus(status Status) {
-	task.status.Store(status)
+	// The scheduler and checker can finish/cancel a task concurrently. Once a
+	// terminal outcome wins, a later promotion or completion must not replace it.
+	task.status.CompareAndSwap(TaskStatusStarted, status)
 }
 
 func (task *baseTask) Priority() Priority {
@@ -331,10 +333,10 @@ func (task *baseTask) Cancel(err error) {
 		rootCancel := task.rootCancel
 		task.ctxMu.Unlock()
 		rootCancel()
+		task.SetStatus(TaskStatusCanceled)
 		if task.Status() != TaskStatusSucceeded {
-			task.SetStatus(TaskStatusCanceled)
+			task.err = err
 		}
-		task.err = err
 		close(task.doneCh)
 		if task.span != nil {
 			task.span.End()
@@ -348,10 +350,10 @@ func (task *baseTask) Fail(err error) {
 		rootCancel := task.rootCancel
 		task.ctxMu.Unlock()
 		rootCancel()
+		task.SetStatus(TaskStatusFailed)
 		if task.Status() != TaskStatusSucceeded {
-			task.SetStatus(TaskStatusFailed)
+			task.err = err
 		}
-		task.err = err
 		close(task.doneCh)
 		if task.span != nil {
 			task.span.End()

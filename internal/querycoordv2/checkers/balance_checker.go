@@ -333,6 +333,41 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context, collect
 	})
 }
 
+// Pending drain work takes precedence over new ordinary Moves in its RG, even
+// when the stopping planner cannot admit a task or has not reached that
+// collection within its check budget. Empty RO membership alone is not demand.
+func (b *BalanceChecker) stoppingDemandResourceGroups(ctx context.Context) map[string]struct{} {
+	blocked := make(map[string]struct{})
+	for _, collectionID := range b.meta.GetAll(ctx) {
+		for _, replica := range b.meta.GetByCollection(ctx, collectionID) {
+			rg := replica.GetResourceGroup()
+			if _, draining := blocked[rg]; draining {
+				continue
+			}
+			for _, nodeID := range replica.GetRONodes() {
+				if len(b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(nodeID))) > 0 {
+					blocked[rg] = struct{}{}
+					break
+				}
+			}
+			if _, draining := blocked[rg]; draining {
+				continue
+			}
+			channelRONodes := replica.GetRONodes()
+			if streamingutil.UseStreamingQueryNodeAsDelegator() {
+				_, channelRONodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
+			}
+			for _, nodeID := range channelRONodes {
+				if len(b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID), meta.WithNodeID2Channel(nodeID))) > 0 {
+					blocked[rg] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+	return blocked
+}
+
 // generateBalanceTasksFromReplicas generates balance tasks for the given replicas.
 // This method is the core of the balance operation that:
 //  1. Uses the balancer to create segment and channel assignment plans
@@ -683,6 +718,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		// Respect the auto balance interval to prevent too frequent operations
 		if time.Since(b.autoBalanceTs) <= config.autoBalanceInterval {
 			return nil
+		}
+		if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+			// Keep this separate from the controller recovery set: direct Check
+			// callers must retain their compatibility pending-load guard.
+			ctx = context.WithValue(ctx, stoppingDemandRGsKey{}, b.stoppingDemandResourceGroups(ctx))
 		}
 
 		generatedSegmentTaskNum, generatedChannelTaskNum := b.processBalanceQueue(ctx,

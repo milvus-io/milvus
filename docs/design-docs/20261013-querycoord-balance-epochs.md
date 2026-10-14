@@ -145,6 +145,9 @@ Streaming balancer registration and node discovery also use bounded snapshot
 lookups; a failed node discovery briefly reuses its last snapshot. Channel
 convergence caches track both Current and Next target versions so promotion
 rechecks channels that were protected only by the old Current target.
+WAL-owner lookup reads an immutable snapshot published after assignment
+metadata commits, including the Assigning state. It does not wait behind the
+StreamingCoord metadata lock while that lock performs catalog IO.
 
 The loop's period is the shorter of the channel and segment check intervals.
 It invokes balance no more often than the balance check interval, but an
@@ -161,6 +164,19 @@ ChannelChecker and SegmentChecker tasks. Ordinary balance admits new work only
 for RGs without either recovery demand or unfinished recovery work. Existing
 balance epochs and stopping-node drain work retain their separate handling;
 accepted work is not canceled just because a later recovery need appears.
+After a coordinator restart, QueryNodes can still report a load from an old
+balance Move although its local task and epoch are gone. A fresh nonempty
+loading report, or a replica member whose initial/periodic report is not yet
+fresh, blocks new ordinary balance in that member's RG. This gate applies to
+all RW, RO, and SQN replica members and leaves recovery, stopping evacuation,
+and other RGs free to proceed. A later empty report or node removal releases
+it. Legacy nodes that do not support loading reports cannot reconstruct this
+remote work; the projected-load accounting remains best effort for them.
+Stopping balance also has a per-RG demand gate for ordinary balance. Actual
+segments or channels on draining nodes retain priority even if this tick
+admits no stopping task or the collection falls beyond the check budget.
+An empty RO membership alone does not block a new ordinary balance epoch;
+other RGs continue while the affected RG drains.
 
 The baseline combines actual sealed/growing distribution, accepted local Grow
 tasks, and QN-reported loads. Merge the same `(node, collection, segment)` using
@@ -173,6 +189,13 @@ Successful scheduler acceptance commits that reservation; a rejected or trimmed
 plan releases it. Projected source row reductions affect desired final placement,
 but never grant physical memory headroom before actual release. Partially
 accepted batches retain only the accepted work as epoch members.
+The optional MultiTarget balancer also admits only its final optimized plans
+through this ledger, so it observes readiness, pending-load slots, and resource
+estimates. Since its optimizer is unconstrained, it can choose only unavailable
+destinations and produce no admitted plan even when another destination could
+improve balance; constrained target selection remains a separate optimization.
+Task status transitions are monotonic once terminal, so a concurrent cancel
+cannot be reverted by scheduler promotion or completion.
 
 The ledger covers the automatic sealed recovery and balance paths. This MEP does
 not claim that every administrative API or reopen operation participates in the
@@ -340,6 +363,20 @@ coordinator restart during an active cold load.
   with missing or unfinished recovery work. Verify zero-task deferrals due to
   missing WAL assignment, no shard leader, or insufficient capacity, and keep
   independent shards and other RGs moving.
+- Hold WAL-owner reads independent of slow assignment persistence; test
+  Assigning, successful commit, failed write, and concurrent reassignments.
+- Restart the coordinator with an old Move still reported by a QueryNode;
+  verify ordinary balance does not move other segments in that RG, resumes on
+  an empty report, and does not block recovery, stopping drain, or another RG.
+- Exercise MultiTarget with a full or unready destination and an outstanding
+  Grow; verify it does not exceed the ledger slot, memory, or batch limits.
+- Race cancellation against scheduler promotion and completion; terminal task
+  status and the completion error must agree, and canceled loads must release
+  their local reservation.
+- Keep actual distribution on an RO node while stopping admission is full or
+  its collection falls outside the scan budget; ordinary balance must not
+  occupy that RG's epoch, while another RG progresses. Verify ordinary work
+  resumes when the RO distribution has cleared.
 - Recover the same missing channel in multiple replicas, including an unready
   lowest-load or WAL-preferred node; verify independent replica placement on
   eligible nodes.

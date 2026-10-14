@@ -909,7 +909,6 @@ func (scheduler *taskScheduler) promote(task Task) error {
 	}
 
 	scheduler.processQueue.Add(task)
-	task.SetStatus(TaskStatusStarted)
 	return nil
 }
 

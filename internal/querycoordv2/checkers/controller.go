@@ -258,9 +258,49 @@ func (controller *CheckerController) checkPlacement(ctx context.Context, checkBa
 			blocked[rg] = struct{}{}
 		}
 	}
+	for rg := range controller.remoteLoadingBlockedResourceGroups(ctx) {
+		blocked[rg] = struct{}{}
+	}
 	if checker := controller.checkers[utils.BalanceChecker]; checker != nil {
 		controller.admit(checker.Check(WithRecoveryBlockedRGs(ctx, blocked)))
 	}
+}
+
+// A restarted coordinator has no local epoch for loads still running on QNs.
+// Their source can remain in distribution, so the recovery diff alone cannot
+// distinguish a settled RG from one with an unfinished remote Move. Also keep
+// unknown reports out of ordinary balance until a fresh report or node removal
+// resolves them. Recovery and stopping evacuation do not use this gate.
+func (controller *CheckerController) remoteLoadingBlockedResourceGroups(ctx context.Context) map[string]struct{} {
+	blocked := make(map[string]struct{})
+	if controller.meta == nil || controller.nodeMgr == nil {
+		return blocked
+	}
+	blockedNodes := make(map[int64]struct{})
+	for _, node := range controller.nodeMgr.GetAll() {
+		if !node.LoadAdmissionReady() || len(node.LoadResourceReport().GetLoadingSegments()) > 0 {
+			blockedNodes[node.ID()] = struct{}{}
+		}
+	}
+	if len(blockedNodes) == 0 {
+		return blocked
+	}
+	// One physical node may still be an RO member of a previous RG while it
+	// joins another replica/RG. Protect every current replica membership,
+	// regardless of which collection owns the reported load.
+	for _, collectionID := range controller.meta.GetAll(ctx) {
+		for _, replica := range controller.meta.GetByCollection(ctx, collectionID) {
+			for _, nodeID := range replica.GetNodes() {
+				if _, pending := blockedNodes[nodeID]; pending {
+					blocked[replica.GetResourceGroup()] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+	// Legacy QNs become admission-ready from a full distribution without a
+	// loading report. Their remote in-flight work cannot be reconstructed.
+	return blocked
 }
 
 func (controller *CheckerController) admit(works []task.Task) {
