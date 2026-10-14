@@ -203,7 +203,7 @@ TEST_P(ExprTest, TupleLoweringNullSemanticsEndToEnd) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                raw_data.SharedRaw());
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     auto run = [&](const expr::TypedExprPtr& e) {
