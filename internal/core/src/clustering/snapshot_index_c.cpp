@@ -180,13 +180,15 @@ SearchSnapshotIndex(CLoadIndexInfo handle,
                     int64_t nq,
                     int64_t topk,
                     const char* search_params,
-                    int64_t* labels) {
+                    int64_t* labels,
+                    float* distances) {
     using namespace milvus;
     try {
         auto info = static_cast<segcore::LoadIndexInfo*>(handle);
         AssertInfo(info && info->partition_stats_version > 0 &&
-                       info->cache_index && queries && labels && nq > 0 &&
-                       topk > 0 && topk <= info->num_rows && info->dim > 0,
+                       info->cache_index && queries && labels && distances &&
+                       nq > 0 && topk > 0 && topk <= info->num_rows &&
+                       info->dim > 0,
                    "invalid snapshot index query");
         AssertInfo(info->field_type == DataType::VECTOR_FLOAT ||
                        info->field_type == DataType::VECTOR_FLOAT16 ||
@@ -214,10 +216,14 @@ SearchSnapshotIndex(CLoadIndexInfo handle,
         SearchResult result;
         auto dataset = knowhere::GenDataSet(nq, info->dim, queries);
         reader->Search(dataset, search, BitsetView{}, nullptr, result);
-        AssertInfo(result.seg_offsets_.size() == static_cast<size_t>(nq) * topk,
-                   "snapshot index returned an invalid result shape");
+        AssertInfo(
+            result.seg_offsets_.size() == static_cast<size_t>(nq) * topk &&
+                result.distances_.size() == result.seg_offsets_.size(),
+            "snapshot index returned an invalid result shape");
         std::copy(
             result.seg_offsets_.begin(), result.seg_offsets_.end(), labels);
+        std::copy(
+            result.distances_.begin(), result.distances_.end(), distances);
         return SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS

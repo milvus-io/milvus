@@ -150,6 +150,22 @@ SearchOnSealedIndex(const Schema& schema,
                                                       reader,
                                                       op_context);
     if (!use_iterator) {
+        // Forward every query with its optional hints; the backend may ignore them.
+        // Hints never replace or modify the scalar/MVCC bitset.
+        auto hints = search_info.clustering_search_hints;
+        const auto type = field.get_data_type();
+        if (hints && hints->Valid(hints->expected_rows, num_queries) &&
+            query_offsets == nullptr && search_info.metric_type_ == "L2" &&
+            (type == DataType::VECTOR_FLOAT ||
+             type == DataType::VECTOR_FLOAT16 ||
+             type == DataType::VECTOR_BFLOAT16) &&
+            !search_info.has_group_by() &&
+            !search_info.iterative_filter_execution &&
+            !search_info.global_refine_enable_ &&
+            search_info.refine_topk_ratio_ == 0 &&
+            !search_info.search_params_.contains("radius")) {
+            dataset->SetSearchHints(hints->queries);
+        }
         reader.Search(dataset,
                       milvus::exec::ProjectVectorSearchParams(search_info),
                       search_bitset,
