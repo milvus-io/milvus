@@ -2571,13 +2571,17 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
         client = rls_client
         name, rows = self._prepare_rls_spaces(client)
         known_capacity_violation = False
-        for changes in [
-            {"spaces": ["tenant_0/red", "tenant_0/blue"]},
-            {"spaces": []},
-            {"tenant": "tenant_1"},
-            {"spaces": ["tenant_0/common"]},
-        ]:
-            changed = [{**copy.deepcopy(rows[i]), **changes} for i in [1, 3001, 3501]]
+        for position, changes in enumerate(
+            [
+                {"spaces": ["tenant_0/red", "tenant_0/blue"]},
+                {"spaces": []},
+                {"tenant": "tenant_1"},
+                {"spaces": ["tenant_0/common"]},
+            ]
+        ):
+            # Use untouched resource_1 chunks so a prior quarantine cannot change the segment paths.
+            indices = [1 + 5 * position + start for _, start, _ in SEGMENT_GROUPS]
+            changed = [{**copy.deepcopy(rows[i]), **changes} for i in indices]
             if operation == "insert":
                 for row in changed:
                     row["id"] += 10000
@@ -2597,7 +2601,7 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                     expected = [replacements.get(row["id"], row) for row in rows]
                     self._check_space_rows(client, name, expected, skip_rls=True)
                     # Restore only the affected rows before checking the other negative scenarios.
-                    self.upsert(client, name, [rows[i] for i in [1, 3001, 3501]], skip_rls=True)
+                    self.upsert(client, name, [rows[i] for i in indices], skip_rls=True)
                     self._check_space_rows(client, name, rows, skip_rls=True)
                     known_capacity_violation = True
                 else:

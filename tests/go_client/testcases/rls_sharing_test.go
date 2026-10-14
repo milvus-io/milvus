@@ -1292,11 +1292,14 @@ func TestRLSSpaceInvalidDestinationPreservesRows(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
 	name, rows := prepareRLSSpaces(ctx, t, mc, true, false)
 	configureRLSSpaces(ctx, t, mc, name)
-	for _, operation := range []string{"insert", "upsert", "partial_upsert"} {
-		for _, scenario := range []string{"multiple_spaces", "empty_spaces", "foreign_tenant", "read_only_space"} {
+	for operationIndex, operation := range []string{"insert", "upsert", "partial_upsert"} {
+		for scenarioIndex, scenario := range []string{"multiple_spaces", "empty_spaces", "foreign_tenant", "read_only_space"} {
 			t.Run(operation+"/"+scenario, func(t *testing.T) {
+				// Untouched resource_1 chunks keep every scenario on the original three segment paths.
+				baseID := int64(2 + 5*(operationIndex*4+scenarioIndex))
+				targetIDs := []int64{baseID, 3000 + baseID, 3500 + baseID}
 				var input []any
-				for _, id := range []int64{2, 3002, 3502} {
+				for _, id := range targetIDs {
 					r := rows[id]
 					if operation == "insert" {
 						r.ID += 10000
@@ -1323,7 +1326,7 @@ func TestRLSSpaceInvalidDestinationPreservesRows(t *testing.T) {
 				if scenario == "multiple_spaces" && operation != "insert" && err == nil {
 					changed := maps.Clone(rows)
 					var original []any
-					for _, id := range []int64{2, 3002, 3502} {
+					for _, id := range targetIDs {
 						r := rows[id]
 						original = append(original, r)
 						r.Spaces = []string{"tenant_0/red", "tenant_0/blue"}
