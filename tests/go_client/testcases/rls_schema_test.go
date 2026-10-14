@@ -1552,15 +1552,23 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 				it, err := mc.QueryIterator(ctx, client.NewQueryIteratorOption(name).WithBatchSize(511).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 				require.NoError(t, err)
 				var got []any
+				seen := map[any]bool{}
 				ended := false
-				for range len(all)/511 + 3 {
+				// A valid page can be smaller than the requested batch after version deduplication.
+				for range len(want) + 1 {
 					r, err := it.Next(ctx)
 					if errors.Is(err, io.EOF) {
 						ended = true
 						break
 					}
 					require.NoError(t, err)
-					got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
+					page := checkRLSSchemaRows(t, r, want, fields)
+					require.NotEmpty(t, page, "an empty iterator page must return EOF")
+					for _, id := range page {
+						require.False(t, seen[id], "duplicate iterator ID across pages: %v", id)
+						seen[id] = true
+					}
+					got = append(got, page...)
 				}
 				require.True(t, ended)
 				checkRLSSchemaIDs(t, keys, got)
@@ -2074,15 +2082,22 @@ func checkRLSKeyReads(ctx context.Context, t *testing.T, mc *client.Client, name
 						it, err := mc.QueryIterator(ctx, client.NewQueryIteratorOption(name).WithFilter(literalFilter).WithBatchSize(511).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
 						require.NoError(t, err)
 						var got []any
+						seen := map[any]bool{}
 						ended := false
-						for range len(all)/511 + 3 {
+						for range len(want) + 1 {
 							r, err := it.Next(ctx)
 							if errors.Is(err, io.EOF) {
 								ended = true
 								break
 							}
 							require.NoError(t, err)
-							got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
+							page := checkRLSSchemaRows(t, r, want, fields)
+							require.NotEmpty(t, page, "an empty iterator page must return EOF")
+							for _, id := range page {
+								require.False(t, seen[id], "duplicate iterator ID across pages: %v", id)
+								seen[id] = true
+							}
+							got = append(got, page...)
 						}
 						require.True(t, ended)
 						checkRLSSchemaIDs(t, ids, got)
