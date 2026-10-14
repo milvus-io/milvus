@@ -65,7 +65,7 @@ void
 CheckHintedSearch(DataType dtype,
                   proto::common::PlaceholderType ptype,
                   const std::string& index_type = "HNSW") {
-    const int64_t rows = 128, dim = 8, nq = 3, topk = 4;
+    const int64_t rows = 128, dim = 8, nq = 8, topk = 4;
     auto schema = std::make_shared<Schema>();
     auto vec = schema->AddDebugField("vec", dtype, dim, knowhere::metric::L2);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -136,6 +136,7 @@ CheckHintedSearch(DataType dtype,
     h->queries = {knowhere::QuerySearchHints{{{50, 2, 0.25f}}},
                   std::nullopt,
                   knowhere::QuerySearchHints{}};
+    h->queries.resize(nq, knowhere::QuerySearchHints{});
     for (const auto* algo : {"BF", "GRAPH"}) {
         ScopedSchemaHandle handle(*schema);
         auto serialized = handle.ParseSearch(

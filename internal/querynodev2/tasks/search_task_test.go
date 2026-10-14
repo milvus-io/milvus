@@ -482,7 +482,7 @@ func TestSearchTask(t *testing.T) {
 	suite.Run(t, new(SearchTaskSuite))
 }
 
-func TestSearchTaskRejectsHintMerge(t *testing.T) {
+func TestSearchTaskRejectsMalformedHintMerge(t *testing.T) {
 	plain := &SearchTask{req: &querypb.SearchRequest{}}
 	hinted := &SearchTask{req: &querypb.SearchRequest{ClusteringSearchHints: map[int64]*querypb.SegmentClusterSearchHints{10: {SnapshotVersion: 1, NumRows: 8}}}}
 	require.False(t, plain.Merge(hinted))

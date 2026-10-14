@@ -43,6 +43,8 @@ type SearchTask struct {
 	req              *querypb.SearchRequest
 	result           *internalpb.SearchResults
 	merged           bool
+	combined         bool
+	mergedHints      map[int64]*querypb.SegmentClusterSearchHints
 	groupSize        int64
 	topk             int64
 	nq               int64
@@ -151,6 +153,11 @@ func (t *SearchTask) Execute() error {
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
 
 	req := t.req
+	if t.mergedHints != nil {
+		req = proto.Clone(t.req).(*querypb.SearchRequest)
+		req.ClusteringSearchHints = t.mergedHints
+		req.Req.Nq = t.nq
+	}
 	err := t.combinePlaceHolderGroups()
 	if err != nil {
 		return err
@@ -413,8 +420,7 @@ func emptySearchResultData(nq, topK int64) *schemapb.SearchResultData {
 }
 
 func (t *SearchTask) Merge(other *SearchTask) bool {
-	// Placeholders and per-query hints must never be merged independently.
-	if len(t.req.GetClusteringSearchHints()) != 0 || len(other.req.GetClusteringSearchHints()) != 0 {
+	if t == other || t.merged || other.merged || t.combined || other.combined || t.nq <= 0 || other.nq <= 0 || len(t.req.GetDmlChannels()) == 0 || len(other.req.GetDmlChannels()) == 0 {
 		return false
 	}
 
@@ -457,6 +463,12 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		return false
 	}
 
+	hints, compatible := mergeClusteringSearchHints(t, other)
+	if !compatible {
+		return false
+	}
+	t.mergedHints = hints
+
 	// Merge
 	t.groupSize += other.groupSize
 	t.topk = maxTopk
@@ -464,6 +476,8 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	t.originTopks = append(t.originTopks, other.originTopks...)
 	t.originNqs = append(t.originNqs, other.originNqs...)
 	t.others = append(t.others, other)
+	t.others = append(t.others, other.others...)
+	other.others = nil // Ownership moves to the flat parent; notify each original request once.
 	other.merged = true
 
 	return true
@@ -523,7 +537,11 @@ func (t *SearchTask) MergeWith(other scheduler.Task) bool {
 
 // combinePlaceHolderGroups combine all the placeholder groups.
 func (t *SearchTask) combinePlaceHolderGroups() error {
+	if t.combined {
+		return nil
+	}
 	if len(t.others) == 0 {
+		t.combined = true
 		return nil
 	}
 
@@ -546,5 +564,6 @@ func (t *SearchTask) combinePlaceHolderGroups() error {
 		ret.Placeholders[0].Values = append(ret.Placeholders[0].Values, x.Placeholders[0].Values...)
 	}
 	t.placeholderGroup, _ = proto.Marshal(ret)
+	t.combined = true
 	return nil
 }

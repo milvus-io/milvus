@@ -72,6 +72,19 @@ func clusteringSearchHints(ctx context.Context, bindings map[int64]*partitionSta
 	if len(queries.GetValues()) == 0 || int64(len(queries.GetValues())) != req.GetNq() {
 		return nil
 	}
+	// Every eligible partition must use this request's field/type/dimension.
+	// Encode the tensor once, retaining per-partition shape checks below.
+	queryBytes := len(queries.GetValues()[0])
+	if queryBytes == 0 || req.GetNq() > int64(math.MaxInt/queryBytes) {
+		return nil
+	}
+	vectors := make([]byte, int(req.GetNq())*queryBytes)
+	for i, q := range queries.GetValues() {
+		if len(q) != queryBytes {
+			return nil
+		}
+		copy(vectors[i*queryBytes:], q)
+	}
 	ctx, span := otel.Tracer("querynode").Start(ctx, "ClusteringSearchHints")
 	defer span.End()
 	fallback := func(reason string) {
@@ -110,18 +123,10 @@ func clusteringSearchHints(ctx context.Context, bindings map[int64]*partitionSta
 		if params[common.MetricTypeKey] != "L2" {
 			continue
 		}
-		var vectors []byte
-		valid := true
-		for _, q := range queries.GetValues() {
-			if len(q) != int(c.GetDim()*width) {
-				valid = false
-				break
-			}
-			vectors = append(vectors, q...)
-		}
-		if !valid {
+		if queryBytes != int(c.GetDim()*width) {
 			continue
 		}
+		valid := true
 		budget := max(int64(1), int64(math.Ceil(float64(c.GetNumClusters())*ratio)))
 		labels, distances, err := binding.index.Search(ctx, vectors, req.GetNq(), budget)
 		if err != nil {
@@ -134,6 +139,7 @@ func clusteringSearchHints(ctx context.Context, bindings map[int64]*partitionSta
 			continue
 		}
 		candidates := make(map[int64]*querypb.SegmentClusterSearchHints)
+		hintLists := make(map[int64][]querypb.ClusterSearchHintList)
 		for _, id := range ids {
 			stats, covered := binding.stats.SegmentStats[id]
 			if !covered {
@@ -148,7 +154,13 @@ func clusteringSearchHints(ctx context.Context, bindings map[int64]*partitionSta
 				return nil
 			}
 			metadataEntries += int(req.GetNq())
-			candidates[id] = &querypb.SegmentClusterSearchHints{SnapshotVersion: binding.stats.Version, NumRows: int64(stats.NumRows), Queries: make([]*querypb.QueryClusterSearchHints, req.GetNq())}
+			messages := make([]querypb.QueryClusterSearchHints, req.GetNq())
+			pointers := make([]*querypb.QueryClusterSearchHints, req.GetNq())
+			for q := range pointers {
+				pointers[q] = &messages[q]
+			}
+			hintLists[id] = make([]querypb.ClusterSearchHintList, req.GetNq())
+			candidates[id] = &querypb.SegmentClusterSearchHints{SnapshotVersion: binding.stats.Version, NumRows: int64(stats.NumRows), Queries: pointers}
 		}
 		if !valid {
 			continue
@@ -175,10 +187,9 @@ func clusteringSearchHints(ctx context.Context, bindings map[int64]*partitionSta
 					selected[label] = distance
 				}
 			}
-			for _, candidate := range candidates {
-				candidate.Queries[q] = &querypb.QueryClusterSearchHints{}
+			for id, candidate := range candidates {
 				if valid && len(selected) > 0 {
-					candidate.Queries[q].Hints = &querypb.ClusterSearchHintList{}
+					candidate.Queries[q].Hints = &hintLists[id][q]
 				}
 			}
 			if !valid || len(selected) == 0 {
