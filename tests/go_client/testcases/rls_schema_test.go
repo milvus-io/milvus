@@ -1731,7 +1731,7 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 								}
 							}
 							require.True(t, ended)
-							if (tc.vector == "binary" || tc.vector == "int8") && len(got) < len(expected) {
+							if tc.vector != "sparse" && len(got) < len(expected) {
 								seen := make(map[any]bool, len(got))
 								for _, id := range got {
 									require.Contains(t, expected, id)
@@ -1742,8 +1742,34 @@ func checkRLSMixedReads(ctx context.Context, t *testing.T, mc *client.Client, na
 								for _, id := range expected {
 									if !seen[id] {
 										// Other incompleteness remains a failure, not an expected tie loss.
-										require.Contains(t, pageBounds, rlsVectorDistance(query, groupWant[id]["vector"]), "missing ID is not tied at a page boundary: %v", id)
+										if tc.vector == "binary" || tc.vector == "int8" {
+											require.Contains(t, pageBounds, rlsVectorDistance(query, groupWant[id]["vector"]), "missing ID is not tied at a page boundary: %v", id)
+										}
 										missing = append(missing, id)
+									}
+								}
+								if tc.vector != "binary" && tc.vector != "int8" {
+									missingRows := make(map[any]rlsSchemaRow, len(missing))
+									missingPKs := rlsSchemaColumns(t, tc)[0]
+									for _, id := range missing {
+										missingRows[id] = groupWant[id]
+										require.NoError(t, missingPKs.AppendValue(id))
+									}
+									var missingValues any
+									if tc.varchar {
+										missingValues = missingPKs.(*column.ColumnVarChar).Data()
+									} else {
+										missingValues = missingPKs.(*column.ColumnInt64).Data()
+									}
+									// FLOAT scores must match the server boundary exactly, not an oracle tolerance.
+									rs, err := mc.Search(ctx, client.NewSearchOption(name, len(missing), []entity.Vector{query}).WithANNSField("vector").WithFilter("id in {missing_ids}").WithTemplateParam("missing_ids", missingValues).WithAnnParam(params).WithIgnoreGrowing(ignoreGrowing).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+									require.NoError(t, err)
+									require.Len(t, rs, 1)
+									recovered := checkRLSSchemaRows(t, rs[0], missingRows, fields)
+									checkRLSSchemaIDs(t, missing, recovered)
+									require.Len(t, rs[0].Scores, len(recovered))
+									for i, id := range recovered {
+										require.Contains(t, pageBounds, rs[0].Scores[i], "missing ID is not tied at a page boundary: %v", id)
 									}
 								}
 								t.Skipf("xfail: https://github.com/milvus-io/milvus/issues/54188, SearchIterator drops page-boundary ties: %v", missing)
