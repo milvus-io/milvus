@@ -1923,10 +1923,6 @@ func TestRLSSchemaKeys(t *testing.T) {
 										} else {
 											_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, patch)...).WithPartialUpdate(partial).WithRLSPrincipal(owner))
 										}
-										if tc.partitionKey != "" {
-											require.ErrorContains(t, err, "RLS upsert with a USING predicate is not supported for partition-key collections")
-											continue
-										}
 										require.NoError(t, err)
 										all[id] = row
 										delete(sealed, id)
