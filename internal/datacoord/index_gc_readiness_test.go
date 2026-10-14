@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"sort"
 	"sync"
 	"testing"
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
