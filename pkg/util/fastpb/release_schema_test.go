@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 )
 
-// These are the audited descriptors pinned by the 2.6 go.mod.
+// These are the audited 2.6 descriptors, not master's field allowlists.
 // Pin kinds as well as field numbers so a wire representation change fails.
 func TestProtoContract_ReleaseFieldKindsPinned(t *testing.T) {
 	cases := []struct {
