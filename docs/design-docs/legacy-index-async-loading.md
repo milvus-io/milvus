@@ -11,7 +11,8 @@ BSON shared-key indexes use the legacy FileSource transport with the same pinned
 mode, file-aware estimates, request cancellation and priority. Their complete
 remote keys are preserved, and each load owns a private DiskFileManager directory
 until its mmap reader is released (RAM loads remove it after opening Tantivy).
-JSON stats preparation and the legacy TextMatch translator are outside this rollout.
+Legacy TextMatch uses the same loader entry and pinned mode as packed TextMatch.
+JSON stats preparation is outside this rollout.
 
 Translator construction borrows the loading request's `OpContext` for metadata
 inspection and file-aware estimates, including cancellation and runtime priority.
@@ -139,6 +140,29 @@ Failed loads drain issued I/O before the index and its private directory are
 destroyed. A loaded mmap index retains that directory until destruction; a RAM
 index removes it after Tantivy has copied the files. No persisted keys or formats
 change.
+
+## Legacy TextMatch loading
+
+`TextMatchIndexTranslator` passes legacy text files through `LoaderEntry::Load`
+with the TextLog namespace and disk-file grouping. The construction request's
+context covers metadata inspection and file-aware Tantivy resource estimation.
+Async preparation retains one detached source for the first load attempt;
+cancellation consumes it too, and later loads reopen with their own context.
+When effective warmup is disabled, preparation releases the source before the
+constructor returns and the first demand load reopens it.
+The pinned mode applies to preparation, first load and reloads regardless of
+subsequent changes to the global setting. Packed TextMatch retains its existing
+loader, and construction now receives the same request context.
+
+Both legacy modes stage directly into a private load directory. mmap readers
+retain that directory, while RAM readers remove it after Tantivy initialization.
+The async TextMatch loader dispatches local file operations, native opening and
+cleanup before reader handoff to LocalFileIOPool. Engine and null-sidecar remote
+waits do not retain that executor. Failure cleanup releases the engine before its
+directory; a disabled local pool uses the existing async executor fallback.
+The synchronous fallback estimate charges this single staging copy; async
+estimates additionally account for file-specific transport/decode peaks and
+nullable-row metadata. Existing text querying and null semantics are unchanged.
 
 ## Vector backends
 

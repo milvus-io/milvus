@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <arrow/filesystem/localfs.h>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <future>
@@ -37,6 +38,7 @@
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncLoadExecutor.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/test_utils/TextPublicationTestUtils.h"
 #include "test_utils/AsyncLoadTestUtils.h"
 
@@ -58,8 +60,8 @@ class TextLoadFileSystem : public arrow::fs::SubTreeFileSystem {
     arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenInputFileAsync(const std::string& path) override {
         ++async_opens;
-        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
-            "MILVUS_ASYNC"));
+        const auto thread = folly::getCurrentThreadName().value_or("");
+        EXPECT_TRUE(thread.starts_with("MILVUS_ASYNC"));
         if (auto found = controlled.find(path); found != controlled.end()) {
             return arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>::
                 MakeFinished(
@@ -72,10 +74,11 @@ class TextLoadFileSystem : public arrow::fs::SubTreeFileSystem {
 
     void
     ResetCounts() {
-        sync_opens = async_opens = 0;
+        sync_opens = 0;
+        async_opens = 0;
     }
-    int sync_opens{};
-    int async_opens{};
+    std::atomic<int> sync_opens{};
+    std::atomic<int> async_opens{};
     std::map<std::string, std::shared_ptr<test::ControlledDirectReadFile>>
         controlled;
 };
@@ -132,6 +135,7 @@ class TextIndexTranslatorTest : public ::testing::Test {
 };
 
 TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
+    storagev2translator::SetStorageV2AsyncLoadEnabled(false);
     storage::text_test::TextPublicationFixture fixture;
     const auto stats = fixture.Publish(false);
     ASSERT_GT(stats.MemSize(), 0);
@@ -149,8 +153,7 @@ TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
                       index::kScalarIndexFixedResidentBytes);
         EXPECT_EQ(loaded.file_bytes, mmap ? stats.MemSize() : 0);
         EXPECT_EQ(overhead.memory_bytes, mmap ? stats.MemSize() : 0);
-        EXPECT_EQ(overhead.file_bytes,
-                  mmap ? stats.MemSize() : 2 * stats.MemSize());
+        EXPECT_EQ(overhead.file_bytes, mmap ? 0 : stats.MemSize());
         // Zero index size adds no disk overhead, even with nullable rows.
         TextMatchIndexTranslator zero_size_translator(
             {mmap, 3, 101, "{}", 0, 3, "", ""}, fixture.context, config);
@@ -167,6 +170,189 @@ TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
         EXPECT_GE(cells.front().second->MemoryUsage(), bitmap_bytes);
         EXPECT_EQ(cells.front().second->CellByteSize().file_bytes > 0, mmap);
     }
+}
+
+TEST_F(TextIndexTranslatorTest, LegacyReloadPinsModeAndRebindsCancellation) {
+    storage::text_test::TextPublicationFixture fixture;
+    const auto stats = fixture.Publish(false);
+    auto fs = std::make_shared<TextLoadFileSystem>(fixture.context.fs);
+    fixture.context.fs = fs;
+    for (const bool mmap : {false, true}) {
+        for (const bool planned_async : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << mmap << "/" << planned_async);
+            storagev2translator::SetStorageV2AsyncLoadEnabled(planned_async);
+            fs->ResetCounts();
+            auto config = fixture.LoadConfig(stats, mmap);
+            TextMatchIndexTranslator translator(
+                {mmap, 3, 101, "{}", stats.MemSize(), 3, "", ""},
+                fixture.context,
+                config);
+            const auto estimate = translator.estimated_byte_size_of_cell(0);
+            storagev2translator::SetStorageV2AsyncLoadEnabled(!planned_async);
+            auto first = translator.get_cells(nullptr, {0});
+            CheckTextReader(*first.front().second);
+            EXPECT_EQ(fs->async_opens.load() > 0, planned_async);
+            // Sync legacy reads use ChunkManager rather than Arrow.
+            EXPECT_EQ(fs->sync_opens.load(), 0);
+            EXPECT_GE(estimate.first.memory_bytes,
+                      first.front().second->CellByteSize().memory_bytes);
+            EXPECT_GE(estimate.first.file_bytes,
+                      first.front().second->CellByteSize().file_bytes);
+            fs->ResetCounts();
+            folly::CancellationSource cancel;
+            cancel.requestCancellation();
+            OpContext operation(cancel.getToken());
+            EXPECT_THROW(translator.get_cells(&operation, {0}), SegcoreError);
+            EXPECT_EQ(fs->async_opens.load(), 0);
+            EXPECT_EQ(fs->sync_opens.load(), 0);
+            auto second = translator.get_cells(nullptr, {0});
+            first.clear();
+            CheckTextReader(*second.front().second);
+            EXPECT_EQ(fs->async_opens.load() > 0, planned_async);
+            // Sync legacy reads use ChunkManager rather than Arrow.
+            EXPECT_EQ(fs->sync_opens.load(), 0);
+            EXPECT_EQ(estimate, translator.estimated_byte_size_of_cell(0));
+        }
+    }
+    EXPECT_TRUE(!std::filesystem::exists(fixture.root->Path() + "/loaded") ||
+                std::filesystem::is_empty(fixture.root->Path() + "/loaded"));
+}
+
+TEST_F(TextIndexTranslatorTest, LegacyPreparationReleasedWhenWarmupDisabled) {
+    storage::text_test::TextPublicationFixture fixture;
+    const auto stats = fixture.Publish(false);
+    auto fs = std::make_shared<TextLoadFileSystem>(fixture.context.fs);
+    fixture.context.fs = fs;
+    for (const bool mmap : {false, true}) {
+        int cold_opens = 0;
+        int warm_opens = 0;
+        for (const auto* policy : {"disable", "sync"}) {
+            TextMatchIndexTranslator translator(
+                {mmap, 3, 101, "{}", stats.MemSize(), 3, policy, ""},
+                fixture.context,
+                fixture.LoadConfig(stats, mmap));
+            fs->ResetCounts();
+            auto cells = translator.get_cells(nullptr, {0});
+            CheckTextReader(*cells.front().second);
+            if (std::string_view(policy) == "disable") {
+                cold_opens = fs->async_opens.load();
+            } else {
+                warm_opens = fs->async_opens.load();
+            }
+        }
+        EXPECT_GT(cold_opens, warm_opens);
+    }
+}
+
+TEST_F(TextIndexTranslatorTest, LegacyRemoteWaitDoesNotRetainLocalPool) {
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    auto restore = folly::makeGuard([&] { pool.Configure(0); });
+    for (const bool mmap : {false, true}) {
+        for (const bool sidecar : {false, true}) {
+            for (const bool cancel_load : {false, true}) {
+                SCOPED_TRACE(::testing::Message()
+                             << mmap << "/" << sidecar << "/" << cancel_load);
+                pool.Configure(1);
+                storage::text_test::TextPublicationFixture fixture;
+                const auto stats = fixture.Publish(false);
+                auto config = fixture.LoadConfig(stats, mmap);
+                auto fs =
+                    std::make_shared<TextLoadFileSystem>(fixture.context.fs);
+                std::shared_ptr<test::ControlledDirectReadFile> held;
+                for (const auto& name : config.at(index::INDEX_FILES)
+                                            .get<std::vector<std::string>>()) {
+                    const auto path =
+                        config.at(STATS_BASE_PATH_KEY).get<std::string>() +
+                        "/" + name;
+                    auto input =
+                        fixture.context.fs->OpenInputFile(path).ValueOrDie();
+                    auto bytes = input->ReadAt(0, input->GetSize().ValueOrDie())
+                                     .ValueOrDie();
+                    auto file =
+                        std::make_shared<test::ControlledDirectReadFile>(
+                            std::vector<uint8_t>(
+                                bytes->data(), bytes->data() + bytes->size()));
+                    fs->controlled.emplace(path, file);
+                    if (!held && (name.find(index::INDEX_NULL_OFFSET) !=
+                                  std::string::npos) == sidecar)
+                        held = file;
+                }
+                ASSERT_NE(held, nullptr);
+                fixture.context.fs = fs;
+                TextMatchIndexTranslator translator(
+                    {mmap, 3, 101, "{}", stats.MemSize(), 3, "sync", ""},
+                    fixture.context,
+                    config);
+                held->ResetCounters();
+                held->SetAutoComplete(false);
+                folly::CancellationSource cancel;
+                OpContext operation(cancel.getToken());
+                auto pending = std::async(std::launch::async, [&] {
+                    return translator.get_cells(&operation, {0});
+                });
+                auto complete = [&] {
+                    held->SetAutoComplete(true);
+                    for (size_t i = 0; i < held->DirectReadCalls().size(); ++i)
+                        held->Complete(i);
+                };
+                auto drain = folly::makeGuard([&] {
+                    complete();
+                    if (pending.valid())
+                        pending.wait();
+                });
+                ASSERT_TRUE(held->WaitForCallCount(1));
+                auto disable =
+                    std::async(std::launch::async, [&] { pool.Configure(0); });
+                auto complete_before_join = folly::makeGuard(complete);
+                EXPECT_EQ(disable.wait_for(std::chrono::seconds(2)),
+                          std::future_status::ready);
+                if (cancel_load)
+                    cancel.requestCancellation();
+                EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+                          std::future_status::timeout);
+                complete();
+                disable.get();
+                const auto loaded =
+                    std::filesystem::path(LocalStagingRoot()) /
+                    TEXT_LOG_ROOT_PATH /
+                    std::to_string(fixture.context.indexMeta.build_id) / "3" /
+                    "101" / "index";
+                if (cancel_load) {
+                    try {
+                        static_cast<void>(pending.get());
+                        FAIL()
+                            << "cancelled text load must not publish a reader";
+                    } catch (const SegcoreError& error) {
+                        EXPECT_EQ(error.get_error_code(), FollyCancel);
+                    }
+                } else {
+                    auto cells = pending.get();
+                    ASSERT_EQ(cells.size(), 1);
+                    CheckTextReader(*cells.front().second);
+                    EXPECT_EQ(!std::filesystem::is_empty(loaded), mmap);
+                }
+                EXPECT_TRUE(std::filesystem::is_empty(loaded));
+            }
+        }
+    }
+}
+
+TEST_F(TextIndexTranslatorTest, LegacyPreparationHonorsCancellation) {
+    storage::text_test::TextPublicationFixture fixture;
+    const auto stats = fixture.Publish(false);
+    auto fs = std::make_shared<TextLoadFileSystem>(fixture.context.fs);
+    fixture.context.fs = fs;
+    folly::CancellationSource cancel;
+    cancel.requestCancellation();
+    OpContext operation(cancel.getToken());
+    EXPECT_THROW((TextMatchIndexTranslator(
+                     {false, 3, 101, "{}", stats.MemSize(), 3, "", ""},
+                     fixture.context,
+                     fixture.LoadConfig(stats, false),
+                     &operation)),
+                 SegcoreError);
+    EXPECT_EQ(fs->async_opens.load(), 0);
+    EXPECT_EQ(fs->sync_opens.load(), 0);
 }
 
 TEST_F(TextIndexTranslatorTest,
