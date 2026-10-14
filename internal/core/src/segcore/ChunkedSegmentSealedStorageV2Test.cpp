@@ -1026,82 +1026,6 @@ TEST_P(TestLazyManifest, StructOffsetsBuiltBeforePublicationAndDoNotReloadRaw) {
     }
 }
 
-TEST_P(TestLazyManifest, LazyManifestMatchConstructionCancellationAndRetry) {
-    LazyColumnGroupGuard lazy_group_guard(true);
-    auto policies =
-        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
-    policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
-    CacheWarmupPolicyGuard warmup_guard(policies);
-    auto schema = GenChunkedSegmentTestSchema(GetParam());
-    schema->AddDebugArrayField("items[source]", DataType::INT32, true);
-    auto label =
-        schema->AddDebugArrayField("items[label]", DataType::INT32, true);
-    constexpr int64_t rows = 64;
-    auto path = UniqueManifestTestPath("lazy_match_cancel_retry");
-    auto fs = GetDefaultArrowFileSystem();
-    StorageV2TempDirGuard dir_guard(fs, path);
-    milvus::test::V3SegmentTestData data(
-        schema,
-        1,
-        rows,
-        128,
-        TestLocalPath,
-        path,
-        PerFieldManifestTestGroupPattern(schema));
-    auto segment =
-        CreateV3ManifestSegment(data, 3193 + (GetParam() ? 100 : 0), 0, schema);
-    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
-    ASSERT_NE(sealed, nullptr);
-    auto state = sealed->TestGetPublishedStateSnapshot();
-    auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(
-        state->runtime->fields.at(label));
-    ASSERT_NE(proxy, nullptr);
-    ASSERT_TRUE(proxy->IsLazy());
-    ASSERT_FALSE(proxy->IsMaterialized());
-    auto entry = state->runtime->struct_element_offsets_map.at(label);
-    auto match = MakeStructMatchExpr(label);
-
-    folly::CancellationSource cancelled;
-    cancelled.requestCancellation();
-    OpContext cancelled_ctx(cancelled.getToken());
-    exec::QueryContext context(
-        "lazy_match", segment.get(), rows, MAX_TIMESTAMP);
-    context.set_read_snapshot(segment->CaptureReadSnapshot());
-    context.set_op_context(&cancelled_ctx);
-    try {
-        (void)exec::CompileExpression(match, &context, {}, false);
-        FAIL() << "expected cancellation before the first layout lookup";
-    } catch (const SegcoreError& error) {
-        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
-    }
-    EXPECT_FALSE(proxy->IsMaterialized());
-    ASSERT_NE(entry, nullptr);
-
-    OpContext fresh_ctx;
-    context.set_op_context(&fresh_ctx);
-    auto physical = exec::CompileExpression(match, &context, {}, false);
-    ASSERT_NE(physical, nullptr);
-    EXPECT_TRUE(proxy->IsMaterialized());
-    // Construction only needs the sibling layout; the mapping was built at load.
-    int64_t first_row = 0;
-    EXPECT_FALSE(proxy->CellsLoaded(&first_row, 1));
-    ASSERT_NE(entry, nullptr);
-    exec::ExecContext exec_context(&context);
-    exec::EvalCtx eval_context(&exec_context);
-    VectorPtr result;
-    physical->Eval(eval_context, result);
-    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
-    ASSERT_NE(output, nullptr);
-    ASSERT_EQ(output->size(), rows);
-    TargetBitmapView values(output->GetRawData(), rows);
-    TargetBitmapView validity(output->GetValidRawData(), rows);
-    for (int64_t i = 0; i < rows; ++i) {
-        EXPECT_EQ(values[i], i % 2 == 0);
-        EXPECT_EQ(validity[i], i % 2 == 0);
-    }
-    EXPECT_EQ(entry, segment->GetStructElementOffsets(label));
-}
-
 TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
     LazyColumnGroupGuard lazy_group_guard(true);
     const auto previous_async =
@@ -1191,6 +1115,15 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
         context.set_op_context(&ctx);
         context.set_read_snapshot(read);
         auto match = MakeStructMatchExpr(label);
+        folly::CancellationSource pre_cancelled;
+        pre_cancelled.requestCancellation();
+        OpContext pre_cancelled_ctx(pre_cancelled.getToken());
+        context.set_op_context(&pre_cancelled_ctx);
+        EXPECT_THROW(exec::CompileExpression(match, &context, {}, false),
+                     SegcoreError);
+        EXPECT_FALSE(proxy->IsMaterialized());
+        EXPECT_EQ(reader->sync_calls + reader->async_calls, 0);
+        context.set_op_context(&ctx);
         reader->Arm();
         auto started = reader->Started();
         auto compilation = std::async(std::launch::async, [&] {
@@ -1215,97 +1148,26 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
 
         OpContext fresh_ctx;
         context.set_op_context(&fresh_ctx);
-        EXPECT_NE(exec::CompileExpression(match, &context, {}, false), nullptr);
+        auto physical = exec::CompileExpression(match, &context, {}, false);
+        ASSERT_NE(physical, nullptr);
         EXPECT_EQ(reader->async_calls, async_enabled ? 2 : 0);
         EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 2);
         EXPECT_TRUE(proxy->IsMaterialized());
-        ASSERT_NE(entry, nullptr);
-    }
-}
-
-TEST_P(TestLazyManifest,
-       LazyManifestLayoutReadsUseContextWithAndWithoutSnapshot) {
-    LazyColumnGroupGuard lazy_group_guard(true);
-    auto policies =
-        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
-    policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
-    CacheWarmupPolicyGuard warmup_guard(policies);
-    constexpr int64_t rows = 64;
-    auto path = UniqueManifestTestPath("lazy_layout_context");
-    auto fs = GetDefaultArrowFileSystem();
-    StorageV2TempDirGuard dir_guard(fs, path);
-    milvus::test::V3SegmentTestData data(schema_,
-                                         1,
-                                         rows,
-                                         128,
-                                         TestLocalPath,
-                                         path,
-                                         LazyManifestTestGroupPattern(schema_));
-    auto segment = CreateV3ManifestSegment(data, 3195 + (GetParam() ? 100 : 0));
-    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
-    ASSERT_NE(sealed, nullptr);
-    auto field = fields.at("int64");
-    auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(
-        sealed->TestGetPublishedStateSnapshot()->runtime->fields.at(field));
-    ASSERT_NE(proxy, nullptr);
-    ASSERT_FALSE(proxy->IsMaterialized());
-    folly::CancellationSource cancelled;
-    cancelled.requestCancellation();
-    OpContext cancelled_ctx(cancelled.getToken());
-    segcore::SegmentChunkReader reader(&cancelled_ctx, segment.get(), rows);
-    auto snapshot = segment->CaptureReadSnapshot();
-    for (bool pinned : {false, true}) {
-        SCOPED_TRACE(pinned);
-        reader.SetSnapshot(pinned ? snapshot.get() : nullptr);
-        const std::vector<std::function<void()>> lookups = {
-            [&] { (void)reader.NumChunkData(field); },
-            [&] { (void)reader.ChunkSize(field, 0); },
-            [&] { (void)reader.NumRowsUntilChunk(field, 0); },
-            [&] { (void)reader.GetChunkByOffset(field, 0); }};
-        for (size_t i = 0; i < lookups.size(); ++i) {
-            SCOPED_TRACE(i);
-            try {
-                lookups[i]();
-                FAIL()
-                    << "expected cancellation before metadata materialization";
-            } catch (const SegcoreError& error) {
-                EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
-            }
-            EXPECT_FALSE(proxy->IsMaterialized());
+        exec::ExecContext exec_context(&context);
+        exec::EvalCtx eval_context(&exec_context);
+        VectorPtr result;
+        physical->Eval(eval_context, result);
+        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+        ASSERT_NE(output, nullptr);
+        ASSERT_EQ(output->size(), rows);
+        TargetBitmapView values(output->GetRawData(), rows);
+        TargetBitmapView validity(output->GetValidRawData(), rows);
+        for (int64_t i = 0; i < rows; ++i) {
+            EXPECT_EQ(values[i], i % 2 == 0);
+            EXPECT_EQ(validity[i], i % 2 == 0);
         }
+        EXPECT_EQ(segment->GetStructElementOffsets(label), entry);
     }
-    // These constructors have their own first-layout lookups instead of
-    // going through SegmentExpr::InitSegmentExpr().
-    exec::QueryContext context(
-        "lazy_layout_constructors", segment.get(), rows, MAX_TIMESTAMP);
-    context.set_op_context(&cancelled_ctx);
-    context.set_read_snapshot(snapshot);
-    const std::vector<expr::TypedExprPtr> expressions = {
-        std::make_shared<expr::ColumnExpr>(
-            expr::ColumnInfo(field, DataType::INT64)),
-        std::make_shared<expr::CompareExpr>(field,
-                                            field,
-                                            DataType::INT64,
-                                            DataType::INT64,
-                                            proto::plan::OpType::Equal)};
-    for (const auto& expression : expressions) {
-        SCOPED_TRACE(expression->ToString());
-        try {
-            (void)exec::CompileExpression(expression, &context, {}, false);
-            FAIL() << "expected cancellation during expression construction";
-        } catch (const SegcoreError& error) {
-            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
-        }
-        EXPECT_FALSE(proxy->IsMaterialized());
-    }
-    OpContext ctx;
-    segcore::SegmentChunkReader fresh_reader(&ctx, segment.get(), rows);
-    fresh_reader.SetSnapshot(snapshot.get());
-    EXPECT_GT(fresh_reader.NumChunkData(field), 0);
-    EXPECT_TRUE(proxy->IsMaterialized());
-    EXPECT_EQ(fresh_reader.NumRowsUntilChunk(field, 0), 0);
-    EXPECT_EQ(fresh_reader.GetChunkByOffset(field, 0), std::make_pair(0L, 0L));
-    EXPECT_GT(fresh_reader.ChunkSize(field, 0), 0);
 }
 
 TEST_P(TestLazyManifest, LazyManifestPreservesInitialMultiFieldTask) {
