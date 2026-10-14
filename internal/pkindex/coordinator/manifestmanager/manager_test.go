@@ -94,6 +94,15 @@ func claimed(t *testing.T, term int64) (*Manager, *fakes.Pointers, *fakes.Store)
 	return m, p, s
 }
 
+// A flush checks the claim record but does not write it.
+func TestFlushDoesNotWriteClaimRecord(t *testing.T) {
+	m, p, _ := claimed(t, 3)
+	_, err := m.CommitFlush(context.Background(), 1, vch, flush(3, 50, 9))
+	require.NoError(t, err)
+	assert.Len(t, p.LastSave, 1)
+	assert.Contains(t, p.LastSave, manifest.PointerKey(1, vch))
+}
+
 func TestClaimPChannelRules(t *testing.T) {
 	m, p, s := newTestManager()
 	ctx := context.Background()

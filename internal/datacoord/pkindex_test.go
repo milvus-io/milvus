@@ -72,18 +72,21 @@ func TestPKIndexMetaKVPointers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "c", v)
 
-	// a write under a condition on a second key: it fails when that key does
-	// not hold the value, and writes both keys in one transaction otherwise
+	// a write under a condition on a second key that it does not write: it
+	// fails when that key does not hold the value, and leaves that key as is
 	claim := manifest.ClaimKey("ch")
 	require.NoError(t, p.Save(ctx, map[string]string{claim: "t1"}, manifest.KeyAbsent(claim)))
-	assert.Error(t, p.Save(ctx, map[string]string{key: "d", claim: "t2"}, manifest.ValueIs(key, "c"), manifest.ValueIs(claim, "t2")))
+	assert.Error(t, p.Save(ctx, map[string]string{key: "d"}, manifest.ValueIs(key, "c"), manifest.ValueIs(claim, "t2")))
 	v, _, err = p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.Equal(t, "c", v)
-	require.NoError(t, p.Save(ctx, map[string]string{key: "d", claim: "t1"}, manifest.ValueIs(key, "c"), manifest.ValueIs(claim, "t1")))
+	require.NoError(t, p.Save(ctx, map[string]string{key: "d"}, manifest.ValueIs(key, "c"), manifest.ValueIs(claim, "t1")))
 	v, _, err = p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.Equal(t, "d", v)
+	v, _, err = p.Load(ctx, claim)
+	require.NoError(t, err)
+	assert.Equal(t, "t1", v)
 
 	values, founds, err = p.MultiLoad(ctx, []string{key, manifest.PointerKey(1, "missing_v0"), claim})
 	require.NoError(t, err)
