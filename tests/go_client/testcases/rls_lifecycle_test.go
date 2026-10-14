@@ -245,7 +245,9 @@ func TestRLSDatabaseIsolation(t *testing.T) {
 			defer cancel()
 			require.NoError(t, admin.DropDatabase(cleanupCtx, client.NewDropDatabaseOption(db)))
 		})
-		mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{DBName: db}).Client
+		cfg := hp.GetDefaultClientConfig()
+		cfg.DBName = db
+		mc := hp.CreateMilvusClient(ctx, t, cfg).Client
 		prepareRLSCollection(ctx, t, mc, name, false)
 		createRLSPolicy(ctx, t, mc, name, "department", "department == $current_principal_tags['department']", "", milvuspb.RowPolicyAction_Query)
 		tags := `{"department":"eng"}`
