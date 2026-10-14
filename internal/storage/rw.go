@@ -423,6 +423,7 @@ func NewDeltalogWriter(
 }
 
 func NewDeltalogReader(
+	ctx context.Context,
 	pkField *schemapb.FieldSchema,
 	paths []string,
 	option ...RwOption,
@@ -435,5 +436,5 @@ func NewDeltalogReader(
 		return nil, err
 	}
 
-	return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+	return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 }
