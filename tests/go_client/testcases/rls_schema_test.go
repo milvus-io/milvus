@@ -1058,7 +1058,9 @@ func TestRLSSchemaAutoID(t *testing.T) {
 				t.Run("insert", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
 				for _, partial := range []bool{false, true} {
 					t.Run(fmt.Sprintf("upsert_partial_%v", partial), func(t *testing.T) {
-						for id, old := range all {
+						// The 2.6 server replaces AutoID PKs; snapshot the IDs before changing the oracle.
+						for _, id := range slices.Collect(maps.Keys(all)) {
+							old := all[id]
 							if old["owner"] != "alice" {
 								continue
 							}
@@ -1068,14 +1070,24 @@ func TestRLSSchemaAutoID(t *testing.T) {
 							if partial {
 								patch = rlsSchemaRow{"id": id, "text": "updated_中"}
 							}
+							var result client.UpsertResult
 							var err error
 							if mode == "row" {
-								_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "alice", false, partial, map[string]any(patch)))
+								// Row-based 2.6 options otherwise omit an AutoID primary key.
+								option := client.NewRowBasedInsertOption(name, map[string]any(patch)).WithKeepAutoIDPk(true).WithRLSPrincipal("alice")
+								option.WithPartialUpdate(partial)
+								result, err = mc.Upsert(ctx, option)
 							} else {
-								_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, patch)...).WithPartialUpdate(partial).WithRLSPrincipal("alice"))
+								result, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, patch)...).WithPartialUpdate(partial).WithRLSPrincipal("alice"))
 							}
 							require.NoError(t, err)
-							all[id] = r
+							require.EqualValues(t, 1, result.UpsertCount)
+							newID, err := result.IDs.Get(0)
+							require.NoError(t, err)
+							require.NotContains(t, all, newID)
+							delete(all, id)
+							r["id"] = newID
+							all[newID] = r
 						}
 						checkRLSSchemaReads(ctx, t, mc, name, tc, all)
 					})
