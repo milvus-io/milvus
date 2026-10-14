@@ -317,6 +317,10 @@ TEST_P(DiskParameterPassthroughTest, DefaultsAndPerRequestSearchControls) {
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->KnowhereIndexType(), GetParam());
+    // Default AISAQ stores disk PQ codes; Milvus must use field data for
+    // original vector output instead of treating those codes as raw vectors.
+    EXPECT_EQ(reader->HasRawData(),
+              GetParam() == knowhere::IndexEnum::INDEX_DISKANN);
     auto query = GenDataset(1, kDim, values.data());
     VectorSearchParams params{
         .search_params_ = nlohmann::json::object(),

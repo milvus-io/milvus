@@ -1272,11 +1272,6 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	}
 	defer s.ptrLock.Unpin()
 
-	// Reopen applies the same live deployment load defaults as a full load.
-	if err := prepareIndexLoadParams(newLoadInfo.GetIndexInfos()); err != nil {
-		return err
-	}
-
 	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,

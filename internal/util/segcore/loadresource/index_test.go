@@ -20,13 +20,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -235,7 +241,8 @@ func TestBuildCLoadIndexInfoResolvesWarmup(t *testing.T) {
 		)
 
 		require.NoError(t, err)
-		require.Equal(t, common.WarmupAsync, info.GetIndexParams()[common.WarmupKey])
+		require.Equal(t, common.WarmupAsync, info.GetLoadParams()[common.WarmupKey])
+		require.NotContains(t, info.GetIndexParams(), common.WarmupKey)
 	})
 }
 
@@ -266,4 +273,105 @@ func TestEstimateIndexLoadResourceReturnsErrorWithoutIndexType(t *testing.T) {
 
 	require.Error(t, err)
 	require.Zero(t, usage)
+}
+
+func TestBuildCLoadIndexInfoSeparatesRuntimeParams(t *testing.T) {
+	params := paramtable.Get()
+	field := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
+	for _, algorithm := range []string{"DISKANN", "AISAQ"} {
+		t.Run(algorithm, func(t *testing.T) {
+			prefix := "knowhere." + algorithm + ".load."
+			for _, key := range []string{"search_cache_budget_gb_ratio", "use_bfs_cache", "disk_pq_dims"} {
+				defer params.Remove(prefix + key)
+			}
+			for _, explicit := range []bool{false, true} {
+				metadata := &querypb.FieldIndexInfo{IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: algorithm}, {Key: common.MmapEnabledKey, Value: "false"}}}
+				if explicit {
+					metadata.IndexParams = append(metadata.IndexParams,
+						&commonpb.KeyValuePair{Key: "search_cache_budget_gb_ratio", Value: "0"},
+						&commonpb.KeyValuePair{Key: "use_bfs_cache", Value: "false"})
+				}
+				original := proto.Clone(metadata).(*querypb.FieldIndexInfo)
+				for _, ratio := range []string{"0.25", "0.5"} {
+					require.NoError(t, params.Save(prefix+"search_cache_budget_gb_ratio", ratio))
+					require.NoError(t, params.Save(prefix+"use_bfs_cache", "true"))
+					require.NoError(t, params.Save(prefix+"disk_pq_dims", "0"))
+					payload, err := buildCLoadIndexInfo(field, &querypb.SegmentLoadInfo{}, metadata)
+					require.NoError(t, err)
+					raw, err := proto.Marshal(payload)
+					require.NoError(t, err)
+					wire := &cgopb.LoadIndexInfo{}
+					require.NoError(t, proto.Unmarshal(raw, wire))
+					require.Equal(t, funcutil.KeyValuePair2Map(original.GetIndexParams()), wire.GetIndexParams())
+					require.False(t, wire.GetEnableMmap())
+					require.True(t, proto.Equal(original, metadata))
+					if explicit {
+						require.NotContains(t, wire.GetLoadParams(), "search_cache_budget_gb_ratio")
+						require.NotContains(t, wire.GetLoadParams(), "use_bfs_cache")
+					} else {
+						require.Equal(t, ratio, wire.GetLoadParams()["search_cache_budget_gb_ratio"])
+						require.Equal(t, "true", wire.GetLoadParams()["use_bfs_cache"])
+					}
+					require.Equal(t, "0", wire.GetLoadParams()["disk_pq_dims"])
+				}
+			}
+		})
+	}
+}
+
+func TestEstimateIndexLoadResourceIgnoresLoadRepresentationDefaults(t *testing.T) {
+	params := paramtable.Get()
+	const key = "knowhere.AISAQ.load.disk_pq_dims"
+	require.NoError(t, params.Save(key, "0"))
+	defer params.Remove(key)
+	field := &schemapb.FieldSchema{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}}}
+	segment := &querypb.SegmentLoadInfo{NumOfRows: 1024}
+	index := &querypb.FieldIndexInfo{FieldID: 101, NumRows: 1024, IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AISAQ"}, {Key: common.MetricTypeKey, Value: "L2"}}}
+	usage, err := EstimateIndexLoadResource(context.Background(), field, segment, index)
+	require.NoError(t, err)
+	require.False(t, usage.HasRawData, "load-only disk_pq_dims cannot change the persisted compressed representation")
+	index.IndexParams = append(index.IndexParams, &commonpb.KeyValuePair{Key: "disk_pq_dims", Value: "0"})
+	usage, err = EstimateIndexLoadResource(context.Background(), field, segment, index)
+	require.NoError(t, err)
+	require.True(t, usage.HasRawData, "explicit build choice still determines static capability")
+}
+
+func TestBuildCLoadIndexInfoRuntimeBitmapMmapWarmup(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.QueryNodeCfg.IndexOffsetCacheEnabled.Key, "true"))
+	defer params.Reset(params.QueryNodeCfg.IndexOffsetCacheEnabled.Key)
+	require.NoError(t, params.Save("knowhere.BITMAP.load."+common.MmapEnabledKey, "true"))
+	defer params.Remove("knowhere.BITMAP.load." + common.MmapEnabledKey)
+	require.NoError(t, params.Save("knowhere.BITMAP.load."+common.WarmupKey, common.WarmupAsync))
+	defer params.Remove("knowhere.BITMAP.load." + common.WarmupKey)
+	field := &schemapb.FieldSchema{DataType: schemapb.DataType_Int64}
+	metadata := &querypb.FieldIndexInfo{IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "BITMAP"}}}
+	payload, err := buildCLoadIndexInfo(field, &querypb.SegmentLoadInfo{}, metadata)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{common.IndexTypeKey: "BITMAP"}, payload.GetIndexParams())
+	require.Equal(t, "true", payload.GetLoadParams()[common.IndexOffsetCacheEnabledKey])
+	require.Equal(t, common.WarmupAsync, payload.GetLoadParams()[common.WarmupKey])
+	require.True(t, payload.GetEnableMmap())
+	metadata.IndexParams = append(metadata.IndexParams,
+		&commonpb.KeyValuePair{Key: common.MmapEnabledKey, Value: "false"},
+		&commonpb.KeyValuePair{Key: common.WarmupKey, Value: common.WarmupDisable},
+		&commonpb.KeyValuePair{Key: common.IndexOffsetCacheEnabledKey, Value: "false"})
+	payload, err = buildCLoadIndexInfo(field, &querypb.SegmentLoadInfo{}, metadata)
+	require.NoError(t, err)
+	require.False(t, payload.GetEnableMmap())
+	require.Equal(t, funcutil.KeyValuePair2Map(metadata.GetIndexParams()), payload.GetIndexParams())
+	for _, key := range []string{common.MmapEnabledKey, common.WarmupKey, common.IndexOffsetCacheEnabledKey} {
+		require.NotContains(t, payload.GetLoadParams(), key)
+	}
+}
+
+func TestBuildCLoadIndexInfoPropagatesRuntimePreparationError(t *testing.T) {
+	patch := mockey.Mock(indexparams.GetRuntimeLoadParams).
+		To(func(_ *paramtable.ComponentParam, _ map[string]string) (map[string]string, error) {
+			return nil, merr.ErrServiceUnavailable
+		}).Build()
+	defer patch.UnPatch()
+	info, err := buildCLoadIndexInfo(&schemapb.FieldSchema{}, &querypb.SegmentLoadInfo{}, &querypb.FieldIndexInfo{IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "TEST_INDEX"}}})
+	require.Nil(t, info)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }

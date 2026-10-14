@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -92,4 +93,36 @@ func TestLoadDeploymentParamsDisabled(t *testing.T) {
 	input := map[string]string{"index_type": "TEST_INDEX"}
 	assert.NoError(t, AppendPrepareLoadParams(&params, input))
 	assert.NotContains(t, input, "load_only")
+}
+
+func TestRuntimeLoadParamsPreserveMetadataAndLiveDefaults(t *testing.T) {
+	var params paramtable.ComponentParam
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	metadata := map[string]string{"index_type": "TEST_INDEX", "explicit_zero": "0", "explicit_false": "false", "explicit_empty": ""}
+	for _, value := range []string{"0.25", "0.5"} {
+		params.Save("knowhere.TEST_INDEX.load.runtime_ratio", value)
+		params.Save("knowhere.TEST_INDEX.load.explicit_zero", "1")
+		params.Save("knowhere.TEST_INDEX.load.explicit_false", "true")
+		params.Save("knowhere.TEST_INDEX.load.explicit_empty", "default")
+		runtime, err := GetRuntimeLoadParams(&params, metadata)
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]string{"runtime_ratio": value}, runtime)
+		assert.Equal(t, map[string]string{"index_type": "TEST_INDEX", "explicit_zero": "0", "explicit_false": "false", "explicit_empty": ""}, metadata)
+	}
+}
+
+func TestRuntimeLoadParamsBitmapOffsetCache(t *testing.T) {
+	var params paramtable.ComponentParam
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	params.Save(params.QueryNodeCfg.IndexOffsetCacheEnabled.Key, "true")
+	metadata := map[string]string{common.IndexTypeKey: "BITMAP"}
+	runtime, err := GetRuntimeLoadParams(&params, metadata)
+	assert.NoError(t, err)
+	assert.Equal(t, "true", runtime[common.IndexOffsetCacheEnabledKey])
+	assert.NotContains(t, metadata, common.IndexOffsetCacheEnabledKey)
+	metadata[common.IndexOffsetCacheEnabledKey] = "false"
+	runtime, err = GetRuntimeLoadParams(&params, metadata)
+	assert.NoError(t, err)
+	assert.NotContains(t, runtime, common.IndexOffsetCacheEnabledKey)
+	assert.Equal(t, "false", metadata[common.IndexOffsetCacheEnabledKey])
 }

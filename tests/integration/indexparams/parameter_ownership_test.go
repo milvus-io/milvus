@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -113,6 +112,13 @@ func (s *ParameterOwnershipSuite) exerciseIndex(algorithm, configName string, ex
 		CollectionName: collection, FieldsData: []*schemapb.FieldData{vectors}, NumRows: indexRows,
 	})
 	s.Require().NoError(merr.CheckRPCCall(insert, err))
+	insertedIDs := insert.GetIDs().GetIntId().GetData()
+	s.Require().Len(insertedIDs, indexRows)
+	rawVectors := vectors.GetVectors().GetFloatVector().GetData()
+	expectedVectors := make(map[int64][]float32, len(insertedIDs))
+	for row, id := range insertedIDs {
+		expectedVectors[id] = rawVectors[row*vectorDim : (row+1)*vectorDim]
+	}
 	flush, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{CollectionNames: []string{collection}})
 	s.Require().NoError(merr.CheckRPCCall(flush, err))
 	segmentIDs := flush.GetFlushCollSegIDs()[collection].GetData()
@@ -135,7 +141,18 @@ func (s *ParameterOwnershipSuite) exerciseIndex(algorithm, configName string, ex
 	s.assertPersistedParams(ctx, collection, description.GetCollectionID(), params)
 	s.assertIndexArtifacts(ctx, collection, description.GetCollectionID(), segmentIDs, algorithm)
 
+	if configName == "defaults" {
+		// A load-only setting cannot rewrite the representation of an existing
+		// artifact or make the load planner discard required original vectors.
+		misleadingDiskPQ := "8"
+		if algorithm == "AISAQ" {
+			misleadingDiskPQ = "0"
+		}
+		revert := s.overrideKnowhereConfig(ctx, "knowhere."+algorithm+".load.disk_pq_dims", misleadingDiskPQ)
+		defer revert()
+	}
 	s.loadAndSearch(ctx, collection, description.GetCollectionID(), algorithm)
+	s.assertReturnedVectors(ctx, collection, expectedVectors)
 	status, err = s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: collection})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	s.CheckCollectionCacheReleased(description.GetCollectionID())
@@ -144,6 +161,7 @@ func (s *ParameterOwnershipSuite) exerciseIndex(algorithm, configName string, ex
 	revert := s.overrideKnowhereConfig(ctx, cacheKey, "0.05")
 	defer revert()
 	s.loadAndSearch(ctx, collection, description.GetCollectionID(), algorithm)
+	s.assertReturnedVectors(ctx, collection, expectedVectors)
 	s.assertPersistedParams(ctx, collection, description.GetCollectionID(), params)
 	status, err = s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: collection})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
@@ -233,6 +251,34 @@ func (s *ParameterOwnershipSuite) assertSearch(ctx context.Context, collection s
 	resp, err := s.Cluster.MilvusClient.Search(ctx, req)
 	s.Require().NoError(merr.CheckRPCCall(resp, err), fmt.Sprint(searchParams))
 	s.Require().Equal([]int64{5}, resp.GetResults().GetTopks())
+}
+
+// Compressed disk indexes must report their raw-data capability accurately so
+// Milvus returns the original field values, including after release/load.
+func (s *ParameterOwnershipSuite) assertReturnedVectors(ctx context.Context, collection string, expected map[int64][]float32) {
+	req := integration.ConstructSearchRequest("", collection, "", integration.FloatVecField,
+		schemapb.DataType_FloatVector, []string{integration.FloatVecField}, metric.L2,
+		map[string]any{}, 1, vectorDim, 5, -1)
+	resp, err := s.Cluster.MilvusClient.Search(ctx, req)
+	s.Require().NoError(merr.CheckRPCCall(resp, err))
+	ids := resp.GetResults().GetIds().GetIntId().GetData()
+	s.Require().Len(ids, 5)
+	var returned *schemapb.FieldData
+	for _, field := range resp.GetResults().GetFieldsData() {
+		if field.GetFieldName() == integration.FloatVecField {
+			returned = field
+			break
+		}
+	}
+	s.Require().NotNil(returned)
+	s.Require().EqualValues(vectorDim, returned.GetVectors().GetDim())
+	actual := returned.GetVectors().GetFloatVector().GetData()
+	s.Require().Len(actual, len(ids)*vectorDim)
+	for row, id := range ids {
+		want, present := expected[id]
+		s.Require().True(present, "unexpected result primary key %d", id)
+		s.Equal(want, actual[row*vectorDim:(row+1)*vectorDim], "original vector for primary key %d", id)
+	}
 }
 
 // Generic MiniCluster config helpers normalize names to environment spellings.

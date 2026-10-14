@@ -66,3 +66,26 @@ func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[
 	}
 	return nil
 }
+
+// GetRuntimeLoadParams returns only additions for this load operation. Persisted
+// index choices remain separate so static artifact capabilities cannot observe
+// deployment load defaults. Presence, including empty/zero/false, wins.
+func GetRuntimeLoadParams(params *paramtable.ComponentParam, indexParams map[string]string) (map[string]string, error) {
+	effective := make(map[string]string, len(indexParams))
+	for key, value := range indexParams {
+		effective[key] = value
+	}
+	if indexParams[common.IndexTypeKey] == "BITMAP" {
+		SetBitmapIndexLoadParams(params, effective)
+	}
+	if err := AppendPrepareLoadParams(params, effective); err != nil {
+		return nil, err
+	}
+	additions := make(map[string]string)
+	for key, value := range effective {
+		if _, explicit := indexParams[key]; !explicit {
+			additions[key] = value
+		}
+	}
+	return additions, nil
+}

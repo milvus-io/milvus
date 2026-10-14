@@ -112,6 +112,16 @@ remains an index choice and takes precedence, just like an API index setting.
 Test this through the real Proxy/metadata/load path. No automatic mutation of an
 already loaded index or new online AlterIndex API is implied.
 
+Keep the original index parameter map separate from runtime load additions in
+the existing in-process Go/segcore load payloads. QueryCoord metadata stays
+unchanged. Full load, Reopen, and admission estimation prepare these payloads
+through the same generic helper. The native loader merges missing keys for
+execution, while static raw-data capability uses the original index parameters.
+Otherwise, a load-only setting could misdescribe an existing artifact and make
+the planner discard its required field data before the artifact is opened. This
+separation contains no algorithm parameter list and does not persist a new
+default snapshot.
+
 The coverage target is the useful behavior, not the old configuration spelling
 or helper implementation. Obsolete thread-ratio translations can be removed;
 live concurrency controls use existing Knowhere controls and pools. Per-request
@@ -144,6 +154,16 @@ Changes:
   iterators without Milvus-side overrides.
 - Verify that the existing sparse validation rejects invalid algorithms through
   ConfigCheck. Add missing coverage, not another whitelist implementation.
+- Keep capabilities consistent with the actual disk representation. A disk-PQ
+  index does not contain original vectors: static capability uses effective build
+  settings, while loaded capability uses artifact metadata. Direct raw-vector
+  retrieval and exact-distance APIs reject compressed artifacts. Milvus uses its
+  existing field-data path to return original vectors. Reject disk PQ with native
+  DiskANN embedding-list exact reranking during build validation; uncompressed
+  array indexes remain supported.
+- Use disk-PQ distance evaluation in both graph search and filtered brute-force
+  refinement. Neither cached nor uncached candidates may be interpreted as raw
+  vector values when the artifact stores PQ codes.
 
 Primary files: `src/index/diskann/diskann_config.h`, `aisaq_config.h`, disk index
 implementations, `include/knowhere/config.h`, and existing config/index tests.
@@ -161,6 +181,10 @@ Acceptance:
 - Float32, Float16, and BFloat16 size calculations are tested. Exercise vector
   arrays where supported, with unsupported combinations rejected explicitly.
 - Static validation works without a runtime memory/CPU context.
+- Default compressed AISAQ and explicit compressed DiskANN report no raw vectors;
+  absolute `disk_pq_dims=0` retains exact retrieval. Load-time parameters cannot
+  override the representation recorded in an existing artifact. Filtered search
+  checks numerical distances through both cached and uncached refinement paths.
 
 ## PR 2: Milvus removes algorithm-specific parameter handling
 
@@ -182,6 +206,10 @@ Changes:
   file/data/resource plumbing.
 - Ensure full load and Reopen share the same generic preparation path, without
   a duplicate enrichment pass or a disk-index-only prerequisite.
+- Preserve index metadata separately from runtime load additions in the internal
+  load payloads, including standalone admission estimates. Derive artifact
+  capabilities from metadata and execution resource estimates from effective
+  load settings.
 - Delete the duplicate sparse algorithm whitelist and other directly affected,
   redundant algorithm parameter checks. Keep schema and function semantics.
 - Keep explicit parameter maps intact across Proxy -> metadata -> build task
@@ -204,6 +232,9 @@ Acceptance:
   and smoke-test a non-disk index to catch generic pipeline regressions.
 - Review all production writers of the affected keys, including blanket map
   merges, and trace each setting from request/default source to consumer.
+- Verify returned vector fields against the original inserted values before and
+  after release/load, including default compressed AISAQ. A successful search or
+  capability boolean alone does not verify the field-data fallback.
 - Run affected Go tests with `-tags dynamic,test -gcflags="all=-N -l" -count=1`,
   relevant C++ tests, and integration coverage. Apply repository-wide error
   contract checks if error projection or codes are changed.

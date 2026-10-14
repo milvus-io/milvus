@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -112,7 +113,8 @@ func TestSegmentLoaderFullLoadParameterOwnership(t *testing.T) {
 					defer params.Remove(cacheKey)
 					defer params.Remove(bfsKey)
 
-					var captured *querypb.SegmentLoadInfo
+					var captured *segcorepb.SegmentLoadInfo
+					var capturedMetadata *querypb.SegmentLoadInfo
 					csegment := mock_segcore.NewMockCSegment(t)
 					csegment.EXPECT().RawPointer().Return(nil)
 					csegment.EXPECT().MemSize().Return(int64(0)).Maybe()
@@ -120,7 +122,19 @@ func TestSegmentLoaderFullLoadParameterOwnership(t *testing.T) {
 					csegment.EXPECT().Load(mock.Anything).Return(nil).Once()
 					createPatch := mockey.Mock(segcore.CreateCSegment).
 						To(func(req *segcore.CreateCSegmentRequest) (segcore.CSegment, error) {
-							captured = proto.Clone(req.LoadInfo).(*querypb.SegmentLoadInfo)
+							capturedMetadata = proto.Clone(req.LoadInfo).(*querypb.SegmentLoadInfo)
+							converted, err := segcore.ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+							if err != nil {
+								return nil, err
+							}
+							payload, err := proto.Marshal(converted)
+							if err != nil {
+								return nil, err
+							}
+							captured = &segcorepb.SegmentLoadInfo{}
+							if err := proto.Unmarshal(payload, captured); err != nil {
+								return nil, err
+							}
 							return csegment, nil
 						}).Build()
 					defer createPatch.UnPatch()
@@ -133,7 +147,17 @@ func TestSegmentLoaderFullLoadParameterOwnership(t *testing.T) {
 					defer manager.Segment.Remove(ctx, segmentID, querypb.DataScope_All)
 					require.NotNil(t, captured)
 					require.Len(t, captured.GetIndexInfos(), 1)
-					actual := funcutil.KeyValuePair2Map(captured.GetIndexInfos()[0].GetIndexParams())
+					original := funcutil.KeyValuePair2Map(metadata.GetIndexInfos()[0].GetIndexParams())
+					require.Equal(t, original, funcutil.KeyValuePair2Map(capturedMetadata.GetIndexInfos()[0].GetIndexParams()))
+					require.Equal(t, original, funcutil.KeyValuePair2Map(captured.GetIndexInfos()[0].GetIndexParams()))
+					loadParams := captured.GetIndexInfos()[0].GetLoadParams()
+					actual := make(map[string]string)
+					for key, value := range loadParams {
+						actual[key] = value
+					}
+					for key, value := range original {
+						actual[key] = value
+					}
 					wantRatio, wantBfs := ratio, "true"
 					if explicit {
 						wantRatio, wantBfs = "0", "false"
@@ -143,8 +167,10 @@ func TestSegmentLoaderFullLoadParameterOwnership(t *testing.T) {
 					require.Equal(t, wantBfs, actual["use_bfs_cache"])
 					require.NotContains(t, actual, "num_load_thread")
 					require.NotContains(t, actual, "search_cache_budget_gb")
-					original := funcutil.KeyValuePair2Map(metadata.GetIndexInfos()[0].GetIndexParams())
-					if !explicit {
+					if explicit {
+						require.NotContains(t, loadParams, "search_cache_budget_gb_ratio")
+						require.NotContains(t, loadParams, "use_bfs_cache")
+					} else {
 						require.NotContains(t, original, "search_cache_budget_gb_ratio")
 						require.NotContains(t, original, "use_bfs_cache")
 					}

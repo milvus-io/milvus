@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -265,10 +264,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	for _, info := range infos {
 		loadInfo := info
-
-		if err := prepareIndexLoadParams(loadInfo.GetIndexInfos()); err != nil {
-			return nil, err
-		}
 
 		segment, err := NewSegment(
 			ctx,
@@ -1978,30 +1973,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		MmapFieldCount:     estimate.MmapFieldCount,
 		FieldGpuMemorySize: estimate.FieldGPUMemoryBytes,
 	}, nil
-}
-
-// prepareIndexLoadParams applies QueryNode-local deployment load defaults to a
-// fresh metadata request. Full load and Reopen share this preparation; none of
-// these defaults is persisted as an explicit index choice.
-func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
-	for _, indexInfo := range indexInfos {
-		if indexInfo == nil {
-			continue
-		}
-		indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
-
-		// set whether enable offset cache for bitmap index
-		if indexParams["index_type"] == indexparamcheck.IndexBitmap {
-			indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
-		}
-
-		if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
-			return err
-		}
-
-		indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
-	}
-	return nil
 }
 
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,

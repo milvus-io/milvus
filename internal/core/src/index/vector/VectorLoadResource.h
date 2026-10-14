@@ -31,13 +31,15 @@ bool
 VectorUsesDiskLoad(const IndexType& index_type, IndexVersion index_version);
 
 LoadResourceRequest
-VecIndexLoadResource(DataType field_type,
-                     DataType element_type,
-                     IndexVersion index_version,
-                     uint64_t index_size_in_bytes,
-                     const std::map<std::string, std::string>& index_params,
-                     bool mmap_enable,
-                     int64_t num_rows,
-                     int64_t dim);
+VecIndexLoadResource(
+    DataType field_type,
+    DataType element_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim,
+    const std::map<std::string, std::string>* metadata_index_params = nullptr);
 
 }  // namespace milvus::index

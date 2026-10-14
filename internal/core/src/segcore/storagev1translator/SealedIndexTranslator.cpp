@@ -247,15 +247,16 @@ SealedIndexTranslator::SealedIndexTranslator(
         load_resource_request_ = resources.request;
         meta_.loading_overhead_config = std::move(resources.overhead);
     } else {
-        load_resource_request_ =
-            index::IndexLoadResource(index_load_info_.field_type,
-                                     index_load_info_.element_type,
-                                     index_load_info_.index_engine_version,
-                                     index_load_info_.index_size,
-                                     index_load_info_.index_params,
-                                     index_load_info_.enable_mmap,
-                                     index_load_info_.num_rows,
-                                     index_load_info_.dim);
+        load_resource_request_ = index::IndexLoadResource(
+            index_load_info_.field_type,
+            index_load_info_.element_type,
+            index_load_info_.index_engine_version,
+            index_load_info_.index_size,
+            index_load_info_.index_params,
+            index_load_info_.enable_mmap,
+            index_load_info_.num_rows,
+            index_load_info_.dim,
+            &index_load_info_.GetMetadataIndexParams());
     }
     if (!packed_v3 && IsVectorDataType(index_load_info_.field_type) &&
         *file_manager_context_.use_async_load) {
