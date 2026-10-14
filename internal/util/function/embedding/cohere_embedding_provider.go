@@ -140,12 +140,15 @@ func (provider *CohereEmbeddingProvider) CallEmbedding(ctx context.Context, text
 	inputType := provider.getInputType(mode)
 	embRet := models.NewEmbdResult(numRows, provider.embdType)
 	for i := 0; i < numRows; i += provider.maxBatch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
 
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], inputType, provider.outputType, provider.truncate, int(provider.embedDimParam), provider.timeoutMs)
+		resp, err := provider.client.Embedding(ctx, provider.url, provider.modelName, texts[i:end], inputType, provider.outputType, provider.truncate, int(provider.embedDimParam), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
