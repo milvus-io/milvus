@@ -1765,3 +1765,24 @@ func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
 	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "2147483648")
 	assert.Equal(t, 256, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
 }
+
+func TestStorageRuntimeThreadPoolsRequireRestart(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	for _, item := range []*ParamItem{
+		&params.CommonCfg.ArrowCPUThreadPoolCoefficient,
+		&params.CommonCfg.ArrowCPUThreadPoolMaxCapacity,
+		&params.CommonCfg.ArrowIOThreadPoolCoefficient,
+		&params.CommonCfg.ArrowIOThreadPoolMaxCapacity,
+	} {
+		t.Run(item.Key, func(t *testing.T) {
+			initial := item.GetValue()
+			params.baseTable.mgr.OnEvent(&config.Event{
+				EventType: config.UpdateType,
+				Key:       item.Key,
+				Value:     "7",
+			})
+			assert.Equal(t, initial, item.GetValue())
+		})
+	}
+}
