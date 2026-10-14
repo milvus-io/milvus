@@ -81,7 +81,7 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 	}
 	if importutilv2.IsL0Import(in.GetOptions()) {
 		// L0 delete logs contain no full rows to check; fail before creating a runnable job.
-		return nil, merr.WrapErrPrivilegeNotPermitted("import operation denied by RLS check expression for L0 import")
+		return nil, merr.WrapErrPrivilegeNotPermitted("import operation denied by RLS: L0 import requires an authorized skip_rls=true; skip_rls is not allowed when rls.mode is Force")
 	}
 	if s.mixCoord == nil {
 		return nil, merr.WrapErrServiceUnavailable("mixcoord is unavailable")

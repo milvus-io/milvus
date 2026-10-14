@@ -825,7 +825,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0RLSCheckFailureAndSki
 				s.Empty(savedJob.GetReason())
 			} else {
 				s.Equal(internalpb.ImportJobState_Failed, savedJob.GetState())
-				s.Contains(savedJob.GetReason(), "RLS check expression for L0 import")
+				s.Contains(savedJob.GetReason(), "L0 import requires an authorized skip_rls=true")
 				s.NotEqual(uint64(math.MaxUint64), savedJob.GetCleanupTs())
 			}
 		})

@@ -214,9 +214,9 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		}{
 			{name: "disabled ignores force", mode: "Force", principal: "alice", skip: true, disabled: true},
 			{name: "default auto skip"},
-			{name: "auto skip with principal fails check", mode: "AutoSkip", principal: "alice", denial: "RLS check expression for L0 import"},
-			{name: "explicit skip mode without skip fails check", mode: "ExplicitSkip", principal: "alice", denial: "RLS check expression for L0 import"},
-			{name: "force fails check", mode: "Force", principal: "alice", denial: "RLS check expression for L0 import"},
+			{name: "auto skip with principal fails check", mode: "AutoSkip", principal: "alice", denial: "L0 import requires an authorized skip_rls=true"},
+			{name: "explicit skip mode without skip fails check", mode: "ExplicitSkip", principal: "alice", denial: "L0 import requires an authorized skip_rls=true"},
+			{name: "force fails check", mode: "Force", principal: "alice", denial: "L0 import requires an authorized skip_rls=true; skip_rls is not allowed when rls.mode is Force"},
 			{name: "auto mode authorized skip", mode: "AutoSkip", principal: "alice", skip: true},
 			{name: "explicit authorized skip without principal", mode: "ExplicitSkip", skip: true},
 			{name: "force rejects authorized skip", mode: "Force", principal: "alice", skip: true, denial: "skip_rls is not allowed"},
