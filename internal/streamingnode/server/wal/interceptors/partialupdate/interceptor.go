@@ -19,6 +19,7 @@ const interceptorName = "partialupdate"
 var _ interceptors.InterceptorBuilder = (*interceptorBuilder)(nil)
 
 type interceptorBuilder struct {
+	enableCAS          bool
 	versionIndexBudget *versionByteBudget
 }
 
@@ -35,6 +36,7 @@ func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 	missed := metrics.StreamingNodePartialUpdateVersionIndexMissedWrites.With(labels)
 	limit.Set(float64(maxBytes))
 	return &interceptorBuilder{
+		enableCAS:          paramtable.Get().StreamingCfg.PartialUpdateEnableCAS.GetAsBool(),
 		versionIndexBudget: newVersionByteBudgetWithMetrics(maxBytes, used, missed),
 	}
 }
@@ -47,12 +49,14 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	}
 	pkDescriptorGetter, _ := param.ShardManager.(primaryKeyDescriptorGetter)
 	return &appendInterceptor{
+		enableCAS:          b.enableCAS,
 		state:              state,
 		pkDescriptorGetter: pkDescriptorGetter,
 	}
 }
 
 type appendInterceptor struct {
+	enableCAS          bool
 	state              *partialUpdateState
 	pkDescriptorGetter primaryKeyDescriptorGetter
 }
@@ -66,6 +70,9 @@ func (i *appendInterceptor) DoAppend(
 	msg message.MutableMessage,
 	appendOp interceptors.Append,
 ) (message.MessageID, error) {
+	if !i.enableCAS {
+		return appendOp(ctx, msg)
+	}
 	switch msg.MessageType() {
 	case message.MessageTypeCommitTxn:
 		return i.appendCommit(ctx, msg, appendOp)
