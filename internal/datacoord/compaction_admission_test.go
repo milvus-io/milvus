@@ -491,3 +491,29 @@ func TestAdmissionTokensSharedBetweenProducers(t *testing.T) {
 	admitted, _ := a.admit(context.Background(), admissionSourceTrigger, legacy, -1)
 	assert.Len(t, admitted, 1)
 }
+
+// With an even budget and both producers backlogged, the second producer is
+// not left with a quarter of the budget: each takes half of the budget and
+// the whole refill is used every round.
+func TestAdmissionEvenBudgetFullyUsedWhenShared(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "4", "60", "200")
+	now := time.Unix(1000, 0)
+	a := newSingleCompactionAdmitter(func() time.Time { return now })
+
+	var legacy, policy []*singleCandidate
+	for i := int64(1); i <= 20; i++ {
+		legacy = append(legacy, admissionSegment(i, 1, 5, 0.5, singleReasonAccumulation))
+		policy = append(policy, admissionSegment(100+i, 2, 5, 0.5, singleReasonAccumulation))
+	}
+	// The first round is uncontested: nobody has a backlog yet.
+	a.admit(context.Background(), admissionSourceTrigger, legacy, -1)
+	a.admit(context.Background(), admissionSourcePolicy, policy, -1)
+	for round := 0; round < 3; round++ {
+		now = now.Add(60 * time.Second)
+		first, _ := a.admit(context.Background(), admissionSourceTrigger, legacy, -1)
+		second, _ := a.admit(context.Background(), admissionSourcePolicy, policy, -1)
+		assert.Len(t, first, 2, "round %d", round)
+		assert.Len(t, second, 2, "round %d", round)
+	}
+}

@@ -1080,10 +1080,12 @@ func (t *compactionTrigger) ShouldCompactExpiryWithTTLField(compactTime *compact
 	// the index. The jitter is applied in time instead: the expiration is
 	// pushed later by (multiplier-1) x the width of the neighboring quantile
 	// step, which spreads a same-aged cohort over the shape of its own TTL
-	// distribution.
-	if mult := singleCompactionThresholdMultiplier(segment.ID); mult > 1 {
+	// distribution. Quantile slots past the rows that carry a positive TTL hold
+	// the never-expire sentinel (math.MaxInt64, see calculateExpirQuantiles);
+	// they are not a real step, so the jitter never measures against them.
+	if mult := singleCompactionThresholdMultiplier(segment.ID); mult > 1 && expirationTime != math.MaxInt64 {
 		var step int64
-		if index+1 < len(percentiles) && percentiles[index+1] > expirationTime {
+		if index+1 < len(percentiles) && percentiles[index+1] != math.MaxInt64 && percentiles[index+1] > expirationTime {
 			step = percentiles[index+1] - expirationTime
 		} else if index > 0 && expirationTime > percentiles[index-1] {
 			step = expirationTime - percentiles[index-1]

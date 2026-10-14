@@ -59,8 +59,8 @@ import (
 // runs, in which case they go through admission themselves) and the single
 // compaction policy (L2 segments). Each keeps its own fairness cursors. Their
 // rounds run on the same interval and nearly in phase, so while the other
-// producer has a backlog a producer takes only half of the tokens, the odd
-// token going to the two in turn; otherwise whichever runs first would take
+// producer has a backlog a producer takes at most half of the budget, the
+// odd token going to the two in turn; otherwise whichever runs first would take
 // the whole refill every round.
 //
 // Both knobs are refreshable; jitter=0 and tokens=0 restore legacy behavior.
@@ -280,7 +280,7 @@ func (a *singleCompactionAdmitter) admit(ctx context.Context, producer string, c
 	}
 	a.lastRefill = now
 
-	tokens := a.tokenShare(producer, int(a.tokens), now)
+	tokens := a.tokenShare(producer, int(a.tokens), budget, now)
 	available := tokens
 	if capacity >= 0 && capacity < available {
 		available = capacity
@@ -322,10 +322,12 @@ func (a *singleCompactionAdmitter) admit(ctx context.Context, producer string, c
 }
 
 // tokenShare returns how many of the whole tokens a producer may use this
-// round. While another producer has a recent backlog, each gets half and the
-// odd token goes to the producers in turn, so the one whose round happens to
-// run first cannot take every refill.
-func (a *singleCompactionAdmitter) tokenShare(producer string, tokens int, now time.Time) int {
+// round. While another producer has a recent backlog, each may take half of
+// the budget (not of the current balance, so the second producer's round is
+// not left with a quarter and the rest discarded at the next refill), and the
+// odd token of an odd budget goes to the producers in turn, so the one whose
+// round happens to run first cannot take every refill.
+func (a *singleCompactionAdmitter) tokenShare(producer string, tokens int, budget float64, now time.Time) int {
 	stale := 2 * Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second)
 	contested := false
 	for other, at := range a.backloggedAt {
@@ -337,12 +339,13 @@ func (a *singleCompactionAdmitter) tokenShare(producer string, tokens int, now t
 	if !contested {
 		return tokens
 	}
-	share := tokens / 2
-	if tokens%2 == 1 && a.oddTokenTo != producer {
+	half := int(budget) / 2
+	share := half
+	if int(budget)%2 == 1 && a.oddTokenTo != producer && tokens > half {
 		share++
 		a.oddTokenTo = producer
 	}
-	return share
+	return min(share, tokens)
 }
 
 // refund returns the tokens of admitted candidates that were not submitted

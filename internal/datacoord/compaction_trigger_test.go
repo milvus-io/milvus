@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"sort"
 	satomic "sync/atomic"
 	"testing"
@@ -4089,6 +4090,25 @@ func Test_compactionTrigger_ShouldCompactExpiryWithTTLField_Jitter(t *testing.T)
 	// Twenty minutes past, both have.
 	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(20 * time.Minute))}
 	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(late)))
+
+	// Fewer rows with a positive TTL than quantile slots: the slots past them
+	// hold the never-expire sentinel. The jitter must not measure a step
+	// against it, or the expiration is pushed out of reach.
+	sentinel := func(id int64, quantiles ...int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, NumOfRows: 100, ExpirQuantiles: quantiles}}
+	}
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct,
+		sentinel(late, ts.UnixMicro(), math.MaxInt64, math.MaxInt64, math.MaxInt64, math.MaxInt64)))
+	// With a real lower neighbor the jitter falls back to the step below.
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.4")
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(time.Hour + 5*time.Minute))}
+	assert.False(t, trigger.ShouldCompactExpiryWithTTLField(ct,
+		sentinel(late, ts.UnixMicro(), ts.Add(time.Hour).UnixMicro(), math.MaxInt64, math.MaxInt64, math.MaxInt64)))
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(time.Hour + 20*time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct,
+		sentinel(late, ts.UnixMicro(), ts.Add(time.Hour).UnixMicro(), math.MaxInt64, math.MaxInt64, math.MaxInt64)))
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.2")
 
 	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
 	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(5 * time.Minute))}
