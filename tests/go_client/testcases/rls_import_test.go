@@ -21,6 +21,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -38,19 +40,34 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
-// The 2.6 suite has no shared object-storage helper; use the same CI environment variables.
+// The 2.6 suite has no shared object-storage helper; honor explicit settings and the Go SDK CI service names.
 func rlsImportStorage() (*miniogo.Client, string, error) {
+	address, bucket := "localhost:9000", "a-bucket"
+	milvusAddress := strings.TrimSpace(hp.GetAddr())
+	if !strings.Contains(milvusAddress, "://") {
+		milvusAddress = "//" + milvusAddress
+	}
+	if endpoint, err := url.Parse(milvusAddress); err == nil {
+		service, namespace, _ := strings.Cut(endpoint.Hostname(), ".")
+		if strings.HasPrefix(service, "gosdk-") && strings.HasSuffix(service, "-milvus") {
+			host := strings.TrimSuffix(service, "-milvus") + "-minio"
+			if namespace != "" {
+				host += "." + namespace
+			}
+			address, bucket = net.JoinHostPort(host, "9000"), "milvus-bucket"
+		}
+	}
 	setting := func(key, fallback string) string {
 		if value := os.Getenv(key); value != "" {
 			return value
 		}
 		return fallback
 	}
-	storage, err := miniogo.New(setting("MINIO_ADDRESS", "localhost:9000"), &miniogo.Options{
+	storage, err := miniogo.New(setting("MINIO_ADDRESS", address), &miniogo.Options{
 		Creds:  miniocreds.NewStaticV4(setting("MINIO_ACCESS_KEY", "minioadmin"), setting("MINIO_SECRET_KEY", "minioadmin"), ""),
 		Secure: false,
 	})
-	return storage, setting("MINIO_BUCKET", "a-bucket"), err
+	return storage, setting("MINIO_BUCKET", bucket), err
 }
 
 // CI enables proxy.rls.importEnforcementEnabled for the freshly deployed build.
