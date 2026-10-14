@@ -2340,21 +2340,13 @@ func (mt *MetaTable) resolveRLSCollection(ctx context.Context, dbName string, co
 	if err != nil {
 		return nil, err
 	}
-	enabled, err := common.IsRLSEnabled(collection.Properties...)
-	if err != nil {
+	if _, err := common.IsRLSEnabled(collection.Properties...); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
-	}
-	if !enabled {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"RLS is not enabled for collection %q; set %s=true when creating the collection",
-			collection.Name,
-			common.RLSEnabledKey,
-		)
 	}
 	return collection, nil
 }
 
-func (mt *MetaTable) reloadEnabledCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
+func (mt *MetaTable) reloadCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
 	policies, err := mt.catalog.ListRLSPolicies(ctx, collection.CollectionID)
 	if err != nil {
 		return merr.Wrapf(err, "failed to reload RLS policies for collection %d", collection.CollectionID)
@@ -2381,31 +2373,24 @@ func (mt *MetaTable) reloadEnabledCollectionRLSMetadata(ctx context.Context, col
 }
 
 func (mt *MetaTable) reloadCollectionsRLSMetadata(ctx context.Context, collections []*model.Collection) error {
-	enabledCollections := make([]*model.Collection, 0)
 	for _, collection := range collections {
 		if collection == nil {
 			continue
 		}
-		enabled, err := common.IsRLSEnabled(collection.Properties...)
-		if err != nil {
+		if _, err := common.IsRLSEnabled(collection.Properties...); err != nil {
 			return merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
 		}
-		if !enabled {
-			collection.RLSPolicies = nil
-			continue
-		}
-		enabledCollections = append(enabledCollections, collection)
 	}
 
-	if ctx == nil {
-		ctx = context.TODO()
-	}
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(rlsRecoveryConcurrency)
-	for _, collection := range enabledCollections {
-		collection := collection
+	// Policies are metadata even while enforcement is disabled.
+	for _, collection := range collections {
+		if collection == nil {
+			continue
+		}
 		group.Go(func() error {
-			return mt.reloadEnabledCollectionRLSMetadata(groupCtx, collection)
+			return mt.reloadCollectionRLSMetadata(groupCtx, collection)
 		})
 	}
 	return group.Wait()
@@ -2421,11 +2406,13 @@ func upsertCollectionRLSPolicy(collection *model.Collection, policy *model.RLSPo
 	collection.RLSPolicies[policy.PolicyName] = model.CloneRLSPolicy(policy)
 }
 
-func removeCollectionRLSPolicy(collection *model.Collection, policyName string) {
+func removeCollectionRLSPolicy(collection *model.Collection, policy *model.RLSPolicy) {
 	if collection == nil {
 		return
 	}
-	delete(collection.RLSPolicies, policyName)
+	if cached := collection.RLSPolicies[policy.PolicyName]; cached != nil && cached.PolicyID == policy.PolicyID {
+		delete(collection.RLSPolicies, policy.PolicyName)
+	}
 }
 
 func validateRLSCombinedExpressionLength(policies []*model.RLSPolicy) error {
@@ -2905,13 +2892,7 @@ func (mt *MetaTable) ApplyDropRLSPolicy(ctx context.Context, collectionID int64,
 	}
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	collection = mt.collID2Meta[collectionID]
-	if collection != nil {
-		current := collection.RLSPolicies[policyName]
-		if current != nil && current.PolicyID == policy.PolicyID {
-			removeCollectionRLSPolicy(collection, policyName)
-		}
-	}
+	removeCollectionRLSPolicy(mt.collID2Meta[collectionID], policy)
 	return nil
 }
 
@@ -2952,11 +2933,9 @@ func (mt *MetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kin
 	}
 	loadPrincipals := false
 	switch kind {
-	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL:
+	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL, rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES:
 		metadata.Policies = model.RLSPolicyMapToSlice(coll.RLSPolicies)
-		loadPrincipals = true
-	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES:
-		metadata.Policies = model.RLSPolicyMapToSlice(coll.RLSPolicies)
+		loadPrincipals = kind == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL
 	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS:
 		loadPrincipals = true
 	default:
@@ -2965,18 +2944,14 @@ func (mt *MetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kin
 	}
 	mt.ddLock.RUnlock()
 
-	if !loadPrincipals {
-		return metadata, nil
-	}
-
 	var principals []*model.RLSPrincipal
-	if principalName == "" {
+	if loadPrincipals && principalName == "" {
 		var err error
 		principals, err = mt.catalog.ListRLSPrincipals(ctx, collectionID)
 		if err != nil {
 			return nil, merr.Wrap(err, "failed to list RLS principal metadata")
 		}
-	} else {
+	} else if loadPrincipals {
 		// TODO: Add a bounded Coord-side principal cache for point reads;
 		// never restore startup full loading.
 		principal, err := mt.catalog.GetRLSPrincipal(ctx, collectionID, principalName)
@@ -3016,17 +2991,6 @@ func (mt *MetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kin
 	return metadata, nil
 }
 
-func cloneRLSTags(tags map[string]rlsutil.TagValue) map[string]rlsutil.TagValue {
-	if tags == nil {
-		return nil
-	}
-	cloned := make(map[string]rlsutil.TagValue, len(tags))
-	for key, value := range tags {
-		cloned[key] = value
-	}
-	return cloned
-}
-
 func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*model.RLSPrincipal, error) {
 	if req == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("set RLS principal tags request is nil")
@@ -3054,9 +3018,9 @@ func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsuti
 		return nil, merr.Wrap(err, "failed to get RLS principal")
 	}
 
-	mergedTags := cloneRLSTags(req.GetTags())
+	mergedTags := maps.Clone(req.GetTags())
 	if !isNew {
-		mergedTags = cloneRLSTags(existingPrincipal.Tags)
+		mergedTags = maps.Clone(existingPrincipal.Tags)
 		if mergedTags == nil {
 			mergedTags = make(map[string]rlsutil.TagValue, len(req.GetTags()))
 		}
@@ -3099,7 +3063,7 @@ func (mt *MetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRL
 		}
 		return nil, merr.Wrap(err, "failed to get RLS principal")
 	}
-	return cloneRLSTags(principal.Tags), nil
+	return maps.Clone(principal.Tags), nil
 }
 
 func (mt *MetaTable) ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error) {
@@ -3168,7 +3132,7 @@ func (mt *MetaTable) PrepareDeleteRLSPrincipalTags(ctx context.Context, req *rls
 		return principal, true, nil
 	}
 
-	tags := cloneRLSTags(principal.Tags)
+	tags := maps.Clone(principal.Tags)
 	for _, key := range tagKeys {
 		delete(tags, key)
 	}
