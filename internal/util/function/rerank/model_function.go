@@ -34,6 +34,7 @@ const (
 	providerParamName       string = "provider"
 	vllmProviderName        string = "vllm"
 	teiProviderName         string = "tei"
+	sglangProviderName      string = "sglang"
 	siliconflowProviderName string = "siliconflow"
 	cohereProviderName      string = "cohere"
 	voyageaiProviderName    string = "voyageai"
@@ -114,6 +115,8 @@ func NewModelProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelEx
 				return newVllmProvider(params, conf, credentials)
 			case teiProviderName:
 				return newTeiProvider(params, conf, credentials)
+			case sglangProviderName:
+				return newSGLangProvider(params, conf, credentials)
 			case siliconflowProviderName:
 				return newSiliconflowProvider(params, conf, credentials, extraInfo)
 			case cohereProviderName:

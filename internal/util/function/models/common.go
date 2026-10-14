@@ -327,6 +327,12 @@ func IsEnable(conf map[string]string) bool {
 type Response any
 
 func PostRequest[T Response](req any, url string, headers map[string]string, timeoutMs int64) (*T, error) {
+	return PostRequestWithContext[T](context.Background(), req, url, headers, timeoutMs)
+}
+
+// PostRequestWithContext sends a JSON request with both the caller's context
+// and the configured request timeout.
+func PostRequestWithContext[T Response](ctx context.Context, req any, url string, headers map[string]string, timeoutMs int64) (*T, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -336,7 +342,7 @@ func PostRequest[T Response](req any, url string, headers map[string]string, tim
 		timeoutMs = 30000
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
 	body, err := retrySend(ctx, data, http.MethodPost, url, headers, 3)
