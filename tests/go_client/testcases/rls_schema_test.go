@@ -854,7 +854,8 @@ func TestRLSSchemaPartialOperators(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx := hp.CreateContext(t, 10*time.Minute)
 			mc := hp.CreateDefaultMilvusClient(ctx, t).Client
-			tc := rlsSchemaCase{vector: "float32", structured: true}
+			// Scalar ARRAY operators do not require StructArray; its inheritance is covered by the schema matrix.
+			tc := rlsSchemaCase{vector: "float32"}
 			name := prepareRLSSchema(ctx, t, mc, tc)
 			all := map[any]rlsSchemaRow{}
 			for i, owner := range []string{"alice", "bob"} {
@@ -879,7 +880,7 @@ func TestRLSSchemaPartialOperators(t *testing.T) {
 			for _, test := range tests {
 				t.Run(test.name, func(t *testing.T) {
 					_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, rlsSchemaRow{"id": int64(1), test.name: test.seed})...).WithPartialUpdate(true).WithRLSPrincipal("alice"))
-					checkRLSStructArrayUpsertError(t, err)
+					require.NoError(t, err)
 					all[int64(1)][test.name] = test.seed
 					for _, op := range []string{"append", "remove", "path_replace"} {
 						t.Run(op, func(t *testing.T) {
@@ -917,7 +918,7 @@ func TestRLSSchemaPartialOperators(t *testing.T) {
 							}
 							require.ErrorContains(t, write([]int64{1, 2}), "RLS")
 							t.Run("rejected_mixed", func(t *testing.T) { checkRLSSchemaState(ctx, t, mc, name, tc, all, false) })
-							checkRLSStructArrayUpsertError(t, write([]int64{1}))
+							require.NoError(t, write([]int64{1}))
 							switch op {
 							case "append":
 								all[int64(1)][test.name] = test.appended
