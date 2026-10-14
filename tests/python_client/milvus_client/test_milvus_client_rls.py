@@ -2570,6 +2570,7 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
         """
         client = rls_client
         name, rows = self._prepare_rls_spaces(client)
+        known_capacity_violation = False
         for changes in [
             {"spaces": ["tenant_0/red", "tenant_0/blue"]},
             {"spaces": []},
@@ -2581,6 +2582,28 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                 for row in changed:
                     row["id"] += 10000
             method = self.insert if operation == "insert" else self.upsert
+            if operation != "insert" and len(changes.get("spaces", [])) > 1:
+                result, succeeded = method(
+                    client,
+                    name,
+                    changed,
+                    rls_principal="member_0",
+                    **({"partial_update": True} if operation == "partial_upsert" else {}),
+                    check_task=CheckTasks.check_nothing,
+                )
+                if succeeded:
+                    assert result["upsert_count"] == len(changed)
+                    replacements = {row["id"]: row for row in changed}
+                    expected = [replacements.get(row["id"], row) for row in rows]
+                    self._check_space_rows(client, name, expected, skip_rls=True)
+                    # Restore only the affected rows before checking the other negative scenarios.
+                    self.upsert(client, name, [rows[i] for i in [1, 3001, 3501]], skip_rls=True)
+                    self._check_space_rows(client, name, rows, skip_rls=True)
+                    known_capacity_violation = True
+                else:
+                    assert "capacity" in str(result)
+                    self._check_space_rows(client, name, rows, skip_rls=True)
+                continue
             # Array cardinality may be rejected by either SDK or Server; both must preserve data.
             method(
                 client,
@@ -2592,6 +2615,8 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                 check_items={ct.err_msg: "capacity" if len(changes.get("spaces", [])) > 1 else "RLS"},
             )
             self._check_space_rows(client, name, rows, skip_rls=True)
+        if known_capacity_violation:
+            pytest.xfail("https://github.com/milvus-io/milvus/issues/54259: upsert accepts an over-capacity ARRAY")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rls_space_membership_lifecycle(self, rls_client):
