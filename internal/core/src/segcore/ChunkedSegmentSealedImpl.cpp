@@ -3926,7 +3926,7 @@ ChunkedSegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: push delete info to delete_record
-    deleted_record_.LoadPush(pks, timestamps);
+    deleted_record_.LoadPush(std::move(pks), timestamps);
 }
 
 void
@@ -4401,7 +4401,7 @@ ChunkedSegmentSealedImpl::GetDataScanResources(FieldId field_id) const {
 int64_t
 ChunkedSegmentSealedImpl::get_deleted_count() const {
     std::shared_lock lck(mutex_);
-    return deleted_record_.size();
+    return deleted_record_.deleted_row_count();
 }
 
 void
@@ -5034,6 +5034,7 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
     }
 }
 
+// Reports a row's matches in input order; DeletedRecord relies on it.
 void
 ChunkedSegmentSealedImpl::search_batch_pks(
     const std::vector<PkType>& pks,
@@ -5517,6 +5518,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       id_(segment_id),
       col_index_meta_(index_meta),
       is_sorted_by_pk_(is_sorted_by_pk),
+      // Every branch reports a row's matches in input order; DeletedRecord
+      // relies on it.
       deleted_record_(
           nullptr,
           [this](const std::vector<PkType>& pks,
@@ -7669,7 +7672,7 @@ ChunkedSegmentSealedImpl::Delete(int64_t size,
         sort_pks[i] = pk;
     }
 
-    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
+    deleted_record_.StreamPush(std::move(sort_pks), sort_timestamps.data());
     return SegcoreError::success();
 }
 
