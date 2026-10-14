@@ -118,7 +118,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 
 	p.SparseIPIndexParams = ParamItem{
 		Key:          "autoIndex.params.sparse.ip.build",
-		Version:      "3.0.3",
+		Version:      "2.6.26",
 		FallbackKeys: []string{p.SparseIndexParams.Key},
 		Formatter:    getOptionalBuildParamFormatter(metric.IP, "autoIndex.params.sparse.ip.build"),
 		Export:       true,
@@ -127,7 +127,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 
 	p.SparseBM25IndexParams = ParamItem{
 		Key:          "autoIndex.params.sparse.bm25.build",
-		Version:      "3.0.3",
+		Version:      "2.6.26",
 		FallbackKeys: []string{p.SparseIndexParams.Key},
 		Formatter:    getOptionalBuildParamFormatter(metric.BM25, "autoIndex.params.sparse.bm25.build"),
 		Export:       true,
