@@ -32,8 +32,11 @@
 #include "segcore/Utils.h"
 #include "storage/Util.h"
 #include "storage/StatusToErrorCode.h"
+#include <atomic>
 
 namespace milvus::segcore::storagev1translator {
+
+static std::atomic<uint64_t> g_default_mmap_generation{0};
 
 DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     int64_t segment_id,
@@ -238,65 +241,20 @@ DefaultValueChunkTranslator::key() const {
 milvus::ChunkBuffer
 DefaultValueChunkTranslator::build_buffer_for_rows(
     int64_t num_rows, const std::string& suffix) const {
-    auto data_type = field_meta_.get_data_type();
-    std::shared_ptr<arrow::ArrayBuilder> builder;
-
-    if (data_type == milvus::DataType::VECTOR_ARRAY) {
-        AssertInfo(field_meta_.is_nullable(),
-                   "only nullable vector array fields can be "
-                   "dynamically added");
-        builder =
-            milvus::storage::CreateArrowBuilder(data_type,
-                                                field_meta_.get_element_type(),
-                                                field_meta_.get_dim(),
-                                                true);
-    } else if (IsVectorDataType(data_type)) {
-        AssertInfo(field_meta_.is_nullable(),
-                   "only nullable vector fields can be dynamically added");
-        builder = std::make_shared<arrow::BinaryBuilder>();
-    } else {
-        builder = milvus::storage::CreateArrowBuilder(data_type);
-    }
-
-    arrow::Status ast;
-    if (field_meta_.default_value().has_value()) {
-        ast = builder->Reserve(num_rows);
-        if (!ast.ok()) {
-            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
-                      "reserve arrow builder failed: {}",
-                      ast.ToString());
-        }
-        auto default_scalar =
-            storage::CreateArrowScalarFromDefaultValue(field_meta_);
-        ast = builder->AppendScalar(*default_scalar, num_rows);
-    } else {
-        ast = builder->AppendNulls(num_rows);
-    }
-    if (!ast.ok()) {
-        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
-                  "append null/default values to arrow builder failed: {}",
-                  ast.ToString());
-    }
-
-    arrow::ArrayVector array_vec;
-    auto finish_result = builder->Finish();
-    if (!finish_result.ok()) {
-        // ValueOrDie would abort the process; a Finish failure (allocation)
-        // must surface as a classified, retriable error instead.
-        ThrowInfo(
-            milvus::storage::ArrowStatusToErrorCode(finish_result.status()),
-            "finish arrow builder for default values failed: {}",
-            finish_result.status().ToString());
-    }
-    array_vec.emplace_back(finish_result.ValueUnsafe());
+    arrow::ArrayVector array_vec{
+        storage::CreateDefaultArrowArray(field_meta_, num_rows)};
 
     if (!use_mmap_ || mmap_dir_path_.empty()) {
         return milvus::create_chunk_buffer(
             field_meta_, array_vec, mmap_populate_);
     } else {
-        auto filepath =
-            std::filesystem::path(mmap_dir_path_) /
-            fmt::format("seg_{}_f_{}_def{}", segment_id_, field_id_, suffix);
+        auto filepath = std::filesystem::path(mmap_dir_path_) /
+                        fmt::format("seg_{}_f_{}_def{}_{}",
+                                    segment_id_,
+                                    field_id_,
+                                    suffix,
+                                    g_default_mmap_generation.fetch_add(
+                                        1, std::memory_order_relaxed));
         std::filesystem::create_directories(filepath.parent_path());
         return milvus::create_chunk_buffer(field_meta_,
                                            array_vec,

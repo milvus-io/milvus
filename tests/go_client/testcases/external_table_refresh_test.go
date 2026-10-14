@@ -3,11 +3,14 @@ package testcases
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -207,8 +210,9 @@ func generateParquetBytesWithCompression(schema string, numRows, startID int64, 
 	}
 	defer os.Remove(tmpPath)
 
+	_, source, _, _ := runtime.Caller(0)
 	args := []string{
-		"generate_parquet_data.py",
+		filepath.Join(filepath.Dir(source), "generate_parquet_data.py"),
 		"--schema", schema,
 		tmpPath,
 		strconv.FormatInt(numRows, 10),
@@ -2090,6 +2094,11 @@ func generateLanceDataOnMinIO(t *testing.T, s3URI, schema string, numRows, start
 // to the process command line.
 func runPythonScript(t *testing.T, pythonBin, scriptPath string, extraEnv map[string]string, args ...string) (string, error) {
 	t.Helper()
+	if !filepath.IsAbs(scriptPath) {
+		_, source, _, ok := runtime.Caller(0)
+		require.True(t, ok)
+		scriptPath = filepath.Join(filepath.Dir(source), scriptPath)
+	}
 	cmd := exec.Command(pythonBin, append([]string{scriptPath}, args...)...) // #nosec G204
 	cmd.Env = append(os.Environ(), mapToEnvSlice(extraEnv)...)
 	output, err := cmd.CombinedOutput()
@@ -3752,7 +3761,7 @@ func TestRefreshExternalCollectionOverridePersistsNewSource(t *testing.T) {
 		"override refresh must persist new external_source; pre-fix #49335 left it stale")
 }
 
-func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClient, jobID int64, expect entity.RefreshExternalCollectionState) {
+func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClient, jobID int64, expect entity.RefreshExternalCollectionState) *entity.RefreshExternalCollectionJobInfo {
 	t.Helper()
 	deadline := time.After(60 * time.Second)
 	ticker := time.NewTicker(2 * time.Second)
@@ -3770,7 +3779,7 @@ func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClien
 				progress.State == entity.RefreshStateFailed {
 				require.Equal(t, expect, progress.State,
 					"refresh terminal state mismatch (reason=%s)", progress.Reason)
-				return
+				return progress
 			}
 		}
 	}
@@ -3910,6 +3919,234 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 
 	t.Logf("milvus-table snapshot e2e passed: sourceCollectionID=%d snapshot=%s externalSource=%s",
 		sourceDesc.ID, snapshotName, externalSource)
+}
+
+// TestExternalTableRefreshAcrossSourceSchemaEvolution covers historical segments
+// without the added physical column alongside a new segment that stores it.
+// The source requires common.storage.useLoonFFI=true before its first write.
+func TestExternalTableRefreshAcrossSourceSchemaEvolution(t *testing.T) {
+	ctx := hp.CreateContext(t, 8*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	cfg := getMinIOConfig()
+	objectStore, err := miniogo.New(cfg.address, &miniogo.Options{
+		Creds: miniocreds.NewStaticV4(cfg.accessKey, cfg.secretKey, ""),
+	})
+	require.NoError(t, err)
+	const oldRows = 2048
+	const newID int64 = 10000
+	sourceName := common.GenRandomString("mt_evolve_src", 6)
+	sourceSchema := entity.NewSchema().WithName(sourceName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithMaxLength(100)).
+		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim)).
+		WithField(entity.NewField().WithName("active").WithDataType(entity.FieldTypeBool))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema).WithShardNum(1)))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(sourceName)))
+	})
+
+	ids, values := make([]int64, oldRows), make([]int64, oldRows)
+	tags, active := make([]string, oldRows), make([]bool, oldRows)
+	vectors := make([][]float32, oldRows)
+	for i := range ids {
+		ids[i], values[i], tags[i], active[i] = int64(i), int64(i), "old", true
+		vectors[i] = []float32{float32(i), 1, 2, 3}
+	}
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", ids), column.NewColumnInt64("value", values),
+		column.NewColumnVarChar("tag", tags), column.NewColumnBool("active", active),
+		column.NewColumnFloatVector("vector", testVecDim, vectors)))
+	require.NoError(t, err)
+	flush := func() {
+		t.Helper()
+		task, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+		require.NoError(t, err)
+		require.NoError(t, task.Await(ctx))
+	}
+	createSnapshot := func(prefix string) string {
+		t.Helper()
+		name := common.GenRandomString(prefix, 6)
+		require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(name, sourceName)))
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			require.NoError(t, mc.DropSnapshot(cleanupCtx, client.NewDropSnapshotOption(name, sourceName)))
+		})
+		info, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(name, sourceName))
+		require.NoError(t, err)
+		require.NotEmpty(t, info.GetS3Location())
+		object, err := objectStore.GetObject(ctx, cfg.bucket, info.GetS3Location(), miniogo.GetObjectOptions{})
+		require.NoError(t, err)
+		defer object.Close()
+		var metadata struct {
+			Manifests []json.RawMessage `json:"storagev2_manifest_list"`
+		}
+		require.NoError(t, json.NewDecoder(object).Decode(&metadata))
+		require.NotEmpty(t, metadata.Manifests,
+			"source must use StorageV3: enable common.storage.useLoonFFI=true before writing")
+		t.Logf("snapshot=%s metadata=%s", name, info.GetS3Location())
+		return info.GetS3Location()
+	}
+	flush()
+	createSnapshot("mt_before") // Pin the pre-evolution historical segment.
+	oldSegments, err := mc.GetPersistentSegmentInfo(ctx, client.NewGetPersistentSegmentInfoOption(sourceName))
+	require.NoError(t, err)
+	require.NotEmpty(t, oldSegments)
+
+	revision := entity.NewField().WithName("revision").WithDataType(entity.FieldTypeInt64).WithNullable(true)
+	require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(sourceName, revision)))
+	newVector := []float32{float32(newID), 1, 2, 3}
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", []int64{newID}), column.NewColumnInt64("value", []int64{999}),
+		column.NewColumnVarChar("tag", []string{"new"}), column.NewColumnBool("active", []bool{true}),
+		column.NewColumnFloatVector("vector", testVecDim, [][]float32{newVector}),
+		column.NewColumnInt64("revision", []int64{42})))
+	require.NoError(t, err)
+	// Match the existing snapshot fixtures' default per-collection flush limit.
+	time.Sleep(10 * time.Second)
+	flush()
+	metadata := createSnapshot("mt_after")
+	segments, err := mc.GetPersistentSegmentInfo(ctx, client.NewGetPersistentSegmentInfoOption(sourceName))
+	require.NoError(t, err)
+	require.Greater(t, len(segments), len(oldSegments), "fixture must retain distinct old and new segments")
+	segmentRows := make(map[int64]int64)
+	for _, segment := range segments {
+		segmentRows[segment.ID] = segment.NumRows
+	}
+	for _, old := range oldSegments {
+		require.Contains(t, segmentRows, old.ID, "historical segment must remain in the fixture")
+		require.Equal(t, old.NumRows, segmentRows[old.ID])
+	}
+	t.Logf("source=%s segmentRows=%v", sourceName, segmentRows)
+
+	externalName := common.GenRandomString("mt_evolve_ext", 6)
+	externalSchema := entity.NewSchema().WithName(externalName).
+		WithExternalSource(extTestURI(cfg, metadata)).WithExternalSpec(extTestSpec(cfg, "milvus-table"))
+	for _, field := range append(sourceSchema.Fields, revision) {
+		externalSchema.WithField(entity.NewField().ReadProto(field.ProtoMessage()).WithExternalField(field.Name))
+	}
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(externalName, externalSchema)))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(externalName)))
+	})
+	refresh := func() {
+		t.Helper()
+		job, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName))
+		require.NoError(t, err)
+		waitRefreshTerminal(t, ctx, mc, job.JobID, entity.RefreshStateCompleted)
+		progress, err := mc.GetRefreshExternalCollectionProgress(ctx, client.NewGetRefreshExternalCollectionProgressOption(job.JobID))
+		require.NoError(t, err)
+		require.EqualValues(t, 100, progress.Progress)
+	}
+	refresh()
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(externalName, "vector", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, idxTask.Await(ctx))
+	load := func() {
+		t.Helper()
+		task, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName))
+		require.NoError(t, err)
+		require.NoError(t, task.Await(ctx))
+	}
+	verify := func(collectionName string) {
+		t.Helper()
+		res, err := mc.Query(ctx, client.NewQueryOption(collectionName).WithFilter("id >= 0").
+			WithOutputFields("id", "revision").WithLimit(oldRows+1).WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		idCol, revisions := res.GetColumn("id"), res.GetColumn("revision")
+		require.NotNil(t, idCol)
+		require.NotNil(t, revisions)
+		require.Equal(t, oldRows+1, idCol.Len())
+		seen := make(map[int64]bool)
+		for i := 0; i < idCol.Len(); i++ {
+			id, err := idCol.GetAsInt64(i)
+			require.NoError(t, err)
+			require.False(t, seen[id], "duplicate row %d", id)
+			seen[id] = true
+			isNull, err := revisions.IsNull(i)
+			require.NoError(t, err)
+			if id == newID {
+				require.False(t, isNull)
+				value, err := revisions.GetAsInt64(i)
+				require.NoError(t, err)
+				require.EqualValues(t, 42, value)
+			} else {
+				require.GreaterOrEqual(t, id, int64(0))
+				require.Less(t, id, int64(oldRows))
+				require.True(t, isNull, "historical row %d must be NULL", id)
+			}
+		}
+		require.True(t, seen[newID])
+		for filter, expected := range map[string]int64{"revision is null": oldRows, "revision == 42": 1} {
+			res, err := mc.Query(ctx, client.NewQueryOption(collectionName).WithFilter(filter).
+				WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			count, err := res.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+			require.NoError(t, err)
+			require.Equal(t, expected, count, filter)
+		}
+		for _, target := range []struct {
+			id     int64
+			vector []float32
+		}{{0, vectors[0]}, {newID, newVector}} {
+			res, err := mc.Search(ctx, client.NewSearchOption(collectionName, 1, []entity.Vector{entity.FloatVector(target.vector)}).
+				WithOutputFields("id", "revision").WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Len(t, res, 1)
+			require.Equal(t, 1, res[0].ResultCount)
+			id, err := res[0].GetColumn("id").GetAsInt64(0)
+			require.NoError(t, err)
+			require.Equal(t, target.id, id)
+			isNull, err := res[0].GetColumn("revision").IsNull(0)
+			require.NoError(t, err)
+			require.Equal(t, target.id != newID, isNull)
+			if !isNull {
+				value, err := res[0].GetColumn("revision").GetAsInt64(0)
+				require.NoError(t, err)
+				require.EqualValues(t, 42, value)
+			}
+		}
+	}
+	load()
+	verify(externalName)
+	require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(externalName)))
+	load()
+	verify(externalName)
+	refresh()
+	verify(externalName)
+	// The historical segment exceeds the index threshold and has no revision
+	// column. Both the internal source and the external snapshot must support
+	// indexing it and reverse-reading NULL values from the loaded scalar index.
+	for _, collectionName := range []string{sourceName, externalName} {
+		if collectionName == sourceName {
+			task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, "vector", index.NewFlatIndex(entity.L2)))
+			require.NoError(t, err)
+			require.NoError(t, task.Await(ctx))
+		}
+		task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, "revision", index.NewBitmapIndex()))
+		require.NoError(t, err)
+		require.NoError(t, task.Await(ctx))
+		desc, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(collectionName, "revision"))
+		require.NoError(t, err)
+		require.EqualValues(t, oldRows+1, desc.IndexedRows)
+		require.Zero(t, desc.PendingIndexRows)
+		if collectionName == externalName {
+			reload, err := mc.RefreshLoad(ctx, client.NewRefreshLoadOption(collectionName))
+			require.NoError(t, err)
+			require.NoError(t, reload.Await(ctx))
+			verify(collectionName)
+			require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(collectionName)))
+		}
+		loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collectionName))
+		require.NoError(t, err)
+		require.NoError(t, loadTask.Await(ctx))
+		verify(collectionName)
+	}
 }
 
 func TestRefreshExternalCollectionMilvusTableSnapshotVirtualPK(t *testing.T) {
@@ -4169,4 +4406,300 @@ func TestRefreshExternalCollectionFiltersNonParquetStrays(t *testing.T) {
 	require.Equal(t, expected, got[0],
 		"row count must equal sum of parquet shards (%d); strays must be filtered, no shard may be dropped",
 		expected)
+}
+
+// Every external format reads missing ordinary fields through runtime defaults.
+// Adding a mapping is visible immediately; physical values become visible on refresh.
+func TestExternalFormatsSchemaEvolutionDefaults(t *testing.T) {
+	for _, format := range []string{"parquet", "lance-table", "vortex", "iceberg-table"} {
+		t.Run(format, func(t *testing.T) {
+			ctx := hp.CreateContext(t, 5*time.Minute)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
+			cfg := getMinIOConfig()
+			objectStore, err := newMinIOClient(cfg)
+			require.NoError(t, err)
+			name := common.GenRandomString("ext_defaults", 6)
+			prefix := "external-e2e-test/" + name
+			source, spec := extTestURI(cfg, prefix), extTestSpec(cfg, format)
+			valueColumn := "value"
+			// Each source fragment exceeds the scalar-index build threshold.
+			const rows = 2048
+			rowCount := rows
+			t.Cleanup(func() { cleanupMinIOPrefix(context.Background(), objectStore, cfg.bucket, prefix+"/") })
+			switch format {
+			case "parquet":
+				data, err := generateParquetBytes(externalDataSchemaBasic, rows, 0, testVecDim)
+				require.NoError(t, err)
+				uploadParquetToMinIO(ctx, t, objectStore, cfg.bucket, prefix+"/data.parquet", data)
+				data, err = generateParquetBytes(externalDataSchemaLarge, rows, rows, testVecDim)
+				require.NoError(t, err)
+				uploadParquetToMinIO(ctx, t, objectStore, cfg.bucket, prefix+"/new.parquet", data)
+				rowCount *= 2
+			case "lance-table":
+				prefix += "/data.lance"
+				generateLanceDataOnMinIO(t, "s3://"+cfg.bucket+"/"+prefix, externalDataSchemaBasic, rows, 0)
+				source = extTestURI(cfg, prefix)
+			case "vortex":
+				generateVortexDataOnMinIO(t, prefix, externalDataSchemaBasic, rows, cfg.bucket)
+			case "iceberg-table":
+				info := createIcebergTable(t, externalDataSchemaMulti, "http://"+cfg.address,
+					cfg.accessKey, cfg.secretKey, cfg.bucket, prefix, strconv.Itoa(rows), "4", "8")
+				source = toMilvusS3URIForMinIO(info.MetadataLocation, cfg.address)
+				var props map[string]any
+				require.NoError(t, json.Unmarshal([]byte(spec), &props))
+				props["extfs"].(map[string]any)["region"] = "us-east-1"
+				props["extfs"].(map[string]any)["use_ssl"] = "false"
+				props["snapshot_id"] = strconv.FormatInt(info.SnapshotID, 10)
+				blob, err := json.Marshal(props)
+				require.NoError(t, err)
+				spec = string(blob)
+				valueColumn = "float_val"
+			}
+			schema := entity.NewSchema().WithName(name).WithExternalSource(source).WithExternalSpec(spec).
+				WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+				WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim).WithExternalField("embedding")).
+				WithField(entity.NewField().WithName("missing").WithDataType(entity.FieldTypeInt64).WithNullable(true).WithExternalField("missing_source")).
+				WithField(entity.NewField().WithName("fallback").WithDataType(entity.FieldTypeInt64).WithDefaultValueLong(7).WithExternalField("fallback_source"))
+			require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema)))
+			t.Cleanup(func() {
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(name)))
+			})
+			refresh := func() {
+				t.Helper()
+				job, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(name))
+				require.NoError(t, err)
+				waitRefreshTerminal(t, ctx, mc, job.JobID, entity.RefreshStateCompleted)
+				progress, err := mc.GetRefreshExternalCollectionProgress(ctx, client.NewGetRefreshExternalCollectionProgressOption(job.JobID))
+				require.NoError(t, err)
+				require.EqualValues(t, 100, progress.Progress)
+			}
+			refresh()
+			idx, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "embedding", index.NewFlatIndex(entity.L2)))
+			require.NoError(t, err)
+			require.NoError(t, idx.Await(ctx))
+			load := func() {
+				t.Helper()
+				task, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
+				require.NoError(t, err)
+				require.NoError(t, task.Await(ctx))
+			}
+			load()
+			field := entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithNullable(true).WithExternalField(valueColumn)
+			require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(name, field)))
+			mixedField := entity.NewField().WithName("mixed").WithDataType(entity.FieldTypeDouble).WithNullable(true).WithDefaultValueDouble(7).WithExternalField("score")
+			require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(name, mixedField)))
+			verify := func(physical bool) {
+				t.Helper()
+				result, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id >= 0").WithLimit(rowCount).
+					WithOutputFields("id", "missing", "fallback", "value", "mixed").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				require.Equal(t, rowCount, result.GetColumn("id").Len())
+				for i := 0; i < rowCount; i++ {
+					id, err := result.GetColumn("id").GetAsInt64(i)
+					require.NoError(t, err)
+					null, err := result.GetColumn("missing").IsNull(i)
+					require.NoError(t, err)
+					require.True(t, null)
+					fallback, err := result.GetColumn("fallback").GetAsInt64(i)
+					require.NoError(t, err)
+					require.EqualValues(t, 7, fallback)
+					mixed, err := result.GetColumn("mixed").GetAsDouble(i)
+					require.NoError(t, err)
+					wantMixed := float64(7)
+					if physical && format == "parquet" && id >= rows {
+						wantMixed = float64(id) * 0.01
+					}
+					require.InDelta(t, wantMixed, mixed, 0.0001)
+					null, err = result.GetColumn("value").IsNull(i)
+					require.NoError(t, err)
+					require.Equal(t, !physical, null)
+					if physical {
+						value, err := result.GetColumn("value").GetAsDouble(i)
+						require.NoError(t, err)
+						wantValue := float64(id) * 1.5
+						if format == "parquet" && id >= rows {
+							wantValue = float64(id) * 0.001
+						}
+						require.InDelta(t, wantValue, value, 0.0001)
+					}
+				}
+				result, err = mc.Query(ctx, client.NewQueryOption(name).WithFilter("missing is null && fallback == 7").
+					WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				count, err := result.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+				require.NoError(t, err)
+				require.EqualValues(t, rowCount, count)
+				search, err := mc.Search(ctx, client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{0, 1, 2, 3}}).
+					WithOutputFields("missing", "fallback", "value", "mixed").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				require.Len(t, search, 1)
+				require.Equal(t, 1, search[0].ResultCount)
+				missing, err := search[0].GetColumn("missing").IsNull(0)
+				require.NoError(t, err)
+				require.True(t, missing)
+				fallback, err := search[0].GetColumn("fallback").GetAsInt64(0)
+				require.NoError(t, err)
+				require.EqualValues(t, 7, fallback)
+				null, err := search[0].GetColumn("value").IsNull(0)
+				require.NoError(t, err)
+				require.Equal(t, !physical, null)
+			}
+			verify(false)
+			refresh()
+			// External refresh commits manifests; refresh-load waits for QueryNode
+			// to publish that snapshot before checking newly physical values.
+			reload, err := mc.RefreshLoad(ctx, client.NewRefreshLoadOption(name))
+			require.NoError(t, err)
+			require.NoError(t, reload.Await(ctx))
+			verify(true)
+			require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)))
+			load()
+			verify(true)
+			refresh()
+			verify(true)
+
+			// These fields remain absent from every physical manifest. IndexNode
+			// builds real scalar indexes from NULL/default rows, and QueryNode
+			// must read them without depending on a runtime default marker.
+			for _, fieldName := range []string{"missing", "fallback"} {
+				task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, fieldName, index.NewBitmapIndex()))
+				require.NoError(t, err)
+				require.NoError(t, task.Await(ctx))
+				desc, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(name, fieldName))
+				require.NoError(t, err)
+				require.EqualValues(t, rowCount, desc.IndexedRows)
+				require.Zero(t, desc.PendingIndexRows)
+			}
+			reload, err = mc.RefreshLoad(ctx, client.NewRefreshLoadOption(name))
+			require.NoError(t, err)
+			require.NoError(t, reload.Await(ctx))
+			verify(true)
+			require.NoError(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(name)))
+			load()
+			verify(true)
+		})
+	}
+}
+
+// Unmapped fragments contribute no rows, while physically present all-NULL
+// columns remain valid mappings. Refresh must also retire and restore old ranges.
+func TestExternalRefreshSkipsUnmappedFragments(t *testing.T) {
+	ctx := hp.CreateContext(t, 5*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	cfg := getMinIOConfig()
+	objectStore, err := newMinIOClient(cfg)
+	require.NoError(t, err)
+	name := common.GenRandomString("ext_unmapped", 6)
+	prefix := "external-e2e-test/" + name
+	t.Cleanup(func() { cleanupMinIOPrefix(context.Background(), objectStore, cfg.bucket, prefix+"/") })
+	write := func(file string, mapped, allNull bool, rows int) {
+		t.Helper()
+		fieldName := "unrelated"
+		if mapped {
+			fieldName = "value"
+		}
+		schema := arrow.NewSchema([]arrow.Field{{Name: fieldName, Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil)
+		builder := array.NewRecordBuilder(memory.NewGoAllocator(), schema)
+		defer builder.Release()
+		values := builder.Field(0).(*array.Int64Builder)
+		for i := 0; i < rows; i++ {
+			if allNull {
+				values.AppendNull()
+			} else {
+				values.Append(int64(i))
+			}
+		}
+		record := builder.NewRecord()
+		defer record.Release()
+		var buf bytes.Buffer
+		writer, err := pqarrow.NewFileWriter(schema, &buf, nil, pqarrow.DefaultWriterProps())
+		require.NoError(t, err)
+		require.NoError(t, writer.Write(record))
+		require.NoError(t, writer.Close())
+		uploadParquetToMinIO(ctx, t, objectStore, cfg.bucket, prefix+"/"+file, buf.Bytes())
+	}
+	write("first.parquet", false, false, 5)
+	schema := entity.NewSchema().WithName(name).WithExternalSource(extTestURI(cfg, prefix)).WithExternalSpec(extTestSpec(cfg, "parquet")).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeInt64).WithNullable(true).WithExternalField("value")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim).WithNullable(true).WithExternalField("embedding")).
+		WithField(entity.NewField().WithName("fallback").WithDataType(entity.FieldTypeInt64).WithDefaultValueLong(7).WithExternalField("fallback"))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema)))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(name)))
+	})
+	refresh := func(state entity.RefreshExternalCollectionState) {
+		t.Helper()
+		job, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(name))
+		require.NoError(t, err)
+		waitRefreshTerminal(t, ctx, mc, job.JobID, state)
+	}
+	rows := func(want int) {
+		t.Helper()
+		stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(name))
+		require.NoError(t, err)
+		require.Equal(t, strconv.Itoa(want), stats["row_count"])
+	}
+	refresh(entity.RefreshStateCompleted)
+	rows(0)
+	refresh(entity.RefreshStateCompleted)
+	rows(0)
+	// One source column exists, even though every value is NULL. Other fields
+	// still use runtime defaults, and the unrelated file stays excluded.
+	write("second.parquet", true, true, 3)
+	refresh(entity.RefreshStateCompleted)
+	rows(3)
+	idx, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "embedding", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, idx.Await(ctx))
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	verify := func(want int, allNull bool) {
+		t.Helper()
+		result, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("fallback == 7").WithLimit(10).
+			WithOutputFields("value", "fallback").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		require.Equal(t, want, result.GetColumn("value").Len())
+		for i := 0; i < want; i++ {
+			null, err := result.GetColumn("value").IsNull(i)
+			require.NoError(t, err)
+			require.Equal(t, allNull, null)
+			value, err := result.GetColumn("fallback").GetAsInt64(i)
+			require.NoError(t, err)
+			require.EqualValues(t, 7, value)
+		}
+	}
+	verify(3, true)
+	// Removing the only mapped column from the same file/range must not keep
+	// its old segment. All tasks explicitly authorize an empty result.
+	write("second.parquet", false, false, 3)
+	refresh(entity.RefreshStateCompleted)
+	rows(0)
+	reload, err := mc.RefreshLoad(ctx, client.NewRefreshLoadOption(name))
+	require.NoError(t, err)
+	require.NoError(t, reload.Await(ctx))
+	result, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("fallback == 7").WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	count, err := result.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	refresh(entity.RefreshStateCompleted)
+	rows(0)
+	// A previously skipped file becomes eligible without changing its path or size in rows.
+	write("first.parquet", true, false, 5)
+	refresh(entity.RefreshStateCompleted)
+	rows(5)
+	reload, err = mc.RefreshLoad(ctx, client.NewRefreshLoadOption(name))
+	require.NoError(t, err)
+	require.NoError(t, reload.Await(ctx))
+	verify(5, false)
+	// An unreadable inventory must fail the refresh and preserve visible rows.
+	uploadParquetToMinIO(ctx, t, objectStore, cfg.bucket, prefix+"/second.parquet", []byte("not parquet"))
+	refresh(entity.RefreshStateFailed)
+	rows(5)
+	verify(5, false)
 }

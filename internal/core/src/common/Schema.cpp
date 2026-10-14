@@ -472,6 +472,17 @@ Schema::RequiresSourceInsertTimestamps() const {
            IsExternalDataField(primary_field_id_opt_.value());
 }
 
+bool
+Schema::CanFillMissingExternalField(FieldId field_id) const {
+    if (!IsExternalDataField(field_id) || is_function_output(field_id) ||
+        field_id.get() < START_USER_FIELDID ||
+        primary_field_id_opt_.value_or(FieldId(-1)) == field_id) {
+        return false;
+    }
+    const auto& field = (*this)[field_id];
+    return field.is_nullable() || field.has_default_value();
+}
+
 std::string
 Schema::GetPhysicalColumnName(FieldId field_id) const {
     const auto& meta = (*this)[field_id];
