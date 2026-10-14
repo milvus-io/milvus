@@ -18,20 +18,46 @@ package proxy
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
-// retryDQL retries the complete DQL, including its load-and-wait step. The
-// callback may additionally request existing operation-specific retries, such
-// as inconsistent requery. It must create a fresh task for each execution attempt.
-func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, execute func(context.Context) (bool, error)) error {
+// retryDQL replans the entire request when its read view has
+// retired, including schema lookup and all shard results. This also applies to
+// explicitly loaded collections. Iterators retain their original read binding.
+func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, params []*commonpb.KeyValuePair, execute func(context.Context) (bool, error)) error {
+	iteratorValue, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, params)
+	isIterator, _ := strconv.ParseBool(iteratorValue)
+	refreshes := 0
+	return node.retryDQLWithExecutionRetry(ctx, dbName, collectionName, func(ctx context.Context) (bool, error) {
+		again, err := execute(ctx)
+		if err == nil || isIterator || ctx.Err() != nil || merr.IsCanceledOrTimeout(err) || merr.GetErrorType(err) == merr.InputError || refreshes >= 3 {
+			return again, err
+		}
+		viewErr := viewerror.AsViewError(err)
+		if !viewErr.IsViewNotFound() && !viewErr.IsViewInvalidated() {
+			return again, err
+		}
+		refreshes++
+		node.GetMetaCache().RemoveCollection(ctx, dbName, collectionName)
+		return true, err
+	}, func(err error) bool {
+		// Iterators cannot switch schema on a whole-request retry. View
+		// refreshes above are bounded independently of AutoLoad.
+		return !isIterator && errors.Is(err, merr.ErrCollectionNotLoaded) && node.shouldRetryDQLLoad(err)
+	})
+}
+
+func (node *Proxy) retryDQLWithExecutionRetry(ctx context.Context, dbName, collectionName string, execute func(context.Context) (bool, error), retryExecution func(error) bool) error {
 	var terminalErr error
 	err := retry.Handle(ctx, func() (bool, error) {
 		terminalErr = nil
@@ -46,7 +72,7 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 			return false, err
 		}
 		again, err := execute(ctx)
-		if again || node.shouldRetryDQLLoad(err) {
+		if again || retryExecution(err) {
 			return true, err
 		}
 		terminalErr = err

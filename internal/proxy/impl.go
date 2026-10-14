@@ -2656,7 +2656,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	isRecallEvaluation := false
-	err2 := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), func(ctx context.Context) (bool, error) {
+	err2 := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetSearchParams(), func(ctx context.Context) (bool, error) {
 		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot)
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
@@ -2926,7 +2926,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
-	err2 := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), func(ctx context.Context) (bool, error) {
+	err2 := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), nil, func(ctx context.Context) (bool, error) {
 		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot)
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
@@ -3855,7 +3855,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
 
 	var result *milvuspb.QueryResults
-	err := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), func(ctx context.Context) (bool, error) {
+	err := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetQueryParams(), func(ctx context.Context) (bool, error) {
 		var err error
 		result, err = node.executeQuery(ctx, request)
 		return false, merr.CheckRPCCall(result, err)

@@ -345,6 +345,8 @@ func newAutoLoadSchedulingProxy(t *testing.T) (*Proxy, *mocks.MockMixCoordClient
 	})
 	require.NoError(t, err)
 	cache := NewMockCache(t)
+	remove := mockey.Mock((*MockCache).RemoveCollection).Return().Build()
+	t.Cleanup(func() { remove.UnPatch() })
 	cache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(100), nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "collection", int64(0)).Return(&collectionInfo{
 		CollID: 100, VChannels: []string{"v0"}, Schema: schema,
@@ -583,6 +585,13 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 			require.NoError(t, node.initRateCollector())
 			t.Cleanup(func() { rateCol = oldRateCol })
 			client := newDQLRetryClient(t, test.phase)
+			loadInfo := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).To(func(_ *mocks.MockMixCoordClient, _ context.Context, _ *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+				if !client.server.loaded.Load() {
+					return nil, merr.WrapErrCollectionNotLoaded(100)
+				}
+				return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil
+			}).Build()
+			t.Cleanup(func() { loadInfo.UnPatch() })
 			node.viewQueryClient = client
 			if test.phase == "wait" {
 				client.server.loaded.Store(false)
@@ -704,7 +713,7 @@ func TestDQLAutoLoadRetryEnsuresOnEveryAttempt(t *testing.T) {
 	node := &Proxy{metaCache: mockSearchCollectionMeta(t, 100, []string{"v0"}), mixCoord: coord}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	calls := 0
-	err := node.retryDQL(context.Background(), "db", "collection", func(context.Context) (bool, error) {
+	err := node.retryDQL(context.Background(), "db", "collection", nil, func(context.Context) (bool, error) {
 		calls++
 		if calls == 1 {
 			return false, viewerror.NewViewInvalidated("view replaced by balance")
@@ -727,7 +736,7 @@ func TestDQLAutoLoadRetryStopsOnPermanentErrorsAndCancellation(t *testing.T) {
 		merr.WrapErrAsInputError(merr.ErrCollectionNotLoaded),
 	} {
 		calls := 0
-		err := node.retryDQL(context.Background(), "db", "collection", func(context.Context) (bool, error) {
+		err := node.retryDQL(context.Background(), "db", "collection", nil, func(context.Context) (bool, error) {
 			calls++
 			return false, want
 		})
@@ -736,7 +745,7 @@ func TestDQLAutoLoadRetryStopsOnPermanentErrorsAndCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
-	err := node.retryDQL(ctx, "db", "collection", func(context.Context) (bool, error) {
+	err := node.retryDQL(ctx, "db", "collection", nil, func(context.Context) (bool, error) {
 		calls++
 		cancel()
 		return false, viewerror.NewViewNotFound("released")
@@ -745,24 +754,24 @@ func TestDQLAutoLoadRetryStopsOnPermanentErrorsAndCancellation(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
-func TestDQLAutoLoadRetryDisabled(t *testing.T) {
+func TestDQLViewRetryWithAutoLoadDisabled(t *testing.T) {
 	require.NoError(t, Params.Save(Params.ProxyCfg.EnableAutoLoad.Key, "false"))
 	t.Cleanup(func() { require.NoError(t, Params.Reset(Params.ProxyCfg.EnableAutoLoad.Key)) })
-	node := &Proxy{}
+	node := &Proxy{metaCache: &MetaCache{}}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	calls := 0
 	want := viewerror.NewViewInvalidated("released")
-	err := node.retryDQL(context.Background(), "db", "collection", func(context.Context) (bool, error) {
+	err := node.retryDQL(context.Background(), "db", "collection", nil, func(context.Context) (bool, error) {
 		calls++
 		return false, want
 	})
 	require.ErrorIs(t, err, want)
-	require.Equal(t, 1, calls)
+	require.Equal(t, 4, calls)
 }
 
 func TestDQLAutoLoadRetryQueryCreatesFreshTask(t *testing.T) {
 	enableAutoLoad(t)
-	node := &Proxy{}
+	node := &Proxy{metaCache: &MetaCache{}}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	oldRateCol := rateCol
 	require.NoError(t, node.initRateCollector())
@@ -805,7 +814,7 @@ func TestDQLAutoLoadRetryHonorsDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	calls := 0
-	err := node.retryDQL(ctx, "db", "collection", func(ctx context.Context) (bool, error) {
+	err := node.retryDQL(ctx, "db", "collection", nil, func(ctx context.Context) (bool, error) {
 		calls++
 		<-ctx.Done()
 		return false, viewerror.NewViewInvalidated("released while request timed out")
@@ -816,7 +825,7 @@ func TestDQLAutoLoadRetryHonorsDeadline(t *testing.T) {
 
 func TestDQLAutoLoadRetryPreservesLatestReadinessTimeout(t *testing.T) {
 	enableAutoLoad(t)
-	node := &Proxy{}
+	node := &Proxy{metaCache: &MetaCache{}}
 	readinessCalls := 0
 	ready := mockey.Mock((*Proxy).ensureCollectionReady).To(
 		func(_ *Proxy, ctx context.Context, _, _ string) error {
@@ -833,7 +842,7 @@ func TestDQLAutoLoadRetryPreservesLatestReadinessTimeout(t *testing.T) {
 
 	parentCtx := context.Background()
 	executeCalls := 0
-	err := node.retryDQL(parentCtx, "db", "collection", func(context.Context) (bool, error) {
+	err := node.retryDQL(parentCtx, "db", "collection", nil, func(context.Context) (bool, error) {
 		executeCalls++
 		return false, viewerror.NewViewNotFound("collection released")
 	})
@@ -851,7 +860,7 @@ func TestDQLAutoLoadRetryPreservesSearchFallbackAndRecall(t *testing.T) {
 			previous := Params.AutoIndexConfig.EnableResultLimitCheck.GetValue()
 			require.NoError(t, Params.Save(key, "true"))
 			t.Cleanup(func() { require.NoError(t, Params.Save(key, previous)) })
-			node := &Proxy{}
+			node := &Proxy{metaCache: &MetaCache{}}
 			checks := 0
 			ready := mockey.Mock((*Proxy).ensureCollectionReady).To(func(*Proxy, context.Context, string, string) error {
 				checks++
@@ -886,7 +895,7 @@ func TestDQLAutoLoadRetryPreservesSearchFallbackAndRecall(t *testing.T) {
 func TestDQLAutoLoadRetryPreservesInconsistentRequery(t *testing.T) {
 	require.NoError(t, Params.Save(Params.ProxyCfg.EnableAutoLoad.Key, "false"))
 	t.Cleanup(func() { require.NoError(t, Params.Reset(Params.ProxyCfg.EnableAutoLoad.Key)) })
-	node := &Proxy{}
+	node := &Proxy{metaCache: &MetaCache{}}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	calls := 0
 	search := mockey.Mock((*Proxy).hybridSearch).To(func(*Proxy, context.Context, *milvuspb.HybridSearchRequest, bool, *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, error) {
@@ -905,7 +914,7 @@ func TestDQLAutoLoadRetryPreservesInconsistentRequery(t *testing.T) {
 
 func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
 	enableAutoLoad(t)
-	node := &Proxy{}
+	node := &Proxy{metaCache: &MetaCache{}}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	previous := rateCol
 	require.NoError(t, node.initRateCollector())
