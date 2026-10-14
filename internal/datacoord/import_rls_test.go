@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	internalmocks "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -200,6 +201,51 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		predicate, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
 		require.NotNil(t, predicate)
 		require.NoError(t, err)
+	})
+
+	t.Run("L0 import obeys enforcement decision", func(t *testing.T) {
+		for _, test := range []struct {
+			name      string
+			mode      string
+			principal string
+			skip      bool
+			disabled  bool
+			denial    string
+		}{
+			{name: "disabled ignores force", mode: "Force", principal: "alice", skip: true, disabled: true},
+			{name: "default auto skip"},
+			{name: "auto skip with principal fails check", mode: "AutoSkip", principal: "alice", denial: "RLS check expression for L0 import"},
+			{name: "explicit skip mode without skip fails check", mode: "ExplicitSkip", principal: "alice", denial: "RLS check expression for L0 import"},
+			{name: "force fails check", mode: "Force", principal: "alice", denial: "RLS check expression for L0 import"},
+			{name: "auto mode authorized skip", mode: "AutoSkip", principal: "alice", skip: true},
+			{name: "explicit authorized skip without principal", mode: "ExplicitSkip", skip: true},
+			{name: "force rejects authorized skip", mode: "Force", principal: "alice", skip: true, denial: "skip_rls is not allowed"},
+			{name: "explicit mode requires principal", mode: "ExplicitSkip", denial: "rls_principal is required"},
+			{name: "force requires principal", mode: "Force", denial: "rls_principal is required"},
+			{name: "whitespace is not automatic skip", principal: " \t ", denial: "rls_principal is required"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				in := proto.Clone(request).(*internalpb.ImportRequestInternal)
+				in.Options = []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}}
+				in.RlsPrincipal, in.SkipRls = test.principal, test.skip
+				if test.disabled {
+					in.Schema.Properties = nil
+				}
+				if test.mode != "" {
+					in.Schema.Properties = append(in.Schema.Properties, &commonpb.KeyValuePair{Key: common.RLSModeKey, Value: test.mode})
+				}
+				// Neither a bypass nor the L0 check failure should read metadata.
+				predicate, err := (&Server{}).resolveImportRLSPredicate(context.Background(), in)
+				require.Nil(t, predicate)
+				if test.denial == "" {
+					require.NoError(t, err)
+				} else {
+					require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+					require.Contains(t, err.Error(), test.denial)
+					require.False(t, merr.IsRetryableErr(err))
+				}
+			})
+		}
 	})
 }
 
