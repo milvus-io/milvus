@@ -268,24 +268,19 @@ func (s *resumableStream) waitUntilUnavailable(ctx context.Context, cancel conte
 
 func (s *resumableStream) removeSubscription(sub *resumableSubscription, err error) {
 	var remote wal.TransformLogSubscription
-	shouldClose := false
 	s.mu.Lock()
 	if s.subscriptions[sub.id] == sub {
 		delete(s.subscriptions, sub.id)
 		remote = sub.remote
 		sub.remote = nil
-		shouldClose = len(s.subscriptions) == 0 && !s.closing
 	}
 	s.mu.Unlock()
 	if remote != nil {
 		_ = remote.Close()
 	}
 	sub.finish(err)
-	if shouldClose {
-		go func() {
-			_ = s.Close()
-		}()
-	}
+	// The stream owner may retain pending subscriptions or retry a canceled
+	// Subscribe. Only its explicit Close ends the shared stream lifetime.
 }
 
 func (s *resumableStream) wakeResume() {

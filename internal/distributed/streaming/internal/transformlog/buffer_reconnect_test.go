@@ -73,3 +73,45 @@ func TestBufferSurvivesSubscriptionCancellationBeforeDisconnect(t *testing.T) {
 		})
 	}
 }
+
+func TestBufferRetriesCanceledPreparationWithoutClosingSharedStream(t *testing.T) {
+	mockey.PatchConvey("a canceled preparation cannot destroy a stream retained by another View", t, func() {
+		entered, resume := make(chan struct{}), make(chan struct{})
+		stream := resumable.NewResumableStream(t.Context(), "p", func(ctx context.Context, _ string) (wal.TransformLogStream, error) {
+			close(entered)
+			select {
+			case <-resume:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			return walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{})), nil
+		})
+		defer stream.Close()
+		manager := wal.NewTransformLogErrorAccesser(wal.ErrTransformLogVChannelUnavailable)
+		mockey.Mock(mockey.GetMethod(manager, "AcquireStream")).Return(stream, nil).Build()
+		buffer := transformlogbuffer.New(manager, 1)
+		view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{Vchannel: "p_100v0"}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
+		first, err := buffer.Bind(view)
+		require.NoError(t, err)
+		next, err := buffer.Bind(view)
+		require.NoError(t, err)
+		defer next.Release()
+		ctx, cancel := context.WithCancel(t.Context())
+		failed := make(chan error, 1)
+		go func() { _, err := first.Prepare(ctx); failed <- err }()
+		<-entered
+		cancel()
+		require.ErrorIs(t, <-failed, context.Canceled)
+		first.Release()
+		select {
+		case <-stream.Done():
+			t.Fatal("pending View lost its owned stream when another preparation canceled")
+		case <-time.After(30 * time.Millisecond):
+		}
+		close(resume)
+		ctx, cancel = context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		_, err = next.Prepare(ctx)
+		require.NoError(t, err)
+	})
+}
