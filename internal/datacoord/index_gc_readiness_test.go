@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"sort"
 	"sync"
 	"testing"
