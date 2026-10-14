@@ -22,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -166,7 +168,7 @@ func (s *RLSSuite) TestAPIs() {
 	s.NoError(err)
 	s.Equal([]string{"alice", "bob"}, principals)
 
-	s.mock.EXPECT().ListRLSPrincipals(ctx, mock.MatchedBy(func(req *milvuspb.ListRLSPrincipalsRequest) bool {
+	s.mock.EXPECT().ListRLSPrincipals(mock.Anything, mock.MatchedBy(func(req *milvuspb.ListRLSPrincipalsRequest) bool {
 		return req.GetCount() && req.GetDbName() == "db" && req.GetCollectionName() == "collection"
 	})).Return(&milvuspb.ListRLSPrincipalsResponse{Status: merr.Success(), PrincipalCnt: 5000000000}, nil).Once()
 	count, err := s.client.CountRLSPrincipals(ctx, NewListRLSPrincipalsOption("collection").WithDbName("db"))
@@ -233,11 +235,11 @@ func (s *RLSSuite) TestErrors() {
 func (s *RLSSuite) TestCountRLSPrincipalsErrors() {
 	ctx := context.Background()
 	option := NewListRLSPrincipalsOption("collection")
-	s.mock.EXPECT().ListRLSPrincipals(ctx, mock.Anything).Return(nil, context.DeadlineExceeded).Once()
+	s.mock.EXPECT().ListRLSPrincipals(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded).Once()
 	count, err := s.client.CountRLSPrincipals(ctx, option)
-	s.ErrorIs(err, context.DeadlineExceeded)
+	s.Equal(codes.DeadlineExceeded, status.Code(err))
 	s.Zero(count)
-	s.mock.EXPECT().ListRLSPrincipals(ctx, mock.Anything).Return(&milvuspb.ListRLSPrincipalsResponse{
+	s.mock.EXPECT().ListRLSPrincipals(mock.Anything, mock.Anything).Return(&milvuspb.ListRLSPrincipalsResponse{
 		Status: merr.Status(merr.ErrParameterInvalid),
 	}, nil).Once()
 	count, err = s.client.CountRLSPrincipals(ctx, option)

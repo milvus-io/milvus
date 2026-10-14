@@ -49,6 +49,7 @@ func TestRLSManagementPrivilegeAnnotations(t *testing.T) {
 		{name: "list policies", request: &milvuspb.ListRowPoliciesRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeViewRLS},
 		{name: "get principal tags", request: &milvuspb.GetRLSPrincipalTagsRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeViewRLS},
 		{name: "list principals", request: &milvuspb.ListRLSPrincipalsRequest{}, privilege: commonpb.ObjectPrivilege_PrivilegeViewRLS},
+		{name: "count principals", request: &milvuspb.ListRLSPrincipalsRequest{Count: true}, privilege: commonpb.ObjectPrivilege_PrivilegeViewRLS},
 	}
 
 	for _, test := range tests {
