@@ -58,6 +58,7 @@
 #include "index/test_utils/ScalarTestData.h"
 #include "knowhere/version.h"
 #include "storage/LocalFileIOPool.h"
+#include "storage/FileWriter.h"
 #include "storage/Util.h"
 #include "storage/artifact/FileSink.h"
 #include "test_utils/AsyncLoadTestUtils.h"
@@ -527,6 +528,71 @@ TEST_F(LegacyIndexLoadTest, SyncMaterializationWritesDirectlyToTarget) {
             manager->Write(slice, encoded.data(), encoded.size());
             materialize();
             EXPECT_EQ(outputs(), published);
+        }
+    }
+}
+
+TEST_F(LegacyIndexLoadTest, SyncMaterializationUsesWritePermitAndDirectIO) {
+    context_.use_async_load = false;
+    FILE_SLICE_SIZE.store(128 * 1024);
+    auto manager = std::make_shared<CountingLegacyChunkManager>(
+        context_.chunkManagerPtr->GetRootPath());
+    context_.chunkManagerPtr = manager;
+    const std::vector<uint8_t> a(storage::FileWriter::DEFAULT_BUFFER_SIZE + 17,
+                                 17),
+        b(389, 23);
+    storage::V1DiskSink sink(context_);
+    sink.WriteEntry("a", a.data(), a.size());
+    sink.WriteEntry("b", b.data(), b.size());
+    std::vector<std::string> paths;
+    const auto stats = sink.Finish();
+    for (const auto& file : stats.Files())
+        paths.push_back(file.file_name);
+    sink.ReleaseLocalStaging();
+    storage::V1RemoteSource source(context_, paths, {});
+    source.SetLoadContext(proto::common::LoadPriority::LOW, {});
+    const auto old_mode = storage::FileWriter::GetMode();
+    auto restore =
+        folly::makeGuard([&] { storage::FileWriter::SetMode(old_mode); });
+    storage::FileWriter::SetMode(storage::FileWriter::WriteMode::DIRECT);
+    auto read = [](const std::string& path) {
+        std::ifstream input(path, std::ios::binary);
+        return std::vector<uint8_t>(std::istreambuf_iterator<char>(input), {});
+    };
+    for (const int mode : {0, 1, 2}) {
+        SCOPED_TRACE(mode);
+        const auto target = staging_ + "/combined";
+        auto permit =
+            storage::LocalFileIOPool::GetInstance().AcquireWritePermit();
+        std::promise<void> read_started;
+        std::once_flag first_read;
+        manager->after_read = [&](const auto&) {
+            std::call_once(first_read, [&] { read_started.set_value(); });
+        };
+        auto write = std::async(std::launch::async, [&] {
+            if (mode == 0)
+                source.ReadEntryToLocalFile("a", target);
+            else if (mode == 1)
+                source.ReadEntriesToLocalFile({"a", "b"}, target);
+            else
+                source.ReadEntriesToLocalDir({"a", "b"}, staging_);
+        });
+        auto release = folly::makeGuard([&] { permit = {}; });
+        EXPECT_EQ(read_started.get_future().wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        EXPECT_EQ(write.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        permit = {};
+        write.get();
+        manager->after_read = {};
+        if (mode == 2) {
+            EXPECT_EQ(read(staging_ + "/a"), a);
+            EXPECT_EQ(read(staging_ + "/b"), b);
+        } else {
+            auto expected = a;
+            if (mode == 1)
+                expected.insert(expected.end(), b.begin(), b.end());
+            EXPECT_EQ(read(target), expected);
         }
     }
 }

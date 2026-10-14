@@ -20,7 +20,6 @@
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <map>
 #include <set>
@@ -337,25 +336,9 @@ CommitAll(std::vector<StagedLocalFile>& files) {
 }
 
 void
-CloseOutput(std::ofstream& output, const std::string& path) {
-    output.flush();
-    if (!output.good()) {
-        ThrowInfo(FileWriteFailed,
-                  "failed to write staged local artifact file {}",
-                  path);
-    }
-    output.close();
-    if (output.fail()) {
-        ThrowInfo(FileWriteFailed,
-                  "failed to close staged local artifact file {}",
-                  path);
-    }
-}
-
-void
 AppendMemory(const uint8_t* data,
              size_t size,
-             std::ofstream& output,
+             FileWriter& output,
              const folly::CancellationToken& cancellation_token) {
     constexpr size_t kCopyBufferSize = 1024 * 1024;
     AssertInfo(size == 0 || data != nullptr,
@@ -364,29 +347,10 @@ AppendMemory(const uint8_t* data,
     while (offset < size) {
         ThrowIfCancelled(cancellation_token, "artifact file materialization");
         const auto chunk = std::min(kCopyBufferSize, size - offset);
-        output.write(reinterpret_cast<const char*>(data + offset), chunk);
-        if (!output.good()) {
-            ThrowInfo(FileWriteFailed,
-                      "failed to append staged artifact entry");
-        }
+        output.Write(data + offset, chunk);
         offset += chunk;
     }
     ThrowIfCancelled(cancellation_token, "artifact file materialization");
-}
-
-void
-WriteBytes(const std::string& path,
-           const uint8_t* data,
-           size_t size,
-           const folly::CancellationToken& cancellation_token = {}) {
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
-    if (!output.good()) {
-        ThrowInfo(FileOpenFailed,
-                  "failed to open staged local artifact file {}",
-                  path);
-    }
-    AppendMemory(data, size, output, cancellation_token);
-    CloseOutput(output, path);
 }
 
 }  // namespace
@@ -957,7 +921,7 @@ class V1RemoteSource::Impl {
 
     // Stream decoded physical slices into an already-open staged output.
     void
-    Append(std::string_view name, std::ofstream& output) {
+    Append(std::string_view name, FileWriter& output) {
         ReadPayload(name, [&](const uint8_t* data, size_t bytes, size_t) {
             AppendMemory(data, bytes, output, cancellation_token);
         });
@@ -1193,14 +1157,10 @@ void
 V1RemoteSource::ReadEntryToLocalFile(std::string_view name,
                                      const std::string& local_path) {
     StagedLocalFile staged(local_path);
-    std::ofstream output(staged.Staging(), std::ios::binary | std::ios::trunc);
-    if (!output.good()) {
-        ThrowInfo(FileOpenFailed,
-                  "failed to open staged local artifact file {}",
-                  staged.Staging());
-    }
+    FileWriter output(staged.Staging(),
+                      io::GetPriorityFromLoadPriority(impl_->load_priority));
     impl_->Append(name, output);
-    CloseOutput(output, staged.Staging());
+    output.Finish();
     impl_->CheckCancelled("V1/V2 artifact file publication");
     staged.Commit();
 }
@@ -1209,16 +1169,12 @@ void
 V1RemoteSource::ReadEntriesToLocalFile(const std::vector<std::string>& names,
                                        const std::string& local_path) {
     StagedLocalFile staged(local_path);
-    std::ofstream output(staged.Staging(), std::ios::binary | std::ios::trunc);
-    if (!output.good()) {
-        ThrowInfo(FileOpenFailed,
-                  "failed to open staged local artifact file {}",
-                  staged.Staging());
-    }
+    FileWriter output(staged.Staging(),
+                      io::GetPriorityFromLoadPriority(impl_->load_priority));
     for (const auto& name : names) {
         impl_->Append(name, output);
     }
-    CloseOutput(output, staged.Staging());
+    output.Finish();
     impl_->CheckCancelled("V1/V2 artifact file publication");
     staged.Commit();
 }
@@ -1241,15 +1197,11 @@ V1RemoteSource::ReadEntriesToLocalDir(const std::vector<std::string>& names,
                    path);
         paths.push_back(path);
         staged.emplace_back(path);
-        std::ofstream output(staged.back().Staging(),
-                             std::ios::binary | std::ios::trunc);
-        if (!output.good()) {
-            ThrowInfo(FileOpenFailed,
-                      "failed to open staged local artifact file {}",
-                      staged.back().Staging());
-        }
+        FileWriter output(
+            staged.back().Staging(),
+            io::GetPriorityFromLoadPriority(impl_->load_priority));
         impl_->Append(name, output);
-        CloseOutput(output, staged.back().Staging());
+        output.Finish();
     }
     impl_->CheckCancelled("V1/V2 artifact directory publication");
     CommitAll(staged);

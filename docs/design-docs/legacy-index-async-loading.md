@@ -51,7 +51,9 @@ metadata concurrency limit; no separate metadata byte/slot budget is introduced.
 Synchronous file materialization decodes bounded batches directly into the target
 staging file, including concatenated entries and directory outputs. It does not
 keep an intermediate disk copy of each entry; staging publication and rollback
-retain the existing target ownership rules.
+retain the existing target ownership rules. The staging writer is `FileWriter`,
+so load priority, configured buffered/direct mode and global write permits also
+apply to these synchronous writes.
 
 Remote reads and admission waits suspend. Local size/read/write calls run on
 LocalFileIOPool. The family coroutine also runs there so local staging, mmap,
