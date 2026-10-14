@@ -888,9 +888,7 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                 # Partition-key partial updates must include the routing key.
                 patch["owner"] = "alice"
             self.upsert(client, name, [patch], partial_update=True, rls_principal="alice")
-        expected = [
-            {"id": pk, "owner": "alice", "note": "initial" if mode == "auto_id" else "updated"}
-        ]
+        expected = [{"id": pk, "owner": "alice", "note": "initial" if mode == "auto_id" else "updated"}]
         for context in [{"skip_rls": True}, {"rls_principal": "alice"}]:
             assert (
                 self.query(client, name, filter="id >= 0", output_fields=["id", "owner", "note"], **context)[0]
