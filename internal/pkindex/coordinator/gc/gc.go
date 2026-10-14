@@ -69,9 +69,9 @@ type InFlightOutputs func(ctx context.Context, collectionID int64, vchannel stri
 
 // GC deletes, for each vchannel that has a manifest pointer, the manifest
 // bodies outside the retention and the SSTs that no retained body references.
-// It reads the current version from the pointer store, never from a cache.
+// It reads the current version from the meta store, never from a cache.
 type GC struct {
-	pointers manifestmanager.PointerStore
+	meta     manifestmanager.MetaStore
 	store    manifest.ObjectStore
 	layout   manifest.Layout
 	cfg      Config
@@ -82,16 +82,16 @@ type GC struct {
 	wg     sync.WaitGroup
 }
 
-// New returns a GC over the pointers in pointers and the objects in store, at
+// New returns a GC over the pointers in meta and the objects in store, at
 // the keys of layout. It returns ErrInvalidConfig when cfg.Interval is not
 // positive, cfg.Grace is below MinGrace, or a retention value is negative.
-func New(pointers manifestmanager.PointerStore, store manifest.ObjectStore, layout manifest.Layout,
+func New(meta manifestmanager.MetaStore, store manifest.ObjectStore, layout manifest.Layout,
 	cfg Config, inFlight InFlightOutputs,
 ) (*GC, error) {
 	if cfg.Interval <= 0 || cfg.Grace < MinGrace || cfg.RetainVersions < 0 || cfg.RetainDuration < 0 {
 		return nil, errors.Wrapf(ErrInvalidConfig, "%+v", cfg)
 	}
-	return &GC{pointers: pointers, store: store, layout: layout, cfg: cfg, inFlight: inFlight, now: time.Now}, nil
+	return &GC{meta: meta, store: store, layout: layout, cfg: cfg, inFlight: inFlight, now: time.Now}, nil
 }
 
 // Start runs one round every cfg.Interval until ctx is done or Close is
@@ -129,7 +129,7 @@ func (g *GC) Close() {
 // cannot list the vchannels; an error on one vchannel is logged and the round
 // goes on to the next. The round stops, without an error, when ctx is done.
 func (g *GC) RunOnce(ctx context.Context) error {
-	keys, _, err := g.pointers.List(ctx, manifest.PointerPrefix)
+	keys, _, err := g.meta.List(ctx, manifest.PointerPrefix)
 	if err != nil {
 		return markUnavailable(err, "list manifest pointers")
 	}
@@ -245,7 +245,7 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 // nil when the vchannel has no pointer.
 func (g *GC) current(ctx context.Context, collectionID int64, vchannel string) (*pkindexpb.Manifest, string, error) {
 	key := manifest.PointerKey(collectionID, vchannel)
-	value, found, err := g.pointers.Load(ctx, key)
+	value, found, err := g.meta.Load(ctx, key)
 	if err != nil {
 		return nil, "", markUnavailable(err, "load manifest pointer %s", key)
 	}

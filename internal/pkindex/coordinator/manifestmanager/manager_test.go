@@ -29,7 +29,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/internal/fakes"
 	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
@@ -45,8 +44,8 @@ const (
 
 var testLayout = manifest.Layout{RootPath: "files"}
 
-func newTestManager() (*Manager, *fakes.Pointers, *fakes.Store) {
-	p, s := fakes.NewPointers(), fakes.NewStore()
+func newTestManager() (*Manager, *FakeMetaStore, *manifest.FakeObjectStore) {
+	p, s := NewFakeMetaStore(), manifest.NewFakeObjectStore()
 	return New(p, s, testLayout), p, s
 }
 
@@ -67,7 +66,7 @@ func sstIDs(m *pkindexpb.Manifest) []int64 {
 }
 
 // bodyKeys returns the manifest body keys of vch in the store.
-func bodyKeys(t *testing.T, s *fakes.Store) []string {
+func bodyKeys(t *testing.T, s *manifest.FakeObjectStore) []string {
 	keys := []string{}
 	err := s.Walk(context.Background(), testLayout.ManifestDir(1, vch)+"/", func(k string, _ time.Time) bool {
 		keys = append(keys, k)
@@ -78,7 +77,7 @@ func bodyKeys(t *testing.T, s *fakes.Store) []string {
 }
 
 // storedClaim returns the term of the stored claim record of pch.
-func storedClaim(t *testing.T, p *fakes.Pointers) int64 {
+func storedClaim(t *testing.T, p *FakeMetaStore) int64 {
 	v, found, err := p.Load(context.Background(), manifest.ClaimKey(pch))
 	require.NoError(t, err)
 	require.True(t, found)
@@ -88,7 +87,7 @@ func storedClaim(t *testing.T, p *fakes.Pointers) int64 {
 }
 
 // claimed returns a manager on new stores whose pch is claimed for term.
-func claimed(t *testing.T, term int64) (*Manager, *fakes.Pointers, *fakes.Store) {
+func claimed(t *testing.T, term int64) (*Manager, *FakeMetaStore, *manifest.FakeObjectStore) {
 	m, p, s := newTestManager()
 	require.NoError(t, m.ClaimPChannel(context.Background(), pch, term))
 	return m, p, s
@@ -232,8 +231,8 @@ func TestFlushFailsWhenClaimChangesBeforeWrite(t *testing.T) {
 	assert.EqualValues(t, 4, storedClaim(t, p))
 }
 
-// A flush with a stale cached claim record does not pass the claim condition
-// of the write, even when the pointer condition holds.
+// A flush with a stale cached claim record does not pass the claim predicate
+// of the write, even when the pointer predicate holds.
 func TestFlushWithStaleCachedClaim(t *testing.T) {
 	a, p, s := claimed(t, 3)
 	ctx := context.Background()
@@ -759,15 +758,16 @@ func TestLoadPointersIgnoresCache(t *testing.T) {
 // The cached claim term only goes up.
 func TestClaimCacheOnlyRaises(t *testing.T) {
 	m, _, _ := newTestManager()
-	entry := func(term int64) *claimEntry {
-		return &claimEntry{claim: &pkindexpb.PChannelClaim{PchannelTerm: term}, value: fmt.Sprint(term)}
+	claims := m.claims
+	claim := func(term int64) *pchannelClaim {
+		return &pchannelClaim{pb: &pkindexpb.PChannelClaim{PchannelTerm: term}, value: fmt.Sprint(term)}
 	}
-	m.rememberClaim(pch, entry(4))
-	m.rememberClaim(pch, entry(3))
-	assert.EqualValues(t, 4, m.cachedClaim(pch).claim.GetPchannelTerm())
-	m.rememberClaim(pch, entry(5))
-	assert.EqualValues(t, 5, m.cachedClaim(pch).claim.GetPchannelTerm())
-	m.forgetClaim(pch)
-	m.rememberClaim(pch, entry(3))
-	assert.EqualValues(t, 3, m.cachedClaim(pch).claim.GetPchannelTerm())
+	claims.remember(pch, claim(4))
+	claims.remember(pch, claim(3))
+	assert.EqualValues(t, 4, claims.cached(pch).pb.GetPchannelTerm())
+	claims.remember(pch, claim(5))
+	assert.EqualValues(t, 5, claims.cached(pch).pb.GetPchannelTerm())
+	claims.forget(pch)
+	claims.remember(pch, claim(3))
+	assert.EqualValues(t, 3, claims.cached(pch).pb.GetPchannelTerm())
 }

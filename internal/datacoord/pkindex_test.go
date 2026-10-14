@@ -33,13 +33,14 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestPKIndexMetaKVPointers(t *testing.T) {
+func TestPKIndexMetaKVStore(t *testing.T) {
 	ctx := context.Background()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: Params.EtcdCfg.Endpoints.GetAsStrings(), DialTimeout: 5 * time.Second,
@@ -47,10 +48,10 @@ func TestPKIndexMetaKVPointers(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	root := "pkindex-pointers-" + uuid.NewString() + "/meta"
+	root := "pkindex-meta-store-" + uuid.NewString() + "/meta"
 	kv := etcdkv.NewEtcdKV(client, root)
 	defer func() { _ = kv.RemoveWithPrefix(ctx, "") }()
-	p := metaKVPointers{kv: kv}
+	p := metaKVStore{kv: kv}
 	key := manifest.PointerKey(1, "ch_v0")
 
 	_, found, err := p.Load(ctx, key)
@@ -59,28 +60,28 @@ func TestPKIndexMetaKVPointers(t *testing.T) {
 	var values []string
 	var founds []bool
 
-	require.NoError(t, p.Save(ctx, map[string]string{key: "a"}, manifest.KeyAbsent(key)))
-	assert.Error(t, p.Save(ctx, map[string]string{key: "b"}, manifest.KeyAbsent(key)))
+	require.NoError(t, p.Save(ctx, map[string]string{key: "a"}, predicates.KeyNotExist(key)))
+	assert.Error(t, p.Save(ctx, map[string]string{key: "b"}, predicates.KeyNotExist(key)))
 	v, found, err := p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "a", v)
 
-	assert.Error(t, p.Save(ctx, map[string]string{key: "c"}, manifest.ValueIs(key, "x")))
-	require.NoError(t, p.Save(ctx, map[string]string{key: "c"}, manifest.ValueIs(key, "a")))
+	assert.Error(t, p.Save(ctx, map[string]string{key: "c"}, predicates.ValueEqual(key, "x")))
+	require.NoError(t, p.Save(ctx, map[string]string{key: "c"}, predicates.ValueEqual(key, "a")))
 	v, _, err = p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.Equal(t, "c", v)
 
-	// a write under a condition on a second key that it does not write: it
+	// a write under a predicate on a second key that it does not write: it
 	// fails when that key does not hold the value, and leaves that key as is
 	claim := manifest.ClaimKey("ch")
-	require.NoError(t, p.Save(ctx, map[string]string{claim: "t1"}, manifest.KeyAbsent(claim)))
-	assert.Error(t, p.Save(ctx, map[string]string{key: "d"}, manifest.ValueIs(key, "c"), manifest.ValueIs(claim, "t2")))
+	require.NoError(t, p.Save(ctx, map[string]string{claim: "t1"}, predicates.KeyNotExist(claim)))
+	assert.Error(t, p.Save(ctx, map[string]string{key: "d"}, predicates.ValueEqual(key, "c"), predicates.ValueEqual(claim, "t2")))
 	v, _, err = p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.Equal(t, "c", v)
-	require.NoError(t, p.Save(ctx, map[string]string{key: "d"}, manifest.ValueIs(key, "c"), manifest.ValueIs(claim, "t1")))
+	require.NoError(t, p.Save(ctx, map[string]string{key: "d"}, predicates.ValueEqual(key, "c"), predicates.ValueEqual(claim, "t1")))
 	v, _, err = p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.Equal(t, "d", v)

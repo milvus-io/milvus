@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/internal/fakes"
 	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifestmanager"
 	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
@@ -41,8 +40,8 @@ const (
 	vch = "p_1v0"
 )
 
-func newService() (*Service, *fakes.Pointers, *fakes.Store) {
-	p, st := fakes.NewPointers(), fakes.NewStore()
+func newService() (*Service, *manifestmanager.FakeMetaStore, *manifest.FakeObjectStore) {
+	p, st := manifestmanager.NewFakeMetaStore(), manifest.NewFakeObjectStore()
 	s := New()
 	s.SetManager(manifestmanager.New(p, st, manifest.Layout{RootPath: "files"}))
 	return s, p, st
@@ -238,7 +237,7 @@ func TestSchemaMismatch(t *testing.T) {
 	assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 }
 
-func TestPointerStoreUnavailable(t *testing.T) {
+func TestMetaStoreUnavailable(t *testing.T) {
 	s, p, _ := newService()
 	ctx := context.Background()
 
@@ -278,7 +277,7 @@ func TestMissingBody(t *testing.T) {
 
 	// a new service over the same pointers and an empty object store has no cache
 	other := New()
-	other.SetManager(manifestmanager.New(p, fakes.NewStore(), manifest.Layout{RootPath: "files"}))
+	other.SetManager(manifestmanager.New(p, manifest.NewFakeObjectStore(), manifest.Layout{RootPath: "files"}))
 	flush, err := other.CommitFlush(ctx, flushReq(vch, 1, 2, 2))
 	require.NoError(t, err)
 	assertCode(t, flush.GetStatus(), merr.Code(merr.ErrDataIntegrity), false)

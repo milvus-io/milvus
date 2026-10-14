@@ -27,7 +27,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/internal/fakes"
 	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifestmanager"
 	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
@@ -43,8 +42,8 @@ var testConfig = Config{Interval: time.Minute, Grace: time.Hour, RetainVersions:
 // versions and a clock that the test moves.
 type env struct {
 	now      time.Time
-	pointers *fakes.Pointers
-	store    *fakes.Store
+	pointers *manifestmanager.FakeMetaStore
+	store    *manifest.FakeObjectStore
 	mgr      *manifestmanager.Manager
 	gc       *GC
 	// inFlight is the in-flight compaction output hook of the GC; nil means none.
@@ -53,8 +52,8 @@ type env struct {
 
 func newEnv(t *testing.T, cfg Config) *env {
 	e := &env{now: time.Unix(1_000_000, 0)}
-	e.pointers = fakes.NewPointers()
-	e.store = fakes.NewStore()
+	e.pointers = manifestmanager.NewFakeMetaStore()
+	e.store = manifest.NewFakeObjectStore()
 	e.store.Now = func() time.Time { return e.now }
 	e.mgr = manifestmanager.New(e.pointers, e.store, testLayout)
 	g, err := New(e.pointers, e.store, testLayout, cfg, func(ctx context.Context, collectionID int64, vchannel string) ([]int64, error) {
@@ -417,14 +416,14 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"retain duration": {Interval: time.Minute, Grace: time.Hour, RetainDuration: -1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := New(fakes.NewPointers(), fakes.NewStore(), testLayout, cfg, nil)
+			_, err := New(manifestmanager.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testLayout, cfg, nil)
 			assert.True(t, errors.Is(err, ErrInvalidConfig))
 		})
 	}
 }
 
 func TestNewAcceptsMinGrace(t *testing.T) {
-	_, err := New(fakes.NewPointers(), fakes.NewStore(), testLayout,
+	_, err := New(manifestmanager.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testLayout,
 		Config{Interval: time.Minute, Grace: MinGrace}, nil)
 	assert.NoError(t, err)
 }
