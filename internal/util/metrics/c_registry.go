@@ -40,6 +40,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
@@ -138,7 +139,9 @@ type CRegistry struct {
 
 // Gather implements Gatherer.
 func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
-	var parser expfmt.TextParser
+	// The zero-value TextParser has no validation scheme and panics on parse;
+	// knowhere/segcore emit legacy-format metric names.
+	parser := expfmt.NewTextParser(model.LegacyValidation)
 
 	r.mtx.RLock()
 	defer r.mtx.RUnlock()
