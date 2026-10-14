@@ -591,6 +591,14 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			fieldData.ValidData = validData
 		}
 
+		// An omitted vector validity bitmap means every supplied row is valid.
+		// Materialize it before merge, which indexes logical rows and appends
+		// validity separately from the compact vector payload.
+		if fieldSchema.GetNullable() && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) &&
+			len(fieldData.GetValidData()) == 0 {
+			fieldData.ValidData = lo.RepeatBy(upsertIDSize, func(int) bool { return true })
+		}
+
 		// compatible with different nullable/default_value data format from sdk
 		if len(fieldData.GetValidData()) != 0 {
 			var err error
