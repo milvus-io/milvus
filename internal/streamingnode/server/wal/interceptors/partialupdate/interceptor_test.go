@@ -770,13 +770,14 @@ func TestPartialUpdateInterceptorRejectsTxnCASAttemptMismatchBeforeAppend(t *tes
 
 type partialUpdateChainTestEnv struct {
 	chain        interceptors.InterceptorWithReady
+	buildParam   *interceptors.InterceptorBuildParam
 	partial      *appendInterceptor
 	txnManager   *txn.TxnManager
 	writeMetrics *metricsutil.WriteMetrics
 	nextID       atomic.Int64
 }
 
-func newPartialUpdateChainTestEnv(t *testing.T) *partialUpdateChainTestEnv {
+func newPartialUpdateChainTestEnv(t testing.TB) *partialUpdateChainTestEnv {
 	return newPartialUpdateChainTestEnvWithBuilders(t, nil)
 }
 
@@ -811,7 +812,7 @@ func newPartialUpdateChainTestEnvWithRecoveredTxn(t *testing.T, cas bool) *parti
 }
 
 func newPartialUpdateChainTestEnvWithBuilders(
-	t *testing.T,
+	t testing.TB,
 	builders map[message.TxnID]*message.ImmutableTxnMessageBuilder,
 ) *partialUpdateChainTestEnv {
 	t.Helper()
@@ -853,6 +854,7 @@ func newPartialUpdateChainTestEnvWithBuilders(
 	t.Cleanup(chain.Close)
 	return &partialUpdateChainTestEnv{
 		chain:        chain,
+		buildParam:   param,
 		partial:      partial,
 		txnManager:   txnManager,
 		writeMetrics: writeMetrics,
@@ -875,14 +877,14 @@ func (e *partialUpdateChainTestEnv) append(
 	return extra, err
 }
 
-func (e *partialUpdateChainTestEnv) allocateReadTS(t *testing.T) uint64 {
+func (e *partialUpdateChainTestEnv) allocateReadTS(t testing.TB) uint64 {
 	t.Helper()
 	readTS, err := resource.Resource().TSOAllocator().Allocate(context.Background())
 	require.NoError(t, err)
 	return readTS
 }
 
-func (e *partialUpdateChainTestEnv) prepareCASTxn(t *testing.T, readTS uint64, pks ...int64) message.TxnContext {
+func (e *partialUpdateChainTestEnv) prepareCASTxn(t testing.TB, readTS uint64, pks ...int64) message.TxnContext {
 	t.Helper()
 	begin := message.NewBeginTxnMessageBuilderV2().
 		WithVChannel("v1").
@@ -912,7 +914,7 @@ func (e *partialUpdateChainTestEnv) hasPKVersionAfter(vchannel string, pk int64,
 	return entry != nil && entry.commitTS > readTS
 }
 
-func newChainTestCASCommit(t *testing.T, txnContext message.TxnContext) message.MutableMessage {
+func newChainTestCASCommit(t testing.TB, txnContext message.TxnContext) message.MutableMessage {
 	t.Helper()
 	commit := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel("v1").
@@ -1004,7 +1006,7 @@ func appendOK(context.Context, message.MutableMessage) (message.MessageID, error
 }
 
 func newCASInsertMessage(
-	t *testing.T,
+	t testing.TB,
 	fields []*schemapb.FieldData,
 	meta *messagespb.PartialUpdateCAS,
 ) message.MutableMessage {

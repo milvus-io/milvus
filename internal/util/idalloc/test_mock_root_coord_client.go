@@ -19,7 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-func NewMockRootCoordClient(t *testing.T) *mocks.MockMixCoordClient {
+func NewMockRootCoordClient(t testing.TB) *mocks.MockMixCoordClient {
 	counter := atomic.NewUint64(1)
 	client := mocks.NewMockMixCoordClient(t)
 	lastAllocate := atomic.NewInt64(0)

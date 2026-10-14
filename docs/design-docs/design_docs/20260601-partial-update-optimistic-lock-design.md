@@ -202,7 +202,9 @@ The design depends on seven invariants:
    allocating the final visibility timestamp. A CommitTxn freezes and drains
    its body before selecting that guard's complete write set. Its provisional
    acker prevents cleanup from overtaking this preparation and does not become
-   the persisted commit timestamp.
+   the persisted commit timestamp. It is acknowledged once the body is drained,
+   before waiting for the guard. A transaction may expire during that wait; the
+   final timestamp lease check rejects it before any CommitTxn WAL append.
 
 ### Architecture and state ownership
 
@@ -258,6 +260,7 @@ sequenceDiagram
     R->>S: CommitTxn with empty _puc marker
     S->>S: Retain shared shard lifecycle lock
     S->>S: Reserve provisional acker; freeze and drain transaction body
+    S->>S: Acknowledge provisional acker before waiting for write guards
     S->>S: Acquire admission read lock and sorted exclusive PK locks
     S->>S: Reserve CAS PKs; wait for earlier overlapping ordinary batches
     S->>S: Allocate final commitTS; recheck transaction lease
@@ -269,7 +272,7 @@ sequenceDiagram
     else commit accepted
         S->>W: Append CommitTxn
         S->>S: Publish PK / fence state; finish transaction
-        S->>S: Ack final commit and provisional timestamp; publish MVCC
+        S->>S: Ack final commit timestamp; publish MVCC
         S->>S: Release PK / admission guards and shard lifecycle lock
         S-->>R: commitTS
         R-->>P: Append response
@@ -578,6 +581,7 @@ acquire glock.RLock + vchannel.RLock
   -> replicate validation
   -> reserve provisional timestamp acker
   -> RequestCommitAndWait using provisional timestamp: freeze and drain body
+  -> acknowledge provisional acker as sync
   -> snapshot complete durable write set
   -> acquire admission[vchannel].RLock
   -> acquire sorted, deduplicated exclusive PK locks
@@ -590,18 +594,23 @@ acquire glock.RLock + vchannel.RLock
   -> append CommitTxn
   -> publish PK / fence state
   -> CommitDone or RejectCommit
-  -> acknowledge final message; acknowledge provisional acker as sync
+  -> acknowledge final message
   -> publish successful MVCC advancement
   -> remove reservation and notify ordinary waiters
   -> release PK locks and admission barrier
 release vchannel.RLock + glock.RUnlock
 ```
 
-The provisional acker remains outstanding while a transaction waits for bodies
-or guards, preventing the TimeTick cleanup watermark from passing its session.
-Only the final timestamp is assigned to the persisted CommitTxn. An error in
-guard acquisition, final allocation, or the final lease check deterministically
-rejects a prepared commit. Ambiguous WAL append failures retain their existing
+The provisional acker remains outstanding only while the transaction body is
+being frozen and drained, preventing cleanup from overtaking that preparation.
+It is acknowledged before guard acquisition, so waiting commits do not pin the
+PChannel confirmation watermark. Transactions may expire and be cleaned up
+during that wait, including removal of their pending write-set records. The
+final timestamp lease check must reject expired transactions before WAL append;
+cleanup cannot turn an expired CAS into an unchecked ordinary commit. Only the
+final timestamp is assigned to the persisted CommitTxn. An error in guard
+acquisition, final allocation, or the final lease check deterministically rejects
+a prepared commit. Ambiguous WAL append failures retain their existing
 transaction outcome handling.
 
 Ordinary nontransactional writes register an in-flight batch before their write
@@ -839,11 +848,13 @@ can still block all exact-PK writers in its vchannel. The existing shared shard
 lifecycle lock remains held throughout append, so existing exclusive DDL
 continues to wait for active writes.
 
-An outstanding provisional acker also holds back the PChannel confirmation
-watermark while a commit waits for its PK guards. Disjoint WAL append concurrency
-therefore does not guarantee independent Strong-read latency: existing TimeTick
-and consumer visibility ordering still apply. Benchmarks should measure this
-confirmation delay alongside write throughput and tail latency.
+A provisional acker holds back the PChannel confirmation watermark only during
+transaction-body preparation, and is acknowledged before PK or admission guard
+waits. A commit already appending to WAL still holds its final acker until append
+and publication finish, so existing TimeTick and consumer visibility ordering
+continue to apply. Benchmarks should distinguish that active-WAL delay from
+queued guard waits, and measure confirmation delay alongside write throughput
+and tail latency.
 
 The required PK-index budget is approximately:
 
@@ -899,9 +910,11 @@ Focused tests must verify ordering and observable concurrency, including:
 - a replicated write participates in the same guards while retaining the
   existing source-proof bypass;
 - the provisional acker prevents sync acknowledgement from advancing past
-  commit preparation, and final timestamp lease expiry rejects before WAL;
+  body preparation, while PK and admission guard waits allow confirmation to
+  advance; final timestamp lease expiry, including cleanup during the wait,
+  rejects before WAL;
 - guard failures reject prepared commits; successful guard release occurs only
-  after transaction transition, final/provisional acknowledgements, and MVCC
+  after transaction transition, final acknowledgement, and MVCC
   publication; ambiguous WAL errors keep their existing classification;
 - exclusive DDL still excludes writes and performs its existing transaction
   cleanup, while local CAS never calls that cleanup path.

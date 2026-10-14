@@ -55,9 +55,10 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	var immutableMsg message.ImmutableMessage
 	var provisionalAcker *ack.Acker
 	var acker *ack.Acker
-	// Keep a provisional commit timestamp outstanding while waiting for the
-	// transaction bodies and its write guard. This prevents the cleanup watermark
-	// from overtaking the session before the final commit timestamp is allocated.
+	// Keep a provisional commit timestamp outstanding while freezing and draining
+	// transaction bodies, so cleanup cannot overtake their preparation. Once the
+	// body is drained, guard waits may expire the session; the final timestamp's
+	// lease check rejects those commits before WAL append.
 	defer func() {
 		if provisionalAcker != nil {
 			provisionalAcker.Ack(ack.OptSync())
@@ -95,6 +96,10 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			}
 			txnSession.CommitDone()
 		}()
+		// A prepared commit has no more body appends to protect. Waiting for its
+		// guard must not hold back confirmation for the entire PChannel.
+		provisionalAcker.Ack(ack.OptSync())
+		provisionalAcker = nil
 	}
 	if writeGuard != nil {
 		ctx, releaseWriteGuard, err = writeGuard.Acquire(ctx, msg)

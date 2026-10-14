@@ -24,7 +24,7 @@ func OptWriteBufferManager(wbMgr writebuffer.BufferManager) optResourceInit {
 }
 
 // InitForTest initializes the singleton of resources for test.
-func InitForTest(t *testing.T, opts ...optResourceInit) {
+func InitForTest(t testing.TB, opts ...optResourceInit) {
 	r = &resourceImpl{
 		logger: mlog.With(),
 	}
