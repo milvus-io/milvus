@@ -273,69 +273,74 @@ TEST_F(LegacyIndexLoadTest, TranslatorConsumesInspectedMetadataOnFirstLoad) {
         info.index_files = paths_;
         info.index_size = PhysicalBytes();
         info.mmap_dir_path = staging_;
-        info.warmup_policy = "disable";
         info.index_params = {{INDEX_TYPE, vector ? "FLAT" : ASCENDING_SORT},
                              {METRIC_TYPE, "L2"},
                              {SCALAR_INDEX_ENGINE_VERSION, "1"},
                              {"nullable", vector ? "false" : "true"}};
-        // Normal load, pre-cancelled load, and an injected scalar payload error.
-        for (const int failure : {0, 1, 2}) {
-            if (vector && failure == 2) {
-                continue;
-            }
-            SCOPED_TRACE(failure);
-            folly::CancellationSource construction;
-            OpContext creation(construction.getToken());
-            segcore::storagev1translator::SealedIndexTranslator translator(
-                &info,
-                tracer::TraceContext{},
-                context_,
-                Config(info.index_params),
-                &creation);
-            construction.requestCancellation();
-            const auto probes = [&] {
-                size_t count = 0;
-                for (const auto& [_, file] : fs_->files) {
-                    const auto size = file->GetSize().ValueOrDie();
-                    for (const auto& call : file->DirectReadCalls())
-                        count += call.position == 0 && call.nbytes < size;
+        for (const auto* warmup : {"sync", "async", "disable"}) {
+            SCOPED_TRACE(warmup);
+            info.warmup_policy = warmup;
+            const bool retain_preparation =
+                std::string_view(warmup) != "disable";
+            // Normal load, pre-cancelled load, and an injected scalar payload error.
+            for (const int failure : {0, 1, 2}) {
+                if ((vector || !retain_preparation) && failure == 2) {
+                    continue;
                 }
-                return count;
-            };
-            const auto inspected = probes();
-            ASSERT_GT(inspected, 0);
-            if (failure == 1) {
-                folly::CancellationSource cancelled;
-                cancelled.requestCancellation();
-                OpContext rejected(cancelled.getToken());
-                ExpectError(FollyCancel,
-                            [&] { translator.get_cells(&rejected, {0}); });
-                EXPECT_EQ(probes(), inspected);
-            } else if (failure == 2) {
-                auto file = DataFile();
-                ASSERT_NE(file, nullptr);
-                file->SetNextCompletion(
-                    arrow::Status::IOError("payload read failed"));
-                OpContext failed;
-                ExpectError(StorageError,
-                            [&] { translator.get_cells(&failed, {0}); });
-                EXPECT_EQ(probes(), inspected);
-            }
-            OpContext load;
-            auto cells = translator.get_cells(&load, {0});
-            ASSERT_EQ(cells.size(), 1);
-            EXPECT_EQ(cells.front().second->Count(), 4);
-            if (failure != 0) {
+                SCOPED_TRACE(failure);
+                folly::CancellationSource construction;
+                OpContext creation(construction.getToken());
+                segcore::storagev1translator::SealedIndexTranslator translator(
+                    &info,
+                    tracer::TraceContext{},
+                    context_,
+                    Config(info.index_params),
+                    &creation);
+                construction.requestCancellation();
+                const auto probes = [&] {
+                    size_t count = 0;
+                    for (const auto& [_, file] : fs_->files) {
+                        const auto size = file->GetSize().ValueOrDie();
+                        for (const auto& call : file->DirectReadCalls())
+                            count += call.position == 0 && call.nbytes < size;
+                    }
+                    return count;
+                };
+                const auto inspected = probes();
+                ASSERT_GT(inspected, 0);
+                if (failure == 1) {
+                    folly::CancellationSource cancelled;
+                    cancelled.requestCancellation();
+                    OpContext rejected(cancelled.getToken());
+                    ExpectError(FollyCancel,
+                                [&] { translator.get_cells(&rejected, {0}); });
+                    EXPECT_EQ(probes(), inspected);
+                } else if (failure == 2) {
+                    auto file = DataFile();
+                    ASSERT_NE(file, nullptr);
+                    file->SetNextCompletion(
+                        arrow::Status::IOError("payload read failed"));
+                    OpContext failed;
+                    ExpectError(StorageError,
+                                [&] { translator.get_cells(&failed, {0}); });
+                    EXPECT_EQ(probes(), inspected);
+                }
+                OpContext load;
+                auto cells = translator.get_cells(&load, {0});
+                ASSERT_EQ(cells.size(), 1);
+                EXPECT_EQ(cells.front().second->Count(), 4);
+                if (failure != 0 || !retain_preparation) {
+                    EXPECT_GT(probes(), inspected);
+                } else {
+                    EXPECT_EQ(probes(), inspected);
+                }
+                cells.clear();
+                // The preparation source ends with the first load, so eviction/reload
+                // does not retain its metadata outside the reader's cache lifetime.
+                cells = translator.get_cells(&load, {0});
+                EXPECT_EQ(cells.front().second->Count(), 4);
                 EXPECT_GT(probes(), inspected);
-            } else {
-                EXPECT_EQ(probes(), inspected);
             }
-            cells.clear();
-            // The preparation source ends with the first load, so eviction/reload
-            // does not retain its metadata outside the reader's cache lifetime.
-            cells = translator.get_cells(&load, {0});
-            EXPECT_EQ(cells.front().second->Count(), 4);
-            EXPECT_GT(probes(), inspected);
         }
     }
 }

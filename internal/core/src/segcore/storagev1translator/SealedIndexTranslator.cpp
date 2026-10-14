@@ -318,7 +318,9 @@ SealedIndexTranslator::SealedIndexTranslator(
         load_resource_request_ = *index_load_info_.load_resource_request;
     }
     storage::ThrowIfCancelled(token, "inspect sealed index metadata");
-    if (!*file_manager_context_.use_async_load) {
+    if (!*file_manager_context_.use_async_load ||
+        meta_.cache_warmup_policy ==
+            CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
         prepared_legacy_source_.reset();
     }
 }

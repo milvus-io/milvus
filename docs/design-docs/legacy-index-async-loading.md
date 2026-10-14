@@ -90,9 +90,10 @@ selection, resource estimation and the first cache-cell load. It detaches the
 construction context after inspection and consumes the source at the start of
 the first load attempt, including cancellation or failure. Later loads open a
 fresh source. This retains directory/envelope metadata, not payload buffers;
-metadata remains allocated until that first attempt or translator destruction
-when warmup is disabled. It is included in the load's transient estimate, but
-has no separate resident cache charge while waiting for that first attempt.
+when the effective warmup policy is disabled, inspection releases the prepared
+source before construction returns and the first demand load reopens it. Warmup
+loads retain the source until their first attempt; its memory is included in the
+load's transient estimate, without a separate idle resident cache charge.
 Packed and synchronous loads still open within each cache-cell request.
 
 The internal loader owns its source and does not retain the creation operation
