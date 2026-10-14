@@ -115,6 +115,9 @@ type broadcastTask struct {
 	ackCallbackScheduler   *ackCallbackScheduler
 	// a flag to indicate that the join ack callback is scheduled.
 	joinAckCallbackScheduled bool
+	// schemaTargetEligible is process-local: recovery re-enters the existing
+	// ordered callback before exposing a target to resource planning.
+	schemaTargetEligible bool
 }
 
 // SetLogger sets the logger of the broadcast task.

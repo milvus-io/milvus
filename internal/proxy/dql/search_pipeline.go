@@ -43,6 +43,7 @@ import (
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -1223,6 +1224,9 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 }
 
 type requeryOperator struct {
+	readSchema     *schemaInfo
+	queryViewPlans []queryclient.ShardPlan
+
 	traceCtx         context.Context
 	rlsPredicate     *planpb.Expr
 	outputFieldNames []string
@@ -1285,6 +1289,8 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		dbName = t.request.GetDbName()
 	}
 	return &requeryOperator{
+		readSchema:         t.schema,
+		queryViewPlans:     t.queryViewPlans,
 		traceCtx:           t.TraceCtx(),
 		rlsPredicate:       t.rlsPredicate,
 		outputFieldNames:   outputFieldNames.Collect(),
@@ -1361,6 +1367,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	}
 	qt := &QueryTask{
 		viewQueryClient: viewQueryClientFromNode(op.node),
+		queryViewPlans:  op.queryViewPlans,
 		baseTask: baseTask{
 			MetaCache: op.node.GetMetaCache(),
 		},
@@ -1388,6 +1395,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		skipRuntimeRLS: true,
 		chMgr:          op.node.ChMgr(),
 	}
+	qt.BindReadSchema(op.collectionID, op.readSchema)
 	queryRunner, ok := op.node.(taskmodel.QueryRunner)
 	if !ok {
 		return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("host node does not implement QueryRunner")

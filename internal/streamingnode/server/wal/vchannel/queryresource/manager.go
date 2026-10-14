@@ -76,12 +76,14 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 	}
 	if _, ok := m.refs[req.Key]; !ok {
 		version := req.Key.QueryViewVersion.DataVersion
-		if m.err != nil || (len(m.refs) != 0 && m.latestDataVersion.GT(version)) {
+		if m.err != nil || (len(m.refs) != 0 && m.latestDataVersion.GT(version) && !m.retainsReadBaseLocked(req.Meta)) {
 			m.mu.Unlock()
 			m.Reject(req)
 			return
 		}
-		m.latestDataVersion = version
+		if version.GT(m.latestDataVersion) {
+			m.latestDataVersion = version
+		}
 		if m.refs == nil {
 			m.refs = make(map[qviews.QueryViewKey]queryViewRef)
 		}
@@ -100,6 +102,20 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 	if notifyReady {
 		m.submitReady(req.Key, req.OnReady)
 	}
+}
+
+// A published-schema placement repair may arrive after a newer schema. Its
+// exact retained base is still pinned by an existing view, so sharing that base
+// does not rewind resource reclamation. Unretained older bases remain rejected.
+func (m *Manager) retainsReadBaseLocked(meta *viewpb.QueryViewMeta) bool {
+	version := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
+	for key, ref := range m.refs {
+		if key.QueryViewVersion.DataVersion.EQ(version) && ref.meta.GetSchemaVersion() == meta.GetSchemaVersion() &&
+			ref.meta.GetLoadInfoVersion() == meta.GetLoadInfoVersion() {
+			return true
+		}
+	}
+	return false
 }
 
 // TryBuildLocked retries a deferred query runtime build after the owning
@@ -194,6 +210,16 @@ func (m *Manager) QueryRuntime(key qviews.QueryViewKey) (*QueryRuntime, bool) {
 		return nil, false
 	}
 	return m.runtime, true
+}
+
+func (m *Manager) ReadRuntime(key qviews.QueryViewKey) (*ReadRuntime, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ref, ok := m.refs[key]
+	if !ok || m.task != nil || m.runtime == nil || m.err != nil {
+		return nil, false
+	}
+	return m.runtime.ReadRuntime(ref.meta)
 }
 
 func (m *Manager) OldestDataVersion() (qviews.DataVersion, bool) {
@@ -445,7 +471,7 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 		if schemaErr != nil {
 			return schemaErr
 		}
-		if err := runtime.PrepareQueryView(ctx, key.QueryViewVersion.DataVersion); err != nil {
+		if err := runtime.PrepareQueryView(ctx, key.QueryViewVersion.DataVersion, ref.meta); err != nil {
 			return err
 		}
 		if err := runtime.CheckSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {

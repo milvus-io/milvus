@@ -3926,7 +3926,7 @@ ChunkedSegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: push delete info to delete_record
-    deleted_record_.LoadPush(pks, timestamps);
+    deleted_record_->LoadPush(pks, timestamps);
 }
 
 void
@@ -4401,14 +4401,14 @@ ChunkedSegmentSealedImpl::GetDataScanResources(FieldId field_id) const {
 int64_t
 ChunkedSegmentSealedImpl::get_deleted_count() const {
     std::shared_lock lck(mutex_);
-    return deleted_record_.size();
+    return deleted_record_->size();
 }
 
 void
 ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
                                            int64_t ins_barrier,
                                            Timestamp timestamp) const {
-    deleted_record_.Query(bitset, ins_barrier, timestamp);
+    deleted_record_->Query(bitset, ins_barrier, timestamp);
 }
 
 void
@@ -4952,10 +4952,11 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
                               snapshot->index_ready_bitset |
                               snapshot->binlog_index_bitset;
 
-    // allow absent fields after supporting add fields
-    AssertInfo(request_fields.size() >= field_ready_bitset.size(),
-               "Request fields size less than field ready bitset size when "
-               "check search");
+    // A retained view can plan against an older schema while this segment
+    // already has additional columns prepared for the next view. Readiness
+    // outside the plan's field range is irrelevant to that request. Conversely,
+    // newer requested fields must remain absent until they are prepared.
+    field_ready_bitset.resize(request_fields.size(), false);
 
     auto absent_fields = request_fields - field_ready_bitset;
 
@@ -5517,7 +5518,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       id_(segment_id),
       col_index_meta_(index_meta),
       is_sorted_by_pk_(is_sorted_by_pk),
-      deleted_record_(
+      deleted_record_(std::make_shared<DeletedRecord<true>>(
           nullptr,
           [this](const std::vector<PkType>& pks,
                  const Timestamp* timestamps,
@@ -5650,11 +5651,32 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                       callback);
               }
           },
-          segment_id) {
+          segment_id)) {
     auto load_info = std::make_shared<const SegmentLoadInfo>(
         milvus::proto::segcore::SegmentLoadInfo(), schema);
     std::atomic_store(&published_state_,
                       BuildPublishedState(schema, load_info, commit_ts_));
+}
+
+ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
+    const ChunkedSegmentSealedImpl& source,
+    std::shared_ptr<const PublishedSegmentState> state)
+    : deleted_record_(source.deleted_record_),
+      published_state_(std::move(state)),
+      id_(source.id_),
+      commit_ts_(published_state_->commit_ts),
+      col_index_meta_(source.col_index_meta_),
+      segcore_config_(source.segcore_config_),
+      is_sorted_by_pk_(source.is_sorted_by_pk_),
+      reader_mutex_(source.reader_mutex_) {
+}
+
+std::unique_ptr<ChunkedSegmentSealedImpl>
+ChunkedSegmentSealedImpl::PinReadState() const {
+    // Sharing PublishedSegmentState shares its column, index and reader handles;
+    // it neither duplicates segment data nor blocks future Reopen publication.
+    return std::unique_ptr<ChunkedSegmentSealedImpl>(
+        new ChunkedSegmentSealedImpl(*this, CapturePublishedState()));
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
@@ -7669,7 +7691,7 @@ ChunkedSegmentSealedImpl::Delete(int64_t size,
         sort_pks[i] = pk;
     }
 
-    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
+    deleted_record_->StreamPush(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
 }
 
@@ -10916,7 +10938,7 @@ ChunkedSegmentSealedImpl::ExecuteTake(
 
     // Reader::take() itself is not thread-safe, so serialize only the call,
     // while the reader object lifetime is owned by the captured runtime snapshot.
-    std::lock_guard<std::mutex> lock(reader_mutex_);
+    std::lock_guard<std::mutex> lock(*reader_mutex_);
     auto take_start = std::chrono::high_resolution_clock::now();
     auto result = reader->take(unique_offsets, 1, needed_columns);
     elapsed_ms = std::chrono::duration<double, std::milli>(

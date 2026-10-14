@@ -105,6 +105,17 @@ type cSegmentImpl struct {
 	ptr C.CSegmentInterface
 }
 
+// PinSealedReadState retains the current immutable columns and indexes. The
+// caller must keep the source alive until the returned segment is released.
+func PinSealedReadState(source CSegment) (CSegment, error) {
+	var ptr C.CSegmentInterface
+	status := C.PinSealedSegmentReadState(C.CSegmentInterface(source.RawPointer()), &ptr)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
+	return &cSegmentImpl{id: source.ID(), ptr: ptr}, nil
+}
+
 // ID returns the ID of the segment.
 func (s *cSegmentImpl) ID() int64 {
 	return s.id

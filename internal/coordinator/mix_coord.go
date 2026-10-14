@@ -1576,11 +1576,13 @@ func (s *mixCoordImpl) ListRefreshExternalCollectionJobs(ctx context.Context, re
 }
 
 func (s *mixCoordImpl) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
-	resp, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, req)
-	if merr.CheckRPCCall(resp, err) == nil {
-		resp.IndexInfoList = s.datacoordServer.GetQueryViewCollectionIndexInfos(req.GetCollectionID())
-	}
-	return resp, err
+	return s.queryCoordServer.GetQueryViewLoadInfo(ctx, req)
+}
+
+// QueryViewCollectionIndexInfos supplies descriptors when a new immutable load
+// snapshot is created; historical RPC reads must not fetch latest descriptors.
+func (s *mixCoordImpl) QueryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
+	return s.datacoordServer.GetQueryViewCollectionIndexInfos(collectionID)
 }
 
 func (s *mixCoordImpl) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {

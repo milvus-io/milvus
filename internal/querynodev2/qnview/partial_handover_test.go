@@ -72,6 +72,8 @@ func TestPendingReplacementRetainsReadySegmentsBeforeOldRelease(t *testing.T) {
 	unblock.Do(func() { close(resume) })
 	waitReady(1)
 	require.Equal(t, 2, loads, "each view must acquire its physical reference")
-	manager.Release(ReleaseSegments{Key: replacement})
+	replacementDropped := make(chan struct{})
+	manager.Release(ReleaseSegments{Key: replacement, OnDropped: func() { close(replacementDropped) }})
+	<-replacementDropped
 	require.True(t, shared.released)
 }

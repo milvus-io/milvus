@@ -43,14 +43,15 @@ type Server struct {
 // Init initializes the streamingnode server.
 func (s *Server) init() {
 	mlog.Info(context.TODO(), "init streamingnode server...")
+	// Install the pull path before opening WALs, which may initialize runners
+	// immediately while recovering their schemas.
+	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.GetLocalMode())
+	fileresource.SetSnapshotFetcher(fetchFileResourceSnapshot)
 	// init all basic components.
 	s.initBasicComponent()
 
 	// init all service.
 	s.initService()
-
-	// init file resource manager
-	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.GetLocalMode())
 
 	if err := analyzer.InitOptions(); err != nil {
 		panic(fmt.Sprintf("init analyzer options failed, %+v", err))

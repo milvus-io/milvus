@@ -1212,7 +1212,7 @@ func (s *Server) qviewsRefreshProgress(ctx context.Context, collectionID, loadPe
 		return 0, err
 	}
 	progress := loadstatus.GetAtVersions(s.qviewsRuntime.loadConfigStore, s.qviewsRuntime.shardViewRegistry,
-		collectionID, collection.GetVirtualChannelNames(), 0, version.(qviews.DataVersion))
+		collectionID, collection.GetVirtualChannelNames(), collection.GetSchema().GetVersion(), version.(qviews.DataVersion))
 	if current, ok := s.qviewsRuntime.refreshVersions.Load(collectionID); !ok || current != version {
 		return 0, nil
 	}

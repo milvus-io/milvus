@@ -458,7 +458,9 @@ func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, in
 		}
 	}
 
+	readSchemaVersion := op.schema.GetVersion()
 	task := &HighlightTask{
+		readSchemaVersion:   &readSchemaVersion,
 		ctx:                 ctx,
 		baseTask:            baseTask{MetaCache: op.metaCache},
 		Condition:           NewTaskCondition(ctx),

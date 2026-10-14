@@ -120,6 +120,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                       int64_t segment_id,
                                       bool is_sorted_by_pk = false);
     ~ChunkedSegmentSealedImpl() override;
+
+    // A read-only segment facade retaining the current column/index state.
+    // The caller must retain the source segment until this facade is released:
+    // deletes still use its shared record and PK lookup callback.
+    std::unique_ptr<ChunkedSegmentSealedImpl>
+    PinReadState() const;
     void
     LoadIndex(LoadIndexInfo& info) override;
     void
@@ -379,7 +385,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
  public:
     size_t
     GetMemoryUsageInBytes() const override {
-        return stats_.mem_size.load() + deleted_record_.mem_size();
+        return stats_.mem_size.load() + deleted_record_->mem_size();
     }
 
     int64_t
@@ -1348,7 +1354,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     update_row_count(RuntimeResourceState& runtime, int64_t row_count) {
         runtime.row_count = row_count;
-        deleted_record_.set_sealed_row_count(row_count);
+        deleted_record_->set_sealed_row_count(row_count);
     }
 
     void
@@ -2227,8 +2233,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                      milvus::OpContext* op_ctx) const;
 
  private:
+    ChunkedSegmentSealedImpl(
+        const ChunkedSegmentSealedImpl& source,
+        std::shared_ptr<const PublishedSegmentState> state);
+
     // deleted pks
-    mutable DeletedRecord<true> deleted_record_;
+    std::shared_ptr<DeletedRecord<true>> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
 
@@ -2271,7 +2281,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Query-time reader calls remain non-thread-safe and must be serialized.
     // The reader object itself now lives in RuntimeResourceState snapshots so
     // reopen/load can stage a replacement reader without exposing it early.
-    mutable std::mutex reader_mutex_;
+    std::shared_ptr<std::mutex> reader_mutex_ = std::make_shared<std::mutex>();
 
 #ifdef MILVUS_UNIT_TEST
  public:

@@ -245,6 +245,16 @@ type QueryViewLease struct {
 }
 
 func (h *SNQueryViewHandler) AcquireLatestUpView(ctx context.Context, shardID qviews.ShardID) (*QueryViewLease, error) {
+	return h.acquireUpViewForSchema(ctx, shardID, nil)
+}
+
+// AcquireUpViewAtSchema selects the newest Up view of one exact read schema.
+// Version zero is an exact version, not a latest selector.
+func (h *SNQueryViewHandler) AcquireUpViewAtSchema(ctx context.Context, shardID qviews.ShardID, schema int32) (*QueryViewLease, error) {
+	return h.acquireUpViewForSchema(ctx, shardID, &schema)
+}
+
+func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID qviews.ShardID, schema *int32) (*QueryViewLease, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -254,7 +264,7 @@ func (h *SNQueryViewHandler) AcquireLatestUpView(ctx context.Context, shardID qv
 	shard := h.shards[shardID]
 	if shard != nil {
 		h.mu.Unlock()
-		return shard.acquireLatestUpView(ctx)
+		return shard.acquireUpViewForSchema(ctx, schema)
 	}
 	if shardID.ReplicaID != qviews.UnknownReplicaID {
 		h.mu.Unlock()
@@ -270,7 +280,7 @@ func (h *SNQueryViewHandler) AcquireLatestUpView(ctx context.Context, shardID qv
 	// A matching replica may be preparing or tearing down. Acquire an Up lease
 	// before choosing it. Never nest shard locks under h.mu: onEmpty takes h.mu.
 	for _, candidate := range candidates {
-		lease, err := candidate.acquireLatestUpView(ctx)
+		lease, err := candidate.acquireUpViewForSchema(ctx, schema)
 		if err == nil {
 			return lease, nil
 		}

@@ -486,7 +486,7 @@ func (m *PChannelRecoveryManager) Release(req snview.ReleaseResource) {
 }
 
 func (m *PChannelRecoveryManager) QueryRuntime(key qviews.QueryViewKey) (snview.QueryRuntime, bool) {
-	runtime, ok := m.GetQueryRuntime(key)
+	runtime, ok := m.GetQueryReadRuntime(key)
 	if !ok {
 		return nil, false
 	}
@@ -502,6 +502,14 @@ func (m *PChannelRecoveryManager) GetQueryRuntime(key qviews.QueryViewKey) (*que
 		return nil, false
 	}
 	return module.QueryRuntime(key)
+}
+
+func (m *PChannelRecoveryManager) GetQueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
+	module := m.Module(key.ShardID.VChannel)
+	if module == nil {
+		return nil, false
+	}
+	return module.QueryReadRuntime(key)
 }
 
 // AcquireStream gives each consumer an independent subscription lifetime while

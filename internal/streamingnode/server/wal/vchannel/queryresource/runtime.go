@@ -185,7 +185,7 @@ func (r *QueryRuntime) Advance(oldestDataVersion qviews.DataVersion) {
 }
 
 // PrepareQueryView fences sealed handoffs and prepares the shared BM25 aggregate before readiness.
-func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.DataVersion) error {
+func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.DataVersion, meta ...*viewpb.QueryViewMeta) error {
 	if r == nil {
 		return nil
 	}
@@ -201,6 +201,16 @@ func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.
 		return err
 	}
 	for _, module := range modules {
+		if len(meta) > 0 {
+			if versioned, ok := module.(interface {
+				PrepareSchemaDataVersion(context.Context, *viewpb.QueryViewMeta) error
+			}); ok {
+				if err := versioned.PrepareSchemaDataVersion(ctx, meta[0]); err != nil {
+					return err
+				}
+				continue
+			}
+		}
 		versioned, ok := module.(QueryRuntimePrepareModule)
 		if !ok {
 			continue

@@ -3,6 +3,8 @@ package loadmgr
 import (
 	"sort"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -16,6 +18,8 @@ type LoadConfig struct {
 	CollectionID             int64
 	PartitionIDs             []int64
 	LoadFields               []*messagespb.LoadFieldConfig
+	LoadAllFields            *bool
+	SkipLoadDynamicField     bool
 	UserSpecifiedReplicaMode bool
 	Replicas                 []*ReplicaAssignment
 }
@@ -37,6 +41,10 @@ func (c *LoadConfig) Clone() *LoadConfig {
 		DbID:                     c.DbID,
 		CollectionID:             c.CollectionID,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
+		SkipLoadDynamicField:     c.SkipLoadDynamicField,
+	}
+	if c.LoadAllFields != nil {
+		out.LoadAllFields = proto.Bool(*c.LoadAllFields)
 	}
 	if len(c.PartitionIDs) > 0 {
 		out.PartitionIDs = append([]int64{}, c.PartitionIDs...)
@@ -76,6 +84,10 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 		CollectionID:             msg.GetCollectionId(),
 		PartitionIDs:             append([]int64{}, msg.GetPartitionIds()...),
 		UserSpecifiedReplicaMode: msg.GetUserSpecifiedReplicaMode(),
+		SkipLoadDynamicField:     msg.GetSkipLoadDynamicField(),
+	}
+	if msg.LoadAllFields != nil {
+		cfg.LoadAllFields = proto.Bool(msg.GetLoadAllFields())
 	}
 	for _, f := range msg.GetLoadFields() {
 		cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{
@@ -106,6 +118,11 @@ func buildFromPersisted(
 		DbID:                     info.GetDbID(),
 		CollectionID:             info.GetCollectionID(),
 		UserSpecifiedReplicaMode: info.GetUserSpecifiedReplicaMode(),
+		SkipLoadDynamicField:     info.GetSkipLoadDynamicField(),
+	}
+
+	if info.LoadAllFields != nil {
+		cfg.LoadAllFields = proto.Bool(info.GetLoadAllFields())
 	}
 
 	// PartitionIDs: derived from PartitionLoadInfo list.
@@ -149,6 +166,10 @@ func (c *LoadConfig) toCollectionLoadInfoProto() *querypb.CollectionLoadInfo {
 		ReplicaNumber:            int32(len(c.Replicas)),
 		Status:                   querypb.LoadStatus_Loaded,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
+		SkipLoadDynamicField:     c.SkipLoadDynamicField,
+	}
+	if c.LoadAllFields != nil {
+		info.LoadAllFields = proto.Bool(*c.LoadAllFields)
 	}
 	if len(c.LoadFields) > 0 {
 		info.LoadFields = make([]int64, 0, len(c.LoadFields))

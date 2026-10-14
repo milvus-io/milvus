@@ -69,6 +69,11 @@ QueryNode.NewQueryViewSegmentManager
 | `QueryViewCollectionRuntimeManager` | Pins local collection runtime using collection schema/load metadata and exposes index meta update for segment load. |
 | `TransformLogBuffer` | Pins the view-level transform range and registers loaded sealed segments for catch-up. |
 
+Asynchronous physical-load and TransformLog catch-up callbacks retain their
+segment-state generation. Release/reload may create a new state with the same
+SegmentID; an old success, failure, or cancellation cannot mark that replacement
+Ready or remove its resources.
+
 ## 4. Authoritative Acquire Execution Order
 
 This section is the single source of truth for the current QueryNode Acquire
@@ -163,6 +168,11 @@ type QueryViewLoadMetadataProvider interface {
     GetQueryViewLoadInfo(ctx context.Context, collectionID int64, version QueryViewLoadInfoVersion) (QueryViewLoadInfo, error)
 }
 ```
+
+The agreed [schema-handoff refactor](../schema_evolution.md) replaces the
+latest-DescribeCollection and shared mutable schema model below with exact SN
+schema lookup, retained LoadInfo snapshots and view-bound column resources.
+That implementation is pending; the following describes current behavior.
 
 Collection runtime acquisition resolves the QueryView's load-info version, then
 pins the local collection runtime through `collectionManager.PutOrRef` before
@@ -366,18 +376,20 @@ When a view is applied as `Dropped`, QueryNode enters local `Dropping` and calls
 
 Release order:
 
-1. `QueryViewSegmentReadinessManager` detaches the view from transform refs.
-2. For each segment whose last transform ref is removed, it cancels catch-up,
-   unregisters TransformLog, and releases the loaded segment.
-3. It calls `ViewScopedPhysicalSegmentManager.Release` to remove physical refs.
-4. The physical manager cancels still-loading segments only when the released
-   view was the last physical ref.
-5. The physical manager closes the segment's SegmentLoadInfo subscription when
-   the final physical ref is removed.
-6. The physical manager waits for the view's in-flight load callbacks.
-7. The transform manager releases the view-level TransformLog guard and
-   collection runtime guard.
-8. `OnDropped` drives the local state machine to `Dropped`.
+1. `QueryViewSegmentReadinessManager` synchronously detaches the transform refs.
+2. It synchronously asks `ViewScopedPhysicalSegmentManager.Release` to remove
+   physical refs. The last reference removes the segment from reuse before
+   another view can acquire it. Closing the detached metadata subscription is
+   asynchronous too: it may wait for a callback that needs the shard mutex.
+3. Outside the shard mutex and scheduler worker pool, release the TransformLog
+   guard, cancel catch-up and unregister segments, then release view-owned read
+   snapshots before destroying physical segments. Native destruction may wait
+   for snapshots still owned by pending callbacks; those callbacks must remain
+   able to enter the shard and run.
+4. Wait for the physical manager's in-flight load callbacks to finish as well.
+5. Release the collection runtime guard, then invoke `OnDropped` exactly once.
+   Completion requires both native cleanup and physical callback completion.
+
 9. QueryNode reports `Dropped` and removes the local view entry.
 
 Task cancellation is asynchronous. Load release correctness depends on context

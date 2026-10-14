@@ -12,6 +12,19 @@ import (
 
 // Wait uses the same version-checked predicate as public progress reporting.
 func Wait(ctx context.Context, store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, changes *readiness.Notifications, collectionID int64, vchannels []string, schemaVersion int32, dataVersion qviews.DataVersion) error {
+	var schema *int32
+	if schemaVersion != 0 {
+		schema = &schemaVersion
+	}
+	return wait(ctx, store, registry, changes, collectionID, vchannels, schema, dataVersion)
+}
+
+// WaitAtSchema waits for an exact read schema, including version zero.
+func WaitAtSchema(ctx context.Context, store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, changes *readiness.Notifications, collectionID int64, vchannels []string, schemaVersion int32) error {
+	return wait(ctx, store, registry, changes, collectionID, vchannels, &schemaVersion, qviews.DataVersion{})
+}
+
+func wait(ctx context.Context, store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, changes *readiness.Notifications, collectionID int64, vchannels []string, schemaVersion *int32, dataVersion qviews.DataVersion) error {
 	// Subscribe before checking so state changes cannot be lost before blocking.
 	subscription := changes.Subscribe(collectionID)
 	defer subscription.Close()
@@ -31,7 +44,7 @@ func Wait(ctx context.Context, store *loadmgr.LoadConfigStore, registry *coordvi
 		// The same configuration-version-checked result drives public loading
 		// progress and AutoLoad readiness. Observe release again after the read
 		// so a coalesced release/reload cannot satisfy an older subscriber.
-		progress := GetAtVersions(store, registry, collectionID, vchannels, schemaVersion, dataVersion)
+		progress := getAtVersions(store, registry, collectionID, vchannels, schemaVersion, dataVersion)
 		if progress.Config == nil {
 			return merr.WrapErrCollectionNotLoaded(collectionID)
 		}

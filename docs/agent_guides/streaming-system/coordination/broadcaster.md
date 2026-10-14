@@ -4,6 +4,12 @@ Executes cross-PChannel atomic broadcast for DDL/DCL messages with resource lock
 
 ## Broadcast API
 
+The agreed [schema-handoff refactor](../../../design-docs/design_docs/qviews/schema_evolution.md)
+uses the durable ALTER message and ordered ACK callback as the target-schema
+source for DataCoord and QueryView planning. Its in-process target projection
+is new work, not an existing historical-schema API. Completed task cleanup is
+not a permanent schema store; all new GC coordination is deferred in that design.
+
 Callers use `broadcast.StartBroadcastWithResourceKeys(ctx, resourceKeys...)` to obtain a `BroadcastAPI`, which acquires resource key locks and returns after WAL-based DDL is ready. The caller then constructs a `BroadcastMutableMessage` with its data VChannels (`WithBroadcast`), or with none (`WithControlChannelBroadcast`) for a CChannel-only broadcast, and calls `Broadcast()`. The broadcaster adds the CChannel to the header of every broadcast, so callers never pass it. `Close()` releases locks if no broadcast was issued.
 
 Non-primary clusters reject all broadcasts with `ErrNotPrimary`. The exception is `broadcast.StartUnreplicableBroadcastWithResourceKeys`: it is accepted on any replicate role, and its message must carry the `Unreplicable` (`_ur`) property, so it is written to the local WAL and never replicated (used for resource group DDL, which describes this cluster's own nodes).

@@ -205,3 +205,24 @@ func TestHighlightStreamingAnalyzer(t *testing.T) {
 		})
 	}
 }
+
+// Pipeline tests exercise the streaming analyzer boundary; QueryNode RPCs are
+// no longer part of lexical highlighting.
+func mockPipelineAnalyzer(t *testing.T, expectedTexts []string) {
+	t.Helper()
+	mockTest(t, streaming.WAL, &highlightWAL{})
+	mockTest(t, (*highlightWAL).AnalyzerClient, &highlightAnalyzer{})
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{VChannels: []string{"p_1v0"}}, nil)
+	mockTestTo(t, (*highlightAnalyzer).RunAnalyzer, func(_ *highlightAnalyzer, _ context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+		texts := make([]string, len(req.GetPlaceholder()))
+		results := make([]*milvuspb.AnalyzerResult, len(texts))
+		for i, text := range req.GetPlaceholder() {
+			texts[i] = string(text)
+			results[i] = &milvuspb.AnalyzerResult{}
+		}
+		require.Equal(t, expectedTexts, texts)
+		require.Equal(t, "p_1v0", req.GetFieldAnalyzer().GetVchannel())
+		require.NotNil(t, req.GetFieldAnalyzer().ReadSchemaVersion)
+		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Results: results}, nil
+	})
+}

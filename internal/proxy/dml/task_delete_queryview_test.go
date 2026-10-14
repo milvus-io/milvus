@@ -32,7 +32,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				pkType = schemapb.DataType_VarChar
 				values = []any{"a", "b", "c"}
 			}
-			schema := mustNewSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			schema := mustNewSchemaInfo(&schemapb.CollectionSchema{Version: 7, Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: pkType},
 				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
 			}})
@@ -124,6 +124,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			require.NotNil(t, captured)
 			require.Equal(t, int64(9), captured.GetDbID())
 			require.Equal(t, int64(10), captured.GetCollectionID())
+			require.EqualValues(t, 7, captured.GetSchemaVersion())
 			require.Equal(t, []int64{11}, captured.GetPartitionIDs())
 			require.Equal(t, commonpb.ConsistencyLevel_Strong, captured.GetConsistencyLevel())
 			require.EqualValues(t, typeutil.Unlimited, captured.GetLimit())

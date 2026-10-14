@@ -364,6 +364,7 @@ message StreamingError {
 service StreamingNodeHandlerService {
     rpc SubscribeTransform(stream TransformRequest) returns (stream TransformResponse) {};
     rpc RunAnalyzer(StreamingNodeRunAnalyzerRequest) returns (StreamingNodeRunAnalyzerResponse) {};
+    rpc GetCollectionSchema(StreamingNodeGetCollectionSchemaRequest) returns (StreamingNodeGetCollectionSchemaResponse) {};
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
     // from the correct position, ensuring no duplicate or missing messages.
     rpc GetReplicateCheckpoint(GetReplicateCheckpointRequest) returns (GetReplicateCheckpointResponse) {}
@@ -1030,10 +1031,31 @@ message StreamingFieldAnalyzer {
     reserved "schema_version";
     repeated string analyzer_names = 5;
     PChannelInfo pchannel = 6;
+    // Internal rendering binds the search schema, including version zero.
+    // Omitted for standalone analyzer requests, which use the WAL write schema.
+    optional int32 read_schema_version = 7;
 }
 message StreamingNodeRunAnalyzerResponse {
     repeated milvus.AnalyzerResult results = 1;
     common.Status status = 2;
+}
+
+// Schema access is independent of collection loading. The selector distinguishes
+// the current write schema from an exact historical version, including zero.
+// Failures use native streaming gRPC errors, not an embedded response status.
+message StreamingNodeGetCollectionSchemaRequest {
+    int64 collection_id = 1;
+    string vchannel = 2;
+    PChannelInfo pchannel = 3;
+    oneof selector {
+        bool current_write = 4;
+        int32 schema_version = 5;
+    }
+}
+
+message StreamingNodeGetCollectionSchemaResponse {
+    schema.CollectionSchema schema = 1;
+    uint64 effective_time_tick = 2;
 }
 
 message CreateTransformStreamRequest {

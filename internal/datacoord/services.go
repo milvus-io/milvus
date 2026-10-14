@@ -1352,6 +1352,12 @@ func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID 
 		}
 		cloned := segment.Clone()
 		segmentutil.ReCalcRowCount(segment.SegmentInfo, cloned.SegmentInfo)
+		// Unlike GetSegmentInfo's legacy QueryCoord broker, QueryView consumers
+		// receive load-ready metadata directly. Expand compressed log IDs on the
+		// snapshot, preserving the compact representation in the metadata cache.
+		if err := binlog.DecompressBinLogs(cloned.SegmentInfo); err != nil {
+			return nil, nil, merr.Wrapf(err, "expand query view binlogs for segment %d", segmentID)
+		}
 		infos = append(infos, s.packQueryViewSegmentLoadInfo(cloned.SegmentInfo, indexInfos, segmentIndexes[segmentID]))
 	}
 	return infos, indexInfos, nil

@@ -21,7 +21,11 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 	if err := validateWALViewSnapshot(view); err != nil {
 		return err
 	}
-	collection, err := newCollection(view)
+	writeView := view
+	if view.WriteSchema != nil {
+		writeView.Schema = view.WriteSchema
+	}
+	collection, err := newCollection(writeView)
 	if err != nil {
 		return err
 	}

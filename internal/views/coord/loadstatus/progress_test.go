@@ -72,7 +72,17 @@ func TestProgress(t *testing.T) {
 	stats[qviews.ShardID{ReplicaID: 10, VChannel: "v0"}].UpSchemaVersion = 2
 	require.Equal(t, int64(50), GetAtSchemaVersion(store, &coordview.ShardViewRegistry{}, 1, channels, 2).Percentage())
 	stats[qviews.ShardID{ReplicaID: 10, VChannel: "v1"}].UpSchemaVersion = 3
+	require.False(t, GetAtSchemaVersion(store, &coordview.ShardViewRegistry{}, 1, channels, 2).Ready(), "a different schema cannot complete this handoff")
+	stats[qviews.ShardID{ReplicaID: 10, VChannel: "v1"}].UpBySchema = map[int32]coordview.SchemaUpView{2: {LoadInfoVersion: version}}
 	require.True(t, GetAtSchemaVersion(store, &coordview.ShardViewRegistry{}, 1, channels, 2).Ready())
+	require.False(t, GetAtSchemaVersion(store, &coordview.ShardViewRegistry{}, 1, channels, 0).Ready(), "schema zero is exact, not latest")
+	require.False(t, GetAtVersions(store, &coordview.ShardViewRegistry{}, 1, channels, 0, qviews.DataVersion{}).Ready(), "a refresh cannot acknowledge an unpublished target instead of schema zero")
+	for _, channel := range channels {
+		stats[qviews.ShardID{ReplicaID: 10, VChannel: channel}].UpBySchema = map[int32]coordview.SchemaUpView{0: {LoadInfoVersion: version}}
+	}
+	require.True(t, GetAtSchemaVersion(store, &coordview.ShardViewRegistry{}, 1, channels, 0).Ready())
+	require.True(t, GetAtVersions(store, &coordview.ShardViewRegistry{}, 1, channels, 0, qviews.DataVersion{}).Ready())
+	require.False(t, GetAtVersions(store, &coordview.ShardViewRegistry{}, 1, channels, 0, qviews.DataVersion{StreamingVersion: 1}).Ready(), "schema coverage must also satisfy the refresh data fence")
 	cfg.Replicas = append(cfg.Replicas, &loadmgr.ReplicaAssignment{ReplicaID: 11})
 	require.NoError(t, store.Put(ctx, cfg))
 	version = store.GetConfigVersion(1)

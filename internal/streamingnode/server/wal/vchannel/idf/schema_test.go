@@ -179,8 +179,13 @@ func TestSchemaRefreshReconcilesLaterLoadFieldsAndPreservesCurrentOracle(t *test
 	require.NoError(t, runtime.PrepareSchema(t.Context(), meta, loadInfo))
 	require.Equal(t, version, runtime.oracle.currentVersion)
 	require.EqualValues(t, 3, runtime.SchemaVersion())
-	require.True(t, old.closed)
+	require.False(t, old.closed, "old read schema must retain its IDF aggregate")
+	retained := runtime.oracles[queryresource.ReadSchemaKey{SchemaVersion: 2, LoadInfoVersion: 2}]
+	require.Same(t, old, retained)
+	require.NoError(t, runtime.PrepareSchema(t.Context(), &viewpb.QueryViewMeta{SchemaVersion: 2, LoadInfoVersion: 2}, loadInfo))
+	require.Same(t, old, runtime.oracles[queryresource.ReadSchemaKey{SchemaVersion: 2, LoadInfoVersion: 2}])
 	runtime.Close()
+	require.True(t, old.closed)
 	require.ErrorIs(t, runtime.PrepareSchema(t.Context(), meta, loadInfo), context.Canceled)
 }
 

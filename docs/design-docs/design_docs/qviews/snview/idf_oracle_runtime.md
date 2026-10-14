@@ -2,6 +2,11 @@
 
 ## Contract
 
+The agreed [schema-handoff refactor](../schema_evolution.md) requires statistics
+and Function resources compatible with each retained read schema. It can share
+compatible current aggregates; it does not introduce per-MVCC statistics.
+Schema-specific resource isolation is pending, and GC coordination is deferred.
+
 A loaded vchannel owns one current BM25 aggregate, shared by all QueryViews and
 all request DataVersions. Statistics are the newest DataView baseline successfully prepared locally for
 a received QueryView, plus applied live growing events. "Newest" is local to SN;

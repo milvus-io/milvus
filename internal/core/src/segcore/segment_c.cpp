@@ -359,6 +359,22 @@ AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
         static_cast<milvus::futures::IFuture*>(future.release())));
 }
 
+CStatus
+PinSealedSegmentReadState(CSegmentInterface c_segment,
+                          CSegmentInterface* read_segment) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        auto* segment =
+            dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                static_cast<milvus::segcore::SegmentInterface*>(c_segment));
+        AssertInfo(segment != nullptr,
+                   "read-state pin requires a sealed segment");
+        *read_segment = segment->PinReadState().release();
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
 void
 DeleteSegment(CSegmentInterface c_segment) {
     SCOPE_CGO_CALL_METRIC();

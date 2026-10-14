@@ -5,6 +5,7 @@ package qnview
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -201,6 +202,8 @@ type fakeCollectionRuntimeGuard struct {
 	updatedIndexes []*indexpb.IndexInfo
 	updateErr      error
 }
+
+func (g *fakeCollectionRuntimeGuard) Pin() func() { return func() {} }
 
 func (g *fakeCollectionRuntimeGuard) Release() {
 	g.mu.Lock()
@@ -476,8 +479,9 @@ func (s *fakeSegmentLoadInfoStream) Subscribe(option SegmentLoadInfoSubscription
 }
 
 func (s *fakeSegmentLoadInfoStream) Emit(snapshot SegmentLoadInfoSnapshot) error {
-	for _, sub := range s.subscriptions {
-		if !sub.closed && sub.option.CollectionID == snapshot.CollectionID && sub.option.SegmentID == snapshot.SegmentID {
+	for i := len(s.subscriptions) - 1; i >= 0; i-- {
+		sub := s.subscriptions[i]
+		if !sub.closed.Load() && sub.option.CollectionID == snapshot.CollectionID && sub.option.SegmentID == snapshot.SegmentID {
 			return sub.option.Handler.Handle(snapshot)
 		}
 	}
@@ -488,13 +492,13 @@ func (*fakeSegmentLoadInfoStream) Close() {}
 
 type fakeSegmentLoadInfoSubscription struct {
 	option SegmentLoadInfoSubscriptionOption
-	closed bool
+	closed atomic.Bool
 }
 
 func (s *fakeSegmentLoadInfoSubscription) CollectionID() int64 { return s.option.CollectionID }
 func (s *fakeSegmentLoadInfoSubscription) SegmentID() int64    { return s.option.SegmentID }
 func (*fakeSegmentLoadInfoSubscription) Error() error          { return nil }
-func (s *fakeSegmentLoadInfoSubscription) Close()              { s.closed = true }
+func (s *fakeSegmentLoadInfoSubscription) Close()              { s.closed.Store(true) }
 
 func (s *fakeNodeScheduler) Tasks() []*SegmentLoadTask {
 	s.mu.Lock()

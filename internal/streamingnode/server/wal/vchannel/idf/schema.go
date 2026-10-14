@@ -45,13 +45,14 @@ func (r *Runtime) PrepareSchema(ctx context.Context, meta *viewpb.QueryViewMeta,
 	}
 	defer r.prepareMu.Unlock()
 	r.mu.RLock()
-	prepared, loadVersion, base, closed := r.schemaVersion, r.loadInfoVersion, r.view, r.closed
+	base, closed := r.view, r.closed
+	_, prepared := r.oracles[queryresource.ReadSchemaKey{SchemaVersion: meta.GetSchemaVersion(), LoadInfoVersion: meta.GetLoadInfoVersion()}]
 	oracle := r.oracle
 	r.mu.RUnlock()
 	if closed {
 		return context.Canceled
 	}
-	if prepared >= meta.GetSchemaVersion() && loadVersion == meta.GetLoadInfoVersion() {
+	if prepared {
 		return nil
 	}
 	if base.CaptureQueryView == nil {
@@ -101,6 +102,9 @@ func (r *Runtime) PrepareSchema(ctx context.Context, meta *viewpb.QueryViewMeta,
 	}) {
 		return merr.WrapErrServiceNotReadyMsg("BM25 schema snapshot is not ready")
 	}
+	if view.Schema.GetVersion() != meta.GetSchemaVersion() {
+		return merr.WrapErrServiceNotReadyMsg("BM25 schema snapshot version mismatch")
+	}
 	view.ResourceEventBarrier = base.ResourceEventBarrier
 	view.RuntimeContext = base.RuntimeContext
 	if view.LoadInfoVersion != 0 && loadInfo != nil {
@@ -138,16 +142,13 @@ func (r *Runtime) PrepareSchema(ctx context.Context, meta *viewpb.QueryViewMeta,
 		stage.pending = nil
 		r.cond.Broadcast()
 		if len(batch) == 0 {
-			old := r.oracle
 			r.oracle, r.disabled = next, next == nil
+			r.oracles[queryresource.ReadSchemaKey{SchemaVersion: view.Schema.GetVersion(), LoadInfoVersion: view.LoadInfoVersion}] = next
 			r.schemaVersion = view.Schema.GetVersion()
 			r.loadInfoVersion = view.LoadInfoVersion
 			r.refresh = nil
 			published = true
 			r.mu.Unlock()
-			if old != nil {
-				old.Close()
-			}
 			return nil
 		}
 		r.mu.Unlock()

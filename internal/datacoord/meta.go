@@ -99,6 +99,9 @@ type meta struct {
 	catalog                   metastore.DataCoordCatalog
 
 	collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo] // collection id to collection info
+	// Installed by Coordinator before background planning starts. Standalone
+	// metadata users can continue using their supplied collection snapshots.
+	preparationSchema func(context.Context, int64, *schemapb.CollectionSchema) (*schemapb.CollectionSchema, error)
 
 	segMu    lock.RWMutex
 	segments *SegmentsInfo // segment id to segment info

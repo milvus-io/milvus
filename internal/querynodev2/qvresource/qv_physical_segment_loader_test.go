@@ -18,10 +18,9 @@ import (
 )
 
 func TestQueryViewPhysicalSegmentLoader_LoadBorrowsCollectionAndWrapsSegment(t *testing.T) {
-	collection := &fakeQVCollectionManager{}
 	segments := &fakeQVSegmentManager{}
 	loader := &fakeQVLoader{segment: &fakeQVSegment{id: 10, partitionID: 100}}
-	physical := newQueryViewPhysicalSegmentLoader(collection, segments, loader)
+	physical := newQueryViewPhysicalSegmentLoader(segments, loader)
 
 	loaded, err := physical.Load(
 		context.Background(),
@@ -30,9 +29,6 @@ func TestQueryViewPhysicalSegmentLoader_LoadBorrowsCollectionAndWrapsSegment(t *
 	)
 	require.NoError(t, err)
 
-	assert.Zero(t, collection.putCollectionID)
-	assert.Zero(t, collection.unrefCount)
-	assert.Zero(t, collection.refCount)
 	assert.Equal(t, int64(1), loader.collectionID)
 	assert.True(t, loader.newCalled)
 	assert.True(t, loader.loadCalled)
@@ -47,7 +43,7 @@ func TestQueryViewPhysicalSegmentLoader_LoadBorrowsCollectionAndWrapsSegment(t *
 
 func TestQueryViewPhysicalSegmentLoaderUpdateDoesNotUseContentHashAsOrderedLoadVersion(t *testing.T) {
 	loader := &fakeQVLoader{}
-	physical := newQueryViewPhysicalSegmentLoader(&fakeQVCollectionManager{}, &fakeQVSegmentManager{}, loader)
+	physical := newQueryViewPhysicalSegmentLoader(&fakeQVSegmentManager{}, loader)
 	segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10, partitionID: 100}, &fakeQVSegmentManager{}, "v1", 50)
 
 	err := physical.Update(
@@ -69,7 +65,7 @@ func TestQueryViewPhysicalSegmentLoaderUpdateDoesNotUseContentHashAsOrderedLoadV
 
 func TestQueryViewPhysicalSegmentLoaderUpdateUnwrapsTransformSegment(t *testing.T) {
 	loader := &fakeQVLoader{}
-	physical := newQueryViewPhysicalSegmentLoader(&fakeQVCollectionManager{}, &fakeQVSegmentManager{}, loader)
+	physical := newQueryViewPhysicalSegmentLoader(&fakeQVSegmentManager{}, loader)
 	segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10, partitionID: 100}, &fakeQVSegmentManager{}, "v1", 50)
 	wrapper := &testTransformSegmentWrapper{TransformSegment: &testTransformSegmentWrapper{TransformSegment: segment}}
 
@@ -102,7 +98,6 @@ func TestRealQVSegmentLoader_NewSegmentUsesPinnedCollection(t *testing.T) {
 	localCollection := segments.NewCollectionWithoutSegcoreForTest(1, schema)
 	collections := &fakeQVCollectionManager{collection: localCollection}
 	runtime := &queryViewCollectionRuntimeGuard{
-		collections:  collections,
 		collection:   localCollection,
 		collectionID: 1,
 		schema:       schema,
@@ -119,7 +114,7 @@ func TestRealQVSegmentLoader_NewSegmentUsesPinnedCollection(t *testing.T) {
 		patch.UnPatch()
 	})
 
-	loader := realQVSegmentLoader{collections: collections}
+	loader := realQVSegmentLoader{}
 	_, err := loader.NewSegment(context.Background(), runtime, &querypb.SegmentLoadInfo{CollectionID: 1})
 	require.ErrorIs(t, err, assert.AnError)
 	assert.Same(t, localCollection, usedCollection)
@@ -128,7 +123,7 @@ func TestRealQVSegmentLoader_NewSegmentUsesPinnedCollection(t *testing.T) {
 
 func TestQueryViewPhysicalSegmentReopenWaitsForHistoricalDeletes(t *testing.T) {
 	loader := &fakeQVLoader{}
-	physical := newQueryViewPhysicalSegmentLoader(nil, nil, loader)
+	physical := newQueryViewPhysicalSegmentLoader(nil, loader)
 	segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10}, nil, "v1", 50)
 	snapshot := qnview.SegmentLoadInfoSnapshot{LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 10}}
 	delta := mockey.Mock((*fakeQVLoader).LoadDeltaLogs).Return(assert.AnError).Build()

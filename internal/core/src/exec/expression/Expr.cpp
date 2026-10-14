@@ -103,8 +103,7 @@ ExprSet::Eval(int32_t begin,
 // This means: keep entities with null TTL (never expire) OR entities with TTL > current time (not expired)
 expr::TypedExprPtr
 CreateTTLFieldFilterExpression(QueryContext* query_context) {
-    auto segment = query_context->get_segment();
-    auto schema = segment->get_schema_snapshot();
+    auto schema = query_context->get_read_schema();
     if (!schema->get_ttl_field_id().has_value()) {
         return nullptr;
     }

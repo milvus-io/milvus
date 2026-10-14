@@ -41,6 +41,8 @@ type VChannelWALView struct {
 	LoadFields   []*messagespb.LoadFieldConfig
 	IndexInfos   []*indexpb.IndexInfo
 	Schema       *schemapb.CollectionSchema
+	// WriteSchema is the allocation/encoding frontier, independent of the read view.
+	WriteSchema *schemapb.CollectionSchema
 
 	SegmentSnapshot                VisibleSegmentSnapshot
 	TransformLogStream             wal.TransformLogStream

@@ -91,7 +91,7 @@ type fakeQVResourceLoader struct {
 	err         error
 }
 
-func (l *fakeQVResourceLoader) ReserveLoadResource(_ context.Context, infos ...*querypb.SegmentLoadInfo) (segments.LoadResourceReservation, error) {
+func (l *fakeQVResourceLoader) ReserveLoadResourceWithSchema(_ context.Context, _ *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (segments.LoadResourceReservation, error) {
 	if len(infos) > 0 {
 		l.info = infos[0]
 	}
@@ -141,7 +141,7 @@ func (l *fakeQVLoader) LoadSegment(_ context.Context, segment qvLoadedSegment, i
 	return l.err
 }
 
-func (l *fakeQVLoader) ReopenSegment(_ context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
+func (l *fakeQVLoader) ReopenSegment(_ context.Context, segment qvLoadedSegment, _ qnview.CollectionRuntime, info *querypb.SegmentLoadInfo) error {
 	l.reopenCalled = true
 	l.infos = append(l.infos, info)
 	return l.err
@@ -217,6 +217,8 @@ func (r fakeQVCollectionRuntime) SchemaVersion() int64 {
 func (r fakeQVCollectionRuntime) CCollection() *segcore.CCollection {
 	return nil
 }
+
+func (r fakeQVCollectionRuntime) Pin() func() { return func() {} }
 
 func (r fakeQVCollectionRuntime) PinnedCollection() *segments.Collection {
 	return r.collection

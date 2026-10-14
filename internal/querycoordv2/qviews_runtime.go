@@ -22,6 +22,7 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -49,6 +51,7 @@ type qviewsBalancer interface {
 }
 
 type qviewsRuntime struct {
+	loadInfos         *loadmgr.LoadInfoStore
 	resources         *qvresource.Resources
 	loadConfigStore   *loadmgr.LoadConfigStore
 	loadManager       *loadmgr.CollectionLoadManager
@@ -66,6 +69,7 @@ type qviewsRuntime struct {
 }
 
 type qviewsRuntimeDependencies struct {
+	loadInfos          *loadmgr.LoadInfoStore
 	dataViewReconciler qvresource.DataViewReconciler
 	vchannels          func(context.Context, int64) ([]string, error)
 	queryCoordCatalog  metastore.QueryCoordCatalog
@@ -81,8 +85,9 @@ type qviewsRuntimeDependencies struct {
 	streamingNodeHandler        snhandler.HandlerClient
 	streamingNodeViewSyncClient snhandler.QueryViewSyncClient
 
-	schemaVersion   balancer.SchemaVersionProvider
-	balancerFactory func(*cache.Cache) qviewsBalancer
+	schemaVersion          balancer.SchemaVersionProvider
+	publishedSchemaVersion balancer.SchemaVersionProvider
+	balancerFactory        func(*cache.Cache) qviewsBalancer
 }
 
 func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qviewsRuntime, error) {
@@ -122,7 +127,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		)
 	}
 
-	loadConfigStore, err := loadmgr.RecoverLoadConfigStore(ctx, deps.queryCoordCatalog)
+	loadConfigStore, err := loadmgr.RecoverLoadConfigStore(ctx, deps.queryCoordCatalog, deps.loadInfos)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +144,20 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	}
 
 	balanceCache := cache.NewFromSources(balancer.DefaultBalanceConfig(), loadConfigStore, deps.dataViewProvider, shardViewRegistry, nodePublisher)
-	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, nil, deps.schemaVersion))
+	schemaVersion := deps.schemaVersion
+	if deps.publishedSchemaVersion != nil {
+		schemaVersion = func(ctx context.Context, id int64) (int32, error) {
+			published, err := deps.publishedSchemaVersion(ctx, id)
+			if err != nil {
+				return 0, err
+			}
+			// Recovery retains both generations until durable public metadata is
+			// available. Never infer this fence from the pending target.
+			shardViewRegistry.PublishCollectionSchema(id, published)
+			return deps.schemaVersion(ctx, id)
+		}
+	}
+	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, nil, schemaVersion))
 	if deps.balancerFactory != nil {
 		balancerController = deps.balancerFactory(balanceCache)
 	}
@@ -151,6 +169,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	)
 
 	runtime := &qviewsRuntime{
+		loadInfos:            deps.loadInfos,
 		loadConfigStore:      loadConfigStore,
 		loadManager:          loadManager,
 		shardViewRegistry:    shardViewRegistry,
@@ -224,6 +243,14 @@ func newDefaultQViewsRuntimeDependencies(
 		reconciler = source.QueryViewDataReconciler()
 	}
 	deps := qviewsRuntimeDependencies{
+		loadInfos: loadmgr.NewLoadInfoStore(queryview.NewLoadInfoCatalog(metaKV), func(id int64) []*indexpb.IndexInfo {
+			if source, ok := mixCoord.(interface {
+				QueryViewCollectionIndexInfos(int64) []*indexpb.IndexInfo
+			}); ok {
+				return source.QueryViewCollectionIndexInfos(id)
+			}
+			return nil
+		}),
 		dataViewReconciler: reconciler,
 		vchannels: func(ctx context.Context, id int64) ([]string, error) {
 			coll, err := broker.DescribeCollection(ctx, id)
@@ -232,12 +259,25 @@ func newDefaultQViewsRuntimeDependencies(
 			}
 			return coll.GetVirtualChannelNames(), nil
 		},
-		schemaVersion: func(ctx context.Context, id int64) (int32, error) {
+		publishedSchemaVersion: func(ctx context.Context, id int64) (int32, error) {
 			collection, err := broker.DescribeCollection(ctx, id)
 			if err != nil {
 				return 0, err
 			}
 			return collection.GetSchema().GetVersion(), nil
+		},
+		schemaVersion: func(ctx context.Context, id int64) (int32, error) {
+			schema, err := qvresource.PreparationSchema(ctx, id, func(ctx context.Context, id int64) (*schemapb.CollectionSchema, error) {
+				collection, err := broker.DescribeCollection(ctx, id)
+				if err != nil {
+					return nil, err
+				}
+				return collection.GetSchema(), nil
+			})
+			if err != nil {
+				return 0, err
+			}
+			return schema.GetVersion(), nil
 		},
 		queryCoordCatalog:           queryCoordCatalog,
 		queryViewCatalog:            queryview.NewQueryViewCatalog(metaKV, "coord"),

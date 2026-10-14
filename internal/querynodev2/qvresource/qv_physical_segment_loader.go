@@ -2,6 +2,7 @@ package qvresource
 
 import (
 	"context"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
@@ -70,7 +71,7 @@ func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnv
 	}
 	if action.Has(qnview.SegmentUpdateReopen) {
 		// Reopen applies the complete load-info diff, including index changes.
-		if err := l.loader.ReopenSegment(ctx, transform.segment, info); err != nil {
+		if err := l.loader.ReopenSegment(ctx, transform.segment, collection, info); err != nil {
 			return err
 		}
 		// Native Reopen updates fields/indexes, but does not apply historical
@@ -106,7 +107,6 @@ func qvSegmentTransformStartAfter(info *querypb.SegmentLoadInfo) uint64 {
 
 type realQVSegmentLoader struct {
 	loader         segments.Loader
-	collections    qvCollectionManager
 	segmentManager segments.SegmentManager
 }
 
@@ -123,9 +123,8 @@ func (l realQVSegmentLoader) NewSegment(ctx context.Context, collection qnview.C
 		return nil, err
 	}
 	return &qvLocalSegment{
-		segment:      segment,
-		collections:  l.collections,
-		collectionID: collection.CollectionID(),
+		segment: segment, collection: localCollection,
+		collectionID: collection.CollectionID(), unpinCollection: collection.Pin(),
 	}, nil
 }
 
@@ -137,15 +136,22 @@ func (l realQVSegmentLoader) LoadSegment(ctx context.Context, segment qvLoadedSe
 	if err != nil {
 		return err
 	}
-	return l.loader.LoadSegment(ctx, local.segment, info)
+	if err := l.loader.LoadSegment(ctx, local.segment, info); err != nil {
+		return err
+	}
+	return local.segment.(*segments.LocalSegment).ValidateQueryViewFields(local.collection)
 }
 
-func (l realQVSegmentLoader) ReopenSegment(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
+func (l realQVSegmentLoader) ReopenSegment(ctx context.Context, segment qvLoadedSegment, collection qnview.CollectionRuntime, info *querypb.SegmentLoadInfo) error {
 	local, err := asQVLocalSegment(segment)
 	if err != nil {
 		return err
 	}
-	return local.segment.Reopen(ctx, info)
+	physical := local.segment.(*segments.LocalSegment)
+	if err := physical.ReopenWithSchema(ctx, info, collection.Schema(), uint64(collection.SchemaVersion())); err != nil {
+		return err
+	}
+	return physical.ValidateQueryViewFields(collection.PinnedCollection())
 }
 
 func (l realQVSegmentLoader) LoadIndex(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo, version int64) error {
@@ -191,7 +197,7 @@ func (l realQVSegmentLoader) LoadPKCandidate(ctx context.Context, segment qvLoad
 	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() && !isMilvusTableRealPK {
 		return nil
 	}
-	bfs, err := l.loader.LoadBloomFilterSet(ctx, info.GetCollectionID(), info)
+	bfs, err := l.loader.LoadBloomFilterSetWithSchema(ctx, collection.Schema(), info)
 	if err != nil {
 		return err
 	}
@@ -212,9 +218,11 @@ func (l realQVSegmentLoader) FinalizeLoad(segment qvLoadedSegment) error {
 }
 
 type qvLocalSegment struct {
-	segment      segments.Segment
-	collections  qvCollectionManager
-	collectionID int64
+	collection      *segments.Collection
+	unpinCollection func()
+	releaseOnce     sync.Once
+	segment         segments.Segment
+	collectionID    int64
 }
 
 func (s *qvLocalSegment) ID() int64 {
@@ -230,10 +238,7 @@ func (s *qvLocalSegment) QuerySegment() segments.Segment {
 }
 
 func (s *qvLocalSegment) Collection() *segments.Collection {
-	if s.collections == nil {
-		return nil
-	}
-	return s.collections.Get(s.collectionID)
+	return s.collection
 }
 
 func (s *qvLocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
@@ -241,7 +246,12 @@ func (s *qvLocalSegment) Delete(ctx context.Context, primaryKeys storage.Primary
 }
 
 func (s *qvLocalSegment) Release(ctx context.Context) error {
-	s.segment.Release(ctx)
+	s.releaseOnce.Do(func() {
+		s.segment.Release(ctx)
+		if s.unpinCollection != nil {
+			s.unpinCollection()
+		}
+	})
 	return nil
 }
 

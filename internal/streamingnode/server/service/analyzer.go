@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -22,6 +23,9 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 	}
 	switch source := req.GetSource().(type) {
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer:
+		if err := fileresource.Prepare(ctx); err != nil {
+			return nil, err
+		}
 		results, err := analyzer.Run(ctx, source.InlineAnalyzer.GetAnalyzerParams(), req.GetPlaceholder(), req.GetWithDetail(), req.GetWithHash())
 		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err), Results: results}, nil
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer:

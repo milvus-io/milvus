@@ -50,6 +50,8 @@ type CollectionRuntimeGuard interface {
 // CollectionRuntime is the QueryView-pinned collection runtime borrowed by
 // segment lifecycle, scheduler, and physical loader.
 type CollectionRuntime interface {
+	// Pin retains the exact schema/load runtime independently of its view.
+	Pin() func()
 	CollectionID() int64
 	DatabaseName() string
 	Schema() *schemapb.CollectionSchema
@@ -243,4 +245,7 @@ type SegmentUpdateTask struct {
 
 	OnUpdated func(SegmentLoadInfoRevision)
 	OnFailed  func(error)
+	// OnRetry transfers a failed attempt to newer requirements when available.
+	// Returning true completes this task without retrying its obsolete snapshot.
+	OnRetry func() bool
 }

@@ -89,7 +89,7 @@ func asViewQueryGRPCError(err error) error {
 	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
 		return err
 	}
-	return viewerror.NewGRPCStatusFromViewError(viewerror.AsViewError(err)).Err()
+	return viewerror.NewGRPCStatusFromError(err).Err()
 }
 
 type pchannelWALProvider interface {

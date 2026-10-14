@@ -215,6 +215,17 @@ message QueryPlanMVCC {
     // Latest timetick of the transforming stream. StreamingNode and QueryNode
     // wait for transform visibility up to this timetick before execution.
     uint64 transforming_timetick = 2;
+    // Installed by Phase 1 after validating schema history through the fixed MVCC.
+    QuerySchemaBinding schema_binding = 3;
+}
+
+// QuerySchemaBinding prevents Phase 2 and requery from changing the schema,
+// MVCC or adding field accesses beyond those checked against WAL schema history.
+message QuerySchemaBinding {
+    int32 schema_version = 1;
+    uint64 growing_timetick = 2;
+    uint64 transforming_timetick = 3;
+    repeated int64 field_ids = 4;
 }
 
 // QueryPlanService generates shard-level query plans.

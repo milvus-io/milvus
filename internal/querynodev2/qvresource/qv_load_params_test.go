@@ -47,7 +47,7 @@ func TestQueryViewLoadPreparesPrivateInfoBeforeConstruction(t *testing.T) {
 		return loader.segment, nil
 	}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	physical := newQueryViewPhysicalSegmentLoader(nil, nil, loader)
+	physical := newQueryViewPhysicalSegmentLoader(nil, loader)
 	_, err := physical.Load(context.Background(), info, fakeQVCollectionRuntime{})
 	require.NoError(t, err)
 	require.NotNil(t, constructed)
@@ -72,7 +72,7 @@ func TestQueryViewUpdatePreparesPrivateInfo(t *testing.T) {
 			info := diskANNLoadInfo()
 			original := proto.Clone(info)
 			loader := &fakeQVLoader{}
-			patch := mockey.Mock((*fakeQVLoader).ReopenSegment).To(func(_ *fakeQVLoader, _ context.Context, _ qvLoadedSegment, prepared *querypb.SegmentLoadInfo) error {
+			patch := mockey.Mock((*fakeQVLoader).ReopenSegment).To(func(_ *fakeQVLoader, _ context.Context, _ qvLoadedSegment, _ qnview.CollectionRuntime, prepared *querypb.SegmentLoadInfo) error {
 				require.NotSame(t, info, prepared)
 				require.True(t, prepared.GetUseTakeForOutput())
 				require.NotEmpty(t, funcutil.KeyValuePair2Map(prepared.IndexInfos[0].IndexParams)[indexparams.NumLoadThreadKey])
@@ -81,7 +81,7 @@ func TestQueryViewUpdatePreparesPrivateInfo(t *testing.T) {
 				return nil
 			}).Build()
 			t.Cleanup(func() { patch.UnPatch() })
-			physical := newQueryViewPhysicalSegmentLoader(nil, nil, loader)
+			physical := newQueryViewPhysicalSegmentLoader(nil, loader)
 			segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10}, nil, "v1", 50)
 			err := physical.Update(context.Background(), segment, fakeQVCollectionRuntime{schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{{FieldID: 101, ExternalField: "vector"}},
@@ -113,7 +113,7 @@ func TestQueryViewLoadPreparationFailurePreservesSnapshot(t *testing.T) {
 	info.IndexInfos[0].IndexParams = info.IndexInfos[0].IndexParams[:1] // Missing required dimension.
 	original := proto.Clone(info)
 	loader := &fakeQVLoader{}
-	physical := newQueryViewPhysicalSegmentLoader(nil, nil, loader)
+	physical := newQueryViewPhysicalSegmentLoader(nil, loader)
 	_, err := physical.Load(context.Background(), info, fakeQVCollectionRuntime{})
 	require.Error(t, err)
 	require.False(t, loader.newCalled)
@@ -140,7 +140,7 @@ func TestQueryViewPhysicalLoadFailureReleasesSegment(t *testing.T) {
 			patch := mockey.Mock(tc.method).Return(assert.AnError).Build()
 			t.Cleanup(func() { patch.UnPatch() })
 			segment := &fakeQVSegment{id: 10}
-			physical := newQueryViewPhysicalSegmentLoader(nil, nil, &fakeQVLoader{segment: segment})
+			physical := newQueryViewPhysicalSegmentLoader(nil, &fakeQVLoader{segment: segment})
 			loaded, err := physical.Load(context.Background(), diskANNLoadInfo(), fakeQVCollectionRuntime{})
 			require.ErrorIs(t, err, assert.AnError)
 			require.Nil(t, loaded)
@@ -154,7 +154,7 @@ func TestQueryViewPhysicalUpdateFailurePreservesSnapshot(t *testing.T) {
 	for _, action := range []qnview.SegmentUpdateAction{qnview.SegmentUpdateReopen, qnview.SegmentUpdateLoadIndex} {
 		t.Run(actionName(action), func(t *testing.T) {
 			loader := &fakeQVLoader{err: assert.AnError}
-			physical := newQueryViewPhysicalSegmentLoader(nil, nil, loader)
+			physical := newQueryViewPhysicalSegmentLoader(nil, loader)
 			info := diskANNLoadInfo()
 			original := proto.Clone(info)
 			segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10}, nil, "v1", 50)

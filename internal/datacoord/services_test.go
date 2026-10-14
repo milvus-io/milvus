@@ -450,7 +450,6 @@ func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
-	s.testServer.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 10, MsgID: []byte{1}}
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, VChannelNames: []string{"ch1"}})
 
 	segments := map[int64]commonpb.SegmentState{
@@ -496,6 +495,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		s.Run(test.description, func() {
 			ctx := context.Background()
 			resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+				GrowingTransformStartAfterTimetick: 10,
 				Base: &commonpb.MsgBase{
 					Timestamp: uint64(time.Now().Unix()),
 				},
@@ -518,7 +518,6 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
-	s.testServer.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 10, MsgID: []byte{1}}
 	s.testServer.meta.AddCollection(&collectionInfo{
 		ID:            0,
 		VChannelNames: []string{"ch1"},
@@ -547,15 +546,16 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 
 	saveBinlog := func(segmentID int64, flushed bool, storageVersion int64, binlogs []*datapb.FieldBinlog) *commonpb.Status {
 		resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-			Base:              &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-			SegmentID:         segmentID,
-			CollectionID:      0,
-			PartitionID:       1,
-			Channel:           "ch1",
-			SegLevel:          datapb.SegmentLevel_L1,
-			Flushed:           flushed,
-			StorageVersion:    storageVersion,
-			Field2BinlogPaths: binlogs,
+			GrowingTransformStartAfterTimetick: 10,
+			Base:                               &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+			SegmentID:                          segmentID,
+			CollectionID:                       0,
+			PartitionID:                        1,
+			Channel:                            "ch1",
+			SegLevel:                           datapb.SegmentLevel_L1,
+			Flushed:                            flushed,
+			StorageVersion:                     storageVersion,
+			Field2BinlogPaths:                  binlogs,
 		})
 		s.NoError(err)
 		return resp
@@ -1008,7 +1008,6 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_FlushedSegmentStaysInvisibleBeforeSortCompaction() {
-	s.testServer.meta.channelCPs.checkpoints["ch-1"] = &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 10, MsgID: []byte{1}}
 	paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
 	s.T().Cleanup(func() {
 		paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
@@ -1027,11 +1026,12 @@ func (s *ServerSuite) TestSaveBinlogPath_FlushedSegmentStaysInvisibleBeforeSortC
 	s.Require().NoError(s.testServer.meta.AddSegment(context.Background(), segment))
 
 	status, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		SegmentID:    10,
-		CollectionID: 100,
-		PartitionID:  20,
-		Channel:      "ch-1",
-		SegLevel:     datapb.SegmentLevel_L1,
+		GrowingTransformStartAfterTimetick: 10,
+		SegmentID:                          10,
+		CollectionID:                       100,
+		PartitionID:                        20,
+		Channel:                            "ch-1",
+		SegLevel:                           datapb.SegmentLevel_L1,
 		Field2BinlogPaths: []*datapb.FieldBinlog{{
 			FieldID: 1,
 			Binlogs: []*datapb.Binlog{{
@@ -1689,9 +1689,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Flushed: true,
 		}
 		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
-		// Model the first-pack registration and checkpoint that precede Flush.
+		// Native Flush carries the WAL-proven frontier.
 		segment.TransformStartAfterTimetick = 10
-		svr.meta.channelCPs.checkpoints["vchan1"] = &msgpb.MsgPosition{ChannelName: "vchan1", Timestamp: 10, MsgID: []byte{1}}
+		binlogReq.GrowingTransformStartAfterTimetick = 10
 
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
@@ -1762,7 +1762,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
 		segment.DataVersion = expectedDataVersion
 		segment.TransformStartAfterTimetick = 10
-		svr.meta.channelCPs.checkpoints["vchan1"] = &msgpb.MsgPosition{ChannelName: "vchan1", Timestamp: 10, MsgID: []byte{1}}
+		binlogReq.GrowingTransformStartAfterTimetick = 10
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 

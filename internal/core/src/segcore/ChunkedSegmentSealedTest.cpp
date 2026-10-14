@@ -516,6 +516,84 @@ TEST(test_chunk_segment, PinnedFillTargetEntryMatchesUnpinned) {
               unpinned.search_storage_cost_.scanned_total_bytes);
 }
 
+TEST(test_chunk_segment, ViewReadStateRetainsColumnsAndSharesDeletes) {
+    constexpr int64_t row_count = 16;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto scalar_id = schema->AddDebugField("scalar", DataType::INT64);
+    auto vector_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+    auto segment = CreateColdVectorOutputSegment(schema, vector_id, row_count);
+    auto* primary =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(primary, nullptr);
+    auto retained = primary->PinReadState();
+    auto primary_state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(
+        primary->CaptureReadSnapshot());
+    auto retained_state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(
+        retained->CaptureReadSnapshot());
+    EXPECT_EQ(primary_state, retained_state);
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {pk_id, scalar_id};
+    auto before = MakeSearchResult({0, 3});
+    retained->TestFillTargetEntry(&plan, before);
+    primary->DropFieldData(scalar_id);
+    EXPECT_FALSE(primary->HasFieldData(scalar_id));
+    EXPECT_TRUE(retained->HasFieldData(scalar_id));
+    auto after = MakeSearchResult({0, 3});
+    retained->TestFillTargetEntry(&plan, after);
+    EXPECT_EQ(before.output_fields_data_.at(scalar_id)->SerializeAsString(),
+              after.output_fields_data_.at(scalar_id)->SerializeAsString());
+
+    proto::schema::IDs ids;
+    ids.mutable_int_id()->add_data(
+        before.output_fields_data_.at(pk_id)->scalars().long_data().data(0));
+    Timestamp delete_ts = primary->get_max_timestamp() + 100;
+    primary->Delete(1, &ids, &delete_ts);
+    EXPECT_EQ(primary->get_deleted_count(), 1);
+    EXPECT_EQ(retained->get_deleted_count(), 1);
+}
+
+TEST(test_chunk_segment, OlderPlanChecksOnlyItsOwnFieldRange) {
+    struct ReadinessSegment : segcore::ChunkedSegmentSealedImpl {
+        using ChunkedSegmentSealedImpl::check_search;
+        using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+    };
+    auto old_schema = std::make_shared<Schema>();
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+    auto new_schema = std::make_shared<Schema>(*old_schema);
+    auto added = new_schema->AddDebugField("added", DataType::INT64);
+
+    auto dataset = segcore::DataGen(new_schema, 5);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto segment =
+        std::make_unique<ReadinessSegment>(new_schema,
+                                           empty_index_meta,
+                                           segcore::SegcoreConfig::default_config(),
+                                           kSegmentID);
+    segment->LoadFieldData(PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm));
+
+    query::Plan plan(old_schema);
+    plan.extra_info_opt_.emplace(pk.get() - START_USER_FIELDID + 1);
+    plan.extra_info_opt_->add_involved_field(pk);
+    ASSERT_NO_THROW(segment->check_search(&plan));
+
+    // Enlarging the request must not accidentally mark unprepared columns ready.
+    auto missing = FieldId(added.get() + 1);
+    auto future_schema = std::make_shared<Schema>(*new_schema);
+    future_schema->AddField(
+        FieldName("missing"), missing, DataType::INT64, false, std::nullopt);
+    query::Plan future_plan(future_schema);
+    future_plan.extra_info_opt_.emplace(missing.get() - START_USER_FIELDID + 1);
+    future_plan.extra_info_opt_->add_involved_field(missing);
+    EXPECT_THROW(segment->check_search(&future_plan), SegcoreError);
+}
+
 TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);

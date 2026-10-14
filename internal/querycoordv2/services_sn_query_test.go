@@ -14,18 +14,30 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func TestQueryViewLoadInfoUsesCurrentLoadedMetadata(t *testing.T) {
+func TestQueryViewLoadInfoUsesExactSnapshots(t *testing.T) {
 	ctx := context.Background()
 
-	s := &Server{qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}}}
+	s := &Server{qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}, loadInfos: &loadmgr.LoadInfoStore{}}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	released := false
 	patch := mockey.Mock((*loadmgr.LoadConfigStore).GetConfigWithVersion).To(func(_ *loadmgr.LoadConfigStore, id int64) (*loadmgr.LoadConfig, uint64) {
-		if id != 1 {
+		if id != 1 || released {
 			return nil, 0
 		}
 		return &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{10}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 102}}}, 3
 	}).Build()
 	defer patch.UnPatch()
+	snapshot := mockey.Mock((*loadmgr.LoadInfoStore).Get).To(func(_ *loadmgr.LoadInfoStore, _ context.Context, id int64, version uint64) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		if version != 3 && version != 2 {
+			return nil, merr.WrapErrServiceNotReadyMsg("snapshot missing")
+		}
+		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: id, Version: version, PartitionIDs: []int64{10}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 102}}}, nil
+	}).Build()
+	defer snapshot.UnPatch()
+	historical, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 2})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(historical.Status))
+	require.EqualValues(t, 2, historical.Version, "historical views must not be rejected because desired config advanced")
 	resp, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 3})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
@@ -43,6 +55,13 @@ func TestQueryViewLoadInfoUsesCurrentLoadedMetadata(t *testing.T) {
 		require.NoError(t, err)
 		require.Error(t, merr.Error(resp.GetStatus()))
 	}
+	released = true
+	historical, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 2})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(historical.Status), "live old views retain their snapshot after release")
+	resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(resp.Status), merr.ErrCollectionNotLoaded)
 	s.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1})
 	require.NoError(t, err)

@@ -10,7 +10,15 @@ import (
 // The snapshot is taken under the ShardViewManager's mutex, so all fields are
 // consistent with each other: segment placements reflect exactly the views whose
 // state is reported.
+// SchemaUpView is the newest serving view for one exact read schema.
+type SchemaUpView struct {
+	Version         qviews.QueryViewVersion
+	LoadInfoVersion uint64
+}
+
 type ShardStats struct {
+	UpBySchema map[int32]SchemaUpView
+
 	// Per-view placements are independent of merged physical resource progress.
 	UpPlacement        *ViewPlacement
 	PreparingPlacement *ViewPlacement

@@ -681,6 +681,14 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		assert.Equal(t, int32(7), info.GetDataVersion())
 		assert.Equal(t, uint64(99), info.GetCommitTimestamp())
 		assert.Equal(t, commonpb.LoadPriority_HIGH, info.GetPriority())
+		assert.Contains(t, info.GetBinlogPaths()[0].GetBinlogs()[0].GetLogPath(), "/insert_log/100/10/1000/101/1")
+		assert.Contains(t, info.GetStatslogs()[0].GetBinlogs()[0].GetLogPath(), "/stats_log/100/10/1000/101/2")
+		assert.Contains(t, info.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath(), "/delta_log/100/10/1000/3")
+		assert.Contains(t, info.GetBm25Logs()[0].GetBinlogs()[0].GetLogPath(), "/bm25_stats/100/10/1000/101/4")
+		stored := svr.meta.GetSegment(context.Background(), segmentID)
+		for _, logs := range [][]*datapb.FieldBinlog{stored.GetBinlogs(), stored.GetStatslogs(), stored.GetDeltalogs(), stored.GetBm25Statslogs()} {
+			assert.Empty(t, logs[0].GetBinlogs()[0].GetLogPath(), "packing a load snapshot must not mutate cached metadata")
+		}
 		require.Len(t, info.GetIndexInfos(), 1)
 		indexInfo := info.GetIndexInfos()[0]
 		assert.Equal(t, fieldID, indexInfo.GetFieldID())
@@ -799,6 +807,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			PartitionID:   partitionID,
 			State:         commonpb.SegmentState_Dropped,
 			ManifestPath:  parentManifest,
+			Deltalogs:     []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 3}}}},
 			JsonKeyStats:  map[int64]*datapb.JsonKeyStats{fieldID: jsonPlaceholder},
 			InsertChannel: "vchan",
 		})))
@@ -807,6 +816,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		assert.Equal(t, jsonPlaceholder, infos[0].GetJsonKeyStatsLogs()[fieldID])
+		assert.Empty(t, infos[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath(), "manifest delta summaries are not legacy files")
 	})
 }
 
@@ -1834,9 +1844,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Flushed: true,
 		}
 		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
-		// Model the first-pack registration and checkpoint that precede Flush.
+		// Native Flush carries the WAL-proven frontier; checkpoints cannot
+		// establish a DataView publication boundary.
 		segment.TransformStartAfterTimetick = 10
-		svr.meta.channelCPs.checkpoints["vchan1"] = &msgpb.MsgPosition{ChannelName: "vchan1", Timestamp: 10, MsgID: []byte{1}}
+		binlogReq.GrowingTransformStartAfterTimetick = 10
 
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
@@ -2826,6 +2837,10 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 
 	err = svr.Init()
 	assert.NoError(t, err)
+	// This fixture runs DataCoord without a Broadcaster lifecycle. Its jobs
+	// use the collection snapshots installed by each test; schema-target tests
+	// explicitly install their preparation source on meta.
+	svr.meta.preparationSchema = nil
 
 	signal := make(chan struct{})
 	if Params.DataCoordCfg.EnableActiveStandby.GetAsBool() {

@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -40,8 +41,8 @@ type DefaultBalancer struct {
 	wg     sync.WaitGroup
 }
 
-// SchemaVersionProvider reads the latest published collection schema. Historical
-// schemas are not available; the result is never persisted as load configuration.
+// SchemaVersionProvider reads the authorized preparation schema identity.
+// Schema identity is independent of the desired load configuration.
 type SchemaVersionProvider func(context.Context, int64) (int32, error)
 
 // NewDefaultBalancer constructs the standard Balancer controller.
@@ -196,7 +197,19 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	}
 	dirty, err := b.readSchemaVersions(ctx, reader, dirty)
 	plan := b.policy.Plan(reader, dirty)
-	return errors.CombineErrors(err, b.apply(ctx, plan))
+	if plan != nil {
+		// A suspended replica may shed serving capacity, but must retain the
+		// published schema's recovery base while a newer schema is pending.
+		// Otherwise resuming it can only plan the unmaterialized target. An
+		// explicit release/removal still tears down its complete obligation.
+		plan.Releases = slices.DeleteFunc(plan.Releases, func(id qviews.ShardID) bool {
+			cfg, manager := reader.ConfigForShard(id), b.viewRegistry.Get(id)
+			return cfg != nil && manager != nil && manager.PublishedRecovery(reader.SchemaVersion(cfg.CollectionID)) != nil
+		})
+	}
+	applyErr := b.apply(ctx, plan)
+	recoveryErr := b.recoverPublishedSchemas(ctx, reader, dirty)
+	return errors.CombineErrors(err, errors.CombineErrors(applyErr, recoveryErr))
 }
 
 func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {

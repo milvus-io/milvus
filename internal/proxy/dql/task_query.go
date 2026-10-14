@@ -60,13 +60,15 @@ type QueryTask struct {
 	Condition
 	*internalpb.RetrieveRequest
 
-	ctx            context.Context
-	result         *milvuspb.QueryResults
-	request        *milvuspb.QueryRequest
-	ids            *schemapb.IDs
-	collectionName string
-	queryParams    *queryParams
-	schema         *schemaInfo
+	ctx               context.Context
+	result            *milvuspb.QueryResults
+	request           *milvuspb.QueryRequest
+	ids               *schemapb.IDs
+	collectionName    string
+	queryParams       *queryParams
+	schema            *schemaInfo
+	boundReadSchema   *schemaInfo
+	boundCollectionID int64
 
 	translatedOutputFields []string
 	userOutputFields       []string
@@ -80,6 +82,7 @@ type QueryTask struct {
 	shardclientMgr   shardclient.ShardClientMgr
 	lb               shardclient.LBPolicy
 	viewQueryClient  queryclient.Client
+	queryViewPlans   []queryclient.ShardPlan
 	channelsMvcc     map[string]Timestamp
 	// Output snapshots for internal partial-update reads, independent of the
 	// channelsMvcc input overrides. Only successful shard responses are recorded.
@@ -130,6 +133,13 @@ func NewQueryTask(ctx context.Context, node taskmodel.TaskNode, request *milvusp
 // Result returns the query result after execution.
 func (t *QueryTask) Result() *milvuspb.QueryResults {
 	return t.result
+}
+
+// BindReadSchema fixes an internal read to its parent operation's schema. A
+// QueryView with that exact schema must be ready; public metadata refreshes must
+// not silently switch a requery or an upsert's read/merge operation.
+func (t *QueryTask) BindReadSchema(collectionID int64, schema *metacache.SchemaInfo) {
+	t.boundCollectionID, t.boundReadSchema = collectionID, schema
 }
 
 // SetActualChannelsMvcc installs the output snapshot for internal partial-update
@@ -814,6 +824,12 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 
 	schema := colInfo.Schema
+	if t.boundReadSchema != nil {
+		if t.boundCollectionID != t.CollectionID {
+			return merr.WrapErrServiceUnavailableMsg("collection identity changed during internal query")
+		}
+		schema = t.boundReadSchema
+	}
 	t.schema = schema
 	t.SchemaVersion = schema.GetVersion()
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
@@ -1019,9 +1035,10 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 	t.IsIterator = queryParams.isIterator
 
-	if collectionInfo.CollectionTTL != 0 {
+	collectionTTL := metacache.GetCollectionTTL(t.schema.GetProperties())
+	if collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
+		expireTime := physicalTime.Add(-time.Duration(collectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
@@ -1102,7 +1119,7 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 
 func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	result, err := t.viewQueryClient.Legacy().Query(ctx, &queryclient.LegacyQueryRequest{
-		Req: t.RetrieveRequest,
+		Req: t.RetrieveRequest, Plans: t.queryViewPlans,
 	})
 	if err != nil {
 		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -27,6 +28,9 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
+	}
 
 	if err := h.localOptimizer.OptimizeSearch(ctx, req); err != nil {
 		return nil, err
@@ -63,6 +67,14 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		mlog.FieldVChannel(shardID.VChannel),
 		mlog.Int("segmentCount", len(handles)),
 	)
+	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
+		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Collection().Schema()); err != nil {
+			for _, handle := range handles {
+				handle.Release()
+			}
+			return nil, err
+		}
+	}
 	tasks := make([]SNSearchSegmentTask, 0, len(handles))
 	for _, handle := range handles {
 		tasks = append(tasks, SNSearchSegmentTask{
@@ -87,6 +99,9 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
+	}
 
 	if err := h.localOptimizer.OptimizeRetrieve(ctx, req); err != nil {
 		return nil, err
@@ -123,6 +138,14 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		mlog.FieldVChannel(shardID.VChannel),
 		mlog.Int("segmentCount", len(handles)),
 	)
+	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
+		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Collection().Schema()); err != nil {
+			for _, handle := range handles {
+				handle.Release()
+			}
+			return nil, err
+		}
+	}
 	tasks := make([]SNQuerySegmentTask, 0, len(handles))
 	for _, handle := range handles {
 		tasks = append(tasks, SNQuerySegmentTask{

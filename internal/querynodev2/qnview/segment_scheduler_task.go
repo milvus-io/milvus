@@ -3,7 +3,10 @@ package qnview
 import (
 	"context"
 
+	"golang.org/x/time/rate"
+
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -100,6 +103,14 @@ func (t *SegmentUpdateTask) Execute(schedulerCtx context.Context) error {
 			t.fail(ctx.Err())
 			return nil
 		}
+		if t.OnRetry != nil && t.OnRetry() {
+			return nil
+		}
+		mlog.RatedWarn(ctx, rate.Limit(0.2), "query view segment update will retry",
+			mlog.FieldSegmentID(t.Segment.ID()),
+			mlog.Int64("schemaVersion", t.Collection.SchemaVersion()),
+			mlog.Uint64("snapshotRevision", t.Snapshot.Revision.Revision),
+			mlog.Err(err))
 		return nodescheduler.ErrDelay
 	}
 	return nil

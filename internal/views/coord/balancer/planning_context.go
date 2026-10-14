@@ -26,6 +26,7 @@ type balanceInput interface {
 }
 
 type planningContext struct {
+	recovery *publishedRecoveryBase
 	balancercache.Reader
 	schemaVersions map[int64]int32
 	collections    map[int64]*balancercache.CollectionEntry
@@ -114,6 +115,9 @@ func (p *planningContext) ConfigForShard(id qviews.ShardID) *loadmgr.LoadConfig 
 }
 
 func (p *planningContext) DataViewForShard(id qviews.ShardID) *ShardDataView {
+	if p.recovery != nil && p.recovery.shardID == id {
+		return p.recovery.shard
+	}
 	if collection := p.collectionForShard(id); collection != nil && collection.DataView() != nil {
 		return collection.DataView().Shard(id.VChannel)
 	}
@@ -121,6 +125,9 @@ func (p *planningContext) DataViewForShard(id qviews.ShardID) *ShardDataView {
 }
 
 func (p *planningContext) DataVersionForCollection(id int64) (qviews.DataVersion, bool) {
+	if p.recovery != nil && p.recovery.collectionID == id {
+		return p.recovery.dataVersion, true
+	}
 	if collection := p.GetCollection(id); collection != nil && collection.DataView() != nil {
 		return collection.DataView().DataVersion, true
 	}
@@ -137,6 +144,9 @@ func (p *planningContext) GetShardStats(id qviews.ShardID) *coordview.ShardStats
 }
 
 func (p *planningContext) ConfigVersion(id int64) uint64 {
+	if p.recovery != nil && p.recovery.collectionID == id {
+		return p.recovery.loadInfoVersion
+	}
 	if collection := p.GetCollection(id); collection != nil {
 		return collection.ConfigVersion()
 	}
@@ -243,5 +253,8 @@ func (p *planningContext) acceptRows(id qviews.ShardID, rows map[int64]int64) {
 
 // SchemaVersion is sampled from current collection metadata for this planning pass.
 func (p *planningContext) SchemaVersion(id int64) int32 {
+	if p.recovery != nil && p.recovery.collectionID == id {
+		return p.recovery.schemaVersion
+	}
 	return p.schemaVersions[id]
 }

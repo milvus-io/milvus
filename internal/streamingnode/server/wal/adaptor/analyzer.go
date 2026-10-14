@@ -2,6 +2,8 @@ package adaptor
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
@@ -13,6 +15,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+var readAnalyzerSequence atomic.Uint64
+
 func (w *walAdaptorImpl) RunAnalyzer(ctx context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("WAL is closing")
@@ -22,12 +26,27 @@ func (w *walAdaptorImpl) RunAnalyzer(ctx context.Context, req *streamingpb.Strea
 		return nil, status.NewUnrecoverableError("analyzer requires the primary WAL")
 	}
 	field := req.GetFieldAnalyzer()
+	key := shard.WALFunctionRunnerKey(field.GetVchannel())
+	if field.ReadSchemaVersion != nil {
+		snapshot, err := w.GetCollectionSchema(ctx, &streamingpb.StreamingNodeGetCollectionSchemaRequest{
+			CollectionId: field.GetCollectionId(), Vchannel: field.GetVchannel(),
+			Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: field.GetReadSchemaVersion()},
+		})
+		if err != nil {
+			return nil, err
+		}
+		key = fmt.Sprintf("read-analyzer/%s/%d", field.GetVchannel(), readAnalyzerSequence.Add(1))
+		if err := function.GetManager().Alloc(field.GetCollectionId(), key, snapshot.GetSchema()); err != nil {
+			return nil, err
+		}
+		defer function.GetManager().Release(field.GetCollectionId(), key)
+	}
 	texts := make([]string, len(req.GetPlaceholder()))
 	for i, text := range req.GetPlaceholder() {
 		texts[i] = string(text)
 	}
 	var tokens [][]*milvuspb.AnalyzerToken
-	ok, err := function.GetManager().RunWithAnalyzer(ctx, field.GetCollectionId(), shard.WALFunctionRunnerKey(field.GetVchannel()), field.GetFieldId(), func(a function.Analyzer) error {
+	ok, err := function.GetManager().RunWithAnalyzer(ctx, field.GetCollectionId(), key, field.GetFieldId(), func(a function.Analyzer) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

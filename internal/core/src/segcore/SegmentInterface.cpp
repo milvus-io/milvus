@@ -166,6 +166,7 @@ SegmentInternalInterface::Search(
                                        collection_ttl,
                                        entity_ttl_physical_time_us,
                                        std::move(trace_span));
+    visitor.SetReadSchema(plan->schema_);
     visitor.SetFilterOnly(filter_only);
     visitor.SetEnableExprCache(enable_expr_cache);
     auto results = std::make_unique<SearchResult>();
@@ -226,6 +227,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        consistency_level,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
+    visitor.SetReadSchema(plan->schema_);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
 
     retrieve_results.segment_ = (void*)this;

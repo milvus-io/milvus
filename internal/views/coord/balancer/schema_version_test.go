@@ -132,3 +132,29 @@ func TestSchemaMustBeReadBeforePreparingNewlyObservedCollection(t *testing.T) {
 	require.Empty(t, plan.Prepares)
 	require.Equal(t, []qviews.ShardID{id}, plan.Retries)
 }
+
+func TestSchemaPreparationFollowsMaterializedDataView(t *testing.T) {
+	cfg := cfgFor(1, 10, []int64{1}, nil)
+	c := newTestCache(cfg)
+	id := cacheShard(1, 10)
+	data := cacheData(1, id.VChannel, 100)
+	data.DataVersion.CompactVersion = 1
+	c.PublishDataView(1, data)
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	version := c.GetCollection(1).ConfigVersion()
+	stats := testShardStats(ver(1, 0, 1), version, placement(1000, 1, 1, coordview.SegmentStateUp))
+	stats.PreparingVersion = ver(1, 0, 2)
+	stats.PreparingSchemaVersion = 1
+	c.PublishShard(id, stats)
+	reader := newPlanningContext(c)
+	reader.schemaVersions = map[int64]int32{1: 1}
+	require.Equal(t, actionMust, classifyShard(reader, id), "new Function outputs require the compaction's new Manifest")
+	plan := NewDefaultBalancePolicy().Plan(reader, []qviews.ShardID{id})
+	require.Contains(t, plan.Prepares, id)
+	require.Equal(t, data.DataVersion, plan.Prepares[id].DataVersion())
+	require.EqualValues(t, 1, plan.Prepares[id].Build().Meta.SchemaVersion)
+
+	stats.PreparingVersion = ver(1, 1, 1)
+	c.PublishShard(id, stats)
+	require.Equal(t, actionNone, classifyShard(newPlanningContext(c), id), "do not repeatedly supersede the same physical base")
+}

@@ -31,6 +31,7 @@ type LoadConfigStore struct {
 	// collectionLocks serializes persistence and in-memory commits per collection.
 	collectionLocks *lock.KeyLock[int64]
 	catalog         metastore.QueryCoordCatalog
+	loadInfos       *LoadInfoStore
 	version         uint64
 	listeners       map[uint64]LoadConfigListener
 	nextListener    uint64
@@ -56,7 +57,7 @@ type LoadConfigEntry struct {
 // RecoverLoadConfigStore constructs a LoadConfigStore and rebuilds its
 // in-memory state from ETCD via the catalog. It is the sole constructor:
 // the store is always fully recovered before any operation.
-func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCatalog) (*LoadConfigStore, error) {
+func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCatalog, loadInfos ...*LoadInfoStore) (*LoadConfigStore, error) {
 	collections, err := catalog.GetCollections(ctx)
 	if err != nil {
 		return nil, err
@@ -99,6 +100,14 @@ func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCat
 		configs:         configs,
 		versions:        versions,
 	}
+	if len(loadInfos) > 0 && loadInfos[0] != nil {
+		store.loadInfos = loadInfos[0]
+		for _, cfg := range configs {
+			if err := store.loadInfos.Ensure(ctx, cfg); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return store, nil
 }
 
@@ -117,6 +126,11 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 }
 
 func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error {
+	if s.loadInfos != nil {
+		if err := s.loadInfos.Ensure(ctx, cfg); err != nil {
+			return err
+		}
+	}
 	collectionID := cfg.CollectionID
 	s.mu.RLock()
 	existing := s.configs[collectionID]

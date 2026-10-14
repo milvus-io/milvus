@@ -23,6 +23,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/pyudf"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -118,6 +119,9 @@ func (e *PyUDFExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]
 		return nil, err
 	}
 
+	if err := fileresource.Prepare(ctx.Context()); err != nil {
+		return nil, err
+	}
 	path, err := pyudf.ResolveResourcePath(e.resourceName)
 	if err != nil {
 		return nil, merr.Wrap(err, "py_udf: resolve resource")

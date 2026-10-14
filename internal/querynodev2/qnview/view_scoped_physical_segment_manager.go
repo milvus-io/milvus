@@ -73,12 +73,14 @@ type segmentLoadSubmission struct {
 }
 
 type segmentUpdateSubmission struct {
-	task  *SegmentUpdateTask
-	state *physicalSegmentState
-	epoch uint64
+	task            *SegmentUpdateTask
+	state           *physicalSegmentState
+	epoch           uint64
+	unpinCollection func()
 }
 
 type segmentLoadRequest struct {
+	prepared                    bool
 	meta                        *viewpb.QueryViewMeta
 	collection                  CollectionRuntime
 	transformStartAfterTimeTick uint64
@@ -140,9 +142,23 @@ func (m *ViewScopedPhysicalSegmentManager) Acquire(req AcquirePhysicalSegments) 
 }
 
 func (m *ViewScopedPhysicalSegmentManager) Release(req ReleaseSegments) {
+	callback := req.OnDropped
+	var loadsDone chan struct{}
+	if callback != nil {
+		loadsDone = make(chan struct{})
+		req.OnDropped = func() { close(loadsDone) }
+	}
 	toClose, onDropped := m.removeView(req)
-	m.closeSubscriptions(toClose)
 	m.submitCallback(onDropped)
+	go func() {
+		// A metadata callback may be waiting for the caller's shard mutex.
+		// Close waits for that callback, so it must run after Release returns.
+		m.closeSubscriptions(toClose)
+		if callback != nil {
+			<-loadsDone
+			callback()
+		}
+	}()
 }
 
 func (m *ViewScopedPhysicalSegmentManager) ApplyLoadInfoSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot) {
@@ -236,7 +252,14 @@ func (m *ViewScopedPhysicalSegmentManager) recordView(req AcquirePhysicalSegment
 			state.pendingSnapshot = state.latestSnapshot
 		}
 	}
+	var notifications []func()
+	for segmentID := range segmentPartitions {
+		notifications = append(notifications, m.readyNotificationsLocked(segmentID)...)
+	}
 	m.mu.Unlock()
+	for _, notify := range notifications {
+		notify()
+	}
 	m.subscribeSegments(toSubscribe)
 	for segmentID := range segmentPartitions {
 		m.submitPendingSegmentUpdate(segmentID)
@@ -307,6 +330,9 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 		},
 		OnUnrecoverable: func(err error) {
 			defer done()
+			if m.retryChangedSegmentLoad(submission) {
+				return
+			}
 			notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission.segmentID, submission.snapshot, err)
 			m.submitSegmentLoadSubmissions(retries)
 			m.closeSubscriptions(subscriptions)
@@ -340,6 +366,7 @@ func (m *ViewScopedPhysicalSegmentManager) completePhysicalSegmentLoad(segment T
 		return nil, nil, false
 	}
 
+	notifications := m.readyNotificationsLocked(segment.ID())
 	request, _ := state.loadRequest()
 	if !state.satisfies(request) && state.pendingSnapshot == nil {
 		state.pendingSnapshot = state.latestSnapshot
@@ -347,7 +374,7 @@ func (m *ViewScopedPhysicalSegmentManager) completePhysicalSegmentLoad(segment T
 	if state.pendingSnapshot != nil && state.pendingSnapshot.Revision == state.revision && state.satisfies(request) {
 		state.pendingSnapshot = nil
 	}
-	return m.readyNotificationsLocked(segment.ID()), m.collectPendingLoadSubmissionsLocked(), true
+	return notifications, m.collectPendingLoadSubmissionsLocked(), true
 }
 
 func (m *ViewScopedPhysicalSegmentManager) recordSegmentSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot, expected *physicalSegmentState) (segmentLoadSubmission, segmentUpdateSubmission, bool) {
@@ -458,8 +485,45 @@ func (m *ViewScopedPhysicalSegmentManager) nextSegmentUpdateLocked(ctx context.C
 		OnFailed: func(error) {
 			m.failSegmentUpdate(segmentID, state, epoch)
 		},
+		OnRetry: func() bool {
+			return m.supersedeFailedSegmentUpdate(segmentID, state, epoch, request, snapshot.Revision)
+		},
 	}, m.estimator)
-	return segmentUpdateSubmission{task: task, state: state, epoch: epoch}, true
+	return segmentUpdateSubmission{task: task, state: state, epoch: epoch, unpinCollection: request.collection.Pin()}, true
+}
+
+// A snapshot that lacks a newly materialized column may never become loadable.
+// Transfer only after the attempt has returned, so native updates never overlap.
+func (m *ViewScopedPhysicalSegmentManager) supersedeFailedSegmentUpdate(segmentID int64, expected *physicalSegmentState, epoch uint64, previous segmentLoadRequest, revision SegmentLoadInfoRevision) bool {
+	m.mu.Lock()
+	state := m.segments[segmentID]
+	if state != expected || state.updateEpoch != epoch {
+		m.mu.Unlock()
+		return true
+	}
+	request, _ := state.loadRequest()
+	requirementsChanged := request.meta.GetSchemaVersion() != previous.meta.GetSchemaVersion() ||
+		request.meta.GetLoadInfoVersion() != previous.meta.GetLoadInfoVersion() ||
+		request.manifestVersion != previous.manifestVersion
+	if !requirementsChanged && (state.pendingSnapshot == nil || state.pendingSnapshot.Revision == revision) {
+		m.mu.Unlock()
+		return false
+	}
+	state.updating = false
+	state.updateHandle = nil
+	if state.pendingSnapshot == nil {
+		state.pendingSnapshot = state.latestSnapshot
+	}
+	notifications := m.readyNotificationsLocked(segmentID)
+	submission, ok := m.nextSegmentUpdateLocked(context.Background(), segmentID)
+	m.mu.Unlock()
+	if ok {
+		m.submitSegmentUpdate(submission)
+	}
+	for _, notify := range notifications {
+		notify()
+	}
+	return true
 }
 
 func (m *ViewScopedPhysicalSegmentManager) submitPendingSegmentUpdate(segmentID int64) {
@@ -473,6 +537,12 @@ func (m *ViewScopedPhysicalSegmentManager) submitPendingSegmentUpdate(segmentID 
 
 func (m *ViewScopedPhysicalSegmentManager) submitSegmentUpdate(submission segmentUpdateSubmission) {
 	handle := m.nodeScheduler.Submit(submission.task)
+	// Cancel can discard a queued task without executing it. Wait covers both
+	// that path and a running native update, and includes every delayed retry.
+	go func() {
+		_ = handle.Wait(context.Background())
+		submission.unpinCollection()
+	}()
 	m.mu.Lock()
 	state := m.segments[submission.task.Snapshot.SegmentID]
 	if state != submission.state || !state.updating || state.updateEpoch != submission.epoch {
@@ -496,8 +566,11 @@ func (m *ViewScopedPhysicalSegmentManager) completeSegmentUpdate(segmentID int64
 		state.appliedManifestVersion = manifestVersion
 		state.updating = false
 		state.updateHandle = nil
-		next, ok = m.nextSegmentUpdateLocked(context.Background(), segmentID)
 		notifications = m.readyNotificationsLocked(segmentID)
+		if request, found := state.loadRequest(); found && !state.satisfies(request) && state.pendingSnapshot == nil {
+			state.pendingSnapshot = state.latestSnapshot
+		}
+		next, ok = m.nextSegmentUpdateLocked(context.Background(), segmentID)
 	}
 	m.mu.Unlock()
 	if ok {
@@ -612,7 +685,7 @@ func (m *ViewScopedPhysicalSegmentManager) ResetSegment(segmentID int64) {
 // requirements. A loaded pointer alone is not a readiness certificate.
 func (m *ViewScopedPhysicalSegmentManager) readyNotificationsLocked(segmentID int64) []func() {
 	state := m.segments[segmentID]
-	if state == nil || state.segment == nil || state.updating || state.pendingSnapshot != nil {
+	if state == nil || state.segment == nil || state.updating {
 		return nil
 	}
 	var notifications []func()
@@ -621,11 +694,28 @@ func (m *ViewScopedPhysicalSegmentManager) readyNotificationsLocked(segmentID in
 		if ref == nil || ref.ready[segmentID] || !state.satisfies(request) {
 			continue
 		}
-		ref.ready[segmentID] = true
+		if state.pendingSnapshot != nil && state.pendingSnapshot.Revision != state.revision && !state.hasNewerSchema(request) {
+			continue
+		}
 		if cb := ref.onLoaded; cb != nil {
 			segment := state.segment
+			if provider, ok := UnwrapTransformSegment(segment).(SealedReadStateProvider); ok {
+				read, err := provider.PinReadState()
+				if err != nil {
+					if failed := ref.onSegmentFailed; failed != nil {
+						notifications = append(notifications, func() { failed(segmentID, err) })
+					} else if failed := ref.onUnrecoverable; failed != nil {
+						notifications = append(notifications, failed)
+					}
+					continue
+				}
+				segment = &preparedReadSegment{TransformSegment: segment, read: read}
+			}
 			notifications = append(notifications, func() { cb([]TransformSegment{segment}) })
 		}
+		ref.ready[segmentID] = true
+		request.prepared = true
+		state.requests[key] = request
 	}
 	return notifications
 }
@@ -815,8 +905,9 @@ func (s *physicalSegmentState) loadRequest() (segmentLoadRequest, bool) {
 	for key := range s.refs {
 		request, ok := s.requests[key]
 		// LoadInfoVersion is a content hash, not an ordered revision. Use the
-		// actual view publication order when choosing a preparation request.
-		if ok && (!found || key.QueryViewVersion.GT(version)) {
+		// actual view publication order within each schema. Unprepared serving
+		// schemas go first; a retained read snapshot no longer blocks the target.
+		if ok && (!found || preferLoadRequest(request, latest, key.QueryViewVersion.GT(version))) {
 			latest, version, found = request, key.QueryViewVersion, true
 		}
 	}

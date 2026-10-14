@@ -4,11 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -266,4 +269,37 @@ func legacyQueryPlanWithoutWorkNodes(shardID qviews.ShardID) *viewpb.QueryPlan {
 			LegacyRetrieveRequest: &internalpb.RetrieveRequest{},
 		},
 	}
+}
+
+func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
+	mockey.PatchConvey("requery preserves the exact parent plan, including failures", t, func() {
+		node := qviews.NewQueryNode(9)
+		plan := ShardPlan{ShardID: qviews.ShardID{VChannel: "p_1v0", ReplicaID: 2}, Version: &viewpb.QueryViewVersion{QueryVersion: 5}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}, WorkNodes: []qviews.WorkNode{node}}
+		service := &fakeViewQueryServiceClient{}
+		client := &legacyClient{shardClient: &shardViewQueryClient{queryServiceClient: service}}
+		var failure error
+		calls := 0
+		mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, selected qviews.WorkNode, request *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+			calls++
+			require.Equal(t, node, selected)
+			require.True(t, proto.Equal(plan.Version, request.GetVersion()))
+			require.True(t, proto.Equal(plan.Mvcc, request.GetMvcc()))
+			require.EqualValues(t, 90, request.GetLegacyReq().GetMvccTimestamp())
+			require.EqualValues(t, 1, request.GetLegacyReq().GetSchemaVersion())
+			if failure != nil {
+				return nil, failure
+			}
+			return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success()}}, nil
+		}).Build()
+		request := &LegacyQueryRequest{Req: &internalpb.RetrieveRequest{SchemaVersion: 1}, Plans: []ShardPlan{plan}}
+		result, err := client.Query(t.Context(), request)
+		require.NoError(t, err)
+		require.Len(t, result.Plans, 1)
+		require.Equal(t, 1, calls)
+		failure = viewerror.NewViewInvalidated("original view retired")
+		_, err = client.Query(t.Context(), request)
+		require.ErrorIs(t, err, failure)
+		require.Equal(t, 2, calls, "do not retry into another snapshot")
+		require.Zero(t, request.Req.MvccTimestamp, "dispatch must not mutate the shared request")
+	})
 }

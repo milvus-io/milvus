@@ -121,6 +121,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 			ExpectedReplicaNumber:            expectedReplicasNumber,
 			ExpectedFieldIndexID:             req.GetFieldIndexID(),
 			ExpectedLoadFields:               req.GetLoadFields(),
+			ExpectedLoadAllFields:            req.LoadAllFields,
+			ExpectedSkipLoadDynamicField:     req.GetSkipLoadDynamicField(),
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		},
@@ -132,6 +134,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		ReplicaNumber:            expectedReplicasNumber,
 		FieldIndexID:             req.GetFieldIndexID(),
 		LoadFields:               req.GetLoadFields(),
+		LoadAllFields:            req.LoadAllFields,
+		SkipLoadDynamicField:     req.GetSkipLoadDynamicField(),
 		Priority:                 req.GetPriority(),
 		UserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 	})
@@ -220,6 +224,8 @@ type qviewsExpectedLoadConfig struct {
 	ReplicaNumber            map[string]int
 	FieldIndexID             map[int64]int64
 	LoadFields               []int64
+	LoadAllFields            *bool
+	SkipLoadDynamicField     bool
 	Priority                 commonpb.LoadPriority
 	UserSpecifiedReplicaMode bool
 }
@@ -239,8 +245,13 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 		CollectionId:             coll.GetCollectionID(),
 		PartitionIds:             sortedInt64s(expected.PartitionIDs),
 		LoadFields:               generateQViewsLoadFields(expected.LoadFields, expected.FieldIndexID),
+		LoadAllFields:            expected.LoadAllFields,
+		SkipLoadDynamicField:     expected.SkipLoadDynamicField,
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: expected.UserSpecifiedReplicaMode,
+	}
+	if header.LoadAllFields == nil && current != nil {
+		header.LoadAllFields, header.SkipLoadDynamicField = current.LoadAllFields, current.SkipLoadDynamicField
 	}
 	if proto.Equal(loadConfigIntoAlterLoadConfigHeader(current), header) {
 		return nil, nil
@@ -318,6 +329,8 @@ func loadConfigIntoAlterLoadConfigHeader(cfg *loadmgr.LoadConfig) *messagespb.Al
 		CollectionId:             cfg.CollectionID,
 		PartitionIds:             sortedInt64s(cfg.PartitionIDs),
 		LoadFields:               cloneAndSortLoadFields(cfg.LoadFields),
+		LoadAllFields:            cfg.LoadAllFields,
+		SkipLoadDynamicField:     cfg.SkipLoadDynamicField,
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode,
 	}
@@ -424,7 +437,7 @@ func qviewsCurrentLoadConfig(cfg *loadmgr.LoadConfig) job.CurrentLoadConfig {
 	if cfg == nil {
 		return current
 	}
-	info := &querypb.CollectionLoadInfo{CollectionID: cfg.CollectionID, DbID: cfg.DbID, ReplicaNumber: int32(len(cfg.Replicas)), Status: querypb.LoadStatus_Loaded, UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode, FieldIndexID: make(map[int64]int64)}
+	info := &querypb.CollectionLoadInfo{CollectionID: cfg.CollectionID, DbID: cfg.DbID, ReplicaNumber: int32(len(cfg.Replicas)), Status: querypb.LoadStatus_Loaded, UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode, FieldIndexID: make(map[int64]int64), LoadAllFields: cfg.LoadAllFields, SkipLoadDynamicField: cfg.SkipLoadDynamicField}
 	for _, field := range cfg.LoadFields {
 		info.LoadFields = append(info.LoadFields, field.GetFieldId())
 		if field.GetIndexId() != 0 {

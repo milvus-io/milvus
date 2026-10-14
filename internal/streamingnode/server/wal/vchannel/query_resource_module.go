@@ -44,6 +44,10 @@ func (m *VChannelRecoveryModule) QueryRuntime(key qviews.QueryViewKey) (*queryre
 	return m.queryResources.QueryRuntime(key)
 }
 
+func (m *VChannelRecoveryModule) QueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
+	return m.queryResources.ReadRuntime(key)
+}
+
 func (m *VChannelRecoveryModule) CloseQueryResources() {
 	if m == nil || m.queryResources == nil {
 		return
@@ -66,6 +70,10 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	if !ok {
 		return walview.VChannelWALView{}, false
 	}
+	schema, err := m.vchannelView.GetSchemaVersion(state.CollectionID, meta.GetSchemaVersion())
+	if err != nil {
+		return walview.VChannelWALView{}, false
+	}
 	if !m.ensureFinalCommitsLocked() {
 		return walview.VChannelWALView{}, false
 	}
@@ -81,7 +89,7 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 			m.mu.Lock()
 			defer m.mu.Unlock()
 			view, ok := m.queryWALViewLocked(meta)
-			if !ok || view.Schema.GetVersion() < meta.GetSchemaVersion() {
+			if !ok || view.Schema.GetVersion() != meta.GetSchemaVersion() {
 				return false
 			}
 			captured(view)
@@ -90,7 +98,7 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 		WithResourceEventLock: func(fn func()) { m.mu.Lock(); defer m.mu.Unlock(); fn() },
 		PrepareQueryView:      m.prepareQueryViewLocked,
 		BaseGrowingTimeTick:   m.queryObservedTimeTick, BaseTransformTimeTick: m.queryObservedTimeTick,
-		LoadInfoVersion: meta.GetLoadInfoVersion(), Schema: state.Schema,
+		LoadInfoVersion: meta.GetLoadInfoVersion(), Schema: schema.GetSchema(), WriteSchema: state.Schema,
 		SegmentSnapshot: snapshot, TransformLogStream: m.queryTransformLogStream,
 		DeleteReplayStartAfterTimeTick: start,
 	}, true

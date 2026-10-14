@@ -38,6 +38,7 @@ type ShardViewRegistry struct {
 	// Reverse indexes cover resident shards. The collection index changes with
 	// shard lifecycle, while the node index tracks current Stats placements.
 	collectionShards map[int64]map[qviews.ShardID]struct{}
+	publishedSchemas map[int64]int32
 	nodeShards       map[int64]map[qviews.ShardID]struct{}
 
 	statsObservers       []func(qviews.ShardID, *ShardStats)
@@ -154,6 +155,10 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	if mgr, ok := r.shards[shardID]; ok {
 		r.mu.Unlock()
 		return mgr
+	}
+	_, collectionID, _, _ := funcutil.ParseVChannel(shardID.VChannel)
+	if version, ok := r.publishedSchemas[collectionID]; ok {
+		mgr.publishedSchema = &version
 	}
 	r.shards[shardID] = mgr
 	r.stats[shardID] = stats
@@ -434,5 +439,27 @@ func (r *ShardViewRegistry) RegisterPublicationListener(listener ShardPublicatio
 func (r *ShardViewRegistry) publishShardLocked(shardID qviews.ShardID, stats *ShardStats) {
 	for _, listener := range r.publicationListeners {
 		listener(shardID, stats)
+	}
+}
+
+// PublishCollectionSchema records the public read generation recovered from or
+// durably committed to RootCoord. Manager calls run without the registry lock.
+func (r *ShardViewRegistry) PublishCollectionSchema(collectionID int64, version int32) {
+	r.mu.Lock()
+	if old, ok := r.publishedSchemas[collectionID]; ok && old > version {
+		r.mu.Unlock()
+		return
+	}
+	if r.publishedSchemas == nil {
+		r.publishedSchemas = make(map[int64]int32)
+	}
+	r.publishedSchemas[collectionID] = version
+	managers := make([]*ShardViewManager, 0, len(r.collectionShards[collectionID]))
+	for id := range r.collectionShards[collectionID] {
+		managers = append(managers, r.shards[id])
+	}
+	r.mu.Unlock()
+	for _, manager := range managers {
+		manager.PublishSchema(version)
 	}
 }

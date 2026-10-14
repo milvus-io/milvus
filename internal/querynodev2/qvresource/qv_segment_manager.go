@@ -3,6 +3,7 @@ package qvresource
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	qvtransformlogbuffer "github.com/milvus-io/milvus/internal/querynodev2/transformlogbuffer"
@@ -12,15 +13,13 @@ import (
 )
 
 type queryViewPhysicalSegmentLoader struct {
-	collections qvCollectionManager
-	segments    qvSegmentManager
-	loader      qvSegmentLoader
+	segments qvSegmentManager
+	loader   qvSegmentLoader
 }
 
 func NewQueryViewPhysicalSegmentLoader(manager *segments.Manager, loader segments.Loader) qnview.PhysicalSegmentLoader {
-	return newQueryViewPhysicalSegmentLoader(manager.Collection, manager.Segment, realQVSegmentLoader{
+	return newQueryViewPhysicalSegmentLoader(manager.Segment, realQVSegmentLoader{
 		loader:         loader,
-		collections:    manager.Collection,
 		segmentManager: manager.Segment,
 	})
 }
@@ -41,7 +40,7 @@ func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, 
 		segmentLoadInfoStream,
 		newQueryViewSegmentResourceEstimator(loader),
 	)
-	collectionRuntime := newQueryViewCollectionRuntimeManager(meta, manager.Collection)
+	collectionRuntime := newQueryViewCollectionRuntimeManager(meta, streaming.WAL().SchemaClient())
 	return qnview.NewQueryViewSegmentReadinessManagerWithScheduler(
 		nodeScheduler,
 		physicalManager,
@@ -54,10 +53,9 @@ func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, 
 	)
 }
 
-func newQueryViewPhysicalSegmentLoader(collections qvCollectionManager, segments qvSegmentManager, loader qvSegmentLoader) *queryViewPhysicalSegmentLoader {
+func newQueryViewPhysicalSegmentLoader(segments qvSegmentManager, loader qvSegmentLoader) *queryViewPhysicalSegmentLoader {
 	return &queryViewPhysicalSegmentLoader{
-		collections: collections,
-		segments:    segments,
-		loader:      loader,
+		segments: segments,
+		loader:   loader,
 	}
 }

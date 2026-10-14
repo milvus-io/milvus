@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
@@ -56,11 +57,12 @@ func TestPhysicalSegmentSchemaHandoffKeepsSubscriptionAndWaitsForReopen(t *testi
 	third := acquire(3, 2, 2)
 	require.Len(t, scheduler.Updates(), 1)
 	require.NoError(t, update.Execute(t.Context()))
+	require.Equal(t, uint64(99), <-ready, "the prepared schema can serve while newer load fields prepare")
 	require.Empty(t, ready, "the earlier reopen cannot acknowledge newer load fields")
 	require.Len(t, scheduler.Updates(), 2, "newest request must win even while older views retain larger hashes")
 	mgr.Release(ReleaseSegments{Key: first.Key})
 	mgr.Release(ReleaseSegments{Key: second.Key})
-	require.False(t, stream.subscriptions[0].closed)
+	require.False(t, stream.subscriptions[0].closed.Load())
 	require.NoError(t, scheduler.Updates()[1].Execute(t.Context()))
 	require.Equal(t, uint64(2), <-ready)
 	// Metadata publication after old views drop still reaches the remaining view.
@@ -71,7 +73,7 @@ func TestPhysicalSegmentSchemaHandoffKeepsSubscriptionAndWaitsForReopen(t *testi
 	require.Empty(t, ready, "ready callbacks are deduplicated per view and segment")
 	require.Len(t, stream.subscriptions, 1)
 	mgr.Release(ReleaseSegments{Key: third.Key})
-	require.True(t, stream.subscriptions[0].closed)
+	require.Eventually(t, stream.subscriptions[0].closed.Load, time.Second, time.Millisecond)
 }
 
 func TestPhysicalSegmentNewSchemaDuringInitialLoad(t *testing.T) {
@@ -93,11 +95,11 @@ func TestPhysicalSegmentNewSchemaDuringInitialLoad(t *testing.T) {
 	newer.SchemaVersion = 2
 	acquire(newer)
 	scheduler.Tasks()[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
-	require.Empty(t, ready)
+	require.Equal(t, int32(1), <-ready, "the old schema must not wait for new fields")
 	require.Len(t, scheduler.Updates(), 1)
 	require.True(t, scheduler.Updates()[0].ForceReopen)
 	scheduler.Updates()[0].OnUpdated(snapshot.Revision)
-	require.Len(t, ready, 2)
+	require.Equal(t, int32(2), <-ready)
 }
 
 func TestPendingViewRetainsPhysicalWatchBeforeCollectionPreparation(t *testing.T) {
@@ -132,7 +134,7 @@ func TestPendingViewRetainsPhysicalWatchBeforeCollectionPreparation(t *testing.T
 	second := qviews.NewQueryViewAtQueryNode(next, view).QueryViewKey()
 	manager.Acquire(AcquireSegments{Key: second, Meta: next, View: view, OnReady: onReady})
 	manager.Release(ReleaseSegments{Key: first})
-	require.False(t, stream.subscriptions[0].closed, "pending replacement owns the watch before its collection task runs")
+	require.False(t, stream.subscriptions[0].closed.Load(), "pending replacement owns the watch before its collection task runs")
 	unblock.Do(func() { close(resume) })
 	<-ready
 	require.Len(t, physicalScheduler.Tasks(), 1, "handoff must reuse the original physical segment")
@@ -141,5 +143,5 @@ func TestPendingViewRetainsPhysicalWatchBeforeCollectionPreparation(t *testing.T
 	require.Len(t, physicalScheduler.Updates(), 1, "later publications still reach the reused segment")
 	physicalScheduler.Updates()[0].OnUpdated(snapshot.Revision)
 	manager.Release(ReleaseSegments{Key: second})
-	require.True(t, stream.subscriptions[0].closed)
+	require.Eventually(t, stream.subscriptions[0].closed.Load, time.Second, time.Millisecond)
 }

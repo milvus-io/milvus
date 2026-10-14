@@ -2,29 +2,43 @@ package qvresource
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type queryViewCollectionRuntimeManager struct {
-	meta        qnview.QueryViewLoadMetadataProvider
-	collections qvCollectionManager
+type collectionRuntimeKey struct {
+	collectionID    int64
+	schemaVersion   int32
+	loadInfoVersion uint64
 }
 
-func newQueryViewCollectionRuntimeManager(meta qnview.QueryViewLoadMetadataProvider, collections qvCollectionManager) *queryViewCollectionRuntimeManager {
+type queryViewCollectionRuntimeManager struct {
+	meta           qnview.QueryViewLoadMetadataProvider
+	schemas        streaming.SchemaClient
+	mu             sync.Mutex
+	collections    map[collectionRuntimeKey]qvCollectionManager
+	newCollections func() qvCollectionManager
+}
+
+func newQueryViewCollectionRuntimeManager(meta qnview.QueryViewLoadMetadataProvider, schemas streaming.SchemaClient) *queryViewCollectionRuntimeManager {
 	return &queryViewCollectionRuntimeManager{
-		meta:        meta,
-		collections: collections,
+		meta: meta, schemas: schemas,
+		collections:    make(map[collectionRuntimeKey]qvCollectionManager),
+		newCollections: func() qvCollectionManager { return segments.NewCollectionManager() },
 	}
 }
 
@@ -34,7 +48,11 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	}
 	pb := view.IntoProto()
 	meta := pb.GetMeta()
-	collection, err := m.meta.DescribeCollection(ctx, meta.GetCollectionId())
+	collection, err := m.schemas.GetCollectionSchema(ctx, &streamingpb.StreamingNodeGetCollectionSchemaRequest{
+		CollectionId: meta.GetCollectionId(),
+		Vchannel:     meta.GetVchannel(),
+		Selector:     &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: meta.GetSchemaVersion()},
+	})
 	if err != nil {
 		return nil, isRetryableCollectionRuntimeError(err), err
 	}
@@ -42,39 +60,51 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 		return nil, false, merr.WrapErrServiceInternalMsg("collection metadata is incomplete")
 	}
 	if collection.GetSchema().GetVersion() != meta.GetSchemaVersion() {
-		return nil, collection.GetSchema().GetVersion() < meta.GetSchemaVersion(), merr.WrapErrServiceNotReadyMsg("query view requires schema %d, metadata has %d", meta.GetSchemaVersion(), collection.GetSchema().GetVersion())
+		return nil, false, merr.WrapErrServiceInternalMsg("query view requires schema %d, streaming returned %d", meta.GetSchemaVersion(), collection.GetSchema().GetVersion())
 	}
 	loadInfo, err := m.loadInfo(ctx, meta)
 	if err != nil {
 		return nil, isRetryableCollectionRuntimeError(err), err
 	}
-	if err := m.collections.PutOrRef(
+	// Schema and load scope are immutable identities. A target view must never
+	// update the CCollection from which a published view builds query plans.
+	// Native schema identity is collection-scoped too: per-channel WAL ticks
+	// differ for the same ALTER and must not advance this shared runtime.
+	key := collectionRuntimeKey{meta.GetCollectionId(), meta.GetSchemaVersion(), meta.GetLoadInfoVersion()}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	collections := m.collections[key]
+	if collections == nil {
+		collections = m.newCollections()
+	}
+	if err := collections.PutOrRef(
 		meta.GetCollectionId(),
 		collection.GetSchema(),
 		segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.GetSchema()),
 		&querypb.LoadMetaInfo{
-			LoadType:        querypb.LoadType_LoadCollection,
-			CollectionID:    meta.GetCollectionId(),
-			PartitionIDs:    loadInfoPartitionIDs(loadInfo, view.ViewOfQueryNode()),
-			DbName:          collection.GetDbName(),
-			LoadFields:      loadInfoFieldIDs(loadInfo),
-			SchemaBarrierTs: collection.GetUpdateTimestamp(),
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: meta.GetCollectionId(),
+			PartitionIDs: loadInfoPartitionIDs(loadInfo, view.ViewOfQueryNode()),
+			DbName:       collection.GetSchema().GetDbName(),
+			LoadFields:   loadInfoFieldIDs(loadInfo),
 		},
 	); err != nil {
 		return nil, false, err
 	}
-	localCollection := m.collections.Get(meta.GetCollectionId())
+	m.collections[key] = collections
+	localCollection := collections.Get(meta.GetCollectionId())
 	var ccollection *segcore.CCollection
 	if localCollection != nil {
 		ccollection = localCollection.GetCCollection()
 	}
 	return &queryViewCollectionRuntimeGuard{
-		collections:   m.collections,
+		manager:       m,
+		key:           key,
 		collection:    localCollection,
 		collectionID:  meta.GetCollectionId(),
-		databaseName:  collection.GetDbName(),
+		databaseName:  collection.GetSchema().GetDbName(),
 		schema:        collection.GetSchema(),
-		schemaVersion: int64(collection.GetUpdateTimestamp()),
+		schemaVersion: int64(meta.GetSchemaVersion()),
 		ccollection:   ccollection,
 	}, false, nil
 }
@@ -83,7 +113,8 @@ func isRetryableCollectionRuntimeError(err error) bool {
 	if err == nil || merr.GetErrorType(err) == merr.InputError {
 		return false
 	}
-	return !errors.Is(err, merr.ErrCollectionNotFound) &&
+	return !status.AsStreamingError(err).IsUnrecoverable() &&
+		!errors.Is(err, merr.ErrCollectionNotFound) &&
 		!errors.Is(err, merr.ErrDatabaseNotFound) &&
 		!errors.Is(err, merr.ErrPartitionNotFound) &&
 		!errors.Is(err, merr.ErrSegmentNotFound) &&
@@ -95,7 +126,8 @@ func (m *queryViewCollectionRuntimeManager) loadInfo(ctx context.Context, meta *
 }
 
 type queryViewCollectionRuntimeGuard struct {
-	collections   qvCollectionManager
+	manager       *queryViewCollectionRuntimeManager
+	key           collectionRuntimeKey
 	collection    *segments.Collection
 	collectionID  int64
 	databaseName  string
@@ -134,7 +166,25 @@ func (g *queryViewCollectionRuntimeGuard) UpdateIndexMeta(ctx context.Context, i
 }
 
 func (g *queryViewCollectionRuntimeGuard) Release() {
-	g.collections.Unref(g.collectionID, 1)
+	g.manager.release(g.key)
+}
+
+// Pin retains this exact collection for physical segments and active queries,
+// which can outlive the view that initially prepared them.
+func (g *queryViewCollectionRuntimeGuard) Pin() func() {
+	g.manager.mu.Lock()
+	g.manager.collections[g.key].Ref(g.collectionID, 1)
+	g.manager.mu.Unlock()
+	var once sync.Once
+	return func() { once.Do(func() { g.manager.release(g.key) }) }
+}
+
+func (m *queryViewCollectionRuntimeManager) release(key collectionRuntimeKey) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.collections[key].Unref(key.collectionID, 1) {
+		delete(m.collections, key)
+	}
 }
 
 func loadInfoPartitionIDs(info qnview.QueryViewLoadInfo, fallback *viewpb.QueryViewOfQueryNode) []int64 {

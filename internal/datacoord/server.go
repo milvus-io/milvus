@@ -657,6 +657,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	reloadEtcdFn := func() error {
 		var err error
 		recoveredMeta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		if err == nil {
+			recoveredMeta.preparationSchema = coordinatorPreparationSchema
+		}
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {

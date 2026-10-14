@@ -210,6 +210,7 @@ service RootCoord {
     rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
     rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
     rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
+    rpc GetFileResourceSnapshot(milvus.ListFileResourcesRequest) returns (FileResourceSnapshot) {}
 
     // Client Telemetry RPCs (forwarded to rootcoord implementation)
     rpc ClientHeartbeat(milvus.ClientHeartbeatRequest) returns (milvus.ClientHeartbeatResponse) {}
@@ -218,6 +219,7 @@ service RootCoord {
     rpc DeleteClientCommand(milvus.DeleteClientCommandRequest) returns (milvus.DeleteClientCommandResponse) {}
     rpc ListClientCommands(ListClientCommandsRequest) returns (ListClientCommandsResponse) {}
 }
+
 
 // ListClientCommandsRequest asks for the commands the coordinator is currently holding for
 // clients: one-time commands that have not expired or been answered, and persistent
@@ -406,4 +408,11 @@ message GetRLSMetadataResponse {
   int64 collection_id = 4;
   repeated RLSPolicyInfo policies = 5;
   repeated RLSPrincipalInfo principals = 6;
+}
+
+// Internal, atomic resource inventory used by workers preparing resources.
+message FileResourceSnapshot {
+  common.Status status = 1;
+  uint64 version = 2;
+  repeated internal.FileResourceInfo resources = 3;
 }

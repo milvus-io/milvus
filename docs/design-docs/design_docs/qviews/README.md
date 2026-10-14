@@ -86,6 +86,14 @@ execution; the ownership transfer changes no RPC fields or query semantics.
 
 ### Schema handoff
 
+The agreed refactor is [Versioned Schema and QueryView Handoff](schema_evolution.md).
+It separates WAL write schema from published read schema: Proxy/workers fetch
+schemas from SN, DataCoord and QueryView planning consume Broadcaster's target,
+and RootCoord publishes the read schema after complete target handoff. It also
+defines exact-schema routing, column resource sharing and recoverable LoadInfo.
+All GC changes are deferred to that document's unified TODO. Implementation is
+pending; the following describes the current, pre-refactor behavior.
+
 Each QueryView carries `schema_version`, sampled from the latest published
 `CollectionSchema.version` when Coord plans the view. Coord only serves the
 latest schema; this field does not identify a retrievable historical snapshot.

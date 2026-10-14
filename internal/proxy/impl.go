@@ -3521,6 +3521,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		ConsistencyLevel: request.ConsistencyLevel,
 		QueryLabel:       metrics.QueryLabel,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
+	qt.BindReadSchema(collectionInfo.CollID, collectionInfo.Schema)
 	qt.SetSkipRuntimeRLS(true)
 
 	// Execute query

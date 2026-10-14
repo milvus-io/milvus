@@ -64,12 +64,20 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 			return nil, err
 		}
 	}
-	return &CCollection{
+	collection := &CCollection{
 		collectionID: req.CollectionID,
 		ptr:          ptr,
 		schema:       req.Schema,
 		indexMeta:    req.IndexMeta,
-	}, nil
+	}
+	// NewCollection parses the fields but leaves the native revision at zero.
+	// Immutable QueryView planning collections must carry their logical version
+	// so LazyCheckSchema can backfill older growing segments before reading.
+	if err := collection.UpdateSchema(req.Schema, uint64(req.Schema.GetVersion())); err != nil {
+		collection.Release()
+		return nil, err
+	}
+	return collection, nil
 }
 
 // CCollection is just a wrapper of the underlying C-structure CCollection.

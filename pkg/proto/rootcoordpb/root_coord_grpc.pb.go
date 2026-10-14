@@ -103,6 +103,7 @@ const (
 	RootCoord_AddFileResource_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AddFileResource"
 	RootCoord_RemoveFileResource_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/RemoveFileResource"
 	RootCoord_ListFileResources_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/ListFileResources"
+	RootCoord_GetFileResourceSnapshot_FullMethodName       = "/milvus.proto.rootcoord.RootCoord/GetFileResourceSnapshot"
 	RootCoord_ClientHeartbeat_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/ClientHeartbeat"
 	RootCoord_GetClientTelemetry_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/GetClientTelemetry"
 	RootCoord_PushClientCommand_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/PushClientCommand"
@@ -271,6 +272,7 @@ type RootCoordClient interface {
 	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error)
+	GetFileResourceSnapshot(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*FileResourceSnapshot, error)
 	// Client Telemetry RPCs (forwarded to rootcoord implementation)
 	ClientHeartbeat(ctx context.Context, in *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error)
 	GetClientTelemetry(ctx context.Context, in *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error)
@@ -1007,6 +1009,15 @@ func (c *rootCoordClient) ListFileResources(ctx context.Context, in *milvuspb.Li
 	return out, nil
 }
 
+func (c *rootCoordClient) GetFileResourceSnapshot(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*FileResourceSnapshot, error) {
+	out := new(FileResourceSnapshot)
+	err := c.cc.Invoke(ctx, RootCoord_GetFileResourceSnapshot_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rootCoordClient) ClientHeartbeat(ctx context.Context, in *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
 	out := new(milvuspb.ClientHeartbeatResponse)
 	err := c.cc.Invoke(ctx, RootCoord_ClientHeartbeat_FullMethodName, in, out, opts...)
@@ -1213,6 +1224,7 @@ type RootCoordServer interface {
 	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
 	RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)
 	ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)
+	GetFileResourceSnapshot(context.Context, *milvuspb.ListFileResourcesRequest) (*FileResourceSnapshot, error)
 	// Client Telemetry RPCs (forwarded to rootcoord implementation)
 	ClientHeartbeat(context.Context, *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error)
 	GetClientTelemetry(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error)
@@ -1464,6 +1476,9 @@ func (UnimplementedRootCoordServer) RemoveFileResource(context.Context, *milvusp
 }
 func (UnimplementedRootCoordServer) ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFileResources not implemented")
+}
+func (UnimplementedRootCoordServer) GetFileResourceSnapshot(context.Context, *milvuspb.ListFileResourcesRequest) (*FileResourceSnapshot, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetFileResourceSnapshot not implemented")
 }
 func (UnimplementedRootCoordServer) ClientHeartbeat(context.Context, *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ClientHeartbeat not implemented")
@@ -2932,6 +2947,24 @@ func _RootCoord_ListFileResources_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_GetFileResourceSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ListFileResourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).GetFileResourceSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_GetFileResourceSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).GetFileResourceSnapshot(ctx, req.(*milvuspb.ListFileResourcesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RootCoord_ClientHeartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(milvuspb.ClientHeartbeatRequest)
 	if err := dec(in); err != nil {
@@ -3348,6 +3381,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFileResources",
 			Handler:    _RootCoord_ListFileResources_Handler,
+		},
+		{
+			MethodName: "GetFileResourceSnapshot",
+			Handler:    _RootCoord_GetFileResourceSnapshot_Handler,
 		},
 		{
 			MethodName: "ClientHeartbeat",

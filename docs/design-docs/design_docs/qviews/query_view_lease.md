@@ -2,6 +2,11 @@
 
 ## Purpose and scope
 
+The agreed [schema-handoff refactor](schema_evolution.md) adds a Coordinator
+publication obligation before retiring old-schema serving coverage. The local
+lease/reference protocol below remains the draining mechanism afterward;
+Phase 1 selection becomes exact-schema-aware. This change is not implemented yet.
+
 Keep an accessed SN QueryView in Up long enough for Phase 1 plans to reach
 Phase 2 during normal view replacement. This is an SN-local, renewable serving
 lease, separate from the existing call-scoped QueryView reference and physical

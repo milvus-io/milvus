@@ -8,6 +8,11 @@ StreamingNode QueryView state machine.
 
 ## 1. Purpose
 
+The agreed [schema-handoff refactor](../schema_evolution.md) separates shared
+WAL/data ownership from per-view read-schema resource bindings. Exact historical
+schema access and those bindings are pending implementation. All GC changes are
+deferred; ordinary runtime handles must still protect executing queries.
+
 StreamingNode query resources are owned by the WAL recovery model:
 
 ```text

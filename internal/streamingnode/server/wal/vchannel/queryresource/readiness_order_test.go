@@ -147,6 +147,31 @@ func TestManagerRejectsOlderCrossReplicaAcquisition(t *testing.T) {
 	require.Empty(t, manager.refs)
 }
 
+func TestManagerAllowsRepairOfRetainedPublishedReadBase(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	manager := NewManager(Config{Scheduler: scheduler})
+	manager.runtime = NewQueryRuntime()
+	defer manager.Close()
+	oldMeta, oldKey := testManagerQueryViewMetaAndKey(1)
+	manager.AcquireLocked(snview.AcquireResource{Key: oldKey, Meta: oldMeta}, nil)
+	targetMeta, targetKey := testManagerQueryViewMetaAndKey(3)
+	targetMeta.SchemaVersion = 1
+	manager.AcquireLocked(snview.AcquireResource{Key: targetKey, Meta: targetMeta}, nil)
+	repairMeta, repairKey := testManagerQueryViewMetaAndKey(1)
+	repairMeta.Version.QueryVersion++
+	repairKey.QueryViewVersion.QueryVersion++
+	manager.AcquireLocked(snview.AcquireResource{Key: repairKey, Meta: repairMeta}, nil)
+	require.Contains(t, manager.refs, repairKey)
+	require.EqualValues(t, 3, manager.latestDataVersion.StreamingVersion, "sharing a retained base must not lower admission")
+	manager.Release(snview.ReleaseResource{Key: oldKey})
+	oldest, ok := manager.OldestDataVersion()
+	require.True(t, ok)
+	require.EqualValues(t, 1, oldest.StreamingVersion, "replacement inherits the runtime retention pin")
+	manager.Release(snview.ReleaseResource{Key: repairKey})
+	require.False(t, manager.retainsReadBaseLocked(oldMeta), "a retired base cannot be reconstructed by relaxing admission")
+}
+
 func TestConcurrentReplicaReleaseKeepsWatermarksOrdered(t *testing.T) {
 	scheduler := nodescheduler.New(1)
 	defer scheduler.Close()

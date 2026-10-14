@@ -4,10 +4,13 @@ package qnview
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -549,7 +552,7 @@ func TestViewScopedPhysicalSegmentManager_CoalescesRevisionRevertDuringInFlightU
 	appliedRevision := SegmentLoadInfoRevision{Revision: 10}
 	inFlightRevision := SegmentLoadInfoRevision{Revision: 11}
 
-	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}}
+	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}, ready: make(map[int64]bool)}
 	mgr.segments[1000] = &physicalSegmentState{
 		segment:      &fakeTransformSegment{id: 1000, partitionID: 10},
 		refs:         map[qviews.QueryViewKey]struct{}{key: {}},
@@ -579,12 +582,13 @@ func TestViewScopedPhysicalSegmentManager_CoalescesRevisionRevertDuringInFlightU
 	assert.Equal(t, appliedRevision, scheduler.Updates()[1].Snapshot.Revision)
 }
 
-func TestViewScopedPhysicalSegmentManager_KeepsNewerSnapshotPendingWhileUpdateTaskRetries(t *testing.T) {
+func TestViewScopedPhysicalSegmentManager_RetriesWithNewerSnapshot(t *testing.T) {
 	nodeScheduler := &capturedNodeScheduler{}
 	var attempts atomic.Int32
 	loader := &fakePhysicalLoader{
-		updateFn: func(TransformSegment, CollectionRuntime, SegmentLoadInfoSnapshot, SegmentUpdateAction) error {
-			if attempts.Add(1) == 1 {
+		updateFn: func(_ TransformSegment, _ CollectionRuntime, snapshot SegmentLoadInfoSnapshot, _ SegmentUpdateAction) error {
+			attempts.Add(1)
+			if snapshot.Revision.Revision == 10 {
 				return errors.New("update failed")
 			}
 			return nil
@@ -596,7 +600,7 @@ func TestViewScopedPhysicalSegmentManager_KeepsNewerSnapshotPendingWhileUpdateTa
 	view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
-	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}}
+	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}, ready: make(map[int64]bool)}
 	mgr.segments[1000] = &physicalSegmentState{
 		segment:      &fakeTransformSegment{id: 1000, partitionID: 10},
 		refs:         map[qviews.QueryViewKey]struct{}{key: {}},
@@ -606,17 +610,18 @@ func TestViewScopedPhysicalSegmentManager_KeepsNewerSnapshotPendingWhileUpdateTa
 	}
 
 	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 10}})
-	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 11}})
 	require.Len(t, nodeScheduler.tasks, 1)
-
 	current := nodeScheduler.tasks[0]
 	require.ErrorIs(t, current.Execute(context.Background()), nodescheduler.ErrDelay)
 	require.Len(t, nodeScheduler.tasks, 1)
-
+	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 11}})
 	require.NoError(t, current.Execute(context.Background()))
 	require.Len(t, nodeScheduler.tasks, 2)
 	next := nodeScheduler.tasks[1].(*SegmentUpdateTask)
 	assert.Equal(t, uint64(11), next.Snapshot.Revision.Revision)
+	require.NoError(t, next.Execute(context.Background()))
+	require.EqualValues(t, 3, attempts.Load())
+	require.EqualValues(t, 11, mgr.segments[1000].revision.Revision)
 }
 
 func TestViewScopedPhysicalSegmentManager_ReleaseStopsRetryingSegmentUpdate(t *testing.T) {
@@ -639,7 +644,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseStopsRetryingSegmentUpdate(t *t
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
-	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}}
+	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}, ready: make(map[int64]bool)}
 	mgr.segments[1000] = &physicalSegmentState{
 		segment:      &fakeTransformSegment{id: 1000, partitionID: 10},
 		refs:         map[qviews.QueryViewKey]struct{}{key: {}},
@@ -753,7 +758,7 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for release")
 	}
-	assert.True(t, stream.subscriptions[0].closed)
+	assert.True(t, stream.subscriptions[0].closed.Load())
 }
 
 func TestViewScopedPhysicalSegmentManager_IgnoresSnapshotFromReleasedSubscriptionLifecycle(t *testing.T) {
@@ -771,7 +776,7 @@ func TestViewScopedPhysicalSegmentManager_IgnoresSnapshotFromReleasedSubscriptio
 	oldSubscription := stream.subscriptions[0]
 
 	mgr.Release(ReleaseSegments{Key: key1})
-	assert.True(t, oldSubscription.closed)
+	// Detachment rejects stale callbacks even before asynchronous Close finishes.
 
 	meta2 := buildHandlerTestMeta(2)
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
@@ -1066,4 +1071,91 @@ func subscriptionOptions(subscriptions []*fakeSegmentLoadInfoSubscription) []Seg
 		options = append(options, option)
 	}
 	return options
+}
+
+func TestViewScopedPhysicalSegmentManager_RetryRechecksRequirementsWithoutNewSnapshot(t *testing.T) {
+	scheduler := &capturedNodeScheduler{}
+	manager := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(scheduler, &fakePhysicalLoader{})
+	meta := buildHandlerTestMeta(1)
+	meta.SchemaVersion = 2
+	meta.LoadInfoVersion = 20
+	key := qviews.QueryViewKey{ShardID: qviews.ShardID{ReplicaID: meta.GetReplicaId(), VChannel: meta.GetVchannel()}}
+	ready := false
+	manager.views[key] = &viewRef{segments: map[int64]int64{1000: 10}, ready: make(map[int64]bool), onLoaded: func(segments []TransformSegment) {
+		require.Len(t, segments, 1)
+		ready = true
+	}}
+	revision := SegmentLoadInfoRevision{Revision: 10}
+	state := &physicalSegmentState{
+		segment:  &fakeTransformSegment{id: 1000, partitionID: 10},
+		refs:     map[qviews.QueryViewKey]struct{}{key: {}},
+		requests: map[qviews.QueryViewKey]segmentLoadRequest{key: {meta: meta, collection: &fakeCollectionRuntimeGuard{collectionID: testCollectionID}}},
+		revision: revision, latestSnapshot: &SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: revision},
+		appliedMeta: meta, updating: true, updateEpoch: 1,
+	}
+	manager.segments[1000] = state
+	previous := segmentLoadRequest{meta: &viewpb.QueryViewMeta{SchemaVersion: 1, LoadInfoVersion: 19}}
+	require.True(t, manager.supersedeFailedSegmentUpdate(1000, state, 1, previous, revision))
+	require.False(t, state.updating)
+	require.True(t, ready, "already satisfied requirements must not remain blocked behind the obsolete retry")
+	require.Empty(t, scheduler.tasks)
+}
+
+func TestViewScopedPhysicalSegmentManager_UpdateOwnsCollectionUntilSchedulerFinishes(t *testing.T) {
+	for _, queued := range []bool{true, false} {
+		t.Run(fmt.Sprintf("queued=%t", queued), func(t *testing.T) {
+			var pins atomic.Int32
+			patch := mockey.Mock((*fakeCollectionRuntimeGuard).Pin).To(func(*fakeCollectionRuntimeGuard) func() {
+				pins.Add(1)
+				return func() { pins.Add(-1) }
+			}).Build()
+			t.Cleanup(func() { patch.UnPatch() })
+			scheduler := nodescheduler.New(1)
+			t.Cleanup(scheduler.Close)
+			unblock := make(chan struct{})
+			var unblockOnce sync.Once
+			release := func() { unblockOnce.Do(func() { close(unblock) }) }
+			t.Cleanup(release)
+			if queued {
+				started := make(chan struct{})
+				scheduler.Submit(schedulerTaskFunc(func(context.Context) error { close(started); <-unblock; return nil }))
+				<-started
+			}
+			started := make(chan struct{})
+			loader := &fakePhysicalLoader{updateFn: func(TransformSegment, CollectionRuntime, SegmentLoadInfoSnapshot, SegmentUpdateAction) error {
+				close(started)
+				<-unblock
+				return nil
+			}}
+			manager := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(scheduler, loader)
+			meta := buildHandlerTestMeta(1)
+			key := qviews.QueryViewKey{ShardID: qviews.ShardID{ReplicaID: meta.GetReplicaId(), VChannel: meta.GetVchannel()}}
+			manager.views[key] = &viewRef{segments: map[int64]int64{1000: 10}, ready: make(map[int64]bool)}
+			manager.segments[1000] = &physicalSegmentState{
+				segment:  &fakeTransformSegment{id: 1000, partitionID: 10},
+				refs:     map[qviews.QueryViewKey]struct{}{key: {}},
+				requests: map[qviews.QueryViewKey]segmentLoadRequest{key: {meta: meta, collection: &fakeCollectionRuntimeGuard{collectionID: testCollectionID}}},
+				revision: SegmentLoadInfoRevision{Revision: 1},
+			}
+			manager.ApplyLoadInfoSnapshot(t.Context(), SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 2}})
+			if !queued {
+				select {
+				case <-started:
+				case <-time.After(time.Second):
+					t.Fatal("update did not start")
+				}
+			}
+			manager.Release(ReleaseSegments{Key: key})
+			require.EqualValues(t, 1, pins.Load(), "view release cannot destroy the task's collection")
+			release()
+			require.Eventually(t, func() bool { return pins.Load() == 0 }, time.Second, time.Millisecond)
+			if queued {
+				select {
+				case <-started:
+					t.Fatal("canceled queued update executed")
+				default:
+				}
+			}
+		})
+	}
 }

@@ -138,6 +138,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Su
 
 	// Create a test core with proper meta setup
 	core := newTestCore(withHealthyCode())
+	core.session = suite.core.session
 	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 	core.meta = mockMeta
 
@@ -163,6 +164,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Ge
 
 	// Create a test core with proper meta setup
 	core := newTestCore(withHealthyCode())
+	core.session = suite.core.session
 	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 	core.meta = mockMeta
 
@@ -182,6 +184,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Br
 
 	// Create a test core with proper meta setup
 	core := newTestCore(withHealthyCode())
+	core.session = suite.core.session
 	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 	core.meta = mockMeta
 

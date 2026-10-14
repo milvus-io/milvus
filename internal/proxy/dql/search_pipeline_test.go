@@ -25,19 +25,15 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
-	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
@@ -1994,22 +1990,22 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 	highlightTasks := map[int64]*highlightTask{
 		100: {
 			HighlightTask: &querypb.HighlightTask{
-				Texts:     []string{"target text"},
-				FieldName: testVarCharField,
-				FieldId:   100,
+				Texts:         []string{"target text"},
+				SearchTextNum: 1,
+				FieldName:     testVarCharField,
+				FieldId:       100,
 			},
 			preTags:  [][]byte{[]byte(DefaultPreTag)},
 			postTags: [][]byte{[]byte(DefaultPostTag)},
 		},
 	}
 
-	mockLb := shardclient.NewMockLBPolicy(s.T())
 	SearchTask := &SearchTask{
-		sched: sched,
+		baseTask: baseTask{MetaCache: newTestCache()},
+		sched:    sched,
 		highlighter: &LexicalHighlighter{
 			tasks: highlightTasks,
 		},
-		lb:             mockLb,
 		schema:         mustNewSchemaInfo(schema),
 		request:        req,
 		collectionName: collName,
@@ -2021,16 +2017,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 	op, err := opFactory[highlightOp](SearchTask, map[string]any{})
 	s.Require().NoError(err)
 
-	// mockery
-	mockLb.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
-		qn := mocks.NewMockQueryNodeClient(s.T())
-		qn.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(
-			&querypb.GetHighlightResponse{
-				Status:  merr.Success(),
-				Results: []*querypb.HighlightResult{{}},
-			}, nil)
-		workload.Exec(ctx, 0, qn, "test_chan")
-	}).Return(nil)
+	mockPipelineAnalyzer(s.T(), []string{"target text", "match text"})
 
 	_, err = op.run(ctx, s.span, &milvuspb.SearchResults{
 		Results: &schemapb.SearchResultData{
@@ -2117,13 +2104,12 @@ func (s *SearchPipelineSuite) TestLexicalHighlightOpNullableStringKeepsEmptyHigh
 				},
 			}
 
-			mockLb := shardclient.NewMockLBPolicy(s.T())
 			SearchTask := &SearchTask{
-				sched: sched,
+				baseTask: baseTask{MetaCache: newTestCache()},
+				sched:    sched,
 				highlighter: &LexicalHighlighter{
 					tasks: highlightTasks,
 				},
-				lb:             mockLb,
 				schema:         mustNewSchemaInfo(schema),
 				request:        &milvuspb.SearchRequest{CollectionName: collName, DbName: "default"},
 				collectionName: collName,
@@ -2133,25 +2119,7 @@ func (s *SearchPipelineSuite) TestLexicalHighlightOpNullableStringKeepsEmptyHigh
 			op, err := opFactory[highlightOp](SearchTask, map[string]any{})
 			s.Require().NoError(err)
 
-			queryNodeResults := make([]*querypb.HighlightResult, tc.rowNum)
-			for i := range queryNodeResults {
-				queryNodeResults[i] = &querypb.HighlightResult{}
-			}
-
-			mockLb.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
-				qn := mocks.NewMockQueryNodeClient(s.T())
-				qn.EXPECT().GetHighlight(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *querypb.GetHighlightRequest, opts ...grpc.CallOption) {
-					s.Require().Len(req.GetTasks(), 1)
-					task := req.GetTasks()[0]
-					s.Equal(int64(tc.rowNum), task.GetCorpusTextNum())
-					s.Equal(tc.expectedTexts, task.GetTexts())
-				}).Return(
-					&querypb.GetHighlightResponse{
-						Status:  merr.Success(),
-						Results: queryNodeResults,
-					}, nil)
-				workload.Exec(ctx, 0, qn, "test_chan")
-			}).Return(nil)
+			mockPipelineAnalyzer(s.T(), tc.expectedTexts)
 
 			ids := make([]int64, tc.rowNum)
 			scores := make([]float32, tc.rowNum)

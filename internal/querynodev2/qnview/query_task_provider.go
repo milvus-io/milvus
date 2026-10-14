@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -23,6 +24,9 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
+	}
 
 	view := filterQueryNodeViewByPartitions(lease.View, req.GetPartitionIDs())
 	if err := h.localOptimizer.OptimizeSearch(ctx, req); err != nil {
@@ -35,6 +39,14 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view)
 	if err != nil {
 		return nil, err
+	}
+	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
+		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Segment().(ReadableSealedSegment).Collection().Schema()); err != nil {
+			for _, handle := range handles {
+				handle.Release()
+			}
+			return nil, err
+		}
 	}
 	tasks := make([]QNSearchSegmentTask, 0, len(handles))
 	for _, handle := range handles {
@@ -59,6 +71,9 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
+	}
 
 	view := filterQueryNodeViewByPartitions(lease.View, req.GetPartitionIDs())
 	if err := h.localOptimizer.OptimizeRetrieve(ctx, req); err != nil {
@@ -71,6 +86,14 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view)
 	if err != nil {
 		return nil, err
+	}
+	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
+		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Segment().(ReadableSealedSegment).Collection().Schema()); err != nil {
+			for _, handle := range handles {
+				handle.Release()
+			}
+			return nil, err
+		}
 	}
 	tasks := make([]QNQuerySegmentTask, 0, len(handles))
 	for _, handle := range handles {

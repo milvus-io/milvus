@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -35,6 +36,9 @@ type LegacySearchResult struct {
 
 type LegacyQueryRequest struct {
 	Req *internalpb.RetrieveRequest
+	// Plans binds an internal requery to the original Search attempt. Non-nil
+	// (including empty) never resolves a new schema, view or MVCC.
+	Plans []ShardPlan
 }
 
 type LegacyQueryResult struct {
@@ -115,6 +119,9 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (*L
 }
 
 func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error) {
+	if req.Plans != nil {
+		return c.queryRetainedPlans(ctx, req)
+	}
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
 	if err != nil {
 		return nil, err
@@ -239,4 +246,33 @@ func (c *legacyQueryCollector) Results() []*internalpb.RetrieveResults {
 		results = append(results, shardResults...)
 	}
 	return results
+}
+
+// Requery failure aborts the whole parent operation. Retrying Phase 1 here would
+// mix its old reduced search results with a new schema or data snapshot.
+func (c *legacyClient) queryRetainedPlans(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error) {
+	collector := newLegacyQueryCollector()
+	group, groupCtx := errgroup.WithContext(ctx)
+	for _, plan := range req.Plans {
+		for _, node := range plan.WorkNodes {
+			group.Go(func() error {
+				request := proto.Clone(req.Req).(*internalpb.RetrieveRequest)
+				request.MvccTimestamp = legacyMVCCForNode(plan.Mvcc, node)
+				response, err := c.shardClient.queryServiceClient.QueryOnView(groupCtx, node, &viewpb.QueryOnViewRequest{
+					LegacyReq: request, ShardId: plan.ShardID.IntoProto(), Version: plan.Version, Mvcc: plan.Mvcc,
+				})
+				if err != nil {
+					return err
+				}
+				if isEmptySuccessfulQueryResponse(response) {
+					return nil
+				}
+				return collector.Add(plan.ShardID, response)
+			})
+		}
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+	return &LegacyQueryResult{Results: collector.Results(), Plans: req.Plans}, nil
 }

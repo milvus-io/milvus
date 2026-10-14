@@ -21,21 +21,23 @@ func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQuery
 		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("collection id is zero"))
 		return resp, nil
 	}
-	if s.qviewsRuntime == nil || s.qviewsRuntime.loadConfigStore == nil {
-		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg("query view runtime is nil"))
+	if s.qviewsRuntime == nil || s.qviewsRuntime.loadConfigStore == nil || s.qviewsRuntime.loadInfos == nil {
+		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg("query view load metadata is not initialized"))
 		return resp, nil
 	}
-	cfg, version := s.qviewsRuntime.loadConfigStore.GetConfigWithVersion(req.GetCollectionID())
-	if cfg == nil {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID()))
+	version := req.GetVersion()
+	if version == 0 {
+		cfg, current := s.qviewsRuntime.loadConfigStore.GetConfigWithVersion(req.GetCollectionID())
+		if cfg == nil {
+			resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID()))
+			return resp, nil
+		}
+		version = current
+	}
+	info, err := s.qviewsRuntime.loadInfos.Get(ctx, req.GetCollectionID(), version)
+	if err != nil {
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	if req.GetVersion() != 0 && req.GetVersion() != version {
-		resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("query view load configuration changed"))
-		return resp, nil
-	}
-	resp.Version = version
-	resp.PartitionIDs = append([]int64(nil), cfg.PartitionIDs...)
-	resp.LoadFields = cloneLoadFields(cfg.LoadFields)
-	return resp, nil
+	return info, nil
 }

@@ -773,6 +773,24 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+
+	for _, tc := range []struct {
+		value   string
+		version int32
+	}{{"60", 4}, {"60", 4}, {"120", 5}} {
+		resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			DbName: dbName, CollectionName: collectionName,
+			Properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: tc.value}},
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		assertSchemaVersion(t, ctx, core, dbName, collectionName, tc.version)
+	}
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		DeleteKeys: []string{common.CollectionTTLConfigKey},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 6)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {

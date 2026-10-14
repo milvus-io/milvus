@@ -17,6 +17,11 @@
 
 ## 1. Overview
 
+The agreed [schema-handoff refactor](schema_evolution.md) retains published-old
+schema coverage while target-schema views prepare and reach Up. It replaces
+the single-Up assumptions below with schema-aware selection and retirement;
+existing lifecycle state enums remain. That implementation is pending.
+
 `ShardViewManager` is the in-memory owner of the QueryViews for one shard on one
 replica. It is responsible for:
 

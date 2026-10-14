@@ -387,6 +387,8 @@ message AlterLoadConfigMessageHeader {
     repeated LoadReplicaConfig replicas = 5; // the replicas that has to be loaded.
     bool user_specified_replica_mode = 6; // whether the replica mode is user specified.
     int32 schema_version = 8 [deprecated = true]; // Ignored: not part of the load configuration.
+    optional bool load_all_fields = 9; // absent on legacy messages; preserve/infer loading intent.
+    bool skip_load_dynamic_field = 10;
     bool use_local_replica_config = 7; // when true, use local cluster-level replica config instead of the replicas field above.
 }
 

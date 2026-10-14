@@ -284,3 +284,11 @@ func getExpectErr() error {
 func (n *noopWALAccesser) AnalyzerClient() AnalyzerClient {
 	return nil
 }
+
+func (n *noopWALAccesser) SchemaClient() SchemaClient {
+	return nil
+}
+
+func (*noopWALAccesser) ResolvePChannelInfo(_ context.Context, vchannel string) (types.PChannelInfo, error) {
+	return types.PChannelInfo{Name: funcutil.ToPhysicalChannel(vchannel), Term: 1}, nil
+}

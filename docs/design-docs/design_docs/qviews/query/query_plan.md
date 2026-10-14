@@ -2,6 +2,11 @@
 
 ## 1. Overview
 
+The agreed [schema-handoff refactor](../schema_evolution.md) changes selection
+to the latest eligible Up within the request's exact read SchemaVersion and
+binds field validity to the fixed MVCC. It is pending implementation; the
+latest-Up rules below describe the current implementation.
+
 This document describes the StreamingNode-side implementation of Phase 1 in the
 QueryView query path.
 

@@ -263,6 +263,8 @@ message LoadCollectionRequest {
     repeated string resource_groups = 8;
     repeated int64 load_fields = 9;
     common.LoadPriority priority = 10;
+    optional bool load_all_fields = 11;
+    bool skip_load_dynamic_field = 12;
 }
 
 message ReleaseCollectionRequest {
@@ -295,6 +297,8 @@ message LoadPartitionsRequest {
     repeated index.IndexInfo index_info_list = 10;
     repeated int64 load_fields = 11;
     common.LoadPriority priority = 12;
+    optional bool load_all_fields = 13;
+    bool skip_load_dynamic_field = 14;
 }
 
 message ReleasePartitionsRequest {
@@ -846,6 +850,8 @@ message CollectionLoadInfo {
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
     int32 schema_version = 11 [deprecated = true]; // Ignored: QueryViews use the latest collection schema.
+    optional bool load_all_fields = 12;
+    bool skip_load_dynamic_field = 13;
 }
 
 message PartitionLoadInfo {

@@ -143,6 +143,11 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const int64_t schema_length,
                    const uint64_t schema_version);
 
+// Return a read-only sealed facade. Retain c_segment until deleting the facade.
+CStatus
+PinSealedSegmentReadState(CSegmentInterface c_segment,
+                          CSegmentInterface* read_segment);
+
 void
 DeleteSegment(CSegmentInterface c_segment);
 

@@ -25,8 +25,8 @@ type DataViewRefProvider = qviews.DataViewRefProvider
 // event; DirtyViewFlushScheduler owns all cross-shard batching and I/O.
 //
 // Invariants (maintained by all methods):
-//   - At most one view in Preparing or Ready state (tracked by preparingView).
-//   - At most one view in Up state (tracked by upView).
+//   - At most one Preparing or Ready per schema; preparingView tracks the newest.
+//   - At most one Up view per SchemaVersion; published and target schemas may coexist.
 //
 // Thread-safety: All methods are thread-safe.
 type ShardViewManager struct {
@@ -42,10 +42,11 @@ type ShardViewManager struct {
 	// All active views keyed by version for O(1) lookup.
 	views map[qviews.QueryViewVersion]*CoordQueryViewStateMachine
 
-	// Fast pointers to the unique Preparing/Ready and Up views.
-	// Invariant: at most one of each at any time.
-	preparingView *CoordQueryViewStateMachine // Preparing or Ready state; nil if none
-	upView        *CoordQueryViewStateMachine // Up state; nil if none
+	// Fast pointers to the Preparing/Ready view and the newest Up view.
+	// Older schemas remain Up until read-schema publication retires them.
+	preparingView   *CoordQueryViewStateMachine // Preparing or Ready state; nil if none
+	upView          *CoordQueryViewStateMachine // newest Up across schemas; nil if none
+	publishedSchema *int32                      // nil until public metadata has been recovered
 
 	// Accumulates persist and sync operations within a single lock-hold scope.
 	// The accumulated effects are moved into one immutable dirtyViewEvent before
@@ -209,8 +210,9 @@ func (m *ShardViewManager) Stats() *ShardStats {
 
 func (m *ShardViewManager) statsLocked() *ShardStats {
 	stats := &ShardStats{
-		Segments:  make(map[int64]*SegmentStats),
-		Resources: make(map[int64]map[ResourceKey]struct{}),
+		Segments:   make(map[int64]*SegmentStats),
+		Resources:  make(map[int64]map[ResourceKey]struct{}),
+		UpBySchema: make(map[int32]SchemaUpView),
 	}
 	resident := make(map[int64]struct{})
 
@@ -226,6 +228,10 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 		version := sm.Version()
 		switch sm.State() {
 		case qviews.QueryViewStateUp:
+			schema := sm.View().GetMeta().GetSchemaVersion()
+			if old, ok := stats.UpBySchema[schema]; !ok || version.GT(old.Version) {
+				stats.UpBySchema[schema] = SchemaUpView{Version: version, LoadInfoVersion: sm.View().GetMeta().GetLoadInfoVersion()}
+			}
 			if stats.UpVersion == nil || version.GT(*stats.UpVersion) {
 				stats.UpVersion = &version
 				stats.UpLoadInfoVersion = sm.View().GetMeta().GetLoadInfoVersion()
@@ -397,14 +403,26 @@ func segmentSet(segments []int64) map[int64]bool {
 //   - If the DataVersion matches existing views, QV = max(existing QV for same DV) + 1.
 //   - Otherwise, QV = 1.
 //
-// Preemption: If an existing view is in Preparing or Ready state, it is preempted
-// (injected with synthetic Unrecoverable → Dropping).
+// Preemption replaces obsolete target preparations, preserving any recovery
+// preparation for the published schema.
 //
 // Validation: The new DataVersion must not be lower than any existing view's DataVersion.
 func (m *ShardViewManager) AddPreparing(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder) error {
+	return m.addPreparing(ctx, builder, nil)
+}
+
+// AddPublishedRecovery changes placement of a retained published-schema view.
+// It preserves that view's exact data and load identities while a newer schema
+// prepares independently. Ordinary planning still cannot roll DataVersion back.
+func (m *ShardViewManager) AddPublishedRecovery(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder, source qviews.QueryViewVersion) error {
+	return m.addPreparing(ctx, builder, &source)
+}
+
+func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder, source *qviews.QueryViewVersion) error {
 	newDV := builder.DataVersion()
+	view := builder.Build()
 	m.mu.Lock()
-	err := m.validatePreparingLocked(newDV)
+	err := m.validatePreparationLocked(view, source)
 	m.mu.Unlock()
 	if err != nil {
 		return err
@@ -413,7 +431,6 @@ func (m *ShardViewManager) AddPreparing(ctx context.Context, builder *qviews.Que
 	// Get pins the exact version against GC, but may wait for collection I/O.
 	// Keep both construction and acquisition outside the manager lock so node
 	// callbacks, Stats and RequestRelease can continue while it waits.
-	view := builder.Build()
 	var ref qviews.DataViewRef
 	if m.dataViewRefs != nil {
 		ref, err = m.dataViewRefs.Get(ctx, view.GetMeta().GetCollectionId(), newDV.IntoProto())
@@ -428,7 +445,7 @@ func (m *ShardViewManager) AddPreparing(ctx context.Context, builder *qviews.Que
 	}
 	// The manager may have been retired, or a newer view accepted, during Get.
 	// QueryVersion must also be assigned from the state observed after Get.
-	err = m.validatePreparingLocked(newDV)
+	err = m.validatePreparationLocked(view, source)
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -442,32 +459,43 @@ func (m *ShardViewManager) AddPreparing(ctx context.Context, builder *qviews.Que
 	qv := m.nextQueryVersion(newDV)
 	builder.SetQueryVersion(qv)
 	view.Meta.Version.QueryVersion = qv
+	if source != nil {
+		view.Meta.TransformStartAfterTimetick = m.views[*source].View().GetMeta().GetTransformStartAfterTimetick()
+	}
+	view.Meta.TransformStartAfterTimetick = m.publishedRetentionStartLocked(view.Meta)
 	sm := NewCoordQueryViewStateMachineWithRef(view, ref)
 
-	// Preempt existing Preparing/Ready view.
-	if m.preparingView != nil {
-		key := m.keyForStateMachine(m.preparingView)
-		before := m.preparingView.State()
-		m.preparingView.EnterUnrecoverable()
+	// Different schema generations have independent preparation obligations.
+	// Preserve published recovery while superseding obsolete target work.
+	for _, preparing := range m.views {
+		if preparing.State() != qviews.QueryViewStatePreparing && preparing.State() != qviews.QueryViewStateReady {
+			continue
+		}
+		schema := preparing.View().GetMeta().GetSchemaVersion()
+		replace := schema == view.GetMeta().GetSchemaVersion() ||
+			(source == nil && (m.publishedSchema == nil || schema != *m.publishedSchema))
+		if !replace {
+			continue
+		}
+		key := m.keyForStateMachine(preparing)
+		before := preparing.State()
+		preparing.EnterUnrecoverable()
 		qvobserve.Observe(ctx, qvobserve.CoordViewPreemptedEvent{
 			ViewStateTransition: qvobserve.ViewStateTransition{
-				CollectionID: m.collectionIDForStateMachine(m.preparingView),
+				CollectionID: m.collectionIDForStateMachine(preparing),
 				View:         key,
 				From:         before,
-				To:           m.preparingView.State(),
+				To:           preparing.State(),
 			},
 			PreemptingDataVersion: newDV,
 		})
-		m.processStateMachine(m.preparingView)
-		// preparingView is cleared by processStateMachine (Unrecoverable case).
+		m.processStateMachine(preparing)
 	}
 
 	// Advance all Unrecoverable views (preempted or naturally failed) to
 	// Dropping so their Dropped sync is batched with the new Preparing sync.
-	m.advanceUnrecoverableToDropping()
-
 	m.views[sm.Version()] = sm
-	m.preparingView = sm
+	m.advanceUnrecoverableToDropping()
 	qvobserve.Observe(ctx, qvobserve.CoordViewCreatedEvent{CollectionID: m.collectionIDForStateMachine(sm), View: m.keyForStateMachine(sm), State: sm.State()})
 
 	// Process: collect persist, sync, and post-persist effects.
@@ -494,36 +522,22 @@ func (m *ShardViewManager) RequestRelease(ctx context.Context) error {
 	m.mu.Lock()
 	m.releaseRequested = true
 
-	if m.preparingView != nil {
-		key := m.keyForStateMachine(m.preparingView)
-		before := m.preparingView.State()
-		m.preparingView.EnterUnrecoverable()
+	for _, sm := range m.views {
+		key, before := m.keyForStateMachine(sm), sm.State()
+		switch before {
+		case qviews.QueryViewStateUp:
+			sm.EnterDown()
+		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
+			sm.EnterUnrecoverable()
+		default:
+			continue
+		}
 		qvobserve.Observe(ctx, qvobserve.CoordViewReleaseRequestedEvent{
 			ViewStateTransition: qvobserve.ViewStateTransition{
-				CollectionID: m.collectionIDForStateMachine(m.preparingView),
-				View:         key,
-				From:         before,
-				To:           m.preparingView.State(),
+				CollectionID: m.collectionIDForStateMachine(sm), View: key, From: before, To: sm.State(),
 			},
 		})
-		m.processStateMachine(m.preparingView)
-		// preparingView is cleared by processStateMachine (Unrecoverable case).
-	}
-
-	if m.upView != nil {
-		key := m.keyForStateMachine(m.upView)
-		before := m.upView.State()
-		m.upView.EnterDown()
-		qvobserve.Observe(ctx, qvobserve.CoordViewReleaseRequestedEvent{
-			ViewStateTransition: qvobserve.ViewStateTransition{
-				CollectionID: m.collectionIDForStateMachine(m.upView),
-				View:         key,
-				From:         before,
-				To:           m.upView.State(),
-			},
-		})
-		m.processStateMachine(m.upView)
-		// processStateMachine's Down case clears m.upView.
+		m.processStateMachine(sm)
 	}
 
 	// Advance all Unrecoverable views (preempted or naturally failed) to Dropping.
@@ -563,26 +577,32 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 	// 3. Handle cascading effects based on current state.
 	switch sm.State() {
 	case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
-		m.preparingView = sm
+		m.refreshNewestPreparingLocked()
 
 	case qviews.QueryViewStateUp:
 		if m.preparingView == sm {
-			m.preparingView = nil
+			m.refreshNewestPreparingLocked()
+		}
+		if m.publishedSchema != nil && sm.View().GetMeta().GetSchemaVersion() < *m.publishedSchema {
+			sm.EnterDown()
+			m.processStateMachine(sm)
+			return
 		}
 		m.downOlderUpView(sm)
-		m.upView = sm
+		m.refreshNewestUpLocked()
+		m.advanceUnrecoverableToDropping()
 
 	case qviews.QueryViewStateDown:
 		if m.upView == sm {
-			m.upView = nil
+			m.refreshNewestUpLocked()
 		}
 
 	case qviews.QueryViewStateUnrecoverable:
 		if m.preparingView == sm {
-			m.preparingView = nil
+			m.refreshNewestPreparingLocked()
 		}
 		if m.upView == sm {
-			m.upView = nil
+			m.refreshNewestUpLocked()
 		}
 		// A late failure must not strand an explicitly released view.
 		// Loaded shards retain Unrecoverable views until AddPreparing can
@@ -610,6 +630,9 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 func (m *ShardViewManager) advanceUnrecoverableToDropping() {
 	for _, sm := range m.views {
 		if sm.State() == qviews.QueryViewStateUnrecoverable {
+			if m.keepPublishedRecoverySourceLocked(sm) {
+				continue
+			}
 			key := m.keyForStateMachine(sm)
 			before := sm.State()
 			sm.EnterDropping()
@@ -626,26 +649,69 @@ func (m *ShardViewManager) advanceUnrecoverableToDropping() {
 	}
 }
 
-// downOlderUpView transitions the current Up view to Down if it differs from newUp.
-//
-// Must be called under m.mu.
+// downOlderUpView replaces only the Up view of the same schema. Target
+// preparation must not remove the public schema's last serving view.
 func (m *ShardViewManager) downOlderUpView(newUp *CoordQueryViewStateMachine) {
-	if m.upView != nil && m.upView != newUp {
-		key := m.keyForStateMachine(m.upView)
-		before := m.upView.State()
-		m.upView.EnterDown()
+	for _, old := range m.views {
+		if old == newUp || old.State() != qviews.QueryViewStateUp ||
+			old.View().GetMeta().GetSchemaVersion() != newUp.View().GetMeta().GetSchemaVersion() {
+			continue
+		}
+		// Recovery and delayed node reports can reach this path out of order.
+		retiring, replacement := old, newUp
+		if old.Version().GT(newUp.Version()) {
+			retiring, replacement = newUp, old
+		}
+		key, before := m.keyForStateMachine(retiring), retiring.State()
+		retiring.EnterDown()
 		qvobserve.Observe(m.ctx, qvobserve.CoordViewHandoffToNewUpEvent{
 			ViewStateTransition: qvobserve.ViewStateTransition{
-				CollectionID: m.collectionIDForStateMachine(m.upView),
-				View:         key,
-				From:         before,
-				To:           m.upView.State(),
+				CollectionID: m.collectionIDForStateMachine(retiring), View: key, From: before, To: retiring.State(),
 			},
-			NewUpView: m.keyForStateMachine(newUp),
+			NewUpView: m.keyForStateMachine(replacement),
 		})
-		m.processStateMachine(m.upView)
-		// processStateMachine's Down case clears m.upView.
+		m.processStateMachine(retiring)
+		if retiring == newUp {
+			return
+		}
 	}
+}
+
+func (m *ShardViewManager) refreshNewestUpLocked() {
+	m.upView = nil
+	for _, sm := range m.views {
+		if sm.State() == qviews.QueryViewStateUp && (m.upView == nil || sm.Version().GT(m.upView.Version())) {
+			m.upView = sm
+		}
+	}
+}
+
+// PublishSchema retires prior read generations after RootCoord has durably
+// published this version. Replays cannot regress the publication fence.
+func (m *ShardViewManager) PublishSchema(version int32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.publishedSchema != nil && version < *m.publishedSchema {
+		return
+	}
+	m.publishedSchema = &version
+	for _, sm := range m.views {
+		if sm.View().GetMeta().GetSchemaVersion() < version {
+			switch sm.State() {
+			case qviews.QueryViewStateUp:
+				sm.EnterDown()
+				m.processStateMachine(sm)
+			case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
+				sm.EnterUnrecoverable()
+				m.processStateMachine(sm)
+			}
+		}
+	}
+	m.refreshNewestUpLocked()
+	m.advanceUnrecoverableToDropping()
+	event := m.consumeDirtyEventLocked()
+	m.publishStatsLocked()
+	m.submitDirtyEvent(event)
 }
 
 // consumeDirtyEventLocked moves the current operation's accumulated effects

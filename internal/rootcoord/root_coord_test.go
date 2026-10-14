@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	querycatalog "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -55,6 +56,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/readiness"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -159,6 +164,17 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	kv, _ := kvfactory.GetEtcdAndPath()
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	// DDL-only tests have no loaded collections. Use a recovered empty config
+	// store so schema publication still executes its real release/no-load path.
+	configs, err := loadmgr.RecoverLoadConfigStore(t.Context(), querycatalog.NewCatalog(catalogKV))
+	require.NoError(t, err)
+	previous := qvresource.Resource()
+	notifications := readiness.NewNotifications()
+	qvresource.Init(&qvresource.Resources{
+		LoadConfigs: configs, LoadManager: loadmgr.NewCollectionLoadManager(configs, nil),
+		ShardViews: &coordview.ShardViewRegistry{}, Readiness: notifications,
+	})
+	t.Cleanup(func() { notifications.Close(); qvresource.Init(previous) })
 
 	testDB := newNameDb()
 	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
@@ -203,6 +219,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
 	streaming.SetWALForTest(wal)
 
+	core.session = sessionutil.NewSessionWithEtcd(t.Context(), path, kv)
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		// Stamp the header the way the real broadcaster does, control channel included.

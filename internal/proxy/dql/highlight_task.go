@@ -41,10 +41,11 @@ type HighlightTask struct {
 	baseTask
 	Condition
 	*querypb.GetHighlightRequest
-	ctx            context.Context
-	collectionName string
-	collectionID   typeutil.UniqueID
-	dbName         string
+	ctx               context.Context
+	collectionName    string
+	collectionID      typeutil.UniqueID
+	dbName            string
+	readSchemaVersion *int32
 
 	result *querypb.GetHighlightResponse
 }
@@ -113,7 +114,7 @@ func (t *HighlightTask) Execute(ctx context.Context) error {
 		response, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{
 			Placeholder: texts, WithDetail: true,
 			Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{
-				CollectionId: t.collectionID, Vchannel: info.VChannels[0], FieldId: task.GetFieldId(), AnalyzerNames: task.GetAnalyzerNames(),
+				CollectionId: t.collectionID, Vchannel: info.VChannels[0], FieldId: task.GetFieldId(), AnalyzerNames: task.GetAnalyzerNames(), ReadSchemaVersion: t.readSchemaVersion,
 			}},
 		})
 		if err != nil {

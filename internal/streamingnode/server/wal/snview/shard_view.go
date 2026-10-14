@@ -431,6 +431,10 @@ func (s *snShardView) startReleaseLocked(version qviews.QueryViewVersion, entry 
 }
 
 func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease, error) {
+	return s.acquireUpViewForSchema(ctx, nil)
+}
+
+func (s *snShardView) acquireUpViewForSchema(ctx context.Context, schema *int32) (*QueryViewLease, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -443,7 +447,7 @@ func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease,
 	var selectedVersion qviews.QueryViewVersion
 	for version, entry := range s.views {
 		s.advancePendingDownLocked(version, entry)
-		if entry.sm.State() != qviews.QueryViewStateUp {
+		if entry.sm.State() != qviews.QueryViewStateUp || (schema != nil && entry.sm.Meta().GetSchemaVersion() != *schema) {
 			continue
 		}
 		if selected == nil || version.GT(selectedVersion) {

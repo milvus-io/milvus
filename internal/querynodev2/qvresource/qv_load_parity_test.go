@@ -33,7 +33,7 @@ func TestQVExternalMilvusTableUsesRealPKCandidate(t *testing.T) {
 				Fields:       []*schemapb.FieldSchema{{FieldID: 100, Name: "id", IsPrimaryKey: true, ExternalField: "id", DataType: pkType}},
 			}
 			collection := segments.NewCollectionWithoutSegcoreForTest(1, schema)
-			local := &qvLocalSegment{segment: &segments.LocalSegment{}, collectionID: 1, collections: &fakeQVCollectionManager{collection: collection}}
+			local := &qvLocalSegment{segment: &segments.LocalSegment{}, collectionID: 1, collection: collection}
 			bfs := pkoracle.NewBloomFilterSet(10, 100, segments.SegmentTypeSealed)
 			// BloomFilterSet has no backing stats in this test. Patch its membership
 			// lookup to distinguish selecting it from virtual-PK routing.
@@ -42,7 +42,7 @@ func TestQVExternalMilvusTableUsesRealPKCandidate(t *testing.T) {
 			hitsPatch := mockey.Mock((*pkoracle.BloomFilterSet).BatchPkExist).Return([]bool{true}).Build()
 			t.Cleanup(func() { hitsPatch.UnPatch() })
 			loader := segments.NewLoader(ctx, nil, nil)
-			patch := mockey.Mock(mockey.GetMethod(loader, "LoadBloomFilterSet")).Return([]*pkoracle.BloomFilterSet{bfs}, nil).Build()
+			patch := mockey.Mock(mockey.GetMethod(loader, "LoadBloomFilterSetWithSchema")).Return([]*pkoracle.BloomFilterSet{bfs}, nil).Build()
 			t.Cleanup(func() { patch.UnPatch() })
 			realLoader := realQVSegmentLoader{loader: loader}
 			require.NoError(t, realLoader.LoadPKCandidate(ctx, local, &querypb.SegmentLoadInfo{CollectionID: 1, SegmentID: 10}))
@@ -65,7 +65,7 @@ func TestQVExternalVirtualPKKeepsEncodedRouting(t *testing.T) {
 			{FieldID: 101, Name: "value", ExternalField: "value", DataType: schemapb.DataType_Int64},
 		},
 	}
-	local := &qvLocalSegment{segment: &segments.LocalSegment{}, collectionID: 1, collections: &fakeQVCollectionManager{collection: segments.NewCollectionWithoutSegcoreForTest(1, schema)}}
+	local := &qvLocalSegment{segment: &segments.LocalSegment{}, collectionID: 1, collection: segments.NewCollectionWithoutSegcoreForTest(1, schema)}
 	require.NoError(t, (realQVSegmentLoader{}).LoadPKCandidate(context.Background(), local, &querypb.SegmentLoadInfo{SegmentID: 10}))
 	pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(10<<32 | 1), storage.NewInt64PrimaryKey(11<<32 | 1)}
 	require.Equal(t, []bool{true, false}, local.BatchPkExist(storage.NewBatchLocationsCache(pks)))
@@ -78,10 +78,10 @@ func TestQVExternalDeltasReachSharedLoader(t *testing.T) {
 	loader := segments.NewLoader(ctx, nil, nil)
 	patch := mockey.Mock(mockey.GetMethod(loader, "LoadDeltaLogsWithoutResource")).Return(assert.AnError).Build()
 	defer patch.UnPatch()
-	local := &qvLocalSegment{segment: &segments.LocalSegment{}, collectionID: 1, collections: &fakeQVCollectionManager{collection: segments.NewCollectionWithoutSegcoreForTest(1, &schemapb.CollectionSchema{
+	local := &qvLocalSegment{segment: &segments.LocalSegment{}, collectionID: 1, collection: segments.NewCollectionWithoutSegcoreForTest(1, &schemapb.CollectionSchema{
 		ExternalSpec: `{"format":"milvus-table"}`,
 		Fields:       []*schemapb.FieldSchema{{Name: "id", ExternalField: "id", IsPrimaryKey: true}},
-	})}}
+	})}
 	err := (realQVSegmentLoader{loader: loader}).LoadDeltaLogs(ctx, local, &querypb.SegmentLoadInfo{CollectionID: 1})
 	require.ErrorIs(t, err, assert.AnError, "historical delete loading cannot be silently skipped")
 	require.Equal(t, 1, patch.Times())
@@ -97,7 +97,7 @@ func TestQVFinalizeRunsAfterAllMetadataConsumers(t *testing.T) {
 		return nil
 	}).Build()
 	defer patch.UnPatch()
-	_, err := newQueryViewPhysicalSegmentLoader(nil, nil, loader).Load(context.Background(), &querypb.SegmentLoadInfo{SegmentID: 10}, fakeQVCollectionRuntime{})
+	_, err := newQueryViewPhysicalSegmentLoader(nil, loader).Load(context.Background(), &querypb.SegmentLoadInfo{SegmentID: 10}, fakeQVCollectionRuntime{})
 	require.NoError(t, err)
 	require.Equal(t, 1, patch.Times())
 }

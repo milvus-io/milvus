@@ -130,6 +130,7 @@ func TestDDLCallbacksSchemaEvolutionRejectsInPlaceFieldMutation(t *testing.T) {
 }
 
 func TestDDLCallbacksSchemaEvolutionRejectsGraphBreakingAlterCollectionSchemaDrop(t *testing.T) {
+	enableFunctionBackfillForTest(t)
 	core := initStreamingSystemAndCore(t)
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
