@@ -780,7 +780,7 @@ func TestRLSSchemaReadWriteMatrix(t *testing.T) {
 										}
 										patch := rlsSchemaRow{"id": r["id"], "doc": r["doc"], "a_i64": r["a_i64"], "f64": r["f64"]}
 										err := write([]rlsSchemaRow{patch}, true, true, owner)
-										require.NoError(t, err)
+										checkRLSStructArrayUpsertError(t, err)
 										for k, v := range patch {
 											all[r["id"]][k] = v
 										}
@@ -879,7 +879,7 @@ func TestRLSSchemaPartialOperators(t *testing.T) {
 			for _, test := range tests {
 				t.Run(test.name, func(t *testing.T) {
 					_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, rlsSchemaRow{"id": int64(1), test.name: test.seed})...).WithPartialUpdate(true).WithRLSPrincipal("alice"))
-					require.NoError(t, err)
+					checkRLSStructArrayUpsertError(t, err)
 					all[int64(1)][test.name] = test.seed
 					for _, op := range []string{"append", "remove", "path_replace"} {
 						t.Run(op, func(t *testing.T) {
@@ -917,7 +917,7 @@ func TestRLSSchemaPartialOperators(t *testing.T) {
 							}
 							require.ErrorContains(t, write([]int64{1, 2}), "RLS")
 							t.Run("rejected_mixed", func(t *testing.T) { checkRLSSchemaState(ctx, t, mc, name, tc, all, false) })
-							require.NoError(t, write([]int64{1}))
+							checkRLSStructArrayUpsertError(t, write([]int64{1}))
 							switch op {
 							case "append":
 								all[int64(1)][test.name] = test.appended
@@ -940,6 +940,14 @@ func TestRLSSchemaPartialOperators(t *testing.T) {
 			t.Run("flushed", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
 		})
 	}
+}
+
+func checkRLSStructArrayUpsertError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil && strings.Contains(err.Error(), "the dim (0) of field data(objects[embedding])") && strings.Contains(err.Error(), "[actual=0]") {
+		t.Skipf("xfail: https://github.com/milvus-io/milvus/issues/54241, inherited StructArray vector dimension is zero: %v", err)
+	}
+	require.NoError(t, err)
 }
 
 func operandBytes(value any) []byte {
