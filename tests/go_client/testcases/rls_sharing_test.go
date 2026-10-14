@@ -1584,6 +1584,8 @@ func TestRLSSpaceAddNullableFieldsExistingData(t *testing.T) {
 	ctx := hp.CreateContext(t, 12*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
 	name, rows := prepareRLSSpaces(ctx, t, mc, false, true)
+	// Reconnect so the 2.6 row encoder sees the newly added nullable fields.
+	mc = hp.CreateDefaultMilvusClient(ctx, t).Client
 	input := func(row rlsSpaceRow) map[string]any {
 		value := map[string]any{"id": row.ID, "tenant": row.Tenant, "spaces": row.Spaces, "access": row.Access, "resource": row.Resource, "content": row.Content, "vector": row.Vector}
 		for _, field := range row.NullFields {

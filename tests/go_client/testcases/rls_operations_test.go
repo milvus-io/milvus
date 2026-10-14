@@ -568,6 +568,8 @@ func TestRLSNullableArrayNotChecks(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, load.Await(ctx))
 	expr := "not array_contains(access, $current_principal)"
+	// Use the post-DDL schema when the 2.6 row encoder builds nullable field payloads.
+	mc = hp.CreateDefaultMilvusClient(ctx, t).Client
 	createRLSPolicy(ctx, t, mc, name, "access", expr, expr, milvuspb.RowPolicyAction_Query, milvuspb.RowPolicyAction_Insert, milvuspb.RowPolicyAction_Upsert)
 	queryRLS(ctx, t, mc, name, "alice", false)
 	for i, access := range []any{nil, []string{}, []string{"alice"}, []string{"bob"}} {
@@ -609,6 +611,7 @@ func TestRLSNumericPrecisionBoundaries(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, load.Await(ctx))
 			expr := "value == $current_principal_tags['value']"
+			mc = hp.CreateDefaultMilvusClient(ctx, t).Client
 			createRLSPolicy(ctx, t, mc, name, "numeric", expr, expr, milvuspb.RowPolicyAction_Query, milvuspb.RowPolicyAction_Insert)
 			row := func(id, offset int64) map[string]any {
 				var value any = float64(tc.boundary + offset)
