@@ -87,13 +87,16 @@ type clusteringSearchInput struct {
 }
 
 type clusteringSearchFixture struct {
-	topk     int64
-	sd       *shardDelegator
-	rows     map[int64]int64
-	scope    []SnapshotItem
-	bindings map[int64]*partitionStatsBinding
-	dtype    schemapb.DataType
-	dim      int64
+	observeRequest func(*querypb.SearchRequest)
+	verifyMerged   bool
+	ordinaryQuery  int
+	topk           int64
+	sd             *shardDelegator
+	rows           map[int64]int64
+	scope          []SnapshotItem
+	bindings       map[int64]*partitionStatsBinding
+	dtype          schemapb.DataType
+	dim            int64
 }
 
 func newClusteringSearchFixture(t testing.TB, input clusteringSearchInput) *clusteringSearchFixture {
@@ -122,7 +125,7 @@ func newClusteringSearchFixture(t testing.TB, input clusteringSearchInput) *clus
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		{FieldID: 101, Name: "vec", DataType: input.dtype, TypeParams: funcutil.Map2KeyValuePair(map[string]string{"dim": strconv.FormatInt(input.dim, 10)})},
 	}}
-	ip := funcutil.Map2KeyValuePair(map[string]string{"index_type": "HNSW", "metric_type": "L2", "M": "8", "efConstruction": "64", "ef": "128", "index_algo": "HYBRID", "graph_search_dim_threshold": "0", "graph_build_algo": "pipnn", "build_quant_type": "NONE", "search_quant_type": "NONE", "refine_quant_type": "NONE", "warmup": "sync", common.LoadPriorityKey: "HIGH", "dim": strconv.FormatInt(input.dim, 10)})
+	ip := funcutil.Map2KeyValuePair(map[string]string{"index_type": "HNSW", "metric_type": "L2", "M": "8", "efConstruction": "64", "ef": "128", "index_algo": "HYBRID", "graph_search_dim_threshold": "0", "graph_build_algo": "pipnn", "pipnn_randseed": "42", "build_quant_type": "NONE", "search_quant_type": "NONE", "refine_quant_type": "NONE", "warmup": "sync", common.LoadPriorityKey: "HIGH", "dim": strconv.FormatInt(input.dim, 10)})
 	require.NoError(t, function.GetManager().Alloc(1, delegatorFunctionRunnerKey("hint-ch_1v0"), schema))
 	t.Cleanup(func() { function.GetManager().Release(1, delegatorFunctionRunnerKey("hint-ch_1v0")) })
 	manager := segments.NewManager()
@@ -208,13 +211,20 @@ func newClusteringSearchFixture(t testing.TB, input clusteringSearchInput) *clus
 	metadata, err := clusteringindex.Build(ctx, &indexcgopb.BuildIndexInfo{CollectionID: 1, PartitionID: 2, IndexVersion: 100, FieldSchema: schema.Fields[3], Dim: input.dim, NumRows: int64(len(input.centroids)), CurrentIndexVersion: 10, IndexParams: funcutil.Map2KeyValuePair(map[string]string{"index_type": "FLAT", "metric_type": "L2"}), StorageConfig: &indexcgopb.StorageConfig{StorageType: "local", RootPath: root}}, centers, filepath.Join(root, "part_stats/1/2/hint-ch_1v0/100.clustering_index"))
 	require.NoError(t, err)
 	stats.ClusteringStats = &clusteringpb.PartitionClusteringStats{FormatVersion: 1, FieldId: 101, DataType: input.dtype, Dim: input.dim, NumClusters: uint32(len(input.centroids)), ClustersFile: "clusters", ClusteringIndex: metadata}
-	var segmentIDs []int64
 	for _, seg := range all[0].Segments {
-		segmentIDs = append(segmentIDs, seg.SegmentID)
 		stats.ClusteringStats.Groups = append(stats.ClusteringStats.Groups, &clusteringpb.ClusteringGroup{SegmentIds: []int64{seg.SegmentID}})
 	}
 	require.NoError(t, stats.ValidateClusteringStats())
-	centroidIndex, err := clusteringindex.Load(ctx, 1, 2, "hint-ch_1v0", 100, schema.Fields[3], metadata, int64(len(input.centroids)))
+	return bindClusteringSearchFixture(t, input, manager, collection, stats, all, rows)
+}
+
+func bindClusteringSearchFixture(t testing.TB, input clusteringSearchInput, manager *segments.Manager, collection *segments.Collection, stats *storage.PartitionStatsSnapshot, all []SnapshotItem, rows map[int64]int64) *clusteringSearchFixture {
+	ctx := context.Background()
+	var segmentIDs []int64
+	for _, seg := range all[0].Segments {
+		segmentIDs = append(segmentIDs, seg.SegmentID)
+	}
+	centroidIndex, err := clusteringindex.Load(ctx, 1, 2, "hint-ch_1v0", stats.Version, collection.Schema().Fields[3], stats.ClusteringStats.ClusteringIndex, int64(stats.ClusteringStats.NumClusters))
 	require.NoError(t, err)
 	t.Cleanup(centroidIndex.Close)
 	binding := &partitionStatsBinding{stats: stats, index: centroidIndex, locations: clusteringLocations(stats)}
@@ -223,6 +233,7 @@ func newClusteringSearchFixture(t testing.TB, input clusteringSearchInput) *clus
 	d.SyncTargetVersion(&querypb.SyncAction{TargetVersion: 1, SealedInTarget: segmentIDs, SealedSegmentRowCount: rows}, []int64{2}, map[int64]*partitionStatsBinding{2: binding})
 	_, _, pin := d.PinOnlineSegments()
 	t.Cleanup(func() { d.Unpin(pin) })
+	fixture := &clusteringSearchFixture{ordinaryQuery: -1}
 	wm := &cluster.MockManager{}
 	worker := &cluster.MockWorker{}
 	wm.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil)
@@ -231,15 +242,28 @@ func newClusteringSearchFixture(t testing.TB, input clusteringSearchInput) *clus
 		require.NoError(t, err)
 		copy := &querypb.SearchRequest{}
 		require.NoError(t, proto.Unmarshal(raw, copy))
+		if fixture.ordinaryQuery >= 0 {
+			for _, hints := range copy.ClusteringSearchHints {
+				hints.Queries[fixture.ordinaryQuery].Hints = nil
+			}
+		}
+		if fixture.observeRequest != nil {
+			fixture.observeRequest(copy)
+		}
 		task := tasks.NewSearchTask(ctx, collection, manager, copy, 1)
 		err = task.Execute()
 		if err != nil {
 			return nil, err
 		}
+		if fixture.verifyMerged {
+			verifyClusteringMergedExecution(ctx, t, collection, manager, copy)
+		}
 		return task.SearchResult(), nil
 	})
 	sd := &shardDelegator{collectionID: 1, vchannelName: "hint-ch_1v0", collection: collection, workerManager: wm, distribution: d}
-	return &clusteringSearchFixture{sd: sd, rows: rows, scope: all, bindings: d.pinnedStatsBindings(pin), dtype: input.dtype, dim: input.dim, topk: input.topk}
+	fixture.sd, fixture.rows, fixture.scope, fixture.bindings = sd, rows, all, d.pinnedStatsBindings(pin)
+	fixture.dtype, fixture.dim, fixture.topk = input.dtype, input.dim, input.topk
+	return fixture
 }
 
 func (f *clusteringSearchFixture) search(ctx context.Context, t testing.TB, algo string, queries [][]float32, scope []SnapshotItem, rows map[int64]int64, hints bool) *schemapb.SearchResultData {
@@ -306,7 +330,7 @@ func testClusteringSearchPipeline(t *testing.T, dtype schemapb.DataType) {
 	queries := [][]float32{make([]float32, 8), make([]float32, 8)}
 	queries[1][0] = 20
 	scope := []SnapshotItem{{NodeID: 1, Segments: f.scope[0].Segments[1:]}}
-	for _, algo := range []string{"BF", "GRAPH"} {
+	for _, algo := range []string{"BF", "GRAPH", "HYBRID"} {
 		t.Run(algo, func(t *testing.T) {
 			result := f.search(context.Background(), t, algo, queries, scope, f.rows, true)
 			require.Equal(t, []int64{0, 4}, result.GetTopks())
@@ -314,6 +338,66 @@ func testClusteringSearchPipeline(t *testing.T, dtype schemapb.DataType) {
 			badRows := map[int64]int64{10: 128, 11: 129}
 			result = f.search(context.Background(), t, algo, queries, scope, badRows, true)
 			require.Equal(t, []int64{4, 4}, result.GetTopks())
+			batch := make([][]float32, 8)
+			for i := range batch {
+				batch[i] = queries[0]
+			}
+			batch[1] = queries[1]
+			f.ordinaryQuery, f.verifyMerged = 2, true
+			result = f.search(context.Background(), t, algo, batch, scope, f.rows, true)
+			require.Equal(t, []int64{0, 4, 4, 0, 0, 0, 0, 0}, result.GetTopks())
+			f.ordinaryQuery, f.verifyMerged = -1, false
 		})
+	}
+}
+
+// Execute a nested merged task against the real loaded segments and compare each
+// original request's reducer output to the matching slice of independent search.
+func verifyClusteringMergedExecution(ctx context.Context, t testing.TB, collection *segments.Collection, manager *segments.Manager, request *querypb.SearchRequest) {
+	t.Helper()
+	var group commonpb.PlaceholderGroup
+	require.NoError(t, proto.Unmarshal(request.Req.PlaceholderGroup, &group))
+	nq := int(request.Req.Nq)
+	require.GreaterOrEqual(t, nq, 3)
+	boundaries := []int{0, 1, 2, nq}
+	var batch []*tasks.SearchTask
+	var expected []*schemapb.SearchResultData
+	for i := 0; i < 3; i++ {
+		req := proto.Clone(request).(*querypb.SearchRequest)
+		part := proto.Clone(&group).(*commonpb.PlaceholderGroup)
+		part.Placeholders[0].Values = part.Placeholders[0].Values[boundaries[i]:boundaries[i+1]]
+		var err error
+		req.Req.PlaceholderGroup, err = proto.Marshal(part)
+		require.NoError(t, err)
+		req.Req.Nq = int64(boundaries[i+1] - boundaries[i])
+		for _, h := range req.ClusteringSearchHints {
+			h.Queries = h.Queries[boundaries[i]:boundaries[i+1]]
+		}
+		req.Req.Topk = int64(4 - i)
+		independent := tasks.NewSearchTask(ctx, collection, manager, proto.Clone(req).(*querypb.SearchRequest), 1)
+		require.NoError(t, independent.Execute())
+		decoded, err := segments.DecodeSearchResults(ctx, []*internalpb.SearchResults{independent.SearchResult()})
+		require.NoError(t, err)
+		expected = append(expected, decoded[0])
+		batch = append(batch, tasks.NewSearchTask(ctx, collection, manager, req, 1))
+	}
+	require.True(t, batch[1].Merge(batch[2]))
+	require.True(t, batch[0].Merge(batch[1]))
+	require.NoError(t, batch[0].Execute())
+	for i, task := range batch {
+		actual, err := segments.DecodeSearchResults(ctx, []*internalpb.SearchResults{task.SearchResult()})
+		require.NoError(t, err)
+		require.Equal(t, expected[i].NumQueries, actual[0].NumQueries)
+		require.Equal(t, expected[i].Topks, actual[0].Topks)
+		want, got := expected[i].GetIds().GetIntId().GetData(), actual[0].GetIds().GetIntId().GetData()
+		require.Len(t, got, len(want))
+		for j := range want {
+			require.Equal(t, want[j], got[j])
+			require.Equal(t, expected[i].Scores[j], actual[0].Scores[j])
+		}
+	}
+	batch[0].Done(nil)
+	for _, task := range batch {
+		require.NoError(t, task.Wait())
 	}
 }
