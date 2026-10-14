@@ -978,8 +978,10 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     bool
     IsRegexPrefilterConsumer() const {
-        return exec_path_ != ExprExecPath::RawData &&
-               expr_->op_type_ == proto::plan::RegexMatch &&
+        // Structural eligibility must not determine or pin a reader. Before
+        // first Eval, RawData is also the undetermined path's default; only
+        // the actual FM routing gate lazily requests these statistics.
+        return expr_->op_type_ == proto::plan::RegexMatch &&
                (field_type_ == DataType::VARCHAR ||
                 field_type_ == DataType::TEXT) &&
                !expr_->column_.element_level_;
