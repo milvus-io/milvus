@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -520,19 +521,44 @@ func TestRLSAliasAndCollectionCacheIsolation(t *testing.T) {
 	queryRLS(ctx, t, mc, a, "alice", false, 1, 3, 4)
 }
 
-func TestRLSPartitionKeyUpsertFailsClosed(t *testing.T) {
+// Legal partition-key upserts are supported after #54168; USING and CHECK still apply.
+func TestRLSPartitionKeyUpsertAuthorization(t *testing.T) {
 	ctx := hp.CreateContext(t, 4*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t).Client
 	name := prepareRLSCollection(ctx, t, mc, "", true)
 	createRLSPolicy(ctx, t, mc, name, "owner", "owner == $current_principal", "owner == $current_principal", rlsActions...)
-	_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsColumns([]int64{1}, []string{"alice"})...).WithRLSPrincipal("alice"))
-	common.CheckErr(t, err, false, "partition-key")
+	cols := rlsColumns([]int64{1}, []string{"alice"})
+	cols[4] = column.NewColumnInt64("number", []int64{10})
+	_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, cols...).WithRLSPrincipal("alice"))
+	common.CheckErr(t, err, true)
 	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsColumns([]int64{2}, []string{"alice"})...).WithRLSPrincipal("alice"))
+	common.CheckErr(t, err, false, "RLS")
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsColumns([]int64{1}, []string{"bob"})...).WithRLSPrincipal("alice"))
 	common.CheckErr(t, err, false, "RLS")
 	queryRLS(ctx, t, mc, name, "bob", false, 2, 4)
 	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsColumns([]int64{5}, []string{"alice"})...).WithRLSPrincipal("alice"))
 	common.CheckErr(t, err, true)
 	queryRLS(ctx, t, mc, name, "alice", false, 1, 3, 5)
+	queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4, 5)
+	r, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id >= 0").WithOutputFields("*").WithSkipRLS(true).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	want := map[any]rlsSchemaRow{}
+	ids := []int64{1, 2, 3, 4, 5}
+	expectedColumns := rlsColumns(ids, []string{"alice", "bob", "alice", "bob", "alice"})
+	expectedColumns[4] = column.NewColumnInt64("number", []int64{10, 2, 3, 4, 5})
+	var fields []string
+	for _, c := range expectedColumns {
+		fields = append(fields, c.Name())
+		for i, id := range ids {
+			if want[id] == nil {
+				want[id] = rlsSchemaRow{}
+			}
+			value, err := c.Get(i)
+			require.NoError(t, err)
+			want[id][c.Name()] = value
+		}
+	}
+	checkRLSSchemaIDs(t, slices.Collect(maps.Keys(want)), checkRLSSchemaRows(t, r, want, fields))
 }
 
 func TestRLSIteratorRevocationBetweenPages(t *testing.T) {
