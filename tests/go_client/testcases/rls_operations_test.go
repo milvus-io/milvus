@@ -579,7 +579,7 @@ func TestRLSNullableArrayNotChecks(t *testing.T) {
 			require.ErrorContains(t, err, "RLS")
 		}
 	}
-	_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": int64(11), "access": nil}).WithPartialUpdate(true).WithRLSPrincipal("alice"))
+	_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "alice", false, true, map[string]any{"id": int64(11), "access": nil}))
 	require.ErrorContains(t, err, "RLS")
 	queryRLS(ctx, t, mc, name, "", true, 1, 2, 3, 4, 11, 13)
 	queryRLS(ctx, t, mc, name, "alice", false, 11, 13)
@@ -589,7 +589,7 @@ func TestRLSNullableArrayNotChecks(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, access)
 	// A successful partial update proves the preserved empty array still passes CHECK.
-	_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": int64(11), "number": int64(99)}).WithPartialUpdate(true).WithRLSPrincipal("alice"))
+	_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "alice", false, true, map[string]any{"id": int64(11), "number": int64(99)}))
 	require.NoError(t, err)
 }
 

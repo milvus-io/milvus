@@ -394,7 +394,7 @@ func rlsSharingWrite(ctx context.Context, t *testing.T, mc *client.Client, name,
 				}
 			}
 		}
-		option = client.NewRowBasedInsertOption(name, values...).WithRLSPrincipal(principal).WithPartialUpdate(partial)
+		option = rlsRowWriteOption(name, principal, false, partial, values...)
 	}
 	if operation == "insert" {
 		result, err := mc.Insert(ctx, option)
@@ -1261,7 +1261,7 @@ func TestRLSSpaceWriteMatrix(t *testing.T) {
 						_, err = mc.Insert(ctx, client.NewRowBasedInsertOption(name, changed...).WithRLSPrincipal(principal))
 						common.CheckErr(t, err, allowed, "RLS")
 					default:
-						_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, changed...).WithPartialUpdate(operation == "partial_upsert").WithRLSPrincipal(principal))
+						_, err = mc.Upsert(ctx, rlsRowWriteOption(name, principal, false, operation == "partial_upsert", changed...))
 						common.CheckErr(t, err, allowed, "RLS")
 					}
 					checkRLSSpaceStored(ctx, t, mc, name, want)
@@ -1313,7 +1313,7 @@ func TestRLSSpaceInvalidDestinationPreservesRows(t *testing.T) {
 					}
 					input = append(input, r)
 				}
-				opt := client.NewRowBasedInsertOption(name, input...).WithRLSPrincipal("member_0").WithPartialUpdate(operation == "partial_upsert")
+				opt := rlsRowWriteOption(name, "member_0", false, operation == "partial_upsert", input...)
 				var err error
 				if operation == "insert" {
 					_, err = mc.Insert(ctx, opt)
@@ -1360,7 +1360,7 @@ func TestRLSSpaceMembershipLifecycle(t *testing.T) {
 			require.Equal(t, "tenant_0", actual["tenant"])
 			require.Equal(t, []any{"tenant_0/common"}, actual["read_spaces"])
 			checkRLSSpaceReads(ctx, t, mc, name, "member_0", rows, stage.resources...)
-			_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": int64(2), "content": rows[2].Content}).WithPartialUpdate(true).WithRLSPrincipal("member_0"))
+			_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "member_0", false, true, map[string]any{"id": int64(2), "content": rows[2].Content}))
 			common.CheckErr(t, err, stage.write, "RLS")
 		})
 	}
@@ -1429,7 +1429,7 @@ func TestRLSSpaceResourceSharingLifecycle(t *testing.T) {
 				common.CheckErr(t, mc.DeleteRLSPrincipalTags(ctx, client.NewDeleteRLSPrincipalTagsOption(name, "member_1")), true)
 			}
 			checkRLSSpaceReads(ctx, t, mc, name, "member_1", rows, stage.resources...)
-			_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": int64(2), "access": []string{"visitor"}}).WithPartialUpdate(true).WithRLSPrincipal("member_1"))
+			_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "member_1", false, true, map[string]any{"id": int64(2), "access": []string{"visitor"}}))
 			common.CheckErr(t, err, false, "RLS")
 			checkRLSSpaceStored(ctx, t, mc, name, rows)
 		})
@@ -1529,7 +1529,7 @@ func TestRLSSpaceEnableExistingData(t *testing.T) {
 		_, err := mc.Upsert(ctx, client.NewRowBasedInsertOption(name, row).WithRLSPrincipal("member_0"))
 		common.CheckErr(t, err, true)
 		rows[id] = row
-		_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": id, "content": "upgraded_partial"}).WithPartialUpdate(true).WithRLSPrincipal("member_0"))
+		_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "member_0", false, true, map[string]any{"id": id, "content": "upgraded_partial"}))
 		common.CheckErr(t, err, true)
 		row.Content = "upgraded_partial"
 		rows[id] = row
@@ -1598,7 +1598,7 @@ func TestRLSSpaceAddNullableFieldsExistingData(t *testing.T) {
 		updates = append(updates, value)
 		rows[id] = row
 	}
-	_, err := mc.Upsert(ctx, client.NewRowBasedInsertOption(name, updates...).WithPartialUpdate(true))
+	_, err := mc.Upsert(ctx, rlsRowWriteOption(name, "", false, true, updates...))
 	common.CheckErr(t, err, true)
 	checkRLSSpaceStored(ctx, t, mc, name, rows)
 	configureRLSSpaces(ctx, t, mc, name)
@@ -1612,7 +1612,7 @@ func TestRLSSpaceAddNullableFieldsExistingData(t *testing.T) {
 
 	// NULL access permits a space writer; NULL tenant or space fails its write checks.
 	for _, field := range []string{"tenant", "spaces"} {
-		_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": int64(2), field: nil}).WithPartialUpdate(true).WithRLSPrincipal("member_0"))
+		_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "member_0", false, true, map[string]any{"id": int64(2), field: nil}))
 		common.CheckErr(t, err, false, "RLS")
 		fresh := input(rows[2])
 		fresh["id"], fresh[field], fresh["vector"] = int64(5001), nil, common.GenFloatVector(128)
@@ -1634,7 +1634,7 @@ func TestRLSSpaceAddNullableFieldsExistingData(t *testing.T) {
 	fresh.Content = "full_update"
 	_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, input(fresh)).WithRLSPrincipal("member_0"))
 	common.CheckErr(t, err, true)
-	_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": int64(5001), "content": "partial_update", "access": nil}).WithPartialUpdate(true).WithRLSPrincipal("member_0"))
+	_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "member_0", false, true, map[string]any{"id": int64(5001), "content": "partial_update", "access": nil}))
 	common.CheckErr(t, err, true)
 	fresh.Content = "partial_update"
 	rows[5001] = fresh
@@ -1655,7 +1655,7 @@ func TestRLSSpaceAddNullableFieldsExistingData(t *testing.T) {
 		updates = append(updates, map[string]any{"id": id, "tenant": row.Tenant, "spaces": row.Spaces})
 		rows[id] = row
 	}
-	_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, updates...).WithPartialUpdate(true).WithSkipRLS(true))
+	_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "", true, true, updates...))
 	common.CheckErr(t, err, true)
 	checkRLSSpaceReads(ctx, t, mc, name, "member_0", rows, "resource_0", "resource_1")
 	checkRLSSpaceReads(ctx, t, mc, name, "member_1", rows, "resource_2")

@@ -727,7 +727,7 @@ func TestRLSSchemaReadWriteMatrix(t *testing.T) {
 							for i, r := range rows {
 								values[i] = rlsSchemaRowInput(r)
 							}
-							opt := client.NewRowBasedInsertOption(name, values...).WithRLSPrincipal(principal).WithPartialUpdate(partial)
+							opt := rlsRowWriteOption(name, principal, false, partial, values...)
 							if upsert {
 								_, e := mc.Upsert(ctx, opt)
 								return e
@@ -1005,7 +1005,7 @@ func TestRLSSchemaDefaults(t *testing.T) {
 							_, err = mc.Insert(ctx, o)
 						}
 					} else {
-						o := client.NewRowBasedInsertOption(name, rlsSchemaRowInput(r)).WithRLSPrincipal("alice").WithPartialUpdate(partial)
+						o := rlsRowWriteOption(name, "alice", false, partial, rlsSchemaRowInput(r))
 						if upsert {
 							_, err = mc.Upsert(ctx, o)
 						} else {
@@ -1070,7 +1070,7 @@ func TestRLSSchemaAutoID(t *testing.T) {
 							}
 							var err error
 							if mode == "row" {
-								_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any(patch)).WithPartialUpdate(partial).WithRLSPrincipal("alice"))
+								_, err = mc.Upsert(ctx, rlsRowWriteOption(name, "alice", false, partial, map[string]any(patch)))
 							} else {
 								_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, patch)...).WithPartialUpdate(partial).WithRLSPrincipal("alice"))
 							}
@@ -1306,7 +1306,7 @@ func TestRLSSchemaUpsertCreatesRows(t *testing.T) {
 							if mode == "column" {
 								option = client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, rows...)...).WithPartialUpdate(partial).WithRLSPrincipal("alice")
 							} else {
-								option = client.NewRowBasedInsertOption(name, values...).WithPartialUpdate(partial).WithRLSPrincipal("alice")
+								option = rlsRowWriteOption(name, "alice", false, partial, values...)
 							}
 							result, err := mc.Upsert(ctx, option)
 							if stage == "rejected_mixed" {
@@ -1744,7 +1744,7 @@ func TestRLSSchemaMixedSegments(t *testing.T) {
 										row["vector"] = rlsVectorValue(rlsQueryVector(tc.vector, v))
 									}
 									if stage == "full_row" || stage == "partial_row" {
-										_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, rlsSchemaRowInput(patch)).WithPartialUpdate(partial).WithRLSPrincipal(owner))
+										_, err = mc.Upsert(ctx, rlsRowWriteOption(name, owner, false, partial, rlsSchemaRowInput(patch)))
 									} else {
 										_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, patch)...).WithPartialUpdate(partial).WithRLSPrincipal(owner))
 									}
@@ -1803,6 +1803,17 @@ func TestRLSSchemaMixedSegments(t *testing.T) {
 	}
 }
 
+// Keep the row option when setting partial updates: the 2.6 SDK setter returns
+// its embedded column option, which bypasses row serialization when chained.
+func rlsRowWriteOption(name, principal string, skipRLS, partial bool, rows ...any) interface {
+	client.InsertOption
+	client.UpsertOption
+} {
+	option := client.NewRowBasedInsertOption(name, rows...).WithRLSPrincipal(principal).WithSkipRLS(skipRLS)
+	option.WithPartialUpdate(partial)
+	return option
+}
+
 // Key routing and pruning must preserve the same application-owned RLS oracle.
 func TestRLSSchemaKeys(t *testing.T) {
 	for _, field := range []string{"i64", "text"} {
@@ -1859,7 +1870,7 @@ func TestRLSSchemaKeys(t *testing.T) {
 											}
 										}
 										if stage == "full_row" || stage == "partial_row" {
-											_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, rlsSchemaRowInput(patch)).WithPartialUpdate(partial).WithRLSPrincipal(owner))
+											_, err = mc.Upsert(ctx, rlsRowWriteOption(name, owner, false, partial, rlsSchemaRowInput(patch)))
 										} else {
 											_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, patch)...).WithPartialUpdate(partial).WithRLSPrincipal(owner))
 										}
