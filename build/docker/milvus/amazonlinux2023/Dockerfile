@@ -15,8 +15,10 @@ ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
 ARG MILVUS_RUNTIME_USER=milvus:milvus
 
-RUN yum install -y wget libgomp libaio libatomic tzdata && \
-    yum upgrade -y openssl openssl-libs && \
+# A cached AL2023 base is locked to its original repository release.
+# Match whichever curl/libcurl flavor is installed, including minimal packages.
+RUN yum --releasever=latest install -y wget libgomp libaio libatomic tzdata && \
+    yum --releasever=latest upgrade -y openssl openssl-libs 'curl*' 'libcurl*' tar zlib glibc && \
     rm -rf /var/cache/yum/*
 
 # Add Tini

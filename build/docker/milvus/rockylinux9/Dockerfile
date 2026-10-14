@@ -15,10 +15,11 @@ ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
 ARG MILVUS_RUNTIME_USER=milvus:milvus
 
+# Match whichever curl/libcurl flavor is installed, including minimal packages.
 RUN dnf install -y dnf-plugins-core && \
     dnf config-manager --set-enabled crb && \
     dnf install -y wget libgomp libaio libatomic tzdata && \
-    dnf upgrade -y openssl openssl-libs && \
+    dnf upgrade -y openssl openssl-libs 'curl*' 'libcurl*' tar zlib glibc && \
     rm -rf /var/cache/dnf/*
 
 # Add Tini
