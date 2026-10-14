@@ -12,7 +12,11 @@ mode, file-aware estimates, request cancellation and priority. Their complete
 remote keys are preserved, and each load owns a private DiskFileManager directory
 until its mmap reader is released (RAM loads remove it after opening Tantivy).
 Legacy TextMatch uses the same loader entry and pinned mode as packed TextMatch.
-JSON stats preparation is outside this rollout.
+JSON stats preparation also follows the pinned mode for `meta.json`, Parquet
+footer inspection and projected-reader opening; see the
+[field-loading design](design_docs/20260811-async-storage-v3-field-data-loading.md#json-stats-preparation).
+Old storage V1/V2 raw-field loading and native Knowhere internal reads remain
+outside this rollout.
 
 Translator construction borrows the loading request's `OpContext` for metadata
 inspection and file-aware estimates, including cancellation and runtime priority.
@@ -132,8 +136,8 @@ The inspected source is detached from the construction context and consumed on
 the first load attempt, even when that attempt is cancelled. Reloads reopen it
 with the new request's cancellation and runtime priority. When effective warmup
 is disabled, the constructor releases the source and demand loading reopens it.
-The construction context is optional; forwarding it from JSON stats preparation
-is part of the preparation migration. Cache-cell loads already bind their own
+JSON stats preparation forwards its request context to BSON construction.
+The context is optional for direct callers; cache-cell loads bind their own
 request context independently.
 
 Failed loads drain issued I/O before the index and its private directory are
@@ -163,6 +167,26 @@ directory; a disabled local pool uses the existing async executor fallback.
 The synchronous fallback estimate charges this single staging copy; async
 estimates additionally account for file-specific transport/decode peaks and
 nullable-row metadata. Existing text querying and null semantics are unchanged.
+
+## JSON stats preparation
+
+The outer `JsonStatsTranslator` pins the mode at construction and supplies it to
+`JsonKeyStats`, projected column translators and the BSON translator. Preparation
+borrows the request's cancellation token and runtime priority; it retains neither
+after returning. Direct `JsonKeyStats::Load` callers pin the supplied context mode
+or the current global setting on their first load. A missing filesystem in their
+`FileManagerContext` falls back to the default filesystem, as before.
+
+`meta.json` is read directly into its parsing buffer, without a local staging
+copy. Async mode uses the remote stream API; sync mode retains ChunkManager
+reads. Parquet schema and row counts share one footer read per file during preparation.
+When no typed-key map is available, the compatibility path additionally reads
+the first raw footer for legacy layout metadata, using the same transport mode.
+This preserves KV entries omitted from Arrow's stored schema and does not
+eliminate footer reads needed by subsequent projected-reader opening. The preparation batch limits async
+footer opens to 16, independently of payload admission, and drains issued opens
+before returning failure or cancellation. The detailed flow and remaining
+synchronous interfaces are documented in the field-loading design linked above.
 
 ## Vector backends
 
@@ -226,6 +250,12 @@ also cover cancellation while legacy initialization waits for its executor.
 Changed C++ files passed clang-format 15; the segcore error-boundary guard and
 `git diff --check` passed. The build used at most 16 outer jobs and one job per
 nested dependency builder.
+
+BSON and legacy TextMatch regressions cover pinned transport modes, cancellation,
+reloads and reader ownership. JSON stats preparation regressions cover both
+transport modes with and without `meta.json`, legacy footer KV outside the stored
+Arrow schema, missing-filesystem fallback, corruption followed by retry, and
+draining issued metadata I/O on cancellation.
 
 The tests exercise injected native asynchronous reads over real serialized
 legacy objects. They do not establish real-S3 behavior, complete DISKANN native

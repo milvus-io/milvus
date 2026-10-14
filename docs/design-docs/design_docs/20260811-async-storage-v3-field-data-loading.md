@@ -211,8 +211,8 @@ preparation, so a configuration change cannot switch it between stages.
 
 JSON key stats use the same helper: eager loading opens one reader projecting
 all columns; lazy loading batches one projected reader per column and reuses a
-prepared reader for size estimates. These call sites currently pass a null
-`OpContext`, so they do not provide context cancellation to reader preparation.
+prepared reader for size estimates. These call sites borrow the JSON preparation
+request's `OpContext` and use its effective runtime load priority.
 
 The concurrency cap is **per `OpenChunkReadersAsync` call**, not process-wide.
 It is separate from the bytes-and-slots admission used by `LoadCellsAsync`;
@@ -233,6 +233,54 @@ cover every reader-construction entry point: the `LoadColumnGroup` overload
 taking `RuntimeResourceState*` still calls synchronous `get_chunk_reader()`.
 Top-level `Reader::create()` and subsequent metadata access also retain their
 synchronous interfaces.
+
+### JSON stats preparation
+
+`JsonStatsTranslator` captures `enableAsyncLoad` when constructed, including when
+warmup is disabled. Each preparation attempt passes that mode to `JsonKeyStats`,
+its projected-column translators and its BSON translator. Later configuration
+changes cannot switch transport midway through initialization or on a cache miss.
+Direct `JsonKeyStats::Load` callers use a supplied `FileManagerContext` mode, or
+capture the global setting at their first load.
+
+Preparation borrows an `OpContext` for the complete call. A local context merges
+the configured priority with the request's override and supplies cancellation to:
+
+1. The direct `meta.json` read and parse. Async mode uses `RemoteInputStream`;
+   sync mode uses ChunkManager. Neither mode stages another local metadata copy.
+2. Parquet footer inspection through `ParquetFormatReader::open_async()` or
+   `open()`. Async opens use the shared priority-aware executor and a window of
+   at most 16 outstanding files per preparation call. Synchronous first-file reads
+   stay on the caller; remaining files use the existing HIGH worker pool. This is metadata work, so it does
+   not acquire payload byte/slot leases.
+3. Eager or lazy projected-reader opening through `OpenChunkReadersAsync`, and
+   BSON file inspection during construction of its cache translator.
+
+Schema and row-count preparation inspects each Parquet file once. Row counts are
+retained per file; only the first file of each group retains a schema. When
+`meta.json` is absent or has no typed keys, the compatibility path additionally
+reads the first raw footer through `ParquetFormatReader::MetaTrait` in the pinned
+mode. This preserves legacy layout KV appended separately from `ARROW:schema`,
+which Arrow's reconstructed schema can omit. All group schemas are registered before any column-group translator is
+created. Full Parquet payloads are not materialized for this phase. Subsequent
+projected-reader opening may still fetch footer metadata through storage's cache.
+
+Cancellation stops pending dispatch; already-issued storage opens and reads drain
+before borrowed contexts, readers or buffers are released. A cancelled attempt
+does not publish its outer cache cell; a retry creates a new `JsonKeyStats`.
+Synchronous I/O remains non-interruptible while in flight. Metadata buffers and
+schemas remain coordination overhead, without a separate payload cache charge.
+`Reader::create()`, JSON parsing and the cache's outer `get_cells()` retain their
+synchronous interfaces. Actual non-blocking remote I/O depends on the filesystem
+backend. The current Parquet adapter still acquires its file handle through
+synchronous `OpenInputFile`; native files then perform size/footer I/O through
+futures. Generic filesystems may block during handle acquisition or use Arrow's
+worker-based fallback. This change does not alter that storage-layer contract.
+
+The BSON transport and directory ownership contract is described in
+[the index loader design](../legacy-index-async-loading.md#bson-shared-key-loading).
+This migration does not cover old storage V1/V2 raw-field readers or Knowhere's
+internal loading operations.
 
 ### Cell-load flow
 
