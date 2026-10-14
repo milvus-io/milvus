@@ -162,7 +162,8 @@ inline double
 RegexIndexExecutionCost(const RegexIndexPlan& plan,
                         size_t remaining_rows,
                         size_t active_batch_rows,
-                        size_t batch_rows) {
+                        size_t batch_rows,
+                        const RegexIndexWorkStats* exact = nullptr) {
     if (!plan.Usable()) {
         return std::numeric_limits<double>::infinity();
     }
@@ -177,7 +178,7 @@ RegexIndexExecutionCost(const RegexIndexPlan& plan,
         return std::numeric_limits<double>::infinity();
     }
     const auto window = regex_index_detail::EstimateScanWindow(
-        model, remaining_rows, active_batch_rows, batch_rows);
+        model, remaining_rows, active_batch_rows, batch_rows, exact);
     const double surviving_candidates =
         plan.estimated_rows * window.active_rows / model.rows;
     const double bytes_per_row =
@@ -195,16 +196,20 @@ inline bool
 ShouldUseRegexIndexPlan(const RegexIndexPlan& plan,
                         size_t remaining_rows,
                         size_t active_batch_rows,
-                        size_t batch_rows) {
+                        size_t batch_rows,
+                        const RegexIndexWorkStats* exact = nullptr) {
     if (remaining_rows == 0 || active_batch_rows == 0 || batch_rows == 0 ||
         !RegexIndexPassesLocateGuard(plan)) {
         return false;
     }
     return plan.empty_result ||
            RegexIndexExecutionCost(
-               plan, remaining_rows, active_batch_rows, batch_rows) <
-               RegexIndexScanCost(
-                   plan.model, remaining_rows, active_batch_rows, batch_rows);
+               plan, remaining_rows, active_batch_rows, batch_rows, exact) <
+               RegexIndexScanCost(plan.model,
+                                  remaining_rows,
+                                  active_batch_rows,
+                                  batch_rows,
+                                  exact);
 }
 
 }  // namespace milvus

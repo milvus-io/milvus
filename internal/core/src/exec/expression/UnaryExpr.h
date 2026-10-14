@@ -906,7 +906,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       false,
                       plan_options),
           expr_(expr),
-          enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
+          enable_sub_expr_cache_write_(enable_sub_expr_cache_write),
+          normal_scan_batch_size_(batch_size) {
         // Pre-warm the LIKE matcher for general Match: the FMINDEX Match
         // route (ExecFMPatternCandidates) rechecks every phase-1 candidate with it, and
         // building it on the query thread inside the first batch would put a
@@ -958,14 +959,54 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     bool
     CanExecuteAllAtOnce() const override {
-        EnsureExecPathDetermined();
-        // The FM regex path may scan when the upstream bitmap is sparse.
-        // Keep ordinary scan batches until that bitmap is available instead
-        // of forcing a potential fallback to materialize the whole column.
-        if (fm_regex_deferred_) {
-            return false;
-        }
+        // A complete logical result may still use normal physical raw batches
+        // after a late routing rejection. It need not disable index one-shot.
         return SegmentExpr::CanExecuteAllAtOnce();
+    }
+
+    void
+    MoveCursor() override {
+        if (fm_regex_deferred_ && execute_all_at_once_ && !has_offset_input_) {
+            // Logical one-shot completion/parent skip still consumes its full
+            // row window. Candidate recheck uses Take and does not advance Scan.
+            AdvanceDataCursor(active_count_ - current_data_global_pos_);
+            current_index_chunk_pos_ = active_count_;
+            return;
+        }
+        SegmentExpr::MoveCursor();
+    }
+
+    bool
+    IsRegexPrefilterConsumer() const {
+        return exec_path_ != ExprExecPath::RawData &&
+               expr_->op_type_ == proto::plan::RegexMatch &&
+               (field_type_ == DataType::VARCHAR ||
+                field_type_ == DataType::TEXT) &&
+               !expr_->column_.element_level_;
+    }
+
+    // Optional already-computed scalar prefix. Never determine a path, pin an
+    // index, evaluate a predicate, or expose candidates/partial/element caches.
+    std::shared_ptr<const TargetBitmap>
+    GetComputedNumericPredicate() const {
+        if (segment_->type() != SegmentType::Sealed ||
+            exec_path_ != ExprExecPath::ScalarIndex || has_offset_input_ ||
+            execute_all_at_once_ || is_nullable_ ||
+            !IsCompareOp(expr_->op_type_) ||
+            !(IsIntegerDataType(field_type_) || IsFloatDataType(field_type_)) ||
+            expr_->column_.element_level_ || cached_is_nested_index_ ||
+            selected_element_level_result_ || selected_reader_ == nullptr ||
+            selected_reader_->CoordDomain() != index::Domain::Row ||
+            !selected_reader_->Caps().predicate ||
+            !selected_reader_->Caps().exact || cached_index_chunk_id_ != 0 ||
+            !cached_index_chunk_res_ || !cached_index_chunk_valid_res_ ||
+            cached_index_chunk_res_->size() !=
+                static_cast<size_t>(active_count_) ||
+            cached_index_chunk_valid_res_->size() !=
+                static_cast<size_t>(active_count_)) {
+            return nullptr;
+        }
+        return cached_index_chunk_res_;
     }
 
     std::string
@@ -1137,6 +1178,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     RegexLiteralCondition fm_regex_requirements_;
     std::shared_ptr<const RegexIndexPlan> fm_regex_plan_;
     bool fm_regex_deferred_{false};
+    const int64_t normal_scan_batch_size_;
 
     void
     EnsureRegexCache() {

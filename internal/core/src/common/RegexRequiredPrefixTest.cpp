@@ -439,6 +439,51 @@ TEST(RegexRequiredPrefix, PreparationCacheIsThreadLocal) {
     second.join();
 }
 
+TEST(RegexRequiredPrefix, CanonicalPreparationSurvivesThreadCacheEviction) {
+    const std::string pattern = R"(foo\x00bar.*SUFFIX)";
+    PartialRegexMatcher first(pattern);
+    const auto first_literal = first.RequiredLiteral();
+    const auto first_condition = first.RequiredIndexCondition();
+    const std::string row("afoo\0bar\nSUFFIX", 15);
+    ASSERT_TRUE(first(row));
+    ASSERT_FALSE(first_literal.empty());
+    ASSERT_TRUE(ConditionMatches(first_condition, row));
+
+    // This second key evicts the thread's one entry. The first matcher keeps
+    // its immutable preparation alive; a new matcher for A compiles its own
+    // canonical RE2 and must produce the same preparation again.
+    PartialRegexMatcher second("(?i:foo).*OTHER");
+    EXPECT_EQ(second.RequiredLiteral(), "OTHER");
+    EXPECT_TRUE(second(std::string("FOO\nOTHER")));
+    EXPECT_EQ(first.RequiredLiteral(), first_literal);
+    EXPECT_EQ(first.RequiredIndexCondition(), first_condition);
+    EXPECT_TRUE(first(row));
+    PartialRegexMatcher again(pattern);
+    EXPECT_EQ(again.RequiredLiteral(), first_literal);
+    EXPECT_EQ(again.RequiredIndexCondition(), first_condition);
+    EXPECT_EQ(PartialRegexMatcher::PrepareIndexCondition(pattern),
+              first_condition);
+
+    // Inline flags and embedded NUL bytes are part of the complete key.
+    PartialRegexMatcher folded("(?i)SUFFIX");
+    EXPECT_TRUE(folded.RequiredLiteral().empty());
+    EXPECT_TRUE(folded.RequiredIndexCondition().IsTrue());
+    EXPECT_TRUE(folded(std::string("suffix")));
+    EXPECT_FALSE(PartialRegexMatcher("SUFFIX")(std::string("suffix")));
+    for (const std::string literal :
+         {std::string("a\0b", 3), std::string("a\0c", 3)}) {
+        PartialRegexMatcher matcher(literal);
+        EXPECT_EQ(matcher.RequiredLiteral(), literal);
+        EXPECT_EQ(matcher.RequiredIndexCondition(),
+                  RegexLiteralCondition::Literal(literal));
+    }
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        EXPECT_ANY_THROW(PartialRegexMatcher("["));
+        EXPECT_ANY_THROW(PartialRegexMatcher::PrepareIndexCondition("["));
+        EXPECT_EQ(first.RequiredIndexCondition(), first_condition);
+    }
+}
+
 TEST(RegexRequiredPrefix, PublicAPITraversalBudgetAndSharedMatcher) {
     // A wide AST must fall back before allocating/visiting its children when
     // the input traversal budget is exhausted. Output node bounds are separate.

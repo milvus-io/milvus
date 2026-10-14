@@ -32,7 +32,9 @@
 #include "exec/QueryContext.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/RawExprCacheAdapter.h"
+#include "exec/expression/RegexPrefilterStats.h"
 #include "exec/expression/UnaryExpr.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "expr/ITypeExpr.h"
@@ -101,14 +103,17 @@ LoadSealedFMMatch(const std::vector<std::string>& rows,
                   const std::vector<int64_t>* ints = nullptr,
                   bool with_index = true,
                   FMReaderDecorator decorate_reader = {},
-                  std::optional<double> reader_cost_ratio = std::nullopt) {
+                  std::optional<double> reader_cost_ratio = std::nullopt,
+                  bool ints_nullable = false,
+                  const uint8_t* ints_validity = nullptr) {
     SealedFMMatch out;
     out.raw_files = std::make_unique<test::expr_index::RawFieldFiles>();
     out.schema = std::make_shared<Schema>();
     out.varchar_id =
         out.schema->AddDebugField("fm_match", DataType::VARCHAR, nullable);
     if (ints != nullptr) {
-        out.int_id = out.schema->AddDebugField("fm_int", DataType::INT64);
+        out.int_id =
+            out.schema->AddDebugField("fm_int", DataType::INT64, ints_nullable);
     }
     out.segment = segcore::CreateSealedSegment(out.schema);
     auto chunks = varchar_chunks;
@@ -119,9 +124,13 @@ LoadSealedFMMatch(const std::vector<std::string>& rows,
     auto raw_info = out.raw_files->Prepare(out.varchar_id, chunks);
     out.segment->LoadFieldData(raw_info);
     if (ints != nullptr) {
-        auto field =
-            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
-        field->FillFieldData(ints->data(), ints->size());
+        auto field = std::make_shared<FieldData<int64_t>>(DataType::INT64,
+                                                          ints_nullable);
+        if (ints_nullable) {
+            field->FillFieldData(ints->data(), ints_validity, ints->size());
+        } else {
+            field->FillFieldData(ints->data(), ints->size());
+        }
         auto info = out.raw_files->Prepare(out.int_id, {field});
         out.segment->LoadFieldData(info);
     }
@@ -622,13 +631,11 @@ TEST_P(FmIndexPatternExpressionTest, MultiChunk) {
         op);
     EXPECT_TRUE(CompiledUseIndexCursor(
         match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
-    EXPECT_EQ(milvus::test::CanExprExecuteAllAtOnce(
-                  match_expr, loaded.segment.get(), static_cast<int64_t>(nb)),
-              op != proto::plan::OpType::RegexMatch);
+    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+        match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
 
-    // LIKE keeps all-at-once execution; regex retains ordinary batches so
-    // upstream bitmaps can inform routing. Both paths read candidates from
-    // all three raw chunks.
+    // Both candidate paths keep one complete logical result. Regex may still
+    // fall back to ordinary physical scan batches after seeing an input mask.
     auto node =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, match_expr);
     auto got = milvus::query::ExecuteQueryExpr(
@@ -1456,7 +1463,8 @@ TEST(FmIndexExpressionTest,
                 exec::ExecContext exec_context(query_context.get());
                 auto compiled =
                     exec::CompileExpressions({root}, &exec_context, {}, false);
-                ASSERT_FALSE(compiled[0]->CanExecuteAllAtOnce());
+                ASSERT_EQ(compiled[0]->CanExecuteAllAtOnce(),
+                          pattern != ".*" && pattern != "a|RARE123END");
                 exec::EvalCtx context(&exec_context);
                 for (size_t begin = 0, part = 0; begin < n;
                      begin += batch_size, ++part) {
@@ -1740,6 +1748,540 @@ TEST(FmIndexExpressionTest,
     check(disabled, "RARE123END$", n, true);
 }
 
+TEST(FmIndexExpressionTest, RegexPrefilterWorkTracksPhysicalWindowsAndScope) {
+    constexpr size_t n = 1027;
+    constexpr size_t batch = 128;
+    auto truth = std::make_shared<TargetBitmap>(n, false);
+    for (size_t row : {size_t{1}, size_t{67}, size_t{256}, size_t{1026}}) {
+        truth->set(row);
+    }
+    const auto complete = exec::ComputeRegexBitmapWork(*truth, batch);
+    EXPECT_EQ(complete.active_rows, 4u);
+    EXPECT_EQ(complete.visited_rows, 259u);
+    EXPECT_EQ(complete.visited_batches, 3u);
+    exec::RegexPrefilterStats suffix(truth);
+    const auto later = suffix.Get(batch, n - batch, batch);
+    ASSERT_TRUE(later.has_value());
+    EXPECT_EQ(later->active_rows, 2u);
+    EXPECT_EQ(later->visited_rows, 131u);
+    EXPECT_EQ(later->visited_batches, 2u);
+    EXPECT_FALSE(suffix.Get(batch + 1, n - batch - 1, batch).has_value());
+    EXPECT_FALSE(suffix.Get(batch, n, batch).has_value());
+    exec::RegexPrefilterStats tiny_batches(
+        std::make_shared<TargetBitmap>(8192, true));
+    EXPECT_FALSE(tiny_batches.Get(0, 8192, 1).has_value());
+
+    auto loaded =
+        LoadSealedFMMatch({"row"}, {}, false, nullptr, nullptr, false);
+    auto query = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, loaded.segment.get(), 1, MAX_TIMESTAMP);
+    exec::ExecContext execution(query.get());
+    exec::EvalCtx context(&execution);
+    size_t requests = 0;
+    exec::EvalCtx::RegexWorkProvider provider =
+        [&](size_t begin, size_t remaining, size_t physical_batch) {
+            ++requests;
+            return suffix.Get(begin, remaining, physical_batch);
+        };
+    context.set_bitmap_input(TargetBitmap(batch, true));
+    {
+        exec::EvalCtx::ScopedRegexWorkProvider outer(context, &provider);
+        ASSERT_TRUE(context.get_regex_work_stats(batch, n - batch, batch));
+        {
+            exec::EvalCtx::ScopedRegexWorkProvider unknown(context, nullptr);
+            EXPECT_FALSE(context.get_regex_work_stats(batch, n - batch, batch));
+        }
+        ASSERT_TRUE(context.get_regex_work_stats(batch, n - batch, batch));
+        // A new mask invalidates both this scope and the saved outer one.
+        context.set_bitmap_input(TargetBitmap(batch, false));
+        EXPECT_FALSE(context.get_regex_work_stats(batch, n - batch, batch));
+    }
+    EXPECT_FALSE(context.get_regex_work_stats(batch, n - batch, batch));
+    EXPECT_EQ(requests, 2u);
+    exec::OffsetVector offsets{0};
+    {
+        exec::EvalCtx::ScopedRegexWorkProvider outer(context, &provider);
+        context.set_offset_input(&offsets);
+        EXPECT_FALSE(context.get_regex_work_stats(batch, n - batch, batch));
+    }
+    context.set_offset_input(nullptr);
+    EXPECT_FALSE(context.get_regex_work_stats(batch, n - batch, batch));
+    {
+        exec::EvalCtx::ScopedRegexWorkProvider outer(context, &provider);
+        context.clear_bitmap_input();
+        EXPECT_FALSE(context.get_regex_work_stats(batch, n - batch, batch));
+    }
+    EXPECT_EQ(requests, 2u);
+}
+
+TEST(FmIndexExpressionTest,
+     ExecutorRegexOneShotFallbackMatchesOrdinaryMaskedBatches) {
+    constexpr size_t n = 1027;
+    constexpr size_t batch = 128;
+    std::vector<std::string> rows(n, "COMMON foo " + std::string(1000, 'x'));
+    for (size_t row = 0; row < n; row += 49) {
+        rows[row] += " RARE123END";
+    }
+    std::vector<uint8_t> validity((n + 7) / 8, 0xff);
+    for (size_t row : {size_t{0}, size_t{404}, size_t{765}, size_t{1026}}) {
+        validity[row / 8] &= static_cast<uint8_t>(~(1u << (row % 8)));
+    }
+    auto chunks = MakeNullableStringChunks(rows, validity, {0, 199, 540, n});
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto indexed = LoadSealedFMMatch(rows,
+                                     chunks,
+                                     true,
+                                     validity.data(),
+                                     nullptr,
+                                     true,
+                                     ObserveFMReader(calls, 0));
+    auto raw =
+        LoadSealedFMMatch(rows, chunks, true, validity.data(), nullptr, false);
+    ASSERT_EQ(indexed.segment->num_chunk_data(indexed.varchar_id), 3);
+    milvus::test::ExprBatchSizeGuard batch_guard(batch);
+    for (const std::string pattern : {"COMMON.*foo", "RARE123END$"}) {
+        for (int mask_kind : {0, 1, 2, 3}) {
+            if (pattern == "RARE123END$" && mask_kind < 2) {
+                continue;  // Dense rare candidates belong to the next test.
+            }
+            TargetBitmap mask;
+            if (mask_kind != 0) {
+                mask = TargetBitmap(n, mask_kind == 1);
+                if (mask_kind == 2) {
+                    for (size_t row : {size_t{49},
+                                       size_t{129},
+                                       size_t{256},
+                                       size_t{404},
+                                       size_t{513},
+                                       size_t{1026}}) {
+                        mask.set(row);
+                    }
+                }
+            }
+            for (bool negate : {false, true}) {
+                SCOPED_TRACE(pattern + "/mask=" + std::to_string(mask_kind) +
+                             "/not=" + std::to_string(negate));
+                auto evaluate = [&](const SealedFMMatch& fixture,
+                                    bool one_shot) {
+                    auto expression =
+                        MakeMatchTypedExpr(fixture.schema,
+                                           fixture.varchar_id,
+                                           pattern,
+                                           true,
+                                           proto::plan::RegexMatch);
+                    expr::TypedExprPtr root = expression;
+                    if (negate) {
+                        root = std::make_shared<expr::LogicalUnaryExpr>(
+                            expr::LogicalUnaryExpr::OpType::LogicalNot, root);
+                    }
+                    auto query = std::make_shared<exec::QueryContext>(
+                        DEAFULT_QUERY_ID,
+                        fixture.segment.get(),
+                        n,
+                        MAX_TIMESTAMP);
+                    query->set_enable_expr_cache(false);
+                    exec::ExecContext execution(query.get());
+                    auto compiled =
+                        exec::CompileExpressions({root}, &execution, {}, false);
+                    if (one_shot) {
+                        EXPECT_TRUE(compiled[0]->CanExecuteAllAtOnce());
+                        compiled[0]->SetExecuteAllAtOnce();
+                    }
+                    exec::EvalCtx context(&execution);
+                    TargetBitmap hits;
+                    TargetBitmap valid;
+                    for (size_t begin = 0; begin < n;) {
+                        const auto size =
+                            one_shot ? n : std::min(batch, n - begin);
+                        if (!mask.empty()) {
+                            TargetBitmap local;
+                            local.append(mask, begin, size);
+                            context.set_bitmap_input(std::move(local));
+                        }
+                        VectorPtr output;
+                        compiled[0]->Eval(context, output);
+                        auto column =
+                            std::dynamic_pointer_cast<ColumnVector>(output);
+                        AssertInfo(
+                            column != nullptr && column->size() == size,
+                            "one-shot fallback changed the logical shape");
+                        hits.append(
+                            TargetBitmapView(column->GetRawData(), size));
+                        valid.append(
+                            TargetBitmapView(column->GetValidRawData(), size));
+                        if (!mask.empty()) {
+                            for (size_t i = 0; i < size; ++i) {
+                                EXPECT_EQ(context.get_bitmap_input()[i],
+                                          mask[begin + i]);
+                            }
+                        }
+                        begin += size;
+                    }
+                    auto physical = compiled[0];
+                    if (negate) {
+                        physical = physical->GetInputsRef()[0];
+                    }
+                    if (auto adapter = std::dynamic_pointer_cast<
+                            exec::RawExprCacheAdapter>(physical)) {
+                        physical = adapter->wrapped_expr();
+                    }
+                    auto leaf = std::dynamic_pointer_cast<
+                        exec::PhyUnaryRangeFilterExpr>(physical);
+                    AssertInfo(leaf != nullptr,
+                               "expected the original unary leaf");
+                    EXPECT_EQ(leaf->GetNextBatchSize(), 0);
+                    // Offset Take stays available after complete sequential
+                    // exhaustion and does not resurrect a sequential window.
+                    context.clear_bitmap_input();
+                    exec::OffsetVector offsets{0, 101, 404, 1026};
+                    context.set_offset_input(&offsets);
+                    VectorPtr gathered;
+                    leaf->Eval(context, gathered);
+                    auto column =
+                        std::dynamic_pointer_cast<ColumnVector>(gathered);
+                    AssertInfo(column != nullptr,
+                               "offset Take must return a vector");
+                    EXPECT_EQ(column->size(), offsets.size());
+                    TargetBitmapView offset_hits(column->GetRawData(),
+                                                 offsets.size());
+                    TargetBitmapView offset_valid(column->GetValidRawData(),
+                                                  offsets.size());
+                    PartialRegexMatcher offset_oracle(pattern);
+                    for (size_t i = 0; i < offsets.size(); ++i) {
+                        const size_t row = offsets[i];
+                        const bool row_valid =
+                            validity[row / 8] & (1u << (row % 8));
+                        EXPECT_EQ(offset_valid[i], row_valid);
+                        if (row_valid) {
+                            EXPECT_EQ(offset_hits[i], offset_oracle(rows[row]));
+                        }
+                    }
+                    context.set_offset_input(nullptr);
+                    VectorPtr exhausted;
+                    leaf->Eval(context, exhausted);
+                    EXPECT_EQ(exhausted, nullptr);
+                    return std::pair(std::move(hits), std::move(valid));
+                };
+                *calls = RegexRoutingCounts{};
+                const auto expected = evaluate(raw, false);
+                const auto actual = evaluate(indexed, true);
+                EXPECT_EQ(calls->prepare, mask_kind == 3 ? 0u : 1u);
+                EXPECT_EQ(calls->execute, 0u);
+                for (size_t row = 0; row < n; ++row) {
+                    // Includes inactive NULL placeholders, active NULLs,
+                    // skipped complete windows, chunk crossings and short tail.
+                    EXPECT_EQ(actual.first[row], expected.first[row]) << row;
+                    EXPECT_EQ(actual.second[row], expected.second[row]) << row;
+                }
+            }
+        }
+    }
+}
+
+TEST(FmIndexExpressionTest, ExecutorRegexRareAndZeroKeepExactOneShotResults) {
+    constexpr size_t n = 1027;
+    constexpr size_t batch = 128;
+    std::vector<std::string> rows(n, std::string(1000, 'x'));
+    rows[101] += " RARE123END";
+    std::vector<uint8_t> validity((n + 7) / 8, 0xff);
+    validity[0] &= static_cast<uint8_t>(~1u);
+    validity[1026 / 8] &= static_cast<uint8_t>(~(1u << (1026 % 8)));
+    auto chunks = MakeNullableStringChunks(rows, validity, {0, 199, 540, n});
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto loaded = LoadSealedFMMatch(rows,
+                                    chunks,
+                                    true,
+                                    validity.data(),
+                                    nullptr,
+                                    true,
+                                    ObserveFMReader(calls, 0));
+    milvus::test::ExprBatchSizeGuard batch_guard(batch);
+    for (const std::string pattern : {"RARE123END$", "ABSENT_54191.*"}) {
+        for (bool negate : {false, true}) {
+            *calls = RegexRoutingCounts{};
+            auto typed = MakeMatchTypedExpr(loaded.schema,
+                                            loaded.varchar_id,
+                                            pattern,
+                                            true,
+                                            proto::plan::RegexMatch);
+            expr::TypedExprPtr root = typed;
+            if (negate) {
+                root = std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, root);
+            }
+            auto node = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, root);
+            ASSERT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+                root, loaded.segment.get(), n));
+            auto output = milvus::query::ExecuteQueryExpr(
+                node, loaded.segment.get(), n, MAX_TIMESTAMP);
+            PartialRegexMatcher oracle(pattern);
+            for (size_t row = 0; row < n; ++row) {
+                const bool valid = validity[row / 8] & (1u << (row % 8));
+                EXPECT_EQ(output[row], valid && (negate != oracle(rows[row])));
+            }
+            EXPECT_EQ(calls->prepare, 1u);
+            EXPECT_EQ(calls->execute, 1u);
+            ASSERT_NE(calls->plan, nullptr);
+            EXPECT_EQ(calls->plan->empty_result, pattern == "ABSENT_54191.*");
+        }
+    }
+}
+
+TEST(FmIndexExpressionTest, ExecutorRegexCountProofsDoNotRequestSuffixStats) {
+    constexpr size_t n = 1027;
+    constexpr size_t batch = 128;
+    std::vector<std::string> rows(n, "COMMON foo " + std::string(1000, 'x'));
+    auto counts = std::make_shared<RegexRoutingCounts>();
+    auto loaded = LoadSealedFMMatch(
+        rows, {}, false, nullptr, nullptr, true, ObserveFMReader(counts, 0));
+    milvus::test::ExprBatchSizeGuard batch_guard(batch);
+    for (const std::string pattern : {"COMMON.*foo", "ABSENT_54191.*"}) {
+        *counts = RegexRoutingCounts{};
+        auto typed = MakeMatchTypedExpr(loaded.schema,
+                                        loaded.varchar_id,
+                                        pattern,
+                                        false,
+                                        proto::plan::RegexMatch);
+        auto query = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+        query->set_enable_expr_cache(false);
+        exec::ExecContext execution(query.get());
+        auto compiled =
+            exec::CompileExpressions({typed}, &execution, {}, false);
+        exec::EvalCtx context(&execution);
+        context.set_bitmap_input(TargetBitmap(batch, true));
+        size_t requests = 0;
+        exec::EvalCtx::RegexWorkProvider provider =
+            [&](size_t, size_t, size_t) -> std::optional<RegexIndexWorkStats> {
+            ++requests;
+            return std::nullopt;
+        };
+        exec::EvalCtx::ScopedRegexWorkProvider scope(context, &provider);
+        VectorPtr output;
+        compiled[0]->Eval(context, output);
+        ASSERT_NE(output, nullptr);
+        EXPECT_EQ(requests, 0u);
+        EXPECT_EQ(counts->prepare, 1u);
+        EXPECT_EQ(counts->execute, pattern == "ABSENT_54191.*" ? 1u : 0u);
+        ASSERT_NE(counts->plan, nullptr);
+        EXPECT_EQ(counts->plan->empty_result, pattern == "ABSENT_54191.*");
+    }
+}
+
+TEST(FmIndexExpressionTest, ExecutorRegexClusteredNumericPrefixAvoidsLocate) {
+    constexpr size_t n = 32771;
+    constexpr size_t batch = 128;
+    std::vector<std::string> rows(n, std::string(28, 'x'));
+    for (size_t row = 0; row < n; row += 512) {
+        rows[row].replace(0, 11, "MARKER54191");
+    }
+    milvus::test::ExprBatchSizeGuard batch_guard(batch);
+    for (size_t prefix_begin : {size_t{0}, batch}) {
+        std::vector<int64_t> ids(n);
+        for (size_t row = 0; row < n; ++row) {
+            ids[row] = (row + n - prefix_begin) % n;
+        }
+        auto calls = std::make_shared<RegexRoutingCounts>();
+        auto loaded = LoadSealedFMMatch(
+            rows, {}, false, nullptr, &ids, true, ObserveFMReader(calls, 0));
+        auto numeric_field =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+        numeric_field->FillFieldData(ids.data(), ids.size());
+        auto opened = test::expr_index::BuildIndex(
+            loaded.int_id, DataType::INT64, "STL_SORT", {numeric_field});
+        test::expr_index::InstallIndex(
+            *loaded.segment, loaded.int_id, DataType::INT64, std::move(opened));
+        for (size_t limit : {size_t{0}, size_t{16}, size_t{64}, n}) {
+            for (bool one_shot : {false, true}) {
+                SCOPED_TRACE("start=" + std::to_string(prefix_begin) +
+                             "/limit=" + std::to_string(limit) +
+                             "/oneShot=" + std::to_string(one_shot));
+                *calls = RegexRoutingCounts{};
+                proto::plan::GenericValue upper;
+                upper.set_int64_val(limit);
+                auto numeric = std::make_shared<expr::UnaryRangeFilterExpr>(
+                    expr::ColumnInfo(loaded.int_id, DataType::INT64),
+                    proto::plan::LessThan,
+                    upper);
+                auto regex = MakeMatchTypedExpr(loaded.schema,
+                                                loaded.varchar_id,
+                                                "MARKER54191.*",
+                                                false,
+                                                proto::plan::RegexMatch);
+                auto typed = std::make_shared<expr::LogicalBinaryExpr>(
+                    expr::LogicalBinaryExpr::OpType::And, numeric, regex);
+                auto query = std::make_shared<exec::QueryContext>(
+                    DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+                query->set_enable_expr_cache(false);
+                exec::ExecContext execution(query.get());
+                auto compiled =
+                    exec::CompileExpressions({typed}, &execution, {}, false);
+                auto parent =
+                    std::dynamic_pointer_cast<exec::PhyConjunctFilterExpr>(
+                        compiled[0]);
+                ASSERT_NE(parent, nullptr);
+                parent->Reorder({0, 1});
+                if (one_shot) {
+                    ASSERT_TRUE(parent->CanExecuteAllAtOnce());
+                    parent->SetExecuteAllAtOnce();
+                }
+                exec::EvalCtx context(&execution);
+                for (size_t begin = 0; begin < n;) {
+                    const auto size = one_shot ? n : std::min(batch, n - begin);
+                    VectorPtr output;
+                    parent->Eval(context, output);
+                    auto column =
+                        std::dynamic_pointer_cast<ColumnVector>(output);
+                    ASSERT_NE(column, nullptr);
+                    ASSERT_EQ(column->size(), size);
+                    TargetBitmapView hits(column->GetRawData(), size);
+                    for (size_t i = 0; i < size; ++i) {
+                        EXPECT_EQ(hits[i],
+                                  static_cast<size_t>(ids[begin + i]) < limit &&
+                                      (begin + i) % 512 == 0);
+                    }
+                    EXPECT_TRUE(context.get_bitmap_input().empty());
+                    EXPECT_FALSE(context.has_regex_work_provider());
+                    begin += size;
+                }
+                EXPECT_EQ(calls->prepare, limit == 0 ? 0u : 1u);
+                EXPECT_EQ(calls->execute, limit == n ? 1u : 0u);
+                if (limit != 0) {
+                    ASSERT_NE(calls->plan, nullptr);
+                    EXPECT_EQ(calls->plan->occurrences, (n + 511) / 512);
+                    EXPECT_TRUE(RegexIndexPassesLocateGuard(*calls->plan));
+                }
+            }
+        }
+    }
+}
+
+TEST(FmIndexExpressionTest, ExecutorRegexNumericStatsKeepUnknownScopesUnknown) {
+    constexpr size_t n = 32771;
+    constexpr size_t batch = 128;
+    std::vector<std::string> rows(n, std::string(28, 'x'));
+    std::vector<int64_t> ids(n);
+    for (size_t row = 0; row < n; ++row) {
+        ids[row] = row;
+        if (row % 512 == 0) {
+            rows[row].replace(0, 11, "MARKER54191");
+        }
+    }
+    milvus::test::ExprBatchSizeGuard batch_guard(batch);
+    for (const std::string scope : {"external_mask",
+                                    "multiple_prefixes",
+                                    "not_regex",
+                                    "nullable_numeric"}) {
+        SCOPED_TRACE(scope);
+        const bool nullable = scope == "nullable_numeric";
+        std::vector<uint8_t> numeric_validity((n + 7) / 8, 0xff);
+        if (nullable) {
+            for (size_t row : {size_t{0}, size_t{200}, size_t{512}}) {
+                numeric_validity[row / 8] &=
+                    static_cast<uint8_t>(~(1u << (row % 8)));
+            }
+        }
+        auto calls = std::make_shared<RegexRoutingCounts>();
+        auto loaded = LoadSealedFMMatch(rows,
+                                        {},
+                                        false,
+                                        nullptr,
+                                        &ids,
+                                        true,
+                                        ObserveFMReader(calls, 0),
+                                        std::nullopt,
+                                        nullable,
+                                        numeric_validity.data());
+        auto field =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, nullable);
+        if (nullable) {
+            field->FillFieldData(
+                ids.data(), numeric_validity.data(), ids.size());
+        } else {
+            field->FillFieldData(ids.data(), ids.size());
+        }
+        auto opened = test::expr_index::BuildIndex(
+            loaded.int_id, DataType::INT64, "STL_SORT", {field});
+        test::expr_index::InstallIndex(
+            *loaded.segment, loaded.int_id, DataType::INT64, std::move(opened));
+        proto::plan::GenericValue upper;
+        upper.set_int64_val(16);
+        auto numeric = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(loaded.int_id, DataType::INT64),
+            proto::plan::LessThan,
+            upper);
+        expr::TypedExprPtr regex = MakeMatchTypedExpr(loaded.schema,
+                                                      loaded.varchar_id,
+                                                      "MARKER54191.*",
+                                                      false,
+                                                      proto::plan::RegexMatch);
+        if (scope == "not_regex") {
+            regex = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, regex);
+        }
+        expr::TypedExprPtr typed = numeric;
+        if (scope == "multiple_prefixes") {
+            proto::plan::GenericValue all_rows;
+            all_rows.set_int64_val(n);
+            auto second = std::make_shared<expr::UnaryRangeFilterExpr>(
+                expr::ColumnInfo(loaded.int_id, DataType::INT64),
+                proto::plan::LessThan,
+                all_rows);
+            typed = std::make_shared<expr::LogicalBinaryExpr>(
+                expr::LogicalBinaryExpr::OpType::And, typed, second);
+        }
+        typed = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, typed, regex);
+        auto query = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+        query->set_enable_expr_cache(false);
+        exec::ExecContext execution(query.get());
+        auto compiled =
+            exec::CompileExpressions({typed}, &execution, {}, false);
+        auto parent =
+            std::dynamic_pointer_cast<exec::PhyConjunctFilterExpr>(compiled[0]);
+        ASSERT_NE(parent, nullptr);
+        std::vector<size_t> order(parent->GetInputsRef().size());
+        for (size_t i = 0; i < order.size(); ++i) {
+            order[i] = i;
+        }
+        parent->Reorder(order);
+        exec::EvalCtx context(&execution);
+        for (size_t begin = 0; begin < n; begin += batch) {
+            const auto size = std::min(batch, n - begin);
+            if (scope == "external_mask") {
+                context.set_bitmap_input(TargetBitmap(size, true));
+            }
+            VectorPtr output;
+            parent->Eval(context, output);
+            auto column = std::dynamic_pointer_cast<ColumnVector>(output);
+            ASSERT_NE(column, nullptr);
+            ASSERT_EQ(column->size(), size);
+            TargetBitmapView hits(column->GetRawData(), size);
+            TargetBitmapView valid(column->GetValidRawData(), size);
+            for (size_t i = 0; i < size; ++i) {
+                const size_t row = begin + i;
+                const bool numeric_valid =
+                    numeric_validity[row / 8] & (1u << (row % 8));
+                const bool regex_match =
+                    (scope == "not_regex") != (row % 512 == 0);
+                const bool expected_valid = numeric_valid || !regex_match;
+                EXPECT_EQ(valid[i], expected_valid) << row;
+                if (expected_valid) {
+                    EXPECT_EQ(hits[i], numeric_valid && row < 16 && regex_match)
+                        << row;
+                }
+            }
+            EXPECT_FALSE(context.has_regex_work_provider());
+        }
+        // These narrow unsupported scopes retain the existing unknown-density
+        // estimate. Their results stay exact; no whole-cache statistics are borrowed.
+        EXPECT_EQ(calls->prepare, 1u);
+        EXPECT_EQ(calls->execute, 1u);
+    }
+}
+
 class FMIndexRegexCacheTest : public ::testing::Test {
  protected:
     void
@@ -1783,52 +2325,63 @@ TEST_F(FMIndexRegexCacheTest, DeferredFMRegexReadsExactPredicateCache) {
                                              true,
                                              proto::plan::RegexMatch);
         PartialRegexMatcher oracle(pattern);
-        for (bool cache_hit : {false, true}) {
-            *calls = RegexRoutingCounts{};
-            auto query_context = std::make_shared<exec::QueryContext>(
-                DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
-            query_context->set_enable_expr_cache(false);
-            exec::ExecContext exec_context(query_context.get());
-            auto compiled = exec::CompileExpressions(
-                {expression}, &exec_context, {}, false);
-            auto adapter = std::dynamic_pointer_cast<exec::RawExprCacheAdapter>(
-                compiled[0]);
-            ASSERT_NE(adapter, nullptr);
-            EXPECT_EQ(adapter->wrapped_expr()->GetExecPath(),
-                      exec::ExprExecPath::ScalarIndex);
-            exec::ExprResCacheManager::Key key{
-                loaded.segment->get_segment_id(),
-                adapter->wrapped_expr()->GetSignatureForRawExprCache()};
-            exec::EvalCtx context(&exec_context);
-            for (size_t begin = 0; begin < n; begin += batch_size) {
-                const size_t size = std::min(batch_size, n - begin);
-                VectorPtr output;
-                compiled[0]->Eval(context, output);
-                auto result = std::dynamic_pointer_cast<ColumnVector>(output);
-                ASSERT_NE(result, nullptr);
-                ASSERT_EQ(result->size(), size);
-                TargetBitmapView hits(result->GetRawData(), size);
-                TargetBitmapView valid(result->GetValidRawData(), size);
-                for (size_t i = 0; i < size; ++i) {
-                    const size_t row = begin + i;
-                    const bool expected_valid =
-                        validity[row / 8] & (1u << (row % 8));
-                    EXPECT_EQ(valid[i], expected_valid);
-                    if (expected_valid) {
-                        EXPECT_EQ(hits[i], oracle(rows[row]));
+        for (bool one_shot : {false, true}) {
+            manager.Clear();
+            for (bool cache_hit : {false, true}) {
+                *calls = RegexRoutingCounts{};
+                auto query_context = std::make_shared<exec::QueryContext>(
+                    DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+                query_context->set_enable_expr_cache(false);
+                exec::ExecContext exec_context(query_context.get());
+                auto compiled = exec::CompileExpressions(
+                    {expression}, &exec_context, {}, false);
+                auto adapter =
+                    std::dynamic_pointer_cast<exec::RawExprCacheAdapter>(
+                        compiled[0]);
+                ASSERT_NE(adapter, nullptr);
+                EXPECT_EQ(adapter->wrapped_expr()->GetExecPath(),
+                          exec::ExprExecPath::ScalarIndex);
+                if (one_shot) {
+                    ASSERT_TRUE(compiled[0]->CanExecuteAllAtOnce());
+                    compiled[0]->SetExecuteAllAtOnce();
+                }
+                exec::ExprResCacheManager::Key key{
+                    loaded.segment->get_segment_id(),
+                    adapter->wrapped_expr()->GetSignatureForRawExprCache()};
+                exec::EvalCtx context(&exec_context);
+                for (size_t begin = 0; begin < n;
+                     begin += one_shot ? n : batch_size) {
+                    const size_t size =
+                        one_shot ? n : std::min(batch_size, n - begin);
+                    VectorPtr output;
+                    compiled[0]->Eval(context, output);
+                    auto result =
+                        std::dynamic_pointer_cast<ColumnVector>(output);
+                    ASSERT_NE(result, nullptr);
+                    ASSERT_EQ(result->size(), size);
+                    TargetBitmapView hits(result->GetRawData(), size);
+                    TargetBitmapView valid(result->GetValidRawData(), size);
+                    for (size_t i = 0; i < size; ++i) {
+                        const size_t row = begin + i;
+                        const bool expected_valid =
+                            validity[row / 8] & (1u << (row % 8));
+                        EXPECT_EQ(valid[i], expected_valid);
+                        if (expected_valid) {
+                            EXPECT_EQ(hits[i], oracle(rows[row]));
+                        }
                     }
                 }
+                EXPECT_EQ(calls->prepare, cache_hit ? 0u : 1u);
+                EXPECT_EQ(calls->execute,
+                          !cache_hit && pattern == "foo.*RARE123END" ? 1u : 0u);
+                exec::ExprResCacheManager::Value cached;
+                cached.active_count = n;
+                ASSERT_TRUE(manager.Get(key, cached));
+                ASSERT_NE(cached.result, nullptr);
+                ASSERT_NE(cached.valid_result, nullptr);
+                EXPECT_EQ(cached.result->size(), n);
+                EXPECT_EQ(cached.valid_result->size(), n);
             }
-            EXPECT_EQ(calls->prepare, cache_hit ? 0u : 1u);
-            EXPECT_EQ(calls->execute,
-                      !cache_hit && pattern == "foo.*RARE123END" ? 1u : 0u);
-            exec::ExprResCacheManager::Value cached;
-            cached.active_count = n;
-            ASSERT_TRUE(manager.Get(key, cached));
-            ASSERT_NE(cached.result, nullptr);
-            ASSERT_NE(cached.valid_result, nullptr);
-            EXPECT_EQ(cached.result->size(), n);
-            EXPECT_EQ(cached.valid_result->size(), n);
         }
     }
 }

@@ -215,6 +215,73 @@ TEST(RegexIndexPlan, RareCandidatesRemainUsefulAfterStrongPrefiltering) {
     EXPECT_LT(RegexIndexExecutionCost(plan, model.rows, 82, 8192), scan);
 }
 
+TEST(RegexIndexPlan, ExactVisitedBatchesDistinguishClusteredAndScatteredMasks) {
+    auto model = LargeSegment();
+    model.text_bytes = 28 * model.rows;
+    const auto plan = PrepareRegexIndexPlan(
+        Literal("MARKER54191"), [](const auto&) { return 2000; }, model);
+    ASSERT_TRUE(RegexIndexPassesLocateGuard(plan));
+    ASSERT_TRUE(CanRegexIndexPlanEverHelp(plan, model.rows, 8192));
+    for (size_t active : {size_t{128}, size_t{512}}) {
+        const RegexIndexWorkStats clustered{model.rows, active, 8192, 1};
+        const RegexIndexWorkStats scattered{
+            model.rows, active, model.rows, (model.rows + 8191) / 8192};
+        // Both masks contain exactly the same number of active rows. Only
+        // one physical window needs string views for the clustered prefix;
+        // popcount alone cannot price that difference.
+        EXPECT_TRUE(ShouldUseRegexIndexPlan(plan, model.rows, active, 8192));
+        EXPECT_FALSE(ShouldUseRegexIndexPlan(
+            plan, model.rows, active, 8192, &clustered));
+        EXPECT_TRUE(ShouldUseRegexIndexPlan(
+            plan, model.rows, active, 8192, &scattered));
+        EXPECT_GT(
+            RegexIndexFixedCost(plan),
+            RegexIndexScanCost(model, model.rows, active, 8192, &clustered));
+    }
+    const RegexIndexWorkStats all_empty{model.rows, 0, 0, 0};
+    EXPECT_FALSE(
+        ShouldUseRegexIndexPlan(plan, model.rows, 128, 8192, &all_empty));
+    // Complete logical output size is not the physical scan batch geometry.
+    const RegexIndexWorkStats prefix{model.rows, 128, 8192, 1};
+    EXPECT_FALSE(
+        ShouldUseRegexIndexPlan(plan, model.rows, model.rows, 8192, &prefix));
+}
+
+TEST(RegexIndexPlan, UnknownOrMalformedWorkStatisticsRetainTheDensityEstimate) {
+    auto model = LargeSegment();
+    model.text_bytes = 28 * model.rows;
+    const auto plan = PrepareRegexIndexPlan(
+        Literal("MARKER54191"), [](const auto&) { return 2000; }, model);
+    const auto unknown_cost = RegexIndexScanCost(model, model.rows, 128, 8192);
+    for (const RegexIndexWorkStats invalid : {
+             RegexIndexWorkStats{model.rows - 1, 128, 8192, 1},
+             RegexIndexWorkStats{model.rows, 128, 128, 0},
+             RegexIndexWorkStats{model.rows, 128, 127, 1},
+             RegexIndexWorkStats{model.rows, 0, 8192, 1},
+             RegexIndexWorkStats{model.rows, 128, model.rows + 1, 1},
+             RegexIndexWorkStats{model.rows, 128, 8192, model.rows},
+         }) {
+        EXPECT_EQ(RegexIndexScanCost(model, model.rows, 128, 8192, &invalid),
+                  unknown_cost);
+        EXPECT_TRUE(
+            ShouldUseRegexIndexPlan(plan, model.rows, 128, 8192, &invalid));
+    }
+}
+
+TEST(RegexIndexPlan, FullDensityBudgetIncludesARealShortTailBatch) {
+    auto model = LargeSegment();
+    model.text_bytes = 523 * model.rows;
+    const auto plan = PrepareRegexIndexPlan(
+        Literal("marker"), [](const auto&) { return 2287; }, model);
+    const RegexIndexWorkStats full_window{8194, 8194, 8194, 2};
+    ASSERT_TRUE(RegexIndexPassesLocateGuard(plan));
+    EXPECT_GE(RegexIndexScanCost(model, 8194, 8192, 8192),
+              RegexIndexScanCost(model, 8194, 8194, 8192, &full_window));
+    // The fixed work is barely below this two-batch maximum. A fractional
+    // 8194/8192 dispatch budget would wrongly prove that FM can never help.
+    EXPECT_TRUE(CanRegexIndexPlanEverHelp(plan, 8194, 8192));
+}
+
 TEST(RegexIndexPlan, PreparationGateAvoidsEmptyAndSmallScanWindows) {
     const auto model = LargeSegment();
     EXPECT_FALSE(ShouldPrepareRegexIndexPlan(model, model.rows, 0, 8192));
