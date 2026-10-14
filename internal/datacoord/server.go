@@ -272,7 +272,12 @@ func (s *Server) Init() error {
 	return s.initDataCoord()
 }
 
-func (s *Server) initDataCoord() error {
+func (s *Server) initDataCoord() (initErr error) {
+	defer func() {
+		if initErr != nil && s.meta != nil {
+			s.meta.closeManifestCommitExecutor()
+		}
+	}()
 	mlog.Info(s.ctx, "DataCoord try to wait for MixCoord ready")
 	if err := s.initMixCoord(); err != nil {
 		return err
@@ -652,6 +657,11 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
+	defer func() {
+		if s.meta != recoveredMeta {
+			recoveredMeta.closeManifestCommitExecutor()
+		}
+	}()
 	// Retry each recovery phase independently: a later metadata error must
 	// not repeat newMeta's successful object-storage manifest scan.
 	if err := retry.Do(s.ctx, func() error {
@@ -1148,6 +1158,9 @@ func (s *Server) Stop() error {
 
 	s.stopServerLoop()
 	mlog.Info(s.ctx, "datacoord serverloop stopped")
+	if s.meta != nil {
+		s.meta.closeManifestCommitExecutor()
+	}
 	mlog.Warn(s.ctx, "datacoord stop successful")
 	return nil
 }

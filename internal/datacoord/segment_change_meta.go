@@ -651,7 +651,7 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 			return updatePack.err
 		}
 	}
-	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
+	if err := commitL0ManifestUpdates(ctx, m.manifestCommitExecutor, updatePack.l0ManifestUpdates); err != nil {
 		return err
 	}
 	for _, update := range updatePack.l0ManifestUpdates {

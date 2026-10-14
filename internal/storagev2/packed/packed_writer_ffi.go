@@ -278,6 +278,29 @@ func (f *ColumnGroups) applyTo(handle C.LoonTransactionHandle) error {
 	return nil
 }
 
+func (f *ColumnGroups) invalidatedIndexColumns() []string {
+	if f == nil || f.addNewColumnGroups {
+		return nil
+	}
+	return appendedIndexColumns(f.cColumnGroups)
+}
+
+func appendedIndexColumns(groups *C.LoonColumnGroups) []string {
+	if groups == nil {
+		return nil
+	}
+	var columns []string
+	for _, group := range unsafe.Slice(groups.column_group_array, int(groups.num_of_column_groups)) {
+		if group.num_of_files == 0 {
+			continue
+		}
+		for _, column := range unsafe.Slice(group.columns, int(group.num_of_columns)) {
+			columns = append(columns, C.GoString(column))
+		}
+	}
+	return columns
+}
+
 // Close closes the underlying loon writer and returns the column-groups
 // payload. The writer never touches the manifest — the caller is
 // responsible for passing the returned handle to CommitManifestUpdates
