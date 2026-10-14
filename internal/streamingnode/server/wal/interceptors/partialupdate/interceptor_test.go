@@ -38,7 +38,7 @@ import (
 
 func TestPartialUpdateInterceptorBuildsIndependentPerWALState(t *testing.T) {
 	budget := newVersionByteBudget(2 * estimatedVersionEntryFixedBytes)
-	builder := &interceptorBuilder{enableCAS: true, versionIndexBudget: budget}
+	builder := &interceptorBuilder{versionIndexBudget: budget}
 	first := builder.Build(&interceptors.InterceptorBuildParam{
 		ChannelInfo: types.PChannelInfo{Name: "p1", Term: 1},
 	}).(*appendInterceptor)
@@ -1063,21 +1063,21 @@ func TestPartialUpdateDisabledBypassesCASAdmission(t *testing.T) {
 	}
 }
 
-func TestPartialUpdateBuilderCachesCASConfig(t *testing.T) {
+func TestPartialUpdateInterceptorCachesCASConfig(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	key := params.StreamingCfg.PartialUpdateEnableCAS.Key
 	old := params.StreamingCfg.PartialUpdateEnableCAS.GetValue()
 	defer params.Save(key, old)
+	builder := NewInterceptorBuilder()
 	for _, value := range []string{"true", "false"} {
 		require.NoError(t, params.Save(key, value))
-		builder := NewInterceptorBuilder()
+		interceptor := builder.Build(&interceptors.InterceptorBuildParam{}).(*appendInterceptor)
 		next := "true"
 		if value == "true" {
 			next = "false"
 		}
 		require.NoError(t, params.Save(key, next))
-		interceptor := builder.Build(&interceptors.InterceptorBuildParam{}).(*appendInterceptor)
 		require.Equal(t, value == "true", interceptor.enableCAS)
 		interceptor.Close()
 	}

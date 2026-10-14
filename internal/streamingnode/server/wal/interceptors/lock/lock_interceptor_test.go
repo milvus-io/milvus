@@ -358,21 +358,21 @@ func TestCASDisabledCommitSharesVChannelLock(t *testing.T) {
 	}
 }
 
-func TestLockBuilderCachesCASConfig(t *testing.T) {
+func TestLockInterceptorCachesCASConfig(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	key := params.StreamingCfg.PartialUpdateEnableCAS.Key
 	old := params.StreamingCfg.PartialUpdateEnableCAS.GetValue()
 	defer params.Save(key, old)
+	builder := NewInterceptorBuilder()
 	for _, value := range []string{"true", "false"} {
 		require.NoError(t, params.Save(key, value))
-		builder := NewInterceptorBuilder()
+		interceptor := builder.Build(&interceptors.InterceptorBuildParam{}).(*lockAppendInterceptor)
 		next := "true"
 		if value == "true" {
 			next = "false"
 		}
 		require.NoError(t, params.Save(key, next))
-		interceptor := builder.Build(&interceptors.InterceptorBuildParam{}).(*lockAppendInterceptor)
 		require.Equal(t, value == "true", interceptor.enableCAS)
 	}
 }

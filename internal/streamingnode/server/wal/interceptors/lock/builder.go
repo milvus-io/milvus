@@ -8,18 +8,16 @@ import (
 
 // NewInterceptorBuilder creates a new redo interceptor builder.
 func NewInterceptorBuilder() interceptors.InterceptorBuilder {
-	return &interceptorBuilder{enableCAS: paramtable.Get().StreamingCfg.PartialUpdateEnableCAS.GetAsBool()}
+	return &interceptorBuilder{}
 }
 
 // interceptorBuilder is the builder for redo interceptor.
-type interceptorBuilder struct {
-	enableCAS bool
-}
+type interceptorBuilder struct{}
 
 // Build creates a new redo interceptor.
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	return &lockAppendInterceptor{
-		enableCAS:      b.enableCAS,
+		enableCAS:      paramtable.Get().StreamingCfg.PartialUpdateEnableCAS.GetAsBool(),
 		channel:        param.ChannelInfo,
 		vchannelLocker: lock.NewKeyLock[string](),
 		txnManager:     param.TxnManager,
