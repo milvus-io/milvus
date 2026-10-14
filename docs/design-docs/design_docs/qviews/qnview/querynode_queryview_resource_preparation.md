@@ -315,6 +315,10 @@ its exclusive replay start. The buffer retains history required by live range
 references and unfinished replay. Compatible Views reuse one buffer and its
 subscription; moving a Segment within that covered range does not create an
 independent remote subscription for the Segment.
+The buffer owner also owns the shared PChannel stream. Canceling a subscription
+attempt, including the last in-flight attempt, does not close that stream:
+pending View bindings can still need it. The owner closes the stream after its
+last buffer reference is released.
 
 QueryView recovery uses TransformLog only, with no L0 loading fallback. Cursor
 production and retention obligations follow the

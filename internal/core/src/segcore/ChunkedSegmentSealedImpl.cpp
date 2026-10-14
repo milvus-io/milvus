@@ -2679,9 +2679,17 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         std::unordered_set<FieldId> seen_field_ids;
         field_ids.reserve(cg->columns.size());
         auto add_field = [&](FieldId field_id) {
-            if (!schema_snapshot->has_field(field_id)) {
+            if (!segment_load_info.HasFieldInSchema(field_id)) {
                 dropped_fields.push_back(field_id.get());
-            } else if (seen_field_ids.emplace(field_id).second) {
+                return;
+            }
+            // An unchanged external manifest may be reopened to expand the
+            // schema/load scope. Retain columns already owned by this read state.
+            if (!is_replace &&
+                committer.runtime()->fields.count(field_id) != 0) {
+                return;
+            }
+            if (seen_field_ids.emplace(field_id).second) {
                 field_ids.emplace_back(field_id);
             }
         };
