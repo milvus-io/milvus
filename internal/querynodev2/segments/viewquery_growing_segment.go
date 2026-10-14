@@ -3,6 +3,8 @@ package segments
 import (
 	"context"
 
+	"github.com/apache/arrow/go/v17/arrow"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -193,6 +195,20 @@ func (s *viewQueryGrowingSegment) Retrieve(ctx context.Context, plan *segcore.Re
 		return nil, err
 	}
 	defer result.Release()
+	return result.GetResult()
+}
+
+func (s *viewQueryGrowingSegment) RetrieveArrow(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, arrow.Record, error) {
+	if s.csegment == nil {
+		return nil, nil, merr.WrapErrSegmentNotLoaded(s.ID(), "nil growing segment")
+	}
+	result, err := s.csegment.RetrieveAsArrow(ctx, plan)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer result.Release()
+	// GetResult transfers the Arrow buffers to the caller. QueryTask releases
+	// the record after materialization, while its growing handle stays pinned.
 	return result.GetResult()
 }
 

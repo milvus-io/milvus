@@ -59,6 +59,8 @@ func TestRuntimeGrowingSegmentHandlePinsSegmentUntilRelease(t *testing.T) {
 	require.Equal(t, int32(1), releaseCount.Load())
 }
 
+var _ segcore.CSegment = fakeCSegment{}
+
 type fakeCSegment struct {
 	id           int64
 	releaseCount *atomic.Int32
@@ -93,6 +95,10 @@ func (fakeCSegment) Search(context.Context, *segcore.SearchRequest) (*segcore.Se
 }
 
 func (fakeCSegment) Retrieve(context.Context, *segcore.RetrievePlan) (*segcore.RetrieveResult, error) {
+	return nil, nil
+}
+
+func (fakeCSegment) RetrieveAsArrow(context.Context, *segcore.RetrievePlan) (*segcore.RetrieveArrowResult, error) {
 	return nil, nil
 }
 
