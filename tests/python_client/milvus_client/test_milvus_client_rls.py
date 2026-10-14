@@ -831,7 +831,7 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
         """
         target: RLS checks after default materialization and with generated/key fields
         method: insert an authorized row, reject a different owner and exercise partial updates
-        expected: generated/default values are visible; partition-key USING upserts reject without mutation
+        expected: authorized updates succeed for generated/default and key fields; unauthorized writes preserve rows
         """
         client = rls_client
         name = cf.gen_unique_str("rls_schema")
@@ -882,23 +882,13 @@ class TestMilvusClientRLSIndependent(TestMilvusClientV2Base):
                 check_task=CheckTasks.err_res,
                 check_items={ct.err_msg: "RLS"},
             )
+            patch = {"id": pk, "note": "updated"}
             if mode == "partition_key":
-                # Existing-row USING checks do not support partition-key collections.
-                self.upsert(
-                    client,
-                    name,
-                    [{"id": pk, "owner": "alice", "note": "updated"}],
-                    partial_update=True,
-                    rls_principal="alice",
-                    check_task=CheckTasks.err_res,
-                    check_items={
-                        ct.err_msg: "RLS upsert with a USING predicate is not supported for partition-key collections"
-                    },
-                )
-            else:
-                self.upsert(client, name, [{"id": pk, "note": "updated"}], partial_update=True, rls_principal="alice")
+                # Partition-key partial updates must include the routing key.
+                patch["owner"] = "alice"
+            self.upsert(client, name, [patch], partial_update=True, rls_principal="alice")
         expected = [
-            {"id": pk, "owner": "alice", "note": "initial" if mode in ["auto_id", "partition_key"] else "updated"}
+            {"id": pk, "owner": "alice", "note": "initial" if mode == "auto_id" else "updated"}
         ]
         for context in [{"skip_rls": True}, {"rls_principal": "alice"}]:
             assert (
