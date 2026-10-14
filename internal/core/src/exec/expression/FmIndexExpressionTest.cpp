@@ -127,7 +127,7 @@ LoadSealedFMMatch(const std::vector<std::string>& rows,
         auto field = std::make_shared<FieldData<int64_t>>(DataType::INT64,
                                                           ints_nullable);
         if (ints_nullable) {
-            field->FillFieldData(ints->data(), ints_validity, ints->size());
+            field->FillFieldData(ints->data(), ints_validity, ints->size(), 0);
         } else {
             field->FillFieldData(ints->data(), ints->size());
         }
@@ -2197,7 +2197,7 @@ TEST(FmIndexExpressionTest, ExecutorRegexNumericStatsKeepUnknownScopesUnknown) {
             std::make_shared<FieldData<int64_t>>(DataType::INT64, nullable);
         if (nullable) {
             field->FillFieldData(
-                ids.data(), numeric_validity.data(), ids.size());
+                ids.data(), numeric_validity.data(), ids.size(), 0);
         } else {
             field->FillFieldData(ids.data(), ids.size());
         }
