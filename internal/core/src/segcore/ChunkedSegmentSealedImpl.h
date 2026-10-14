@@ -328,9 +328,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     struct RuntimeResourceState {
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
             fields;
-        std::unordered_map<std::string, std::shared_ptr<LazyArrayOffsets>>
+        std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
             struct_to_array_offsets;
-        std::unordered_map<FieldId, std::shared_ptr<LazyArrayOffsets>>
+        std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
             array_offsets_map;
         std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings;
         std::unordered_map<FieldId, SealedIndexingEntryPtr> vector_indexings;
@@ -405,6 +405,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetArrayOffsetsFromState(const PublishedSegmentState& state,
                              FieldId field_id,
                              milvus::OpContext* op_ctx);
+
+    // Complete mappings while the new runtime is still private, after every
+    // column in the load/reopen batch has been staged. Queries only read them.
+    static void
+    PrepareArrayOffsets(const Schema& schema,
+                        const SegmentLoadInfo& load_info,
+                        RuntimeResourceState& runtime,
+                        milvus::OpContext* op_ctx);
 
     static std::shared_ptr<const RuntimeResourceState>
     BuildRuntimeResourceState();
@@ -1660,6 +1668,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 const StateDelta& delta,
                 milvus::OpContext* op_ctx = nullptr,
                 PublishMode publish_mode = PublishMode::Drain) {
+            // All load futures have completed. Do the raw read before taking
+            // the publication lease, so old queries can keep using their state.
+            segment_.PrepareArrayOffsets(*staged_state_->schema,
+                                         *staged_state_->load_info,
+                                         *runtime_,
+                                         op_ctx);
             std::vector<SealedIndexingEntryPtr> retired_indexings;
             std::vector<index::CacheIndexBasePtr> retired_cache_indexings;
             std::shared_ptr<PublishedSegmentState> next;

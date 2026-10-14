@@ -19,10 +19,8 @@
 #include <assert.h>
 #include <algorithm>
 #include <cstddef>
-#include <chrono>
 #include <cstring>
 #include <limits>
-#include <new>
 #include <type_traits>
 
 #include "bitset/bitset.h"
@@ -489,59 +487,6 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
-}
-
-std::shared_ptr<ArrayOffsetsSealed>
-LazyArrayOffsets::GetOrBuild(OpContext* op_ctx, Builder build) const {
-    CheckOffsetsCancellation(op_ctx);
-    if (auto offsets = GetIfReady()) {
-        return offsets;
-    }
-    {
-        std::unique_lock lock(mutex_);
-        while (building_) {
-            // A waiting query may cancel independently of the builder. Poll
-            // only while building, so cancellation cannot miss a notification.
-            ready_.wait_for(lock, std::chrono::milliseconds(10));
-            CheckOffsetsCancellation(op_ctx);
-        }
-        if (auto offsets = GetIfReady()) {
-            return offsets;
-        }
-        CheckOffsetsCancellation(op_ctx);
-        building_ = true;
-    }
-
-    auto abandon_build = [&] {
-        {
-            std::lock_guard lock(mutex_);
-            building_ = false;
-        }
-        ready_.notify_all();
-    };
-    try {
-        auto offsets = build();
-        CheckOffsetsCancellation(op_ctx);
-        AssertInfo(offsets != nullptr,
-                   "struct element offsets builder returned no metadata");
-        {
-            std::lock_guard lock(mutex_);
-            std::atomic_store(&offsets_, offsets);
-            building_ = false;
-        }
-        ready_.notify_all();
-        return offsets;
-    } catch (const std::bad_alloc&) {
-        abandon_build();
-        // The query driver preserves typed segcore errors but classifies an
-        // untyped bad_alloc as UnexpectedError. Keep the allocation failure
-        // category that construction during segment loading previously had.
-        ThrowInfo(ErrorCode::MemAllocateFailed,
-                  "failed to allocate struct element offsets metadata");
-    } catch (...) {
-        abandon_build();
-        throw;
-    }
 }
 
 std::pair<int32_t, int32_t>

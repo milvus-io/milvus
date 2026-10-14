@@ -893,7 +893,10 @@ TEST(MatchExprNullableStruct, ColdMatchCancellationAndFreshContextRetry) {
     auto entry = state->runtime->array_offsets_map.at(sub);
     auto column = state->runtime->fields.at(sub);
     const int64_t first_row = 0;
-    ASSERT_EQ(entry->GetIfReady(), nullptr);
+    ASSERT_NE(entry, nullptr);
+    ASSERT_TRUE(column->CellsLoaded(&first_row, 1));
+    // The mapping stays ready when a normal raw-data query becomes cold.
+    column->ManualEvictCache();
     ASSERT_FALSE(column->CellsLoaded(&first_row, 1));
 
     expr::ColumnInfo column_info(
@@ -928,14 +931,14 @@ TEST(MatchExprNullableStruct, ColdMatchCancellationAndFreshContextRetry) {
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
     }
-    EXPECT_EQ(entry->GetIfReady(), nullptr);
+    EXPECT_EQ(segment->GetArrayOffsets(sub), entry);
     EXPECT_FALSE(column->CellsLoaded(&first_row, 1));
 
     OpContext fresh_ctx;
     auto output = evaluate(fresh_ctx);
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), 5);
-    ASSERT_NE(entry->GetIfReady(), nullptr);
+    EXPECT_EQ(segment->GetArrayOffsets(sub), entry);
     TargetBitmapView values(output->GetRawData(), output->size());
     TargetBitmapView validity(output->GetValidRawData(), output->size());
     EXPECT_TRUE(values[0]);
