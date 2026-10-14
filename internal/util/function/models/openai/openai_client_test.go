@@ -144,7 +144,9 @@ func TestEmbeddingRetry(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if atomic.LoadInt32(&count) < 2 {
 			atomic.AddInt32(&count, 1)
-			w.WriteHeader(http.StatusUnauthorized)
+			// 503 is a transient status, so the client retries it. A 401 is
+			// permanent and is covered by TestEmbeddingFailed instead.
+			w.WriteHeader(http.StatusServiceUnavailable)
 		} else {
 			w.WriteHeader(http.StatusOK)
 			data, _ := json.Marshal(res)
@@ -185,6 +187,8 @@ func TestEmbeddingRetry(t *testing.T) {
 	}
 }
 
+// TestEmbeddingFailed covers a permanent failure: a 401 cannot be fixed by
+// repeating the request, so the client must give up after the first attempt.
 func TestEmbeddingFailed(t *testing.T) {
 	var count int32 = 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +206,7 @@ func TestEmbeddingFailed(t *testing.T) {
 		assert.True(t, err == nil)
 		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err != nil)
-		assert.Equal(t, atomic.LoadInt32(&count), int32(3))
+		assert.Equal(t, atomic.LoadInt32(&count), int32(1))
 	}
 	{
 		atomic.StoreInt32(&count, 0)
@@ -211,7 +215,7 @@ func TestEmbeddingFailed(t *testing.T) {
 		assert.True(t, err == nil)
 		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err != nil)
-		assert.Equal(t, atomic.LoadInt32(&count), int32(3))
+		assert.Equal(t, atomic.LoadInt32(&count), int32(1))
 	}
 }
 
@@ -220,7 +224,9 @@ func TestTimeoutAndRetry(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
 		atomic.AddInt32(&st, 1)
-		w.WriteHeader(http.StatusUnauthorized)
+		// 503 is transient, so the retry budget is actually spent here; a 401
+		// would stop after the first attempt.
+		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 
 	defer ts.Close()
