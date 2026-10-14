@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
@@ -114,41 +113,30 @@ func (c *Client) GetRLSPrincipalTags(ctx context.Context, option GetRLSPrincipal
 	return tags, err
 }
 
-// ListRLSPrincipals lists principal identifiers that have stored tags.
-func (c *Client) ListRLSPrincipals(ctx context.Context, option ListRLSPrincipalsOption, callOptions ...grpc.CallOption) ([]string, error) {
+type ListRLSPrincipalsResult struct {
+	PrincipalNames []string
+	PrincipalCount int64
+}
+
+// ListRLSPrincipals lists principal identifiers with stored tags, or only their count with WithCountOnly(true).
+func (c *Client) ListRLSPrincipals(ctx context.Context, option ListRLSPrincipalsOption, callOptions ...grpc.CallOption) (*ListRLSPrincipalsResult, error) {
 	if option == nil {
 		return nil, merr.WrapErrParameterInvalid("ListRLSPrincipalsOption", "nil", "option cannot be nil")
 	}
 
-	var principals []string
+	var result *ListRLSPrincipalsResult
 	err := c.callService(func(service milvuspb.MilvusServiceClient) error {
 		resp, err := service.ListRLSPrincipals(ctx, option.Request(), callOptions...)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return err
 		}
-		principals = resp.GetPrincipalNames()
-		return nil
-	})
-	return principals, err
-}
-
-// CountRLSPrincipals counts principal identifiers with stored tags without listing their names.
-func (c *Client) CountRLSPrincipals(ctx context.Context, option ListRLSPrincipalsOption, callOptions ...grpc.CallOption) (int64, error) {
-	if option == nil {
-		return 0, merr.WrapErrParameterInvalid("ListRLSPrincipalsOption", "nil", "option cannot be nil")
-	}
-	req := proto.Clone(option.Request()).(*milvuspb.ListRLSPrincipalsRequest)
-	req.Count = true
-	var count int64
-	err := c.callService(func(service milvuspb.MilvusServiceClient) error {
-		resp, err := service.ListRLSPrincipals(ctx, req, callOptions...)
-		if err = merr.CheckRPCCall(resp, err); err != nil {
-			return err
+		result = &ListRLSPrincipalsResult{
+			PrincipalNames: resp.GetPrincipalNames(),
+			PrincipalCount: resp.GetPrincipalCnt(),
 		}
-		count = resp.GetPrincipalCnt()
 		return nil
 	})
-	return count, err
+	return result, err
 }
 
 // DeleteRLSPrincipalTags deletes selected tags, or all tags when no keys are provided.

@@ -72,8 +72,8 @@ repeated keys are deduplicated and limits are enforced.
 
 Listing reads names only, without loading tags or applying an extra total-count
 or size limit; oversized responses fail at the RPC transport limit rather than
-being truncated. The Go client retains `ListRLSPrincipals` for names and adds
-`CountRLSPrincipals` for count-only queries.
+being truncated. The Go client uses `ListRLSPrincipals` for names and count;
+`WithCountOnly(true)` returns only the count through the same operation.
 
 One request currently performs either incremental tag upserts or deletions,
 not both. Applications that need both changes should revoke tags before
