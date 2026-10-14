@@ -152,8 +152,8 @@ class SegmentChunkReader {
 
     std::shared_ptr<const IArrayOffsets>
     GetArrayOffsets(FieldId field_id) const {
-        return snapshot_ ? snapshot_->GetArrayOffsets(field_id, op_ctx_)
-                         : segment_->GetArrayOffsets(field_id, op_ctx_);
+        return snapshot_ ? snapshot_->GetArrayOffsets(field_id)
+                         : segment_->GetArrayOffsets(field_id);
     }
 
     SchemaPtr

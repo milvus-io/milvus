@@ -270,8 +270,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          const std::string& nested_path) const override;
 
     std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id,
-                    OpContext* op_ctx = nullptr) const override;
+    GetArrayOffsets(FieldId field_id) const override;
 
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
@@ -403,8 +402,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     static std::shared_ptr<const IArrayOffsets>
     GetArrayOffsetsFromState(const PublishedSegmentState& state,
-                             FieldId field_id,
-                             milvus::OpContext* op_ctx);
+                             FieldId field_id);
 
     // Complete mappings while the new runtime is still private, after every
     // column in the load/reopen batch has been staged. Queries only read them.
@@ -2006,14 +2004,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   milvus::OpContext* op_ctx,
                   bool is_replace,
                   const SchemaPtr& schema_snapshot,
-                  RuntimeResourceState* runtime = nullptr);
-
-    void
-    LoadFieldData(const LoadFieldDataInfo& load_info,
-                  const SegmentLoadInfo& segment_load_info,
-                  milvus::OpContext* op_ctx,
-                  bool is_replace,
-                  const SchemaPtr& schema_snapshot,
                   StagedStateCommitter& committer);
 
     void
@@ -2025,25 +2015,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     load_field_data_internal(const LoadFieldDataInfo& load_info,
                              const SegmentLoadInfo& segment_load_info,
                              const SchemaPtr& schema_snapshot,
-                             milvus::OpContext* op_ctx = nullptr,
-                             bool is_replace = false,
-                             RuntimeResourceState* runtime = nullptr);
-
-    void
-    load_field_data_internal(const LoadFieldDataInfo& load_info,
-                             const SegmentLoadInfo& segment_load_info,
-                             const SchemaPtr& schema_snapshot,
                              milvus::OpContext* op_ctx,
                              bool is_replace,
                              StagedStateCommitter& committer);
-
-    void
-    load_column_group_data_internal(const LoadFieldDataInfo& load_info,
-                                    const SegmentLoadInfo& segment_load_info,
-                                    const SchemaPtr& schema_snapshot,
-                                    milvus::OpContext* op_ctx = nullptr,
-                                    bool is_replace = false,
-                                    RuntimeResourceState* runtime = nullptr);
 
     void
     load_column_group_data_internal(const LoadFieldDataInfo& load_info,
@@ -2069,17 +2043,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                            field_binlog_to_load,
                        const SegmentLoadInfo& segment_load_info,
                        const SchemaPtr& schema_snapshot,
-                       milvus::OpContext* op_ctx = nullptr,
-                       bool is_replace = false,
-                       StagedStateCommitter* committer = nullptr);
-
-    void
-    LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
-                       std::vector<std::pair<std::vector<FieldId>,
-                                             proto::segcore::FieldBinlog>>&
-                           field_binlog_to_load,
-                       milvus::OpContext* op_ctx = nullptr,
-                       bool is_replace = false);
+                       milvus::OpContext* op_ctx,
+                       bool is_replace,
+                       StagedStateCommitter& committer);
 
     void
     InitTextLobPaths(const std::string& manifest_path,
@@ -2238,23 +2204,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_proxy_column,
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
-        RuntimeResourceState* runtime,
-        std::optional<ParquetStatistics> statistics = {},
-        milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false,
-        StagedStateCommitter* committer = nullptr);
-
-    void
-    load_field_data_common(
-        FieldId field_id,
-        const std::shared_ptr<ChunkedColumnInterface>& column,
-        size_t num_rows,
-        DataType data_type,
-        bool enable_mmap,
-        bool is_proxy_column,
-        std::optional<ParquetStatistics> statistics = {},
-        milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false);
+        std::optional<ParquetStatistics> statistics,
+        milvus::OpContext* op_ctx,
+        bool is_replace,
+        StagedStateCommitter& committer);
 
     // Pure function of the published runtime state: never touches this.
     // Static so callers that already hold a snapshot (SealedReadSnapshot,
@@ -2642,11 +2595,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                /*is_proxy_column=*/false,
                                *current->load_info,
                                schema_snapshot,
-                               runtime.get(),
                                std::nullopt,
                                nullptr,
                                /*is_replace=*/true,
-                               &committer);
+                               committer);
         verifier();
         final_delta.runtime = ToConstRuntimeState(std::move(runtime));
         committer.Publish(current, final_delta);

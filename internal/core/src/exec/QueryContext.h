@@ -297,9 +297,8 @@ class QueryContext : public Context {
 
     std::shared_ptr<const IArrayOffsets>
     get_array_offsets(FieldId field_id) const {
-        return read_snapshot_
-                   ? read_snapshot_->GetArrayOffsets(field_id, op_context_)
-                   : segment_->GetArrayOffsets(field_id, op_context_);
+        return read_snapshot_ ? read_snapshot_->GetArrayOffsets(field_id)
+                              : segment_->GetArrayOffsets(field_id);
     }
 
     SchemaPtr
