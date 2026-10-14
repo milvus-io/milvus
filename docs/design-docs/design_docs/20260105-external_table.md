@@ -706,7 +706,7 @@ DataCoord: persist each task's result
 All tasks finished: aggregate results and apply segment updates
                  |
                  v
-Complete job; attempt to persist changed source/spec in collection schema
+Wait for indexes if configured, then complete job
                  |
                  v
 Client: GetRefreshExternalCollectionProgress(job_id)
@@ -714,7 +714,8 @@ Client: GetRefreshExternalCollectionProgress(job_id)
 
 Task failures are reflected in the job state. Segment updates are applied from
 aggregated results after all tasks finish, rather than independently by each
-worker.
+worker. Once segment updates are applied, DataCoord attempts to persist changed
+source/spec in the collection schema, including while the job waits for indexes.
 
 ### 7.1.1 Job Lifecycle
 
@@ -730,14 +731,31 @@ RefreshExternalCollection()
               |
               | All results persisted and segment updates applied
               v
+       Index wait enabled? ---- no --------------------> Completed
+              |
+              | yes
+              v
+    InProgress (waiting for indexes) ---- timeout -------> Failed
+              |
+              | Indexes ready, or index wait disabled
+              v
           Completed
 ```
 
 **State Descriptions**:
 - **Pending**: Job is persisted; source exploration or task scheduling is pending
-- **InProgress**: DataNode tasks are executing or retrying
-- **Completed**: Job finished successfully, segments updated
+- **InProgress**: DataNode tasks are executing or retrying, or applied segments
+  are waiting for indexes
+- **Completed**: Segment updates are applied and any configured index wait has
+  finished
 - **Failed**: Job encountered an error, reason stored in job info
+
+`dataCoord.externalCollection.refreshWaitForIndex` defaults to `false`. When
+enabled, the job remains `InProgress` after segment updates are applied until
+indexes are ready. Disabling the setting releases waiting jobs on their next
+check. The wait shares `dataCoord.externalCollectionJobTimeout` with ingestion;
+the timeout is measured from the job's start. A timeout during index wait marks
+the job `Failed` without rolling back the applied data or its source/spec update.
 
 ### 7.1.2 Parallel Task Partitioning and Segment Ownership
 
