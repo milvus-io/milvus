@@ -63,6 +63,8 @@ type Pointers struct {
 	ListErr error
 	// MultiLoads counts the MultiLoad calls.
 	MultiLoads int
+	// LastSave holds the saves of the last Save call.
+	LastSave map[string]string
 }
 
 // NewPointers returns an empty Pointers.
@@ -116,6 +118,7 @@ func (p *Pointers) Save(_ context.Context, saves map[string]string, conds ...man
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.LastSave = maps.Clone(saves)
 	if err := p.WriteErr; err != nil {
 		applies := p.WriteApplies
 		p.WriteErr, p.WriteApplies = nil, false
