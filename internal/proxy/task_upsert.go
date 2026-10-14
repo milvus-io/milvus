@@ -327,17 +327,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		return err
 	}
 	if existRowNum := typeutil.GetSizeOfIDs(existIDs); existRowNum > 0 && it.rlsEnabled {
+		// Authorize the PK-deduplicated read snapshot, including partition-key collections.
 		if err := rlsutil.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, it.rlsUsingPredicate, "upsert", "using"); err != nil {
 			log.Warn("RLS using expression validation failed for upsert", zap.Error(err))
 			return err
-		}
-		if it.partitionKeyMode && it.rlsUsingPredicate != nil {
-			// Query reduction keeps one row per PK, while partition-key upsert
-			// deletes that PK from every physical partition. Until internal
-			// retrieval preserves every (partition, PK) copy, a non-trivial USING
-			// predicate cannot authorize all rows that the delete will affect.
-			return merr.WrapErrOperationNotSupportedMsg(
-				"RLS upsert with a USING predicate is not supported for partition-key collections")
 		}
 		if partialUpdate && it.rlsUsingPredicate != nil {
 			// Internal RLS evaluation keeps TIMESTAMPTZ values in their raw int64

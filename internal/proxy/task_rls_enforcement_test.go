@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -121,16 +122,12 @@ func rlsPolicyInfos(collectionID int64, policies []*rlsutil.RowPolicy) []*rootco
 		if policy == nil {
 			continue
 		}
-		actions := make([]milvuspb.RowPolicyAction, len(policy.Actions))
-		for i, action := range policy.Actions {
-			actions[i] = milvuspb.RowPolicyAction(action)
-		}
 		converted = append(converted, &rootcoordpb.RLSPolicyInfo{
 			CollectionId: collectionID,
 			PolicyId:     int64(len(converted) + 1),
 			PolicyName:   policy.PolicyName,
-			PolicyType:   milvuspb.RowPolicyType(policy.PolicyType),
-			Actions:      actions,
+			PolicyType:   policy.PolicyType,
+			Actions:      slices.Clone(policy.Actions),
 			UsingExpr:    policy.UsingExpr,
 			CheckExpr:    policy.CheckExpr,
 			Description:  policy.Description,
@@ -653,28 +650,51 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		require.Equal(t, task.req.GetFieldsData(), task.insertFieldData)
 	})
 
-	mockey.PatchConvey("partition-key upsert rejects a non-trivial using policy for existing rows", t, func() {
-		const collectionID = int64(991012)
-		task := newTask(collectionID)
-		task.partitionKeyMode = true
-		refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
-			PolicyName: "upsert_partition_key",
-			PolicyType: rlsutil.PolicyTypePermissive,
-			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
-			UsingExpr:  "id == 1",
-			CheckExpr:  "true",
-		}})
-		resolvePredicates(task)
-		existingPK := proto.Clone(task.req.GetFieldsData()[0]).(*schemapb.FieldData)
-		existingPK.GetScalars().GetLongData().Data = []int64{1}
-		mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
-			Status:     merr.Success(),
-			FieldsData: []*schemapb.FieldData{existingPK},
-		}, segcore.StorageCost{}, nil).Build()
+	for _, tc := range []struct {
+		name          string
+		partialUpdate bool
+		usingExpr     string
+		wantDenied    bool
+	}{
+		{name: "partition-key full upsert allows authorized rows", usingExpr: "id in [1, 2, 3]"},
+		{name: "partition-key full upsert rejects unauthorized rows", usingExpr: "id == 1", wantDenied: true},
+		{name: "partition-key partial upsert allows authorized rows", partialUpdate: true, usingExpr: "id in [1, 2, 3]"},
+		{name: "partition-key partial upsert rejects unauthorized rows", partialUpdate: true, usingExpr: "id == 1", wantDenied: true},
+	} {
+		mockey.PatchConvey(tc.name, t, func() {
+			const collectionID = int64(991012)
+			task := newTask(collectionID)
+			schema := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
+			schema.Fields[2].IsPartitionKey = true
+			task.schema = newSchemaInfo(schema)
+			task.partitionKeyMode = true
+			task.req.PartitionName = ""
+			task.req.PartialUpdate = tc.partialUpdate
+			task.upsertMsg.InsertMsg.Version = msgpb.InsertDataVersion_ColumnBased
+			refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
+				PolicyName: "upsert_partition_key",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+				UsingExpr:  tc.usingExpr,
+				CheckExpr:  "true",
+			}})
+			resolvePredicates(task)
+			require.NotNil(t, task.rlsUsingPredicate)
+			mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+				Status:     merr.Success(),
+				FieldsData: proto.Clone(task.req).(*milvuspb.UpsertRequest).GetFieldsData(),
+			}, segcore.StorageCost{}, nil).Build()
 
-		err := task.prepareUpsert(context.Background())
-		require.ErrorIs(t, err, merr.ErrOperationNotSupported)
-	})
+			err := task.queryPreExecute(context.Background())
+			if tc.wantDenied {
+				require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []int64{1, 2, 3}, task.deletePKs.GetIntId().GetData())
+			require.Len(t, task.insertFieldData, len(task.req.GetFieldsData()))
+		})
+	}
 
 	mockey.PatchConvey("always-true using policy preserves direct full upsert", t, func() {
 		const collectionID = int64(991007)
