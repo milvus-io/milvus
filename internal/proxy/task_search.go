@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -1236,8 +1237,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 
 func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 	ctx = retry.WithMaxAttemptsContext(ctx, 1)
-	searchReq := typeutil.Clone(t.SearchRequest)
-	searchReq.GetBase().TargetID = nodeID
+	searchReq := shallowcopy.ShallowCopySearchRequest(t.SearchRequest, nodeID)
 	req := &querypb.SearchRequest{
 		Req:             searchReq,
 		DmlChannels:     []string{channel},
