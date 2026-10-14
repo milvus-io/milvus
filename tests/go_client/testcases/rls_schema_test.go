@@ -748,6 +748,9 @@ func TestRLSSchemaReadWriteMatrix(t *testing.T) {
 						return e
 					}
 					t.Run(mode, func(t *testing.T) {
+						if tc.structured && mode == "row" {
+							t.Skip("StructArray row serialization is not supported by the 2.6 Go SDK")
+						}
 						for _, stage := range []string{"insert", "full_upsert", "partial_upsert", "rejected_insert", "rejected_upsert", "rejected_partial", "hidden_upsert", "hidden_partial", "transfer_owner", "delete_ids", "delete_filter", "delete_template"} {
 							stagePassed := t.Run(stage, func(t *testing.T) {
 								switch stage {
