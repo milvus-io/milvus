@@ -791,24 +791,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
  private:
     void
-    load_system_field_internal(
-        FieldId field_id,
-        FieldDataInfo& data,
-        milvus::proto::common::LoadPriority load_priority,
-        RuntimeResourceState* runtime = nullptr,
-        bool publish_ready = true);
-
-    // Initialize timestamp index with owned data (StorageV1 path)
-    void
-    init_storage_v1_timestamp_index(std::vector<Timestamp> timestamps,
-                                    size_t num_rows);
-
-    void
-    init_storage_v1_timestamp_index(std::vector<Timestamp> timestamps,
-                                    size_t num_rows,
-                                    RuntimeResourceState* runtime);
-
-    void
     init_storage_v2_timestamp_index(
         const std::shared_ptr<ChunkedColumnInterface>& column,
         size_t num_rows,
@@ -1841,11 +1823,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     PublishSystemFieldStateLocked();
-
-    void
-    PublishFieldDataReadyLocked(
-        FieldId field_id,
-        const std::shared_ptr<const RuntimeResourceState>& runtime = nullptr);
 
     void
     PublishIndexReadyLocked(

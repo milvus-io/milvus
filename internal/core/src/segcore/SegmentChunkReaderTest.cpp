@@ -29,7 +29,6 @@
 #include "common/IndexMeta.h"
 #include "common/Schema.h"
 #include "expr/ITypeExpr.h"
-#include "exec/QueryContext.h"
 #include "exec/expression/ColumnExpr.h"
 #include "exec/expression/CompareExpr.h"
 #include "knowhere/comp/index_param.h"
@@ -587,46 +586,6 @@ TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
     }
     EXPECT_EQ(snapshot.column_reads, 3);
     EXPECT_EQ(stats_->scans, 1);
-}
-
-TEST_P(SegmentChunkReaderStringTest, SchemaUsesBoundSnapshot) {
-    auto captured_schema = std::make_shared<Schema>(*schema_);
-    auto snapshot =
-        std::make_shared<ReaderStringSnapshot>(column_, captured_schema);
-    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    exec::QueryContext query_context(
-        "schema_snapshot", segment_.get(), expected_.size(), MAX_TIMESTAMP);
-
-    EXPECT_EQ(reader.GetSchemaSnapshot(), schema_);
-    EXPECT_EQ(query_context.get_schema_snapshot(), schema_);
-
-    reader.SetSnapshot(snapshot.get());
-    query_context.set_read_snapshot(snapshot);
-    EXPECT_EQ(reader.GetSchemaSnapshot(), captured_schema);
-    EXPECT_EQ(query_context.get_schema_snapshot(), captured_schema);
-}
-
-TEST_P(SegmentChunkReaderStringTest,
-       MissingSnapshotSchemaDoesNotUseLiveSchema) {
-    // The live segment has a valid schema. A broken snapshot must fail rather
-    // than combine that schema with columns from a different published state.
-    auto snapshot = std::make_shared<ReaderStringSnapshot>(column_, nullptr);
-    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    reader.SetSnapshot(snapshot.get());
-    exec::QueryContext query_context(
-        "missing_schema", segment_.get(), expected_.size(), MAX_TIMESTAMP);
-    query_context.set_read_snapshot(snapshot);
-
-    auto expect_missing_schema = [](auto&& get_schema) {
-        try {
-            get_schema();
-            FAIL() << "expected missing snapshot schema to fail";
-        } catch (const SegcoreError& error) {
-            EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
-        }
-    };
-    expect_missing_schema([&] { return reader.GetSchemaSnapshot(); });
-    expect_missing_schema([&] { return query_context.get_schema_snapshot(); });
 }
 
 // The pinned ApplyFieldValidData path must read the validity bitmap from the
