@@ -106,6 +106,33 @@ type principalCountFaultKV struct {
 	*memkv.MemoryKV
 	failBeforeCommit bool
 	failAfterCommit  bool
+	failBeforeInit   bool
+	failAfterInit    bool
+	scanErr          error
+	scans            int
+}
+
+func (kv *principalCountFaultKV) WalkKeysWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte) error) error {
+	kv.scans++
+	return kv.MemoryKV.WalkKeysWithPrefix(ctx, prefix, paginationSize, func(key []byte) error {
+		if err := fn(key); err != nil {
+			return err
+		}
+		return kv.scanErr
+	})
+}
+
+func (kv *principalCountFaultKV) Save(ctx context.Context, key, value string) error {
+	if kv.failBeforeInit {
+		return merr.ErrServiceUnavailable
+	}
+	if err := kv.MemoryKV.Save(ctx, key, value); err != nil {
+		return err
+	}
+	if kv.failAfterInit {
+		return context.DeadlineExceeded
+	}
+	return nil
 }
 
 func (kv *principalCountFaultKV) MultiSave(ctx context.Context, saves map[string]string) error {
@@ -216,4 +243,117 @@ func TestRLSPrincipalCountRejectsCorruptCounter(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	_, err = kv.Load(ctx, buildRLSPrincipalKey(20, "alice"))
 	require.NoError(t, err)
+}
+
+func TestRLSPrincipalCountLegacyMutation(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		principal string
+		bindings  int
+		drop      bool
+		wantCount int64
+	}{
+		{name: "new binding", principal: "carol", bindings: 2, wantCount: 3},
+		{name: "update binding", principal: "alice", bindings: 2, wantCount: 2},
+		{name: "drop binding", principal: "alice", bindings: 2, drop: true, wantCount: 1},
+		{name: "drop last binding", principal: "alice", bindings: 1, drop: true, wantCount: 0},
+		{name: "drop absent binding", principal: "carol", bindings: 2, drop: true, wantCount: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			kv := &principalCountFaultKV{MemoryKV: memkv.NewMemoryKV()}
+			catalog := NewCatalog(kv)
+			for _, name := range []string{"alice", "bob"}[:test.bindings] {
+				// Bootstrap counts keys without decoding legacy tag values.
+				require.NoError(t, kv.MemoryKV.Save(ctx, buildRLSPrincipalKey(20, name), "legacy tags"))
+			}
+			require.NoError(t, kv.MemoryKV.Save(ctx, buildRLSPrincipalKey(201, "neighbor"), "legacy tags"))
+			count, err := catalog.GetRLSPrincipalCount(ctx, 20)
+			require.NoError(t, err)
+			require.Zero(t, count)
+			require.Zero(t, kv.scans)
+
+			principal := &model.RLSPrincipal{CollectionID: 20, PrincipalName: test.principal, Tags: map[string]rlsutil.TagValue{"tenant": rlsutil.NewInt64TagValue(1)}}
+			for range 2 {
+				if test.drop {
+					count, err = catalog.DropRLSPrincipal(ctx, 20, test.principal)
+				} else {
+					count, err = catalog.SaveRLSPrincipal(ctx, principal)
+				}
+				require.NoError(t, err)
+				require.Equal(t, test.wantCount, count)
+				require.Equal(t, 1, kv.scans)
+				persisted, err := catalog.GetRLSPrincipalCount(ctx, 20)
+				require.NoError(t, err)
+				require.Equal(t, test.wantCount, persisted)
+			}
+		})
+	}
+}
+
+func TestRLSPrincipalCountLegacyMutationRetries(t *testing.T) {
+	for _, operation := range []string{"save", "drop"} {
+		for _, test := range []struct {
+			name             string
+			fault            principalCountFaultKV
+			wantErr          error
+			counterPersisted bool
+		}{
+			{name: "partial scan failure", fault: principalCountFaultKV{scanErr: merr.ErrServiceUnavailable}, wantErr: merr.ErrServiceUnavailable},
+			{name: "initialization rejected", fault: principalCountFaultKV{failBeforeInit: true}, wantErr: merr.ErrServiceUnavailable},
+			{name: "initialization response lost", fault: principalCountFaultKV{failAfterInit: true}, wantErr: context.DeadlineExceeded, counterPersisted: true},
+			{name: "mutation rejected", fault: principalCountFaultKV{failBeforeCommit: true}, wantErr: merr.ErrServiceUnavailable, counterPersisted: true},
+			{name: "mutation response lost", fault: principalCountFaultKV{failAfterCommit: true}, wantErr: context.DeadlineExceeded, counterPersisted: true},
+		} {
+			t.Run(operation+"/"+test.name, func(t *testing.T) {
+				ctx := context.Background()
+				kv := &test.fault
+				kv.MemoryKV = memkv.NewMemoryKV()
+				catalog := NewCatalog(kv)
+				for _, name := range []string{"alice", "bob"} {
+					require.NoError(t, kv.MemoryKV.Save(ctx, buildRLSPrincipalKey(20, name), "legacy tags"))
+				}
+				principal := &model.RLSPrincipal{CollectionID: 20, PrincipalName: "carol", Tags: map[string]rlsutil.TagValue{"tenant": rlsutil.NewInt64TagValue(1)}}
+				mutate := func() (int64, error) {
+					if operation == "drop" {
+						return catalog.DropRLSPrincipal(ctx, 20, "alice")
+					}
+					return catalog.SaveRLSPrincipal(ctx, principal)
+				}
+				_, err := mutate()
+				require.ErrorIs(t, err, test.wantErr)
+				exists, err := kv.Has(ctx, BuildRLSPrincipalCountKey(20))
+				require.NoError(t, err)
+				require.Equal(t, test.counterPersisted, exists)
+				wantCount := int64(3)
+				if operation == "drop" {
+					wantCount = 1
+				}
+				persisted, err := catalog.GetRLSPrincipalCount(ctx, 20)
+				require.NoError(t, err)
+				switch {
+				case test.fault.failAfterCommit:
+					require.Equal(t, wantCount, persisted)
+				case test.counterPersisted:
+					require.Equal(t, int64(2), persisted)
+				default:
+					require.Zero(t, persisted)
+				}
+				kv.failBeforeInit, kv.failAfterInit = false, false
+				kv.failBeforeCommit, kv.failAfterCommit = false, false
+				kv.scanErr = nil
+				count, err := mutate()
+				require.NoError(t, err)
+				require.Equal(t, wantCount, count)
+				if test.counterPersisted {
+					require.Equal(t, 1, kv.scans)
+				} else {
+					require.Equal(t, 2, kv.scans)
+				}
+				persisted, err = catalog.GetRLSPrincipalCount(ctx, 20)
+				require.NoError(t, err)
+				require.Equal(t, wantCount, persisted)
+			})
+		}
+	}
 }

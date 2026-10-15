@@ -2422,7 +2422,7 @@ func (kc *Catalog) SaveRLSPrincipal(ctx context.Context, principal *model.RLSPri
 	}
 	// Collection-scoped broadcast callbacks serialize mutations. Read persisted
 	// state so a retry after an uncertain commit cannot increment twice.
-	count, err := kc.GetRLSPrincipalCount(ctx, principal.CollectionID)
+	count, err := kc.ensureRLSPrincipalCount(ctx, principal.CollectionID)
 	if err != nil {
 		return 0, err
 	}
@@ -2461,7 +2461,7 @@ func (kc *Catalog) GetRLSPrincipal(ctx context.Context, collectionID int64, prin
 }
 
 func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (int64, error) {
-	count, err := kc.GetRLSPrincipalCount(ctx, collectionID)
+	count, err := kc.ensureRLSPrincipalCount(ctx, collectionID)
 	if err != nil {
 		return 0, err
 	}
@@ -2482,6 +2482,32 @@ func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, pri
 
 // GetRLSPrincipalCount reads the persisted counter; an absent counter means zero.
 func (kc *Catalog) GetRLSPrincipalCount(ctx context.Context, collectionID int64) (int64, error) {
+	count, err := kc.loadRLSPrincipalCount(ctx, collectionID)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return 0, nil
+	}
+	return count, err
+}
+
+// Called under the collection mutation guard; bootstrap legacy bindings only on writes.
+func (kc *Catalog) ensureRLSPrincipalCount(ctx context.Context, collectionID int64) (int64, error) {
+	count, err := kc.loadRLSPrincipalCount(ctx, collectionID)
+	if !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return count, err
+	}
+	if err := kc.walkRLSPrincipalKeys(ctx, collectionID, func(_ []byte) error {
+		count++
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	if count > 0 {
+		return count, kc.Txn.Save(ctx, BuildRLSPrincipalCountKey(collectionID), strconv.FormatInt(count, 10))
+	}
+	return 0, nil
+}
+
+func (kc *Catalog) loadRLSPrincipalCount(ctx context.Context, collectionID int64) (int64, error) {
 	key := BuildRLSPrincipalCountKey(collectionID)
 	value, err := kc.Txn.Load(ctx, key)
 	if err == nil {
@@ -2493,9 +2519,6 @@ func (kc *Catalog) GetRLSPrincipalCount(ctx context.Context, collectionID int64)
 			return 0, merr.WrapErrDataIntegrityMsg("negative RLS principal count for collection %d", collectionID)
 		}
 		return count, nil
-	}
-	if errors.Is(err, merr.ErrIoKeyNotFound) {
-		return 0, nil
 	}
 	return 0, err
 }
