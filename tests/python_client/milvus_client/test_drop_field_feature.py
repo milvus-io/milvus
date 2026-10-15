@@ -2304,6 +2304,10 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         client.insert(collection_name=collection_name, data=new_rows)
         client.flush(collection_name)
 
+        # Text Match does not yet guarantee Strong consistency; allow an extra
+        # refresh window for the growing text index reader after Flush.
+        time.sleep(0.5)
+
         new_token_match = client.query(
             collection_name,
             filter=f"text_match(text_content, '{new_token}')",

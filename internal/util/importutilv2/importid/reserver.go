@@ -47,7 +47,7 @@ const maxIDsPerAllocBatch = int64(math.MaxUint32)
 //
 // Two-phase flow: the ImportMsg broadcast carries no ranges and does no file I/O. After the
 // PreImport tasks have read every file and produced the row counts, the cluster acting as
-// primary allocates the ranges here and ships them to every cluster via the ImportIDRange WAL
+// primary allocates the ranges here and ships them to every cluster via the UpdateImport WAL
 // message, so each derives identical primary keys. The reservation is the sum of fileRows
 // with no expansion factor: the counts come from fully reading the files.
 func ReserveFileIDRanges(fileRows []int64, allocN func(int64) (int64, int64, error), clusterID uint64) ([]*commonpb.IDRange, error) {

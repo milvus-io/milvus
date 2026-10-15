@@ -488,6 +488,11 @@ func (helper *SchemaHelper) GetTimezone() string {
 	return helper.timezone
 }
 
+// GetVersion returns the version of the collection schema used to build this helper.
+func (helper *SchemaHelper) GetVersion() int32 {
+	return helper.schema.GetVersion()
+}
+
 // GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
@@ -1516,6 +1521,11 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 			}
 			dstVector := dstFieldData.GetVectors()
+			if dstVector.GetDim() == 0 && IsFixDimVectorType(fieldData.GetType()) {
+				// Older QueryNodes omit the dimension for all-null columns.
+				// Recover it when a later shard supplies vector metadata.
+				dstVector.Dim = dim
+			}
 			isNullRow := fieldIdx < 0 || (len(srcValidData) > 0 && !srcValidData[idx])
 
 			switch srcVector := fieldType.Vectors.Data.(type) {
@@ -3873,7 +3883,7 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 }
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
-	if validData := GetFieldDataValidData(field); validData != nil {
+	if validData := GetFieldDataValidData(field); len(validData) > 0 {
 		if IsCompactNullableVectorFieldData(field) {
 			idxs, _ := BuildNullableVectorDataIndices(validData)
 			return func(idx int) any {

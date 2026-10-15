@@ -33,7 +33,7 @@
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
@@ -70,6 +70,11 @@ class PhyExistsFilterExpr : public SegmentExpr {
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
 
     std::string
     ToString() const override {

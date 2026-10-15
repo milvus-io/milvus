@@ -258,7 +258,7 @@ func TestIdempotencyWindowCompleteReportsEvictionCount(t *testing.T) {
 	require.Equal(t, BeginDecisionDuplicate, window.Begin("key-2", nil).Decision)
 }
 
-// A key can appear twice in a snapshot: the store retains by maxRetainedBytes
+// A key can appear twice in a snapshot: the store retains by the Summary byte budget
 // per pchannel while the window caps itself by maxBytesPerWindow per vchannel,
 // so a key evicted here and later reused is written again and both records can
 // survive in the retained chunk set.

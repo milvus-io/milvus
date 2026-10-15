@@ -90,13 +90,6 @@ func (s *rawDataSuite) prepareRawDataCollection(ctx context.Context, c rawDataCa
 	s.bindRawDataFieldIDs(description.GetSchema(), c.fields)
 	// Finish logical-index broadcasts before insert/flush starts the segment lifecycle.
 	s.createRawVectorIndexes(ctx, collection, description.GetSchema())
-	if s.growingSource {
-		status, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-			DbName: s.dbName, CollectionName: collection,
-		})
-		s.Require().NoError(merr.CheckRPCCall(status, err))
-		s.WaitForLoadWithDB(ctx, s.dbName, collection)
-	}
 	return description
 }
 

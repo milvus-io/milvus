@@ -15,28 +15,111 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <folly/ScopeGuard.h>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <future>
+#include <chrono>
 #include <filesystem>
 #include <memory>
+#include <new>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
+#include <roaring/roaring.h>
 
 #include "bitset/bitset.h"
+#include "cachinglayer/Metrics.h"
+#include "common/Schema.h"
 #include "common/Types.h"
+#include "common/ValueOp.h"
 #include "exec/expression/CacheCompressor.h"
 #include "exec/expression/DiskSlotFile.h"
 #include "exec/expression/EntryPool.h"
 #include "exec/expression/ExprCache.h"
+#include "exec/expression/ExprCacheHelper.h"
+#include "monitor/Monitor.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 // SegmentCacheFile removed; V2 uses EntryPool (memory) and DiskSlotFile (disk)
 #include "gtest/gtest.h"
 
+namespace milvus::exec {
+class ExprCacheTestPeer {
+ public:
+    using DiskPutStage = ExprResCacheManager::DiskPutStage;
+
+    static bool
+    Put(ExprResCacheManager& manager,
+        const ExprResCacheManager::Key& key,
+        const ExprResCacheManager::Value& value,
+        const ExprResCacheManager::DiskPutHook& hook) {
+        return RunExprCacheBestEffort(
+            [&]() { manager.PutInternal(key, value, nullptr, hook); });
+    }
+
+    static bool
+    IsDiskSegmentRegistered(ExprResCacheManager& manager, int64_t segment_id) {
+        std::lock_guard lock(manager.disk_clock_mutex_);
+        return manager.disk_clock_index_.count(segment_id) != 0;
+    }
+
+    // Called only from a put hook, which already holds disk_files_mutex_.
+    static DiskSlotFile&
+    DiskFileDuringPut(ExprResCacheManager& manager, int64_t segment_id) {
+        return *manager.disk_files_.at(segment_id);
+    }
+
+    static void
+    AssertDiskState(ExprResCacheManager& manager, size_t expected_files) {
+        std::shared_lock state_lock(manager.state_mutex_);
+        std::shared_lock files_lock(manager.disk_files_mutex_);
+        std::lock_guard clock_lock(manager.disk_clock_mutex_);
+        EXPECT_EQ(manager.disk_files_.size(), expected_files);
+        EXPECT_EQ(manager.disk_clock_segments_.size(), expected_files);
+        EXPECT_EQ(manager.disk_clock_index_.size(), expected_files);
+        EXPECT_EQ(manager.disk_segment_usage_.size(), expected_files);
+        for (const auto& [segment_id, index] : manager.disk_clock_index_) {
+            ASSERT_LT(index, manager.disk_clock_segments_.size());
+            EXPECT_EQ(manager.disk_clock_segments_[index], segment_id);
+            EXPECT_EQ(manager.disk_segment_usage_.count(segment_id), 1u);
+            EXPECT_EQ(manager.disk_files_.count(segment_id), 1u);
+        }
+        EXPECT_EQ(manager.reported_disk_bytes_.load(),
+                  manager.GetDiskCurrentBytesLocked());
+    }
+
+    static ExprResCacheManager::LookupResult
+    Get(ExprResCacheManager& manager,
+        const ExprResCacheManager::Key& key,
+        ExprResCacheManager::Value& value,
+        const std::function<void()>& before_decode) {
+        return manager.GetWithStatus(key, value, before_decode);
+    }
+};
+}  // namespace milvus::exec
+
 using milvus::exec::ExprResCacheManager;
+
+static_assert(noexcept(ExprResCacheManager::IsEnabled()));
+static_assert(noexcept(std::declval<const ExprResCacheManager&>()
+                           .CanCacheSegment(SegmentType::Sealed)));
+static_assert(noexcept(std::declval<ExprResCacheManager&>().Get(
+    std::declval<const ExprResCacheManager::Key&>(),
+    std::declval<ExprResCacheManager::Value&>())));
+static_assert(noexcept(std::declval<ExprResCacheManager&>().Put(
+    std::declval<const ExprResCacheManager::Key&>(),
+    std::declval<const ExprResCacheManager::Value&>())));
+static_assert(noexcept(std::declval<ExprResCacheManager&>().PutAdmitted(
+    std::declval<const ExprResCacheManager::Key&>(),
+    std::declval<const ExprResCacheManager::Value&>(),
+    std::declval<const ExprResCacheManager::AdmissionTicket&>())));
 
 namespace {
 
@@ -50,9 +133,86 @@ MakeBits(size_t n, bool v = true) {
     return b;
 }
 
+void
+AssertBitsEqual(const milvus::TargetBitmap& a, const milvus::TargetBitmap& b) {
+    ASSERT_EQ(a.size(), b.size());
+    for (size_t i = 0; i < a.size(); ++i) {
+        ASSERT_EQ(bool(a[i]), bool(b[i])) << "bit " << i << " differs";
+    }
+}
+
 }  // namespace
 
 // ---- Updated existing ExprResCacheManager tests (disk-backed) ----
+
+TEST(ExprResCacheManagerTest, BestEffortBoundaryContainsCacheExceptions) {
+    int calls = 0;
+    EXPECT_TRUE(milvus::exec::RunExprCacheBestEffort([&]() { ++calls; }));
+    EXPECT_FALSE(milvus::exec::RunExprCacheBestEffort([&]() {
+        ++calls;
+        throw std::bad_alloc();
+    }));
+    EXPECT_FALSE(milvus::exec::RunExprCacheBestEffort([&]() {
+        ++calls;
+        throw std::runtime_error("injected cache backend failure");
+    }));
+    EXPECT_EQ(calls, 3);
+}
+
+TEST(ExprResCacheManagerTest,
+     HelperContainsSignatureFailureButPropagatesEvaluationFailure) {
+    auto& manager = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(false);
+    manager.Clear();
+
+    milvus::exec::CacheConfig config;
+    config.mode = milvus::exec::CacheMode::Memory;
+    config.mem_max_bytes = 1U << 20;
+    config.materialization_max_bytes = 1U << 20;
+    config.compression_enabled = false;
+    config.admission_threshold = 1;
+    ASSERT_TRUE(manager.SetConfig(config));
+    ExprResCacheManager::SetEnabled(true);
+
+    auto schema = std::make_shared<milvus::Schema>();
+    const auto primary_field_id =
+        schema->AddDebugField("pk", milvus::DataType::INT64);
+    schema->set_primary_field_id(primary_field_id);
+    auto segment = milvus::segcore::CreateSealedSegment(
+        schema, milvus::empty_index_meta, 9001);
+
+    int compute_calls = 0;
+    auto cached = milvus::exec::ExprCacheHelper::GetOrCompute(
+        segment.get(),
+        []() -> std::string { throw std::bad_alloc(); },
+        8,
+        [&]() -> milvus::exec::ExprCacheHelper::ComputeResult {
+            ++compute_calls;
+            return {MakeBits(8), MakeBits(8)};
+        });
+    EXPECT_EQ(compute_calls, 1);
+    EXPECT_NE(cached.result, nullptr);
+    EXPECT_NE(cached.valid, nullptr);
+    if (cached.result != nullptr) {
+        EXPECT_EQ(cached.result->size(), 8);
+    }
+    if (cached.valid != nullptr) {
+        EXPECT_EQ(cached.valid->size(), 8);
+    }
+
+    EXPECT_THROW(
+        milvus::exec::ExprCacheHelper::GetOrCompute(
+            segment.get(),
+            []() { return std::string("evaluation-failure"); },
+            8,
+            []() -> milvus::exec::ExprCacheHelper::ComputeResult {
+                throw std::runtime_error("injected expression failure");
+            }),
+        std::runtime_error);
+
+    manager.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
 
 TEST(ExprResCacheManagerTest, PutGetBasic) {
     auto& mgr = ExprResCacheManager::Instance();
@@ -84,6 +244,49 @@ TEST(ExprResCacheManagerTest, PutGetBasic) {
     // restore global state
     mgr.Clear();
     std::filesystem::remove_all(tmpdir);
+    ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(ExprResCacheManagerTest, CacheHitIncrementsPrometheusCounter) {
+    auto& manager = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(false);
+    manager.Clear();
+    manager.SetCapacityBytes(1U << 20);
+    ExprResCacheManager::SetEnabled(true);
+
+    ExprResCacheManager::Key key{124, "expr:metric"};
+    ExprResCacheManager::Value value;
+    value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.active_count = 128;
+    manager.Put(key, value);
+
+    auto& hit_counter = milvus::monitor::internal_expr_cache_hit_total;
+    const auto hits_before = hit_counter.Value();
+
+    ExprResCacheManager::Value miss;
+    miss.active_count = 128;
+    EXPECT_FALSE(manager.Get({124, "expr:missing"}, miss));
+    EXPECT_DOUBLE_EQ(hit_counter.Value(), hits_before);
+
+    ExprResCacheManager::Value hit;
+    hit.active_count = 128;
+    EXPECT_TRUE(manager.Get(key, hit));
+    EXPECT_DOUBLE_EQ(hit_counter.Value(), hits_before + 1);
+
+    ExprResCacheManager::Value status_hit;
+    status_hit.active_count = 128;
+    EXPECT_EQ(manager.GetWithStatus(key, status_hit),
+              ExprResCacheManager::LookupResult::Hit);
+    EXPECT_DOUBLE_EQ(hit_counter.Value(), hits_before + 2);
+
+    const auto metrics = milvus::monitor::getPrometheusClient().GetMetrics();
+    EXPECT_NE(metrics.find("# TYPE internal_expr_cache_hit_total counter"),
+              std::string::npos);
+    EXPECT_NE(metrics.find("internal_expr_cache_hit_total "),
+              std::string::npos);
+
+    manager.Clear();
     ExprResCacheManager::SetEnabled(false);
 }
 
@@ -191,6 +394,558 @@ TEST(ExprResCacheManagerTest, EnableDisable) {
     ASSERT_TRUE(mgr.Get(k, out));
 
     // restore global state
+    mgr.Clear();
+    std::filesystem::remove_all(tmpdir);
+    ExprResCacheManager::SetEnabled(false);
+}
+
+class ExprCacheMaterializationTest
+    : public ::testing::TestWithParam<milvus::exec::CacheMode> {
+ protected:
+    static constexpr int64_t kRows = 128;
+    static constexpr size_t kPairBytes = 32;
+    const ExprResCacheManager::Key key_{101, "materialized:existing"};
+    ExprResCacheManager& manager_ = ExprResCacheManager::Instance();
+    std::filesystem::path directory_;
+
+    void
+    SetUp() override {
+        ExprResCacheManager::SetEnabled(false);
+        manager_.Clear();
+        directory_ = std::filesystem::temp_directory_path() /
+                     ("expr_cache_lookup_budget_" + std::to_string(getpid()) +
+                      "_" + std::to_string(rand()));
+        milvus::exec::CacheConfig config;
+        config.mode = GetParam();
+        config.mem_max_bytes = 1ULL << 20;
+        config.disk_base_path = directory_.string();
+        config.disk_max_bytes = 1ULL << 20;
+        config.disk_max_file_size = 1ULL << 20;
+        config.materialization_max_bytes = kPairBytes;
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = 0;
+        config.disk_min_eval_duration_us = 0;
+        ASSERT_TRUE(manager_.SetConfig(config));
+        ExprResCacheManager::SetEnabled(true);
+
+        ExprResCacheManager::Value value;
+        value.active_count = kRows;
+        value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(kRows));
+        value.valid_result =
+            std::make_shared<milvus::TargetBitmap>(MakeBits(kRows));
+        manager_.Put(key_, value);
+        ASSERT_EQ(manager_.GetEntryCount(), 1u);
+    }
+
+    void
+    TearDown() override {
+        manager_.Clear();
+        ExprResCacheManager::SetEnabled(false);
+        EXPECT_EQ(manager_.GetMaterializationBytes(), 0u);
+        std::filesystem::remove_all(directory_);
+    }
+};
+
+TEST_P(ExprCacheMaterializationTest,
+       MissingAndStaleEntriesIgnoreBudgetPressure) {
+    auto reservation = manager_.TryAcquireMaterialization(kRows);
+    ASSERT_TRUE(reservation.has_value());
+    ASSERT_EQ(manager_.GetMaterializationBytes(), kPairBytes);
+
+    for (const auto& key :
+         {ExprResCacheManager::Key{102, key_.signature},
+          ExprResCacheManager::Key{key_.segment_id, "materialized:missing"},
+          key_}) {
+        ExprResCacheManager::Value value;
+        value.active_count = key == key_ ? kRows + 1 : kRows;
+        EXPECT_EQ(manager_.GetWithStatus(key, value),
+                  ExprResCacheManager::LookupResult::Miss);
+        EXPECT_EQ(value.result, nullptr);
+        EXPECT_EQ(value.valid_result, nullptr);
+        EXPECT_EQ(value.bytes, 0u);
+        EXPECT_EQ(manager_.GetMaterializationBytes(), kPairBytes);
+    }
+
+    ExprResCacheManager::Value value;
+    value.active_count = kRows;
+    EXPECT_EQ(manager_.GetWithStatus(key_, value),
+              ExprResCacheManager::LookupResult::ResourceLimit);
+    EXPECT_EQ(value.result, nullptr);
+    EXPECT_EQ(value.valid_result, nullptr);
+
+    reservation.reset();
+    ASSERT_EQ(manager_.GetWithStatus(key_, value),
+              ExprResCacheManager::LookupResult::Hit);
+    EXPECT_EQ(value.result->count(), kRows);
+    EXPECT_EQ(value.valid_result->count(), kRows);
+    EXPECT_EQ(manager_.GetMaterializationBytes(), kPairBytes);
+}
+
+TEST_P(ExprCacheMaterializationTest,
+       MemoryGaugeTracksLeasesAndHitsAcrossReconfiguration) {
+    auto& gauge = milvus::cachinglayer::monitor::cache_loaded_bytes(
+        milvus::cachinglayer::CellDataType::OTHER,
+        milvus::cachinglayer::StorageType::MEMORY);
+    const auto baseline = gauge.Value() - manager_.GetMemoryBytes();
+
+    // Capture reservations and decoded hit reservations use the same budget.
+    auto reservation = manager_.TryAcquireMaterialization(kRows);
+    ASSERT_TRUE(reservation.has_value());
+    EXPECT_DOUBLE_EQ(gauge.Value(),
+                     baseline + manager_.GetMemoryBytes() + kPairBytes);
+    auto moved = std::move(*reservation);
+    reservation.reset();
+    EXPECT_FALSE(manager_.TryAcquireMaterialization(kRows).has_value());
+    EXPECT_DOUBLE_EQ(gauge.Value(),
+                     baseline + manager_.GetMemoryBytes() + kPairBytes);
+    moved.Release();
+    moved.Release();
+    EXPECT_DOUBLE_EQ(gauge.Value(), baseline + manager_.GetMemoryBytes());
+
+    ExprResCacheManager::Value hit;
+    hit.active_count = kRows;
+    ASSERT_TRUE(manager_.Get(key_, hit));
+    EXPECT_DOUBLE_EQ(gauge.Value(),
+                     baseline + manager_.GetMemoryBytes() + kPairBytes);
+    ExprResCacheManager::Value rejected;
+    rejected.active_count = kRows;
+    EXPECT_EQ(manager_.GetWithStatus(key_, rejected),
+              ExprResCacheManager::LookupResult::ResourceLimit);
+    EXPECT_EQ(manager_.GetWithStatus({key_.segment_id, "missing"}, rejected),
+              ExprResCacheManager::LookupResult::Miss);
+    EXPECT_DOUBLE_EQ(gauge.Value(),
+                     baseline + manager_.GetMemoryBytes() + kPairBytes);
+
+    auto retained_valid = hit.valid_result;
+    hit = {};
+    manager_.Clear();
+    EXPECT_DOUBLE_EQ(gauge.Value(), baseline + kPairBytes);
+
+    milvus::exec::CacheConfig config;
+    config.mode = GetParam();
+    config.disk_base_path = directory_.string();
+    config.materialization_max_bytes = 0;
+    ASSERT_TRUE(manager_.SetConfig(config));
+    ExprResCacheManager::SetEnabled(false);
+    EXPECT_FALSE(manager_.TryAcquireMaterialization(kRows).has_value());
+    EXPECT_EQ(manager_.GetMaterializationBytes(), kPairBytes);
+    EXPECT_DOUBLE_EQ(gauge.Value(), baseline + kPairBytes);
+
+    retained_valid.reset();
+    EXPECT_EQ(manager_.GetMaterializationBytes(), 0u);
+    EXPECT_DOUBLE_EQ(gauge.Value(), baseline);
+}
+
+TEST_P(ExprCacheMaterializationTest, ConcurrentMissesDoNotRejectHits) {
+    constexpr int kMissThreads = 4;
+    constexpr int kIterations = 2000;
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<int> unexpected_misses{0};
+    std::vector<std::thread> threads;
+    for (int i = 0; i < kMissThreads; ++i) {
+        threads.emplace_back([&, i]() {
+            const ExprResCacheManager::Key missing{
+                i % 2 == 0 ? key_.segment_id : key_.segment_id + 1,
+                "materialized:missing"};
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            for (int j = 0; j < kIterations; ++j) {
+                ExprResCacheManager::Value value;
+                value.active_count = kRows;
+                if (manager_.GetWithStatus(missing, value) !=
+                    ExprResCacheManager::LookupResult::Miss) {
+                    unexpected_misses.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+    while (ready.load(std::memory_order_acquire) != kMissThreads) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    int rejected_hits = 0;
+    for (int i = 0; i < kIterations; ++i) {
+        ExprResCacheManager::Value value;
+        value.active_count = kRows;
+        if (manager_.GetWithStatus(key_, value) !=
+            ExprResCacheManager::LookupResult::Hit) {
+            ++rejected_hits;
+        }
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    EXPECT_EQ(unexpected_misses.load(), 0);
+    EXPECT_EQ(rejected_hits, 0);
+    EXPECT_EQ(manager_.GetMaterializationBytes(), 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Backends,
+    ExprCacheMaterializationTest,
+    ::testing::Values(milvus::exec::CacheMode::Memory,
+                      milvus::exec::CacheMode::Disk),
+    [](const ::testing::TestParamInfo<milvus::exec::CacheMode>& info) {
+        return info.param == milvus::exec::CacheMode::Memory ? "Memory"
+                                                             : "Disk";
+    });
+
+TEST(ExprResCacheManagerTest,
+     MemoryMaterializationBudgetTracksAliasedBitmapLifetime) {
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    mgr.Clear();
+
+    constexpr int64_t kRows = 128;
+    const size_t pair_bytes = MakeBits(kRows).size_in_bytes() * 2;
+    milvus::exec::CacheConfig cfg;
+    cfg.mode = milvus::exec::CacheMode::Memory;
+    cfg.mem_max_bytes = 1ULL << 20;
+    cfg.materialization_max_bytes = pair_bytes;
+    cfg.compression_enabled = false;
+    cfg.admission_threshold = 1;
+    cfg.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(mgr.SetConfig(cfg));
+
+    ExprResCacheManager::Value value;
+    value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(kRows));
+    value.valid_result =
+        std::make_shared<milvus::TargetBitmap>(MakeBits(kRows));
+    value.active_count = kRows;
+    const ExprResCacheManager::Key first_key{101, "materialized:first"};
+    const ExprResCacheManager::Key second_key{101, "materialized:second"};
+    mgr.Put(first_key, value);
+    mgr.Put(second_key, value);
+
+    ExprResCacheManager::Value first;
+    first.active_count = kRows;
+    EXPECT_EQ(mgr.GetWithStatus(first_key, first),
+              ExprResCacheManager::LookupResult::Hit);
+    EXPECT_EQ(mgr.GetMaterializationBytes(), pair_bytes);
+
+    ExprResCacheManager::Value second;
+    second.active_count = kRows;
+    EXPECT_EQ(mgr.GetWithStatus(second_key, second),
+              ExprResCacheManager::LookupResult::ResourceLimit);
+    EXPECT_EQ(second.result, nullptr);
+    EXPECT_EQ(second.valid_result, nullptr);
+
+    // Both aliases own one decoded pair. Dropping only one bitmap must not
+    // return the reservation while the companion bitmap remains reachable.
+    first.result.reset();
+    EXPECT_EQ(mgr.GetMaterializationBytes(), pair_bytes);
+    first.valid_result.reset();
+    EXPECT_EQ(mgr.GetMaterializationBytes(), 0u);
+
+    second.active_count = kRows;
+    EXPECT_EQ(mgr.GetWithStatus(second_key, second),
+              ExprResCacheManager::LookupResult::Hit);
+    EXPECT_EQ(mgr.GetMaterializationBytes(), pair_bytes);
+
+    // Backend eviction/clear must not invalidate a value already returned to
+    // a query or release its reservation prematurely.
+    mgr.Clear();
+    EXPECT_EQ(mgr.GetMaterializationBytes(), pair_bytes);
+    second.result.reset();
+    second.valid_result.reset();
+    EXPECT_EQ(mgr.GetMaterializationBytes(), 0u);
+    ExprResCacheManager::SetEnabled(false);
+}
+
+class ExprCacheUnlockedReadTest
+    : public ::testing::TestWithParam<std::tuple<std::string, bool>> {};
+
+TEST_P(ExprCacheUnlockedReadTest, WritersCompleteBeforeDecodeResumes) {
+    using namespace milvus::exec;
+    const auto& [operation, compression_enabled] = GetParam();
+    auto& manager = ExprResCacheManager::Instance();
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("expr_unlocked_read_" + std::to_string(getpid()) + "_" +
+                      std::to_string(rand()));
+    const auto cleanup = folly::makeGuard([&]() {
+        manager.Clear();
+        ExprResCacheManager::SetEnabled(false);
+        std::filesystem::remove_all(dir);
+    });
+    ExprResCacheManager::SetEnabled(true);
+    CacheConfig config;
+    config.mode = CacheMode::Memory;
+    config.mem_max_bytes = 1U << 20;
+    config.admission_threshold = 1;
+    config.mem_min_eval_duration_us = 0;
+    config.disk_min_eval_duration_us = 0;
+    config.compression_enabled = compression_enabled;
+    config.disk_base_path = dir.string();
+    ASSERT_TRUE(manager.SetConfig(config));
+    constexpr int64_t kRows = 4096;
+    ExprResCacheManager::Key key{100, "held"};
+    ExprResCacheManager::Value value;
+    value.result =
+        std::make_shared<milvus::TargetBitmap>(MakeBits(kRows, false));
+    value.valid_result =
+        std::make_shared<milvus::TargetBitmap>(MakeBits(kRows));
+    (*value.result)[57] = true;
+    (*value.valid_result)[19] = false;
+    value.active_count = kRows;
+    manager.Put(key, value);
+    const auto charge = manager.GetMemoryBytes();
+    ASSERT_GT(charge, 0u);
+    config.mem_max_bytes = charge * 2;
+    ASSERT_TRUE(manager.SetConfig(config));
+    manager.Put(key, value);
+    manager.Put({200, "other"}, value);
+    ASSERT_EQ(manager.GetEntryCount(), 2u);
+    // Gauge has contributions from other cachinglayer users as well.
+    auto& gauge = milvus::cachinglayer::monitor::cache_loaded_bytes(
+        milvus::cachinglayer::CellDataType::OTHER,
+        milvus::cachinglayer::StorageType::MEMORY);
+    const auto gauge_base = gauge.Value() - manager.GetMemoryBytes();
+
+    std::promise<void> entered, resume;
+    auto entered_future = entered.get_future();
+    auto resume_future = resume.get_future().share();
+    auto reader = std::async(std::launch::async, [&]() {
+        ExprResCacheManager::Value got;
+        got.active_count = kRows;
+        auto status = ExprCacheTestPeer::Get(manager, key, got, [&]() {
+            entered.set_value();
+            resume_future.wait();
+        });
+        return std::pair{status, std::move(got)};
+    });
+    auto release_reader = folly::makeGuard([&]() { resume.set_value(); });
+    ASSERT_EQ(entered_future.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    EXPECT_EQ(manager.GetMaterializationBytes(), 2 * (kRows / 8));
+    auto writer = std::async(std::launch::async, [&]() {
+        if (operation == "PutEvict") {
+            manager.Put({300, "new"}, value);
+            EXPECT_EQ(manager.GetEntryCount(), 2u);
+            ExprResCacheManager::Value missing;
+            missing.active_count = kRows;
+            EXPECT_FALSE(manager.Get({200, "other"}, missing));
+        } else if (operation == "EraseOther") {
+            EXPECT_EQ(manager.EraseSegment(200), 1u);
+        } else if (operation == "EraseSame") {
+            EXPECT_EQ(manager.EraseSegment(100), 1u);
+        } else if (operation == "Clear") {
+            manager.Clear();
+            EXPECT_EQ(manager.GetEntryCount(), 0u);
+        } else if (operation == "Rebuild") {
+            ASSERT_TRUE(manager.SetConfig(config));
+            manager.Put({300, "new"}, value);
+            // The old pool's reader still consumes half the shared budget.
+            // A second new entry must evict the first, not create a fresh
+            // independent allowance for this generation.
+            manager.Put({400, "last"}, value);
+            EXPECT_EQ(manager.GetEntryCount(), 1u);
+            EXPECT_EQ(manager.GetMemoryBytes(), charge * 2);
+        } else if (operation == "Shrink") {
+            config.mem_max_bytes = charge / 2;
+            ASSERT_TRUE(manager.SetConfig(config));
+            manager.Put({300, "new"}, value);
+            EXPECT_EQ(manager.GetEntryCount(), 0u);
+        } else if (operation == "SwitchDisk") {
+            config.mode = CacheMode::Disk;
+            ASSERT_TRUE(manager.SetConfig(config));
+            manager.Put({300, "new"}, value);
+            EXPECT_EQ(manager.GetEntryCount(), 1u);
+        } else if (operation == "ConfigFailure") {
+            std::filesystem::create_directories(dir);
+            const auto file = dir / "not-a-directory";
+            std::ofstream(file) << "x";
+            config.mode = CacheMode::Disk;
+            config.disk_base_path = file.string();
+            EXPECT_FALSE(manager.SetConfig(config));
+        }
+        EXPECT_GE(manager.GetMemoryBytes(), charge);
+        EXPECT_DOUBLE_EQ(gauge.Value(),
+                         gauge_base + manager.GetMemoryBytes() +
+                             manager.GetMaterializationBytes());
+    });
+    EXPECT_EQ(writer.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready)
+        << operation << " waited for a reader paused before decompression";
+    resume.set_value();
+    release_reader.dismiss();
+    writer.get();
+    auto [status, got] = reader.get();
+    ASSERT_EQ(status, ExprResCacheManager::LookupResult::Hit);
+    AssertBitsEqual(*value.result, *got.result);
+    AssertBitsEqual(*value.valid_result, *got.valid_result);
+    EXPECT_EQ(manager.GetMaterializationBytes(), 2 * (kRows / 8));
+    manager.Clear();
+    EXPECT_EQ(manager.GetMemoryBytes(), 0u);
+    EXPECT_DOUBLE_EQ(gauge.Value(),
+                     gauge_base + manager.GetMaterializationBytes());
+    // Returned decoded values do not retain their compressed payload.
+    EXPECT_EQ(manager.GetMaterializationBytes(), 2 * (kRows / 8));
+    got = {};
+    EXPECT_EQ(manager.GetMaterializationBytes(), 0u);
+    EXPECT_DOUBLE_EQ(gauge.Value(), gauge_base);
+}
+
+INSTANTIATE_TEST_SUITE_P(Memory,
+                         ExprCacheUnlockedReadTest,
+                         ::testing::Combine(::testing::Values("PutEvict",
+                                                              "EraseOther",
+                                                              "EraseSame",
+                                                              "Clear",
+                                                              "Rebuild",
+                                                              "Shrink",
+                                                              "SwitchDisk",
+                                                              "ConfigFailure"),
+                                            ::testing::Bool()),
+                         [](const auto& info) {
+                             return std::string(std::get<1>(info.param)
+                                                    ? "Compressed"
+                                                    : "Raw") +
+                                    std::get<0>(info.param);
+                         });
+
+TEST(ExprResCacheManagerTest, FailedUnlockedReadReleasesBothReservations) {
+    using namespace milvus::exec;
+    auto& manager = ExprResCacheManager::Instance();
+    const auto cleanup = folly::makeGuard([&]() {
+        manager.Clear();
+        ExprResCacheManager::SetEnabled(false);
+    });
+    ExprResCacheManager::SetEnabled(true);
+    CacheConfig config;
+    config.mode = CacheMode::Memory;
+    config.admission_threshold = 1;
+    config.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(manager.SetConfig(config));
+    auto& gauge = milvus::cachinglayer::monitor::cache_loaded_bytes(
+        milvus::cachinglayer::CellDataType::OTHER,
+        milvus::cachinglayer::StorageType::MEMORY);
+    const auto gauge_base = gauge.Value();
+    ExprResCacheManager::Value value;
+    value.active_count = 128;
+    value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    ExprResCacheManager::Key key{101, "failure"};
+    manager.Put(key, value);
+    ExprResCacheManager::Value got;
+    got.active_count = 128;
+    EXPECT_FALSE(RunExprCacheBestEffort([&]() {
+        ExprCacheTestPeer::Get(manager, key, got, [&]() {
+            manager.Clear();
+            EXPECT_GT(manager.GetMemoryBytes(), 0u);
+            EXPECT_GT(manager.GetMaterializationBytes(), 0u);
+            EXPECT_DOUBLE_EQ(gauge.Value(),
+                             gauge_base + manager.GetMemoryBytes() +
+                                 manager.GetMaterializationBytes());
+            throw std::bad_alloc();
+        });
+    }));
+    EXPECT_EQ(got.result, nullptr);
+    EXPECT_EQ(got.valid_result, nullptr);
+    EXPECT_EQ(manager.GetMemoryBytes(), 0u);
+    EXPECT_EQ(manager.GetMaterializationBytes(), 0u);
+    EXPECT_DOUBLE_EQ(gauge.Value(), gauge_base);
+}
+
+TEST(ExprResCacheManagerTest, DiskMaterializationBudgetBoundsConcurrentHits) {
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    mgr.Clear();
+
+    auto tmpdir = std::filesystem::temp_directory_path() /
+                  ("expr_cache_materialization_disk_" +
+                   std::to_string(getpid()) + "_" + std::to_string(rand()));
+    std::filesystem::create_directories(tmpdir);
+
+    constexpr int64_t kRows = 128;
+    const size_t pair_bytes = MakeBits(kRows).size_in_bytes() * 2;
+    milvus::exec::CacheConfig cfg;
+    cfg.mode = milvus::exec::CacheMode::Disk;
+    cfg.disk_base_path = tmpdir.string();
+    cfg.disk_max_bytes = 1ULL << 20;
+    cfg.disk_max_file_size = 1ULL << 20;
+    cfg.materialization_max_bytes = pair_bytes;
+    cfg.admission_threshold = 1;
+    cfg.disk_min_eval_duration_us = 0;
+    ASSERT_TRUE(mgr.SetConfig(cfg));
+
+    auto& gauge = milvus::cachinglayer::monitor::cache_loaded_bytes(
+        milvus::cachinglayer::CellDataType::OTHER,
+        milvus::cachinglayer::StorageType::MEMORY);
+    const auto gauge_base = gauge.Value();
+    const ExprResCacheManager::Key key{202, "materialized:disk"};
+    ExprResCacheManager::Value value;
+    value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(kRows));
+    value.valid_result =
+        std::make_shared<milvus::TargetBitmap>(MakeBits(kRows));
+    value.active_count = kRows;
+    mgr.Put(key, value);
+    ASSERT_EQ(mgr.GetEntryCount(), 1u);
+
+    constexpr int kThreads = 8;
+    std::atomic<int> ready{0};
+    std::atomic<int> hits{0};
+    std::atomic<int> limited{0};
+    std::atomic<int> misses{0};
+    std::atomic<bool> release_hit{false};
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+    for (int i = 0; i < kThreads; ++i) {
+        threads.emplace_back([&]() {
+            ExprResCacheManager::Value got;
+            got.active_count = kRows;
+            const auto status = mgr.GetWithStatus(key, got);
+            if (status == ExprResCacheManager::LookupResult::Hit) {
+                hits.fetch_add(1, std::memory_order_relaxed);
+            } else if (status ==
+                       ExprResCacheManager::LookupResult::ResourceLimit) {
+                limited.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                misses.fetch_add(1, std::memory_order_relaxed);
+            }
+            ready.fetch_add(1, std::memory_order_release);
+            if (status == ExprResCacheManager::LookupResult::Hit) {
+                while (!release_hit.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                }
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) != kThreads) {
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(hits.load(std::memory_order_relaxed), 1);
+    EXPECT_EQ(limited.load(std::memory_order_relaxed), kThreads - 1);
+    EXPECT_EQ(misses.load(std::memory_order_relaxed), 0);
+    EXPECT_EQ(mgr.GetMaterializationBytes(), pair_bytes);
+    EXPECT_DOUBLE_EQ(gauge.Value(), gauge_base + pair_bytes);
+    release_hit.store(true, std::memory_order_release);
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    EXPECT_EQ(mgr.GetMaterializationBytes(), 0u);
+    EXPECT_DOUBLE_EQ(gauge.Value(), gauge_base);
+
+    // Preserve the slot header and result payload but truncate the validity
+    // payload. A failed read after allocating both bitmaps must return its
+    // reservation and must not expose a partially materialized hit.
+    std::filesystem::resize_file(
+        tmpdir / "seg_202.cache",
+        milvus::exec::DiskSlotFile::kFileHeaderSize +
+            milvus::exec::DiskSlotFile::kSlotHeaderSize + pair_bytes / 2);
+    ExprResCacheManager::Value failed;
+    failed.active_count = kRows;
+    EXPECT_EQ(mgr.GetWithStatus(key, failed),
+              ExprResCacheManager::LookupResult::Miss);
+    EXPECT_EQ(failed.result, nullptr);
+    EXPECT_EQ(failed.valid_result, nullptr);
+    EXPECT_EQ(failed.bytes, 0u);
+    EXPECT_EQ(mgr.GetMaterializationBytes(), 0u);
+    EXPECT_DOUBLE_EQ(gauge.Value(), gauge_base);
+
     mgr.Clear();
     std::filesystem::remove_all(tmpdir);
     ExprResCacheManager::SetEnabled(false);
@@ -330,7 +1085,7 @@ using milvus::exec::CacheCompressor;
 
 // ---- CacheCompressor tests ----
 
-using milvus::exec::kCompTypeLZ4;
+using milvus::exec::kCompTypeIndependent;
 using milvus::exec::kCompTypeRaw;
 using milvus::exec::kCompTypeRoaring;
 using milvus::exec::kCompTypeRoaringInv;
@@ -353,18 +1108,9 @@ MakeRandomBits(size_t n, double density, uint32_t seed = 42) {
     return b;
 }
 
-// Helper: compare two bitsets bit-by-bit.
-void
-AssertBitsEqual(const milvus::TargetBitmap& a, const milvus::TargetBitmap& b) {
-    ASSERT_EQ(a.size(), b.size());
-    for (size_t i = 0; i < a.size(); ++i) {
-        ASSERT_EQ(bool(a[i]), bool(b[i])) << "bit " << i << " differs";
-    }
-}
-
 }  // namespace
 
-TEST(CacheCompressorTest, LZ4RoundTrip) {
+TEST(CacheCompressorTest, DenseResultAndRawValidityRoundTrip) {
     const size_t n = 1024;
     auto result = MakeBits(n, true);
     auto valid = MakeBits(n, false);
@@ -375,8 +1121,9 @@ TEST(CacheCompressorTest, LZ4RoundTrip) {
 
     uint8_t comp_type = 0;
     auto compressed = CacheCompressor::Compress(result, valid, true, comp_type);
-    // result is all-1s → density=100% → RoaringInv
-    ASSERT_NE(comp_type, kCompTypeRaw);
+    ASSERT_EQ(comp_type, kCompTypeIndependent);
+    ASSERT_EQ(static_cast<uint8_t>(compressed[8]), kCompTypeRoaringInv);
+    ASSERT_EQ(static_cast<uint8_t>(compressed[9]), kCompTypeRaw);
 
     milvus::TargetBitmap out_result(0);
     milvus::TargetBitmap out_valid(0);
@@ -495,10 +1242,7 @@ TEST(CacheCompressorTest, VariousDensities) {
                 CacheCompressor::Compress(result, valid, compress, comp_type);
 
             if (compress) {
-                // Auto-selected: Roaring/RoaringInv/LZ4/Raw based on density
-                ASSERT_TRUE(comp_type == kCompTypeLZ4 ||
-                            comp_type == kCompTypeRoaring ||
-                            comp_type == kCompTypeRoaringInv ||
+                ASSERT_TRUE(comp_type == kCompTypeIndependent ||
                             comp_type == kCompTypeRaw)
                     << "density=" << density;
             } else {
@@ -520,6 +1264,207 @@ TEST(CacheCompressorTest, VariousDensities) {
     }
 }
 
+TEST(CacheCompressorTest, ResultAndValidityChooseEncodingIndependently) {
+    constexpr size_t rows = 10000;
+    const std::pair<size_t, uint8_t> cases[] = {
+        {0, kCompTypeRoaring},
+        {1, kCompTypeRoaring},
+        {300, kCompTypeRoaring},
+        {301, kCompTypeRaw},
+        {5000, kCompTypeRaw},
+        {9699, kCompTypeRaw},
+        {9700, kCompTypeRoaringInv},
+        {9999, kCompTypeRoaringInv},
+        {10000, kCompTypeRoaringInv},
+    };
+    for (auto [result_count, result_type] : cases) {
+        for (auto [valid_count, valid_type] : cases) {
+            SCOPED_TRACE(::testing::Message()
+                         << "result_count=" << result_count
+                         << " valid_count=" << valid_count);
+            auto result = MakeBits(rows, false);
+            result.set(0, result_count, true);
+            auto valid = MakeBits(rows, false);
+            valid.set(0, valid_count, true);
+            // All-ones validity is omitted, with its codec slot set to Raw.
+            if (valid_count == rows) {
+                valid_type = kCompTypeRaw;
+            }
+
+            auto encoded = CacheCompressor::Compress(result, valid, true);
+            EXPECT_EQ(encoded.result_comp_type, result_type);
+            EXPECT_EQ(encoded.valid_comp_type, valid_type);
+
+            uint8_t comp_type = 0;
+            auto compressed =
+                CacheCompressor::Compress(result, valid, true, comp_type);
+            if (result_type == kCompTypeRaw && valid_type == kCompTypeRaw) {
+                ASSERT_EQ(comp_type, kCompTypeRaw);
+            } else {
+                ASSERT_EQ(comp_type, kCompTypeIndependent);
+                ASSERT_EQ(static_cast<uint8_t>(compressed[8]), result_type);
+                ASSERT_EQ(static_cast<uint8_t>(compressed[9]), valid_type);
+            }
+
+            milvus::TargetBitmap out_result(0), out_valid(0);
+            ASSERT_TRUE(CacheCompressor::Decompress(compressed.data(),
+                                                    compressed.size(),
+                                                    comp_type,
+                                                    out_result,
+                                                    out_valid));
+            AssertBitsEqual(result, out_result);
+            AssertBitsEqual(valid, out_valid);
+        }
+    }
+}
+
+TEST(CacheCompressorTest, OneNullStoresOnlyNullPosition) {
+    constexpr size_t rows = 10000000;
+    constexpr uint32_t null_row = 65536;
+    auto result = MakeBits(rows, false);
+    result[rows - 1] = true;
+    auto valid = MakeBits(rows, true);
+    valid[null_row] = false;
+
+    uint8_t comp_type = 0;
+    auto compressed = CacheCompressor::Compress(result, valid, true, comp_type);
+    ASSERT_EQ(comp_type, kCompTypeIndependent);
+    ASSERT_EQ(static_cast<uint8_t>(compressed[8]), kCompTypeRoaring);
+    ASSERT_EQ(static_cast<uint8_t>(compressed[9]), kCompTypeRoaringInv);
+
+    uint32_t result_size = 0;
+    std::memcpy(&result_size, compressed.data() + 10, sizeof(result_size));
+    const size_t valid_offset = 14 + result_size;
+    ASSERT_LT(valid_offset, compressed.size());
+    std::unique_ptr<roaring_bitmap_t, decltype(&roaring_bitmap_free)>
+        encoded_valid(
+            roaring_bitmap_deserialize_safe(compressed.data() + valid_offset,
+                                            compressed.size() - valid_offset),
+            roaring_bitmap_free);
+    ASSERT_NE(encoded_valid, nullptr);
+    EXPECT_EQ(roaring_bitmap_get_cardinality(encoded_valid.get()), 1);
+    EXPECT_TRUE(roaring_bitmap_contains(encoded_valid.get(), null_row));
+
+    milvus::TargetBitmap out_result(0), out_valid(0);
+    ASSERT_TRUE(CacheCompressor::Decompress(compressed.data(),
+                                            compressed.size(),
+                                            comp_type,
+                                            out_result,
+                                            out_valid));
+    EXPECT_EQ(out_result.count(), 1);
+    EXPECT_TRUE(out_result[rows - 1]);
+    EXPECT_EQ(out_valid.size(), rows);
+    EXPECT_EQ(out_valid.count(), rows - 1);
+    EXPECT_FALSE(out_valid[null_row]);
+}
+
+TEST(CacheCompressorTest, RoaringContainersAtWordAndContainerBoundaries) {
+    for (size_t rows :
+         {1, 63, 64, 65, 4095, 4096, 4097, 8193, 65535, 65536, 65537, 131073}) {
+        // Exercise word and container boundaries, as well as inversion
+        // with dirty padding from TargetBitmap(rows, true).
+        for (int pattern = 0; pattern < 4; ++pattern) {
+            SCOPED_TRACE(::testing::Message()
+                         << "rows=" << rows << " pattern=" << pattern);
+            milvus::TargetBitmap result(rows, false);
+            milvus::TargetBitmap valid(rows, pattern == 3);
+            if (pattern == 0) {
+                valid[rows - 1] = true;
+            } else if (pattern == 1) {
+                for (size_t i = 0; i < rows; i += 2) {
+                    valid[i] = true;
+                }
+            } else if (pattern == 2) {
+                valid.set(rows / 4, rows / 2, true);
+            } else {
+                valid[rows - 1] = false;
+            }
+
+            uint8_t comp_type = 0;
+            auto compressed =
+                CacheCompressor::Compress(result, valid, true, comp_type);
+            milvus::TargetBitmap out_result(0), out_valid(0);
+            ASSERT_TRUE(CacheCompressor::Decompress(compressed.data(),
+                                                    compressed.size(),
+                                                    comp_type,
+                                                    out_result,
+                                                    out_valid));
+            AssertBitsEqual(result, out_result);
+            AssertBitsEqual(valid, out_valid);
+        }
+    }
+}
+
+TEST(CacheCompressorTest, RoaringContainerCardinalityBoundary) {
+    constexpr size_t rows = (1U << 20) + 1;
+    for (size_t cardinality : {4095, 4096, 4097}) {
+        for (bool invert_result : {false, true}) {
+            for (bool invert_valid : {false, true}) {
+                SCOPED_TRACE(::testing::Message()
+                             << "cardinality=" << cardinality
+                             << " invert_result=" << invert_result
+                             << " invert_valid=" << invert_valid);
+                milvus::TargetBitmap result(rows, invert_result);
+                milvus::TargetBitmap valid(rows, invert_valid);
+                // Keep each encoded set in one container. Spaced positions
+                // prevent run optimization from hiding the array/bitset
+                // boundary; the overall density still selects Roaring.
+                for (size_t i = 0; i < cardinality; ++i) {
+                    result[i * 2] = !invert_result;
+                    valid[65536 + i * 2] = !invert_valid;
+                }
+
+                uint8_t comp_type = 0;
+                auto compressed =
+                    CacheCompressor::Compress(result, valid, true, comp_type);
+                ASSERT_EQ(comp_type, kCompTypeIndependent);
+                ASSERT_EQ(
+                    static_cast<uint8_t>(compressed[8]),
+                    invert_result ? kCompTypeRoaringInv : kCompTypeRoaring);
+                ASSERT_EQ(
+                    static_cast<uint8_t>(compressed[9]),
+                    invert_valid ? kCompTypeRoaringInv : kCompTypeRoaring);
+
+                milvus::TargetBitmap out_result(0), out_valid(0);
+                ASSERT_TRUE(CacheCompressor::Decompress(compressed.data(),
+                                                        compressed.size(),
+                                                        comp_type,
+                                                        out_result,
+                                                        out_valid));
+                AssertBitsEqual(result, out_result);
+                AssertBitsEqual(valid, out_valid);
+            }
+        }
+    }
+}
+
+TEST(CacheCompressorTest, RejectsUnsupportedEntryFormats) {
+    auto result = MakeBits(65, false);
+    auto valid = MakeBits(65, false);
+    uint8_t comp_type = 0;
+    auto compressed = CacheCompressor::Compress(result, valid, true, comp_type);
+    ASSERT_EQ(comp_type, kCompTypeIndependent);
+    ASSERT_EQ(static_cast<uint8_t>(compressed[8]), kCompTypeRoaring);
+    ASSERT_EQ(static_cast<uint8_t>(compressed[9]), kCompTypeRoaring);
+
+    // Removing the per-bitmap codecs produces the unsupported old layout.
+    // Its payload is valid Roaring, so rejection must be based on the format.
+    compressed.erase(compressed.begin() + 8, compressed.begin() + 10);
+    for (uint8_t unsupported : {uint8_t{0},
+                                kCompTypeRoaring,
+                                kCompTypeRoaringInv,
+                                uint8_t{0x81},
+                                uint8_t{0x82}}) {
+        SCOPED_TRACE(static_cast<int>(unsupported));
+        milvus::TargetBitmap out_result(0), out_valid(0);
+        EXPECT_FALSE(CacheCompressor::Decompress(compressed.data(),
+                                                 compressed.size(),
+                                                 unsupported,
+                                                 out_result,
+                                                 out_valid));
+    }
+}
+
 TEST(CacheCompressorTest, CorruptPayloadReturnsFalse) {
     const size_t n = 1024;
     auto result = MakeRandomBits(n, 0.01, 3);
@@ -527,20 +1472,64 @@ TEST(CacheCompressorTest, CorruptPayloadReturnsFalse) {
 
     uint8_t comp_type = 0;
     auto compressed = CacheCompressor::Compress(result, valid, true, comp_type);
-    ASSERT_EQ(comp_type, kCompTypeRoaring);
+    ASSERT_EQ(comp_type, kCompTypeIndependent);
 
     milvus::TargetBitmap out_result(0);
     milvus::TargetBitmap out_valid(0);
     ASSERT_FALSE(CacheCompressor::Decompress(
         compressed.data(), 10, comp_type, out_result, out_valid));
 
-    std::memset(compressed.data() + 8, 0x7F, 4);
+    std::memset(compressed.data() + 10, 0x7F, 4);
     ASSERT_FALSE(
         CacheCompressor::Decompress(compressed.data(),
                                     static_cast<uint32_t>(compressed.size()),
                                     comp_type,
                                     out_result,
                                     out_valid));
+}
+
+TEST(CacheCompressorTest, RejectsInvalidPerBitmapEncodingAndLengths) {
+    const size_t rows = 1024;
+    auto result = MakeRandomBits(rows, 0.5);
+    auto valid = MakeBits(rows, true);
+    valid[63] = false;
+    uint8_t comp_type = 0;
+    const auto original =
+        CacheCompressor::Compress(result, valid, true, comp_type);
+    ASSERT_EQ(comp_type, kCompTypeIndependent);
+    ASSERT_EQ(static_cast<uint8_t>(original[8]), kCompTypeRaw);
+    ASSERT_EQ(static_cast<uint8_t>(original[9]), kCompTypeRoaringInv);
+    uint32_t result_size = 0;
+    std::memcpy(&result_size, original.data() + 10, 4);
+
+    auto rejected = [&](const std::vector<char>& data) {
+        milvus::TargetBitmap out_result(0), out_valid(0);
+        return !CacheCompressor::Decompress(
+            data.data(), data.size(), comp_type, out_result, out_valid);
+    };
+    for (size_t codec_offset : {8, 9}) {
+        auto corrupt = original;
+        corrupt[codec_offset] = 0x7f;
+        EXPECT_TRUE(rejected(corrupt));
+    }
+    // A Raw bitmap must have exactly the expected number of bytes.
+    auto corrupt = original;
+    const uint32_t short_result = result_size - 1;
+    std::memcpy(corrupt.data() + 10, &short_result, 4);
+    EXPECT_TRUE(rejected(corrupt));
+
+    // Truncated validity, a wrong validity codec, and a contradictory
+    // all-ones flag must all reject the entry instead of returning bad bits.
+    corrupt = original;
+    corrupt.resize(14 + result_size);
+    EXPECT_TRUE(rejected(corrupt));
+    corrupt = original;
+    corrupt[9] = static_cast<char>(kCompTypeRaw);
+    EXPECT_TRUE(rejected(corrupt));
+    corrupt = original;
+    const uint32_t all_ones = rows | milvus::exec::kValidAllOnesMask;
+    std::memcpy(corrupt.data() + 4, &all_ones, 4);
+    EXPECT_TRUE(rejected(corrupt));
 }
 
 // SegmentCacheFileTest::PerfBenchmark removed — V1 mmap backend replaced.
@@ -644,22 +1633,22 @@ TEST(ExprResCacheManagerPerfTest, EndToEndAllDensities) {
             size_t raw_bytes = values[0].result->size_in_bytes() +
                                values[0].valid_result->size_in_bytes();
 
-            // Detect comp_type from first entry
-            uint8_t detected_comp_type = 0;
+            // Report both independently selected codecs.
+            std::string comp_names;
             {
-                milvus::exec::CacheCompressor cmp;
-                auto buf = cmp.Compress(*values[0].result,
-                                        *values[0].valid_result,
-                                        true,
-                                        detected_comp_type);
+                const auto encoded = CacheCompressor::Compress(
+                    *values[0].result, *values[0].valid_result, true);
+                auto name = [](uint8_t encoding) {
+                    return encoding == kCompTypeRaw       ? "Raw"
+                           : encoding == kCompTypeRoaring ? "Roaring"
+                                                          : "RoarInv";
+                };
+                comp_names = std::string(name(encoded.result_comp_type)) + "/" +
+                             (values[0].valid_result->all()
+                                  ? "All1"
+                                  : name(encoded.valid_comp_type));
             }
-            const char* comp_name =
-                detected_comp_type == milvus::exec::kCompTypeRoaring ? "Roaring"
-                : detected_comp_type == milvus::exec::kCompTypeRoaringInv
-                    ? "RoarInv"
-                : detected_comp_type == milvus::exec::kCompTypeLZ4 ? "LZ4"
-                : detected_comp_type == milvus::exec::kCompTypeRaw ? "Raw"
-                                                                   : "???";
+            const char* comp_name = comp_names.c_str();
 
             // Put
             auto t0 = std::chrono::high_resolution_clock::now();
@@ -885,6 +1874,158 @@ TEST(ExprResCacheManagerTest, AdmissionThresholdSkipsOneOff) {
 
     mgr.Clear();
     std::filesystem::remove_all(tmpdir);
+    ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(ExprResCacheManagerTest, AdmissionThresholdIsIsolatedAcrossSegments) {
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+
+    milvus::exec::CacheConfig cfg;
+    cfg.mode = milvus::exec::CacheMode::Memory;
+    cfg.mem_max_bytes = 1ULL << 20;
+    cfg.compression_enabled = false;
+    cfg.admission_threshold = 2;
+    cfg.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(mgr.SetConfig(cfg));
+    mgr.Clear();
+
+    ExprResCacheManager::Key segment_a{7101, "same_expr_across_segments"};
+    ExprResCacheManager::Key segment_b{7102, "same_expr_across_segments"};
+    ExprResCacheManager::Value value;
+    value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.active_count = 128;
+
+    // One occurrence of the same expression on each segment must not satisfy
+    // either per-entry threshold.
+    mgr.Put(segment_a, value);
+    mgr.Put(segment_b, value);
+
+    ExprResCacheManager::Value got_a;
+    got_a.active_count = 128;
+    EXPECT_FALSE(mgr.Get(segment_a, got_a));
+    ExprResCacheManager::Value got_b;
+    got_b.active_count = 128;
+    EXPECT_FALSE(mgr.Get(segment_b, got_b));
+
+    // Each full cache key becomes eligible only on its own second occurrence.
+    mgr.Put(segment_a, value);
+    got_a.active_count = 128;
+    EXPECT_TRUE(mgr.Get(segment_a, got_a));
+    got_b.active_count = 128;
+    EXPECT_FALSE(mgr.Get(segment_b, got_b));
+
+    mgr.Put(segment_b, value);
+    got_b.active_count = 128;
+    EXPECT_TRUE(mgr.Get(segment_b, got_b));
+
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(ExprResCacheManagerTest,
+     ForwardAdmissionAndTicketsAreIsolatedAcrossSegments) {
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+
+    milvus::exec::CacheConfig cfg;
+    cfg.mode = milvus::exec::CacheMode::Memory;
+    cfg.mem_max_bytes = 1ULL << 20;
+    cfg.compression_enabled = false;
+    cfg.admission_threshold = 2;
+    cfg.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(mgr.SetConfig(cfg));
+    mgr.Clear();
+
+    ExprResCacheManager::Key segment_a{7201, "same_forward_expr"};
+    ExprResCacheManager::Key segment_b{7202, "same_forward_expr"};
+
+    EXPECT_FALSE(mgr.ObserveMiss(segment_a, 128, SegmentType::Sealed).admitted);
+    EXPECT_FALSE(mgr.ObserveMiss(segment_b, 128, SegmentType::Sealed).admitted);
+    auto ticket_a = mgr.ObserveMiss(segment_a, 128, SegmentType::Sealed);
+    auto ticket_b = mgr.ObserveMiss(segment_b, 128, SegmentType::Sealed);
+    ASSERT_TRUE(ticket_a.admitted);
+    ASSERT_TRUE(ticket_b.admitted);
+
+    ExprResCacheManager::Value value;
+    value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
+    value.active_count = 128;
+    value.eval_duration_us = 1;
+
+    // A ticket for one segment cannot authorize a put for another segment,
+    // even when the expression signature is identical.
+    mgr.PutAdmitted(segment_b, value, ticket_a);
+    ExprResCacheManager::Value got;
+    got.active_count = 128;
+    EXPECT_FALSE(mgr.Get(segment_b, got));
+
+    mgr.PutAdmitted(segment_a, value, ticket_a);
+    mgr.PutAdmitted(segment_b, value, ticket_b);
+    got.active_count = 128;
+    EXPECT_TRUE(mgr.Get(segment_a, got));
+    got.active_count = 128;
+    EXPECT_TRUE(mgr.Get(segment_b, got));
+
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(ExprResCacheManagerTest, AdmissionCountsEachSnapshotSeparately) {
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    milvus::exec::CacheConfig cfg;
+    cfg.mode = milvus::exec::CacheMode::Memory;
+    cfg.mem_max_bytes = 1ULL << 20;
+    cfg.mem_enable_growing = true;
+    cfg.admission_threshold = 2;
+    cfg.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(mgr.SetConfig(cfg));
+
+    ExprResCacheManager::Key key{7301, "growing:snapshot-admission"};
+    auto make_value = [](int64_t active_count) {
+        ExprResCacheManager::Value value;
+        value.result =
+            std::make_shared<milvus::TargetBitmap>(MakeBits(active_count));
+        value.valid_result =
+            std::make_shared<milvus::TargetBitmap>(active_count, true);
+        value.active_count = active_count;
+        return value;
+    };
+
+    // Distinct snapshots must not collectively satisfy threshold 2.
+    mgr.Put(key, make_value(64));
+    mgr.Put(key, make_value(128));
+    EXPECT_EQ(mgr.GetEntryCount(), 0);
+
+    // Normal puts and forward admission share the same snapshot counter.
+    auto ticket = mgr.ObserveMiss(key, 128, SegmentType::Growing);
+    ASSERT_TRUE(ticket.admitted);
+    mgr.PutAdmitted(key, make_value(128), ticket);
+    ExprResCacheManager::Value cached;
+    cached.active_count = 128;
+    ASSERT_TRUE(mgr.Get(key, cached));
+    EXPECT_TRUE(*cached.result == MakeBits(128));
+
+    EXPECT_FALSE(mgr.ObserveMiss(key, 192, SegmentType::Growing).admitted);
+    mgr.Put(key, make_value(192));
+    cached.active_count = 192;
+    ASSERT_TRUE(mgr.Get(key, cached));
+    EXPECT_TRUE(*cached.result == MakeBits(192));
+    EXPECT_EQ(mgr.GetEntryCount(), 1);
+    cached.active_count = 128;
+    EXPECT_FALSE(mgr.Get(key, cached));
+
+    // Heating the old snapshot must not admit the next snapshot on sight.
+    mgr.Put(key, make_value(256));
+    cached.active_count = 256;
+    EXPECT_FALSE(mgr.Get(key, cached));
+    cached.active_count = 192;
+    EXPECT_TRUE(mgr.Get(key, cached));
+    EXPECT_EQ(mgr.GetEntryCount(), 1);
+
+    mgr.Clear();
     ExprResCacheManager::SetEnabled(false);
 }
 
@@ -1170,7 +2311,7 @@ DenseBitsetToRoaringZeroCopy(const milvus::TargetBitmap& bset) {
         if (popcount == 0)
             continue;
 
-        if (popcount >= ARRAY_THRESHOLD) {
+        if (popcount > ARRAY_THRESHOLD) {
             // Dense chunk: memcpy uint64 words directly into bitmap container
             bitset_container_t* bc = bitset_container_create();
             memcpy(bc->words, words + word_start, chunk_words * 8);
@@ -1489,8 +2630,8 @@ TEST(FrequencyTrackerTest, ResetClearsCounters) {
 
 // ---- EntryPool V2 Tests (pure in-memory with signature exact-match) ----
 
-TEST(EntryPoolV2Test, PutGetBasic) {
-    // Basic round-trip: Put a bitset, Get it back, verify decompressed data matches.
+TEST(EntryPoolV2Test, PutLookupDecodeBasic) {
+    // Basic round-trip: look up a stored bitset and verify decoded data matches.
     milvus::exec::EntryPool pool(1 << 20);  // 1MB
 
     const size_t N = 1024;
@@ -1507,12 +2648,11 @@ TEST(EntryPoolV2Test, PutGetBasic) {
     ASSERT_GT(pool.GetCurrentBytes(), 0u);
 
     milvus::TargetBitmap out_result, out_valid;
-    bool hit = pool.Get(/*segment_id=*/100,
-                        /*signature=*/"age > 30 AND status == 1",
-                        /*active_count=*/N,
-                        out_result,
-                        out_valid);
-    ASSERT_TRUE(hit);
+    auto payload = pool.Lookup(/*segment_id=*/100,
+                               /*signature=*/"age > 30 AND status == 1",
+                               /*active_count=*/N);
+    ASSERT_NE(payload, nullptr);
+    ASSERT_TRUE(payload->Decode(out_result, out_valid));
     ASSERT_EQ(out_result.size(), N);
     ASSERT_EQ(out_valid.size(), N);
 
@@ -1520,6 +2660,447 @@ TEST(EntryPoolV2Test, PutGetBasic) {
         ASSERT_EQ(bool(out_result[i]), bool(result[i])) << "result bit " << i;
         ASSERT_EQ(bool(out_valid[i]), bool(valid[i])) << "valid bit " << i;
     }
+}
+
+TEST(EntryPoolV2Test, InvertedValidityBoundaryPreservesNullsUnderNot) {
+    constexpr size_t rows = 1U << 20;
+    constexpr size_t null_count = 4096;
+    milvus::exec::EntryPool pool(1U << 20);
+    pool.Configure(1U << 20, true, 0);
+    milvus::TargetBitmap result(rows, false), valid(rows, true);
+    for (size_t i = 0; i < null_count; ++i) {
+        valid[i * 2] = false;
+    }
+
+    pool.Put(100, "nullable-boundary", rows, result, valid);
+    milvus::TargetBitmap out_result(0), out_valid(0);
+    auto payload = pool.Lookup(100, "nullable-boundary", rows);
+    ASSERT_NE(payload, nullptr);
+    ASSERT_TRUE(payload->Decode(out_result, out_valid));
+    AssertBitsEqual(result, out_result);
+    AssertBitsEqual(valid, out_valid);
+
+    auto column = std::make_shared<milvus::ColumnVector>(std::move(out_result),
+                                                         std::move(out_valid));
+    milvus::common::ThreeValuedLogicOp::Not(column);
+    milvus::TargetBitmapView matches(column->GetRawData(), column->size());
+    EXPECT_EQ(matches.count(), rows - null_count);
+    EXPECT_FALSE(matches[0]);
+    EXPECT_FALSE(matches[2]);
+    EXPECT_FALSE(matches[(null_count - 1) * 2]);
+    // A malformed bitset container used to decode into spurious position
+    // 0x5555, incorrectly clearing this non-NULL row after NOT.
+    EXPECT_TRUE(matches[0x5555]);
+}
+
+TEST(EntryPoolV2Test, PayloadSurvivesPoolAndRemainsChargedOnce) {
+    using namespace milvus::exec;
+    constexpr size_t kRows = 4096;
+    auto budget = std::make_shared<ExprCacheMemoryBudget>(1U << 20);
+    EntryPool::Handle first;
+    EntryPool::Handle second;
+    auto result = MakeRandomBits(kRows, 0.01, 42);
+    auto valid = MakeRandomBits(kRows, 0.99, 43);
+    size_t charge = 0;
+    {
+        EntryPool pool(1U << 20, budget);
+        pool.Put(1, "held", kRows, result, valid);
+        charge = pool.GetCurrentBytes();
+        first = pool.Lookup(1, "held", kRows);
+        second = pool.Lookup(1, "held", kRows);
+        ASSERT_NE(first, nullptr);
+        EXPECT_EQ(first, second);
+        EXPECT_EQ(pool.GetCurrentBytes(), charge);
+        pool.Put(2, "other", kRows, result, valid);
+        EXPECT_GT(pool.GetCurrentBytes(), charge);
+    }
+    EXPECT_EQ(budget->GetUsedBytes(), charge);
+    milvus::TargetBitmap decoded, decoded_valid;
+    ASSERT_TRUE(first->Decode(decoded, decoded_valid));
+    AssertBitsEqual(result, decoded);
+    AssertBitsEqual(valid, decoded_valid);
+    first.reset();
+    EXPECT_EQ(budget->GetUsedBytes(), charge);
+    second.reset();
+    EXPECT_EQ(budget->GetUsedBytes(), 0u);
+}
+
+TEST(EntryPoolV2Test, ReaderHeldBytesPreventOversubscriptionAfterClear) {
+    using namespace milvus::exec;
+    constexpr size_t kRows = 1024;
+    EntryPool pool(1U << 20);
+    pool.Configure(1U << 20, false, 0);
+    auto result = MakeBits(kRows, false);
+    auto valid = MakeBits(kRows, true);
+    pool.Put(1, "a", kRows, result, valid);
+    const auto charge = pool.GetCurrentBytes();
+    pool.Configure(charge * 2, false, 0);
+    pool.Put(2, "b", kRows, result, valid);
+    auto a = pool.Lookup(1, "a", kRows);
+    auto b = pool.Lookup(2, "b", kRows);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    pool.Put(3, "c", kRows, result, valid);
+    EXPECT_EQ(pool.GetEntryCount(), 2u);
+    EXPECT_EQ(pool.GetCurrentBytes(), charge * 2);
+    pool.Clear();
+    EXPECT_EQ(pool.GetEntryCount(), 0u);
+    EXPECT_EQ(pool.GetCurrentBytes(), charge * 2);
+    pool.Put(3, "c", kRows, result, valid);
+    EXPECT_EQ(pool.GetEntryCount(), 0u);
+    a.reset();
+    pool.Put(3, "c", kRows, result, valid);
+    EXPECT_EQ(pool.GetEntryCount(), 1u);
+    EXPECT_EQ(pool.GetCurrentBytes(), charge * 2);
+    b.reset();
+    EXPECT_EQ(pool.GetCurrentBytes(), charge);
+    // An individually oversized entry must not evict the usable entry.
+    pool.Put(4, "huge", kRows * 16, MakeBits(kRows * 16), MakeBits(kRows * 16));
+    EXPECT_NE(pool.Lookup(3, "c", kRows), nullptr);
+    EXPECT_EQ(pool.GetCurrentBytes(), charge);
+    pool.Clear();
+    EXPECT_EQ(pool.GetCurrentBytes(), 0u);
+}
+
+TEST(EntryPoolV2Test, ClockEvictsUnheldPayloadWhileAnotherReaderIsActive) {
+    using namespace milvus::exec;
+    constexpr size_t kRows = 1024;
+    EntryPool pool(1U << 20);
+    pool.Configure(1U << 20, false, 0);
+    auto result = MakeBits(kRows, false);
+    auto valid = MakeBits(kRows, true);
+    pool.Put(1, "a", kRows, result, valid);
+    const auto charge = pool.GetCurrentBytes();
+    pool.Configure(charge * 2, false, 0);
+    pool.Put(2, "b", kRows, result, valid);
+    auto held = pool.Lookup(1, "a", kRows);
+    // Even a hot entry must be reclaimable when it has no active reader.
+    // The forced Clock pass must still skip the reader-held entry.
+    for (int i = 0; i < 10; ++i) {
+        ASSERT_NE(pool.Lookup(2, "b", kRows), nullptr);
+    }
+    pool.Put(3, "c", kRows, result, valid);
+    EXPECT_NE(pool.Lookup(1, "a", kRows), nullptr);
+    EXPECT_EQ(pool.Lookup(2, "b", kRows), nullptr);
+    EXPECT_NE(pool.Lookup(3, "c", kRows), nullptr);
+    EXPECT_EQ(pool.GetCurrentBytes(), charge * 2);
+}
+
+class EntryPoolAdmissionTest
+    : public ::testing::TestWithParam<std::tuple<std::string, bool>> {};
+
+TEST_P(EntryPoolAdmissionTest, RejectedPutPreservesExistingEntries) {
+    using namespace milvus::exec;
+    const auto& [operation, compression_enabled] = GetParam();
+    constexpr size_t kInitialCapacity = 1U << 20;
+    constexpr size_t kHeldRows = 65536;
+    constexpr size_t kSmallRows = 8192;
+    const size_t incoming_rows =
+        operation == "HeldReplacement" ? kHeldRows : 32768;
+    const std::string incoming_key = operation == "HeldReplacement"     ? "a"
+                                     : operation == "UnheldReplacement" ? "b"
+                                                                        : "d";
+    auto held_result = MakeRandomBits(kHeldRows, 0.01, 42);
+    auto held_valid = MakeRandomBits(kHeldRows, 0.99, 43);
+    auto small_result = MakeRandomBits(kSmallRows, 0.01, 44);
+    auto small_valid = MakeRandomBits(kSmallRows, 0.99, 45);
+    auto incoming_result = MakeRandomBits(incoming_rows, 0.01, 46);
+    auto incoming_valid = MakeRandomBits(incoming_rows, 0.99, 47);
+    auto budget = std::make_shared<ExprCacheMemoryBudget>(kInitialCapacity);
+    auto pool = std::make_unique<EntryPool>(kInitialCapacity, budget);
+    pool->Configure(kInitialCapacity, compression_enabled, 0);
+    pool->Put(1, "a", kHeldRows, held_result, held_valid);
+    const auto held_bytes = pool->GetCurrentBytes();
+    pool->Put(1, "b", kSmallRows, small_result, small_valid);
+    pool->Put(1, "c", kSmallRows, small_result, small_valid);
+    const auto capacity = pool->GetCurrentBytes();
+    pool->Configure(capacity, compression_enabled, 0);
+
+    // Verify the premise using actual charges for each codec: the incoming
+    // entry fits the total budget, but even both small entries cannot fund it.
+    EntryPool probe(kInitialCapacity);
+    probe.Configure(kInitialCapacity, compression_enabled, 0);
+    probe.Put(1, incoming_key, incoming_rows, incoming_result, incoming_valid);
+    ASSERT_GT(probe.GetCurrentBytes(), capacity - held_bytes);
+    ASSERT_LE(probe.GetCurrentBytes(), capacity);
+    auto held = pool->Lookup(1, "a", kHeldRows);
+    ASSERT_NE(held, nullptr);
+    if (operation == "RetiredPool") {
+        pool.reset();
+        EXPECT_EQ(budget->GetUsedBytes(), held_bytes);
+        pool = std::make_unique<EntryPool>(capacity, budget);
+        pool->Configure(capacity, compression_enabled, 0);
+        pool->Put(1, "b", kSmallRows, small_result, small_valid);
+        pool->Put(1, "c", kSmallRows, small_result, small_valid);
+    }
+
+    const auto expect_value = [&](const std::string& key,
+                                  const milvus::TargetBitmap& result,
+                                  const milvus::TargetBitmap& valid) {
+        milvus::TargetBitmap decoded, decoded_valid;
+        auto payload = pool->Lookup(1, key, result.size());
+        ASSERT_NE(payload, nullptr);
+        ASSERT_TRUE(payload->Decode(decoded, decoded_valid));
+        AssertBitsEqual(result, decoded);
+        AssertBitsEqual(valid, decoded_valid);
+    };
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        SCOPED_TRACE(attempt);
+        pool->Put(
+            1, incoming_key, incoming_rows, incoming_result, incoming_valid);
+        EXPECT_EQ(pool->GetEntryCount(), operation == "RetiredPool" ? 2u : 3u);
+        EXPECT_EQ(pool->GetCurrentBytes(), capacity);
+        expect_value("b", small_result, small_valid);
+        expect_value("c", small_result, small_valid);
+        if (operation != "RetiredPool") {
+            expect_value("a", held_result, held_valid);
+        }
+        if (operation != "HeldReplacement") {
+            EXPECT_EQ(pool->Lookup(1, incoming_key, incoming_rows), nullptr);
+        }
+    }
+    milvus::TargetBitmap decoded, decoded_valid;
+    ASSERT_TRUE(held->Decode(decoded, decoded_valid));
+    AssertBitsEqual(held_result, decoded);
+    AssertBitsEqual(held_valid, decoded_valid);
+
+    // The same Put must succeed once the reader releases its payload. Failed
+    // attempts must leave Clock usable and the shared budget fully accounted.
+    held.reset();
+    pool->Put(1, incoming_key, incoming_rows, incoming_result, incoming_valid);
+    expect_value(incoming_key, incoming_result, incoming_valid);
+    EXPECT_LE(pool->GetCurrentBytes(), capacity);
+    pool->Clear();
+    EXPECT_EQ(budget->GetUsedBytes(), 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Memory,
+    EntryPoolAdmissionTest,
+    ::testing::Combine(::testing::Values("NewKey",
+                                         "HeldReplacement",
+                                         "UnheldReplacement",
+                                         "RetiredPool"),
+                       ::testing::Bool()),
+    [](const auto& info) {
+        return std::string(std::get<1>(info.param) ? "Compressed" : "Raw") +
+               std::get<0>(info.param);
+    });
+
+TEST(EntryPoolV2Test, ClockEvictsMultipleUnheldEntriesForOnePut) {
+    using namespace milvus::exec;
+    for (const bool hot : {false, true}) {
+        SCOPED_TRACE(hot);
+        constexpr size_t kRows = 1024;
+        EntryPool pool(1U << 20);
+        pool.Configure(1U << 20, false, 0);
+        auto result = MakeBits(kRows, false);
+        auto valid = MakeBits(kRows, true);
+        pool.Put(1, "a", kRows, result, valid);
+        const auto charge = pool.GetCurrentBytes();
+        const auto capacity = charge * 5;
+        pool.Configure(capacity, false, 0);
+        for (int64_t segment = 2; segment <= 5; ++segment) {
+            pool.Put(segment, "a", kRows, result, valid);
+            if (hot) {
+                for (int i = 0; i < 10; ++i) {
+                    ASSERT_NE(pool.Lookup(segment, "a", kRows), nullptr);
+                }
+            }
+        }
+        auto held = pool.Lookup(1, "a", kRows);
+        ASSERT_NE(held, nullptr);
+        auto incoming = MakeBits(kRows * 4, false);
+        auto incoming_valid = MakeBits(kRows * 4, true);
+        EntryPool probe(1U << 20);
+        probe.Configure(1U << 20, false, 0);
+        probe.Put(6, "a", incoming.size(), incoming, incoming_valid);
+        const auto incoming_charge = probe.GetCurrentBytes();
+        ASSERT_GT(incoming_charge, charge);
+        ASSERT_LE(incoming_charge, charge * 4);
+
+        pool.Put(6, "a", incoming.size(), incoming, incoming_valid);
+        const auto evicted = (incoming_charge + charge - 1) / charge;
+        EXPECT_EQ(pool.GetEntryCount(), 6 - evicted);
+        EXPECT_EQ(pool.GetCurrentBytes(),
+                  capacity - evicted * charge + incoming_charge);
+        EXPECT_EQ(pool.Lookup(1, "a", kRows), held);
+        milvus::TargetBitmap decoded, decoded_valid;
+        auto payload = pool.Lookup(6, "a", incoming.size());
+        ASSERT_NE(payload, nullptr);
+        ASSERT_TRUE(payload->Decode(decoded, decoded_valid));
+        AssertBitsEqual(incoming, decoded);
+        AssertBitsEqual(incoming_valid, decoded_valid);
+    }
+}
+
+TEST(EntryPoolV2Test, ReplacementReclaimsOldEntryAndVictimAfterBudgetShrink) {
+    using namespace milvus::exec;
+    constexpr size_t kRows = 1024;
+    EntryPool pool(1U << 20);
+    pool.Configure(1U << 20, false, 0);
+    pool.Put(1, "a", kRows * 8, MakeBits(kRows * 8), MakeBits(kRows * 8));
+    const auto held_bytes = pool.GetCurrentBytes();
+    pool.Put(1, "b", kRows, MakeBits(kRows), MakeBits(kRows));
+    pool.Put(1, "c", kRows, MakeBits(kRows), MakeBits(kRows));
+    auto held = pool.Lookup(1, "a", kRows * 8);
+    ASSERT_NE(held, nullptr);
+    auto incoming = MakeBits(kRows * 2, false);
+    auto incoming_valid = MakeBits(kRows * 2, true);
+    EntryPool probe(1U << 20);
+    probe.Configure(1U << 20, false, 0);
+    probe.Put(1, "b", incoming.size(), incoming, incoming_valid);
+    const auto capacity = held_bytes + probe.GetCurrentBytes();
+    ASSERT_LT(capacity, pool.GetCurrentBytes());
+    pool.Configure(capacity, false, 0);
+
+    // Only reclaiming both the replaced entry and the other unheld entry
+    // lets the Put meet the reduced budget exactly, without touching a reader.
+    pool.Put(1, "b", incoming.size(), incoming, incoming_valid);
+    EXPECT_EQ(pool.GetEntryCount(), 2u);
+    EXPECT_EQ(pool.GetCurrentBytes(), capacity);
+    EXPECT_EQ(pool.Lookup(1, "a", kRows * 8), held);
+    EXPECT_EQ(pool.Lookup(1, "c", kRows), nullptr);
+    milvus::TargetBitmap decoded, decoded_valid;
+    auto payload = pool.Lookup(1, "b", incoming.size());
+    ASSERT_NE(payload, nullptr);
+    ASSERT_TRUE(payload->Decode(decoded, decoded_valid));
+    AssertBitsEqual(incoming, decoded);
+    AssertBitsEqual(incoming_valid, decoded_valid);
+}
+
+TEST(ExprResCacheManagerTest, RejectedPutDuringDecodePreservesOtherHits) {
+    using namespace milvus::exec;
+    auto& manager = ExprResCacheManager::Instance();
+    const auto cleanup = folly::makeGuard([&]() {
+        manager.Clear();
+        ExprResCacheManager::SetEnabled(false);
+    });
+    ExprResCacheManager::SetEnabled(true);
+    const auto make_value = [](size_t rows) {
+        ExprResCacheManager::Value value;
+        value.active_count = rows;
+        value.result = std::make_shared<milvus::TargetBitmap>(
+            MakeRandomBits(rows, 0.01, 42));
+        value.valid_result = std::make_shared<milvus::TargetBitmap>(
+            MakeRandomBits(rows, 0.99, 43));
+        return value;
+    };
+    const auto large = make_value(65536);
+    const auto small = make_value(8192);
+    const auto incoming = make_value(32768);
+    for (const bool compression_enabled : {false, true}) {
+        SCOPED_TRACE(compression_enabled);
+        CacheConfig config;
+        config.mode = CacheMode::Memory;
+        config.compression_enabled = compression_enabled;
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = 0;
+        ASSERT_TRUE(manager.SetConfig(config));
+        manager.Put({1, "a"}, large);
+        manager.Put({1, "b"}, small);
+        manager.Put({1, "c"}, small);
+        const auto capacity = manager.GetMemoryBytes();
+        config.mem_max_bytes = capacity;
+        ASSERT_TRUE(manager.SetConfig(config));
+        manager.Put({1, "a"}, large);
+        manager.Put({1, "b"}, small);
+        manager.Put({1, "c"}, small);
+
+        ExprResCacheManager::Value got;
+        got.active_count = large.active_count;
+        ASSERT_EQ(ExprCacheTestPeer::Get(
+                      manager,
+                      {1, "a"},
+                      got,
+                      [&]() {
+                          manager.Put({1, "d"}, incoming);
+                          EXPECT_EQ(manager.GetEntryCount(), 3u);
+                          EXPECT_EQ(manager.GetMemoryBytes(), capacity);
+                          ExprResCacheManager::Value other;
+                          other.active_count = small.active_count;
+                          ASSERT_TRUE(manager.Get({1, "b"}, other));
+                          AssertBitsEqual(*small.result, *other.result);
+                          AssertBitsEqual(*small.valid_result,
+                                          *other.valid_result);
+                          other.active_count = incoming.active_count;
+                          EXPECT_FALSE(manager.Get({1, "d"}, other));
+                      }),
+                  ExprResCacheManager::LookupResult::Hit);
+        AssertBitsEqual(*large.result, *got.result);
+        AssertBitsEqual(*large.valid_result, *got.valid_result);
+        manager.Clear();
+        EXPECT_EQ(manager.GetMemoryBytes(), 0u);
+        got = {};
+        EXPECT_EQ(manager.GetMaterializationBytes(), 0u);
+    }
+}
+
+TEST(EntryPoolV2Test, ReplacementPreservesReadersAndChecksBothCharges) {
+    using namespace milvus::exec;
+    constexpr size_t kRows = 1024;
+    EntryPool pool(1U << 20);
+    pool.Configure(1U << 20, false, 0);
+    auto old_result = MakeBits(kRows, false);
+    auto new_result = MakeBits(kRows, true);
+    auto valid = MakeBits(kRows, true);
+    pool.Put(1, "a", kRows, old_result, valid);
+    const auto charge = pool.GetCurrentBytes();
+    pool.Configure(charge, false, 0);
+    auto old = pool.Lookup(1, "a", kRows);
+    pool.Put(1, "a", kRows, new_result, valid);
+    EXPECT_EQ(pool.Lookup(1, "a", kRows), old);
+    pool.Configure(charge * 2, false, 0);
+    pool.Put(1, "a", kRows, new_result, valid);
+    EXPECT_EQ(pool.GetEntryCount(), 1u);
+    EXPECT_EQ(pool.GetCurrentBytes(), charge * 2);
+    milvus::TargetBitmap decoded, decoded_valid;
+    ASSERT_TRUE(old->Decode(decoded, decoded_valid));
+    EXPECT_TRUE(decoded.none());
+    {
+        auto payload = pool.Lookup(1, "a", kRows);
+        ASSERT_NE(payload, nullptr);
+        ASSERT_TRUE(payload->Decode(decoded, decoded_valid));
+        EXPECT_TRUE(decoded.all());
+    }
+    old.reset();
+    EXPECT_EQ(pool.GetCurrentBytes(), charge);
+    pool.Configure(charge, false, 0);
+    // Replacing an unheld payload can reclaim its charge at a full budget.
+    pool.Put(1, "a", kRows, old_result, valid);
+    auto payload = pool.Lookup(1, "a", kRows);
+    ASSERT_NE(payload, nullptr);
+    ASSERT_TRUE(payload->Decode(decoded, decoded_valid));
+    EXPECT_TRUE(decoded.none());
+    EXPECT_EQ(pool.GetCurrentBytes(), charge);
+}
+
+TEST(EntryPoolV2Test, LookupReleasesLockBeforeDecode) {
+    using namespace milvus::exec;
+    EntryPool pool(1U << 20);
+    pool.Put(1, "held", 128, MakeBits(128), MakeBits(128));
+    std::promise<void> entered, resume;
+    auto entered_future = entered.get_future();
+    auto resume_future = resume.get_future().share();
+    auto reader = std::async(std::launch::async, [&]() {
+        milvus::TargetBitmap result, valid;
+        auto payload = pool.Lookup(1, "held", 128);
+        entered.set_value();
+        resume_future.wait();
+        return payload && payload->Decode(result, valid) && result.all() &&
+               valid.all();
+    });
+    auto release_reader = folly::makeGuard([&]() { resume.set_value(); });
+    ASSERT_EQ(entered_future.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    auto writer = std::async(std::launch::async, [&]() { pool.Clear(); });
+    const auto status = writer.wait_for(std::chrono::seconds(2));
+    EXPECT_EQ(status, std::future_status::ready);
+    resume.set_value();
+    release_reader.dismiss();
+    writer.get();
+    EXPECT_TRUE(reader.get());
+    EXPECT_EQ(pool.GetCurrentBytes(), 0u);
 }
 
 TEST(EntryPoolV2Test, SignatureExactMatch) {
@@ -1540,14 +3121,18 @@ TEST(EntryPoolV2Test, SignatureExactMatch) {
     // Both should be retrievable independently
     milvus::TargetBitmap out_r, out_v;
 
-    ASSERT_TRUE(pool.Get(100, "expr_A", N, out_r, out_v));
+    auto payload = pool.Lookup(100, "expr_A", N);
+    ASSERT_NE(payload, nullptr);
+    ASSERT_TRUE(payload->Decode(out_r, out_v));
     ASSERT_EQ(out_r.size(), N);
     // result_a is all-ones
     for (size_t i = 0; i < N; ++i) {
         ASSERT_TRUE(out_r[i]) << "expr_A result bit " << i;
     }
 
-    ASSERT_TRUE(pool.Get(100, "expr_B", N, out_r, out_v));
+    payload = pool.Lookup(100, "expr_B", N);
+    ASSERT_NE(payload, nullptr);
+    ASSERT_TRUE(payload->Decode(out_r, out_v));
     ASSERT_EQ(out_r.size(), N);
     // result_b is all-zeros
     for (size_t i = 0; i < N; ++i) {
@@ -1555,7 +3140,7 @@ TEST(EntryPoolV2Test, SignatureExactMatch) {
     }
 
     // Non-existent signature should miss
-    ASSERT_FALSE(pool.Get(100, "expr_C", N, out_r, out_v));
+    ASSERT_EQ(pool.Lookup(100, "expr_C", N), nullptr);
 }
 
 TEST(EntryPoolV2Test, ActiveCountStaleness) {
@@ -1571,14 +3156,16 @@ TEST(EntryPoolV2Test, ActiveCountStaleness) {
     milvus::TargetBitmap out_r, out_v;
 
     // Correct active_count → hit
-    ASSERT_TRUE(pool.Get(100, "expr_stale", N, out_r, out_v));
+    auto payload = pool.Lookup(100, "expr_stale", N);
+    ASSERT_NE(payload, nullptr);
+    ASSERT_TRUE(payload->Decode(out_r, out_v));
 
     // Wrong active_count → miss (data has been deleted/compacted)
-    ASSERT_FALSE(pool.Get(100, "expr_stale", N + 1, out_r, out_v));
-    ASSERT_FALSE(pool.Get(100, "expr_stale", N - 1, out_r, out_v));
+    ASSERT_EQ(pool.Lookup(100, "expr_stale", N + 1), nullptr);
+    ASSERT_EQ(pool.Lookup(100, "expr_stale", N - 1), nullptr);
 }
 
-TEST(EntryPoolV2Test, SameSignatureActiveCountCreatesDistinctSnapshots) {
+TEST(EntryPoolV2Test, SameSignatureKeepsNewestActiveCountSnapshot) {
     milvus::exec::EntryPool pool(1 << 20);
 
     const size_t old_n = 256;
@@ -1589,28 +3176,44 @@ TEST(EntryPoolV2Test, SameSignatureActiveCountCreatesDistinctSnapshots) {
     auto new_valid = MakeBits(new_n, true);
 
     pool.Put(100, "expr_replace", old_n, old_result, old_valid);
-    pool.Configure(1 << 20,
-                   /*compression_enabled=*/true,
-                   /*min_eval_duration_us=*/100000);
-    pool.Put(100,
-             "expr_replace",
-             new_n,
-             new_result,
-             new_valid,
-             /*eval_duration_us=*/1);
+    pool.Put(100, "expr_replace", new_n, new_result, new_valid);
+    // Simulate an older growing-segment query finishing after the newer one.
+    pool.Put(100, "expr_replace", old_n, old_result, old_valid);
 
     milvus::TargetBitmap out_r, out_v;
-    ASSERT_TRUE(pool.Get(100, "expr_replace", old_n, out_r, out_v));
-    ASSERT_EQ(out_r.size(), old_n);
-    for (size_t i = 0; i < old_n; ++i) {
-        ASSERT_FALSE(out_r[i]) << "old result bit " << i;
-    }
-    ASSERT_TRUE(pool.Get(100, "expr_replace", new_n, out_r, out_v));
+    ASSERT_EQ(pool.Lookup(100, "expr_replace", old_n), nullptr);
+    auto payload = pool.Lookup(100, "expr_replace", new_n);
+    ASSERT_NE(payload, nullptr);
+    ASSERT_TRUE(payload->Decode(out_r, out_v));
     ASSERT_EQ(out_r.size(), new_n);
     for (size_t i = 0; i < new_n; ++i) {
         ASSERT_TRUE(out_r[i]) << "new result bit " << i;
     }
-    ASSERT_EQ(pool.GetEntryCount(), 2u);
+    ASSERT_EQ(pool.GetEntryCount(), 1u);
+}
+
+TEST(EntryPoolV2Test, MemoryAccountingChargesOneKeyCopy) {
+    constexpr size_t kRows = 256;
+    milvus::exec::EntryPool pool(1U << 20);
+    pool.Configure(1U << 20,
+                   /*compression_enabled=*/false,
+                   /*min_eval_duration_us=*/0);
+
+    const std::string signature(4096, 'x');
+    auto result = MakeBits(kRows, false);
+    auto valid = MakeBits(kRows, true);
+
+    pool.Put(100, signature, kRows, result, valid);
+    const auto first_usage = pool.GetCurrentBytes();
+    EXPECT_GE(first_usage, signature.size());
+    EXPECT_LT(first_usage, signature.size() * 2);
+
+    // Replacing the same cache key must subtract and add the same estimate.
+    pool.Put(100, signature, kRows, result, valid);
+    EXPECT_EQ(pool.GetCurrentBytes(), first_usage);
+
+    EXPECT_EQ(pool.EraseSegment(100), 1u);
+    EXPECT_EQ(pool.GetCurrentBytes(), 0u);
 }
 
 TEST(EntryPoolV2Test, ClockEviction) {
@@ -1682,17 +3285,127 @@ TEST(EntryPoolV2Test, EraseSegment) {
 
     // Segment 200 entries should still be accessible
     milvus::TargetBitmap out_r, out_v;
-    ASSERT_TRUE(pool.Get(200, "seg200_expr1", N, out_r, out_v));
+    auto payload = pool.Lookup(200, "seg200_expr1", N);
+    ASSERT_NE(payload, nullptr);
+    ASSERT_TRUE(payload->Decode(out_r, out_v));
 
     // Segment 100 entries should be gone
-    ASSERT_FALSE(pool.Get(100, "seg100_expr1", N, out_r, out_v));
-    ASSERT_FALSE(pool.Get(100, "seg100_expr2", N, out_r, out_v));
+    ASSERT_EQ(pool.Lookup(100, "seg100_expr1", N), nullptr);
+    ASSERT_EQ(pool.Lookup(100, "seg100_expr2", N), nullptr);
 
     // Erase non-existent segment returns 0
     ASSERT_EQ(pool.EraseSegment(999), 0u);
 }
 
 // ---- DiskSlotFile tests ----
+
+namespace milvus::exec {
+struct DiskSlotFileTestAccess {
+    static size_t
+    FreeSlotBytes(const DiskSlotFile& file) {
+        return file.free_slots_.capacity() * sizeof(uint32_t);
+    }
+
+    static uint32_t
+    SlotId(const DiskSlotFile& file, const std::string& signature) {
+        return file.slot_index_.at(signature)->slot_id;
+    }
+
+    static int
+    SwapFileDescriptor(DiskSlotFile& file, int replacement) {
+        return std::exchange(file.fd_, replacement);
+    }
+};
+}  // namespace milvus::exec
+
+TEST(DiskSlotFileTest, SmallSegmentAllocatesSlotsLazily) {
+    using Access = milvus::exec::DiskSlotFileTestAccess;
+    auto tmpdir = std::filesystem::temp_directory_path() /
+                  ("disk_slot_lazy_" + std::to_string(getpid()) + "_" +
+                   std::to_string(rand()));
+    std::filesystem::create_directories(tmpdir);
+    auto cleanup =
+        folly::makeGuard([&]() { std::filesystem::remove_all(tmpdir); });
+
+    constexpr int64_t rows = 1000;
+    const auto path = (tmpdir / "seg_101.excr").string();
+    milvus::exec::DiskSlotFile file(101, path, rows, 256ULL << 20);
+    // The default file limit permits 983,279 slots. Their unused IDs must not
+    // consume the approximately 3.75 MiB of an eagerly populated free list.
+    EXPECT_LT(Access::FreeSlotBytes(file), 1024u);
+    RecordProperty("free_slot_bytes_before_put", Access::FreeSlotBytes(file));
+
+    auto result = MakeRandomBits(rows, 0.5, 42);
+    auto valid = MakeBits(rows, true);
+    file.Put("lazy_expr", rows, result, valid);
+    ASSERT_EQ(file.GetUsedCount(), 1u);
+    EXPECT_EQ(Access::SlotId(file, "lazy_expr"), 0u);
+    EXPECT_LT(Access::FreeSlotBytes(file), 1024u);
+    RecordProperty("free_slot_bytes_after_put", Access::FreeSlotBytes(file));
+    EXPECT_EQ(file.GetUsedBytes(), 337u);
+
+    milvus::TargetBitmap out_result;
+    milvus::TargetBitmap out_valid;
+    ASSERT_TRUE(file.Get("lazy_expr", rows, out_result, out_valid));
+    for (size_t i = 0; i < rows; ++i) {
+        ASSERT_EQ(out_result[i], result[i]);
+        ASSERT_TRUE(out_valid[i]);
+    }
+}
+
+TEST(DiskSlotFileTest, FailedWriteAndReplacementReuseSlots) {
+    using Access = milvus::exec::DiskSlotFileTestAccess;
+    auto tmpdir = std::filesystem::temp_directory_path() /
+                  ("disk_slot_reuse_" + std::to_string(getpid()) + "_" +
+                   std::to_string(rand()));
+    std::filesystem::create_directories(tmpdir);
+    auto cleanup =
+        folly::makeGuard([&]() { std::filesystem::remove_all(tmpdir); });
+
+    constexpr int64_t rows = 1000;
+    const auto path = (tmpdir / "seg_102.excr").string();
+    // Exactly three slots: a failed write must not lose one of them.
+    milvus::exec::DiskSlotFile file(102, path, rows, 64 + 3 * 273);
+    auto result = MakeBits(rows, true);
+    auto valid = MakeBits(rows, true);
+    file.Put("first", rows, result, valid);
+    ASSERT_EQ(Access::SlotId(file, "first"), 0u);
+
+    const int read_only_fd = ::open(path.c_str(), O_RDONLY);
+    ASSERT_GE(read_only_fd, 0);
+    {
+        const int original_fd = Access::SwapFileDescriptor(file, read_only_fd);
+        auto restore = folly::makeGuard([&]() {
+            Access::SwapFileDescriptor(file, original_fd);
+            ::close(read_only_fd);
+        });
+        file.Put("failed", rows, result, valid);
+        ASSERT_EQ(file.GetUsedCount(), 1u);
+    }
+
+    file.Put("second", rows, result, valid);
+    ASSERT_EQ(Access::SlotId(file, "second"), 1u);
+    file.Put("third", rows, result, valid);
+    ASSERT_EQ(Access::SlotId(file, "third"), 2u);
+    ASSERT_EQ(file.GetUsedCount(), 3u);
+
+    auto replacement = MakeBits(rows, false);
+    for (int i = 0; i < 10; ++i) {
+        file.Put("first", rows, replacement, valid);
+        ASSERT_EQ(Access::SlotId(file, "first"), 0u);
+    }
+    EXPECT_EQ(file.GetUsedCount(), 3u);
+    milvus::TargetBitmap out_result;
+    milvus::TargetBitmap out_valid;
+    for (const auto& signature : {"first", "second", "third"}) {
+        ASSERT_TRUE(file.Get(signature, rows, out_result, out_valid));
+        EXPECT_EQ(
+            out_result.count(),
+            signature == std::string("first") ? 0u : static_cast<size_t>(rows));
+        EXPECT_EQ(out_valid.count(), static_cast<size_t>(rows));
+    }
+    EXPECT_FALSE(file.Get("failed", rows, out_result, out_valid));
+}
 
 TEST(DiskSlotFileTest, PutGetBasic) {
     // Write a 1M-row bitset + read back, bit-level verify.
@@ -2071,7 +3784,7 @@ TEST(ExprResCacheManagerV2Test, MemoryModePutGet) {
     ExprResCacheManager::SetEnabled(false);
 }
 
-TEST(ExprResCacheManagerV2Test, MemoryModeActiveCountRefreshesSnapshot) {
+TEST(ExprResCacheManagerV2Test, MemoryModeKeepsNewestActiveCountSnapshot) {
     auto& mgr = ExprResCacheManager::Instance();
     ExprResCacheManager::SetEnabled(true);
     mgr.Clear();
@@ -2106,6 +3819,16 @@ TEST(ExprResCacheManagerV2Test, MemoryModeActiveCountRefreshesSnapshot) {
     ASSERT_TRUE(mgr.Get(k, got));
     ASSERT_EQ(got.result->size(), 256u);
     ASSERT_TRUE((*got.result)[0]);
+
+    // A late result from the older snapshot must not move the cache backward.
+    mgr.Put(k, v1);
+    got.active_count = 256;
+    ASSERT_TRUE(mgr.Get(k, got));
+    ASSERT_TRUE((*got.result)[0]);
+
+    got.active_count = 128;
+    ASSERT_FALSE(mgr.Get(k, got));
+    ASSERT_EQ(mgr.GetEntryCount(), 1u);
 
     mgr.Clear();
     ExprResCacheManager::SetEnabled(false);
@@ -2190,23 +3913,32 @@ TEST(ExprResCacheManagerV2Test, DiskModeFrequencyAdmission) {
     cfg.admission_threshold = 2;
     mgr.SetConfig(cfg);
 
-    ExprResCacheManager::Key k{250, "disk_freq_sig"};
+    ExprResCacheManager::Key segment_a{250, "disk_freq_sig"};
+    ExprResCacheManager::Key segment_b{251, "disk_freq_sig"};
     ExprResCacheManager::Value v;
     v.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
     v.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
     v.active_count = 128;
     v.eval_duration_us = 0;
 
-    mgr.Put(k, v);
+    mgr.Put(segment_a, v);
+    mgr.Put(segment_b, v);
     ExprResCacheManager::Value got;
     got.active_count = 128;
-    ASSERT_FALSE(mgr.Get(k, got));
-    ASSERT_FALSE(std::filesystem::exists(tmpdir / "seg_250.cache"));
-
-    mgr.Put(k, v);
+    ASSERT_FALSE(mgr.Get(segment_a, got));
     got.active_count = 128;
-    ASSERT_TRUE(mgr.Get(k, got));
+    ASSERT_FALSE(mgr.Get(segment_b, got));
+    ASSERT_FALSE(std::filesystem::exists(tmpdir / "seg_250.cache"));
+    ASSERT_FALSE(std::filesystem::exists(tmpdir / "seg_251.cache"));
+
+    mgr.Put(segment_a, v);
+    mgr.Put(segment_b, v);
+    got.active_count = 128;
+    ASSERT_TRUE(mgr.Get(segment_a, got));
+    got.active_count = 128;
+    ASSERT_TRUE(mgr.Get(segment_b, got));
     ASSERT_TRUE(std::filesystem::exists(tmpdir / "seg_250.cache"));
+    ASSERT_TRUE(std::filesystem::exists(tmpdir / "seg_251.cache"));
 
     mgr.Clear();
     std::filesystem::remove_all(tmpdir);
@@ -2263,6 +3995,166 @@ TEST(ExprResCacheManagerV2Test, DiskModeEraseSegment) {
     mgr.Clear();
     std::filesystem::remove_all(tmpdir);
     ExprResCacheManager::SetEnabled(false);
+}
+
+class DiskCacheRegistrationTest : public ::testing::Test {
+ protected:
+    using Peer = milvus::exec::ExprCacheTestPeer;
+    using Stage = Peer::DiskPutStage;
+
+    void
+    SetUp() override {
+        ExprResCacheManager::SetEnabled(false);
+        manager.Clear();
+        directory = std::filesystem::temp_directory_path() /
+                    ("expr_cache_disk_registration_" +
+                     std::to_string(getpid()) + "_" + std::to_string(rand()));
+        milvus::exec::CacheConfig config;
+        config.mode = milvus::exec::CacheMode::Disk;
+        config.disk_base_path = directory.string();
+        config.disk_max_bytes = 600;  // One used file fits, two do not.
+        config.disk_max_file_size = 1024;
+        config.disk_min_eval_duration_us = 0;
+        config.admission_threshold = 1;
+        ASSERT_TRUE(manager.SetConfig(config));
+        ExprResCacheManager::SetEnabled(true);
+        value.result = std::make_shared<milvus::TargetBitmap>(MakeBits(1024));
+        value.valid_result =
+            std::make_shared<milvus::TargetBitmap>(MakeBits(1024));
+        value.active_count = 1024;
+    }
+
+    void
+    TearDown() override {
+        manager.Clear();
+        ExprResCacheManager::SetEnabled(false);
+        std::filesystem::remove_all(directory);
+    }
+
+    void
+    ExpectHit(const ExprResCacheManager::Key& key) {
+        ExprResCacheManager::Value got;
+        got.active_count = value.active_count;
+        ASSERT_TRUE(manager.Get(key, got));
+        AssertBitsEqual(*got.result, *value.result);
+        AssertBitsEqual(*got.valid_result, *value.valid_result);
+    }
+
+    void
+    ExpectRetryEvictsResident() {
+        manager.Put(candidate, value);
+        EXPECT_LE(manager.GetCurrentBytes(), 600u);
+        EXPECT_EQ(manager.GetEntryCount(), 1u);
+        EXPECT_FALSE(std::filesystem::exists(directory / "seg_530.cache"));
+        EXPECT_TRUE(std::filesystem::exists(directory / "seg_531.cache"));
+        Peer::AssertDiskState(manager, 1);
+        ExprResCacheManager::Value got;
+        got.active_count = value.active_count;
+        EXPECT_FALSE(manager.Get(resident, got));
+        ExpectHit(candidate);
+    }
+
+    ExprResCacheManager& manager = ExprResCacheManager::Instance();
+    std::filesystem::path directory;
+    ExprResCacheManager::Value value;
+    const ExprResCacheManager::Key resident{530, "resident"};
+    const ExprResCacheManager::Key candidate{531, "candidate"};
+};
+
+class DiskCacheRegistrationFailureTest
+    : public DiskCacheRegistrationTest,
+      public ::testing::WithParamInterface<
+          milvus::exec::ExprCacheTestPeer::DiskPutStage> {};
+
+TEST_P(DiskCacheRegistrationFailureTest, FailureLeavesNoFileAndRetryCanEvict) {
+    manager.Put(resident, value);
+    const auto bytes_before = manager.GetCurrentBytes();
+    ASSERT_EQ(bytes_before, 337u);
+    int injected = 0;
+    EXPECT_FALSE(Peer::Put(manager, candidate, value, [&](Stage stage) {
+        if (stage == Stage::FileCreate) {
+            EXPECT_TRUE(
+                Peer::IsDiskSegmentRegistered(manager, candidate.segment_id));
+        }
+        if (stage == GetParam()) {
+            ++injected;
+            throw std::bad_alloc();
+        }
+    }));
+    ASSERT_EQ(injected, 1);
+    EXPECT_FALSE(std::filesystem::exists(directory / "seg_531.cache"));
+    EXPECT_EQ(manager.GetCurrentBytes(), bytes_before);
+    EXPECT_EQ(manager.GetEntryCount(), 1u);
+    Peer::AssertDiskState(manager, 1);
+    ExpectHit(resident);
+    ExpectRetryEvictsResident();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DiskPutStages,
+    DiskCacheRegistrationFailureTest,
+    ::testing::Values(
+        milvus::exec::ExprCacheTestPeer::DiskPutStage::ClockAppend,
+        milvus::exec::ExprCacheTestPeer::DiskPutStage::ClockIndexInsert,
+        milvus::exec::ExprCacheTestPeer::DiskPutStage::ClockUsageInsert,
+        milvus::exec::ExprCacheTestPeer::DiskPutStage::FileCreate,
+        milvus::exec::ExprCacheTestPeer::DiskPutStage::FilePublish,
+        milvus::exec::ExprCacheTestPeer::DiskPutStage::SlotWrite,
+        milvus::exec::ExprCacheTestPeer::DiskPutStage::SlotWritten));
+
+TEST_F(DiskCacheRegistrationTest, ExistingFileSurvivesFailedPut) {
+    manager.Put(resident, value);
+    const ExprResCacheManager::Key another{resident.segment_id, "another"};
+    int injected = 0;
+    EXPECT_FALSE(Peer::Put(manager, another, value, [&](Stage stage) {
+        if (stage == Stage::SlotWrite) {
+            ++injected;
+            throw std::bad_alloc();
+        }
+    }));
+    ASSERT_EQ(injected, 1);
+    EXPECT_TRUE(std::filesystem::exists(directory / "seg_530.cache"));
+    EXPECT_EQ(manager.GetEntryCount(), 1u);
+    Peer::AssertDiskState(manager, 1);
+    ExpectHit(resident);
+    ExpectRetryEvictsResident();
+}
+
+TEST_F(DiskCacheRegistrationTest, OpenFailureLeavesNoRegistration) {
+    ASSERT_TRUE(std::filesystem::remove(directory));
+    manager.Put(candidate, value);
+    EXPECT_EQ(manager.GetCurrentBytes(), 0u);
+    EXPECT_EQ(manager.GetEntryCount(), 0u);
+    Peer::AssertDiskState(manager, 0);
+    std::filesystem::create_directories(directory);
+    manager.Put(candidate, value);
+    Peer::AssertDiskState(manager, 1);
+    ExpectHit(candidate);
+}
+
+TEST_F(DiskCacheRegistrationTest, WriteFailureRemovesNewFileAndRegistration) {
+    manager.Put(resident, value);
+    int injected = 0;
+    EXPECT_TRUE(Peer::Put(manager, candidate, value, [&](Stage stage) {
+        if (stage == Stage::SlotWrite) {
+            ++injected;
+            const int read_only_fd =
+                ::open((directory / "seg_531.cache").c_str(), O_RDONLY);
+            ASSERT_GE(read_only_fd, 0);
+            const int original_fd =
+                milvus::exec::DiskSlotFileTestAccess::SwapFileDescriptor(
+                    Peer::DiskFileDuringPut(manager, candidate.segment_id),
+                    read_only_fd);
+            ::close(original_fd);
+        }
+    }));
+    ASSERT_EQ(injected, 1);
+    EXPECT_FALSE(std::filesystem::exists(directory / "seg_531.cache"));
+    EXPECT_EQ(manager.GetEntryCount(), 1u);
+    EXPECT_EQ(manager.GetCurrentBytes(), 337u);
+    Peer::AssertDiskState(manager, 1);
+    ExpectHit(resident);
+    ExpectRetryEvictsResident();
 }
 
 TEST(ExprResCacheManagerV2Test, DiskModeGlobalCapacityEvictsSegments) {
@@ -2519,15 +4411,14 @@ TEST(ExprResCacheManagerV2Test, DiskModeLatencyFilter) {
     got.active_count = 128;
     ASSERT_TRUE(mgr.Get(k2, got));
 
-    // Existing same-row-count entry must be replaceable even if the recompute is
-    // below the current latency admission threshold.
+    // A cheap recompute is rejected even when the signature already exists.
     v.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128, false));
     v.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
     v.eval_duration_us = 1;
     mgr.Put(k2, v);
     got.active_count = 128;
     ASSERT_TRUE(mgr.Get(k2, got));
-    ASSERT_FALSE((*got.result)[0]);
+    ASSERT_TRUE((*got.result)[0]);
 
     // eval_duration_us=0 means skip cost check: admitted
     ExprResCacheManager::Key k3{500, "no_dur_disk_expr"};

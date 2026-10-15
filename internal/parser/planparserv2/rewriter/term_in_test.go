@@ -1,6 +1,7 @@
 package rewriter_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -447,6 +448,99 @@ func TestRewrite_And_In_Intersection(t *testing.T) {
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
 	require.Equal(t, 6, len(term.GetValues()))
+	require.Equal(t, []int64{5, 6, 7, 8, 9, 10}, []int64{
+		term.GetValues()[0].GetInt64Val(), term.GetValues()[1].GetInt64Val(), term.GetValues()[2].GetInt64Val(),
+		term.GetValues()[3].GetInt64Val(), term.GetValues()[4].GetInt64Val(), term.GetValues()[5].GetInt64Val(),
+	})
+}
+
+func TestRewrite_And_In_IntersectionScalarKinds(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+
+	stringExpr, err := parser.ParseExpr(helper, `VarCharField in ["c","a","b","b"] and VarCharField in ["d","b","a"]`, nil)
+	require.NoError(t, err)
+	stringTerm := stringExpr.GetTermExpr()
+	require.NotNil(t, stringTerm)
+	require.Equal(t, []string{"a", "b"}, []string{
+		stringTerm.GetValues()[0].GetStringVal(), stringTerm.GetValues()[1].GetStringVal(),
+	})
+
+	floatExpr, err := parser.ParseExpr(helper, `FloatField in [3.5,1.5,2.5,2.5] and FloatField in [4.5,3.5,2.5]`, nil)
+	require.NoError(t, err)
+	floatTerm := floatExpr.GetTermExpr()
+	require.NotNil(t, floatTerm)
+	require.Equal(t, []float64{2.5, 3.5}, []float64{
+		floatTerm.GetValues()[0].GetFloatVal(), floatTerm.GetValues()[1].GetFloatVal(),
+	})
+
+	threeExpr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4] and Int64Field in [2,3,4,5] and Int64Field in [3,4,6]`, nil)
+	require.NoError(t, err)
+	threeTerm := threeExpr.GetTermExpr()
+	require.NotNil(t, threeTerm)
+	require.Equal(t, []int64{3, 4}, []int64{
+		threeTerm.GetValues()[0].GetInt64Val(), threeTerm.GetValues()[1].GetInt64Val(),
+	})
+}
+
+func TestMergeNormalizedAnd_NaNTermFallsBack(t *testing.T) {
+	column := &planpb.ColumnInfo{FieldId: 104, DataType: schemapb.DataType_Double}
+	term := func(values ...float64) *planpb.Expr {
+		genericValues := make([]*planpb.GenericValue, 0, len(values))
+		for _, value := range values {
+			genericValues = append(genericValues, &planpb.GenericValue{
+				Val: &planpb.GenericValue_FloatVal{FloatVal: value},
+			})
+		}
+		return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+			ColumnInfo: column,
+			Values:     genericValues,
+		}}}
+	}
+
+	left := term(1, math.NaN())
+	right := term(1, math.NaN())
+	merged := rewriter.MergeNormalizedAnd(left, right).GetBinaryExpr()
+	require.NotNil(t, merged)
+	require.Same(t, left, merged.GetLeft())
+	require.Same(t, right, merged.GetRight())
+}
+
+func TestRewrite_NormalizesWrappedPredicates(t *testing.T) {
+	column := &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Int64}
+	term := func(values ...int64) *planpb.Expr {
+		genericValues := make([]*planpb.GenericValue, 0, len(values))
+		for _, value := range values {
+			genericValues = append(genericValues, &planpb.GenericValue{
+				Val: &planpb.GenericValue_Int64Val{Int64Val: value},
+			})
+		}
+		return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+			ColumnInfo: column,
+			Values:     genericValues,
+		}}}
+	}
+	values := func(expr *planpb.Expr) []int64 {
+		result := make([]int64, 0, len(expr.GetTermExpr().GetValues()))
+		for _, value := range expr.GetTermExpr().GetValues() {
+			result = append(result, value.GetInt64Val())
+		}
+		return result
+	}
+
+	randomSample := &planpb.Expr{Expr: &planpb.Expr_RandomSampleExpr{RandomSampleExpr: &planpb.RandomSampleExpr{
+		SampleFactor: 0.5,
+		Predicate:    term(3, 1, 2, 2),
+	}}}
+	randomSample = rewriter.RewriteExpr(randomSample)
+	require.Equal(t, []int64{1, 2, 3}, values(randomSample.GetRandomSampleExpr().GetPredicate()))
+
+	elementFilter := &planpb.Expr{Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: &planpb.ElementFilterExpr{
+		ElementExpr: term(6, 4, 5),
+		Predicate:   term(9, 7, 8),
+	}}}
+	elementFilter = rewriter.RewriteExpr(elementFilter)
+	require.Equal(t, []int64{4, 5, 6}, values(elementFilter.GetElementFilterExpr().GetElementExpr()))
+	require.Equal(t, []int64{7, 8, 9}, values(elementFilter.GetElementFilterExpr().GetPredicate()))
 }
 
 func TestRewrite_And_In_Intersection_Empty_ToFalse(t *testing.T) {
@@ -457,22 +551,23 @@ func TestRewrite_And_In_Intersection_Empty_ToFalse(t *testing.T) {
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
-func TestRewrite_And_In_And_NotEqual_Remove(t *testing.T) {
+func TestRewrite_And_In_And_NotEqual_RemovesExcludedValue(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field != 5`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
-	require.Equal(t, 9, len(term.GetValues()))
+	values := make([]int64, 0, len(term.GetValues()))
+	for _, value := range term.GetValues() {
+		values = append(values, value.GetInt64Val())
+	}
+	require.Equal(t, []int64{1, 2, 3, 4, 6, 7, 8, 9, 10}, values)
 }
 
-func TestRewrite_And_In_And_NotEqual_AllRemoved_ToFalse(t *testing.T) {
+func TestRewrite_And_In_And_NotEquals_AllExcluded_ToFalse(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// in [10 values] and != each of them → false
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field != 1 and Int64Field != 2 and Int64Field != 3 and Int64Field != 4 and Int64Field != 5 and Int64Field != 6 and Int64Field != 7 and Int64Field != 8 and Int64Field != 9 and Int64Field != 10`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
@@ -480,18 +575,14 @@ func TestRewrite_Or_In_Or_NotEqual_VInSet_ToTrue(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field != 5`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
-	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
-		"OR(IN, !=) tautology should be rewritten to AlwaysTrueExpr")
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr))
 }
 
-func TestRewrite_Or_In_Or_NotEqual_VarChar_Tautology(t *testing.T) {
+func TestRewrite_Or_In_Or_NotEqual_VarChar_ToTrue(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `VarCharField in ["", "a", "b"] or VarCharField != ""`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
-	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
-		"OR(IN, !=) tautology with VarChar should be rewritten to AlwaysTrueExpr")
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr))
 }
 
 func TestRewrite_Or_In_Or_NotEqual_Nullable_KeepsOriginalPredicate(t *testing.T) {
@@ -507,6 +598,21 @@ func TestRewrite_Or_In_Or_NotEqual_Nullable_KeepsOriginalPredicate(t *testing.T)
 		require.NotNil(t, expr.GetBinaryExpr(), "nullable OR(IN, !=) should keep OR predicate shape: %s", exprStr)
 		require.NotNil(t, findTermExpr(expr), "nullable OR(IN, !=) should keep IN term: %s", exprStr)
 		require.NotNil(t, findUnaryRangeExpr(expr, planpb.OpType_NotEqual), "nullable OR(IN, !=) should keep != predicate: %s", exprStr)
+	}
+}
+
+func TestRewrite_Or_In_Or_NotEqual_Nullable_MissDropsRedundantIn(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+	for _, filter := range []string{
+		`NullableInt64Field in [1,2] or NullableInt64Field != 3`,
+		`NullableVarCharField in ["a","b"] or NullableVarCharField != "c"`,
+	} {
+		expr, err := parser.ParseExpr(helper, filter, nil)
+		require.NoError(t, err, filter)
+		notEqual := expr.GetUnaryRangeExpr()
+		require.NotNil(t, notEqual, "removing a redundant IN must preserve NULL semantics: %s", filter)
+		require.Equal(t, planpb.OpType_NotEqual, notEqual.GetOp())
+		require.True(t, notEqual.GetColumnInfo().GetNullable())
 	}
 }
 
@@ -604,19 +710,26 @@ func TestRewrite_NullableContradictions_UnderNot_DoNotBecomeAlwaysTrue(t *testin
 	}
 }
 
-func TestRewrite_Or_In_Or_NotEqual_VNotInSet_ToNotEqual(t *testing.T) {
+func TestRewrite_Or_In_Or_NotEqual_VNotInSet_DropsRedundantIn(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field != 20`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
-	ure := expr.GetUnaryRangeExpr()
-	require.NotNil(t, ure)
-	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
-	require.Equal(t, int64(20), ure.GetValue().GetInt64Val())
+	notEqual := expr.GetUnaryRangeExpr()
+	require.NotNil(t, notEqual)
+	require.Equal(t, planpb.OpType_NotEqual, notEqual.GetOp())
+	require.Equal(t, int64(20), notEqual.GetValue().GetInt64Val())
 }
 
-// Test contradictory equals: (a == 1) AND (a == 2) → false
-// NOTE: This is a known limitation - currently NOT optimized
+func TestRewrite_Or_EqualsMergeToInThenDropRedundantIn(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `Int64Field == 1 or Int64Field == 2 or Int64Field != 3`, nil)
+	require.NoError(t, err)
+	notEqual := expr.GetUnaryRangeExpr()
+	require.NotNil(t, notEqual)
+	require.Equal(t, planpb.OpType_NotEqual, notEqual.GetOp())
+	require.Equal(t, int64(3), notEqual.GetValue().GetInt64Val())
+}
+
 func TestRewrite_And_Equal_And_Equal_Contradiction_CurrentLimitation(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field == 1 and Int64Field == 2`, nil)

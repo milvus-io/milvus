@@ -19,6 +19,8 @@ package segments
 import (
 	"context"
 
+	"github.com/apache/arrow/go/v17/arrow"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
@@ -121,6 +123,12 @@ type Segment interface {
 	// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
 	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
+	// RetrieveArrow is Retrieve with the Arrow transport: it returns the
+	// protobuf header and the user output columns as a separate Arrow record,
+	// which the caller owns and must Release after MaterializeArrowSelection
+	// has read it. Only reached when shouldUseArrowTransport says so; see
+	// retrieve.go.
+	RetrieveArrow(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, arrow.Record, error)
 	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)
 
 	// FlushData flushes data from segment memory directly to storage via C++ milvus-storage.

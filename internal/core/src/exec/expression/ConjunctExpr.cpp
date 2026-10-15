@@ -19,6 +19,7 @@
 #include <algorithm>
 
 #include "LikeConjunctExpr.h"
+#include "RawExprCacheAdapter.h"
 #include "UnaryExpr.h"
 #include "common/EasyAssert.h"
 #include "common/Tracer.h"
@@ -115,9 +116,16 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         std::vector<std::shared_ptr<PhyUnaryRangeFilterExpr>> ngram_exprs;
         if (!has_input_offset) {
             for (size_t idx : like_indices_) {
+                auto input = inputs_[idx];
+                if (auto cached =
+                        std::dynamic_pointer_cast<RawExprCacheAdapter>(input)) {
+                    input = cached->wrapped_expr();
+                }
                 auto unary_expr =
-                    std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(
-                        inputs_[idx]);
+                    std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(input);
+                if (unary_expr) {
+                    unary_expr->EnsureExecPathDetermined();
+                }
                 if (unary_expr && unary_expr->CanUseNgramIndex()) {
                     ngram_exprs.push_back(unary_expr);
                     batch_ngram_indices_.insert(idx);
@@ -128,11 +136,11 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // Create PhyLikeConjunctExpr and add to inputs_ if we have >= 2 eligible
         if (ngram_exprs.size() >= 2) {
             auto active_count = ngram_exprs[0]->GetActiveCount();
+            // The driver may have selected all-at-once execution before this
+            // runtime node exists. Inherit its inputs' effective batch size.
+            auto batch_size = ngram_exprs[0]->GetNextBatchSize();
             auto like_conjunct = std::make_shared<PhyLikeConjunctExpr>(
-                std::move(ngram_exprs),
-                op_ctx_,
-                active_count,
-                context.get_query_config()->get_expr_batch_size());
+                std::move(ngram_exprs), op_ctx_, active_count, batch_size);
             inputs_.push_back(like_conjunct);
         } else {
             batch_ngram_indices_.clear();

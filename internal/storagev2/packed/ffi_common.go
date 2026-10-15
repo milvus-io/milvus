@@ -203,9 +203,38 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyWriterFormat)
 	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
-	// No extfs.default.* properties here. Per-collection extfs properties
-	// (extfs.{collectionID}.*) are injected downstream via
-	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
+	// Store the External Table mode in the same properties map; it is consumed
+	// by InjectExternalSpecProperties once the collection is known.
+	externalMode := uint32(0)
+	if storageConfig.GetTalonEnableForExternalTable() {
+		externalMode = storageConfig.GetTalonMode()
+	}
+	keys = append(keys, "milvus.talon.external_mode")
+	values = append(values, strconv.FormatUint(uint64(externalMode), 10))
+	for _, property := range []struct {
+		key   string
+		value uint32
+	}{
+		{"fs.talon.mode", storageConfig.GetTalonMode()},
+		{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
+		{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
+		{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
+	} {
+		isMode := property.key == "fs.talon.mode"
+		if !isMode && property.value == 0 {
+			continue // Older StorageConfig messages use the storage defaults.
+		}
+		value := property.value
+		if isMode && storageConfig.GetStorageType() == "local" {
+			value = 0
+		}
+		keys = append(keys, property.key)
+		values = append(values, strconv.FormatUint(uint64(value), 10))
+	}
+	if coordinator := storageConfig.GetTalonCoordinator(); coordinator != "" {
+		keys = append(keys, "fs.talon.coordinator")
+		values = append(values, coordinator)
+	}
 
 	// Add extra kvs (override existing keys if present)
 	for k, v := range extraKVs {
@@ -223,32 +252,6 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		}
 	}
 
-	return makeProperties(keys, values)
-}
-
-// MakeOwnedProperties creates properties whose outer struct and contents live
-// in C memory, so they can be referenced by another C struct passed through cgo.
-// It adds no filesystem defaults. Call cleanup after the native caller finishes.
-func MakeOwnedProperties(kvs map[string]string) (*C.LoonProperties, func(), error) {
-	keys := make([]string, 0, len(kvs))
-	values := make([]string, 0, len(kvs))
-	for key, value := range kvs {
-		keys = append(keys, key)
-		values = append(values, value)
-	}
-	properties, err := makeProperties(keys, values)
-	if err != nil {
-		return nil, nil, err
-	}
-	owned := (*C.LoonProperties)(C.malloc(C.sizeof_LoonProperties))
-	*owned = *properties
-	return owned, func() {
-		FreeProperties(owned)
-		C.free(unsafe.Pointer(owned))
-	}, nil
-}
-
-func makeProperties(keys, values []string) (*C.LoonProperties, error) {
 	// Convert to C arrays
 	cKeys := make([]*C.char, len(keys))
 	cValues := make([]*C.char, len(values))
@@ -287,7 +290,7 @@ func makeProperties(keys, values []string) (*C.LoonProperties, error) {
 	return properties, nil
 }
 
-// FreeProperties releases the contents of a LoonProperties object, not its outer struct.
+// FreeProperties releases a C-allocated LoonProperties object.
 func FreeProperties(props *C.LoonProperties) {
 	if props != nil {
 		C.loon_properties_free(props)
@@ -473,7 +476,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// open transaction
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -528,7 +531,7 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 
 	// open transaction to get manifest
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -542,6 +545,10 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 	}
 	defer C.loon_manifest_destroy(cManifest)
 
+	return manifestLobFiles(cManifest), nil
+}
+
+func manifestLobFiles(cManifest *C.LoonManifest) []LobFileInfo {
 	// extract LOB files from manifest
 	numFiles := int(cManifest.lob_files.num_files)
 	lobFiles := make([]LobFileInfo, 0, numFiles)
@@ -560,5 +567,5 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 		}
 	}
 
-	return lobFiles, nil
+	return lobFiles
 }

@@ -278,7 +278,6 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
-	initcore.RegisterArrowIOThreadPoolWatchers(pt, "querynode")
 	pt.Watch(pt.QueryNodeCfg.StorageV2CellTargetSizeBytes.Key,
 		config.NewHandler("queryNode.segcore.storageV2.cellTargetSizeBytes", func(evt *config.Event) {
 			if !evt.HasUpdated {

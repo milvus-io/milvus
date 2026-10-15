@@ -41,6 +41,9 @@ type TaskNode interface {
 	ShardMgr() shardclient.ShardClientMgr
 	ChMgr() channelmgr.ChannelsMgr
 	TsoAllocator() TsoAllocator
+	ResolveRLSEnforcement(ctx context.Context, cache metacache.Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error)
+	CheckManageRLSPrivilege(ctx context.Context, metaCache metacache.Cache, req *milvuspb.AlterCollectionRequest, dbName, collectionName string) error
+	CheckClusterPrivilege(ctx context.Context, req interface{}, fullMethod string, objectPrivilege string) error
 }
 
 // QueryRunner executes a query task. Implemented by the proxy composition root;

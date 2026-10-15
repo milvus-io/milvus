@@ -1240,7 +1240,7 @@ func (s *ImportCheckerSuite) TestCheckUncommittedJob_NilFn_AutoCommitTrue() {
 // checkUncommittedJob before the ack callback transitions the job state is safe.
 // the commit hook is invoked once per tick; correctness against the resulting
 // duplicate broadcasts is guaranteed by the broadcaster's resource-key lock,
-// the ack callback's state guard, and HandleCommitVchannel's idempotency.
+// the completed callback's idempotency guard.
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_RepeatedTicks_Safe() {
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
 		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
@@ -1653,7 +1653,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryAssignsWithAlignedFileRows()
 // Gate: secondary path (Test Plan item 2)
 // ---------------------------------------------------------------------------
 
-// A secondary never allocates: it waits for the replicated ImportIDRange. Once
+// A secondary never allocates: it waits for the replicated UpdateImport. Once
 // the ack callback (simulated here via UpdateJobIDRanges) applies the primary's
 // ranges, the next tick passes the gate: Import tasks are created and the
 // ranges are stamped onto the task fileStats (ImportTaskV2 meta carries
@@ -1692,8 +1692,8 @@ func (s *ImportCheckerSuite) TestIDRangeGate_SecondaryWaitsThenProceeds() {
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType))))
 
-	// The replicated ImportIDRange ack applies the primary's ranges (what
-	// importIDRangeAckCallback does via UpdateJobIDRanges). Each range is sized to its
+	// The replicated UpdateImport ack applies the primary's ranges (what
+	// updateImportAckCallback does via UpdateJobIDRanges). Each range is sized to its
 	// file's exact row count.
 	ranges := []*commonpb.IDRange{
 		{Begin: 5000, End: 5100}, // file 1: 100 rows
@@ -1893,7 +1893,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_ExcludedJobsProceedWithoutHook() {
 // While the version gate is not yet satisfied (ImportEnableIDRangeMsg resolves to
 // "false": the default "auto" until the MixCoord confirmator flips it after every node
 // reaches the gate version), a ranged job must NOT enter AssigningIDRange or broadcast
-// the ImportIDRange V2 message. It proceeds straight to Importing with no ranges, so the
+// the UpdateImport V2 message. It proceeds straight to Importing with no ranges, so the
 // datanode falls back to the legacy local allocator -- the behavior every older streaming
 // node understands. This is what prevents the new-type panic during a rolling upgrade.
 func (s *ImportCheckerSuite) TestIDRangeGate_VersionGateOffUsesLegacyPath() {

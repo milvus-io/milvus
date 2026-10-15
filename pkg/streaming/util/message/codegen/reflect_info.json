@@ -127,11 +127,11 @@
         },
         {
             "MessageSpecializedType": {
-                "HeaderType": "messagespb.ImportIDRangeMessageHeader",
-                "BodyType": "messagespb.ImportIDRangeMessageBody"
+                "HeaderType": "messagespb.UpdateImportMessageHeader",
+                "BodyType": "messagespb.UpdateImportMessageBody"
             },
             "MessageTypeWithVersion": {
-                "MessageType": "MessageTypeImportIDRange",
+                "MessageType": "MessageTypeUpdateImport",
                 "Version": 2
             }
         },

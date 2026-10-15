@@ -62,7 +62,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -105,12 +104,13 @@ type meta struct {
 	// segmentManifestLocks serializes the full StorageV3 manifest commit for a
 	// segment. It must be acquired before segMu. Manifest I/O runs outside
 	// segMu; final full-record catalog and memory publication runs under segMu.
-	segmentManifestLocks *lock.KeyLock[int64]
-	copyResultLocksOnce  sync.Once
-	copyResultLocks      *lock.KeyLock[int64]
-	manifestReadOnce     sync.Once
-	manifestReadSlots    *semaphore.Weighted
-	dataViewManager      DataViewManager
+	segmentManifestLocks   *lock.KeyLock[int64]
+	copyResultLocksOnce    sync.Once
+	copyResultLocks        *lock.KeyLock[int64]
+	manifestCommitExecutor *manifestCommitExecutor
+	manifestReadOnce       sync.Once
+	manifestReadSlots      *semaphore.Weighted
+	dataViewManager        DataViewManager
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -168,17 +168,13 @@ type channelCPs struct {
 	lock.RWMutex
 	checkpoints  map[string]*msgpb.MsgPosition
 	channelLocks *lock.KeyLock[string]
-	cond         *syncutil.ContextCond
 }
 
 func newChannelCps() *channelCPs {
-	cp := &channelCPs{
+	return &channelCPs{
 		checkpoints:  make(map[string]*msgpb.MsgPosition),
 		channelLocks: lock.NewKeyLock[string](),
 	}
-	// use the same lock as channelCPs
-	cp.cond = syncutil.NewContextCond(&cp.RWMutex)
-	return cp
 }
 
 type segmentMetricStateChange map[string]map[string]map[string]map[string]map[string]int
@@ -277,6 +273,12 @@ func showCollectionIDs(ctx context.Context, broker broker.Broker) ([]int64, erro
 	return collectionIDs, nil
 }
 
+func (m *meta) closeManifestCommitExecutor() {
+	if m.manifestCommitExecutor != nil {
+		m.manifestCommitExecutor.close()
+	}
+}
+
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker) (*meta, error) {
 	// Fetch collection IDs first so both reloadFromKV and indexMeta can use them for per-collection loading.
@@ -298,7 +300,9 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
+	commitConcurrency := paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.GetAsInt()
 	mt := &meta{
+		manifestCommitExecutor:   newManifestCommitExecutor(commitConcurrency),
 		ctx:                      ctx,
 		catalog:                  catalog,
 		collections:              typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
@@ -311,6 +315,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		stagedSegmentToGroup:     make(map[int64]int64),
 		supersededSegmentToGroup: make(map[int64]int64),
 	}
+
+	initialized := false
+	defer func() {
+		if !initialized {
+			mt.closeManifestCommitExecutor()
+		}
+	}()
 
 	g, _ := errgroup.WithContext(ctx)
 
@@ -418,6 +429,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.stagedSegmentToGroup = stag
 	mt.supersededSegmentToGroup = sup
 
+	initialized = true
 	return mt, nil
 }
 
@@ -1404,77 +1416,84 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 	return true
 }
 
-func (u *l0ManifestUpdate) commitManifest() error {
-	if u.segment.GetManifestPath() == "" || u.manifestPath != "" || len(u.entries) == 0 {
+// submitManifest advances this segment's private snapshot only on confirmed
+// success. Cached revisions and empty updates complete inline without I/O.
+func (u *l0ManifestUpdate) submitManifest(ctx context.Context, io *packed.ManifestIOContext, complete func(error)) error {
+	if u.manifestPath != "" || len(u.entries) == 0 {
+		complete(updateManifestPathIfNewer(u.segment, u.manifestPath))
 		return nil
 	}
-	manifestPath, err := packed.AddDeltaLogsToManifestOverwrite(u.segment.GetManifestPath(), u.storageConfig, u.entries)
+	base, version, err := packed.UnmarshalManifestPath(u.segment.GetManifestPath())
 	if err != nil {
 		return err
 	}
-	u.manifestPath = manifestPath
-	return nil
+	return packed.SubmitManifestUpdates(ctx, io, base, version, u.storageConfig,
+		&packed.ManifestUpdates{DeltaLogs: u.entries}, func(result packed.ManifestUpdateResult, err error) {
+			if err == nil {
+				u.manifestPath = result.ManifestPath
+				err = updateManifestPathIfNewer(u.segment, u.manifestPath)
+			}
+			complete(err)
+		})
 }
 
-func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
-	updates = lo.Filter(updates, func(update *l0ManifestUpdate, _ int) bool {
-		return update.segment.GetManifestPath() != ""
-	})
-	if len(updates) == 0 {
-		return nil
-	}
-
+func commitL0ManifestUpdates(ctx context.Context, executor *manifestCommitExecutor, updates []*l0ManifestUpdate) error {
 	groups := make(map[int64][]*l0ManifestUpdate)
 	for _, update := range updates {
-		groups[update.segmentID] = append(groups[update.segmentID], update)
+		if update.segment.GetManifestPath() != "" {
+			groups[update.segmentID] = append(groups[update.segmentID], update)
+		}
 	}
-
-	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
-	if poolSize < 1 {
-		poolSize = 1
+	if len(groups) == 0 {
+		return nil
 	}
-	if poolSize > len(groups) {
-		poolSize = len(groups)
+	io, releaseIO, err := executor.acquire(ctx)
+	if err != nil {
+		return err
 	}
+	defer releaseIO()
 
-	pool := conc.NewPool[struct{}](poolSize)
-	defer pool.Release()
-
-	futures := make([]*conc.Future[struct{}], 0, len(groups))
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// Each segment has at most one outstanding commit. A completion makes its
+	// remaining updates ready for the caller to submit, never the callback.
+	// One buffered slot per group lets callbacks finish even during admission.
+	ready := make(chan []*l0ManifestUpdate, len(groups))
 	for _, group := range groups {
-		group := group
-		futures = append(futures, pool.Submit(func() (struct{}, error) {
-			return struct{}{}, commitL0ManifestUpdateGroup(group)
-		}))
+		ready <- group
 	}
-	err := conc.BlockOnAll(futures...)
+	var failed sync.Once
+	var firstErr error
+	for remaining := len(groups); remaining > 0; {
+		group := <-ready
+		if len(group) == 0 || workCtx.Err() != nil {
+			remaining--
+			continue
+		}
+		complete := func(err error) {
+			if err != nil {
+				failed.Do(func() {
+					firstErr = err
+					cancel()
+				})
+			}
+			ready <- group[1:]
+		}
+		if err := group[0].submitManifest(workCtx, io, complete); err != nil {
+			complete(err) // Rejection has no callback.
+		}
+	}
+	// All accepted callbacks have finished before shared retry caches are updated
+	// or the caller can release its segment locks, including on partial failure.
 	for _, update := range updates {
 		if update.committedV3Manifests != nil && update.manifestPath != "" {
 			update.committedV3Manifests[update.segmentID] = update.manifestPath
 		}
 	}
-	return err
-}
-
-func commitL0ManifestUpdateGroup(updates []*l0ManifestUpdate) error {
-	for _, update := range updates {
-		if update.manifestPath != "" {
-			if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
-				return err
-			}
-			continue
-		}
-		if len(update.entries) == 0 {
-			continue
-		}
-		if err := update.commitManifest(); err != nil {
-			return err
-		}
-		if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
-			return err
-		}
+	if firstErr != nil {
+		return firstErr
 	}
-	return nil
+	return ctx.Err()
 }
 
 func (u *l0ManifestUpdate) apply(modPack *updateSegmentPack) bool {
@@ -1755,15 +1774,21 @@ func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, newSchemaVe
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		for _, pos := range startPositions {
-			if len(pos.GetStartPosition().GetMsgID()) == 0 {
-				continue
-			}
 			s := modPack.Get(pos.GetSegmentID())
 			if s == nil {
 				continue
 			}
+			// L0 segments materialized from WALSummary have no physical WAL
+			// position. Their timestamp-only StartPosition is a valid delete
+			// retention boundary used by QueryCoord/delegators, not a WAL seek
+			// position. Dropping it would allow live L0 deletes to be evicted.
+			startPosition := pos.GetStartPosition()
+			if len(startPosition.GetMsgID()) == 0 &&
+				(s.GetLevel() != datapb.SegmentLevel_L0 || startPosition.GetTimestamp() == 0) {
+				continue
+			}
 
-			s.StartPosition = pos.GetStartPosition()
+			s.StartPosition = startPosition
 		}
 		return true
 	}
@@ -2059,19 +2084,9 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 					mlog.Int64("segmentID", segmentID),
 					mlog.Uint64("commitTs", ts),
 					mlog.Uint64("maxBinlogTimestampTo", maxTsTo))
-				// Fail-stop. Unreachable for a normal import: its rows carry the
-				// Import message's timetick and the commit fence is a later
-				// timetick on the same WAL. Keep the error retriable so the
-				// flusher blocks on the fence instead of failing the job — a
-				// blocked pchannel surfaces as WAL lag, whereas a replica that
-				// commits what the source rejected can no longer be rolled back.
-				//
-				// Recovery from here is out of band. The job is already
-				// Committing by the time this runs -- commitImportV2AckCallback
-				// persists that state on the broadcast FastAck, independent of
-				// this fence -- and Committing cannot be failed by any writer
-				// (UnfailableJobStates). Validating earlier does not change that:
-				// the ack path flips the state regardless of what this check says.
+				// Preserve the commit fence and let the broadcast callback retry.
+				// It must not publish segment visibility or complete the job
+				// with a timestamp preceding the imported rows.
 				return modPack.fail(merr.WrapErrImportSysFailedMsg(
 					"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
 					ts, maxTsTo, segmentID))
@@ -2107,6 +2122,29 @@ func UpdateImportSegmentPosition(segmentID int64, minTs, maxTs uint64) UpdateOpe
 			MsgID:       nil,
 			Timestamp:   maxTs,
 		}
+		return true
+	}
+}
+
+// setSealedAtDataVersion binds the first publication in the same transaction as
+// SegmentMeta and DataView. The caller holds the DataView collection lock.
+func setSealedAtDataVersion(segmentID int64, version *viewpb.DataVersion) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		current := pack.meta.segments.GetSegment(segmentID)
+		if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
+			return pack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		if current.GetState() == commonpb.SegmentState_Flushed && current.GetSealedAtDataVersion() == nil {
+			return pack.fail(merr.WrapErrServiceInternalMsg("flushed segment %d has no publication version", segmentID))
+		}
+		segment := pack.Get(segmentID)
+		if segment == nil {
+			return pack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		if segment.GetSealedAtDataVersion() != nil && !proto.Equal(segment.GetSealedAtDataVersion(), version) {
+			return pack.fail(merr.WrapErrServiceInternalMsg("conflicting sealed DataVersion for segment %d", segmentID))
+		}
+		segment.SealedAtDataVersion = proto.Clone(version).(*viewpb.DataVersion)
 		return true
 	}
 }
@@ -2161,24 +2199,12 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	return nil
 }
 
-// UpdateSegmentsInfoAndDataView applies operators to SegmentMeta and commits
-// SegmentMeta together with the supplied DataView snapshot in one atomic
-// catalog txn (flush path). The DataView entry is the visibility marker of
-// the composite write (see DataViewEntry encoding): on the over-limit
-// fallback the DataView key lands in the final guarded txn after every
-// SegmentMeta op, so a visible DataView implies its SegmentMeta is committed.
-// dataView may be nil to commit SegmentMeta alone.
-// UpdateSegmentsInfoAndDataView returns whether the composite txn actually
-// ran. The DataView snapshot is persisted even when the SegmentMeta update
-// short-circuits (updatePack == nil, e.g. a replayed flush of an
-// already-flushed segment): the flush must synchronously advance
-// streaming_version. Catalog failures are retried in-function until the
-// version is durably published (catalog.Update is an idempotent KV
-// overwrite, so an in-function retry is safe; retrying the whole
-// SaveBinlogPaths from the caller would not be idempotent). Only when both
-// sides are empty (no SegmentMeta mutation and no DataView snapshot) does it
-// return (false, nil); the caller then discards any prepared in-memory
-// snapshot instead of committing a version that does not exist in etcd.
+// UpdateSegmentsInfoAndDataView persists SegmentMeta and its DataView before
+// publishing either in memory. On the over-limit fallback, binlogs land first;
+// the first-publication binding and DataView commit together in the final txn.
+// dataView may be nil to commit SegmentMeta alone. A supplied DataView is saved
+// even without SegmentMeta mutations; (false, nil) means both are absent.
+// Catalog retries overwrite the same actions until success or cancellation.
 func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
@@ -2216,8 +2242,7 @@ func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 	}
 	// The flush publish must keep retrying: catalog.Update is an idempotent
 	// overwrite of the same actions, so an in-function retry converges to a
-	// durable streaming_version without replaying caller-side effects
-	// (retrying SaveBinlogPaths from the caller is not idempotent).
+	// durable streaming_version without replaying caller-side effects.
 	// retry.Do short-circuits InputError-typed errors unless an explicit
 	// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
 	if err := retry.Do(ctx, func() error {
@@ -2260,7 +2285,7 @@ func (m *meta) buildUpdateSegmentPack(ctx context.Context, operators []UpdateOpe
 			return nil, updatePack.err
 		}
 	}
-	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
+	if err := commitL0ManifestUpdates(ctx, m.manifestCommitExecutor, updatePack.l0ManifestUpdates); err != nil {
 		return nil, err
 	}
 	for _, update := range updatePack.l0ManifestUpdates {
@@ -3443,8 +3468,6 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		channel := pos.GetChannelName()
 		m.channelCPs.checkpoints[channel] = pos
 	}
-	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
-	m.channelCPs.cond.UnsafeBroadcast()
 	m.channelCPs.Unlock()
 	for _, pos := range toUpdates {
 		channel := pos.GetChannelName()
@@ -4279,22 +4302,4 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 	}
 
 	return nil
-}
-
-// WatchChannelCheckpoint waits until the checkpoint of the specified channel
-// reaches or exceeds the target timestamp. Used for TruncateCollection.
-func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targetTs uint64) error {
-	m.channelCPs.cond.L.Lock()
-
-	for {
-		cp, ok := m.channelCPs.checkpoints[vChannel]
-		if ok && cp != nil && cp.GetTimestamp() >= targetTs {
-			m.channelCPs.cond.L.Unlock()
-			return nil
-		}
-
-		if err := m.channelCPs.cond.Wait(ctx); err != nil {
-			return err
-		}
-	}
 }

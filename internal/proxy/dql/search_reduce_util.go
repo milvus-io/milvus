@@ -11,10 +11,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -520,7 +520,9 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 		// for results of each subSearchResultData, storing the start offset of each query of nq queries
 		subSearchNqOffset = make([][]int64, subSearchNum)
 	)
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, subSearchNum)
 	for i := 0; i < subSearchNum; i++ {
+		idxComputers[i] = typeutil.NewFieldDataIdxComputer(subSearchResultData[i].GetFieldsData())
 		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
 		for j := int64(1); j < nq; j++ {
 			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
@@ -547,6 +549,12 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 				acceptedRows = append(acceptedRows, reduce.RowRef{ResultIdx: subIdx, RowIdx: innerIdx})
 				typeutil.AppendPKs(ret.Results.Ids, pk)
 				ret.Results.Scores = append(ret.Results.Scores, score)
+				if len(ret.Results.FieldsData) > 0 {
+					// Keep output fields aligned with the concatenated IDs for
+					// reranking and assembly when hybrid search skips requery.
+					fieldIdxs := idxComputers[subIdx].Compute(innerIdx)
+					typeutil.AppendFieldData(ret.Results.FieldsData, subData.GetFieldsData(), innerIdx, fieldIdxs...)
+				}
 
 				// Handle ElementIndices if present
 				if subData.ElementIndices != nil {
@@ -840,9 +848,8 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 			results = append(results, partialSearchResult.ResultData)
 		} else if partialSearchResult.SlicedBlob != nil {
 			var partialResultData schemapb.SearchResultData
-			// fastpb: hand-written decoder for the search reduce hot path
-			// (wire-equivalent to proto.Unmarshal, ~2x varchar / ~6x vector).
-			err := fastpb.UnmarshalSearchResultData(partialSearchResult.SlicedBlob, &partialResultData)
+			// Decode with the configured fast or standard protobuf decoder.
+			err := resource.UnmarshalSearchResultData(partialSearchResult.SlicedBlob, &partialResultData)
 			if err != nil {
 				return nil, err
 			}

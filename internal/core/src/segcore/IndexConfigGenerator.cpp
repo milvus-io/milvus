@@ -129,6 +129,11 @@ VecIndexConfig::GetBuildBaseParams(DataType data_type) const {
     }
 }
 
+const knowhere::Json&
+VecIndexConfig::GetSearchBaseParams() const noexcept {
+    return search_params_;
+}
+
 SearchInfo
 VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) const {
     SearchInfo searchParam(searchInfo);
@@ -138,6 +143,11 @@ VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) const {
         if (searchInfo.search_params_.contains(key)) {
             searchParam.search_params_[key] = searchInfo.search_params_[key];
         }
+    }
+
+    if (searchInfo.search_params_.contains("skip_refine")) {
+        searchParam.search_params_["skip_refine"] =
+            searchInfo.search_params_["skip_refine"];
     }
 
     if (metric_type_ == knowhere::metric::BM25) {

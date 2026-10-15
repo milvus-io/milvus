@@ -81,8 +81,8 @@ var (
 	RegisterCommitImportV2AckCallback   = registerMessageAckCallback[*message.CommitImportMessageHeader, *message.CommitImportMessageBody]
 	RegisterRollbackImportV2AckCallback = registerMessageAckCallback[*message.RollbackImportMessageHeader, *message.RollbackImportMessageBody]
 
-	// Import ID range (two-phase ID range assignment)
-	RegisterImportIDRangeV2AckCallback = registerMessageAckCallback[*message.ImportIDRangeMessageHeader, *message.ImportIDRangeMessageBody]
+	// Update import (two-phase ID range assignment)
+	RegisterUpdateImportV2AckCallback = registerMessageAckCallback[*message.UpdateImportMessageHeader, *message.UpdateImportMessageBody]
 )
 
 // resetMessageAckCallbacks resets the message ack callbacks.
@@ -156,7 +156,7 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeCommitImportV2:   syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeRollbackImportV2: syncutil.NewFuture[messageInnerAckCallback](),
 
-		// Import ID range (two-phase ID range assignment)
-		message.MessageTypeImportIDRangeV2: syncutil.NewFuture[messageInnerAckCallback](),
+		// Update import (two-phase ID range assignment)
+		message.MessageTypeUpdateImportV2: syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

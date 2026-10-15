@@ -23,6 +23,7 @@
 
 #include <roaring/roaring.h>
 #include <roaring/roaring.hh>
+#include <roaring/bitset_util.h>
 #include <roaring/containers/bitset.h>
 #include <roaring/containers/containers.h>
 #include <roaring/roaring_array.h>
@@ -36,27 +37,36 @@ namespace exec {
 // [result_bit_count (4B)] [valid_bit_count (4B)] [payload...]
 // valid_bit_count high bit = kValidAllOnesMask means valid is all-ones (not in payload).
 //
-// For LZ4/Raw: payload = LZ4-compressed or raw bytes of result (+ valid if not all-ones).
-// For Roaring/RoaringInv: payload = [result_roaring_size (4B)][result_roaring][valid_roaring]
-//   (valid_roaring is absent if valid is all-ones)
+// Raw: [raw result][raw valid, unless all-ones].
+// Independent: [result codec (1B)][valid codec (1B)][result size (4B)]
+//              [encoded result][encoded valid, unless all-ones].
 
 constexpr size_t kHeaderSize = sizeof(uint32_t) * 2;
+constexpr size_t kEncodingHeaderSize = 2 + sizeof(uint32_t);
 
 // Density thresholds for auto-selection
 constexpr double kRoaringDensityMax = 0.03;     // <= 3%  → Roaring
 constexpr double kRoaringInvDensityMin = 0.97;  // >= 97% → invert + Roaring
-constexpr double kRawDensityMin = 0.30;         // 30%-70% → Raw
-constexpr double kRawDensityMax = 0.70;
 
 // ---- Roaring V2 zero-copy encode ----
 
 std::vector<char>
-CacheCompressor::CompressRoaring(const TargetBitmap& bset) {
+CacheCompressor::CompressRoaring(const TargetBitmap& bset, bool inverted) {
     using namespace roaring::internal;
 
     const uint64_t* words = reinterpret_cast<const uint64_t*>(bset.data());
     size_t total_bits = bset.size();
     size_t total_words = bset.size_in_bytes() / 8;
+
+    // Invert while encoding instead of allocating another full bitmap. The
+    // final word may contain padding bits, which must never enter Roaring.
+    auto load_word = [&](size_t w) {
+        uint64_t word = inverted ? ~words[w] : words[w];
+        if (w + 1 == total_words && total_bits % 64 != 0) {
+            word &= (uint64_t{1} << (total_bits % 64)) - 1;
+        }
+        return word;
+    };
 
     size_t num_containers = (total_bits + 65535) / 65536;
     constexpr size_t WORDS_PER_CONTAINER = 1024;
@@ -76,16 +86,20 @@ CacheCompressor::CompressRoaring(const TargetBitmap& bset) {
 
         int32_t popcount = 0;
         for (size_t w = word_start; w < word_end; ++w) {
-            popcount += __builtin_popcountll(words[w]);
+            popcount += __builtin_popcountll(load_word(w));
         }
 
         if (popcount == 0) {
             continue;
         }
 
-        if (popcount >= ARRAY_THRESHOLD) {
+        // Roaring infers array versus bitset from cardinality when reading:
+        // exactly 4096 positions must use an array container.
+        if (popcount > ARRAY_THRESHOLD) {
             bitset_container_t* bc = bitset_container_create();
-            std::memcpy(bc->words, words + word_start, chunk_words * 8);
+            for (size_t w = word_start; w < word_end; ++w) {
+                bc->words[w - word_start] = load_word(w);
+            }
             if (chunk_words < WORDS_PER_CONTAINER) {
                 std::memset(bc->words + chunk_words,
                             0,
@@ -100,7 +114,7 @@ CacheCompressor::CompressRoaring(const TargetBitmap& bset) {
             array_container_t* ac =
                 array_container_create_given_capacity(popcount);
             for (size_t w = word_start; w < word_end; ++w) {
-                uint64_t word = words[w];
+                uint64_t word = load_word(w);
                 while (word != 0) {
                     ac->array[ac->cardinality++] = static_cast<uint16_t>(
                         (w - word_start) * 64 + __builtin_ctzll(word));
@@ -130,6 +144,8 @@ CacheCompressor::DecompressRoaring(const char* data,
                                    uint32_t data_len,
                                    uint32_t num_bits,
                                    TargetBitmap& out) {
+    using namespace roaring::internal;
+
     std::unique_ptr<roaring_bitmap_t, decltype(&roaring_bitmap_free)> r(
         roaring_bitmap_deserialize_safe(data, data_len), roaring_bitmap_free);
     if (!r) {
@@ -138,18 +154,56 @@ CacheCompressor::DecompressRoaring(const char* data,
     }
 
     TargetBitmap result(num_bits, false);
-    uint64_t card = roaring_bitmap_get_cardinality(r.get());
-    if (card > 0) {
-        // Extract all set-bit positions and set them in dense bitset
-        std::vector<uint32_t> positions(card);
-        roaring_bitmap_to_uint32_array(r.get(), positions.data());
-
-        uint64_t* words = reinterpret_cast<uint64_t*>(result.data());
-        for (uint32_t pos : positions) {
-            if (pos < num_bits) {
-                words[pos / 64] |= (uint64_t{1} << (pos % 64));
-            }
+    auto* words = reinterpret_cast<uint64_t*>(result.data());
+    const auto& containers = r->high_low_container;
+    // Write containers directly into the output. Expanding all set positions
+    // to uint32_t would require up to 32 times the bitmap's memory as scratch.
+    for (int32_t i = 0; i < containers.size; ++i) {
+        const size_t bit_start = size_t{containers.keys[i]} << 16;
+        if (bit_start >= num_bits) {
+            continue;
         }
+        const uint32_t bits = std::min<size_t>(65536, num_bits - bit_start);
+        auto* dst = words + bit_start / 64;
+        uint8_t type = containers.typecodes[i];
+        const auto* container =
+            container_unwrap_shared(containers.containers[i], &type);
+        switch (type) {
+            case BITSET_CONTAINER_TYPE: {
+                const auto* src = const_CAST_bitset(container);
+                std::memcpy(dst, src->words, ((bits + 63) / 64) * 8);
+                break;
+            }
+            case ARRAY_CONTAINER_TYPE: {
+                const auto* src = const_CAST_array(container);
+                for (int32_t j = 0; j < src->cardinality; ++j) {
+                    const uint32_t pos = src->array[j];
+                    if (pos < bits) {
+                        dst[pos / 64] |= uint64_t{1} << (pos % 64);
+                    }
+                }
+                break;
+            }
+            case RUN_CONTAINER_TYPE: {
+                const auto* src = const_CAST_run(container);
+                for (int32_t j = 0; j < src->n_runs; ++j) {
+                    const auto& run = src->runs[j];
+                    if (run.value < bits) {
+                        bitset_set_lenrange(
+                            dst,
+                            run.value,
+                            std::min<uint32_t>(run.length,
+                                               bits - run.value - 1));
+                    }
+                }
+                break;
+            }
+            default:
+                return false;
+        }
+    }
+    if (num_bits % 64 != 0) {
+        words[num_bits / 64] &= (uint64_t{1} << (num_bits % 64)) - 1;
     }
     out = std::move(result);
     return true;
@@ -164,18 +218,11 @@ CacheCompressor::Compress(const TargetBitmap& result,
     CompressedData out;
     const uint32_t result_bits = static_cast<uint32_t>(result.size());
     const uint32_t valid_bits = static_cast<uint32_t>(valid.size());
-    const uint32_t result_bytes = static_cast<uint32_t>(result.size_in_bytes());
-
-    // Single popcount for result (used for density-based compression selection)
-    size_t result_count =
-        (compression_enabled && result.size() > 0) ? result.count() : 0;
 
     // Detect valid all-ones: skip storing valid bytes if all set.
     // Uses all() which does word-level comparison with short-circuit (~5μs),
     // much faster than count() == size() which does full popcount (~15μs).
     bool valid_all_ones = valid.all();
-    const uint32_t valid_bytes =
-        valid_all_ones ? 0 : static_cast<uint32_t>(valid.size_in_bytes());
     const uint32_t valid_bits_header =
         valid_all_ones ? (valid_bits | kValidAllOnesMask) : valid_bits;
 
@@ -183,74 +230,48 @@ CacheCompressor::Compress(const TargetBitmap& result,
     std::memcpy(out.header, &result_bits, 4);
     std::memcpy(out.header + 4, &valid_bits_header, 4);
 
-    // Auto-select compression based on result density
-    if (compression_enabled && result.size() > 0) {
-        double density = static_cast<double>(result_count) / result.size();
-
-        // --- Roaring path (sparse ≤3%) ---
+    auto select_encoding = [compression_enabled](const TargetBitmap& bitmap) {
+        if (!compression_enabled || bitmap.size() == 0) {
+            return kCompTypeRaw;
+        }
+        const double density =
+            static_cast<double>(bitmap.count()) / bitmap.size();
         if (density <= kRoaringDensityMax) {
-            out.comp_type = kCompTypeRoaring;
-            auto result_roaring = CompressRoaring(result);
-            uint32_t rr_sz = static_cast<uint32_t>(result_roaring.size());
-
-            std::vector<char> valid_roaring;
-            uint32_t vr_sz = 0;
-            if (!valid_all_ones && valid.size() > 0) {
-                valid_roaring = CompressRoaring(valid);
-                vr_sz = static_cast<uint32_t>(valid_roaring.size());
-            }
-            out.payload.resize(4 + rr_sz + vr_sz);
-            std::memcpy(out.payload.data(), &rr_sz, 4);
-            std::memcpy(out.payload.data() + 4, result_roaring.data(), rr_sz);
-            if (vr_sz > 0) {
-                std::memcpy(out.payload.data() + 4 + rr_sz,
-                            valid_roaring.data(),
-                            vr_sz);
-            }
-            return out;
+            return kCompTypeRoaring;
         }
-
-        // --- Inverted Roaring path (dense ≥97%) ---
         if (density >= kRoaringInvDensityMin) {
-            out.comp_type = kCompTypeRoaringInv;
-            TargetBitmap inverted(result.size());
-            inverted.set();
-            inverted -= result;
-            auto result_roaring = CompressRoaring(inverted);
-            uint32_t rr_sz = static_cast<uint32_t>(result_roaring.size());
-
-            std::vector<char> valid_roaring;
-            uint32_t vr_sz = 0;
-            if (!valid_all_ones && valid.size() > 0) {
-                valid_roaring = CompressRoaring(valid);
-                vr_sz = static_cast<uint32_t>(valid_roaring.size());
-            }
-            out.payload.resize(4 + rr_sz + vr_sz);
-            std::memcpy(out.payload.data(), &rr_sz, 4);
-            std::memcpy(out.payload.data() + 4, result_roaring.data(), rr_sz);
-            if (vr_sz > 0) {
-                std::memcpy(out.payload.data() + 4 + rr_sz,
-                            valid_roaring.data(),
-                            vr_sz);
-            }
-            return out;
+            return kCompTypeRoaringInv;
         }
+        return kCompTypeRaw;
+    };
+    out.result_comp_type = select_encoding(result);
+    out.valid_comp_type =
+        valid_all_ones ? kCompTypeRaw : select_encoding(valid);
+    out.comp_type = out.result_comp_type == kCompTypeRaw &&
+                            out.valid_comp_type == kCompTypeRaw
+                        ? kCompTypeRaw
+                        : kCompTypeIndependent;
 
-        // Mid-density (3%-97%): fall through to zero-copy Raw
+    if (out.result_comp_type == kCompTypeRaw) {
+        out.raw_result_ptr = reinterpret_cast<const char*>(result.data());
+        out.raw_result_size = result.size_in_bytes();
+    } else {
+        out.result_payload = CompressRoaring(
+            result, out.result_comp_type == kCompTypeRoaringInv);
     }
-
-    // --- Raw path: zero-copy via pointers ---
-    out.comp_type = kCompTypeRaw;
-    out.raw_result_ptr = reinterpret_cast<const char*>(result.data());
-    out.raw_result_size = result_bytes;
-    if (!valid_all_ones && valid.size() > 0) {
-        out.raw_valid_ptr = reinterpret_cast<const char*>(valid.data());
-        out.raw_valid_size = valid_bytes;
+    if (!valid_all_ones) {
+        if (out.valid_comp_type == kCompTypeRaw) {
+            out.raw_valid_ptr = reinterpret_cast<const char*>(valid.data());
+            out.raw_valid_size = valid.size_in_bytes();
+        } else {
+            out.valid_payload = CompressRoaring(
+                valid, out.valid_comp_type == kCompTypeRoaringInv);
+        }
     }
     return out;
 }
 
-// Backward-compat wrapper: flatten CompressedData into a single buffer
+// Flatten both bitmap representations without copying Raw bytes into scratch.
 std::vector<char>
 CacheCompressor::Compress(const TargetBitmap& result,
                           const TargetBitmap& valid,
@@ -260,19 +281,52 @@ CacheCompressor::Compress(const TargetBitmap& result,
     out_comp_type = cd.comp_type;
     std::vector<char> buf(cd.total_size());
     std::memcpy(buf.data(), cd.header, 8);
-    if (cd.comp_type == kCompTypeRaw) {
-        char* p = buf.data() + 8;
-        if (cd.raw_result_size > 0) {
-            std::memcpy(p, cd.raw_result_ptr, cd.raw_result_size);
-            p += cd.raw_result_size;
-        }
-        if (cd.raw_valid_size > 0) {
-            std::memcpy(p, cd.raw_valid_ptr, cd.raw_valid_size);
-        }
-    } else {
-        std::memcpy(buf.data() + 8, cd.payload.data(), cd.payload.size());
+    char* p = buf.data() + kHeaderSize;
+    if (cd.comp_type == kCompTypeIndependent) {
+        p[0] = static_cast<char>(cd.result_comp_type);
+        p[1] = static_cast<char>(cd.valid_comp_type);
+        const auto result_size = static_cast<uint32_t>(cd.result_size());
+        std::memcpy(p + 2, &result_size, sizeof(result_size));
+        p += kEncodingHeaderSize;
+    }
+    if (cd.result_size() > 0) {
+        std::memcpy(p, cd.result_data(), cd.result_size());
+        p += cd.result_size();
+    }
+    if (cd.valid_size() > 0) {
+        std::memcpy(p, cd.valid_data(), cd.valid_size());
     }
     return buf;
+}
+
+bool
+CacheCompressor::DecompressBitmap(const char* data,
+                                  uint32_t data_len,
+                                  uint32_t num_bits,
+                                  uint8_t comp_type,
+                                  TargetBitmap& out) {
+    if (comp_type == kCompTypeRaw) {
+        const size_t bytes = ((size_t{num_bits} + 63) / 64) * 8;
+        if (data_len != bytes) {
+            return false;
+        }
+        TargetBitmap result(num_bits, false);
+        if (bytes > 0) {
+            std::memcpy(result.data(), data, bytes);
+        }
+        out = std::move(result);
+        return true;
+    }
+    if (comp_type != kCompTypeRoaring && comp_type != kCompTypeRoaringInv) {
+        return false;
+    }
+    if (!DecompressRoaring(data, data_len, num_bits, out)) {
+        return false;
+    }
+    if (comp_type == kCompTypeRoaringInv) {
+        out.flip();
+    }
+    return true;
 }
 
 bool
@@ -295,58 +349,49 @@ CacheCompressor::Decompress(const char* data,
     bool valid_all_ones = (valid_bits_raw & kValidAllOnesMask) != 0;
     uint32_t valid_bits = valid_bits_raw & ~kValidAllOnesMask;
 
-    if (result_bits == 0 && valid_bits == 0) {
-        out_result = TargetBitmap(0);
-        out_valid = TargetBitmap(0);
-        return true;
-    }
-
     const char* payload = data + kHeaderSize;
     const uint32_t payload_len = data_len - kHeaderSize;
 
-    // --- Roaring / RoaringInv path ---
-    if (comp_type == kCompTypeRoaring || comp_type == kCompTypeRoaringInv) {
-        if (payload_len < 4) {
-            LOG_WARN("CacheCompressor::Decompress: roaring payload too short");
+    if (comp_type == kCompTypeIndependent) {
+        if (payload_len < kEncodingHeaderSize) {
             return false;
         }
-        uint32_t rr_sz = 0;
-        std::memcpy(&rr_sz, payload, 4);
-        if (rr_sz > payload_len - 4) {
-            LOG_WARN(
-                "CacheCompressor::Decompress: roaring result payload too short "
-                "(rr_sz={}, payload_len={})",
-                rr_sz,
-                payload_len);
+        const auto result_type = static_cast<uint8_t>(payload[0]);
+        const auto valid_type = static_cast<uint8_t>(payload[1]);
+        auto valid_encoding = [](uint8_t encoding) {
+            return encoding == kCompTypeRaw || encoding == kCompTypeRoaring ||
+                   encoding == kCompTypeRoaringInv;
+        };
+        if (!valid_encoding(result_type) || !valid_encoding(valid_type)) {
             return false;
         }
-
-        if (!DecompressRoaring(payload + 4, rr_sz, result_bits, out_result)) {
+        uint32_t result_size = 0;
+        std::memcpy(&result_size, payload + 2, sizeof(result_size));
+        if (result_size > payload_len - kEncodingHeaderSize) {
             return false;
         }
-
-        if (comp_type == kCompTypeRoaringInv) {
-            out_result.flip();
+        const uint32_t valid_size =
+            payload_len - kEncodingHeaderSize - result_size;
+        if (valid_all_ones && (valid_type != kCompTypeRaw || valid_size != 0)) {
+            return false;
         }
-
+        const char* result_data = payload + kEncodingHeaderSize;
+        if (!DecompressBitmap(result_data,
+                              result_size,
+                              result_bits,
+                              result_type,
+                              out_result)) {
+            return false;
+        }
         if (valid_all_ones) {
-            out_valid = TargetBitmap(valid_bits);
-            out_valid.set();
-        } else if (payload_len > 4 + rr_sz) {
-            if (!DecompressRoaring(payload + 4 + rr_sz,
-                                   payload_len - 4 - rr_sz,
-                                   valid_bits,
-                                   out_valid)) {
-                return false;
-            }
-        } else if (valid_bits > 0) {
-            LOG_WARN(
-                "CacheCompressor::Decompress: roaring valid payload missing");
-            return false;
-        } else {
-            out_valid = TargetBitmap(valid_bits, false);
+            out_valid = TargetBitmap(valid_bits, true);
+            return true;
         }
-        return true;
+        return DecompressBitmap(result_data + result_size,
+                                valid_size,
+                                valid_bits,
+                                valid_type,
+                                out_valid);
     }
 
     // --- Raw path ---

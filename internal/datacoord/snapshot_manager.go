@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -116,11 +117,12 @@ type SnapshotManager interface {
 	//   - collectionID: ID of the collection to snapshot
 	//   - name: Unique name for the snapshot (globally unique)
 	//   - description: Optional description of the snapshot
+	//   - positions: Acknowledged CreateSnapshot boundaries for the business VChannels
 	//
 	// Returns:
 	//   - snapshotID: Allocated snapshot ID (0 on error)
 	//   - error: If name already exists, allocation fails, or save fails
-	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64) (int64, error)
+	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64, positions []*msgpb.MsgPosition) (int64, error)
 
 	// DropSnapshot deletes an existing snapshot by name within a collection.
 	// It removes the snapshot from memory cache, etcd, and S3 storage.
@@ -436,6 +438,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	collectionID int64,
 	name, description string,
 	compactionProtectionSeconds int64,
+	positions []*msgpb.MsgPosition,
 ) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
 	sm.createSnapshotMu.Lock()
@@ -467,7 +470,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	}
 
 	// Generate snapshot data
-	snapshotData, err := sm.handler.GenSnapshot(ctx, collectionID)
+	snapshotData, err := sm.handler.GenSnapshot(ctx, collectionID, positions)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to generate snapshot", mlog.Err(err))
 		return 0, err

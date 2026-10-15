@@ -103,9 +103,6 @@ func TestStatsManager(t *testing.T) {
 	assert.Equal(t, uint64(600), m.pchannelStats["pchannel"].Insert.BinarySize)
 	assert.Equal(t, uint64(250), m.pchannelStats["pchannel2"].Insert.BinarySize)
 
-	m.UpdateOnSync(3, SyncOperationMetrics{BinLogCounterIncr: 100})
-	m.UpdateOnSync(1000, SyncOperationMetrics{BinLogCounterIncr: 100})
-
 	err = m.AllocRows(3, ModifiedMetrics{Rows: 400, BinarySize: 400})
 	assert.NoError(t, err)
 	stat = m.GetStatsOfSegment(3)
@@ -328,7 +325,6 @@ func TestStatsManagerRuntimeFlushSizeUnregisterAndModeCorrection(t *testing.T) {
 func TestConcurrentStasManager(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
-	params.Save(params.DataCoordCfg.SegmentMaxBinlogFileNumber.Key, "5")
 	params.Save(params.StreamingCfg.FlushMemoryThreshold.Key, "0.000003")
 	params.Save(params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.Key, "0.000002")
 	params.Save(params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.Key, "0.000001")
@@ -363,9 +359,6 @@ func TestConcurrentStasManager(t *testing.T) {
 		binarySize := 100 + rand.Int63n(100)
 		_ = m.AllocRows(segment.SegmentID, ModifiedMetrics{Rows: uint64(rows), BinarySize: uint64(binarySize)})
 
-		if rand.Int31n(2) > 0 {
-			m.UpdateOnSync(segment.SegmentID, SyncOperationMetrics{BinLogCounterIncr: 100})
-		}
 		return true
 	}
 

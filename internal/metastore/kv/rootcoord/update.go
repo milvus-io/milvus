@@ -26,17 +26,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Update applies a composite set of UpdateActions as a single write: each
+// Update applies a composite set of UpdateActions: each
 // action's Entry/Type pair is type-switched into the same kv encoding its
 // dedicated Catalog method uses, accumulated into a txn.Builder, which is
 // then committed via txn.Commit - atomically if the op count fits within
 // the store's txn op limit, else via the caller-ordered chunked fallback.
+// Collection drops first remove RLS principals by prefix; the collection key
+// remains as the visibility marker until the remaining commit succeeds.
 //
 // ts is unused: it is kept for interface parity with the legacy
 // CreateCollection/DropCollection methods, which also ignore ts since
 // kc.Txn is a plain TxnKV.
 func (kc *Catalog) Update(ctx context.Context, ts typeutil.Timestamp, actions ...metastore.UpdateAction) error {
 	b := txn.New()
+	var rlsPrincipalPrefixes []string
 	for _, action := range actions {
 		ce, ok := action.Entry.(metastore.CollectionEntry)
 		if !ok {
@@ -78,11 +81,17 @@ func (kc *Catalog) Update(ctx context.Context, ts typeutil.Timestamp, actions ..
 			for _, k := range delMetakeysSnap {
 				b.Remove(k)
 			}
+			rlsPrincipalPrefixes = append(rlsPrincipalPrefixes, BuildRLSPrincipalPrefix(coll.CollectionID))
 			b.CommitRemove(collectionKey)
 		default:
 			return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply action type %v to CollectionEntry", action.Type)
 		}
 	}
 
+	for _, prefix := range rlsPrincipalPrefixes {
+		if err := kc.Txn.RemoveWithPrefix(ctx, prefix); err != nil {
+			return merr.Wrapf(err, "failed to remove RLS principals with prefix %q", prefix)
+		}
+	}
 	return txn.Commit(ctx, kc.Txn, b)
 }

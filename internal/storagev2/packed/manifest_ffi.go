@@ -193,9 +193,9 @@ func CreateManifestForSegment(
 
 	// Begin transaction (read_version=0 for earliest, retry_limit=10)
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(0), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(0), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return "", merr.WrapErrStorage(err, "loon_transaction_begin failed")
+		return "", merr.WrapErrStorage(err, "loon_transaction_open failed")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
 

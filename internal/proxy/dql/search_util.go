@@ -719,7 +719,7 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 
 func GetPartitionIDs(ctx context.Context, metaCache Cache, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
 	for _, tag := range partitionNames {
-		if err := validatePartitionTag(tag, false); err != nil {
+		if err := ValidatePartitionTag(tag, false); err != nil {
 			return nil, err
 		}
 	}
@@ -1175,6 +1175,8 @@ func ConvertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		SubReqs:               nil,
 		FunctionScore:         req.FunctionScore,
 		FunctionChains:        req.GetFunctionChains(),
+		RlsPrincipal:          req.GetRlsPrincipal(),
+		SkipRls:               req.GetSkipRls(),
 	}
 
 	for _, sub := range req.GetRequests() {

@@ -198,6 +198,8 @@ type ImmutableMessage interface {
 type OwnedImmutableMessage interface {
 	Message() ImmutableMessage
 	Clone() RetainedImmutableMessage
+	// IsPoisoned reports whether any consumer failed to process the message.
+	IsPoisoned() bool
 	RegisterExclusiveCallback(callback func())
 	Release()
 }

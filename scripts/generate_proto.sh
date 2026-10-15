@@ -101,6 +101,7 @@ mkdir -p ./datapb
 mkdir -p ./querypb
 mkdir -p ./planpb
 mkdir -p ./workerpb
+mkdir -p ./pyudfpb
 mkdir -p ./messagespb
 mkdir -p ./streamingpb
 mkdir -p ./viewpb
@@ -127,6 +128,8 @@ ${protoc_opt} --go_out=paths=source_relative:./messagespb --go-grpc_out=require_
 ${protoc_opt} --go_out=paths=source_relative:./streamingpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./streamingpb streaming.proto || { echo 'generate streamingpb.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./viewpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./viewpb view.proto || { echo 'generate view.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./workerpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./workerpb worker.proto|| { echo 'generate worker.proto failed'; exit 1; }
+
+${protoc_opt} --go_out=paths=source_relative:./pyudfpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./pyudfpb pyudf.proto || { echo 'generate pyudf.proto failed'; exit 1; }
 
 ${protoc_opt} --proto_path=$ROOT_DIR/pkg/eventlog/ --go_out=paths=source_relative:../../pkg/eventlog/ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:../../pkg/eventlog/ event_log.proto || { echo 'generate event_log.proto failed'; exit 1; }
 ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/backend --go_out=paths=source_relative:../../cmd/tools/migration/backend/ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:../../cmd/tools/migration/backend backup_header.proto || { echo 'generate backup_header.proto failed'; exit 1; }

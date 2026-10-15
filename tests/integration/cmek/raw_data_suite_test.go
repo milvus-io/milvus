@@ -44,7 +44,6 @@ type rawDataSuite struct {
 	integration.MiniClusterSuite
 	dbName                 string
 	ezID                   int64
-	growingSource          bool
 	physicalIndexThreshold int
 }
 
@@ -53,22 +52,12 @@ func (s *rawDataSuite) setupRawData(storageVersion int64) {
 	s.WithMilvusConfig("common.storage.useLoonFFI", strconv.FormatBool(storageVersion == 3))
 	s.WithMilvusConfig("dataNode.storage.format", "parquet")
 	s.WithMilvusConfig("dataCoord.enableCompaction", "false")
-	s.WithMilvusConfig("common.storage.enableGrowingSourceFlush", strconv.FormatBool(s.growingSource))
 	indexThreshold := s.physicalIndexThreshold
 	if indexThreshold == 0 {
 		indexThreshold = 1024
 	}
 	s.WithMilvusConfig("indexCoord.segment.minSegmentNumRowsToEnableIndex", strconv.Itoa(indexThreshold))
 	s.WithMilvusConfig("queryNode.segcore.interimIndex.enableIndex", "false")
-	if s.growingSource {
-		// This fixture has one StreamingNode, so shutdown cannot migrate its channel.
-		s.WithMilvusConfig("queryNode.gracefulStopTimeout", "5")
-		// One 256-row batch also fills the WriteBuffer fallback used during recovery.
-		s.WithMilvusConfig("dataNode.segment.insertBufSize", "16384")
-		s.WithMilvusConfig("dataNode.segment.syncPeriod", "3600")
-		s.WithMilvusConfig("dataCoord.segment.maxIdleTime", "3600")
-		s.WithMilvusConfig("dataNode.memory.forceSyncEnable", "false")
-	}
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.scalarField", "sync")
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.vectorField", "sync")
 	s.SetupSuite()

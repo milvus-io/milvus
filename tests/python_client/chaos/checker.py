@@ -4,6 +4,7 @@ import math
 import os
 import random
 import re
+import tempfile
 import threading
 import time
 import unittest
@@ -3251,6 +3252,7 @@ class BulkInsertChecker(Checker):
 
     def prepare(self, data_size=100000):
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=self.schema,
             file_type=BulkFileType.NUMPY,
             remote_path="bulk_data",
@@ -3545,6 +3547,7 @@ class Import2PCChecker(Checker):
 
     def _write_import_files(self, rows):
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=self.schema,
             file_type=BulkFileType.PARQUET,
             remote_path=self.import_remote_path,
@@ -4202,10 +4205,11 @@ class NullVectorQueryChecker(Checker):
     field is non-null is collected; each query() call fetches those specific rows
     and asserts they are still non-null.
 
-    Avoids using 'vec_field is not null' as a server-side filter because Milvus
-    does not yet support IsNull/IsNotNull on vector fields.  Excludes dynamically-
-    added new_vec_* fields: segments sealed before those fields were added have
-    all-null values by design, so sampling those fields at init would yield no PKs.
+    Samples by reading vector output fields instead of using a server-side
+    'vec_field is not null' filter, so the checker keeps validating query
+    result materialization. Excludes dynamically-added new_vec_* fields:
+    segments sealed before those fields were added have all-null values by
+    design, so sampling those fields at init would yield no PKs.
     """
 
     def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):

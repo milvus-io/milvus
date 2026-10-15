@@ -92,6 +92,9 @@ BuildIndexInfoWithPluginContext() {
     proto::indexcgo::BuildIndexInfo build_index_info;
     build_index_info.mutable_field_schema()->set_data_type(
         proto::schema::DataType::Int64);
+    auto index_type = build_index_info.add_index_params();
+    index_type->set_key("index_type");
+    index_type->set_value("STL_SORT");
 
     auto storage_config = build_index_info.mutable_storage_config();
     storage_config->set_root_path(TestLocalPath);
@@ -141,8 +144,13 @@ TEST(CipherPluginContextTest, IndexApisUseContextWhenPresent) {
     ExpectMissingCipherPlugin(CreateIndex(&index, data, serialized.size()));
     EXPECT_EQ(index, nullptr);
 
+    std::unique_ptr<::ProtoLayout, decltype(&ReleaseProtoLayout)> result(
+        CreateProtoLayout(), ReleaseProtoLayout);
+    ASSERT_NE(result, nullptr);
     ExpectMissingCipherPlugin(
-        BuildJsonKeyIndex(nullptr, data, serialized.size()));
+        BuildJsonKeyIndex(result.get(), data, serialized.size()));
+    EXPECT_EQ(result->blob, nullptr);
+    EXPECT_EQ(result->size, 0);
 }
 
 TEST(CipherPluginContextTest, RegistersPluginAndReturnsOnlyIdentifiers) {
@@ -191,34 +199,26 @@ TEST(CipherPluginContextTest, WriterPreservesBinaryKeysAcrossStringBoundary) {
         auto encryptor =
             std::make_shared<testing::StrictMock<KeyOnlyEncryptor>>();
         cipher->encryptor = encryptor;
-        EXPECT_CALL(*encryptor, GetKey())
-            .Times(2)
-            .WillRepeatedly(testing::Return(key));
+        EXPECT_CALL(*encryptor, GetKey()).WillOnce(testing::Return(key));
 
-        auto context = loader.registerCipherPluginContext(17, 23, "ez-key");
-        for (const char* imported_key :
-             {static_cast<const char*>(nullptr), "ez-key"}) {
-            SCOPED_TRACE(imported_key == nullptr ? "registered" : "imported");
-            context->key = imported_key;
-            auto previous_updates = cipher->update_count;
-            char* encoded_key = nullptr;
-            char* metadata = nullptr;
-            auto status = GetEncParams(context.get(), &encoded_key, &metadata);
-            auto cleanup = folly::makeGuard([&] {
-                free(encoded_key);
-                free(metadata);
-                if (status.error_code != Success) {
-                    free(const_cast<char*>(status.error_msg));
-                }
-            });
-            ASSERT_EQ(status.error_code, Success);
-            ASSERT_NE(encoded_key, nullptr);
-            ASSERT_NE(metadata, nullptr);
-            EXPECT_EQ(arrow::util::base64_decode(encoded_key), key);
-            EXPECT_STREQ(metadata, "17_23_fixture-edek");
-            EXPECT_EQ(cipher->update_count,
-                      previous_updates + (imported_key != nullptr));
-        }
+        CPluginContext context{17, 23, "ez-key"};
+        auto previous_updates = cipher->update_count;
+        char* encoded_key = nullptr;
+        char* metadata = nullptr;
+        auto status = GetEncParams(&context, &encoded_key, &metadata);
+        auto cleanup = folly::makeGuard([&] {
+            free(encoded_key);
+            free(metadata);
+            if (status.error_code != Success) {
+                free(const_cast<char*>(status.error_msg));
+            }
+        });
+        ASSERT_EQ(status.error_code, Success);
+        ASSERT_NE(encoded_key, nullptr);
+        ASSERT_NE(metadata, nullptr);
+        EXPECT_EQ(arrow::util::base64_decode(encoded_key), key);
+        EXPECT_STREQ(metadata, "17_23_fixture-edek");
+        EXPECT_EQ(cipher->update_count, previous_updates + 1);
     }
 }
 
