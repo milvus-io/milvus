@@ -16,7 +16,7 @@ import (
 )
 
 func TestRunnerPreparationSurvivesInitCreatorCancellation(t *testing.T) {
-	mockey.PatchConvey("only the creator's wait is cancelled", t, func() {
+	mockey.PatchConvey("only the creator's wait is canceled", t, func() {
 		schema := newBM25SignatureTestSchema()
 		schema.FileResourceIds = []int64{7}
 		entry := newFunctionRunnerEntry(schema, schema.GetFunctions()[0])

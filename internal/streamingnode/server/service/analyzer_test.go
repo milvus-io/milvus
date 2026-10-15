@@ -234,7 +234,16 @@ func TestValidateAnalyzerNativeTransport(t *testing.T) {
 			`{"tokenizer":"standard","filter":[{"type":"stop","stop_words":[1]}]}`,
 			`{"tokenizer":"standard","filter":[{"type":"synonym","synonyms":[1]}]}`,
 			`{"tokenizer":{"type":"lang_ident","identifier":{"type":"whatlang","confidence":"high"}}}`,
-			`{"tokenizer":"standard"}`, `{"tokenizer":"not_a_tokenizer"}`, `{"type":"klingon"}`, `{"tokenizer":"standard","filter":[{"type":"stemmer","language":"xx"}]}`, `{"tokenizer":"standard","filter":["unknown_filter"]}`, `{"tokenizer":"standard","unknown_option":true}`, `{"tokenizer":`, `[]`, `null`} {
+			`{"tokenizer":"standard"}`,
+			`{"tokenizer":"not_a_tokenizer"}`,
+			`{"type":"klingon"}`,
+			`{"tokenizer":"standard","filter":[{"type":"stemmer","language":"xx"}]}`,
+			`{"tokenizer":"standard","filter":["unknown_filter"]}`,
+			`{"tokenizer":"standard","unknown_option":true}`,
+			`{"tokenizer":`,
+			`[]`,
+			`null`,
+		} {
 			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: params, Field: "body"}}})
 			if params == `{"tokenizer":"standard"}` {
 				require.NoError(t, err)
