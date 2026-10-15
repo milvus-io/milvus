@@ -114,7 +114,7 @@ func TestPartialUpdateChainDisjointPKsProceedDuringCASCommit(t *testing.T) {
 	}()
 	<-atWAL
 	// Construct both writes while the first CAS remains inside its WAL append.
-	// Neither a different-PK CAS nor an ordinary different-PK write may wait.
+	// These PKs use different stripes, so neither write may wait.
 	secondDone := make(chan error, 1)
 	go func() {
 		_, err := env.append(newChainTestCASCommit(t, second), nil)
@@ -253,7 +253,9 @@ func TestRowLocksOrderAndSeparateTypedPKs(t *testing.T) {
 	g := newRowLockManager()
 	intPKs := primaryKeys{int64Values: []int64{20, 10, 20}}
 	release := acquireTestRowLock(t, g, "v1", intPKs, true)
-	// String "10" is distinct from integer 10 even within the same vchannel.
+	// These typed values hash to different stripes in the same vchannel.
+	require.NotEqual(t, int64RowLockStripe(10), stringRowLockStripe("10"))
+	require.NotEqual(t, int64RowLockStripe(20), stringRowLockStripe("10"))
 	stringRelease := acquireTestRowLock(t, g, "v1", primaryKeys{stringValues: []string{"10", "10"}}, true)
 	stringRelease()
 	done := make(chan struct{})
@@ -279,9 +281,9 @@ func TestRowLockManagerOrdinaryWritesTakeSharedPKLocks(t *testing.T) {
 		{vchannel: "v1", kind: primaryKeyKindInt64, int64Value: 10},
 		{vchannel: "v1", kind: primaryKeyKindString, stringValue: "10"},
 	} {
-		require.False(t, g.pks.TryLock(key))
-		require.True(t, g.pks.TryRLock(key))
-		g.pks.RUnlock(key)
+		require.False(t, testPKMutex(t, g, key).TryLock())
+		require.True(t, testPKMutex(t, g, key).TryRLock())
+		testPKMutex(t, g, key).RUnlock()
 	}
 	require.Equal(t, []int64{20, 10, 20}, pks.int64Values)
 	require.Equal(t, []string{"20", "10", "20"}, pks.stringValues)
@@ -340,15 +342,15 @@ func TestRowLockManagerCancellationReleasesPartiallyAcquiredPKs(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			g := newRowLockManager()
-			blocker := acquireTestRowLock(t, g, "v1", primaryKeys{int64Values: []int64{20}}, true)
+			blocker := acquireTestRowLock(t, g, "v1", primaryKeys{int64Values: []int64{10}}, true)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			result := startTestRowLock(g, ctx, "v1", primaryKeys{int64Values: []int64{20, 10, 20}}, exclusive)
-			// Acquiring 10 first despite the input order proves that cancellation
-			// below must release a partially acquired sorted write set.
-			waitForTestPKHeld(t, g, "v1", 10)
+			result := startTestRowLock(g, ctx, "v1", primaryKeys{int64Values: []int64{10, 20, 10}}, exclusive)
+			// Stripe(20) precedes stripe(10); cancellation must release the
+			// already acquired stripe even though the input starts at PK 10.
+			waitForTestPKHeld(t, g, "v1", 20)
 			cancel()
-			// KeyLock itself is not cancellable. Release its blocker so acquire
+			// RWMutex itself is not cancellable. Release its blocker so acquire
 			// can observe cancellation and unwind all acquired PKs.
 			blocker()
 			acquired := awaitTestRowLock(t, result)
@@ -362,7 +364,7 @@ func TestRowLockManagerCancellationReleasesPartiallyAcquiredPKs(t *testing.T) {
 func TestRowLockManagerDuplicateSharedPKDoesNotDeadlockQueuedCAS(t *testing.T) {
 	g := newRowLockManager()
 	ctx := &pauseAfterFirstPKContext{
-		Context: context.Background(), manager: g,
+		Context: context.Background(), manager: g, t: t,
 		key:    pkLockKey{vchannel: "v1", kind: primaryKeyKindInt64, int64Value: 10},
 		locked: make(chan struct{}), resume: make(chan struct{}),
 	}
@@ -392,6 +394,7 @@ func TestRowLockManagerDuplicateSharedPKDoesNotDeadlockQueuedCAS(t *testing.T) {
 type pauseAfterFirstPKContext struct {
 	context.Context
 	manager *rowLockManager
+	t       *testing.T
 	key     pkLockKey
 	once    sync.Once
 	locked  chan struct{}
@@ -402,8 +405,8 @@ func (ctx *pauseAfterFirstPKContext) Err() error {
 	if err := ctx.Context.Err(); err != nil {
 		return err
 	}
-	if ctx.manager.pks.TryLock(ctx.key) {
-		ctx.manager.pks.Unlock(ctx.key)
+	if testPKMutex(ctx.t, ctx.manager, ctx.key).TryLock() {
+		testPKMutex(ctx.t, ctx.manager, ctx.key).Unlock()
 		return nil
 	}
 	ctx.once.Do(func() {
@@ -451,9 +454,10 @@ func awaitTestRowLock(t *testing.T, result <-chan testRowLockResult) testRowLock
 func waitForTestPKWriter(t *testing.T, g *rowLockManager, vchannel string, pk int64) {
 	t.Helper()
 	key := pkLockKey{vchannel: vchannel, kind: primaryKeyKindInt64, int64Value: pk}
+	mutex := testPKMutex(t, g, key)
 	require.Eventually(t, func() bool {
-		if g.pks.TryRLock(key) {
-			g.pks.RUnlock(key)
+		if mutex.TryRLock() {
+			mutex.RUnlock()
 			return false
 		}
 		return true
@@ -463,9 +467,10 @@ func waitForTestPKWriter(t *testing.T, g *rowLockManager, vchannel string, pk in
 func waitForTestPKHeld(t *testing.T, g *rowLockManager, vchannel string, pk int64) {
 	t.Helper()
 	key := pkLockKey{vchannel: vchannel, kind: primaryKeyKindInt64, int64Value: pk}
+	mutex := testPKMutex(t, g, key)
 	require.Eventually(t, func() bool {
-		if g.pks.TryLock(key) {
-			g.pks.Unlock(key)
+		if mutex.TryLock() {
+			mutex.Unlock()
 			return false
 		}
 		return true
@@ -476,8 +481,8 @@ func requireTestRowLocksAvailable(t *testing.T, g *rowLockManager, vchannel stri
 	t.Helper()
 	for _, pk := range pks {
 		key := pkLockKey{vchannel: vchannel, kind: primaryKeyKindInt64, int64Value: pk}
-		require.True(t, g.pks.TryLock(key))
-		g.pks.Unlock(key)
+		require.True(t, testPKMutex(t, g, key).TryLock())
+		testPKMutex(t, g, key).Unlock()
 	}
 }
 

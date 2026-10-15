@@ -37,9 +37,9 @@ func TestPartialUpdateRecoveryRestoresPrefixAndAddsSuffixWithoutLosingBody(t *te
 	_, err = env.append(newCommitTxnMessage("v1", 1, 0), func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		for _, pk := range []int64{10, 20} {
 			key := pkLockKey{vchannel: "v1", kind: primaryKeyKindInt64, int64Value: pk}
-			require.False(t, env.partial.state.rowLocks.pks.TryLock(key), "commit did not lock recovered prefix and live suffix")
-			require.True(t, env.partial.state.rowLocks.pks.TryRLock(key), "ordinary commit unexpectedly took an exclusive PK lock")
-			env.partial.state.rowLocks.pks.RUnlock(key)
+			require.False(t, testPKMutex(t, env.partial.state.rowLocks, key).TryLock(), "commit did not lock recovered prefix and live suffix")
+			require.True(t, testPKMutex(t, env.partial.state.rowLocks, key).TryRLock(), "ordinary commit unexpectedly took an exclusive PK lock")
+			testPKMutex(t, env.partial.state.rowLocks, key).RUnlock()
 		}
 		id := env.nextMessageID()
 		commit = msg.IntoImmutableMessage(id)
@@ -127,9 +127,9 @@ func TestPartialUpdateRecoveryReplicatedCASUsesSharedPKLocks(t *testing.T) {
 	_, err := env.append(commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		called = true
 		key := pkLockKey{vchannel: "v1", kind: primaryKeyKindInt64, int64Value: 10}
-		require.False(t, env.partial.state.rowLocks.pks.TryLock(key))
-		require.True(t, env.partial.state.rowLocks.pks.TryRLock(key))
-		env.partial.state.rowLocks.pks.RUnlock(key)
+		require.False(t, testPKMutex(t, env.partial.state.rowLocks, key).TryLock())
+		require.True(t, testPKMutex(t, env.partial.state.rowLocks, key).TryRLock())
+		testPKMutex(t, env.partial.state.rowLocks, key).RUnlock()
 		return env.nextMessageID(), nil
 	})
 	require.NoError(t, err)
@@ -151,12 +151,12 @@ func TestPartialUpdateLegacySchemaLessInsertPreservesWriteWithoutRowLock(t *test
 			})
 			key := pkLockKey{vchannel: "v1", kind: primaryKeyKindInt64, int64Value: 10}
 			// An exclusive same-PK holder cannot block an allowed old-schema write.
-			env.partial.state.rowLocks.pks.Lock(key)
+			testPKMutex(t, env.partial.state.rowLocks, key).Lock()
 			var once bool
 			unlock := func() {
 				if !once {
 					once = true
-					env.partial.state.rowLocks.pks.Unlock(key)
+					testPKMutex(t, env.partial.state.rowLocks, key).Unlock()
 				}
 			}
 			defer unlock()
@@ -285,11 +285,11 @@ func TestPartialUpdateRecoveryMixedLegacyAndNewInsertLocksOnlyKnownPKs(t *testin
 	_, err := env.append(newCommitTxnMessage("v1", 1, 0), func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		known := pkLockKey{vchannel: "v1", kind: primaryKeyKindInt64, int64Value: 10}
 		unknown := pkLockKey{vchannel: "v1", kind: primaryKeyKindInt64, int64Value: 20}
-		require.False(t, env.partial.state.rowLocks.pks.TryLock(known))
-		require.True(t, env.partial.state.rowLocks.pks.TryRLock(known))
-		env.partial.state.rowLocks.pks.RUnlock(known)
-		require.True(t, env.partial.state.rowLocks.pks.TryLock(unknown), "schema-less legacy row unexpectedly acquired a row lock")
-		env.partial.state.rowLocks.pks.Unlock(unknown)
+		require.False(t, testPKMutex(t, env.partial.state.rowLocks, known).TryLock())
+		require.True(t, testPKMutex(t, env.partial.state.rowLocks, known).TryRLock())
+		testPKMutex(t, env.partial.state.rowLocks, known).RUnlock()
+		require.True(t, testPKMutex(t, env.partial.state.rowLocks, unknown).TryLock(), "schema-less legacy row unexpectedly acquired a row lock")
+		testPKMutex(t, env.partial.state.rowLocks, unknown).Unlock()
 		return env.nextMessageID(), nil
 	})
 	require.NoError(t, err)

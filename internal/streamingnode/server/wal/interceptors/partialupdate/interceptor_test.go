@@ -104,7 +104,7 @@ func TestPartialUpdateInterceptorCloseAndDropPreserveSharedRowLocks(t *testing.T
 	second.state.removeDroppedVChannel(vchannel, 1)
 
 	key := pkLockKey{vchannel: vchannel, kind: primaryKeyKindInt64, int64Value: 10}
-	require.False(t, globalRowLockManager.pks.TryRLock(key))
+	require.False(t, testPKMutex(t, globalRowLockManager, key).TryRLock())
 	result := startTestRowLock(second.state.rowLocks, context.Background(), vchannel,
 		primaryKeys{int64Values: []int64{5, 10}}, false)
 	waitForTestPKHeld(t, second.state.rowLocks, vchannel, 5)
