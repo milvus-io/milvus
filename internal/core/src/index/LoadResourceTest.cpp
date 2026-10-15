@@ -219,6 +219,35 @@ class IndexMetadataContextTest : public ::testing::Test {
               OpContext& ctx,
               bool resource_only = false) {
         if (resource_only) {
+            if (fixture.context.use_async_load.value_or(false) &&
+                info.index_params.at(SCALAR_INDEX_ENGINE_VERSION) == "1") {
+                storage::LoadOptions options;
+                options.op_ctx = &ctx;
+                auto estimate =
+                    [&]() -> folly::coro::Task<LoadResourceRequest> {
+                    auto source = co_await storage::V1RemoteSource::OpenAsync(
+                        fixture.context,
+                        info.index_files,
+                        options,
+                        storage::ArtifactStorageNamespace::Index,
+                        storage::V1SourceLayout::DiskFiles);
+                    co_return co_await LegacyScalarIndexLoadResourceAsync(
+                        info.field_type,
+                        info.index_size,
+                        info.index_params,
+                        false,
+                        info.num_rows,
+                        *source);
+                };
+                folly::coro::blockingWait(folly::coro::co_withExecutor(
+                    storage::ResolveAsyncLoadExecutor(
+                        {},
+                        ctx.runtime_load_priority.value_or(0) != 0
+                            ? proto::common::LoadPriority::LOW
+                            : proto::common::LoadPriority::HIGH),
+                    estimate()));
+                return;
+            }
             ScalarIndexFileLoadResource(
                 info.field_type,
                 info.index_size,
@@ -428,15 +457,24 @@ TEST(LegacyLoadResourceTest, SegmentMetadataPreservesFileAwareEstimates) {
                          << "vector=" << vector << " async=" << async);
             fixture.context.use_async_load = async;
             auto expected = generic;
-            if (vector && async) {
+            if (async) {
                 storage::LoadOptions options;
                 options.params = Config(info.index_params);
                 auto estimate =
                     [&]() -> folly::coro::Task<LoadResourceRequest> {
                     auto source = co_await storage::V1RemoteSource::OpenAsync(
                         fixture.context, info.index_files, options);
-                    co_return co_await LegacyVectorFileLoadResourceAsync(
-                        generic, false, options, *source);
+                    if (vector) {
+                        co_return co_await LegacyVectorFileLoadResourceAsync(
+                            generic, false, options, *source);
+                    }
+                    co_return co_await LegacyScalarIndexLoadResourceAsync(
+                        info.field_type,
+                        info.index_size,
+                        info.index_params,
+                        info.enable_mmap,
+                        info.num_rows,
+                        *source);
                 };
                 expected =
                     folly::coro::blockingWait(folly::coro::co_withExecutor(
@@ -539,30 +577,54 @@ TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
                     SCOPED_TRACE(::testing::Message()
                                  << name << " version=" << version
                                  << " async=" << async << " mmap=" << mmap);
-                    const auto& files = async ? async_files : sync_files;
-                    const auto expected =
-                        async ? ScalarIndexFileLoadResource(DataType::INT64,
-                                                            index_size,
-                                                            child_params,
-                                                            mmap,
-                                                            rows,
-                                                            files,
-                                                            ctx)
-                                    .request
-                              : ScalarIndexLoadResource(DataType::INT64,
-                                                        0,
-                                                        index_size,
-                                                        child_params,
-                                                        mmap,
-                                                        rows);
-                    const auto resources =
-                        ScalarIndexFileLoadResource(DataType::INT64,
-                                                    index_size,
-                                                    params,
-                                                    mmap,
-                                                    rows,
-                                                    files,
-                                                    ctx);
+                    LoadResourceRequest expected;
+                    ScalarIndexLoadResources resources;
+                    if (async) {
+                        storage::LoadOptions options;
+                        auto estimate = [&]() -> folly::coro::Task<void> {
+                            auto source =
+                                co_await storage::V1RemoteSource::OpenAsync(
+                                    ctx,
+                                    async_files,
+                                    options,
+                                    storage::ArtifactStorageNamespace::Index,
+                                    storage::V1SourceLayout::DiskFiles);
+                            expected =
+                                co_await LegacyScalarIndexLoadResourceAsync(
+                                    DataType::INT64,
+                                    index_size,
+                                    child_params,
+                                    mmap,
+                                    rows,
+                                    *source);
+                            resources.request =
+                                co_await LegacyScalarIndexLoadResourceAsync(
+                                    DataType::INT64,
+                                    index_size,
+                                    params,
+                                    mmap,
+                                    rows,
+                                    *source);
+                        };
+                        folly::coro::blockingWait(folly::coro::co_withExecutor(
+                            storage::ResolveAsyncLoadExecutor(
+                                {}, proto::common::LoadPriority::HIGH),
+                            estimate()));
+                    } else {
+                        expected = ScalarIndexLoadResource(DataType::INT64,
+                                                           0,
+                                                           index_size,
+                                                           child_params,
+                                                           mmap,
+                                                           rows);
+                        resources = ScalarIndexFileLoadResource(DataType::INT64,
+                                                                index_size,
+                                                                params,
+                                                                mmap,
+                                                                rows,
+                                                                sync_files,
+                                                                ctx);
+                    }
                     EXPECT_EQ(resources.request.final_memory_cost,
                               expected.final_memory_cost);
                     EXPECT_EQ(resources.request.final_disk_cost,

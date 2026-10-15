@@ -1695,22 +1695,11 @@ TEST_F(LegacyIndexLoadTest,
     Persist(*backend.Build(input.View(), {.row_count = 4}));
     const std::map<std::string, std::string> params{
         {INDEX_TYPE, BITMAP_INDEX_TYPE}, {SCALAR_INDEX_ENGINE_VERSION, "2"}};
-    const auto heap = ScalarIndexFileLoadResource(DataType::VARCHAR,
-                                                  PhysicalBytes(),
-                                                  params,
-                                                  false,
-                                                  4,
-                                                  paths_,
-                                                  context_)
-                          .request;
-    const auto mmap = ScalarIndexFileLoadResource(DataType::VARCHAR,
-                                                  PhysicalBytes(),
-                                                  params,
-                                                  true,
-                                                  4,
-                                                  paths_,
-                                                  context_)
-                          .request;
+    auto source = Run(storage::V1RemoteSource::OpenAsync(context_, paths_, {}));
+    const auto heap = Run(LegacyScalarIndexLoadResourceAsync(
+        DataType::VARCHAR, PhysicalBytes(), params, false, 4, *source));
+    const auto mmap = Run(LegacyScalarIndexLoadResourceAsync(
+        DataType::VARCHAR, PhysicalBytes(), params, true, 4, *source));
     // Two resident value bitsets plus validity and per-value bookkeeping.
     EXPECT_GE(mmap.final_memory_cost,
               3 * sizeof(uint64_t) + 2 * 128 + kScalarIndexFixedResidentBytes);
@@ -1735,14 +1724,14 @@ TEST_F(LegacyIndexLoadTest, NullableTantivyMmapEstimateRetainsNullSidecar) {
         const std::map<std::string, std::string> params{
             {INDEX_TYPE, ngram ? NGRAM_INDEX_TYPE : INVERTED_INDEX_TYPE},
             {SCALAR_INDEX_ENGINE_VERSION, "2"}};
-        const auto estimate = ScalarIndexFileLoadResource(DataType::VARCHAR,
-                                                          PhysicalBytes(),
-                                                          params,
-                                                          true,
-                                                          4,
-                                                          paths_,
-                                                          context_)
-                                  .request;
+        auto source = Run(storage::V1RemoteSource::OpenAsync(
+            context_,
+            paths_,
+            {},
+            storage::ArtifactStorageNamespace::Index,
+            storage::V1SourceLayout::DiskFiles));
+        const auto estimate = Run(LegacyScalarIndexLoadResourceAsync(
+            DataType::VARCHAR, PhysicalBytes(), params, true, 4, *source));
         // V1/V2 ngram uses its built-in average-row-size default; only V3
         // persists that POD. Both legacy families retain one validity word
         // and the single null row's native-size_t offset.

@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include "yaml-cpp/yaml.h"
-#include "storage/LocalFileIOPool.h"
 #include "index/vector/VectorDiskLoader.h"
 #include "index/vector/KnowhereEngine.h"
 #include <cstring>
@@ -43,14 +42,11 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/PluginLoader.h"
 
-#include "folly/coro/BlockingWait.h"
-#include "folly/coro/WithCancellation.h"
 #include "index/IndexLoadUtils.h"
 #include "index/PackedIndexLoad.h"
 #include "index/IndexTypeAdapter.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncIndexEntryReader.h"
-#include "storage/AsyncLoadExecutor.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/FileWriter.h"
 #include "roaring/roaring.hh"
@@ -670,51 +666,6 @@ LegacyScalarIndexLoadResourceAsync(
     co_return request;
 }
 
-namespace {
-// Envelope inspection measures decoded bytes and admitted scratch, rather than
-// treating compressed object size as the in-memory load peak.
-LoadResourceRequest
-LegacyScalarLoadResource(DataType field_type,
-                         uint64_t index_size,
-                         const std::map<std::string, std::string>& index_params,
-                         bool mmap_enable,
-                         int64_t num_rows,
-                         const std::vector<std::string>& paths,
-                         const storage::FileManagerContext& context,
-                         milvus::OpContext* op_ctx) {
-    auto estimate = [&]() -> folly::coro::Task<LoadResourceRequest> {
-        auto params = index_params;
-        auto type = params.at(INDEX_TYPE);
-        const bool directory_layout =
-            type == HYBRID_INDEX_TYPE || type == INVERTED_INDEX_TYPE ||
-            type == NGRAM_INDEX_TYPE || type == RTREE_INDEX_TYPE;
-        storage::LoadOptions options;
-        options.op_ctx = op_ctx;
-        options.params = ParseConfigFromIndexParams(params);
-        auto source = co_await storage::V1RemoteSource::OpenAsync(
-            context,
-            paths,
-            options,
-            storage::ArtifactStorageNamespace::Index,
-            directory_layout ? storage::V1SourceLayout::DiskFiles
-                             : storage::V1SourceLayout::MemoryEntries);
-        co_return co_await LegacyScalarIndexLoadResourceAsync(field_type,
-                                                              index_size,
-                                                              index_params,
-                                                              mmap_enable,
-                                                              num_rows,
-                                                              *source);
-    };
-    return folly::coro::blockingWait(folly::coro::co_withExecutor(
-        storage::ResolveAsyncLoadExecutor(
-            storage::LocalFileIOPool::GetInstance().GetExecutor(),
-            op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
-                ? proto::common::LoadPriority::LOW
-                : proto::common::LoadPriority::HIGH),
-        estimate()));
-}
-}  // namespace
-
 folly::coro::Task<LoadResourceRequest>
 LegacyVectorFileLoadResourceAsync(LoadResourceRequest request,
                                   bool disk_family,
@@ -762,17 +713,7 @@ ScalarIndexFileLoadResource(
     const bool use_async_load = context.use_async_load.value_or(
         segcore::storagev2translator::StorageV2AsyncLoadEnabled());
     if (version < 3 && index_params.at(INDEX_TYPE) != FMINDEX_INDEX_TYPE) {
-        if (use_async_load && context.Valid() && !index_files.empty()) {
-            return {LegacyScalarLoadResource(field_type,
-                                             index_size,
-                                             index_params,
-                                             mmap_enable,
-                                             num_rows,
-                                             index_files,
-                                             context,
-                                             op_ctx),
-                    std::nullopt};
-        }
+        // Legacy async callers estimate their prepared source directly.
         auto resolved_params = index_params;
         if (resolved_params.at(INDEX_TYPE) == HYBRID_INDEX_TYPE) {
             auto type =
