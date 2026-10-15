@@ -18,12 +18,13 @@ package coverage
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 )
 
 func fixture(t *testing.T) *collector {
@@ -35,14 +36,14 @@ func fixture(t *testing.T) *collector {
 		}
 	}
 	write := func(name string) func(string) error {
-		return func(dir string) error { return os.WriteFile(filepath.Join(dir, name), []byte("go data"), 0o644) }
+		return func(dir string) error { return os.WriteFile(filepath.Join(dir, name), []byte("go data"), 0o600) }
 	}
 	return &collector{
 		root:          root,
 		writeMeta:     write("covmeta.test"),
 		writeCounters: write("covcounters.test"),
 		dump: func() {
-			if err := os.WriteFile(filepath.Join(root, "cpp", "probe.gcda"), []byte("native data"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "cpp", "probe.gcda"), []byte("native data"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		},
@@ -52,7 +53,7 @@ func fixture(t *testing.T) *collector {
 func requestSnapshot(t *testing.T, c *collector, id string) string {
 	t.Helper()
 	request := filepath.Join(c.root, "requests", id)
-	if err := os.WriteFile(request, nil, 0o644); err != nil {
+	if err := os.WriteFile(request, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c.handle(t.Context(), id)
@@ -93,7 +94,7 @@ func TestSnapshotFailuresNeverPublishCompletion(t *testing.T) {
 		{"missing native counters", func(c *collector) { c.dump = func() {} }, "no .gcda"},
 		{"native dump error", func(c *collector) {
 			c.dump = func() {
-				if err := os.WriteFile(filepath.Join(c.root, "gcov-errors.log"), []byte("profiling: permission denied"), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(c.root, "gcov-errors.log"), []byte("profiling: permission denied"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -103,7 +104,7 @@ func TestSnapshotFailuresNeverPublishCompletion(t *testing.T) {
 			c.dump = func() {
 				original()
 				// Block creation of the destination directory.
-				if err := os.WriteFile(filepath.Join(c.root, "runs", strings.Repeat("b", 32), "cpp"), nil, 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(c.root, "runs", strings.Repeat("b", 32), "cpp"), nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -127,7 +128,7 @@ func TestSnapshotFailuresNeverPublishCompletion(t *testing.T) {
 func TestNativeFailureIsSticky(t *testing.T) {
 	c := fixture(t)
 	c.dump = func() {
-		if err := os.WriteFile(filepath.Join(c.root, "gcov-errors.log"), []byte("write failed"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(c.root, "gcov-errors.log"), []byte("write failed"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -182,7 +183,7 @@ func TestStartDoesNotModifyAnOwnedDirectory(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	ready := filepath.Join(root, "ready")
-	if err := os.WriteFile(ready, []byte("owner"), 0o644); err != nil {
+	if err := os.WriteFile(ready, []byte("owner"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := start(t.Context(), root, func() {}); err == nil {
@@ -213,13 +214,13 @@ func TestServeProcessesOnlyValidRegularRequests(t *testing.T) {
 	id := strings.Repeat("e", 32)
 	ignored := []string{"invalid-id", strings.Repeat("f", 32)}
 	requests := filepath.Join(c.root, "requests")
-	if err := os.WriteFile(filepath.Join(requests, ignored[0]), nil, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(requests, ignored[0]), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(requests, ignored[0]), filepath.Join(requests, ignored[1])); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(requests, id), nil, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(requests, id), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -247,7 +248,7 @@ func TestRepeatedSnapshotsKeepPreviousData(t *testing.T) {
 	c := fixture(t)
 	first := requestSnapshot(t, c, strings.Repeat("1", 32))
 	c.dump = func() {
-		if err := os.WriteFile(filepath.Join(c.root, "cpp", "probe.gcda"), []byte("updated data"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(c.root, "cpp", "probe.gcda"), []byte("updated data"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
