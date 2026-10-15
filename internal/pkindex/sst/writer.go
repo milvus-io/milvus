@@ -26,7 +26,7 @@ import (
 	"github.com/cockroachdb/pebble/sstable"
 	"github.com/cockroachdb/pebble/vfs"
 
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
 )
 
 // FileName is the file name a table with this ID is written under.
@@ -51,7 +51,7 @@ type Writer struct {
 func NewWriter(dir string, id ID) (*Writer, error) {
 	tmp, err := os.CreateTemp(dir, FileName(id)+".tmp-*")
 	if err != nil {
-		return nil, pkerr.MarkIO(err, "create temp sst in %s", dir)
+		return nil, pkindex.MarkIO(err, "create temp sst in %s", dir)
 	}
 	tmpPath := tmp.Name()
 	tmp.Close()
@@ -60,7 +60,7 @@ func NewWriter(dir string, id ID) (*Writer, error) {
 	f, err := vfs.Default.Create(tmpPath)
 	if err != nil {
 		os.Remove(tmpPath)
-		return nil, pkerr.MarkIO(err, "open temp sst %s", tmpPath)
+		return nil, pkindex.MarkIO(err, "open temp sst %s", tmpPath)
 	}
 	return &Writer{
 		id:      id,
@@ -93,10 +93,10 @@ func (w *Writer) Close() (Info, error) {
 	}
 	st, err := os.Stat(w.tmpPath)
 	if err != nil {
-		return Info{}, pkerr.MarkIO(err, "stat sst %s", w.tmpPath)
+		return Info{}, pkindex.MarkIO(err, "stat sst %s", w.tmpPath)
 	}
 	if err := os.Rename(w.tmpPath, w.path); err != nil {
-		return Info{}, pkerr.MarkIO(err, "publish sst as %s", w.path)
+		return Info{}, pkindex.MarkIO(err, "publish sst as %s", w.path)
 	}
 	return Info{
 		ID:          w.id,

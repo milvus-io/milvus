@@ -32,7 +32,7 @@ import (
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/sstable"
 
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
 )
 
 // Extension is the file extension of a pkindex SST file.
@@ -103,7 +103,7 @@ func ReadInfo(id ID, path string) (Info, error) {
 // this, so that one rule covers both.
 func MarkPebbleErr(err error) error {
 	if errors.Is(err, pebble.ErrCorruption) {
-		return errors.Mark(err, pkerr.ErrCorrupted)
+		return errors.Mark(err, pkindex.ErrCorrupted)
 	}
-	return errors.Mark(err, pkerr.ErrIO)
+	return errors.Mark(err, pkindex.ErrIO)
 }

@@ -27,7 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
 )
 
 var int64Boundaries = []int64{
@@ -83,7 +83,7 @@ func TestDecodeInt64PKInvalidLength(t *testing.T) {
 	for _, b := range [][]byte{nil, {}, make([]byte, 7), make([]byte, 9)} {
 		_, err := DecodeInt64PK(b)
 		assert.Error(t, err)
-		assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+		assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 	}
 }
 

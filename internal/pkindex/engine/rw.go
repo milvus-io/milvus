@@ -19,8 +19,8 @@ package engine
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/codec"
-	"github.com/milvus-io/milvus/internal/pkindex/core/sst"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
+	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
 func (e *Engine) Write(ctx context.Context, muts []Mutation) error {

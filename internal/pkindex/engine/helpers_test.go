@@ -28,8 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/codec"
-	"github.com/milvus-io/milvus/internal/pkindex/core/sst"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
+	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
 func newTestEngine(t *testing.T, opts ...func(*Config)) *Engine {

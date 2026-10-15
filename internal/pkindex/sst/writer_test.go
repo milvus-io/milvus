@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/codec"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 )
 
 // The ID names the file, here and in object storage, which is what lets an

@@ -28,8 +28,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/pebble"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/sst"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -47,7 +47,7 @@ const (
 
 // Conditions that are bugs in the calling code rather than signals to act on.
 // They are unexported because nothing outside should branch on them, and they
-// carry no pkerr category so that no boundary reports them as retriable or as
+// carry no pkindex error category so that no boundary reports them as retriable or as
 // damaged data.
 var (
 	errNoSharedResources      = errors.New("pkindex engine opened without shared resources")
@@ -58,7 +58,7 @@ var (
 // errClosed is ErrClosed in the form the methods return: a closed engine is
 // something a retry against a reopened engine can clear, so it also carries
 // the unavailable category for the boundary translation.
-var errClosed = errors.Mark(ErrClosed, pkerr.ErrUnavailable)
+var errClosed = errors.Mark(ErrClosed, pkindex.ErrUnavailable)
 
 var (
 	_ RW        = (*Engine)(nil)
@@ -198,7 +198,7 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 		return nil, errNoAllocID
 	}
 	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
-		return nil, pkerr.MarkIO(err, "create engine dir %s", cfg.Dir)
+		return nil, pkindex.MarkIO(err, "create engine dir %s", cfg.Dir)
 	}
 	e := &Engine{
 		cfg:    cfg,
@@ -252,7 +252,7 @@ func existingGenerations(dir string) ([]Generation, error) {
 func dirsWithPrefix(dir, prefix string) ([]Generation, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, pkerr.MarkIO(err, "list engine dir %s", dir)
+		return nil, pkindex.MarkIO(err, "list engine dir %s", dir)
 	}
 	gens := make([]Generation, 0, len(ents))
 	for _, ent := range ents {
@@ -304,7 +304,7 @@ func (e *Engine) removeOrphanStaging(live []Generation) error {
 		}
 		dir := stagedDir(e.cfg.Dir, gen)
 		if err := os.RemoveAll(dir); err != nil {
-			return pkerr.MarkIO(err, "remove orphan staged tables %s", dir)
+			return pkindex.MarkIO(err, "remove orphan staged tables %s", dir)
 		}
 	}
 	return nil
@@ -359,7 +359,7 @@ func (e *Engine) Destroy() error {
 		return err
 	}
 	if err := os.RemoveAll(e.cfg.Dir); err != nil {
-		return pkerr.MarkIO(err, "remove engine dir %s", e.cfg.Dir)
+		return pkindex.MarkIO(err, "remove engine dir %s", e.cfg.Dir)
 	}
 	return nil
 }
