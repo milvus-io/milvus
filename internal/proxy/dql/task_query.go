@@ -1398,13 +1398,18 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 			return nil, merr.Error(chunk.GetStatus())
 		}
 
-		rowCount := typeutil.GetSizeOfIDs(chunk.GetIds())
+		rowCount := queryutil.GetRowCount(chunk)
 		if rowCount > 0 {
 			if len(chunk.GetFieldsData()) == 0 {
-				return nil, merr.WrapErrServiceInternalMsg("final Query Chunk contains IDs without field data")
+				return nil, merr.WrapErrServiceInternalMsg("final Query Chunk contains rows without field data")
+			}
+			idCount := typeutil.GetSizeOfIDs(chunk.GetIds())
+			if idCount > 0 && idCount != rowCount {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"final Query Chunk ID count %d does not match row count %d", idCount, rowCount)
 			}
 			if len(output.GetFieldsData()) == 0 {
-				output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), t.GetLimit())
+				output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), max(t.GetLimit(), int64(rowCount)))
 			}
 			if len(output.GetFieldsData()) != len(chunk.GetFieldsData()) {
 				return nil, merr.WrapErrServiceInternalMsg(
@@ -1414,7 +1419,9 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 			for row := 0; row < rowCount; row++ {
 				fieldIndexes := indexComputer.Compute(int64(row))
 				outputSize += typeutil.AppendFieldData(output.FieldsData, chunk.GetFieldsData(), int64(row), fieldIndexes...)
-				typeutil.AppendPKs(output.Ids, typeutil.GetPK(chunk.GetIds(), int64(row)))
+				if idCount > 0 {
+					typeutil.AppendPKs(output.Ids, typeutil.GetPK(chunk.GetIds(), int64(row)))
+				}
 			}
 			if outputSize > maxOutputSize {
 				return nil, merr.WrapErrParameterInvalidMsg(

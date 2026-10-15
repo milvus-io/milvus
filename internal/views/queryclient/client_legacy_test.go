@@ -383,11 +383,93 @@ func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
 	require.Equal(t, []int64{3}, second.GetIds().GetIntId().GetData())
 }
 
+func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+	queryNode := qviews.NewQueryNode(11)
+	groupChunk := func(groups, counts []int64) *internalpb.RetrieveResults {
+		return &internalpb.RetrieveResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:    schemapb.DataType_Int64,
+					FieldId: 100,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: groups}},
+					}},
+				},
+				{
+					Type:    schemapb.DataType_Int64,
+					FieldId: 101,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: counts}},
+					}},
+				},
+			},
+		}
+	}
+
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true, ReduceStreamChunkBytes: 1 << 20},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardA.VChannel: legacyQueryPlan(shardA, queryNode),
+			shardB.VChannel: legacyQueryPlan(shardB, queryNode),
+		}},
+		&legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{
+			shardA.VChannel: groupChunk([]int64{1, 2}, []int64{2, 3}),
+			shardB.VChannel: groupChunk([]int64{1, 3}, []int64{5, 6}),
+		}},
+		&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
+	)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "count", DataType: schemapb.DataType_Int64},
+	}}
+
+	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+		AllowStreaming: true,
+		Schema:         schema,
+		Req: &internalpb.RetrieveRequest{
+			CollectionID:    100,
+			GroupByFieldIds: []int64{100},
+			Aggregates: []*planpb.Aggregate{
+				{Op: planpb.AggregateOp_count, FieldId: 101},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, result.Results)
+	require.Len(t, result.Plans, 2)
+	chunk, err := result.Stream.Recv()
+	require.NoError(t, err)
+	groups := chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+	counts := chunk.GetFieldsData()[1].GetScalars().GetLongData().GetData()
+	actual := make(map[int64]int64, len(groups))
+	for i, group := range groups {
+		actual[group] = counts[i]
+	}
+	require.Equal(t, map[int64]int64{1: 7, 2: 3, 3: 6}, actual)
+	_, err = result.Stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+}
+
 func TestLegacyClientQueryKeepsUnlimitedOrdinaryQueryOnBatchPath(t *testing.T) {
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{}))
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
 		Limit:         1,
 		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
+	}))
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		GroupByFieldIds: []int64{100},
+		Aggregates: []*planpb.Aggregate{
+			{Op: planpb.AggregateOp_count, FieldId: 101},
+		},
+	}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		Aggregates: []*planpb.Aggregate{
+			{Op: planpb.AggregateOp_sum, FieldId: 101},
+		},
 	}))
 }
 
