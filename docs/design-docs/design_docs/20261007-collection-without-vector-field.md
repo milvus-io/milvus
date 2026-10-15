@@ -52,9 +52,10 @@ The change set is:
 
 The size target is the only part of the design that is not a pure removal of
 an assumption. It is justified by measurement: delete application inside one
-sealed segment is serial at roughly 8 µs per primary key, so a 1 GB segment of
-13-byte rows (44 M rows) stalls the channel's tsafe for 28 s on a 10 % delete,
-while eight segments of 5.5 M rows stall 5.8 s under the same delete.
+sealed segment is serial at 6 to 13 µs per primary key (aarch64 and x86 test
+machines), so a 1 GB segment of 13-byte rows (44 M rows) stalls the channel's
+tsafe for 28 s (aarch64) or 55 s (x86) on a 10 % delete, while eight segments
+of 5.5 M rows stall 5.8 s or 8.1 s under the same delete.
 
 ## Motivation
 
@@ -273,7 +274,8 @@ Consequences of waiting for scalar indexes at handoff, for every collection:
 - **Publication latency.** A compaction output becomes visible after its scalar
   indexes finish instead of after its vector index. Measured on the test build:
   `INVERTED` on one `int32` field builds in 8.5 s for 5.5 M rows and 28.6 s for
-  44 M rows; at the 4 M-row target this adds about 6 s per segment, and scalar
+  44 M rows (`STL_SORT` 2.5 s / 6.5 s, `BITMAP` 8.5 s / 48.6 s on the same
+  column); at the 4 M-row target this adds about 6 s per segment, and scalar
   index tasks for sibling segments run in parallel. Until publication the
   parents keep serving, so the cost is index freshness of the children, not
   availability.
@@ -324,7 +326,11 @@ rows:
 |------|---------------|----------------|------|
 | Delete 1 % by expression, tsafe stall | 3.8 s | 0.7 s | strong-consistency queries fail above the 3 s `tsafe` lag limit |
 | Delete 10 % by expression, tsafe stall | 28.6 s | 5.8 s | ~8 µs per primary key, serial inside a segment, parallel across segments |
+| Delete 1 % by primary-key list, one request of 440 k ids | 3.0 s | 0.6 s | same per-key cost as by expression (6.8 µs) |
+| Delete 10 % by primary-key list, 44 requests of 100 k ids | 24 s tsafe stall, 33 s apply | 0.15 s stall, 5.3 s apply | batches queue on the one segment; on eight segments each batch is applied between queries |
 | INVERTED index build on one int32 field | 28.6 s | 8.5 s wall, 8 tasks in parallel | linear in rows, one task per segment |
+| STL_SORT index build on the same field | 6.5 s | 2.5 s wall | |
+| BITMAP index build on the same field (1 M distinct values) | 48.6 s | 8.5 s wall | |
 | Load, RSS delta | +5.3 GB | +5.3 GB | memory is per row, not per segment |
 | Point / filter / count query latency | 2–4 ms | 2–4 ms | unaffected |
 
@@ -332,6 +338,15 @@ Delete application is the item that affects availability: the delegator does
 not advance a channel's tsafe until the delete is applied to every affected
 segment, and inside a sealed segment the primary-key lookup is serial.
 Memory and query latency do not need a cap.
+
+The same deletes on an x86 machine (AMD Ryzen 9 7945HX, 32 threads, master
+`179225cd09`, 2026-10-15) cost 11 to 12.5 µs per key: 5.5 s and 55 s on the
+single segment, 0.8 s and 8.1 s on eight segments, by expression and by
+primary-key list alike. Across the two CPUs the per-key cost is 6 to 13 µs,
+so the 3 s tsafe limit corresponds to 240 k to 470 k keys applied to one
+segment in one batch. Delete by primary-key list goes through the same
+per-segment apply path as delete by expression; it changes only how the keys
+are batched into the WAL.
 
 Comparable systems bound both bytes and rows per scheduling unit: Druid
 segments (`maxRowsPerSegment` default 5,000,000, about 100 B per row at its
@@ -357,7 +372,8 @@ p.SegmentMaxRows = ParamItem{
 
 Default 4,000,000: 250 B per row at 1 GB, the same ratio Elasticsearch
 recommends, and the point where a 10 % single-request delete on one segment
-(400 k keys × 8 µs = 3.2 s) sits at the tsafe lag limit. 5,000,000 (Druid)
+(400 k keys × 8 µs = 3.2 s on aarch64, 5 s on the x86 test machine) sits at
+the tsafe lag limit. 5,000,000 (Druid)
 is equally defensible; the difference is at the margin.
 
 The target applies to every collection. Vector collections with dim > 61
@@ -478,7 +494,13 @@ target are not merged again.
    `shard_manager.go`) and the allocation request carries the schema version,
    so the policy takes the schema and sets
    `SegmentSize = jitterRatio × expectedSize(c) × sealProportion`.
-   `SegmentRows` stays `MaxUint64`; L0 keeps `FlushL0MaxRowNum`. The formula
+   `SegmentRows` stays `MaxUint64`; L0 keeps `FlushL0MaxRowNum`. The seal
+   compares the wire size of the insert messages, not binlog `MemorySize`:
+   measured on the narrow schema, 26 B per row on the wire (protobuf varints:
+   pk 4 B, int32 3 B, vector 1 B, timestamp 9 B, row id 9 B) against 29.6 B
+   per row of `MemorySize`, so growing segments sealed at 4.85 M to 4.9 M rows
+   (137 MB) against a 123 MB threshold, a ratio of 1.14. The same ratio
+   applies to `maxSize` today and is within the seal jitter band. The formula
    lives in one helper (`pkg/util/segmentutil` or similar) shared with
    DataCoord so that the two components cannot diverge; the DiskANN term is
    DataCoord-only and the StreamingNode uses `maxSize` as `baseSize`, which
@@ -653,11 +675,26 @@ is bounded (4 M rows × ~80 B = 320 MB).
 
 ### Measurements already done (2026-10-07, master `036bef9e9f`, single node)
 
-Reported in Section 3.1 and Section 4. Remaining measurements, none blocking:
-growing-segment (streaming insert) path on a narrow schema; `STL_SORT` /
-`BITMAP` build time per segment; delete by primary-key list (different
-batching from delete by expression); x86 delete-apply cost per key (8 µs is
-aarch64).
+Reported in Section 3.1 and Section 4.
+
+### Measurements added 2026-10-15
+
+- `STL_SORT` and `BITMAP` build times (Section 3.1 table).
+- Delete by primary-key list on the same segments (Section 3.1 table): same
+  per-key cost as by expression; a 4.4 M-key delete sent as 44 requests of
+  100 k stalls the single segment's tsafe for 24 s because the batches queue,
+  and the eight-segment collection for 0.15 s.
+- x86 delete-apply cost (Section 3.1): 11 to 12.5 µs per key on an AMD Ryzen
+  9 7945HX versus 6.4 to 8.5 µs on the aarch64 Cortex-X925, master
+  `179225cd09`; same collections, same import, same deletes.
+- Growing-segment path (streaming insert, aarch64): 12 M rows of the narrow
+  schema inserted at 175 k rows/s through pymilvus; segments sealed at 4.85 M
+  to 4.9 M rows (137 MB `MemorySize`, 26 B per row on the wire against the
+  123 MB seal threshold, Section 3.4 point 2), sort compaction followed each
+  seal; `MemorySize` 29.6 B per row, the same as the imported segments.
+- Both runs: autocompaction off, standalone, single shard; scripts and raw
+  results under the implementation PR's test notes (`run5.sh`, `run_x86.sh`,
+  `grow.py`, `delids.py`).
 
 ## Alternatives considered
 
