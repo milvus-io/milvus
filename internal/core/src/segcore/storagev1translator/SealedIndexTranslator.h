@@ -41,7 +41,7 @@ class SealedIndexTranslator : public IndexReaderTranslator {
         milvus::tracer::TraceContext ctx,
         milvus::storage::FileManagerContext file_manager_context,
         Config config,
-        std::function<const void*(size_t)> vector_data_view = {});
+        storage::VectorDataViewScope vector_data_view_scope = {});
     ~SealedIndexTranslator() override = default;
     size_t
     num_cells() const override;
@@ -95,7 +95,7 @@ class SealedIndexTranslator : public IndexReaderTranslator {
     milvus::tracer::TraceContext ctx_;
     milvus::storage::FileManagerContext file_manager_context_;
     Config config_;
-    std::function<const void*(size_t)> vector_data_view_;
+    storage::VectorDataViewScope vector_data_view_scope_;
     milvus::index::IndexFamily source_family_;
     std::string index_key_;
     IndexLoadInfo index_load_info_;

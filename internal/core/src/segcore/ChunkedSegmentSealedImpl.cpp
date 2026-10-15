@@ -48,6 +48,7 @@
 #include "NamedType/named_type_impl.hpp"
 #include "Types.h"
 #include "Utils.h"
+#include "segcore/indexing/ChunkedColumnDataView.h"
 #include "arrow/array.h"
 #include "arrow/result.h"
 #include "arrow/table.h"
@@ -9491,71 +9492,17 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                          field_id.get(),
                          load_index_info_ptr->index_files.size());
 
-                knowhere::ViewDataOp view_data;
-                const auto& params = load_index_info_ptr->index_params;
-                const auto refine_it = params.find(WITH_MRL_REFINE_KEY);
-                if (refine_it != params.end() && refine_it->second == "true") {
-                    auto rows_until_chunk =
-                        std::make_shared<std::vector<int64_t>>();
-                    auto pinned_chunks = std::make_shared<
-                        std::vector<cachinglayer::PinWrapper<Chunk*>>>();
-                    auto initialize_rows = std::make_shared<std::once_flag>();
-                    view_data = [this,
-                                 field_id,
-                                 rows_until_chunk,
-                                 pinned_chunks,
-                                 initialize_rows](size_t id) {
-                        auto column = get_column(field_id);
-                        AssertInfo(column != nullptr,
-                                   "raw vector column {} is unavailable for "
-                                   "MRL refinement",
-                                   field_id.get());
-                        std::call_once(*initialize_rows, [&] {
-                            if (column->IsNullable()) {
-                                column->BuildValidRowIds(nullptr);
-                            }
-                            *pinned_chunks = column->GetAllChunks(nullptr);
-                            AssertInfo(
-                                pinned_chunks->size() ==
-                                    static_cast<size_t>(column->num_chunks()),
-                                "raw vector column {} returned an incomplete "
-                                "chunk set",
-                                field_id.get());
-                            rows_until_chunk->reserve(column->num_chunks() + 1);
-                            rows_until_chunk->push_back(0);
-                            for (int64_t chunk_id = 0;
-                                 chunk_id < column->num_chunks();
-                                 ++chunk_id) {
-                                const auto rows =
-                                    column->IsNullable()
-                                        ? column->GetValidCountInChunk(chunk_id)
-                                        : column->chunk_row_nums(chunk_id);
-                                rows_until_chunk->push_back(
-                                    rows_until_chunk->back() + rows);
-                            }
-                        });
-
-                        const auto compact_offset = static_cast<int64_t>(id);
-                        auto it = std::upper_bound(rows_until_chunk->begin(),
-                                                   rows_until_chunk->end(),
-                                                   compact_offset);
-                        AssertInfo(it != rows_until_chunk->begin() &&
-                                       it != rows_until_chunk->end(),
-                                   "MRL refinement offset {} is out of range",
-                                   id);
-                        const auto chunk_id =
-                            std::distance(rows_until_chunk->begin(), it) - 1;
-                        auto* chunk = (*pinned_chunks)[chunk_id].get();
-                        return static_cast<const void*>(chunk->ValueAt(
-                            compact_offset - (*rows_until_chunk)[chunk_id]));
-                    };
+                storage::VectorDataViewScope vector_data_view_scope;
+                if (IsVectorDataType(load_index_info_ptr->field_type)) {
+                    vector_data_view_scope = CreateChunkedColumnDataViewScope(
+                        [this, field_id] { return get_column(field_id); });
                 }
 
                 // Download & compose index
                 LoadIndexData(trace_ctx,
                               load_index_info_ptr,
                               op_ctx,
-                              std::move(view_data));
+                              std::move(vector_data_view_scope));
 
                 // RuntimeResourceState and staged PublishedSegmentState are
                 // shared batch-private objects. Keep expensive IO/build work

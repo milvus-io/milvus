@@ -290,7 +290,7 @@ struct OpenedMemState {
             ConfigureMRL(engine,
                          *params.runtime_dim,
                          params.knowhere_config,
-                         opts.vector_data_view);
+                         opts.vector_data_view_scope);
         }
     }
 

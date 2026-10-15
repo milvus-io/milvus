@@ -182,7 +182,7 @@ bool
 ConfigureMRL(KnowhereEngine& engine,
              int64_t source_dim,
              const Config& params,
-             knowhere::ViewDataOp view_data = {});
+             knowhere::ViewDataScopeOp view_data_scope = {});
 
 // Decode owning raw-vector results from knowhere datasets. These helpers need
 // no reader state and are shared across vector query implementations.

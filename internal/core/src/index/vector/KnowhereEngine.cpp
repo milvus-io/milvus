@@ -355,7 +355,7 @@ bool
 ConfigureMRL(KnowhereEngine& engine,
              int64_t source_dim,
              const Config& params,
-             knowhere::ViewDataOp view_data) {
+             knowhere::ViewDataScopeOp view_data_scope) {
     const auto mrl_dim = GetValueFromConfig<int64_t>(params, MRL_DIM_KEY);
     const auto with_refine =
         GetValueFromConfig<bool>(params, WITH_MRL_REFINE_KEY).value_or(false);
@@ -388,12 +388,13 @@ ConfigureMRL(KnowhereEngine& engine,
                       "MRL does not support vector type {}",
                       engine.PhysicalType());
     }
-    engine.native_index = knowhere::CreateMRLIndex(std::move(engine.native_index),
-                                                    source_dim,
-                                                    *mrl_dim,
-                                                    data_type,
-                                                    with_refine,
-                                                    std::move(view_data));
+    engine.native_index =
+        knowhere::CreateMRLIndex(std::move(engine.native_index),
+                                 source_dim,
+                                 *mrl_dim,
+                                 data_type,
+                                 with_refine,
+                                 std::move(view_data_scope));
     engine.SetDim(source_dim);
     return true;
 }

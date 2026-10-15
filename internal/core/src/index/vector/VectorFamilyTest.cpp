@@ -538,8 +538,10 @@ TEST(VectorFamilyEdgeTest, MRLRefinesWithSourceRowsAfterReload) {
         persisted, storage::Generation::V1V2);
     storage::LoadOptions options;
     options.params = adapted.params;
-    options.vector_data_view = [&values](size_t id) {
-        return static_cast<const void*>(values.data() + id * kDim);
+    options.vector_data_view_scope = [&values](milvus::OpContext*) {
+        return [&values](size_t id) {
+            return static_cast<const void*>(values.data() + id * kDim);
+        };
     };
     auto base = LoaderRegistry::Instance()
                     .Lookup(adapted.family)

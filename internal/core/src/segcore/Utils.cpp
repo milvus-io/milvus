@@ -1325,7 +1325,7 @@ void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,
               milvus::OpContext* op_ctx,
-              std::function<const void*(size_t)> vector_data_view) {
+              storage::VectorDataViewScope vector_data_view_scope) {
     auto& index_params = load_index_info->index_params;
     auto field_type = load_index_info->field_type;
     auto engine_version = load_index_info->index_engine_version;
@@ -1435,7 +1435,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         ctx,
         file_manager_context,
         config,
-        std::move(vector_data_view));
+        std::move(vector_data_view_scope));
     load_index_info->index_family = translator->Family();
     load_index_info->index_value_type = translator->ValueType();
     load_index_info->index_caps = translator->Caps();

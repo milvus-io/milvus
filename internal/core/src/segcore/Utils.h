@@ -30,6 +30,7 @@
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/Meta.h"
 #include "segcore/SegmentInterface.h"
+#include "storage/artifact/LoadOptions.h"
 
 namespace milvus::segcore {
 
@@ -199,7 +200,7 @@ void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,
               milvus::OpContext* op_ctx = nullptr,
-              std::function<const void*(size_t)> vector_data_view = {});
+              storage::VectorDataViewScope vector_data_view_scope = {});
 
 /**
  * Convert Milvus timestamp to physical time in milliseconds.

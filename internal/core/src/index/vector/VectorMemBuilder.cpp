@@ -396,11 +396,12 @@ VectorMemBuilder<T>::VectorMemBuilder(
                    dim);
     }
     engine_.SetDim(dim);
-    ConfigureMRL(engine_,
-                 dim,
-                 build_params_,
-                 view_data.has_value() ? std::move(*view_data)
-                                       : knowhere::ViewDataOp{});
+    knowhere::ViewDataScopeOp view_data_scope;
+    if (view_data.has_value()) {
+        view_data_scope = [view_data = std::move(*view_data)](
+                              milvus::OpContext*) { return view_data; };
+    }
+    ConfigureMRL(engine_, dim, build_params_, std::move(view_data_scope));
 
     expected_rows_ =
         GetValueFromConfig<int64_t>(build_params_, INDEX_NUM_ROWS_KEY);

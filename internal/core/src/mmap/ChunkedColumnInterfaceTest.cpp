@@ -32,6 +32,7 @@
 #include "mmap/ChunkedColumn.h"
 #include "mmap/ChunkedColumnFilter.h"
 #include "mmap/ChunkedColumnGroup.h"
+#include "segcore/indexing/ChunkedColumnDataView.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
 namespace milvus {
@@ -547,6 +548,33 @@ struct ProxyVectorArrayColumnFactory {
                 std::static_pointer_cast<void>(buffers)};
     }
 };
+
+TEST(ChunkedColumnDataViewTest, PinsOnlyTouchedChunksForEachScope) {
+    ColumnSpec spec{{3, 3},
+                    {{true, false, true}, {false, true, true}},
+                    /*nullable=*/true};
+    auto fx = ChunkedColumnFactory::Create(spec);
+    auto make_view = segcore::CreateChunkedColumnDataViewScope(
+        [column = fx.column] { return column; });
+
+    EXPECT_TRUE(fx.pin_requests->empty());
+    {
+        auto view = make_view(nullptr);
+        EXPECT_EQ(*static_cast<const int32_t*>(view(2)), 2);
+        EXPECT_EQ(*static_cast<const int32_t*>(view(0)), 0);
+        EXPECT_EQ(fx.pin_requests->size(), 1u);
+        EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
+
+        EXPECT_EQ(*static_cast<const int32_t*>(view(4)), 4);
+        EXPECT_EQ(fx.pin_requests->size(), 2u);
+        EXPECT_EQ(fx.pin_requests->back(), (std::vector<int64_t>{1}));
+    }
+
+    auto next_view = make_view(nullptr);
+    EXPECT_EQ(*static_cast<const int32_t*>(next_view(4)), 4);
+    ASSERT_EQ(fx.pin_requests->size(), 3u);
+    EXPECT_EQ(fx.pin_requests->back(), (std::vector<int64_t>{1}));
+}
 
 bool
 IsScanRowValid(const ChunkedColumnInterface::ScanBatch& batch, int64_t offset) {

@@ -31,6 +31,9 @@ struct OpContext;
 // parameters; the storage boundary does not persist or reinterpret them.
 namespace milvus::storage {
 
+using VectorDataView = std::function<const void*(size_t)>;
+using VectorDataViewScope = std::function<VectorDataView(milvus::OpContext*)>;
+
 struct LoadOptions {
     // Open with file-backed bulk ownership. A family may stream format
     // conversion or build heap auxiliary metadata within its declared load
@@ -55,10 +58,11 @@ struct LoadOptions {
     // parses its own typed settings from it.
     nlohmann::json params = nlohmann::json::object();
 
-    // Optional runtime access to raw vector rows. Vector loaders pass this to
-    // wrappers that refine search results against segment-owned data. The
-    // callback and the referenced rows are never persisted by the artifact.
-    std::function<const void*(size_t)> vector_data_view;
+    // Optional factory for search-scoped access to raw vector rows. Vector
+    // loaders pass it to wrappers that refine against segment-owned data. Each
+    // produced callback owns its row pins only for the consuming search; none
+    // of this runtime state is persisted by the artifact.
+    VectorDataViewScope vector_data_view_scope;
 
     // Per-operation context: cancellation token, runtime load priority, cold-byte
     // accounting. Borrowed, never owned; may be null.
