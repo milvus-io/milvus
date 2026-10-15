@@ -136,14 +136,17 @@ func (provider *HuggingFaceEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *HuggingFaceEmbeddingProvider) CallEmbedding(_ context.Context, texts []string, _ models.TextEmbeddingMode) (any, error) {
+func (provider *HuggingFaceEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, _ models.TextEmbeddingMode) (any, error) {
 	data := make([][]float32, 0, len(texts))
 	for i := 0; i < len(texts); i += provider.maxBatch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		end := i + provider.maxBatch
 		if end > len(texts) {
 			end = len(texts)
 		}
-		resp, err := provider.client.FeatureExtraction(provider.hfProvider, provider.modelName, texts[i:end], provider.params, provider.timeoutMs)
+		resp, err := provider.client.FeatureExtraction(ctx, provider.hfProvider, provider.modelName, texts[i:end], provider.params, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

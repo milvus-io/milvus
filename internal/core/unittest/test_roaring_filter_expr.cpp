@@ -45,8 +45,6 @@
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "exec/expression/MembershipFilterExpr.h"
 #include "expr/ITypeExpr.h"
-#include "index/BitmapIndex.h"
-#include "index/ScalarIndexSort.h"
 #include "pb/plan.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanProto.h"
@@ -56,6 +54,8 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
+#include "test_utils/CountingScalarReader.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -287,15 +287,6 @@ WidenValues(const std::vector<T>& values) {
 
 std::atomic<int64_t> g_roaring_reverse_lookup_calls{0};
 
-class CountingInt64Index : public index::ScalarIndexSort<int64_t> {
- public:
-    std::optional<int64_t>
-    Reverse_Lookup(size_t offset) const override {
-        ++g_roaring_reverse_lookup_calls;
-        return index::ScalarIndexSort<int64_t>::Reverse_Lookup(offset);
-    }
-};
-
 class RoaringFilterExprEvalTest : public ::testing::Test {
  protected:
     void
@@ -339,7 +330,7 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
                         N,
                         dataset_->row_ids_.data(),
                         dataset_->timestamps_.data(),
-                        dataset_->raw_);
+                        dataset_->SharedRaw());
         return segment;
     }
 
@@ -354,17 +345,17 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
             schema_, *dataset_, false, {i64_fid_.get()});
         EXPECT_FALSE(segment->HasFieldData(i64_fid_));
 
-        segcore::LoadIndexInfo index_info;
+        segcore::LoadIndexInfo index_info{};
         index_info.field_id = i64_fid_.get();
         index_info.field_type = DataType::INT64;
-        std::unique_ptr<index::ScalarIndex<int64_t>> scalar_index;
+        auto scalar_index = BuildTestScalarIndex<int64_t>(
+            "sort", N, i64_values_.data(), validity_.data());
         if (counting) {
-            scalar_index = std::make_unique<CountingInt64Index>();
-        } else {
-            scalar_index = index::CreateScalarIndexSort<int64_t>();
+            scalar_index = std::make_unique<CountingScalarReader<int64_t>>(
+                std::move(scalar_index), g_roaring_reverse_lookup_calls);
         }
-        scalar_index->Build(N, i64_values_.data(), validity_.data());
-        index_info.index_params = GenIndexParams(scalar_index.get());
+        index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+        SetTestIndexMetadata(index_info, *scalar_index, "sort");
         index_info.cache_index = CreateTestCacheIndex(
             counting ? "roaring-counting-index" : "roaring-stl-index",
             std::move(scalar_index));
@@ -380,13 +371,14 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
             schema_, *dataset_, false, {i64_fid_.get()});
         EXPECT_FALSE(segment->HasFieldData(i64_fid_));
 
-        segcore::LoadIndexInfo index_info;
+        segcore::LoadIndexInfo index_info{};
         index_info.field_id = i64_fid_.get();
         index_info.field_type = DataType::INT64;
-        auto bitmap_index = std::make_unique<index::BitmapIndex<int64_t>>();
-        bitmap_index->Build(N, i64_values_.data(), validity_.data());
-        EXPECT_FALSE(bitmap_index->SupportFastReverseLookup());
-        index_info.index_params = GenIndexParams(bitmap_index.get());
+        auto bitmap_index = milvus::BuildTestScalarIndex<int64_t>(
+            "bitmap", N, i64_values_.data(), validity_.data());
+        EXPECT_FALSE(bitmap_index->Caps().cheap_value_lookup);
+        index_info.index_params = GenIndexParams(bitmap_index.get(), "bitmap");
+        SetTestIndexMetadata(index_info, *bitmap_index, "bitmap");
         index_info.cache_index = CreateTestCacheIndex("roaring-bitmap-index",
                                                       std::move(bitmap_index));
         segment->LoadIndex(index_info);
@@ -510,12 +502,13 @@ TEST_F(RoaringFilterExprEvalTest,
        CompilesDedicatedPhysicalExprAndForcesRawPath) {
     auto sealed = BuildSealed();
 
-    segcore::LoadIndexInfo index_info;
+    segcore::LoadIndexInfo index_info{};
     index_info.field_id = i64_fid_.get();
     index_info.field_type = DataType::INT64;
-    auto index = index::CreateScalarIndexSort<int64_t>();
-    index->Build(N, i64_values_.data(), validity_.data());
-    index_info.index_params = GenIndexParams(index.get());
+    auto index = milvus::BuildTestScalarIndex<int64_t>(
+        "sort", N, i64_values_.data(), validity_.data());
+    index_info.index_params = GenIndexParams(index.get(), "sort");
+    SetTestIndexMetadata(index_info, *index, "sort");
     index_info.cache_index =
         CreateTestCacheIndex("roaring-raw-path", std::move(index));
     sealed->LoadIndex(index_info);

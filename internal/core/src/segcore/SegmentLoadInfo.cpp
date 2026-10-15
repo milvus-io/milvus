@@ -21,7 +21,6 @@
 #include "index/Meta.h"
 #include "log/Log.h"
 #include "common/resource_c.h"
-#include "index/IndexFactory.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/manifest.h"
 #include "pb/schema.pb.h"

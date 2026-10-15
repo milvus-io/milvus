@@ -179,6 +179,9 @@ TimestampIndexTranslator::get_cells(
     // pins to GroupChunk cells — callers read raw timestamps by pinning the
     // timestamp column directly. This avoids a DList deadlock where evicting
     // this cell would unpin GroupChunk cells under the same list_mtx_.
+    // TODO(local-format): Keep this system column Raw and preserve GetAllChunks
+    // until the full-column pointer consumer accepts a cursor and can honor its
+    // borrowed-data lifetime, with equivalent pin/loading behavior.
     auto all_chunks = column_->GetAllChunks(ctx);
     TimestampIndex index;
     if (all_chunks.size() == 1) {

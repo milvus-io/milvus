@@ -621,28 +621,51 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		require.Equal(t, []int64{1}, task.deletePKs.GetIntId().GetData())
 	})
 
-	mockey.PatchConvey("partition-key upsert rejects a non-trivial using policy for existing rows", t, func() {
-		const collectionID = int64(991012)
-		task := newTask(collectionID)
-		task.partitionKeyMode = true
-		refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
-			PolicyName: "upsert_partition_key",
-			PolicyType: rlsutil.PolicyTypePermissive,
-			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
-			UsingExpr:  "id == 1",
-			CheckExpr:  "true",
-		}})
-		resolvePredicates(task)
-		existingPK := proto.Clone(task.req.GetFieldsData()[0]).(*schemapb.FieldData)
-		existingPK.GetScalars().GetLongData().Data = []int64{1}
-		mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
-			Status:     merr.Success(),
-			FieldsData: []*schemapb.FieldData{existingPK},
-		}, segcore.StorageCost{}, nil).Build()
+	for _, tc := range []struct {
+		name          string
+		partialUpdate bool
+		usingExpr     string
+		wantDenied    bool
+	}{
+		{name: "partition-key full upsert allows authorized rows", usingExpr: "id in [1, 2, 3]"},
+		{name: "partition-key full upsert rejects unauthorized rows", usingExpr: "id == 1", wantDenied: true},
+		{name: "partition-key partial upsert allows authorized rows", partialUpdate: true, usingExpr: "id in [1, 2, 3]"},
+		{name: "partition-key partial upsert rejects unauthorized rows", partialUpdate: true, usingExpr: "id == 1", wantDenied: true},
+	} {
+		mockey.PatchConvey(tc.name, t, func() {
+			const collectionID = int64(991012)
+			task := newTask(collectionID)
+			schema := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
+			schema.Fields[2].IsPartitionKey = true
+			task.schema = mustNewSchemaInfo(schema)
+			task.partitionKeyMode = true
+			task.req.PartitionName = ""
+			task.req.PartialUpdate = tc.partialUpdate
+			task.upsertMsg.InsertMsg.Version = msgpb.InsertDataVersion_ColumnBased
+			refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
+				PolicyName: "upsert_partition_key",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+				UsingExpr:  tc.usingExpr,
+				CheckExpr:  "true",
+			}})
+			resolvePredicates(task)
+			require.NotNil(t, task.rlsUsingPredicate)
+			mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+				Status:     merr.Success(),
+				FieldsData: cloneFieldDataList(task.req.GetFieldsData()),
+			}, segcore.StorageCost{}, nil).Build()
 
-		err := task.prepareUpsert(context.Background())
-		require.ErrorIs(t, err, merr.ErrOperationNotSupported)
-	})
+			_, err := task.queryPreExecute(context.Background())
+			if tc.wantDenied {
+				require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []int64{1, 2, 3}, task.deletePKs.GetIntId().GetData())
+			require.Len(t, task.insertFieldData, len(task.req.GetFieldsData()))
+		})
+	}
 
 	mockey.PatchConvey("always-true using policy preserves direct full upsert", t, func() {
 		const collectionID = int64(991007)

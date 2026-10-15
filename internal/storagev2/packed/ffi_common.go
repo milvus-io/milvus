@@ -498,7 +498,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// open transaction
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -553,7 +553,7 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 
 	// open transaction to get manifest
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -567,6 +567,10 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 	}
 	defer C.loon_manifest_destroy(cManifest)
 
+	return manifestLobFiles(cManifest), nil
+}
+
+func manifestLobFiles(cManifest *C.LoonManifest) []LobFileInfo {
 	// extract LOB files from manifest
 	numFiles := int(cManifest.lob_files.num_files)
 	lobFiles := make([]LobFileInfo, 0, numFiles)
@@ -585,5 +589,5 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 		}
 	}
 
-	return lobFiles, nil
+	return lobFiles
 }
