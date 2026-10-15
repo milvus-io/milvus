@@ -2100,9 +2100,13 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 		return nil
 	}).Build()
 	defer saveJob.UnPatch()
-	var captured *internalpb.ImportRequestInternal
+	var rlsPrincipal string
+	var skipRLS bool
 	resolve := mockey.Mock((*Server).resolveImportRLSPredicate).To(func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*planpb.Expr, error) {
-		captured = in
+		// The real resolver consumes the request synchronously. Mockey does
+		// not change its escape analysis, so copy values while in is valid.
+		rlsPrincipal = in.GetRlsPrincipal()
+		skipRLS = in.GetSkipRls()
 		return nil, nil
 	}).Build()
 	defer resolve.UnPatch()
@@ -2140,9 +2144,9 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
 	assert.Equal(t, []string{"vchannel1"}, saved.GetReadyVchannels())
 	assert.Equal(t, uint64(200), saved.GetDataTs())
-	require.NotNil(t, captured)
-	assert.Equal(t, "alice", captured.GetRlsPrincipal())
-	assert.True(t, captured.GetSkipRls())
+	require.Equal(t, 1, resolve.Times())
+	assert.Equal(t, "alice", rlsPrincipal)
+	assert.True(t, skipRLS)
 	assert.NotContains(t, funcutil.KeyValuePair2Map(saved.GetOptions()), importutilv2.RLSPrincipal)
 	assert.NotContains(t, funcutil.KeyValuePair2Map(saved.GetOptions()), importutilv2.SkipRLS)
 }
