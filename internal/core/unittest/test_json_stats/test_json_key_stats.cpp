@@ -70,6 +70,7 @@
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/PayloadReader.h"
 #include "storage/ThreadPools.h"
@@ -1971,7 +1972,62 @@ INSTANTIATE_TEST_SUITE_P(JsonStatsPreparationModes,
                          ::testing::Combine(::testing::Bool(),
                                             ::testing::Bool()));
 
+TEST_F(JsonKeyStatsUploadLoadTest,
+       MetadataWaitsForSharedSlotAndCancelsWithoutIO) {
+    InitContext();
+    PrepareData({R"({"int": 1})", R"({"int": 2})"});
+    BuildAndUpload();
+    const auto original_files = index_files_;
+    const auto original_fs = fs_;
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    const auto old_slots = admission.CapacitySlots();
+    admission.SetCapacitySlots(1);
+    auto restore =
+        folly::makeGuard([&] { admission.SetCapacitySlots(old_slots); });
+    for (const bool with_meta : {true, false}) {
+        index_files_ = original_files;
+        if (!with_meta)
+            std::erase(index_files_, std::string(JSON_STATS_META_FILE_NAME));
+        auto fs = std::make_shared<JsonStatsAsyncFileSystem>(original_fs);
+        fs_ = fs;
+        auto lease =
+            folly::coro::blockingWait(storage::AcquireMetadataLoadSlotAsync(
+                proto::common::LoadPriority::HIGH));
+        folly::CancellationSource cancel;
+        OpContext ctx(cancel.getToken());
+        auto pending = std::async(std::launch::async,
+                                  [&] { Load("disable", &ctx, true); });
+        auto cleanup = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            lease.Release();
+            if (pending.valid())
+                pending.wait();
+        });
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        EXPECT_EQ(fs->async_opens.load(), 0);
+        EXPECT_EQ(fs->sync_footer_opens.load(), 0);
+        cancel.requestCancellation();
+        try {
+            pending.get();
+            FAIL() << "expected cancelled metadata admission";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+        EXPECT_EQ(fs->async_opens.load(), 0);
+        EXPECT_EQ(fs->sync_footer_opens.load(), 0);
+        lease.Release();
+        Load("disable", nullptr, true);
+        EXPECT_EQ(load_index_->Count(), data_.size());
+    }
+}
+
 TEST_F(JsonKeyStatsUploadLoadTest, PreparationCancellationDrainsIssuedOpens) {
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    const auto old_slots = admission.CapacitySlots();
+    admission.SetCapacitySlots(1);
+    auto restore =
+        folly::makeGuard([&] { admission.SetCapacitySlots(old_slots); });
     InitContext();
     PrepareData({R"({"int": 1})", R"({"int": 2})"});
     BuildAndUpload();
@@ -2046,6 +2102,11 @@ TEST_F(JsonKeyStatsUploadLoadTest, PreparationCancellationDrainsIssuedOpens) {
         } else {
             ASSERT_TRUE(footer->WaitForSizeCall());
         }
+        const bool available =
+            admission.TryAcquire({0, 1}, storage::LoadAdmissionPriority::High);
+        EXPECT_FALSE(available);
+        if (available)
+            admission.Release({0, 1});
         in_flight.requestCancellation();
         EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
                   std::future_status::timeout);

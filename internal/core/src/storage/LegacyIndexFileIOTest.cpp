@@ -290,9 +290,9 @@ TEST_F(LegacyIndexFileIOTest, PayloadAdmissionRemainsCancellable) {
     EXPECT_TRUE(file_->DirectReadCalls().empty());
 }
 
-TEST_F(LegacyIndexFileIOTest, SmallMetadataBypassesPayloadAdmission) {
+TEST_F(LegacyIndexFileIOTest, SmallMetadataUsesSlotWithoutChargingBytes) {
     auto lease = Run([&]() -> folly::coro::Task<LoadAdmissionLease> {
-        co_return co_await budget_.AcquireAsync({1, 1},
+        co_return co_await budget_.AcquireAsync({budget_.CapacityBytes(), 0},
                                                 LoadAdmissionPriority::High);
     }());
     auto input = Open(Encode({1, 2, 3}));
@@ -300,9 +300,104 @@ TEST_F(LegacyIndexFileIOTest, SmallMetadataBypassesPayloadAdmission) {
     EXPECT_EQ(info.payload_bytes, 3);
 }
 
+TEST_F(LegacyIndexFileIOTest, MetadataSlotWaitCancelsBeforeReading) {
+    auto lease = Run(AcquireMetadataLoadSlotAsync(kPriority));
+    auto input = Open(Encode({1, 2, 3}));
+    folly::CancellationSource cancel;
+    auto pending = std::async(std::launch::async, [&] {
+        return Run(
+            InspectLegacyIndexFileAsync(*input, kPriority, cancel.getToken()));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        lease.Release();
+        if (pending.valid())
+            pending.wait();
+    });
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    EXPECT_TRUE(file_->DirectReadCalls().empty());
+    cancel.requestCancellation();
+    try {
+        pending.get();
+        FAIL() << "expected cancelled metadata admission";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FollyCancel);
+    }
+    EXPECT_TRUE(file_->DirectReadCalls().empty());
+    lease.Release();
+    EXPECT_EQ(Run(InspectLegacyIndexFileAsync(*input, kPriority)).payload_bytes,
+              3);
+}
+
+TEST_F(LegacyIndexFileIOTest, StreamingOpenWaitHonorsExplicitCancellation) {
+    auto input = Open(Encode({1, 2, 3}));
+    const auto info = Run(InspectLegacyIndexFileAsync(*input, kPriority));
+    for (const size_t count : {1, 2}) {
+        std::vector<LegacyIndexFile> files(count, {"unused", info});
+        std::vector<uint8_t> data(count * info.payload_bytes);
+        const EntryTarget target =
+            MemoryEntryTarget{nullptr, data.data(), data.size()};
+        auto lease = Run(AcquireMetadataLoadSlotAsync(kPriority));
+        folly::CancellationSource cancel;
+        auto pending = std::async(std::launch::async, [&] {
+            Run(StreamLegacyIndexFilesAsync(
+                files, nullptr, nullptr, target, kPriority, cancel.getToken()));
+        });
+        auto cleanup = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            lease.Release();
+            if (pending.valid())
+                pending.wait();
+        });
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        cancel.requestCancellation();
+        ASSERT_EQ(pending.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        try {
+            pending.get();
+            FAIL() << "expected cancellation while waiting to open";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+    }
+}
+
+TEST_F(LegacyIndexFileIOTest, PathInspectionPreservesParentCancellation) {
+    auto lease = Run(AcquireMetadataLoadSlotAsync(kPriority));
+    folly::CancellationSource cancel;
+    const std::string path = "unused";
+    const ChunkManagerPtr manager;
+    const milvus_storage::ArrowFileSystemPtr fs;
+    const std::shared_ptr<const LegacyIndexFileInfos> infos;
+    auto pending = std::async(std::launch::async, [&] {
+        return Run(folly::coro::co_withCancellation(
+            cancel.getToken(),
+            InspectLegacyIndexFileAsync(path, manager, fs, infos, kPriority)));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        lease.Release();
+        if (pending.valid())
+            pending.wait();
+    });
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    cancel.requestCancellation();
+    ASSERT_EQ(pending.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    try {
+        pending.get();
+        FAIL() << "expected inherited cancellation while waiting to inspect";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FollyCancel);
+    }
+}
+
 TEST_F(LegacyIndexFileIOTest, LargeDescriptorWaitIsCancellable) {
     auto lease = Run([&]() -> folly::coro::Task<LoadAdmissionLease> {
-        co_return co_await budget_.AcquireAsync({1, 1},
+        co_return co_await budget_.AcquireAsync({budget_.CapacityBytes(), 0},
                                                 LoadAdmissionPriority::High);
     }());
     auto input = Open(EncodeLargeDescriptor());

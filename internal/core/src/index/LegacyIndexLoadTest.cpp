@@ -694,7 +694,7 @@ TEST_F(LegacyIndexLoadTest, SyncEnvelopeBypassesPayloadAdmission) {
     sink.ReleaseLocalStaging();
 }
 
-TEST_F(LegacyIndexLoadTest, AsyncEnvelopeOpenBypassesPayloadAdmission) {
+TEST_F(LegacyIndexLoadTest, AsyncEnvelopeOpenWaitsForSharedSlots) {
     FILE_SLICE_SIZE.store(1024 * 1024);
     PersistSorted();
     auto source = Run(storage::V1RemoteSource::OpenAsync(context_, paths_, {}));
@@ -716,8 +716,9 @@ TEST_F(LegacyIndexLoadTest, AsyncEnvelopeOpenBypassesPayloadAdmission) {
         if (load.valid())
             load.wait();
     });
-    EXPECT_EQ(load.wait_for(std::chrono::seconds(1)),
-              std::future_status::ready);
+    EXPECT_EQ(load.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    EXPECT_EQ(fs_->opens.load(), 0);
     lease.Release();
     EXPECT_GT(load.get().payload, 0);
     EXPECT_GT(fs_->opens.load(), 0);

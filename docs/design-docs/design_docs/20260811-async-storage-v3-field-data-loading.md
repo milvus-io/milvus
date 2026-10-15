@@ -56,7 +56,7 @@ This document follows the names used by the current Segcore implementation:
 | read window | One async storage request containing one or more adjacent cache cells and all row groups belonging to them. |
 | loaded bytes | The estimated final decoded size used to split read windows. |
 | transient bytes | The estimated peak temporary memory held from admission through finalization. This is the memory dimension charged by load admission. |
-| admission slot | One admitted, unfinished load window, legacy field-data batch, or index stream slice. It is released with the transient-byte reservation. |
+| admission slot | One admitted, unfinished load window, legacy field-data batch, index stream slice, or async metadata preparation operation. It is released with the transient-byte reservation. |
 | finalization | Converting Arrow record batches into Milvus `GroupChunk` data, including local mmap-file materialization when enabled. |
 
 This feature is part of the Storage V3 load path. Some existing implementation
@@ -193,8 +193,10 @@ build manifest load tasks and projected-column specs
   -> blockingWait(OpenChunkReadersAsync())
        -> shared priority-aware async-load executor
        -> collectAllWindowed(max concurrent opens = 16)
+       -> await shared load slot (zero transient-byte charge)
        -> Reader::get_chunk_reader_async(column_group_index, needed_columns)
        -> validate status and non-null reader
+       -> release each slot after its open drains
        -> return readers in spec order
   -> reuse prepared readers for column-size estimates
   -> move each reader into its MIDDLE-pool load task
@@ -214,10 +216,13 @@ all columns; lazy loading batches one projected reader per column and reuses a
 prepared reader for size estimates. These call sites borrow the JSON preparation
 request's `OpContext` and use its effective runtime load priority.
 
-The concurrency cap is **per `OpenChunkReadersAsync` call**, not process-wide.
-It is separate from the bytes-and-slots admission used by `LoadCellsAsync`;
-reader opens do not acquire either resource, and the cap does not bound cell-read
-windows or total memory across concurrent batches.
+The window of 16 is **per `OpenChunkReadersAsync` call**. Each child also
+acquires `{transient_bytes: 0, slots: 1}` from the process-wide
+`LoadAdmissionController` before invoking the storage factory, sharing its limit
+and priority queues with data and index loads. The slot belongs to the open
+operation, not the returned reader, and remains held until issued storage work
+drains. Footer memory is not charged. A storage reader may open multiple files
+internally, so the limit does not directly bound file I/O or total footer memory.
 
 Cancellation is checked before each storage factory invocation. The first
 observed open failure cancels pending dispatches; already issued opens are
@@ -246,13 +251,14 @@ capture the global setting at their first load.
 Preparation borrows an `OpContext` for the complete call. A local context merges
 the configured priority with the request's override and supplies cancellation to:
 
-1. The direct `meta.json` read and parse. Async mode uses `RemoteInputStream`;
-   sync mode uses ChunkManager. Neither mode stages another local metadata copy.
+1. The direct `meta.json` read and parse. Async mode uses `RemoteInputStream`
+   and holds one shared load slot through remote open/read; sync mode uses
+   ChunkManager. Neither mode stages another local metadata copy.
 2. Parquet footer inspection through `ParquetFormatReader::open_async()` or
    `open()`. Async opens use the shared priority-aware executor and a window of
    at most 16 outstanding files per preparation call. Synchronous first-file reads
-   stay on the caller; remaining files use the existing HIGH worker pool. This is metadata work, so it does
-   not acquire payload byte/slot leases.
+   stay on the caller; remaining files use the existing HIGH worker pool. Each
+   async footer inspection reserves one shared load slot without charging footer bytes.
 3. Eager or lazy projected-reader opening through `OpenChunkReadersAsync`, and
    BSON file inspection during construction of its cache translator.
 
@@ -260,7 +266,9 @@ Schema and row-count preparation inspects each Parquet file once. Row counts are
 retained per file; only the first file of each group retains a schema. When
 `meta.json` is absent or has no typed keys, the compatibility path additionally
 reads the first raw footer through `ParquetFormatReader::MetaTrait` in the pinned
-mode. This preserves legacy layout KV appended separately from `ARROW:schema`,
+mode. The async compatibility read reserves its own shared slot after the prior
+inspection slots are released. This preserves legacy layout KV appended separately
+from `ARROW:schema`,
 which Arrow's reconstructed schema can omit. All group schemas are registered before any column-group translator is
 created. Full Parquet payloads are not materialized for this phase. Subsequent
 projected-reader opening may still fetch footer metadata through storage's cache.
@@ -502,7 +510,7 @@ the CRT-backed S3 build path through `WITH_CRT`.
 The pipeline uses the process-wide
 `storage::LoadAdmissionController::GetInstance()` instance. The controller is
 shared with legacy field-data batches and scalar-index V3 stream slices.
-Each current production caller reserves one slot and its estimated transient
+Payload callers reserve one slot and their estimated transient
 bytes in a single request:
 
 ```cpp
@@ -556,9 +564,11 @@ release that work instead of blocking on admission. Callers must not hold an
 admission while waiting for child work that needs the same exhausted controller.
 
 The slot capacity counts unfinished windows, batches, and stream slices; it
-does not count worker threads or individual storage RPCs. A window can fan out
-inside the storage implementation. Reader opens retain their separate per-call
-concurrency limit. Stage-specific I/O or CPU admission can be considered later
+does not count worker threads or individual storage RPCs. Async reader opens
+and index/JSON metadata preparation also reserve one slot with a zero-byte
+charge, retaining their per-call concurrency windows. A window or reader open
+can fan out inside the storage implementation. Stage-specific I/O or CPU admission
+can be considered later
 if measurements show that a window-level limit is insufficient.
 
 The async feature can technically run with both capacities `0`, but enabling it
@@ -737,7 +747,7 @@ remote record batches are not considered consumed until the final
 | `queryNode.segcore.storageV2.asyncLoadThreadPoolSize` | `min(CPUNUM, 16)`, at least 1 | watched dynamically; invalid/non-positive values restore the default | shared async executor worker limit; independent of admission slots |
 | `queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes` | `16777216` (16 MiB) | watched dynamically; non-positive values fall back to 16 MiB | target loaded bytes per contiguous read window |
 | `common.loadTransientBudgetBytes` | unset: `2 GiB` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted transient bytes across load paths |
-| `common.loadAdmissionSlots` | unset: `2 × CPUNUM` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted, unfinished load windows, batches, and index stream slices |
+| `common.loadAdmissionSlots` | unset: `2 × CPUNUM` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted, unfinished load windows, batches, index stream slices, and async metadata preparation operations |
 | `common.diskWriteNumThreads` | `0` | applied through disk-writer configuration | optional local mmap-finalization executor and write concurrency limit |
 
 The async switch, async executor size, and both load admission parameters are intentionally not

@@ -466,8 +466,8 @@ TEST_F(TextIndexTranslatorTest,
                 first->Complete(i);
             pending.wait();
         });
-        // Magic, footer and directory precede admission; the next read is the
-        // admitted metadata payload. Keep it outstanding during cancellation.
+        // Magic, footer and directory only reserve a slot; the next read also
+        // reserves payload bytes. Keep it outstanding during cancellation.
         for (size_t i = 0; i < 3; ++i) {
             ASSERT_TRUE(first->WaitForCallCount(i + 1));
             first->Complete(i);

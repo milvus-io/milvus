@@ -63,6 +63,9 @@ InspectPackedScalarIndex(const std::vector<std::string>& files,
         storage_namespace == storage::ArtifactStorageNamespace::Index;
     std::shared_ptr<InputStream> input;
     if (use_async_load) {
+        auto metadata_lease =
+            co_await storage::AcquireMetadataLoadSlotAsync(priority, token);
+        storage::ThrowIfCancelled(token, "open packed index metadata");
         input = co_await folly::coro::co_withCancellation(
             folly::CancellationToken{},
             manager.OpenInputStreamAsync(files.front(), is_index_file));

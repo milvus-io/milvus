@@ -343,10 +343,17 @@ ReadJsonStatsParquetMetadata(const std::string& file,
                              const milvus_storage::api::Properties& properties,
                              bool use_async,
                              bool retain_schema,
-                             folly::CancellationToken token) {
+                             folly::CancellationToken token,
+                             proto::common::LoadPriority priority) {
     token = folly::cancellation_token_merge(
         token, co_await folly::coro::co_current_cancellation_token);
     storage::ThrowIfCancelled(token, "prepare JSON stats footer");
+    storage::LoadAdmissionLease metadata_lease;
+    if (use_async) {
+        metadata_lease =
+            co_await storage::AcquireMetadataLoadSlotAsync(priority, token);
+        storage::ThrowIfCancelled(token, "prepare JSON stats footer");
+    }
     auto reader =
         std::make_shared<milvus_storage::parquet::ParquetFormatReader>(
             fs,
@@ -1648,7 +1655,13 @@ JsonKeyStats::LoadMetaFile(const std::string& remote_path, OpContext* ctx) {
                               "load JSON stats metadata");
     std::string content;
     if (*file_manager_context_.use_async_load) {
+        const auto priority = ctx->runtime_load_priority.value_or(0) != 0
+                                  ? proto::common::LoadPriority::LOW
+                                  : proto::common::LoadPriority::HIGH;
         auto read = [&]() -> folly::coro::Task<void> {
+            auto metadata_lease =
+                co_await storage::AcquireMetadataLoadSlotAsync(
+                    priority, ctx->cancellation_token);
             storage::ThrowIfCancelled(ctx->cancellation_token,
                                       "load JSON stats metadata");
             auto input = co_await storage::RemoteInputStream::OpenAsync(
@@ -1664,12 +1677,7 @@ JsonKeyStats::LoadMetaFile(const std::string& remote_path, OpContext* ctx) {
                 ctx->cancellation_token);
         };
         folly::coro::blockingWait(folly::coro::co_withExecutor(
-            storage::ResolveAsyncLoadExecutor(
-                {},
-                ctx->runtime_load_priority.value_or(0) != 0
-                    ? proto::common::LoadPriority::LOW
-                    : proto::common::LoadPriority::HIGH),
-            read()));
+            storage::ResolveAsyncLoadExecutor({}, priority), read()));
     } else {
         content.resize(rcm_->Size(remote_path));
         rcm_->Read(remote_path, content.data(), content.size());
@@ -1918,6 +1926,9 @@ JsonKeyStats::LoadShreddingMeta(
     }
     const auto properties = GetJsonStatsReadProperties();
     const auto& token = ctx->cancellation_token;
+    const auto priority = ctx->runtime_load_priority.value_or(0) != 0
+                              ? proto::common::LoadPriority::LOW
+                              : proto::common::LoadPriority::HIGH;
     std::vector<JsonStatsParquetMetadata> metadata;
     if (*file_manager_context_.use_async_load) {
         auto inspect =
@@ -1931,9 +1942,10 @@ JsonKeyStats::LoadShreddingMeta(
                                                  properties,
                                                  true,
                                                  first,
-                                                 token));
+                                                 token,
+                                                 priority));
             }
-            // Metadata bypasses payload admission; bound opens per preparation.
+            // The per-batch window also bounds tasks waiting for shared slots.
             auto result = co_await folly::coro::co_awaitTry(
                 folly::coro::co_withCancellation(
                     token,
@@ -1942,12 +1954,7 @@ JsonKeyStats::LoadShreddingMeta(
             co_return std::move(result).value();
         };
         metadata = folly::coro::blockingWait(folly::coro::co_withExecutor(
-            storage::ResolveAsyncLoadExecutor(
-                {},
-                ctx->runtime_load_priority.value_or(0) != 0
-                    ? proto::common::LoadPriority::LOW
-                    : proto::common::LoadPriority::HIGH),
-            inspect()));
+            storage::ResolveAsyncLoadExecutor({}, priority), inspect()));
     } else {
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
@@ -1970,7 +1977,8 @@ JsonKeyStats::LoadShreddingMeta(
                                                  properties,
                                                  false,
                                                  files[i].second,
-                                                 token));
+                                                 token,
+                                                 priority));
             };
             // Keep first-file schema reads on the caller, as in the sync path.
             if (files[i].second) {
@@ -1995,6 +2003,11 @@ JsonKeyStats::LoadShreddingMeta(
             file.path = files.front().first;
             arrow::Result<MetadataReader::MetadataPtr> result;
             if (*file_manager_context_.use_async_load) {
+                auto metadata_lease =
+                    co_await storage::AcquireMetadataLoadSlotAsync(priority,
+                                                                   token);
+                storage::ThrowIfCancelled(token,
+                                          "prepare JSON stats legacy layout");
                 result = co_await folly::coro::co_withCancellation(
                     folly::CancellationToken{},
                     MetadataReader::load_metadata_async(file, properties, {}));
@@ -2013,11 +2026,7 @@ JsonKeyStats::LoadShreddingMeta(
         };
         if (*file_manager_context_.use_async_load) {
             folly::coro::blockingWait(folly::coro::co_withExecutor(
-                storage::ResolveAsyncLoadExecutor(
-                    {},
-                    ctx->runtime_load_priority.value_or(0) != 0
-                        ? proto::common::LoadPriority::LOW
-                        : proto::common::LoadPriority::HIGH),
+                storage::ResolveAsyncLoadExecutor({}, priority),
                 read_layout()));
         } else {
             folly::coro::blockingWait(read_layout());

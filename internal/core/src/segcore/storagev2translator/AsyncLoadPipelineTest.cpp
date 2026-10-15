@@ -861,6 +861,106 @@ TEST_F(AsyncLoadPipelineTest, LimitsConcurrentChunkReaderOpens) {
     }
 }
 
+TEST_F(AsyncLoadPipelineTest, ChunkReaderBatchesShareSlotsWithDataLoads) {
+    budget_.SetCapacitySlots(2);
+    // Fill the byte budget: opening readers only needs the remaining slot.
+    ASSERT_TRUE(
+        budget_.TryAcquire({1024, 1}, storage::LoadAdmissionPriority::High));
+    auto release = folly::makeGuard([&] { budget_.Release({1024, 1}); });
+    auto first = std::make_shared<FakeReader>(&executor_);
+    auto second = std::make_shared<FakeReader>(&executor_);
+    auto a = Start(OpenChunkReadersAsync(nullptr,
+                                         kTestSegmentId,
+                                         first,
+                                         MakeChunkReaderOpenSpecs(2),
+                                         OpenOptions()));
+    auto b = Start(OpenChunkReadersAsync(nullptr,
+                                         kTestSegmentId,
+                                         second,
+                                         MakeChunkReaderOpenSpecs(2),
+                                         OpenOptions()));
+    ASSERT_EQ(first->AsyncCalls(), 1);
+    EXPECT_EQ(second->AsyncCalls(), 0);
+    first->Complete(0);
+    executor_.drain();
+    ASSERT_EQ(first->AsyncCalls(), 2);
+    EXPECT_EQ(second->AsyncCalls(), 0);
+    first->Complete(1);
+    const auto opened = Get(std::move(a));
+    ASSERT_EQ(opened.size(), 2);
+    // Retaining opened readers must not retain their admission slots.
+    ASSERT_EQ(second->AsyncCalls(), 1);
+    second->Complete(0);
+    executor_.drain();
+    ASSERT_EQ(second->AsyncCalls(), 2);
+    second->Complete(1);
+    EXPECT_EQ(Get(std::move(b)).size(), 2);
+    EXPECT_TRUE(
+        budget_.TryAcquire({0, 1}, storage::LoadAdmissionPriority::High));
+    budget_.Release({0, 1});
+}
+
+TEST_F(AsyncLoadPipelineTest, ChunkReaderSlotWaitUsesRequestPriority) {
+    budget_.SetCapacitySlots(1);
+    ASSERT_TRUE(
+        budget_.TryAcquire({0, 1}, storage::LoadAdmissionPriority::High));
+    auto low = std::make_shared<FakeReader>(&executor_);
+    auto high = std::make_shared<FakeReader>(&executor_);
+    auto low_task = Start(
+        OpenChunkReadersAsync(nullptr,
+                              kTestSegmentId,
+                              low,
+                              MakeChunkReaderOpenSpecs(1),
+                              OpenOptions(proto::common::LoadPriority::LOW)));
+    auto high_task = Start(OpenChunkReadersAsync(nullptr,
+                                                 kTestSegmentId,
+                                                 high,
+                                                 MakeChunkReaderOpenSpecs(1),
+                                                 OpenOptions()));
+    EXPECT_EQ(low->AsyncCalls(), 0);
+    EXPECT_EQ(high->AsyncCalls(), 0);
+    budget_.Release({0, 1});
+    executor_.drain();
+    EXPECT_EQ(low->AsyncCalls(), 0);
+    ASSERT_EQ(high->AsyncCalls(), 1);
+    high->Complete(0);
+    EXPECT_EQ(Get(std::move(high_task)).size(), 1);
+    ASSERT_EQ(low->AsyncCalls(), 1);
+    low->Complete(0);
+    EXPECT_EQ(Get(std::move(low_task)).size(), 1);
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       ChunkReaderCancellationReleasesQueuedButDrainsActiveSlot) {
+    budget_.SetCapacitySlots(1);
+    folly::CancellationSource cancel;
+    OpContext ctx(cancel.getToken());
+    auto first = std::make_shared<FakeReader>(&executor_);
+    auto pending = Start(OpenChunkReadersAsync(&ctx,
+                                               kTestSegmentId,
+                                               first,
+                                               MakeChunkReaderOpenSpecs(2),
+                                               OpenOptions()));
+    ASSERT_EQ(first->AsyncCalls(), 1);
+    cancel.requestCancellation();
+    executor_.drain();
+    EXPECT_FALSE(pending.isReady());
+    EXPECT_EQ(first->AsyncCalls(), 1);
+    auto next = std::make_shared<FakeReader>(&executor_);
+    auto successor = Start(OpenChunkReadersAsync(nullptr,
+                                                 kTestSegmentId,
+                                                 next,
+                                                 MakeChunkReaderOpenSpecs(1),
+                                                 OpenOptions()));
+    EXPECT_EQ(next->AsyncCalls(), 0);
+    first->Complete(0);
+    ExpectClassifiedFailure([&] { Get(std::move(pending)); },
+                            ErrorCode::FollyCancel);
+    ASSERT_EQ(next->AsyncCalls(), 1);
+    next->Complete(0);
+    EXPECT_EQ(Get(std::move(successor)).size(), 1);
+}
+
 TEST_F(AsyncLoadPipelineTest, RunsSynchronousFallbackFactoryOnExecutor) {
     auto reader = std::make_shared<SyncFallbackReader>(&executor_);
     std::vector<ChunkReaderOpenSpec> specs{{.column_group_index = 5}};

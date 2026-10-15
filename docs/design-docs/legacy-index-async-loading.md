@@ -48,14 +48,22 @@ existing order into logical entries, memory targets or positioned file targets.
 Synchronous unsliced entry reads validate the envelope in the downloaded buffer
 and allocate the result from its decoded size, without separate remote probes.
 Explicit size queries and multi-slice entries without a known total still inspect
-envelopes before allocating. Open/size requests and descriptors up to 64 KiB
-bypass payload admission in both modes. Larger descriptors reserve their estimated
+envelopes before allocating. Async open/size and envelope-inspection phases
+reserve one process-wide load slot each, without charging small metadata bytes. Descriptors up to 64 KiB
+remain outside byte accounting in both modes. Synchronous metadata reads retain
+their existing scheduling. Larger descriptors reserve their estimated
 wire/parse scratch through the existing admission controller before allocation,
-and hold that lease until reading and parsing finish, including failure draining.
+and hold that lease through inspection, including failure draining. Async
+inspection releases its ordinary slot before acquiring descriptor bytes and a
+slot together, so a one-slot limit permits progress.
 This threshold changes resource handling, not the accepted storage format.
-Async inspection bounds concurrent objects per batch by the configured slot
-capacity and drains issued I/O on failure. That window is not a process-wide
-metadata concurrency limit; no separate metadata byte/slot budget is introduced.
+Async inspection retains its per-batch window and drains issued I/O on failure.
+All batches now also share `LoadAdmissionController` slots with payload loading;
+`common.loadAdmissionSlots=0` retains unlimited slot admission. Packed V3 stream
+opening and directory inspection participate too; directory inspection releases
+its slot before `__meta__` loading acquires its existing slice reservations.
+No separate metadata controller or byte budget is introduced. Slot waits preserve
+request priority and cancellation; issued I/O drains before returning its slot.
 
 Synchronous file materialization decodes bounded batches directly into the target
 staging file, including concatenated entries and directory outputs. It does not
@@ -184,8 +192,13 @@ When no typed-key map is available, the compatibility path additionally reads
 the first raw footer for legacy layout metadata, using the same transport mode.
 This preserves KV entries omitted from Arrow's stored schema and does not
 eliminate footer reads needed by subsequent projected-reader opening. The preparation batch limits async
-footer opens to 16, independently of payload admission, and drains issued opens
-before returning failure or cancellation. The detailed flow and remaining
+footer opens to 16. Each async `meta.json` read, footer inspection, legacy-layout
+footer read and projected-reader open also reserves one shared load slot without
+charging footer bytes. Preparation releases its slots before nested BSON or
+column-data loading. Issued opens drain before returning failure or cancellation.
+A projected-reader open can still fan out to multiple files inside storage; the
+shared slot limit bounds unfinished preparation operations, not individual
+network requests or total footer memory. The detailed flow and remaining
 synchronous interfaces are documented in the field-loading design linked above.
 
 ## Vector backends
