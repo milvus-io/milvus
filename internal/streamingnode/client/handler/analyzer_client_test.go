@@ -306,3 +306,54 @@ func TestValidateAnalyzerDiscovery(t *testing.T) {
 		})
 	}
 }
+
+func TestAnalyzerRequestsBoundPersistentPreparationFailures(t *testing.T) {
+	for _, validate := range []bool{false, true} {
+		mockey.PatchConvey("persistent preparation failure has an operation deadline", t, func() {
+			param := &paramtable.Get().FunctionCfg.AnalyzerRequestTimeout
+			previous := param.SwapTempValue("50ms")
+			defer param.SwapTempValue(previous)
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			calls := 0
+			mockey.Mock((*analyzerRPC).RunAnalyzer).To(func(_ *analyzerRPC, _ context.Context, _ *streamingpb.StreamingNodeRunAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+				calls++
+				return nil, status.NewUnknownError("resource download failed")
+			}).Build()
+			mockey.Mock((*analyzerRPC).ValidateAnalyzer).To(func(_ *analyzerRPC, _ context.Context, _ *streamingpb.StreamingNodeValidateAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+				calls++
+				return nil, status.NewUnknownError("resource download failed")
+			}).Build()
+			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
+			// The caller itself has no deadline. Repeated errors must not keep the
+			// request (and a RootCoord DDL lock) alive indefinitely.
+			var err error
+			if validate {
+				_, err = client.ValidateAnalyzer(context.Background(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			} else {
+				_, err = client.RunAnalyzer(context.Background(), &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}})
+			}
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.Positive(t, calls)
+			client.lifetime.SetState(typeutil.LifetimeStateStopped)
+			client.lifetime.Wait()
+		})
+	}
+}
+
+func TestAnalyzerRequestPreservesEarlierCallerDeadline(t *testing.T) {
+	mockey.PatchConvey("the caller's earlier deadline wins", t, func() {
+		mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		deadline, _ := ctx.Deadline()
+		mockey.Mock((*analyzerRPC).ValidateAnalyzer).To(func(_ *analyzerRPC, got context.Context, _ *streamingpb.StreamingNodeValidateAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+			actual, ok := got.Deadline()
+			require.True(t, ok)
+			require.Equal(t, deadline, actual)
+			return &streamingpb.StreamingNodeValidateAnalyzerResponse{}, nil
+		}).Build()
+		client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
+		_, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+		require.NoError(t, err)
+	})
+}

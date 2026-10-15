@@ -62,7 +62,11 @@ progress.
 Proxy resolves metadata once and forwards the result; it does not refresh
 metadata or retry analyzer responses. RunAnalyzer uses the same gRPC service
 configuration and streaming recovery helper as the other handler operations.
-There is no analyzer-specific retry loop, attempt budget or method configuration.
+There is no analyzer-specific retry loop or method configuration.
+`function.analyzer.requestTimeout` (default `10m`) bounds the complete client wait
+for RunAnalyzer and ValidateAnalyzer, including discovery, preparation and retries;
+a shorter caller deadline wins. Large inventories may require a higher value.
+This bounds the caller's wait, not native execution already in progress.
 HandlerClient does not interpret business Status or retry business failures.
 
 Collection identity is pinned before execution: Proxy resolves field/channel
@@ -104,8 +108,11 @@ non-retriable become terminal streaming system errors. Deterministically invalid
 analyzer options are classified as input errors at their Rust origin; internal
 failures are not relabeled as bad user parameters. HandlerClient
 uses its existing readiness/retry loop, returns Unimplemented immediately, and
-maps invalid arguments to the public DDL parameter-error contract. No independent
-retry loop, discovery mechanism, or shutdown lifecycle is introduced.
+maps invalid arguments to the public DDL parameter-error contract. The same
+Analyzer request timeout bounds retries of persistent preparation failures, so
+DDL validation cannot retain its collection-name lock indefinitely when the
+caller supplied no deadline. No independent retry loop, discovery mechanism,
+or shutdown lifecycle is introduced.
 
 The internal Coordinator `GetFileResourceSnapshot` RPC uses a dedicated
 `GetFileResourceSnapshotRequest`. Its `known_version` is the last snapshot
