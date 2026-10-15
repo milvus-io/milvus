@@ -9,16 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#pragma once
+
 #include <cstdint>
-#include "cachinglayer/Translator.h"
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "common/Types.h"
-#include "index/Index.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "knowhere/config.h"
+#include "segcore/storagev1translator/IndexReaderTranslator.h"
+
+namespace milvus {
+class ChunkedColumnInterface;
+}
 
 namespace milvus::segcore::storagev1translator {
 
-class InterimSealedIndexTranslator
-    : public milvus::cachinglayer::Translator<milvus::index::IndexBase> {
+class InterimSealedIndexTranslator : public IndexReaderTranslator {
  public:
     InterimSealedIndexTranslator(
         std::shared_ptr<ChunkedColumnInterface> vec_data,
@@ -42,10 +50,10 @@ class InterimSealedIndexTranslator
     const std::string&
     key() const override;
     std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::IndexBase>>>
+                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
-    Meta*
+    milvus::cachinglayer::Meta*
     meta() override;
 
     int64_t

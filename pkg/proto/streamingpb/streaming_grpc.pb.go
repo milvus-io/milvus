@@ -467,6 +467,7 @@ var StreamingCoordAssignmentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	StreamingNodeHandlerService_RunAnalyzer_FullMethodName            = "/milvus.proto.streaming.StreamingNodeHandlerService/RunAnalyzer"
 	StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/GetReplicateCheckpoint"
 	StreamingNodeHandlerService_GetSalvageCheckpoint_FullMethodName   = "/milvus.proto.streaming.StreamingNodeHandlerService/GetSalvageCheckpoint"
 	StreamingNodeHandlerService_Produce_FullMethodName                = "/milvus.proto.streaming.StreamingNodeHandlerService/Produce"
@@ -477,6 +478,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingNodeHandlerServiceClient interface {
+	RunAnalyzer(ctx context.Context, in *StreamingNodeRunAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeRunAnalyzerResponse, error)
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
 	GetReplicateCheckpoint(ctx context.Context, in *GetReplicateCheckpointRequest, opts ...grpc.CallOption) (*GetReplicateCheckpointResponse, error)
@@ -506,6 +508,15 @@ type streamingNodeHandlerServiceClient struct {
 
 func NewStreamingNodeHandlerServiceClient(cc grpc.ClientConnInterface) StreamingNodeHandlerServiceClient {
 	return &streamingNodeHandlerServiceClient{cc}
+}
+
+func (c *streamingNodeHandlerServiceClient) RunAnalyzer(ctx context.Context, in *StreamingNodeRunAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeRunAnalyzerResponse, error) {
+	out := new(StreamingNodeRunAnalyzerResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_RunAnalyzer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *streamingNodeHandlerServiceClient) GetReplicateCheckpoint(ctx context.Context, in *GetReplicateCheckpointRequest, opts ...grpc.CallOption) (*GetReplicateCheckpointResponse, error) {
@@ -592,6 +603,7 @@ func (x *streamingNodeHandlerServiceConsumeClient) Recv() (*ConsumeResponse, err
 // All implementations should embed UnimplementedStreamingNodeHandlerServiceServer
 // for forward compatibility
 type StreamingNodeHandlerServiceServer interface {
+	RunAnalyzer(context.Context, *StreamingNodeRunAnalyzerRequest) (*StreamingNodeRunAnalyzerResponse, error)
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
 	GetReplicateCheckpoint(context.Context, *GetReplicateCheckpointRequest) (*GetReplicateCheckpointResponse, error)
@@ -619,6 +631,9 @@ type StreamingNodeHandlerServiceServer interface {
 type UnimplementedStreamingNodeHandlerServiceServer struct {
 }
 
+func (UnimplementedStreamingNodeHandlerServiceServer) RunAnalyzer(context.Context, *StreamingNodeRunAnalyzerRequest) (*StreamingNodeRunAnalyzerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
+}
 func (UnimplementedStreamingNodeHandlerServiceServer) GetReplicateCheckpoint(context.Context, *GetReplicateCheckpointRequest) (*GetReplicateCheckpointResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetReplicateCheckpoint not implemented")
 }
@@ -641,6 +656,24 @@ type UnsafeStreamingNodeHandlerServiceServer interface {
 
 func RegisterStreamingNodeHandlerServiceServer(s grpc.ServiceRegistrar, srv StreamingNodeHandlerServiceServer) {
 	s.RegisterService(&StreamingNodeHandlerService_ServiceDesc, srv)
+}
+
+func _StreamingNodeHandlerService_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StreamingNodeRunAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeHandlerServiceServer).RunAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeHandlerService_RunAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeHandlerServiceServer).RunAnalyzer(ctx, req.(*StreamingNodeRunAnalyzerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _StreamingNodeHandlerService_GetReplicateCheckpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -738,6 +771,10 @@ var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.streaming.StreamingNodeHandlerService",
 	HandlerType: (*StreamingNodeHandlerServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "RunAnalyzer",
+			Handler:    _StreamingNodeHandlerService_RunAnalyzer_Handler,
+		},
 		{
 			MethodName: "GetReplicateCheckpoint",
 			Handler:    _StreamingNodeHandlerService_GetReplicateCheckpoint_Handler,

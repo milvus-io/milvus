@@ -276,7 +276,8 @@ TEST_F(ChunkedColumnGroupTest, DeferredGroupKeepsStateProbesCold) {
     EXPECT_EQ(factory_calls, 0);
 
     EXPECT_FALSE(captured_params.expired());
-    EXPECT_EQ(column->DataByteSize(), 128);
+    // Each proxy reports its share of the two-field group's byte estimate.
+    EXPECT_EQ(column->DataByteSize(), 64);
     EXPECT_TRUE(captured_params.expired());
     EXPECT_EQ(column->GetNumRowsUntilChunk(), (std::vector<int64_t>{0, 5}));
     EXPECT_TRUE(column->IsMaterialized());
@@ -287,7 +288,7 @@ TEST_F(ChunkedColumnGroupTest, DeferredGroupKeepsStateProbesCold) {
 
     EXPECT_NE(column->DataOfChunk(nullptr, 0).get(), nullptr);
     EXPECT_TRUE(column->CellsLoaded(&offset, 1));
-    EXPECT_EQ(column->DataByteSize(), 128);
+    EXPECT_EQ(column->DataByteSize(), 64);
     EXPECT_EQ(column->num_chunks(), 1);
     EXPECT_EQ(factory_calls, 1);
 }
@@ -319,7 +320,7 @@ TEST_F(ChunkedColumnGroupTest, DeferredFieldsShareConcurrentInitialization) {
         reads.push_back(std::async(
             std::launch::async, [column = i % 2 == 0 ? first : second] {
                 auto num_chunks = column->num_chunks();
-                EXPECT_EQ(column->DataByteSize(), 128);
+                EXPECT_EQ(column->DataByteSize(), 64);
                 auto rows = column->GetChunk(nullptr, 0).get()->RowNums();
                 return std::make_pair(num_chunks, rows);
             }));

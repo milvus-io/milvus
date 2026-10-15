@@ -65,12 +65,7 @@ func TestBumpSchemaVersionCompactionTaskSuite(t *testing.T) {
 
 type fakeTextIndex struct{}
 
-func (fakeTextIndex) Build(*indexcgowrapper.Dataset) error                        { return nil }
-func (fakeTextIndex) Serialize() ([]*indexcgowrapper.Blob, error)                 { return nil, nil }
-func (fakeTextIndex) GetIndexFileInfo() ([]*indexcgowrapper.IndexFileInfo, error) { return nil, nil }
-func (fakeTextIndex) Load([]*indexcgowrapper.Blob) error                          { return nil }
-func (fakeTextIndex) Delete() error                                               { return nil }
-func (fakeTextIndex) CleanLocalData() error                                       { return nil }
+func (fakeTextIndex) Delete() error { return nil }
 func (fakeTextIndex) UpLoad() (*cgopb.IndexStats, error) {
 	return &cgopb.IndexStats{SerializedIndexInfos: []*cgopb.SerializedIndexFileInfo{{FileName: "text-index", FileSize: 42}}}, nil
 }

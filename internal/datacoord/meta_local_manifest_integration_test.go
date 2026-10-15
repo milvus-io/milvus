@@ -262,7 +262,7 @@ func TestReloadLocalManifestPreservesPackedReferences(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegments(mock.Anything, int64(1)).Return([]*datapb.SegmentInfo{f.segment}, nil).Twice()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Twice()
-	mt := newLocalManifestTestMeta(catalog, f.cm)
+	mt := newLocalManifestTestMeta(t, catalog, f.cm)
 	originalSegment := proto.Clone(f.segment)
 	for i := 0; i < 2; i++ {
 		// The R/M namespace remains live compatibility data, not a rename source
@@ -311,7 +311,7 @@ func TestMigrateDoubleRootPackedReferencesAndGCRetry(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegments(mock.Anything, int64(1)).Return([]*datapb.SegmentInfo{f.segment}, nil).Twice()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Twice()
-	mt := newLocalManifestTestMeta(catalog, f.cm)
+	mt := newLocalManifestTestMeta(t, catalog, f.cm)
 	for range 2 {
 		report, err = localmigrate.Migrate(t.Context(), f.root, opts)
 		require.NoError(t, err)
@@ -373,7 +373,7 @@ func TestReloadLocalManifestCommitSegmentManifestCAS(t *testing.T) {
 				return []*datapb.SegmentInfo{stored}, nil
 			}).Twice()
 			catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Twice()
-			mt := newLocalManifestTestMeta(catalog, f.cm)
+			mt := newLocalManifestTestMeta(t, catalog, f.cm)
 			ctx := context.Background()
 			require.NoError(t, mt.reloadFromKV(ctx, []int64{1}))
 			assertLocalManifestCatalogReadOnly(t, catalog)

@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <arrow/array/builder_primitive.h>
+#include <arrow/io/type_fwd.h>
 #include <arrow/scalar.h>
 #include <arrow/util/byte_size.h>
+#include <arrow/util/thread_pool.h>
 #include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -113,6 +115,40 @@ get_azure_storage_config() {
                           "",
                           false,
                           100};
+}
+
+TEST(StorageRuntimeDeathTest, ConfiguresBothPoolsAndPreservesFailure) {
+    // Rust runtime configuration is process-wide and cannot be reset.
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    ASSERT_EXIT(
+        {
+            const auto invalid = InitStorageRuntime(0, 3);
+            if (invalid.error_code != milvus::ConfigInvalid) {
+                std::_Exit(1);
+            }
+            std::free(const_cast<char*>(invalid.error_msg));
+
+            const auto status = InitStorageRuntime(2, 3);
+            if (status.error_code != 0 ||
+                arrow::GetCpuThreadPoolCapacity() != 2 ||
+                arrow::io::GetIOThreadPoolCapacity() != 3) {
+                std::_Exit(2);
+            }
+
+            const auto repeated = InitStorageRuntime(4, 5);
+            const bool preserved =
+                repeated.error_code == milvus::UnexpectedError &&
+                std::string(repeated.error_msg)
+                        .find("already been configured") != std::string::npos;
+            std::free(const_cast<char*>(repeated.error_msg));
+            if (!preserved || arrow::GetCpuThreadPoolCapacity() != 2 ||
+                arrow::io::GetIOThreadPoolCapacity() != 3) {
+                std::_Exit(3);
+            }
+            std::_Exit(0);
+        },
+        ::testing::ExitedWithCode(0),
+        "");
 }
 
 class StorageTest : public testing::Test {
@@ -314,7 +350,7 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
         std::string(70 * 1024, 'x') + " searchable-tail-token"};
     bool text_valid[N] = {true, false, true};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
@@ -324,7 +360,7 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     CFlushConfig config{};
     std::string segment_path =
@@ -549,7 +585,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
     std::vector<Timestamp> timestamps = {10, 11, 12};
     std::vector<int64_t> pks = {100, 101, 102};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(
@@ -557,7 +593,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     // Flush schema carries a function output field the segment never
     // materialized.
@@ -645,7 +681,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
     std::vector<Timestamp> timestamps = {10, 11, 12};
     std::vector<int64_t> pks = {100, 101, 102};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(
@@ -653,7 +689,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     // Staler flush schema still carries an ordinary field the segment's own
     // schema never had (dropped before the segment was created).
@@ -740,7 +776,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
 
     // Insert carries no data for the function output; the consume path
     // exempts function outputs, leaving field 101 allocated but empty.
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(
@@ -748,7 +784,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     std::string schema_blob = schema_proto.SerializeAsString();
 
@@ -824,7 +860,7 @@ TEST_F(StorageTest, LoadGrowingSegmentSkipsDroppedFieldColumnGroup) {
     std::vector<int64_t> pks = {100, 101, 102};
     std::vector<int64_t> extras = {200, 201, 202};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(
@@ -836,7 +872,7 @@ TEST_F(StorageTest, LoadGrowingSegmentSkipsDroppedFieldColumnGroup) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     std::string schema_blob = full_proto.SerializeAsString();
 

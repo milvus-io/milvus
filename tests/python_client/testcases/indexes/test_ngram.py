@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -563,3 +565,59 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
             assert len(res_ngram) > 0
             assert sorted(res_ngram, key=lambda item: item["id"]) == sorted(res_no_index, key=lambda item: item["id"])
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_ngram_single_multibyte_like_does_not_crash(self):
+        """
+        target: Verify single multi-byte LIKE literals on an NGRAM-indexed field do not crash QueryNode
+        method: 1. Build and load an NGRAM index with min_gram=2 over more than 1,024 rows
+                2. Query all four LIKE pattern shapes with a single multi-byte character
+                3. Run a follow-up query to verify the collection remains available
+        expected: Every pattern returns its expected primary keys and the follow-up query succeeds
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(pk_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("title", datatype=DataType.VARCHAR, max_length=128)
+        self.create_collection(client, collection_name, schema=schema)
+
+        nb = 1100  # NGRAM indexes are skipped for segments below the index build threshold.
+        titles = ["订单（已取消）", "abc订单）后缀", "普通中文文本"]
+        rows = [{pk_field_name: i, vector_field_name: [0.0] * dim, "title": titles[i % len(titles)]} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name="title",
+            index_name="title_ngram",
+            index_type=index_type,
+            params={"min_gram": 2, "max_gram": 3},
+        )
+        # A vector index is needed to load this collection in cluster mode.
+        index_params.add_index(field_name=vector_field_name, index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        assert self.wait_for_index_ready(client, collection_name, index_name="title_ngram")
+        assert self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
+        ngram_index = client.describe_index(collection_name, "title_ngram")
+        assert ngram_index["indexed_rows"] >= nb
+
+        self.load_collection(client, collection_name)
+        # Loading returns before every QueryNode has refreshed its indexes_to_load list.
+        time.sleep(45)
+
+        test_cases = {
+            'title LIKE "%）%"': {i for i in range(nb) if i % 3 in (0, 1)},
+            'title LIKE "订%"': {i for i in range(nb) if i % 3 == 0},
+            'title LIKE "%）"': {i for i in range(nb) if i % 3 == 0},
+            'title LIKE "%abc%）%"': {i for i in range(nb) if i % 3 == 1},
+        }
+        for filter_expr, expected_ids in test_cases.items():
+            results = self.query(client, collection_name, filter=filter_expr, output_fields=[pk_field_name])[0]
+            assert {row[pk_field_name] for row in results} == expected_ids
+
+        # A panic in the NGRAM path must not leave the collection unavailable.
+        follow_up = self.query(client, collection_name, filter=f"{pk_field_name} >= 0", output_fields=["count(*)"])[0]
+        assert follow_up == [{"count(*)": nb}]

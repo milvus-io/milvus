@@ -24,12 +24,12 @@
 #include "common/Types.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
-#include "index/ScalarIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -124,7 +124,7 @@ class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
                          N,
                          dataset_->row_ids_.data(),
                          dataset_->timestamps_.data(),
-                         dataset_->raw_);
+                         dataset_->SharedRaw());
         sealed_ = CreateSealedWithFieldDataLoaded(schema_, *dataset_);
     }
 
@@ -199,15 +199,28 @@ class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
         }
     }
 
+    // A production sealed load registers the type AdaptIndexType assigns, the
+    // INT64 storage type; the default keeps the logical timestamp type.
     void
-    LoadTimestamptzIndex(const int64_t* values, bool drop_field_data) {
-        auto scalar_index = milvus::index::CreateScalarIndexSort<int64_t>();
-        scalar_index->Build(N, values, tstz_valid_.data());
+    LoadTimestamptzIndex(const int64_t* values,
+                         bool drop_field_data,
+                         DataType value_type = DataType::TIMESTAMPTZ) {
+        auto scalar_index = milvus::BuildTestScalarIndex<int64_t>(
+            "sort",
+            N,
+            values,
+            tstz_valid_.data(),
+            {{"field_type", DataType::TIMESTAMPTZ},
+             {"value_type", value_type}});
+        ASSERT_EQ(scalar_index->ValueType(), value_type);
+        ASSERT_TRUE(scalar_index->Caps().value_lookup);
 
-        LoadIndexInfo load_index_info;
+        LoadIndexInfo load_index_info{};
         load_index_info.field_id = tstz_fid_.get();
         load_index_info.field_type = DataType::TIMESTAMPTZ;
-        load_index_info.index_params = GenIndexParams(scalar_index.get());
+        load_index_info.index_params =
+            GenIndexParams(scalar_index.get(), "sort");
+        SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
         load_index_info.cache_index = milvus::CreateTestCacheIndex(
             "timestamptz", std::move(scalar_index));
         sealed_->LoadIndex(load_index_info);
@@ -318,6 +331,46 @@ TEST_F(TimestamptzArithCompareCorrectnessTest,
         const bool expected = tstz_valid_[i] && i >= 16;
         EXPECT_EQ(result[i], expected) << "row " << i;
         EXPECT_EQ(valid[i], tstz_valid_[i]) << "row " << i;
+    }
+}
+
+TEST_F(TimestamptzArithCompareCorrectnessTest,
+       SealedIndexOnlyWithStorageTypedIndex) {
+    std::vector<int64_t> values(N);
+    std::iota(values.begin(), values.end(), int64_t{0});
+    LoadTimestamptzIndex(values.data(), true, DataType::INT64);
+
+    proto::plan::Interval ignored_interval;
+    ignored_interval.set_months(1);
+    auto arith = MakeTstzCompare(tstz_fid_,
+                                 proto::plan::ArithOpType::Unknown,
+                                 ignored_interval,
+                                 proto::plan::OpType::GreaterEqual,
+                                 16);
+    auto arith_result =
+        query::ExecuteQueryExpr(milvus::test::CreateRetrievePlanByExpr(arith),
+                                sealed_.get(),
+                                N,
+                                MAX_TIMESTAMP);
+    ASSERT_EQ(arith_result.size(), N);
+    for (size_t i = 0; i < N; ++i) {
+        EXPECT_EQ(arith_result[i], tstz_valid_[i] && i >= 16) << "row " << i;
+    }
+
+    proto::plan::GenericValue bound;
+    bound.set_int64_val(9);
+    auto range = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(tstz_fid_, DataType::TIMESTAMPTZ),
+        proto::plan::OpType::LessThan,
+        bound);
+    auto range_result =
+        query::ExecuteQueryExpr(milvus::test::CreateRetrievePlanByExpr(range),
+                                sealed_.get(),
+                                N,
+                                MAX_TIMESTAMP);
+    ASSERT_EQ(range_result.size(), N);
+    for (size_t i = 0; i < N; ++i) {
+        EXPECT_EQ(range_result[i], tstz_valid_[i] && i < 9) << "row " << i;
     }
 }
 

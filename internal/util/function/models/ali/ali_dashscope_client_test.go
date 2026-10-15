@@ -17,6 +17,7 @@
 package ali
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -87,7 +88,7 @@ func TestEmbeddingOK(t *testing.T) {
 		c := NewAliDashScopeEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		ret, err := c.Embedding("text-embedding-v2", []string{"sentence"}, 0, "query", "dense", 0)
+		ret, err := c.Embedding(context.Background(), "text-embedding-v2", []string{"sentence"}, 0, "query", "dense", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Output.Embeddings[0].TextIndex, 0)
 		assert.Equal(t, ret.Output.Embeddings[1].TextIndex, 1)
@@ -110,7 +111,7 @@ func TestEmbeddingFailed(t *testing.T) {
 		c := NewAliDashScopeEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-v2", []string{"sentence"}, 0, "query", "dense", 0)
+		_, err = c.Embedding(context.Background(), "text-embedding-v2", []string{"sentence"}, 0, "query", "dense", 0)
 		assert.True(t, err != nil)
 	}
 }
@@ -130,7 +131,7 @@ func TestRerankOK(t *testing.T) {
 
 	{
 		c := NewAliDashScopeRerank("mock_key")
-		r, err := c.Rerank(url, "gte-rerank-v2", "query", []string{"t1", "t2", "t3"}, nil, 0)
+		r, err := c.Rerank(context.Background(), url, "gte-rerank-v2", "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, r.Output.Results[0].Index, 0)
 		assert.Equal(t, r.Output.Results[1].Index, 1)
@@ -151,7 +152,7 @@ func TestRerankFailed(t *testing.T) {
 
 	{
 		c := NewAliDashScopeRerank("mock_key")
-		_, err := c.Rerank(url, "gte-rerank-v2", "query", []string{"t1", "t2", "t3"}, nil, 0)
+		_, err := c.Rerank(context.Background(), url, "gte-rerank-v2", "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err != nil)
 	}
 }

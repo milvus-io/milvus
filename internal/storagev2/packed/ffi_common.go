@@ -598,6 +598,10 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 	}
 	defer C.loon_manifest_destroy(cManifest)
 
+	return manifestLobFiles(cManifest), nil
+}
+
+func manifestLobFiles(cManifest *C.LoonManifest) []LobFileInfo {
 	// extract LOB files from manifest
 	numFiles := int(cManifest.lob_files.num_files)
 	lobFiles := make([]LobFileInfo, 0, numFiles)
@@ -616,5 +620,5 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 		}
 	}
 
-	return lobFiles, nil
+	return lobFiles
 }

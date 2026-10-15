@@ -105,11 +105,11 @@ func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
 		ManifestPath:   oldManifest,
 	})))
 
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			require.Equal(t, oldManifest, baseManifest)
 			require.Len(t, updates.DeltaLogs, 1)
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, updates), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -255,7 +255,7 @@ func TestCommitSegmentManifestLeavesMemoryUntouchedOnCatalogFailure(t *testing.T
 	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(merr.WrapErrServiceUnavailableMsg("catalog unavailable")).Once()
 	meta.catalog = catalog
 
-	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).Return(mockManifestUpdateResult(newManifest, nil), nil).Build()
 	defer commit.UnPatch()
 
 	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
@@ -288,11 +288,12 @@ func TestCommitSegmentManifestDoesNotSerializeDifferentSegmentsDuringManifestIO(
 
 	entered := make(chan string, 2)
 	release := make(chan struct{})
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			entered <- baseManifest
 			<-release
-			return advanceManifest(baseManifest, 1)
+			published, err := advanceManifest(baseManifest, 1)
+			return mockManifestUpdateResult(published, nil), err
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -345,11 +346,11 @@ func TestCommitSegmentManifestRebasesCatalogMutationAfterManifestIO(t *testing.T
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(string, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig, *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			close(entered)
 			<-release
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, nil), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -396,11 +397,12 @@ func TestCommitSegmentManifestFailsStaleWhenPointerAdvancesDuringManifestIO(t *t
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			close(entered)
 			<-release
-			return advanceManifest(baseManifest, 2)
+			published, err := advanceManifest(baseManifest, 2)
+			return mockManifestUpdateResult(published, nil), err
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -522,18 +524,19 @@ func TestCommitSegmentManifestSerializesSameSegment(t *testing.T) {
 	firstEntered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			_, version, err := packed.UnmarshalManifestPath(baseManifest)
 			if err != nil {
-				return "", err
+				return packed.ManifestUpdateResult{}, err
 			}
 			versions <- version
 			once.Do(func() {
 				close(firstEntered)
 				<-release
 			})
-			return advanceManifest(baseManifest, 1)
+			published, err := advanceManifest(baseManifest, 1)
+			return mockManifestUpdateResult(published, nil), err
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -743,14 +746,14 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	}))
 
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			// The transaction opens at the segment's currently published
 			// revision, not at whatever revision the build was issued against.
 			require.Equal(t, oldManifest, baseManifest)
 			require.Len(t, updates.Indexes, 1)
 			require.EqualValues(t, indexID, updates.Indexes[0].IndexID)
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, updates), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -843,10 +846,10 @@ func TestCommitSegmentManifestRejectsStaleIndexTaskProjection(t *testing.T) {
 	require.NoError(t, meta.indexMeta.UpdateVersion(buildID, 1000))
 
 	manifestCalls := 0
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(string, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig, *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			manifestCalls++
-			return packed.MarshalManifestPath(basePath, 4), nil
+			return mockManifestUpdateResult(packed.MarshalManifestPath(basePath, 4), nil), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -891,8 +894,8 @@ func TestCommitSegmentManifestDiscardsResultForDeletedIndexTask(t *testing.T) {
 		ManifestPath:   oldManifest,
 	})))
 
-	commit := mockey.Mock(packed.CommitManifestUpdates).
-		Return(packed.MarshalManifestPath(basePath, 4), nil).Build()
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).
+		Return(mockManifestUpdateResult(packed.MarshalManifestPath(basePath, 4), nil), nil).Build()
 	defer commit.UnPatch()
 
 	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
@@ -986,16 +989,18 @@ func TestCommitSegmentManifestRemovesSegmentIndexWithRetraction(t *testing.T) {
 		IndexFileKeys: []string{"0"},
 	}))
 
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			require.Equal(t, oldManifest, baseManifest)
 			require.Len(t, updates.DropIndexes, 1)
 			require.EqualValues(t, indexID, updates.DropIndexes[0].IndexID)
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, updates), nil
 		},
 	).Build()
 	defer commit.UnPatch()
-	defer mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{}, nil).Build().UnPatch()
+	read := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrServiceInternal).Build()
+	defer read.UnPatch()
+	defer func() { require.Zero(t, read.Times(), "use the commit result without reopening its manifest") }()
 
 	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
 		SegmentID:     segmentID,
@@ -1039,7 +1044,7 @@ func TestCommitSegmentManifestRemovesMissingSegmentIndexStillPublishes(t *testin
 		ManifestPath:   oldManifest,
 	})))
 
-	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).Return(mockManifestUpdateResult(newManifest, nil), nil).Build()
 	defer commit.UnPatch()
 
 	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
@@ -1094,8 +1099,8 @@ func TestCommitSegmentManifestRejectsMalformedSegmentIndexMutation(t *testing.T)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newMeta(t)
-			commit := mockey.Mock(packed.CommitManifestUpdates).
-				Return(packed.MarshalManifestPath(basePath, 4), nil).Build()
+			commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).
+				Return(mockManifestUpdateResult(packed.MarshalManifestPath(basePath, 4), nil), nil).Build()
 			defer commit.UnPatch()
 
 			err := m.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
@@ -1162,10 +1167,10 @@ func TestCommitSegmentManifestRejectsAmbiguousSegmentIndexBatchBeforeManifestIO(
 			m, err := newMemoryMeta(t)
 			require.NoError(t, err)
 			manifestCalls := 0
-			commitManifest := mockey.Mock(packed.CommitManifestUpdates).To(
-				func(string, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+			commitManifest := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+				func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig, *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 					manifestCalls++
-					return "", nil
+					return mockManifestUpdateResult("", nil), nil
 				}).Build()
 			defer commitManifest.UnPatch()
 
@@ -1225,7 +1230,7 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 		IndexState:   commonpb.IndexState_InProgress,
 	}))
 
-	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).Return(mockManifestUpdateResult(newManifest, nil), nil).Build()
 	defer commit.UnPatch()
 
 	var actionCount int

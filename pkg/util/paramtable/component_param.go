@@ -349,8 +349,10 @@ type commonConfig struct {
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
-	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
-	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
+	ArrowCPUThreadPoolCoefficient       ParamItem `refreshable:"false"`
+	ArrowCPUThreadPoolMaxCapacity       ParamItem `refreshable:"false"`
+	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"false"`
+	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"false"`
 	ArrowReaderHoleSizeLimitBytes       ParamItem `refreshable:"true"`
 	ArrowReaderRangeSizeLimitBytes      ParamItem `refreshable:"true"`
 	StorageReaderThreadPoolSize         ParamItem `refreshable:"true"`
@@ -918,19 +920,41 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
 
+	p.ArrowCPUThreadPoolCoefficient = ParamItem{
+		Key:          "common.arrow.cpuThreadPoolCoefficient",
+		Version:      "3.0.1",
+		DefaultValue: "1",
+		Doc: `Coefficient for the process-wide Arrow CPU pool and shared storage Tokio worker count. ` +
+			`Threads = max(1, CPU cores x coefficient), truncated to an integer and capped by ` +
+			`common.arrow.cpuThreadPoolMaxCapacity when > 0. 0 uses CPU cores and ignores the cap. ` +
+			`Must be finite and nonnegative. Takes effect only at startup; requires a restart.`,
+		Forbidden: true,
+		Export:    false,
+	}
+	p.ArrowCPUThreadPoolCoefficient.Init(base.mgr)
+
+	p.ArrowCPUThreadPoolMaxCapacity = ParamItem{
+		Key:          "common.arrow.cpuThreadPoolMaxCapacity",
+		Version:      "3.0.1",
+		DefaultValue: "0",
+		Doc: `Upper bound on the Arrow CPU pool and shared storage Tokio worker count. ` +
+			`0 disables the cap. Has no effect when common.arrow.cpuThreadPoolCoefficient is 0. ` +
+			`Must be a nonnegative int32. Takes effect only at startup; requires a restart.`,
+		Forbidden: true,
+		Export:    false,
+	}
+	p.ArrowCPUThreadPoolMaxCapacity.Init(base.mgr)
+
 	p.ArrowIOThreadPoolCoefficient = ParamItem{
 		Key:          "common.arrow.ioThreadPoolCoefficient",
 		Version:      "3.0.0",
-		DefaultValue: "0",
-		Doc: `Coefficient for arrow's internal IO thread pool size ` +
-			`(threads = CPU cores × coefficient, then clamped by ` +
-			`common.arrow.ioThreadPoolMaxCapacity when > 0). Arrow runs async ` +
-			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
-			`S3 GetObject requests — it is the real ceiling on parallel ` +
-			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
-			`minio.maxConnections. 0 means a fixed pool of 8 threads (the cap ` +
-			`is ignored). Typical range: 2–8. Negative values are ignored.`,
-		Export: false,
+		DefaultValue: "1",
+		Doc: `Coefficient for the process-wide Arrow IO pool and shared storage Tokio blocking-thread limit. ` +
+			`Threads = max(1, CPU cores x coefficient), truncated to an integer and capped by ` +
+			`common.arrow.ioThreadPoolMaxCapacity when > 0. 0 uses 8 threads and ignores the cap. ` +
+			`Must be finite and nonnegative. Takes effect only at startup; requires a restart.`,
+		Forbidden: true,
+		Export:    false,
 	}
 	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
 
@@ -938,14 +962,11 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.arrow.ioThreadPoolMaxCapacity",
 		Version:      "3.0.0",
 		DefaultValue: "0",
-		Doc: `Upper bound on arrow's IO thread pool size after applying ` +
-			`common.arrow.ioThreadPoolCoefficient. When > 0, the computed ` +
-			`threads = coefficient × CPU cores is clamped to this value — ` +
-			`useful on very large hosts where the coefficient would otherwise ` +
-			`produce a pool larger than minio.maxConnections or the S3 gateway ` +
-			`can service. 0 disables the cap. Has no effect when coefficient ` +
-			`is 0.`,
-		Export: false,
+		Doc: `Upper bound on the Arrow IO pool and shared storage Tokio blocking-thread limit. ` +
+			`0 disables the cap. Has no effect when common.arrow.ioThreadPoolCoefficient is 0. ` +
+			`Must be a nonnegative int32. Takes effect only at startup; requires a restart.`,
+		Forbidden: true,
+		Export:    false,
 	}
 	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
 
@@ -6346,6 +6367,8 @@ type dataCoordConfig struct {
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
 	DVForceAllIndexReady           ParamItem `refreshable:"true"`
 
+	ManifestCommitConcurrency ParamItem `refreshable:"false"`
+
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
@@ -6377,7 +6400,6 @@ type dataCoordConfig struct {
 	CompactionExpiryTolerance                  ParamItem `refreshable:"true"`
 	BumpSchemaVersionCompactionEnabled         ParamItem `refreshable:"true"`
 	BumpSchemaVersionCompactionTriggerInterval ParamItem `refreshable:"true"`
-	L0ManifestUpdatePoolSize                   ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -6812,20 +6834,17 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)
 
-	p.L0ManifestUpdatePoolSize = ParamItem{
-		Key:          "dataCoord.compaction.levelzero.manifestUpdatePoolSize",
+	p.ManifestCommitConcurrency = ParamItem{
+		Key:          "dataCoord.manifestCommitConcurrency",
 		Version:      "3.0.0",
 		DefaultValue: "16",
-		Doc:          "The goroutine pool size for committing L0 compaction manifest updates inside DataCoord meta update.",
-		Export:       false,
+		Doc:          "Maximum concurrent DataCoord manifest commits across L0 compaction, index and stats publication, schema materialization, and GC. Values are clamped to [1, 256]. Workers start on demand. Read once during metadata initialization; changes require restart.",
+		Export:       true,
 		Formatter: func(v string) string {
-			if getAsInt(v) < 1 {
-				return "1"
-			}
-			return v
+			return strconv.Itoa(min(256, max(1, getAsInt(v))))
 		},
 	}
-	p.L0ManifestUpdatePoolSize.Init(base.mgr)
+	p.ManifestCommitConcurrency.Init(base.mgr)
 
 	p.MinSegmentToMerge = ParamItem{
 		Key:          "dataCoord.compaction.min.segment",
@@ -7205,8 +7224,8 @@ The value must be exactly true or false. A value that does not parse as a boolea
 		Formatter: func(v string) string {
 			return strconv.Itoa(min(256, max(1, getAsInt(v))))
 		},
-		Doc: `Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
-Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.`,
+		Doc: `Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Reads await asynchronous transaction callbacks in Go. Values are clamped to [1, 256], and the coordinator read limit is also capped by positive minio.maxConnections values. Restore assembly and verification share the same budget.
+Startup continuously schedules bounded concurrent reads and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.`,
 		Export: true,
 	}
 	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
@@ -8908,7 +8927,7 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 			"records are still delivered in order. A chunk being read also fetches all byte ranges of its current round at once " +
 			"rather than one at a time; how far adjacent ranges are coalesced is left as configured (common.arrow.reader.*), so " +
 			"a sort issues the requests every other reader issues, only together. The requests actually in flight are capped by " +
-			"arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient, 8 threads by default). " +
+			"arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient, one thread per CPU core by default). " +
 			"Memory: a sort holds its whole decoded input regardless, so decoding chunks ahead adds nothing to its peak. Each " +
 			"chunk being read additionally holds the raw bytes of its current round, released when the round is replaced or the " +
 			"chunk is closed, so the read phase of one sort task adds up to this value times " +

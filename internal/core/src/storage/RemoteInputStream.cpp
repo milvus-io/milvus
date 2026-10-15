@@ -20,6 +20,7 @@
 #include "arrow/util/thread_pool.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "folly/Try.h"
 #include "folly/coro/Promise.h"
 #include "folly/coro/WithCancellation.h"
 #include "milvus-storage/common/extend_status.h"
@@ -148,21 +149,31 @@ RemoteInputStream::OpenAsync(std::shared_ptr<arrow::fs::FileSystem> fs,
         throw milvus_storage::ToSegcoreError(opened.status());
     }
     auto file = std::move(*opened);
-    arrow::Future<int64_t> size_future;
+    folly::coro::Future<arrow::Result<int64_t>> size_future;
     if (auto* native =
             dynamic_cast<milvus_storage::NonBlockingRandomAccessFile*>(
                 file.get())) {
-        size_future = native->GetSizeAsync();
+        size_future = AwaitFileResult(native->GetSizeAsync());
     } else {
-        auto submitted = file->io_context().executor()->Submit(
-            [file] { return file->GetSize(); });
+        // Arrow's task runner does not transport thrown C++ exceptions. Keep
+        // the generic filesystem fallback's exception type across the I/O hop.
+        auto [promise, future] =
+            folly::coro::makePromiseContract<arrow::Result<int64_t>>();
+        auto completion =
+            std::make_shared<folly::coro::Promise<arrow::Result<int64_t>>>(
+                std::move(promise));
+        auto submitted =
+            file->io_context().executor()->Spawn([file, completion] {
+                completion->setResult(
+                    folly::makeTryWith([&] { return file->GetSize(); }));
+            });
         if (!submitted.ok()) {
-            throw milvus_storage::ToSegcoreError(submitted.status());
+            throw milvus_storage::ToSegcoreError(submitted);
         }
-        size_future = std::move(*submitted);
+        size_future = std::move(future);
     }
     auto size = co_await folly::coro::co_withCancellation(
-        folly::CancellationToken{}, AwaitFileResult(std::move(size_future)));
+        folly::CancellationToken{}, std::move(size_future));
     if (!size.ok()) {
         throw milvus_storage::ToSegcoreError(size.status());
     }
