@@ -860,6 +860,8 @@ message CompactionPlan {
   // The requesting DataCoord can commit schema-bump manifest deltas. Absent
   // or false preserves the legacy worker-produced complete manifest response.
   bool enable_manifest_delta = 32;
+  // Zero only for initial construction; never silently replace a missing base.
+  int64 base_partition_stats_version = 33;
 }
 
 // ManifestColumnGroupFile is one loon/parquet file belonging to a column
@@ -959,6 +961,9 @@ message CompactionPlanResult {
   // classifies the original error (merr.Status), so DataCoord can persist the
   // code/reason and decide retryability instead of seeing a bare `failed`.
   common.Status fail_status = 6;
+  // Equals planID for a successful vector clustering result, including empty outputs.
+  // The complete snapshot must already exist before returning this receipt.
+  int64 partition_stats_version = 7;
 }
 
 message CompactionStateResponse {
@@ -1647,6 +1652,8 @@ message CompactionTask{
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
   uint64 create_ts = 30;
+  int64 base_partition_stats_version = 31;
+  map<string, string> clustering_plan_params = 32;
 }
 
 message PartitionStatsInfo {
@@ -1654,6 +1661,7 @@ message PartitionStatsInfo {
   int64 partitionID = 2;
   string vChannel = 3;
   int64 version = 4;
+  // Complete snapshot coverage, including retained segments from the base.
   repeated int64 segmentIDs = 5;
   int64 analyzeTaskID = 6;
   int64 commitTime = 7;

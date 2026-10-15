@@ -170,6 +170,8 @@ message AnalyzeRequest {
   int64 max_cluster_size = 17;
   int64 task_slot = 18;
   repeated common.KeyValuePair plugin_context = 19;
+  string cluster_type = 20;
+  map<string, string> cluster_params = 21;
 }
 
 message CreateStatsRequest {
