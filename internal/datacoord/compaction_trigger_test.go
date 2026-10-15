@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -90,6 +91,10 @@ func (h *spyCompactionInspector) checkAndSetSegmentStating(channel string, segme
 
 // isFull return true if the task pool is full
 func (h *spyCompactionInspector) isFull() bool {
+	return false
+}
+
+func (h *spyCompactionInspector) atTaskLimit() bool {
 	return false
 }
 
@@ -2401,6 +2406,8 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	})
 	s.allocator = allocator.NewMockAllocator(s.T())
 	s.inspector = NewMockCompactionInspector(s.T())
+	// The compaction task limits are off unless a test sets them.
+	s.inspector.EXPECT().atTaskLimit().Return(false).Maybe()
 	s.handler = NewNMockHandler(s.T())
 	s.versionManager = NewMockVersionManager(s.T())
 	s.tr = newCompactionTrigger(
@@ -2848,6 +2855,87 @@ func (s *CompactionTriggerSuite) TestCollectionScopedSignalKeepsEarlyReturn() {
 				common.CollectionTTLConfigKey: "not-a-number",
 			},
 		}))
+	})
+}
+
+// TestHandleSignalTaskLimits checks that an automatic signal stops planning,
+// without an error, at the per-trigger budget, which counts successful
+// submissions only, and at the soft task limit, while a force (manual) signal
+// is not capped.
+func (s *CompactionTriggerSuite) TestHandleSignalTaskLimits() {
+	const mb = 1024 * 1024
+	setup := func() {
+		// Rebuild the fixture so the mocks verify their calls when the subtest
+		// ends, with an inspector that expects every atTaskLimit call.
+		s.SetupTest()
+		s.inspector = NewMockCompactionInspector(s.T())
+		s.tr.inspector = s.inspector
+		pt := paramtable.Get()
+		for key, value := range map[string]string{
+			pt.DataCoordCfg.IndexBasedCompaction.Key:                   "false",
+			pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key: "1",
+			pt.DataCoordCfg.SegmentMaxSize.Key:                         "100",
+			// Every segment qualifies for single compaction and exceeds the
+			// 100MB target size, so each one becomes its own plan.
+			pt.DataCoordCfg.SingleCompactionRatioThreshold.Key: "0",
+		} {
+			pt.Save(key, value)
+			s.T().Cleanup(func() { pt.Reset(key) })
+		}
+		for _, segment := range s.meta.segments.segments {
+			segment.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		}
+		// Every subtest plans a single group.
+		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(&collectionInfo{
+			ID: s.collectionID,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+			}},
+		}, nil).Once()
+		s.tr.allocator = newMockAllocator(s.T())
+	}
+	newSignal := func(isForce bool) *compactionSignal {
+		return NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel).
+			WithSegmentIDs(1, 2, 3, 4).
+			WithIsForce(isForce)
+	}
+
+	s.Run("automatic signal stops at maxTaskNumPerTrigger submissions", func() {
+		setup()
+		paramtable.Get().Save(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key, "2")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key)
+		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().atTaskLimit().Return(false)
+		// The rejected first plan does not count, so three of the four plans are tried.
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(merr.WrapErrCompactionPlanConflict("segment is compacting")).Once()
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Twice()
+		s.NoError(s.tr.handleSignal(newSignal(false)))
+	})
+
+	s.Run("automatic signal returns nil and plans no further group at the task limit", func() {
+		setup()
+		// Segment 7 in another partition forms a second group.
+		segment := &SegmentInfo{SegmentInfo: s.genSeg(7, 60), lastFlushTime: time.Now()}
+		segment.PartitionID = s.partitionID + 1
+		segment.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		s.meta.segments.SetSegment(7, segment)
+		s.inspector.EXPECT().isFull().Return(false)
+		// Checked for the signal, the first group and its first plan; the
+		// submitted task then reaches the limit.
+		s.inspector.EXPECT().atTaskLimit().Return(false).Times(3)
+		s.inspector.EXPECT().atTaskLimit().Return(true).Once()
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Once()
+		s.NoError(s.tr.handleSignal(NewCompactionSignal()))
+	})
+
+	s.Run("force signal is not capped", func() {
+		setup()
+		// No isFull or atTaskLimit expectation is set, so a call would fail the test.
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Times(4)
+		s.NoError(s.tr.handleSignal(newSignal(true)))
 	})
 }
 

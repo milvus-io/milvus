@@ -281,7 +281,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 			return nil
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroViews)
+	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroViews, nil)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
@@ -321,7 +321,95 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 			return nil
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroViews)
+	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroViews, nil)
+}
+
+// TestHandleTickerTaskLimits checks that an automatic run stops at the
+// per-trigger budget, which spans its trigger types and counts successful
+// submissions only, and at the soft task limit, while its sort views are never
+// capped.
+func (s *CompactionTriggerManagerSuite) TestHandleTickerTaskLimits() {
+	views := func(segmentIDs ...int64) []CompactionView {
+		return lo.Map(segmentIDs, func(segmentID int64, _ int) CompactionView {
+			return &MixSegmentView{label: s.testLabel, segments: []*SegmentView{{ID: segmentID, label: s.testLabel, Size: 1}}, triggerID: 1000}
+		})
+	}
+	// run triggers a SingleTicker run and returns the segments of the
+	// successful non-sort and sort submissions.
+	run := func(events map[CompactionTriggerType][]CompactionView) (capped, sorted []int64) {
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: &schemapb.CollectionSchema{}}, nil)
+		s.triggerManager.handler = handler
+		s.triggerManager.allocator = newMockAllocator(s.T())
+		s.triggerManager.policies[SingleTicker] = &testCompactionPolicy{enabled: true, policyName: "test", triggerResult: events}
+		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(func(task *datapb.CompactionTask) error {
+			segmentID := task.GetInputSegments()[0]
+			switch {
+			case segmentID == 900:
+				return merr.WrapErrCompactionPlanConflict("segment is compacting")
+			case task.GetType() == datapb.CompactionType_SortCompaction:
+				sorted = append(sorted, segmentID)
+			default:
+				capped = append(capped, segmentID)
+			}
+			return nil
+		})
+		s.triggerManager.handleTicker(context.Background(), SingleTicker)
+		return capped, sorted
+	}
+
+	s.Run("stops at maxTaskNumPerTrigger submissions", func() {
+		s.SetupTest()
+		paramtable.Get().Save(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key, "2")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key)
+		s.inspector.EXPECT().atTaskLimit().Return(false)
+
+		capped, sorted := run(map[CompactionTriggerType][]CompactionView{
+			TriggerTypeSingle:                views(900, 901, 902, 903),
+			TriggerTypeStorageVersionUpgrade: views(904),
+			TriggerTypeSort:                  views(905, 906),
+		})
+		// The rejected view 900 does not count; trigger types run in map order.
+		s.Len(capped, 2)
+		s.ElementsMatch([]int64{905, 906}, sorted)
+	})
+
+	s.Run("still submits its sort views at the task limit", func() {
+		s.SetupTest()
+		s.inspector.EXPECT().atTaskLimit().Return(true)
+
+		capped, sorted := run(map[CompactionTriggerType][]CompactionView{
+			TriggerTypeSingle: views(901, 902),
+			TriggerTypeSort:   views(905, 906),
+		})
+		s.Empty(capped)
+		s.ElementsMatch([]int64{905, 906}, sorted)
+	})
+}
+
+// Manual compaction is not capped: it neither consults atTaskLimit nor stops at
+// maxTaskNumPerTrigger.
+func (s *CompactionTriggerManagerSuite) TestManualTriggerIsNotCapped() {
+	paramtable.Get().Save(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key)
+	// One L0 segment per view, so the request yields three views.
+	paramtable.Get().Save(Params.DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.Key)
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	s.triggerManager.handler = handler
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil)
+	// No atTaskLimit expectation is set, so a call would fail the test.
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Times(3)
+
+	_, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: s.testLabel.CollectionID,
+		L0Compaction: true,
+	})
+	s.NoError(err)
 }
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {

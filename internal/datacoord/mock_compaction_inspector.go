@@ -22,6 +22,51 @@ func (_m *MockCompactionInspector) EXPECT() *MockCompactionInspector_Expecter {
 	return &MockCompactionInspector_Expecter{mock: &_m.Mock}
 }
 
+// atTaskLimit provides a mock function with no fields
+func (_m *MockCompactionInspector) atTaskLimit() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for atTaskLimit")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockCompactionInspector_atTaskLimit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'atTaskLimit'
+type MockCompactionInspector_atTaskLimit_Call struct {
+	*mock.Call
+}
+
+// atTaskLimit is a helper method to define mock.On call
+func (_e *MockCompactionInspector_Expecter) atTaskLimit() *MockCompactionInspector_atTaskLimit_Call {
+	return &MockCompactionInspector_atTaskLimit_Call{Call: _e.mock.On("atTaskLimit")}
+}
+
+func (_c *MockCompactionInspector_atTaskLimit_Call) Run(run func()) *MockCompactionInspector_atTaskLimit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactionInspector_atTaskLimit_Call) Return(_a0 bool) *MockCompactionInspector_atTaskLimit_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionInspector_atTaskLimit_Call) RunAndReturn(run func() bool) *MockCompactionInspector_atTaskLimit_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // enqueueCompaction provides a mock function with given fields: task
 func (_m *MockCompactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
 	ret := _m.Called(task)

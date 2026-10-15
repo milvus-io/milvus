@@ -56,6 +56,8 @@ type CompactionInspector interface {
 	enqueueCompaction(task *datapb.CompactionTask) error
 	// isFull return true if the task pool is full
 	isFull() bool
+	// atTaskLimit returns true if pending and running tasks reach dataCoord.compaction.maxTaskNum
+	atTaskLimit() bool
 	// get compaction tasks by signal id
 	getCompactionTasksNumBySignalID(signalID int64) int
 	getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo
@@ -738,6 +740,19 @@ func (c *compactionInspector) cleanFailedTasks() {
 // isFull return true if the task pool is full
 func (c *compactionInspector) isFull() bool {
 	return c.queueTasks.Len() >= c.queueTasks.capacity
+}
+
+// atTaskLimit returns true if pending and running tasks reach
+// dataCoord.compaction.maxTaskNum. Automatic compaction checks it before each
+// submission, so maxTaskNum is a soft cap.
+func (c *compactionInspector) atTaskLimit() bool {
+	maxTaskNum := Params.DataCoordCfg.CompactionMaxTaskNum.GetAsInt()
+	if maxTaskNum <= 0 {
+		return false
+	}
+	c.executingGuard.RLock()
+	defer c.executingGuard.RUnlock()
+	return c.queueTasks.Len()+len(c.executingTasks) >= maxTaskNum
 }
 
 func (c *compactionInspector) checkDelay(t CompactionTask) {

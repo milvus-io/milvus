@@ -333,9 +333,27 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		mlog.Int64("signal.partitionID", signal.partitionID),
 		mlog.Int64s("signal.segmentIDs", signal.segmentIDs))
 
+	// A force signal is a manual compaction request, which is not capped.
+	var budget *triggerBudget
+	if !signal.isForce {
+		budget = newTriggerBudget()
+	}
+	// The compaction task limits are back-pressure, not an error: stop planning
+	// and leave the remaining plans to later signals.
+	limitReached := func() bool {
+		if !budget.stop(t.inspector) {
+			return false
+		}
+		log.RatedInfo(context.TODO(), rate.Limit(1), "stop generating compaction plans, compaction task limit reached")
+		return true
+	}
+
 	if !signal.isForce && t.inspector.isFull() {
 		log.Warn(context.TODO(), "skip to generate compaction plan due to handler full")
 		return merr.WrapErrServiceQuotaExceeded("compaction handler full")
+	}
+	if limitReached() {
+		return nil
 	}
 
 	log.Info(context.TODO(), "handleSignal receive")
@@ -359,6 +377,9 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		if !signal.isForce && t.inspector.isFull() {
 			log.Warn(context.TODO(), "skip to generate compaction plan due to handler full")
 			return merr.WrapErrServiceQuotaExceeded("compaction handler full")
+		}
+		if limitReached() {
+			return nil
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
@@ -399,6 +420,9 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			if !signal.isForce && t.inspector.isFull() {
 				log.Warn(context.TODO(), "skip to generate compaction plan due to handler full")
 				return merr.WrapErrServiceQuotaExceeded("compaction handler full")
+			}
+			if limitReached() {
+				return nil
 			}
 			inputSegmentIDs := lo.Map(bucket.segments, func(s *SegmentInfo, _ int) int64 { return s.GetID() })
 
@@ -441,6 +465,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 					mlog.Err(err))
 				continue
 			}
+			budget.consume()
 
 			log.Info(context.TODO(), "time cost of generating compaction",
 				mlog.Int64("planID", task.GetPlanID()),
