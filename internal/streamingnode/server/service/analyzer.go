@@ -26,7 +26,7 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 	switch source := req.GetSource().(type) {
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer:
 		if err := fileresource.Prepare(ctx); err != nil {
-			return nil, err
+			return nil, analyzerPreparationError(err)
 		}
 		results, err := analyzer.Run(ctx, source.InlineAnalyzer.GetAnalyzerParams(), req.GetPlaceholder(), req.GetWithDetail(), req.GetWithHash())
 		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err), Results: results}, nil
@@ -56,7 +56,7 @@ func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streami
 		return nil, err
 	}
 	if err := fileresource.Prepare(ctx); err != nil {
-		return nil, merr.Wrap(err, "prepare analyzer file resources")
+		return nil, analyzerPreparationError(err)
 	}
 	resourceIDs := typeutil.NewSet[int64]()
 	for _, info := range req.GetAnalyzerInfos() {
@@ -69,7 +69,7 @@ func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streami
 				return nil, status.NewInvalidArgument("analyzer parameters must be a JSON object for field: %s, name: %s", info.GetField(), info.GetName())
 			}
 		}
-		ids, err := analyzer.ValidateAnalyzer(info.GetParams(), "")
+		ids, err := fileresource.ValidateAnalyzer(info.GetParams())
 		if err != nil {
 			err = merr.Wrapf(err, "validate analyzer failed for field: %s, name: %s", info.GetField(), info.GetName())
 			if merr.GetErrorType(err) == merr.InputError {
@@ -86,4 +86,14 @@ func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streami
 		resourceIDs.Insert(ids...)
 	}
 	return &streamingpb.StreamingNodeValidateAnalyzerResponse{ResourceIds: resourceIDs.Collect()}, nil
+}
+
+// Preparation can return gRPC, context and network errors without merr metadata.
+// Only known permanent storage failures should bypass the readiness retry loop.
+func analyzerPreparationError(err error) error {
+	err = merr.Wrap(err, "prepare analyzer file resources")
+	if merr.IsNonRetryableErr(err) {
+		return status.NewUnrecoverableError(err.Error())
+	}
+	return err
 }

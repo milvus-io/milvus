@@ -9,6 +9,8 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -124,4 +126,44 @@ func setupPullTestManager(t *testing.T, version uint64) *SyncManager {
 		GlobalFileManager = previous
 	})
 	return manager
+}
+
+func TestValidateAnalyzerUsesResourceSnapshot(t *testing.T) {
+	manager := setupPullTestManager(t, 4)
+	manager.resourceMap = map[string]int64{"dictionary": 10}
+	native := mockey.Mock(analyzer.ValidateAnalyzer).To(func(params, extraInfo string) ([]int64, error) {
+		// A later sync may replace or mutate the inventory. The native request must
+		// still use the version copied under the manager lock, not the global table.
+		manager.Lock()
+		manager.resourceMap["dictionary"] = 20
+		manager.version.Store(5)
+		manager.Unlock()
+		require.Equal(t, "{}", params)
+		require.JSONEq(t, `{"resource_map":{"dictionary":10},"validate_resource_names":true}`, extraInfo)
+		var snapshot struct {
+			Resources map[string]int64 `json:"resource_map"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(extraInfo), &snapshot))
+		return []int64{snapshot.Resources["dictionary"]}, nil
+	}).Build()
+	defer native.UnPatch()
+	ids, err := ValidateAnalyzer("{}")
+	require.NoError(t, err)
+	require.Equal(t, []int64{10}, ids)
+	require.EqualValues(t, 5, manager.GetVersion())
+}
+
+func TestValidateAnalyzerWithoutSyncInventory(t *testing.T) {
+	previous := GlobalFileManager
+	defer func() { GlobalFileManager = previous }()
+	native := mockey.Mock(analyzer.ValidateAnalyzer).To(func(_, extraInfo string) ([]int64, error) {
+		require.Empty(t, extraInfo, "non-sync inventories must not classify missing names as input errors")
+		return nil, merr.ErrServiceInternal
+	}).Build()
+	defer native.UnPatch()
+	for _, manager := range []Manager{nil, &BaseManager{}, &RefManager{}} {
+		GlobalFileManager = manager
+		_, err := ValidateAnalyzer("{}")
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	}
 }

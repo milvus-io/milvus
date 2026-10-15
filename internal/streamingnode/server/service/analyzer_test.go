@@ -10,7 +10,9 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
@@ -266,5 +268,71 @@ func TestValidateAnalyzerNativeTransport(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 		require.False(t, status.AsStreamingError(err).IsInvalidArgument(), "terminal system failures must not be blamed on the user")
+	})
+}
+
+func TestAnalyzerPreparationErrorClassification(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		terminal bool
+	}{
+		{"missing object", merr.WrapErrIoKeyNotFound("dictionary.txt"), true},
+		{"missing bucket", merr.Wrap(merr.ErrIoBucketNotFound, "bucket"), true},
+		{"permission denied", merr.Wrap(merr.ErrIoPermissionDenied, "dictionary.txt"), true},
+		{"not ready", merr.ErrServiceUnavailable, false},
+		{"network unavailable", grpcstatus.Error(codes.Unavailable, "connection lost"), false},
+		{"fetch timeout", context.DeadlineExceeded, false},
+		{"canceled", context.Canceled, false},
+	}
+	for _, tc := range cases {
+		mockey.PatchConvey(tc.name, t, func() {
+			mockey.Mock(fileresource.Prepare).Return(tc.err).Build()
+			native := mockey.Mock(analyzer.ValidateAnalyzer).To(func(string, string) ([]int64, error) {
+				t.Fatal("failed preparation must not enter native validation")
+				return nil, nil
+			}).Build()
+			handler := NewHandlerService(nil)
+			_, validateErr := handler.ValidateAnalyzer(t.Context(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			_, runErr := handler.RunAnalyzer(t.Context(), inlineAnalyzerRequest("{}"))
+			for _, err := range []error{validateErr, runErr} {
+				require.Error(t, err)
+				wireErr := status.AsStreamingError(err)
+				require.Equal(t, tc.terminal, wireErr.IsUnrecoverable())
+				require.False(t, wireErr.IsInvalidArgument(), "storage state is not an analyzer parameter error")
+				if !tc.terminal {
+					require.ErrorIs(t, err, tc.err)
+				}
+			}
+			require.Zero(t, native.Times())
+		})
+	}
+}
+
+func TestValidateAnalyzerMissingResourceNativeTransport(t *testing.T) {
+	mockey.PatchConvey("missing names are input only against a prepared sync inventory", t, func() {
+		previous := fileresource.GlobalFileManager
+		defer func() { fileresource.GlobalFileManager = previous }()
+		mockey.Mock(fileresource.Prepare).Return(nil).Build()
+		listener := bufconn.Listen(1024 * 1024)
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
+		go server.Serve(listener)
+		defer server.Stop()
+		conn, err := grpc.NewClient("passthrough:///resource-validation", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		require.NoError(t, err)
+		defer conn.Close()
+		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"missing_validation_dictionary","file_name":"stop.txt"}}]}`
+		req := &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: params}}}
+		for _, mode := range []fileresource.Mode{fileresource.SyncMode, fileresource.CloseMode} {
+			fileresource.GlobalFileManager = fileresource.NewManager(nil, mode)
+			resp, err := client.ValidateAnalyzer(ctx, req)
+			require.Nil(t, resp)
+			require.Error(t, err)
+			require.Equal(t, mode == fileresource.SyncMode, status.AsStreamingError(err).IsInvalidArgument())
+		}
 	})
 }

@@ -5,7 +5,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // SnapshotFetcher returns the current inventory version and, only when it
@@ -53,4 +56,27 @@ func Prepare(ctx context.Context) error {
 	// the inventory. Sync rechecks the version under its lock in case another
 	// pull or the legacy push path has advanced it while this RPC was in flight.
 	return Sync(ctx, version, resources)
+}
+
+// ValidateAnalyzer must follow a successful Prepare. A sync-mode inventory is
+// authoritative for name validation; other modes cannot blame a missing name on
+// the caller. Explicit extra info keeps all native lookups on the same snapshot.
+func ValidateAnalyzer(params string) ([]int64, error) {
+	manager, ok := GlobalFileManager.(*SyncManager)
+	if !ok {
+		return analyzer.ValidateAnalyzer(params, "")
+	}
+	manager.Lock()
+	// Marshal under the lock: Sync cannot mutate the map midway through the copy.
+	extraInfo, err := json.Marshal(map[string]any{
+		"resource_map":            manager.resourceMap,
+		"validate_resource_names": true,
+	})
+	manager.Unlock()
+	if err != nil {
+		return nil, merr.Wrap(err, "marshal analyzer validation resource snapshot")
+	}
+	// Sync can remove files after the snapshot was captured. Native file I/O errors
+	// retain their system classification, and RootCoord still reserves returned IDs.
+	return analyzer.ValidateAnalyzer(params, string(extraInfo))
 }

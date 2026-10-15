@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub struct ResourceInfo {
     storage_name: Option<String>,
     resource_map: HashMap<String, i64>,
+    validate_resource_names: bool,
 }
 
 impl ResourceInfo {
@@ -17,6 +18,7 @@ impl ResourceInfo {
         Self {
             storage_name: None,
             resource_map: HashMap::new(),
+            validate_resource_names: false,
         }
     }
 
@@ -47,6 +49,7 @@ impl ResourceInfo {
         Ok(Self {
             storage_name: None,
             resource_map,
+            validate_resource_names: false,
         })
     }
 
@@ -92,6 +95,12 @@ impl ResourceInfo {
         Ok(Self {
             storage_name,
             resource_map,
+            // Set only by the streaming validation boundary after preparation.
+            // Global/runtime and per-collection lookups keep system semantics.
+            validate_resource_names: m
+                .get("validate_resource_names")
+                .and_then(json::Value::as_bool)
+                .unwrap_or(false),
         })
     }
 }
@@ -105,10 +114,17 @@ impl FileResourcePathBuilder for ResourceInfo {
         let resource_id =
             self.resource_map
                 .get(resource_name)
-                .ok_or(TantivyBindingError::InternalError(format!(
-                    "file resource: {} not found in local resource list",
-                    resource_name
-                )))?;
+                .ok_or_else(|| {
+                    let message = format!(
+                        "file resource: {} not found in local resource list",
+                        resource_name
+                    );
+                    if self.validate_resource_names {
+                        TantivyBindingError::InvalidArgument(message)
+                    } else {
+                        TantivyBindingError::InternalError(message)
+                    }
+                })?;
 
         let base_value =
             get_options(RESOURCE_PATH_KEY).ok_or(TantivyBindingError::InternalError(
