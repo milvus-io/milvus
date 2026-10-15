@@ -34,7 +34,12 @@ See [Transaction Messages](../message/message-semantic-txn.md) for message types
 3. **Commit**: Mark the transaction as committed. The transaction's messages become visible to consumers as a single atomic group at the assigned TimeTick.
 4. **Rollback**: Mark the transaction as rolled back. All messages in the transaction are discarded.
 5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
-6. **Force-fail**: The [Lock](lock.md) interceptor force-fails all active transactions at a VChannel when an exclusive operation is appended.
+6. **Force-fail**: The [Lock](lock.md) interceptor force-fails locally originated active transactions at a VChannel when an exclusive operation is appended.
+
+Replicated Commit append failures restore InFlight without releasing segment
+references, allowing retry. Local Flush waits for successful commit, as described
+in [Local Flush Control](local-flush.md). ForcePromote remains the explicit path
+for rolling back unfinished replicated transactions.
 
 ## LastConfirmedMessageID
 

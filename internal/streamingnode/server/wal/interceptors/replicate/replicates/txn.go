@@ -65,8 +65,8 @@ func (s *replicateTxnHelper) StartCommit(txn *message.TxnContext) error {
 	if s.currentTxn.TxnID != txn.TxnID {
 		return status.NewReplicateViolation("commit txn with different txn, current: %d, incoming: %d", s.currentTxn.TxnID, txn.TxnID)
 	}
-	s.currentTxn = nil
-	s.messageIDs = nil
+	// Keep the transaction and deduplication state until CommitDone acknowledges
+	// a successful local append. An append failure must remain retryable.
 	return nil
 }
 

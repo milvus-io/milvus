@@ -38,6 +38,7 @@ func newTxnSession(
 // TxnSession is a session for a transaction.
 type TxnSession struct {
 	mu               sync.Mutex
+	replicated       bool                         // Set from BeginTxn, immutable for this session.
 	vchannel         string                       // The vchannel of the session.
 	lastTimetick     uint64                       // session last timetick.
 	expired          bool                         // The flag indicates the transaction has trigger expired once.
@@ -162,6 +163,19 @@ func (s *TxnSession) CommitDone() {
 	}
 	s.state = message.TxnStateCommitted
 	s.cleanup()
+}
+
+// RetryCommit preserves the transaction and its segment references after a failed
+// replicated commit. The replication append path serializes commit attempts.
+func (s *TxnSession) RetryCommit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.state != message.TxnStateOnCommit {
+		return
+	}
+	s.state = message.TxnStateInFlight
+	s.doneWait = nil
 }
 
 // RejectCommit marks the transaction as rollbacked after commit admission rejects it.

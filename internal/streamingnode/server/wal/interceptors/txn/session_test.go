@@ -535,3 +535,62 @@ func newImmutableBeginTxnMessageWithVChannel(vchannel string, txnID int64, timet
 		IntoImmutableMessage(rmq.NewRmqID(1))
 	return message.MustAsImmutableBeginTxnMessageV2(msg)
 }
+
+func TestReplicatedCommitRetryKeepsSegmentReferences(t *testing.T) {
+	metrics := metricsutil.NewTxnMetrics("replicated-commit-retry")
+	defer metrics.Close()
+	session := newTxnSession("v1", message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}, 1, metrics.BeginTxn())
+	cleaned := 0
+	session.RegisterCleanup(func() { cleaned++ }, 1)
+	require.NoError(t, session.RequestCommitAndWait(context.Background(), 2))
+	session.RetryCommit()
+	require.Equal(t, message.TxnStateInFlight, session.State())
+	require.Zero(t, cleaned)
+	// Retried body/commit can use the same session without releasing its segment.
+	require.NoError(t, session.AddNewMessage(context.Background(), 3))
+	session.AddNewMessageDoneAndKeepalive(3)
+	require.NoError(t, session.RequestCommitAndWait(context.Background(), 4))
+	session.CommitDone()
+	require.Equal(t, 1, cleaned)
+}
+
+func TestExclusiveWritePreservesRecoveredReplicatedTxn(t *testing.T) {
+	resource.InitForTest(t)
+	makeBuilder := func(id message.TxnID, replicated bool) *message.ImmutableTxnMessageBuilder {
+		msg := newBeginTxnMessage(1, time.Second).WithTxnContext(message.TxnContext{TxnID: id, Keepalive: message.TxnKeepaliveInfinite})
+		if replicated {
+			msg = msg.WithReplicateHeader(&message.ReplicateHeader{
+				ClusterID: "source", TimeTick: 10,
+				MessageID: walimplstest.NewTestMessageID(1), LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+			})
+		}
+		return message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(msg.IntoImmutableMessage(walimplstest.NewTestMessageID(int64(id)))))
+	}
+	manager := NewTxnManager(types.PChannelInfo{Name: "preserve-replicated"}, map[message.TxnID]*message.ImmutableTxnMessageBuilder{
+		1: makeBuilder(1, false), 2: makeBuilder(2, true),
+	})
+	defer manager.metrics.Close()
+	local, err := manager.GetSessionOfTxn(1)
+	require.NoError(t, err)
+	replica, err := manager.GetSessionOfTxn(2)
+	require.NoError(t, err)
+	var localCleaned, replicaCleaned bool
+	local.RegisterCleanup(func() { localCleaned = true }, 1)
+	replica.RegisterCleanup(func() { replicaCleaned = true }, 1)
+	manager.FailTxnAtVChannel("v1")
+	require.True(t, localCleaned)
+	require.False(t, replicaCleaned)
+	_, err = manager.GetSessionOfTxn(1)
+	require.Error(t, err)
+	_, err = manager.GetSessionOfTxn(2)
+	require.NoError(t, err)
+	manager.FailTxnAtVChannel("")
+	require.False(t, replicaCleaned)
+	manager.RollbackAllInFlightTransactions()
+	require.True(t, replicaCleaned)
+	select {
+	case <-manager.RecoverDone():
+	default:
+		t.Fatal("promotion must resolve recovered transactions")
+	}
+}

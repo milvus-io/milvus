@@ -60,7 +60,7 @@ func StartUnreplicableBroadcastWithResourceKeys(ctx context.Context, resourceKey
 	return broadcaster.WithUnreplicableResourceKeys(ctx, resourceKeys...)
 }
 
-// StartBroadcastWithSecondaryClusterResourceKey starts a broadcast with exclusive cluster resource key
+// StartBroadcastWithSecondaryClusterResourceKey starts a broadcast with exclusive promotion admission
 // and verifies the cluster is secondary. Returns error if the cluster is primary.
 // This is used for force promote operations that should only be executed on secondary clusters.
 func StartBroadcastWithSecondaryClusterResourceKey(ctx context.Context) (broadcaster.BroadcastAPI, error) {

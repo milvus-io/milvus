@@ -85,6 +85,10 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			return nil, err
 		}
 		defer func() {
+			if err != nil && msg.ReplicateHeader() != nil {
+				txnSession.RetryCommit()
+				return
+			}
 			if txn.IsCommitAdmissionRejected(err) {
 				txnSession.RejectCommit()
 				return
@@ -175,6 +179,9 @@ func (impl *timeTickAppendInterceptor) handleCommit(ctx context.Context, msg mes
 
 	// Start commit the message.
 	if err = session.RequestCommitAndWait(ctx, msg.TimeTick()); err != nil {
+		if msg.ReplicateHeader() != nil {
+			session.RetryCommit()
+		}
 		return nil, err
 	}
 	return session, nil

@@ -18,12 +18,28 @@ type lockAppendInterceptor struct {
 	vchannelLocker *lock.KeyLock[string]
 	txnManager     *txn.TxnManager
 	// Builders run in chain order; a later builder can install the row-lock hook.
-	buildParam *interceptors.InterceptorBuildParam
+	buildParam     *interceptors.InterceptorBuildParam
+	replicateOrder *replicateAppendOrder
 }
 
-func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
+func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
+	finish, err := r.replicateOrder.acquire(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
 	g := r.acquireLockGuard(ctx, msg)
 	defer g()
+	defer func() {
+		if err == nil && msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+			header := message.MustAsMutableAlterReplicateConfigMessageV2(msg).Header()
+			if header.ForcePromote && !header.Ignore {
+				r.replicateOrder.forcePromoted()
+			}
+		}
+		if finish != nil {
+			finish(err)
+		}
+	}()
 
 	// Row locks are taken under the shard lifecycle lock and before TimeTick
 	// allocates the write timestamp, so a later lock holder always receives a
@@ -56,7 +72,7 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 		if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
 			r.glock.Lock()
 			return func() {
-				// fail all transactions at all vchannels.
+				// Fail local transactions at all VChannels.
 				r.txnManager.FailTxnAtVChannel("")
 				r.glock.Unlock()
 			}
@@ -64,7 +80,8 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 			r.glock.RLock()
 			r.vchannelLocker.Lock(vchannel)
 			return func() {
-				// For exclusive messages, we need to fail all transactions at the vchannel.
+				// Exclusive messages fail locally originated transactions at the VChannel.
+				// Local flush admission has already drained replicated transactions.
 				// Otherwise, the transaction message may cross the exclusive message.
 				// e.g. an exclusive message like `ManualFlush` happens, it will flush all the growing segment.
 				// But the transaction insert message that use those segments may not be committed,
@@ -94,4 +111,10 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 }
 
 // Close the interceptor release all the resources.
-func (r *lockAppendInterceptor) Close() {}
+func (r *lockAppendInterceptor) Close() {
+	r.replicateOrder.close()
+}
+
+func (r *lockAppendInterceptor) GracefulClose() {
+	r.replicateOrder.close()
+}

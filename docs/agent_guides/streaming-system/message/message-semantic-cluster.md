@@ -6,13 +6,13 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 
 | Message | Dispatch | ExclusiveRequired | ResourceKey |
 |---------|----------|-------------------|-------------|
-| FlushAll | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
+| FlushAll | Broadcast: all PChannels, Unreplicable (`_ur`) | Yes (all PChannels) | ExclusiveCluster |
 | AlterReplicateConfig | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
 | AlterWAL | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
 | AlterResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
 | DropResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
 
-- **FlushAll**: Flushes ALL growing segments and required L0 Delete output across ALL collections on ALL PChannels. Uses AckSyncUp; the RPC waits for consuming-side completion on every PChannel. Follow-up GetFlushAllState returns true without polling channel checkpoints.
+- **FlushAll**: Issued through the unreplicable broadcast entrance on either replication role, affecting only the receiving cluster. Waits at each PChannel for its current replicated transaction and precedes subsequent transactions (see [Local Flush Control](../wal/local-flush.md)). Flushes ALL growing segments and required L0 Delete output across ALL collections on ALL PChannels. Uses AckSyncUp; the RPC waits for consuming-side completion on every PChannel. Follow-up GetFlushAllState returns true without polling channel checkpoints.
 - **AlterReplicateConfig**: Changes replication topology — enabling, disabling, or switching PRIMARY/SECONDARY roles.
 - **AlterWAL**: Switches WAL backend implementation across the entire cluster.
 - **AlterResourceGroup**: Creates, updates, or transfers nodes between query resource groups.

@@ -30,6 +30,7 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 			beginMessages.TimeTick(),
 			m.BeginTxn(),
 		)
+		session.replicated = beginMessages.ReplicateHeader() != nil
 		for _, msg := range body {
 			session.AddNewMessage(context.Background(), msg.TimeTick())
 			session.AddNewMessageDoneAndKeepalive(msg.TimeTick())
@@ -91,6 +92,7 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTx
 		return nil, status.NewTransactionExpired("manager closed")
 	}
 	session := newTxnSession(vchannel, *txnCtx, timetick, m.metrics.BeginTxn())
+	session.replicated = msg.ReplicateHeader() != nil
 	m.sessions[session.TxnContext().TxnID] = session
 	return session, nil
 }
@@ -124,15 +126,16 @@ func (m *TxnManager) buildTxnContext(ctx context.Context, msg message.MutableBeg
 	}, nil
 }
 
-// FailTxnAtVChannel fails all transactions at the specified vchannel.
-// If the vchannel is empty, it will fail all transactions.
+// FailTxnAtVChannel fails locally originated transactions at the specified vchannel.
+// An empty vchannel covers all local transactions. Replicated transactions are
+// drained before local flush, or explicitly rolled back by ForcePromote.
 func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	// avoid the txn to be committed.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ids := make([]int64, 0, len(m.sessions))
 	for id, session := range m.sessions {
-		if vchannel == "" || session.VChannel() == vchannel {
+		if !session.replicated && (vchannel == "" || session.VChannel() == vchannel) {
 			session.Cleanup()
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)

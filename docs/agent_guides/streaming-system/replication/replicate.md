@@ -9,7 +9,7 @@ Milvus supports multi-cluster WAL replication via a star topology: one PRIMARY c
 ## Roles
 
 - **PRIMARY**: Accepts client writes (DML/DDL/DCL). The Replicate Interceptor **rejects** any message carrying a replicate header.
-- **SECONDARY**: Only accepts replicated messages forwarded from the primary. The Replicate Interceptor **rejects** any message without a replicate header, with two exceptions: WAL self-controlled messages like TimeTick/CreateSegment/Flush, which bypass the interceptor entirely since they are locally generated regardless of role, and messages carrying the `Unreplicable` (`_ur`) property, which are local to the cluster: the secondary WAL appends them and CDC never forwards them. The broadcaster issues them through `StartUnreplicableBroadcastWithResourceKeys`, which skips the primary check (used for resource group DDL, see [Cluster Messages](../message/message-semantic-cluster.md)).
+- **SECONDARY**: Only accepts replicated messages forwarded from the primary. The Replicate Interceptor **rejects** any message without a replicate header, with two exceptions: WAL self-controlled messages like TimeTick/CreateSegment/Flush, which bypass the interceptor entirely since they are locally generated regardless of role, and messages carrying the `Unreplicable` (`_ur`) property, which are local to the cluster: the secondary WAL appends them and CDC never forwards them. The broadcaster issues them through `StartUnreplicableBroadcastWithResourceKeys`, which skips the primary check (used for resource group DDL and local Flush/FlushAll, see [Cluster Messages](../message/message-semantic-cluster.md)).
 
 ## Data Flow
 
@@ -53,3 +53,10 @@ All topology changes are triggered by `AlterReplicateConfig` broadcast messages,
 - `internal/streamingcoord/server/balancer/` — `ChannelManager` replication config persistence, `AvailableInReplication`, CDC task creation
 - `internal/streamingnode/server/wal/interceptors/replicate/` — Replicate interceptor, `ReplicateManager`, secondary state
 - `internal/cdc/replication/` — CDC `ChannelReplicator`, `ReplicateStreamClient`
+
+## Local flush ordering
+
+Local Flush/FlushAll use `_ur` and do not advance the source checkpoint. Their
+PChannel gate drains the current replicated transaction, appends the flush, then
+admits the next transaction. See [Local Flush Control](../wal/local-flush.md) for
+reconnect, commit failure, WAL recovery and ForcePromote behavior.

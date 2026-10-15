@@ -22,6 +22,7 @@ Messages managing transactions on a single VChannel.
 - With partial-update CAS enabled, the lock interceptor enforces the body-before-commit order for local transactions before TimeTick: a CommitTxn freezes its transaction on arrival, later bodies are rejected with `TRANSACTION_EXPIRED`, and a commit that arrives while a body admitted before it is still in flight is itself rejected with `TRANSACTION_EXPIRED` (the session stays InFlight until its lease ends), so an accepted commit's row locks cover the complete write set. See the [partial-update design](../../../design-docs/design_docs/20260601-partial-update-optimistic-lock-design.md).
 - The consumer assembles Begin + body messages into a single ImmutableTxnMessage using **CommitTxn's TimeTick and LastConfirmedMessageID** as the transaction's overall TimeTick and LastConfirmedMessageID.
 - On RollbackTxn, the consumer discards the corresponding Begin + body messages.
+- Replicated transactions use an infinite lease. Local exclusive operations only fail locally originated sessions; local Flush waits for the current replicated Commit and precedes subsequent replicated Begin messages. Failed replicated Commit appends remain retryable; ForcePromote explicitly rolls back unfinished replicated transactions. See [Local Flush Control](../wal/local-flush.md).
 
 ```
 BeginTxn@tt=10 → Insert@tt=11 → Insert@tt=12 → CommitTxn@tt=15

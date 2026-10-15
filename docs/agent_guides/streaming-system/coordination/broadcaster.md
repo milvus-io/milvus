@@ -6,7 +6,7 @@ Executes cross-PChannel atomic broadcast for DDL/DCL messages with resource lock
 
 Callers use `broadcast.StartBroadcastWithResourceKeys(ctx, resourceKeys...)` to obtain a `BroadcastAPI`, which acquires resource key locks and returns after WAL-based DDL is ready. The caller then constructs a `BroadcastMutableMessage` with its data VChannels (`WithBroadcast`), or with none (`WithControlChannelBroadcast`) for a CChannel-only broadcast, and calls `Broadcast()`. The broadcaster adds the CChannel to the header of every broadcast, so callers never pass it. `Close()` releases locks if no broadcast was issued.
 
-Non-primary clusters reject all broadcasts with `ErrNotPrimary`. The exception is `broadcast.StartUnreplicableBroadcastWithResourceKeys`: it is accepted on any replicate role, and its message must carry the `Unreplicable` (`_ur`) property, so it is written to the local WAL and never replicated (used for resource group DDL, which describes this cluster's own nodes).
+The ordinary broadcast entrance rejects non-primary clusters with `ErrNotPrimary`. For local operations, `broadcast.StartUnreplicableBroadcastWithResourceKeys`: it is accepted on any replicate role, and its message must carry the `Unreplicable` (`_ur`) property, so it is written to the local WAL and never replicated (used for resource group DDL and local Flush/FlushAll). ForcePromote has a separate secondary-only entrance. See [Local Flush Control](../wal/local-flush.md) for its admission lock and transaction-boundary semantics.
 
 ## Broadcast Flow
 
@@ -198,6 +198,11 @@ Each ResourceKey has: **Domain** (resource type), **Key** (entity identifier), *
 
 Domains: `Cluster`, `DBName`, `CollectionName`, `Privilege`, `SnapshotName`.
 
+ForcePromote maps its ExclusiveCluster admission to a separate promotion lock so
+it can resolve a transaction that a local Flush is waiting for. Local tasks keep
+their regular resource keys; callback ordering still uses the broadcast header.
+See [Local Flush Control](../wal/local-flush.md).
+
 See [Message Semantic Docs](../message/message.md) for per-message ResourceKey usage.
 
 ## BroadcastTask State Machine
@@ -218,7 +223,7 @@ REPLICATED → TOMBSTONE → DONE (removed from catalog)
 
 ## Collection Flush Completion
 
-DataCoord Flush broadcasts ManualFlush with AckSyncUp to the collection's business
+DataCoord Flush uses the unreplicable broadcast entrance and broadcasts ManualFlush with `_ur` and AckSyncUp to the collection's business
 VChannels under shared DB and exclusive collection-name locks. The broadcaster
 automatically includes CChannel; its copy has no data to flush. The business-channel Ack
 waits for both L1 and L0 completion, without waiting for global recovery checkpoint

@@ -45,7 +45,8 @@ type resourceKeyLocker struct {
 
 // lockGuards is the guards for multiple resource keys.
 type lockGuards struct {
-	guards []*lockGuard
+	guards    []*lockGuard
+	admission *lockGuards // Additional promotion admission; not part of the broadcast header.
 }
 
 // ResourceKeys returns the resource keys.
@@ -64,6 +65,10 @@ func (l *lockGuards) append(guard *lockGuard) {
 
 // Unlock unlocks the resource keys.
 func (l *lockGuards) Unlock() {
+	if l.admission != nil {
+		l.admission.Unlock()
+		l.admission = nil
+	}
 	// release the locks in reverse order to avoid deadlock.
 	for i := len(l.guards) - 1; i >= 0; i-- {
 		l.guards[i].Unlock()

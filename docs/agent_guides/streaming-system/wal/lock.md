@@ -13,6 +13,13 @@ Broadcaster's ResourceKey lock. PChannel-level messages sent through the CChanne
 
 See [Message Semantic Docs](../message/message.md) for per-message lock requirements.
 
+## Local flush and replication
+
+A PChannel admission gate runs before WAL locks. Local flushes wait for the current
+replicated transaction to commit and precede new transactions. Exclusive-lock
+cleanup only fails locally originated transactions; ForcePromote explicitly rolls
+back replicated transactions after successful append. See [Local Flush Control](local-flush.md).
+
 ## Key Packages
 
 - `internal/streamingnode/server/wal/interceptors/lock/` — `lockAppendInterceptor`, builder

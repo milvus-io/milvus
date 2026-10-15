@@ -32,8 +32,8 @@ type Broadcaster interface {
 	// It is accepted on any replicate role, and the message passed to Broadcast must be unreplicable.
 	WithUnreplicableResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
 
-	// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
-	// and verifies the cluster is secondary. Returns error if the cluster is primary.
+	// WithSecondaryClusterResourceKey acquires exclusive promotion admission while
+	// retaining ExclusiveCluster in the broadcast header, and verifies the cluster is secondary. Returns error if the cluster is primary.
 	// This is used for force promote operations that should only be executed on secondary clusters.
 	WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error)
 

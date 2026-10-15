@@ -147,3 +147,29 @@ func newCommitTxnMessageForExistingSession(
 		MustBuildMutable().
 		WithTxnContext(*txnContext), session
 }
+
+func TestTimeTickReplicatedCommitAppendFailureCanRetry(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	commit = commit.WithReplicateHeader(&message.ReplicateHeader{
+		ClusterID: "source", TimeTick: 10,
+		MessageID: walimplstest.NewTestMessageID(10), LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+	})
+	cleaned := false
+	session.RegisterCleanup(func() { cleaned = true }, 1)
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return nil, context.DeadlineExceeded
+	})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, message.TxnStateInFlight, session.State())
+	require.False(t, cleaned)
+	requireCommitAckerError(t, impl, context.DeadlineExceeded)
+	_, err = impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return walimplstest.NewTestMessageID(2), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, message.TxnStateCommitted, session.State())
+	require.True(t, cleaned)
+	requireCommitAckerSuccess(t, impl, session)
+}

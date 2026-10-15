@@ -97,7 +97,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	var bc broadcaster.BroadcastAPI
 	if streamingutil.IsStreamingServiceEnabled() {
 		var err error
-		bc, err = s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+		bc, err = s.startLocalFlushBroadcast(ctx, req.GetCollectionID())
 		if err != nil {
 			return &datapb.FlushResponse{
 				Status: merr.Status(err),
@@ -126,6 +126,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 // broadcastManualFlush waits for L1 and L0 completion on every collection VChannel.
 func (s *Server) broadcastManualFlush(ctx context.Context, bc broadcaster.BroadcastAPI, coll *collectionInfo) error {
 	msg := message.NewManualFlushMessageBuilderV2().
+		WithUnreplicable().
 		WithHeader(&message.ManualFlushMessageHeader{CollectionId: coll.ID}).
 		WithBody(&message.ManualFlushMessageBody{}).
 		WithBroadcast(coll.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
@@ -218,7 +219,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}
 
 	// Create a new broadcaster with exclusive cluster resource key.
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+	broadcaster, err := broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
@@ -228,6 +229,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 
 	cc := channel.GetClusterChannels()
 	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
+		WithUnreplicable().
 		WithHeader(&message.FlushAllMessageHeader{}).
 		WithBody(&message.FlushAllMessageBody{}).
 		WithClusterLevelBroadcast(cc, message.OptBuildBroadcastAckSyncUp()).
