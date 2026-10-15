@@ -543,6 +543,12 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
   outputs.
 - **Collection drop.** Nothing deletes the `pk_index/<collectionID>` prefix after
   a collection drop.
+- **Vchannel without a pointer.** GC finds a vchannel only through its manifest
+  pointer. If the first commit of a vchannel writes the body (and the streaming
+  node uploads SSTs) but the pointer write never succeeds, GC does not see
+  these objects. A later successful flush of the vchannel creates the pointer,
+  and GC then deletes them after `grace`. If no flush of the vchannel succeeds
+  before it is dropped, they stay, like the prefix of a dropped collection.
 - **Snapshot protection.** Collection snapshots protect segments and index
   builds, but not primary key index SSTs.
 - **Tables in use by streaming nodes.** Lazy reads from object storage will let
