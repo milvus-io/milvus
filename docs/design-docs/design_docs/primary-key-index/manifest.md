@@ -3,7 +3,7 @@
 - **Created:** 2026-10-12
 - **Author:** bigsheeper
 - **Status:** Draft
-- **Component:** DataCoord, `internal/pkindex/coordinator`, `internal/pkindex/core/manifest`
+- **Component:** DataCoord, `internal/pkindex/coordinator/manifest`, `internal/pkindex/core/objpath`
 - **Related work:** Primary Key Index Core Library (#53910), issue #52305
 
 ## Summary
@@ -111,13 +111,16 @@ Rules of the model:
 | Object storage | `<rootPath>/pk_index/<collectionID>/<vchannel>/manifest/<version>-<uuid>.pb` | `Manifest` body |
 | Object storage | `<rootPath>/pk_index/<collectionID>/<vchannel>/sst/<id>.sst` | SST file |
 
+- The meta keys come from `ClaimKey` and `PointerKey` in
+  `internal/pkindex/coordinator/manifest`.
 - `pk_index` is `common.PKIndexPath`. No other storage prefix starts with it, so
   the existing orphan scans do not see these objects.
 - `sst_base_path` is `<rootPath>/pk_index/<collectionID>/<vchannel>/sst`. The
-  shared helper `metautil.BuildPKIndexSSTBasePath(rootPath, collectionID,
-  vchannel)` in `pkg/util/metautil` builds it. The writer of the SSTs and the
-  manifest layout both call it, so they cannot disagree. The first version
-  records the value, and readers and GC use the recorded value.
+  function `objpath.SSTBasePath(rootPath, collectionID, vchannel)` in
+  `internal/pkindex/core/objpath` builds it. That package builds all object
+  keys of the primary key index. The writer of the SSTs, the manifest writer
+  and GC all use it, so they cannot disagree. The first version records the
+  value, and readers and GC use the recorded value.
 - A claim record stays for the life of the pchannel. The set of pchannels is
   fixed, so GC does not delete claim records.
 - The writer never overwrites a body. Each body key has a new UUID. Two writers
@@ -130,9 +133,9 @@ Rules of the model:
 ## Edits and Validation
 
 A caller sends an edit, not a complete manifest. The manager applies the edit
-to the current version. The edit functions are pure functions in
-`internal/pkindex/core/manifest/edit.go`. They do not change the current
-version.
+to the current version. The edit rules are private functions of the manifest
+writer in `internal/pkindex/coordinator/manifest`. They do not change the
+current version.
 
 ### Claim
 
@@ -202,7 +205,7 @@ A compaction replaces a run of SSTs (inputs) with merged SSTs (outputs).
 
 | Condition | Result |
 |---|---|
-| No manifest | `ErrNotClaimed` |
+| No manifest | `ErrNoManifest` |
 | Inputs are not empty, no input is in the list, and all outputs are in the list | No write. Return the current version |
 | Inputs are empty, or are not a contiguous run of the list in the same order | `ErrStaleEdit` |
 | An output ID is in the manifest, or is twice in the outputs | `ErrDuplicateSST` |
@@ -232,7 +235,7 @@ This is true only when compaction follows this contract:
 
 ## Commit Steps and Crash Windows
 
-`internal/pkindex/coordinator/manifestmanager` holds the only writer. It keeps
+`internal/pkindex/coordinator/manifest` holds the only writer. It keeps
 one lock for each vchannel, so it applies the edits of one vchannel one at a
 time. Different vchannels commit at the same time.
 
@@ -343,7 +346,7 @@ reads the body from object storage.
   `manifestRetainDuration`, so a body that a caller reads a few seconds after
   this call still exists. If the read fails, the caller asks again.
 - The SST base path of a vchannel without a manifest comes from
-  `metautil.BuildPKIndexSSTBasePath`, not from this call.
+  `objpath.SSTBasePath`, not from this call.
 
 ## Fencing by Pchannel Term
 
@@ -367,7 +370,7 @@ Code under `internal/pkindex` does not return merr. It uses two kinds of
 errors:
 
 - Sentinels that a caller can test with `errors.Is`. The manifest sentinels are
-  in `core/manifest/errors.go`.
+  in `internal/pkindex/coordinator/manifest`.
 - Categories from `internal/pkindex/pkerr`, attached with `errors.Mark`.
 
 The service translates each error once, before it returns. `ErrFenced` maps to
@@ -393,7 +396,7 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | Pointer or claim write failed and the read-back does not show the new value | Commit step 5, claim | `ServiceUnavailable` | Yes |
 | Missing body object (`ErrCorrupted`) | Load | `DataIntegrity` | No |
 | Body, pointer or claim record does not decode, or has no body key, version 0 or term 0, or versions differ (`ErrCorrupted`) | Load | `DataIntegrity` | No |
-| `ErrNotClaimed`, `ErrCheckpointRegressed`, `ErrDuplicateSST`, `ErrStaleEdit`, `ErrSchemaMismatch` | Edits | `ServiceInternal` | No (caller bug) |
+| `ErrNotClaimed`, `ErrNoManifest`, `ErrCheckpointRegressed`, `ErrDuplicateSST`, `ErrStaleEdit`, `ErrSchemaMismatch` | Edits | `ServiceInternal` | No (caller bug) |
 | Error with no category | Any | `ServiceInternal` | No |
 
 Notes:
