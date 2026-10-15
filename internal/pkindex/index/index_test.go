@@ -82,7 +82,7 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 	env.client.set(func(c *fakeClient) { c.loseNext = true })
 	ch.step(farFuture)
 	require.NotNil(t, idx.pending.Load())
-	assert.Equal(t, 1, idx.backoff.Failures())
+	assert.Equal(t, 1, idx.failures)
 	assert.Len(t, idx.eng.FrozenGenerations(), 1)
 
 	// new writes and a new tick do not change the retried request
@@ -93,7 +93,7 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 	require.Len(t, reqs, 2)
 	assert.Equal(t, reqs[0], reqs[1])
 	assert.Nil(t, idx.pending.Load())
-	assert.Zero(t, idx.backoff.Failures())
+	assert.Zero(t, idx.failures)
 	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
 	assert.Empty(t, idx.eng.FrozenGenerations())
 	assert.True(t, idx.dirty(), "the write after the rotate is not committed")
@@ -307,7 +307,7 @@ func TestUploadFailuresKeepThePending(t *testing.T) {
 		assert.Same(t, p, idx.pending.Load())
 		assert.Equal(t, gens, idx.eng.FrozenGenerations(), "a failed upload does not rotate again")
 	}
-	assert.Equal(t, 3, idx.backoff.Failures())
+	assert.Equal(t, 3, idx.failures)
 	assert.Empty(t, env.client.requestList())
 
 	ch.step(farFuture)

@@ -46,7 +46,7 @@ index.Manager            one per streaming node: shared engine caches, config
 ```
 
 - `internal/pkindex/snapshot` holds the two handover phases (`Prepare`,
-  `Commit`), the retry state (`Backoff`) and the `TableStore` interface. It
+  `Commit`) and the `TableStore` interface. It
   does not know the streaming node.
 - `internal/pkindex/index` holds the index layer. `Index` implements
   `snapshot.Target`.
@@ -570,7 +570,7 @@ reach 64 MiB and hand over through trigger 2.
 
 | Case | Handling |
 |---|---|
-| Retryable upload, download, claim, lookup or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. Each failure reads `handover.maxBackoff` again. The pending request keeps the same table IDs. |
+| Retryable upload, download, claim, lookup or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. A claim and a lookup use `retry.Do` and read `handover.maxBackoff` when they start. A handover uses `typeutil.BackoffWithInstant`: it reads `handover.maxBackoff` when the `Index` opens and after a successful handover that follows a failure, and its wait has a jitter of ±50 %. The pending request keeps the same table IDs. |
 | Fenced (`snapshot.ErrFenced`) on the claim, a lookup or a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
 | Corrupted (`pkerr.ErrCorrupted`) in a handover | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable. The WAL is assigned again and recovers on another node. |
 | Corrupted (`pkerr.ErrCorrupted`) in a lookup on the write path | `Decide` returns the error and calls `OnFatal`, which marks the WAL unavailable. |
@@ -593,7 +593,7 @@ reach 64 MiB and hand over through trigger 2.
   | Local disk (open, stat, temporary file, rename, sync, a write of the local chunk manager) | `pkerr.ErrIO`, retried |
   | Missing object on download | `pkerr.ErrCorrupted`, fatal |
 
-- The backoff state belongs to the `Index`. The task returns no error to the
+- The backoff state and the failure count belong to the `Index`. The task returns no error to the
   scheduler. The scheduler only has a fixed 100 ms requeue for a delayed task.
 - After more than 5 failures in a row, the failure log goes from info to
   warn level.
@@ -617,7 +617,7 @@ Metrics:
 | `streaming.pkindex.maxOpenFiles` | `4096` | No, forbidden at runtime | Table cache size that all indexes on one streaming node share. |
 | `streaming.pkindex.handover.activeBytes` | `64m` | Yes, at the next driver step | Size trigger. |
 | `streaming.pkindex.handover.tailBytes` | `2g` | Yes, at the next driver step | Early tail trigger. Keep it below `streaming.walRecovery.tail.lowWatermark`. |
-| `streaming.pkindex.handover.maxBackoff` | `60s` | Yes, at the next failure | Longest wait between two attempts of a failed handover, claim or manifest lookup. Each failure reads it again. |
+| `streaming.pkindex.handover.maxBackoff` | `60s` | Yes: a claim or lookup at its start, a handover when the `Index` opens or after its next success | Longest wait between two attempts of a failed handover, claim or manifest lookup. A new value does not change the wait of a handover that keeps failing. |
 | `streaming.pkindex.memTableSize` | `4m` | No, read when an `Index` opens | Memtable size of the engine of one vchannel. |
 | `streaming.walRecovery.tail.softWatermark` | `8g` | Yes, at the next driver step | Existing key. Soft pressure trigger. |
 | `dataCoord.pkindex.gc.grace` | `86400` (s) | — | Key of the manifest service. The change that injects the `Committer` sets `ReuploadAfter` of the index layer to half of it. A retry uploads again after that age. |

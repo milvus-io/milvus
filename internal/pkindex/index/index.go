@@ -90,11 +90,13 @@ type Index struct {
 	notFresh atomic.Bool
 	// pending is the prepared handover that is not committed yet.
 	pending atomic.Pointer[snapshot.Pending]
-	// backoff and handle are used only by the driver step while running is
-	// false, and only by the handover task while running is true. A failure
-	// reads the backoff params again, so they are refreshable.
-	backoff snapshot.Backoff
-	handle  nodescheduler.TaskHandle
+	// backoff, failures and handle are used only by the driver step while
+	// running is false, and only by the handover task while running is true.
+	// A success makes a new backoff with the current params, so they are
+	// refreshable.
+	backoff  *typeutil.BackoffWithInstant
+	failures int
+	handle   nodescheduler.TaskHandle
 
 	// installMu serializes the installs of committed table sets.
 	installMu        sync.Mutex
@@ -163,6 +165,7 @@ func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID in
 		lifetime:     typeutil.NewLifetime(),
 		ready:        make(chan struct{}),
 		sstBasePath:  objpath.SSTBasePath(cfg.StorageRootPath, collectionID, vchannel),
+		backoff:      c.newBackoff(),
 		heapPos:      -1,
 	}
 	idx.notFresh.Store(leftover)
@@ -490,11 +493,6 @@ func (idx *Index) readyDone() bool {
 	}
 }
 
-// fail records a failure in b with the current backoff params.
-func (idx *Index) fail(b *snapshot.Backoff, now time.Time) {
-	idx.ch.fail(b, now)
-}
-
 // markReady marks the Index ready, once. found reports whether the vchannel
 // has a manifest. A manifest of any version makes the Index not fresh: an
 // owner committed it, and this Index can miss the writes of that owner that
@@ -587,7 +585,9 @@ func (idx *Index) runHandover(taskCtx context.Context) {
 	switch {
 	case err == nil:
 		if committed {
-			idx.backoff.Succeed()
+			if idx.failures > 0 {
+				idx.backoff, idx.failures = idx.ch.newBackoff(), 0
+			}
 			metrics.StreamingNodePKIndexHandoverTotal.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 		}
 	case ctx.Err() != nil:
@@ -597,10 +597,11 @@ func (idx *Index) runHandover(taskCtx context.Context) {
 		idx.logger.Error(ctx, "primary key index handover failed, the WAL becomes unavailable", mlog.Err(err))
 		idx.ch.fatal(err)
 	default:
-		idx.fail(&idx.backoff, time.Now())
+		idx.failures++
+		idx.backoff.UpdateInstantWithNextBackOff()
 		metrics.StreamingNodePKIndexHandoverFailuresTotal.WithLabelValues(paramtable.GetStringNodeID()).Inc()
-		fields := []mlog.Field{mlog.Int("failures", idx.backoff.Failures()), mlog.Bool("pending", idx.pending.Load() != nil), mlog.Err(err)}
-		if idx.backoff.Failures() > warnFailures {
+		fields := []mlog.Field{mlog.Int("failures", idx.failures), mlog.Bool("pending", idx.pending.Load() != nil), mlog.Err(err)}
+		if idx.failures > warnFailures {
 			idx.logger.Warn(ctx, "primary key index handover failed, retry later", fields...)
 		} else {
 			idx.logger.Info(ctx, "primary key index handover failed, retry later", fields...)

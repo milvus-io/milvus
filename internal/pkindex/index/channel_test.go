@@ -368,11 +368,11 @@ func TestFencedCommitStopsTheHandovers(t *testing.T) {
 func TestRetryableCommitErrorBacksOff(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
-	idx := env.add(ch, "v0")
 	env.setParams(func(p *Params) {
 		p.BackoffBase = time.Hour
 		p.MaxBackoff = 2 * time.Hour
 	})
+	idx := env.add(ch, "v0")
 	env.client.set(func(c *fakeClient) { c.commitErrs = []error{merr.WrapErrServiceUnavailable("down")} })
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
@@ -380,7 +380,7 @@ func TestRetryableCommitErrorBacksOff(t *testing.T) {
 	ch.step(now)
 
 	assert.Empty(t, env.fatalList())
-	assert.Equal(t, 1, idx.backoff.Failures())
+	assert.Equal(t, 1, idx.failures)
 	require.NotNil(t, idx.pending.Load())
 	assert.Empty(t, ch.pickHandovers(now), "the backoff is not over")
 	assert.Equal(t, []*Index{idx}, ch.pickHandovers(now.Add(2*time.Hour)), "the backoff is over")
@@ -451,7 +451,7 @@ func TestRejectedCommitIsFatal(t *testing.T) {
 	err := env.waitFatal()
 	assert.True(t, errors.Is(err, snapshot.ErrRejected))
 	assert.True(t, idx.handoverStopped.Load())
-	assert.Zero(t, idx.backoff.Failures(), "no retry is scheduled")
+	assert.Zero(t, idx.failures, "no retry is scheduled")
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	assert.Len(t, env.client.requestList(), 1)
 }
@@ -473,53 +473,37 @@ func TestRejectedClaimIsFatal(t *testing.T) {
 	assert.Empty(t, ch.pickHandovers(farFuture))
 }
 
-func TestBackoffParamsAreReadAtEachFailure(t *testing.T) {
+func TestBackoffParamsApplyAfterASuccess(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
-	idx := env.add(ch, "v0")
 	env.setParams(func(p *Params) {
 		p.BackoffBase = time.Hour
 		p.MaxBackoff = time.Hour
 	})
-	env.client.set(func(c *fakeClient) {
-		c.commitErrs = []error{merr.WrapErrServiceUnavailable("down"), merr.WrapErrServiceUnavailable("down")}
-	})
+	idx := env.add(ch, "v0")
+	env.client.set(func(c *fakeClient) { c.commitErrs = []error{merr.WrapErrServiceUnavailable("down")} })
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
-	require.Equal(t, 1, idx.backoff.Failures())
-	assert.False(t, idx.backoff.Ready(time.Now().Add(time.Minute)), "the wait is one hour")
+	require.Equal(t, 1, idx.failures)
+	assert.Empty(t, ch.pickHandovers(time.Now().Add(time.Minute)), "the wait is about one hour")
 
-	// a smaller max applies to the next failure
-	env.setParams(func(p *Params) { p.MaxBackoff = time.Millisecond })
-	ch.step(farFuture)
-	require.Equal(t, 2, idx.backoff.Failures())
-	assert.Equal(t, time.Millisecond, idx.backoff.Max)
-	assert.True(t, idx.backoff.Ready(time.Now().Add(time.Second)), "the wait is the new max")
-	assert.Empty(t, env.fatalList())
-}
-
-func TestFailReadsTheBackoffParams(t *testing.T) {
-	env := newTestEnv(t, syncScheduler{})
-	ch := env.channel(0)
-	idx := env.add(ch, "v0")
-	// the claim loop uses the same helper with its own Backoff
-	var bo snapshot.Backoff
-	env.setParams(func(p *Params) {
-		p.BackoffBase = time.Hour
-		p.MaxBackoff = 2 * time.Hour
-	})
-	now := time.Now()
-	idx.fail(&bo, now)
-	assert.Equal(t, time.Hour, bo.Base)
-	assert.False(t, bo.Ready(now.Add(time.Minute)))
+	// a smaller max applies after the next success
 	env.setParams(func(p *Params) {
 		p.BackoffBase = time.Millisecond
 		p.MaxBackoff = time.Millisecond
 	})
-	idx.fail(&bo, now)
-	assert.Equal(t, time.Millisecond, bo.Max)
-	assert.True(t, bo.Ready(now.Add(time.Second)))
+	ch.step(farFuture)
+	require.Zero(t, idx.failures)
+	require.EqualValues(t, 10, idx.LastCommittedTimeTick())
+
+	env.client.set(func(c *fakeClient) { c.commitErrs = []error{merr.WrapErrServiceUnavailable("down")} })
+	insert(t, idx, 2, 2)
+	ch.Tick(20)
+	ch.step(farFuture)
+	require.Equal(t, 1, idx.failures)
+	assert.Equal(t, []*Index{idx}, ch.pickHandovers(time.Now().Add(time.Second)), "the wait is the new max")
+	assert.Empty(t, env.fatalList())
 }
 
 func TestRemoveWaitsForARunningHandover(t *testing.T) {

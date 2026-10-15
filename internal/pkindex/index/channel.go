@@ -281,7 +281,7 @@ func (c *Channel) pickHandovers(now time.Time) []*Index {
 		if idx.running.Load() || idx.handoverStopped.Load() || !idx.readyDone() || !idx.fresh() {
 			continue
 		}
-		if !idx.backoff.Ready(now) {
+		if now.Before(idx.backoff.NextInstant()) {
 			continue
 		}
 		// a pending request is retried first, regardless of size or tail

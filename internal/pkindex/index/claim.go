@@ -18,12 +18,12 @@ package index
 
 import (
 	"context"
-	"time"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -70,18 +70,16 @@ func (c *Channel) claim(recovered []*Index) {
 	defer c.lifetime.Done()
 	ctx := c.ctx
 	committer := c.m.cfg.Committer
-	var bo snapshot.Backoff
-	for {
-		err := committer.ClaimPChannel(ctx, c.info.Name, c.info.Term)
-		if err == nil {
-			break
-		}
-		if !c.retryable(ctx, &bo, "claim", 1, err) {
-			return
-		}
+	err := retry.Do(ctx, func() error {
+		return c.retryable(ctx, "claim", 1, committer.ClaimPChannel(ctx, c.info.Name, c.info.Term))
+	}, c.retryOptions()...)
+	if err != nil {
+		c.stopClaim(ctx, "claim", err)
+		return
 	}
 	c.logger.Info(ctx, "primary key index pchannel claimed", mlog.Int("recoveredVChannels", len(recovered)))
-	if !c.lookupRecovered(ctx, recovered) {
+	if err := c.lookupRecovered(ctx, recovered); err != nil {
+		c.stopClaim(ctx, "manifest lookup", err)
 		return
 	}
 
@@ -101,13 +99,12 @@ func (c *Channel) claim(recovered []*Index) {
 
 // lookupRecovered looks up the manifests of idxs in calls of at most
 // recoveryBatch refs, and marks each Index ready with its answer. It retries
-// only the items that failed. It reports false when ctx ends or a failure is
-// fatal.
-func (c *Channel) lookupRecovered(ctx context.Context, idxs []*Index) bool {
+// only the items that failed. It returns an error when ctx ends or a failure
+// is fatal.
+func (c *Channel) lookupRecovered(ctx context.Context, idxs []*Index) error {
 	committer := c.m.cfg.Committer
-	var bo snapshot.Backoff
 	pending := idxs
-	for len(pending) > 0 {
+	return retry.Do(ctx, func() error {
 		var failed []*Index
 		var lastErr error
 		for start := 0; start < len(pending); start += recoveryBatch {
@@ -122,8 +119,7 @@ func (c *Channel) lookupRecovered(ctx context.Context, idxs []*Index) bool {
 			}
 			if err != nil {
 				if ctx.Err() != nil || isFatal(err) {
-					c.fatalLookup(ctx, err)
-					return false
+					return retry.Unrecoverable(err)
 				}
 				failed, lastErr = append(failed, batch...), err
 				continue
@@ -134,61 +130,65 @@ func (c *Channel) lookupRecovered(ctx context.Context, idxs []*Index) bool {
 					continue
 				}
 				if isFatal(a.Err) {
-					c.fatalLookup(ctx, a.Err)
-					return false
+					return retry.Unrecoverable(a.Err)
 				}
 				failed, lastErr = append(failed, batch[i]), a.Err
 			}
 		}
-		if len(failed) == 0 {
-			return true
-		}
-		if !c.retryable(ctx, &bo, "manifest lookup", len(failed), lastErr) {
-			return false
-		}
 		pending = failed
-	}
-	return true
+		if len(failed) == 0 {
+			return nil
+		}
+		return c.retryable(ctx, "manifest lookup", len(failed), lastErr)
+	}, c.retryOptions()...)
 }
 
-// fatalLookup reports a fatal lookup error. It ignores the error of a ctx
-// that ended.
-func (c *Channel) fatalLookup(ctx context.Context, err error) {
+// retryOptions retries a claim or a lookup until it succeeds, a failure is
+// fatal or ctx ends. The wait doubles from the backoff base up to the max.
+func (c *Channel) retryOptions() []retry.Option {
+	params := c.m.cfg.Params()
+	return []retry.Option{
+		retry.AttemptAlways(),
+		retry.Sleep(params.BackoffBase),
+		retry.MaxSleepTime(params.MaxBackoff),
+		// retryable decides which errors stop the retry, not the merr type
+		retry.RetryErr(func(error) bool { return true }),
+	}
+}
+
+// retryable handles the result of a claim or lookup call. A fatal error stops
+// the retry. Another error is logged and retried.
+func (c *Channel) retryable(ctx context.Context, step string, items int, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil || isFatal(err) {
+		return retry.Unrecoverable(err)
+	}
+	c.logger.Warn(ctx, "primary key index manifest call failed, retry later",
+		mlog.String("step", step), mlog.Int("items", items), mlog.Err(err))
+	return err
+}
+
+// stopClaim reports a claim or lookup that stopped. A fatal error goes to
+// OnFatal. It ignores the error of a ctx that ended.
+func (c *Channel) stopClaim(ctx context.Context, step string, err error) {
 	if ctx.Err() != nil {
 		return
 	}
-	c.logger.Error(ctx, "primary key index manifest lookup failed, the WAL becomes unavailable", mlog.Err(err))
+	c.logger.Error(ctx, "primary key index manifest call failed, the WAL becomes unavailable", mlog.String("step", step), mlog.Err(err))
 	c.fatal(err)
 }
 
-// retryable handles a failed claim or lookup. A fatal error goes to OnFatal.
-// Else it waits for the backoff. It reports whether the caller retries: false
-// when the error is fatal or ctx ends.
-func (c *Channel) retryable(ctx context.Context, bo *snapshot.Backoff, step string, items int, err error) bool {
-	if ctx.Err() != nil {
-		return false
-	}
-	if isFatal(err) {
-		c.logger.Error(ctx, "primary key index manifest call failed, the WAL becomes unavailable", mlog.String("step", step), mlog.Err(err))
-		c.fatal(err)
-		return false
-	}
-	c.fail(bo, time.Now())
-	c.logger.Warn(ctx, "primary key index manifest call failed, retry later",
-		mlog.String("step", step), mlog.Int("items", items), mlog.Int("failures", bo.Failures()), mlog.Err(err))
-	for !bo.Ready(time.Now()) {
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(bo.Base):
-		}
-	}
-	return true
-}
-
-// fail records a failure in b with the current backoff params.
-func (c *Channel) fail(b *snapshot.Backoff, now time.Time) {
+// newBackoff returns the handover backoff of an Index with the current
+// params.
+func (c *Channel) newBackoff() *typeutil.BackoffWithInstant {
 	params := c.m.cfg.Params()
-	b.Base, b.Max = params.BackoffBase, params.MaxBackoff
-	b.Fail(now)
+	return typeutil.NewBackoffWithInstant(typeutil.BackoffTimerConfig{
+		Backoff: typeutil.BackoffConfig{
+			InitialInterval: params.BackoffBase,
+			Multiplier:      2,
+			MaxInterval:     params.MaxBackoff,
+		},
+	})
 }
