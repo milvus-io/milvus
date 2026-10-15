@@ -30,7 +30,8 @@ func TestPartialUpdateChainNewInsertBlocksSamePKCASUntilPublication(t *testing.T
 			readTS := env.allocateReadTS(t)
 			cas := env.prepareCASTxn(t, readTS, 10)
 			write := insert
-			if mode == "transaction" {
+			switch mode {
+			case "transaction":
 				begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
 					WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable()
 				result, err := env.append(begin, nil)
@@ -38,7 +39,7 @@ func TestPartialUpdateChainNewInsertBlocksSamePKCASUntilPublication(t *testing.T
 				_, err = env.append(insert.WithTxnContext(*result.TxnCtx), nil)
 				require.NoError(t, err)
 				write = newCommitTxnMessage("v1", result.TxnCtx.TxnID, 0)
-			} else if mode == "recovered_transaction" {
+			case "recovered_transaction":
 				write = newCommitTxnMessage("v1", 1, 0)
 			}
 			atWAL, resume := make(chan struct{}), make(chan struct{})

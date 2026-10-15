@@ -51,7 +51,7 @@ func TestStripedRowLocksCollidingPKsShareExclusion(t *testing.T) {
 			manager := newRowLockManager()
 			collision := collidingInt64PK(t, 10)
 			holder := acquireTestRowLock(t, manager, "v1", primarykey.Keys{Int64Values: []int64{10}}, !ordinary)
-			waiter := startTestRowLock(manager, context.Background(), "v1", primarykey.Keys{Int64Values: []int64{collision}}, true)
+			waiter := startTestRowLock(context.Background(), manager, "v1", primarykey.Keys{Int64Values: []int64{collision}}, true)
 			require.Eventually(t, func() bool {
 				manager.mu.Lock()
 				defer manager.mu.Unlock()
@@ -88,13 +88,13 @@ func TestStripedRowLocksCollisionDeduplicatesReaderBeforeQueuedWriter(t *testing
 	var once sync.Once
 	resume := func() { once.Do(func() { close(ctx.resume) }) }
 	t.Cleanup(resume)
-	reader := startTestRowLock(manager, ctx, "v1", primarykey.Keys{Int64Values: []int64{collision, 10, collision}}, false)
+	reader := startTestRowLock(ctx, manager, "v1", primarykey.Keys{Int64Values: []int64{collision, 10, collision}}, false)
 	select {
 	case <-ctx.locked:
 	case <-time.After(time.Second):
 		t.Fatal("reader did not acquire the colliding stripe")
 	}
-	writer := startTestRowLock(manager, context.Background(), "v1", primarykey.Keys{Int64Values: []int64{collision}}, true)
+	writer := startTestRowLock(context.Background(), manager, "v1", primarykey.Keys{Int64Values: []int64{collision}}, true)
 	waitForTestPKWriter(t, manager, "v1", collision)
 	resume()
 	// A second RLock of the collision stripe would wait behind the queued
@@ -119,7 +119,7 @@ func TestStripedRowLocksStringFastPathMatchesMixedWriteSet(t *testing.T) {
 	}
 	require.NotEmpty(t, collision)
 	holder := acquireTestRowLock(t, manager, "v1", primarykey.Keys{StringValues: []string{collision}}, false)
-	waiter := startTestRowLock(manager, context.Background(), "v1", primarykey.Keys{
+	waiter := startTestRowLock(context.Background(), manager, "v1", primarykey.Keys{
 		Int64Values: []int64{10}, StringValues: []string{collision, collision},
 	}, true)
 	waitForTestPKWriter(t, manager, "v1", 10)
@@ -186,7 +186,7 @@ func TestStripedRowLocksWaiterPinsTableUntilLastRelease(t *testing.T) {
 	original := manager.channels["v1"]
 	require.Equal(t, 1, original.refs)
 	manager.mu.Unlock()
-	waiter := startTestRowLock(manager, context.Background(), "v1", pks, false)
+	waiter := startTestRowLock(context.Background(), manager, "v1", pks, false)
 	require.Eventually(t, func() bool {
 		manager.mu.Lock()
 		defer manager.mu.Unlock()
@@ -220,7 +220,7 @@ func TestStripedRowLocksCanceledWaiterReleasesTable(t *testing.T) {
 	holder, err := manager.acquire(context.Background(), "v1", pks, true)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
-	waiter := startTestRowLock(manager, ctx, "v1", pks, false)
+	waiter := startTestRowLock(ctx, manager, "v1", pks, false)
 	require.Eventually(t, func() bool {
 		manager.mu.Lock()
 		defer manager.mu.Unlock()

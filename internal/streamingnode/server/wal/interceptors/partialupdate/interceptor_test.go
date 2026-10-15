@@ -105,7 +105,7 @@ func TestPartialUpdateInterceptorCloseAndDropPreserveSharedRowLocks(t *testing.T
 
 	key := pkLockKey{vchannel: vchannel, kind: primarykey.KindInt64, int64Value: 10}
 	require.False(t, testPKMutex(t, globalRowLockManager, key).TryRLock())
-	result := startTestRowLock(second.state.rowLocks, context.Background(), vchannel,
+	result := startTestRowLock(context.Background(), second.state.rowLocks, vchannel,
 		primarykey.Keys{Int64Values: []int64{5, 10}}, false)
 	waitForTestPKHeld(t, second.state.rowLocks, vchannel, 5)
 	select {
@@ -876,14 +876,14 @@ func newPartialUpdateChainTestEnvWithBuildersAndGetter(
 	getter primaryKeyDescriptorGetter,
 ) *partialUpdateChainTestEnv {
 	t.Helper()
-	return newPartialUpdateChainTestEnvWithBuildersGetterAndContext(t, builders, getter, context.Background())
+	return newPartialUpdateChainTestEnvWithBuildersGetterAndContext(context.Background(), t, builders, getter)
 }
 
 func newPartialUpdateChainTestEnvWithBuildersGetterAndContext(
+	ctx context.Context,
 	t *testing.T,
 	builders map[message.TxnID]*message.ImmutableTxnMessageBuilder,
 	getter primaryKeyDescriptorGetter,
-	ctx context.Context,
 ) *partialUpdateChainTestEnv {
 	t.Helper()
 	paramtable.Init()

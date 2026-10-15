@@ -253,7 +253,8 @@ func decodeDeleteBody(ctx context.Context, msg message.BasicMessage) (*msgpb.Del
 
 func decodeRecoveredBody[B proto.Message](ctx context.Context, kind string, msg interface {
 	Body(context.Context) (B, error)
-}) (B, error) {
+},
+) (B, error) {
 	body, err := msg.Body(ctx)
 	switch {
 	case err == nil:
