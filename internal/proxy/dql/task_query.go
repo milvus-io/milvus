@@ -707,6 +707,10 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.plan.DynamicFields = t.userDynamicFields
 	}
 
+	if err := t.prepareQueryFunctionChains(); err != nil {
+		return err
+	}
+
 	mlog.Debug(ctx, "translate output fields to field ids",
 		mlog.Int64s("OutputFieldsID", t.OutputFieldsId),
 		mlog.String("requestType", t.getQueryLabel()))

@@ -98,6 +98,7 @@ endif()
 add_subdirectory( pb )
 add_subdirectory( config )
 add_subdirectory( common )
+add_subdirectory( grep )
 add_subdirectory( mmap )
 add_subdirectory( monitor )
 add_subdirectory( storage )
@@ -174,6 +175,7 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_pb>
     $<TARGET_OBJECTS:milvus_config>
     $<TARGET_OBJECTS:milvus_common>
+    $<TARGET_OBJECTS:milvus_grep>
     $<TARGET_OBJECTS:milvus_mmap>
     $<TARGET_OBJECTS:milvus_monitor>
     $<TARGET_OBJECTS:milvus_storage>

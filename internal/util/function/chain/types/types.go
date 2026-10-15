@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/grep/native"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 )
 
@@ -36,6 +37,7 @@ import (
 // =============================================================================
 
 const (
+	StageQueryScan   = "query_scan"   // per-segment Query candidates before output-field materialization
 	StageIngestion   = "ingestion"    // insert/upsert/import stage
 	StageL2Rerank    = "L2_rerank"    // proxy rerank stage
 	StageL1Rerank    = "L1_rerank"    // QN/SN rerank stage
@@ -146,11 +148,21 @@ type SearchRuntimeInfo struct {
 	MetricTypes []string
 }
 
+// QueryScanBuildContext binds one segment to its own chain and operators.
+// The caller keeps Segment pinned until execution returns. The factory owns
+// configuration and budget snapshots. FieldID is resolved and validated during
+// Query chain preparation; no native resource is stored here.
+type QueryScanBuildContext struct {
+	Segment native.Segment
+	FieldID int64
+}
+
 // FunctionBuildContext contains runtime-only context used while constructing a
 // FunctionExpr or a context-aware operator.
 // It is not serialized in public FunctionChain proto params.
 type FunctionBuildContext struct {
 	ModelExtraInfo *models.ModelExtraInfo
+	QueryScan      *QueryScanBuildContext
 	Search         *SearchRuntimeInfo
 }
 

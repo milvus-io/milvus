@@ -437,5 +437,8 @@ message PlanNode {
   PlanOption plan_options = 7;
   ScoreOption score_option = 8;
   optional string namespace = 9;
+  // Worker-owned chains: Search L0/L1 or QueryScan-stage chains for a QueryPlanNode.
+  // Query chains retain raw expression arguments and output_columns here; do
+  // not duplicate their configuration in the enclosing RetrieveRequest.
   repeated schema.FunctionChain querynode_function_chains = 10;
 }
