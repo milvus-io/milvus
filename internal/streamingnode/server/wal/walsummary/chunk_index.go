@@ -23,13 +23,8 @@ type indexedChunk struct {
 	loading *chunkLoad
 	recent  *list.Element
 	retired bool
-}
-
-// chunkPayload is immutable. Only the encoded object is cached: section decoders
-// return independent records without retaining another decoded copy per reader.
-type chunkPayload struct {
-	bytes       []byte
-	footerStart uint64
+	// Protected by cache.mu. The embedded manifest index is immutable.
+	verified *chunkValidation
 }
 
 type chunkLoad struct {
@@ -76,6 +71,7 @@ func (i *chunkIndex) remove(generation uint64) {
 	chunk := i.chunks[n]
 	i.cache.mu.Lock()
 	chunk.retired = true
+	chunk.verified = nil
 	i.cache.evictLocked(chunk)
 	i.cache.mu.Unlock()
 	copy(i.chunks[n:], i.chunks[n+1:])
@@ -113,18 +109,20 @@ func (c *chunkCache) read(ctx context.Context, store *Store, chunk *indexedChunk
 		}
 		loading := &chunkLoad{done: make(chan struct{})}
 		chunk.loading = loading
+		verified := chunk.verified
 		c.mu.Unlock()
 
 		select {
 		case <-ctx.Done():
 			loading.err = ctx.Err()
 		case c.loadSlots <- struct{}{}:
-			loading.payload, loading.err = store.readChunkPayload(ctx, chunk.PChannelSummaryChunkIndexEntry)
+			loading.payload, loading.err = store.readChunkPayload(ctx, chunk.PChannelSummaryChunkIndexEntry, verified)
 			<-c.loadSlots
 		}
 		loading.canceled = ctx.Err() != nil && errors.Is(loading.err, ctx.Err())
 		c.mu.Lock()
 		if loading.err == nil && !chunk.retired {
+			chunk.verified = loading.payload.verified
 			c.putLocked(chunk, loading.payload)
 		}
 		chunk.loading = nil
