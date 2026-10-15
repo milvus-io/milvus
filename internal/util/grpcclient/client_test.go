@@ -127,7 +127,9 @@ func TestClientBase_NodeIDChangesOnExistingConnection(t *testing.T) {
 			}
 			base.SetNodeID(serverID.Load())
 			base.SetGetAddrFunc(func() (string, error) { return lis.Addr().String(), nil })
-			base.SetNewGrpcClientFunc(rootcoordpb.NewRootCoordClient)
+			base.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) rootcoordpb.RootCoordClient {
+				return rootcoordpb.NewRootCoordClient(cc)
+			})
 			t.Cleanup(func() { assert.NoError(t, base.Close()) })
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
