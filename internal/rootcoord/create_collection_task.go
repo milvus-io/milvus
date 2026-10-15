@@ -196,6 +196,10 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
+	// Prepare has already replaced request EZ properties with the database's EZ.
+	if _, hasEZ := hookutil.ParseEzIDFromProperties(t.Req.GetProperties()); hasEZ && typeutil.HasTextField(schema) {
+		return merr.WrapErrParameterInvalidMsg("TEXT fields are not supported with CMEK")
+	}
 
 	// For external collections, validate the source URL scheme allowlist and
 	// the JSON spec structure (extfs allowlist + format whitelist) at the
