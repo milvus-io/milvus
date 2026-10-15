@@ -153,9 +153,10 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		physicalTimeUs = physicalTimeMs * 1000
 	}
 
+	hints := flattenClusteringSearchHints(searchReq.clusteringSearchHints[s.id], searchReq.GetNumOfQuery())
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncSearch(
+			return (cgo.CFuturePtr)(C.AsyncSearchWithHints(
 				traceCtx.ctx,
 				s.ptr,
 				searchReq.plan.cSearchPlan,
@@ -166,6 +167,12 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				C.uint64_t(physicalTimeUs),
 				C.bool(searchReq.filterOnly),
 				C.bool(searchReq.enableExprCache),
+				(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(hints.presence))), C.int64_t(len(hints.presence)),
+				(*C.int64_t)(unsafe.Pointer(unsafe.SliceData(hints.boundaries))),
+				(*C.int64_t)(unsafe.Pointer(unsafe.SliceData(hints.offsets))),
+				(*C.int64_t)(unsafe.Pointer(unsafe.SliceData(hints.counts))),
+				(*C.float)(unsafe.Pointer(unsafe.SliceData(hints.distances))),
+				C.int64_t(len(hints.offsets)), C.int64_t(hints.rows),
 			))
 		},
 		cgo.WithName("search"),

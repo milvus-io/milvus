@@ -148,6 +148,9 @@ SealedIndexTranslator::SealedIndexTranslator(
           !lazy_load_,
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
+    if (load_index_info->partition_stats_version > 0) {
+        index_key_ = load_index_info->SnapshotIndexKey();
+    }
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
             segcore::storagev2translator::StorageV2AsyncLoadEnabled());
@@ -321,11 +324,16 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
             .value_or(0));
     options.op_ctx = &load_ctx.ctx;
     // Loaders stage local files under localStorage even without mmap.
-    const auto base_path =
-        std::filesystem::path(
-            LocalStagingRoot(index_load_info_.mmap_dir_path)) /
-        "index_files" / index_load_info_.index_id /
-        index_load_info_.segment_id / index_load_info_.field_id;
+    auto base_path = std::filesystem::path(
+                         LocalStagingRoot(index_load_info_.mmap_dir_path)) /
+                     "index_files" / index_load_info_.index_id /
+                     index_load_info_.segment_id / index_load_info_.field_id;
+    if (!file_manager_context_.index_local_prefix.empty()) {
+        base_path = std::filesystem::path(
+                        LocalStagingRoot(index_load_info_.mmap_dir_path)) /
+                    "partition_index" /
+                    file_manager_context_.index_local_prefix;
+    }
     options.mmap_dir_path = (base_path / "index").string();
     if (index_load_info_.enable_mmap) {
         config_[milvus::index::ENABLE_MMAP] = true;

@@ -1674,3 +1674,19 @@ func TestProcessImmutableConfigsRendererKeyAbsentFromSources(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "woodpecker", v)
 }
+
+// Prefix filters must use the same case rules as their stored keys. In
+// particular, compactionPlan and provider parameter suffixes are case sensitive.
+func TestKnowhereMixedCasePrefixFilters(t *testing.T) {
+	mgr := NewManager()
+	mgr.RegisterConfigPrefix("knowhere.")
+	mgr.RegisterConfigPrefix("example.")
+	mgr.SetMapConfig("knowhere.cluster.compactionPlan.efConstruction", "64")
+	mgr.SetMapConfig("knowhere.cluster.analyze.num_threads", "8")
+	mgr.SetMapConfig("example.option", "value")
+	require.Equal(t, map[string]string{"efConstruction": "64"},
+		mgr.GetEffectiveBy(WithPrefix("knowhere.cluster.compactionPlan."), RemovePrefix("knowhere.cluster.compactionPlan.")))
+	require.Equal(t, map[string]string{
+		"knowhere.cluster.compactionPlan.efConstruction": "64", "example.option": "value",
+	}, mgr.GetEffectiveBy(WithOneOfPrefixs("knowhere.cluster.compactionPlan.", "EXAMPLE.")))
+}

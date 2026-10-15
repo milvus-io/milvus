@@ -8254,3 +8254,17 @@ func TestValidateDropFunction(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestHalfClusteringKeyAdmission(t *testing.T) {
+	paramtable.Init()
+	item := &paramtable.Get().CommonCfg.EnableVectorClusteringKey
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+		task := &createCollectionTask{CreateCollectionRequest: &milvuspb.CreateCollectionRequest{CollectionName: "half_clustering"}, schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: "vec", DataType: dtype, IsClusteringKey: true}}}}
+		assert.NoError(t, task.validateClusteringKey(context.Background()))
+		item.SwapTempValue("false")
+		assert.Error(t, task.validateClusteringKey(context.Background()))
+		item.SwapTempValue("true")
+	}
+}

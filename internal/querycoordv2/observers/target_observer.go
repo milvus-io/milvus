@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"time"
 
@@ -624,6 +625,7 @@ func (ob *TargetObserver) genSyncAction(ctx context.Context, leaderView *meta.Le
 		mlog.Int64("newVersion", targetVersion),
 	)
 
+	bindingVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, leaderView.CollectionID, meta.NextTarget)
 	sealedSegments := ob.targetMgr.GetSealedSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	growingSegments := ob.targetMgr.GetGrowingSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	droppedSegments := ob.targetMgr.GetDroppedSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
@@ -641,6 +643,12 @@ func (ob *TargetObserver) genSyncAction(ctx context.Context, leaderView *meta.Le
 		SealedSegmentRowCount: sealedSegmentRowCount,
 	}
 
+	// Target versions are monotonic. Only attach a binding if every read
+	// above observed the same target; otherwise this sync safely skips pruning.
+	if channel != nil && bindingVersion == targetVersion &&
+		ob.targetMgr.GetCollectionTargetVersion(ctx, leaderView.CollectionID, meta.NextTarget) == bindingVersion {
+		action.PartitionStatsVersions = maps.Clone(channel.GetPartitionStatsVersions())
+	}
 	if channel != nil {
 		action.Checkpoint = channel.GetSeekPosition()
 		// used to clean delete buffer in delegator, cause delete record before this ts already be dispatch to sealed segments

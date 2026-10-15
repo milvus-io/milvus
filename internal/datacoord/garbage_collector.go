@@ -894,6 +894,9 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 ) bool {
 	log := mlog.With(mlog.Int64("segmentID", segment.ID))
 
+	if gc.meta.clusteringSegmentReferenced(segment) {
+		return false
+	}
 	if !gc.isExpire(segment.GetDroppedAt()) {
 		return false
 	}

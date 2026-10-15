@@ -154,17 +154,24 @@ Analyze(CAnalyze* res_analyze,
                         std::string(plugin_context->key)));
         }
 
-        if (field_type != DataType::VECTOR_FLOAT) {
-            throw SegcoreError(
-                DataTypeInvalid,
-                fmt::format("invalid data type for clustering is {}",
-                            int(field_type)));
-        }
         auto clusteringJob =
             std::make_unique<milvus::clustering::KmeansClustering>(
                 fileManagerContext);
-
-        clusteringJob->Run<float>(*analyze_info);
+        switch (field_type) {
+            case DataType::VECTOR_FLOAT:
+                clusteringJob->Run<float>(*analyze_info);
+                break;
+            case DataType::VECTOR_FLOAT16:
+                clusteringJob->Run<knowhere::fp16>(*analyze_info);
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                clusteringJob->Run<knowhere::bf16>(*analyze_info);
+                break;
+            default:
+                ThrowInfo(DataTypeInvalid,
+                          "invalid clustering field type {}",
+                          static_cast<int>(field_type));
+        }
         *res_analyze = clusteringJob.release();
         auto status = CStatus();
         status.error_code = Success;
@@ -205,7 +212,8 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                      const char** centroid_path,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
-                     int64_t* id_mapping_sizes) {
+                     int64_t* id_mapping_sizes,
+                     int64_t mapping_count) {
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -219,6 +227,13 @@ GetAnalyzeResultMeta(CAnalyze analyze,
         // struct's std::string members, so they must reference the object owned
         // by real_analyze rather than a local copy that dies on return.
         const auto& res = real_analyze->GetClusteringResultMeta();
+        AssertInfo(
+            centroid_path != nullptr && centroid_file_size != nullptr &&
+                mapping_count >= 0 &&
+                static_cast<size_t>(mapping_count) == res.id_mappings.size() &&
+                (mapping_count == 0 ||
+                 (id_mapping_paths != nullptr && id_mapping_sizes != nullptr)),
+            "analyze result buffers do not match mapping count");
         *centroid_path = res.centroid_path.data();
         *centroid_file_size = res.centroid_file_size;
 

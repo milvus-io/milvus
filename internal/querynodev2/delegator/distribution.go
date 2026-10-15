@@ -64,6 +64,7 @@ func getClosedCh() chan struct{} {
 // for new delegator, will got a new channelQueryView from WatchChannel, and get the queryView update from querycoord before it becomes serviceable
 // after delegator becomes serviceable, it only update the queryView by SyncTargetVersion
 type channelQueryView struct {
+	statsBindings         map[int64]*partitionStatsBinding
 	growingSegments       typeutil.UniqueSet // growing segment list which should be used for search/query
 	sealedSegmentRowCount map[int64]int64    // sealed segment list which should be used for search/query, segmentID -> row count
 	partitions            typeutil.UniqueSet // partitions list which sealed segments belong to
@@ -460,10 +461,13 @@ func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 // 2. update readable channel view to support full result after new distribution is serviceable
 // Notice: if we don't need to be compatible with 2.5.x, we can just update new query view to support query,
 // and new query view will become serviceable automatically, a sync action after distribution is serviceable is unnecessary
-func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions []int64) {
+func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions []int64, bindings ...map[int64]*partitionStatsBinding) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
+	if action.GetTargetVersion() < d.queryView.version {
+		return
+	}
 	oldValue := d.queryView.version
 	d.queryView = &channelQueryView{
 		growingSegments:       typeutil.NewUniqueSet(action.GetGrowingInTarget()...),
@@ -474,6 +478,9 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		syncedByCoord:         true,
 	}
 
+	if len(bindings) == 1 {
+		d.queryView.statsBindings = bindings[0]
+	}
 	sealedSet := typeutil.NewUniqueSet(action.GetSealedInTarget()...)
 	droppedSet := typeutil.NewUniqueSet(action.GetDroppedInTarget()...)
 	redundantGrowings := make([]int64, 0)
@@ -625,6 +632,7 @@ func (d *distribution) genSnapshot() chan struct{} {
 	d.snapshotVersion++
 	newSnapShot := NewSnapshot(dist, growing, last, d.snapshotVersion, d.queryView.GetVersion())
 	newSnapShot.partitions = d.queryView.partitions
+	newSnapShot.statsBindings = d.queryView.statsBindings
 
 	d.current.Store(newSnapShot)
 	// shall be a new one
@@ -788,4 +796,13 @@ func (d *distribution) drainSealedCandidatesLocked() []pkoracle.Candidate {
 		}
 	}
 	return toRefund
+}
+
+// The caller must retain its pin until it has finished using these bindings.
+func (d *distribution) pinnedStatsBindings(version int64) map[int64]*partitionStatsBinding {
+	snapshot, ok := d.snapshots.Get(version)
+	if !ok {
+		return nil
+	}
+	return snapshot.statsBindings
 }

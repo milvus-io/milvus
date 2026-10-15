@@ -20,9 +20,7 @@ package delegator
 import (
 	"context"
 	"fmt"
-	"path"
 	"slices"
-	"strconv"
 	"sync"
 	"time"
 
@@ -60,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -171,9 +168,10 @@ type shardDelegator struct {
 	tsCond      *syncutil.ContextCond
 	latestTsafe *atomic.Uint64
 	// queryHook
-	queryHook      optimizers.QueryHook
-	partitionStats map[UniqueID]*storage.PartitionStatsSnapshot
-	chunkManager   storage.ChunkManager
+	queryHook              optimizers.QueryHook
+	partitionStats         map[UniqueID]*storage.PartitionStatsSnapshot
+	partitionStatsBindings map[int64]*partitionStatsBinding
+	chunkManager           storage.ChunkManager
 
 	excludedSegments *ExcludedSegments
 	// cause growing segment meta has been stored in segmentManager/distribution/excludeSegments
@@ -415,14 +413,25 @@ func (sd *shardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int
 
 func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
 	nodeReq := &querypb.SearchRequest{
-		DmlChannels:     []string{sd.vchannelName},
-		SegmentIDs:      segmentIDs,
-		Scope:           scope,
-		Req:             shallowcopy.ShallowCopySearchRequest(req.GetReq(), targetID),
-		FromShardLeader: req.FromShardLeader,
-		TotalChannelNum: req.TotalChannelNum,
-		FilterOnly:      req.FilterOnly,
-		EnableExprCache: req.EnableExprCache,
+		DmlChannels:           []string{sd.vchannelName},
+		SegmentIDs:            segmentIDs,
+		Scope:                 scope,
+		Req:                   shallowcopy.ShallowCopySearchRequest(req.GetReq(), targetID),
+		FromShardLeader:       req.FromShardLeader,
+		TotalChannelNum:       req.TotalChannelNum,
+		FilterOnly:            req.FilterOnly,
+		EnableExprCache:       req.EnableExprCache,
+		ClusteringSearchHints: req.GetClusteringSearchHints(),
+	}
+	if scope == querypb.DataScope_Historical && len(req.GetClusteringSearchHints()) > 0 {
+		nodeReq.ClusteringSearchHints = make(map[int64]*querypb.SegmentClusterSearchHints)
+		for _, id := range segmentIDs {
+			if h := req.GetClusteringSearchHints()[id]; h != nil {
+				nodeReq.ClusteringSearchHints[id] = h
+			}
+		}
+	} else {
+		nodeReq.ClusteringSearchHints = nil
 	}
 	return nodeReq
 }
@@ -473,19 +482,27 @@ func (sd *shardDelegator) executeSearchSubTasks(
 }
 
 // Search preforms search operation on shard.
-func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64) ([]*internalpb.SearchResults, error) {
+func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, bindings ...map[int64]*partitionStatsBinding) ([]*internalpb.SearchResults, error) {
+	// Hybrid subsearches share the pin, but each owns its candidate slice.
+	candidates := make([]SnapshotItem, len(sealed))
+	for i, item := range sealed {
+		candidates[i] = SnapshotItem{NodeID: item.NodeID, Segments: append([]SegmentEntry(nil), item.Segments...)}
+	}
+	sealed = candidates
+	req.ClusteringSearchHints = nil
 	log := sd.getLogger(ctx)
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		func() {
-			sd.partitionStatsMut.RLock()
-			defer sd.partitionStatsMut.RUnlock()
-			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
+		if len(bindings) == 1 {
+			stats := legacyStatsBindings(bindings[0])
+			PruneSegments(ctx, stats, req.GetReq(), nil, sd.collection.Schema(), sealed,
 				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
-		}()
+			req.ClusteringSearchHints = clusteringSearchHints(ctx, bindings[0], req.GetReq(), sealed, sealedRowCount,
+				paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat())
+		}
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentFilter.GetAsBool() {
@@ -507,7 +524,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return []*internalpb.SearchResults{}, nil
 	}
 
-	// get final sealedNum after possible segment prune
+	// Decide whether to use two-stage search before applying cluster candidates.
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 
 	rowCounts := make([]int64, 0, sealedNum)
@@ -525,6 +542,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	)
 
 	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
+		req.ClusteringSearchHints = nil // Multi-stage queries retain their original search scope.
 		results, fallback, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		if err != nil {
 			return nil, err
@@ -535,6 +553,18 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		// fallback: continue with normal single-stage search below
 		mlog.Debug(ctx, "Two-stage search requested fallback, continuing with normal search")
 	}
+
+	sealed, candidateRows := pruneClusteringSegments(sealed, sealedRowCount, req.GetClusteringSearchHints(), req.GetReq().GetNq())
+	if len(candidateRows) != len(sealedRowCount) {
+		rowCounts = rowCounts[:0]
+		for _, item := range sealed {
+			for _, seg := range item.Segments {
+				rowCounts = append(rowCounts, candidateRows[seg.SegmentID])
+			}
+		}
+		effectiveSegmentNum = optimizers.CalculateEffectiveSegmentNum(sd.queryHook, rowCounts, req.GetReq().GetTopk())
+	}
+	sealedRowCount = candidateRows
 
 	const isSecondStageSearch = false
 	indexType := sd.collection.GetIndexType(req.GetReq().GetFieldId())
@@ -623,6 +653,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	defer sd.distribution.Unpin(version)
 
 	if req.GetReq().GetIsAdvanced() {
+		// Preserve scalar pruning for hybrid sub-requests without enabling the
+		// cluster-hint path before its multi-stage semantics are supported.
+		legacyBindings := make(map[int64]*partitionStatsBinding)
+		for partition, binding := range sd.distribution.pinnedStatsBindings(version) {
+			if binding != nil && binding.stats != nil && binding.stats.ClusteringStats == nil {
+				legacyBindings[partition] = binding
+			}
+		}
 		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
 		for index, subReq := range req.GetReq().GetSubReqs() {
 			newRequest := &internalpb.SearchRequest{
@@ -669,7 +707,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					searchReq.GetReq().MvccTimestamp = tSafe
 				}
 				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
-				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount)
+				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount, legacyBindings)
 				if err != nil {
 					return nil, err
 				}
@@ -700,7 +738,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return results, nil
 	}
 
-	results, err := sd.search(ctx, req, sealed, growing, sealedRowCount)
+	results, err := sd.search(ctx, req, sealed, growing, sealedRowCount, sd.distribution.pinnedStatsBindings(version))
 	if err != nil {
 		mlog.Warn(ctx, "delegator common search failed", mlog.Err(err))
 		return nil, err
@@ -853,11 +891,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		func() {
-			sd.partitionStatsMut.RLock()
-			defer sd.partitionStatsMut.RUnlock()
-			PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
-		}()
+		PruneSegments(ctx, legacyStatsBindings(sd.distribution.pinnedStatsBindings(version)), nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentFilter.GetAsBool() {
@@ -1497,47 +1531,39 @@ func delegatorFunctionRunnerKey(vchannel string) string {
 // As partition stats is an optimization for search/query which is not mandatory for milvus instance,
 // loading partitionStats will be a try-best process and will skip+logError when running across errors rather than
 // return an error status
-func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersions map[int64]int64) {
-	colID := sd.Collection()
-	for partID, newVersion := range partStatsVersions {
-		var curStats *storage.PartitionStatsSnapshot
-		var exist bool
-		func() {
-			sd.partitionStatsMut.RLock()
-			defer sd.partitionStatsMut.RUnlock()
-			curStats, exist = sd.partitionStats[partID]
-		}()
-		if exist && curStats != nil && curStats.Version >= newVersion {
-			mlog.RatedWarn(ctx, rate.Limit(60), "Input partition stats' version is less or equal than current partition stats, skip",
-				mlog.Int64("partID", partID),
-				mlog.Int64("curVersion", curStats.Version),
-				mlog.Int64("inputVersion", newVersion),
-			)
+func (sd *shardDelegator) loadPartitionStats(ctx context.Context, versions map[int64]int64) map[int64]*partitionStatsBinding {
+	bindings := make(map[int64]*partitionStatsBinding)
+	for partition, version := range versions {
+		if version <= 0 {
 			continue
 		}
-		idPath := metautil.JoinIDPath(colID, partID)
-		idPath = path.Join(idPath, sd.vchannelName)
-		statsFilePath := path.Join(sd.chunkManager.RootPath(), common.PartitionStatsPath, idPath, strconv.FormatInt(newVersion, 10))
-		statsBytes, err := sd.chunkManager.Read(ctx, statsFilePath)
+		sd.partitionStatsMut.RLock()
+		cached := sd.partitionStatsBindings[partition]
+		sd.partitionStatsMut.RUnlock()
+		if cached != nil && cached.stats.Version == version {
+			bindings[partition] = cached
+			continue
+		}
+		binding, err := sd.loadPartitionStatsBinding(ctx, partition, version)
 		if err != nil {
-			mlog.Error(ctx, "failed to read stats file from object storage", mlog.String("path", statsFilePath))
+			mlog.Warn(ctx, "skip unavailable partition stats binding", mlog.Int64("partitionID", partition), mlog.Int64("version", version), mlog.Err(err))
 			continue
 		}
-		partStats, err := storage.DeserializePartitionsStatsSnapshot(statsBytes)
-		if err != nil {
-			mlog.Error(ctx, "failed to parse partition stats from bytes",
-				mlog.Int("bytes_length", len(statsBytes)), mlog.Err(err))
-			continue
+		bindings[partition] = binding
+		sd.partitionStatsMut.Lock()
+		if sd.partitionStatsBindings == nil {
+			sd.partitionStatsBindings = make(map[int64]*partitionStatsBinding)
 		}
-		partStats.SetVersion(newVersion)
-		func() {
-			sd.partitionStatsMut.Lock()
-			defer sd.partitionStatsMut.Unlock()
-			sd.partitionStats[partID] = partStats
-		}()
-		mlog.Info(ctx, "Updated partitionStats for partition", mlog.Int64("collectionID", sd.collectionID), mlog.Int64("partitionID", partID),
-			mlog.Int64("newVersion", newVersion), mlog.Int64("oldVersion", curStats.GetVersion()))
+		if sd.partitionStats == nil {
+			sd.partitionStats = make(map[int64]*storage.PartitionStatsSnapshot)
+		}
+		if current := sd.partitionStatsBindings[partition]; current == nil || current.stats.Version < version {
+			sd.partitionStatsBindings[partition] = binding
+			sd.partitionStats[partition] = binding.stats
+		}
+		sd.partitionStatsMut.Unlock()
 	}
+	return bindings
 }
 
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.

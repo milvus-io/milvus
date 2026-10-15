@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type CodecAnalyze interface {
@@ -66,7 +67,7 @@ func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo, pluginC
 	}
 
 	var analyzePtr C.CAnalyze
-	status := C.Analyze(&analyzePtr, (*C.uint8_t)(unsafe.Pointer(&analyzeInfoBlob[0])), (C.uint64_t)(len(analyzeInfoBlob)), pluginContextPtr)
+	status := C.Analyze(&analyzePtr, (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(analyzeInfoBlob))), (C.uint64_t)(len(analyzeInfoBlob)), pluginContextPtr)
 	if err := HandleCStatus(&status, "failed to analyze task"); err != nil {
 		return nil, err
 	}
@@ -103,6 +104,9 @@ func (ca *CgoAnalyze) Delete() error {
 }
 
 func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, error) {
+	if ca == nil || ca.close || ca.analyzePtr == nil || size < 0 {
+		return "", 0, nil, nil, merr.WrapErrServiceInternalMsg("invalid analyze result handle or count")
+	}
 	cOffsetMappingFilesPath := make([]unsafe.Pointer, size)
 	cOffsetMappingFilesSize := make([]C.int64_t, size)
 	// Out-parameters only: GetAnalyzeResultMeta overwrites this with a pointer
@@ -120,10 +124,11 @@ func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, err
 	status := C.GetAnalyzeResultMeta(ca.analyzePtr,
 		&cCentroidsFilePath,
 		&cCentroidsFileSize,
-		unsafe.Pointer(&cOffsetMappingFilesPath[0]),
-		&cOffsetMappingFilesSize[0],
+		unsafe.Pointer(unsafe.SliceData(cOffsetMappingFilesPath)),
+		unsafe.SliceData(cOffsetMappingFilesSize),
+		C.int64_t(size),
 	)
-	if err := HandleCStatus(&status, "failed to delete analyze"); err != nil {
+	if err := HandleCStatus(&status, "failed to read analyze result"); err != nil {
 		return "", 0, nil, nil, err
 	}
 	offsetMappingFilesPath := make([]string, size)

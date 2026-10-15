@@ -199,7 +199,7 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bo
 	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
 		return false
 	}
-	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
+	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && segment.GetPartitionStatsVersion() == 0 {
 		return false
 	}
 
@@ -218,7 +218,7 @@ func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted
 	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
 		return false
 	}
-	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
+	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && segment.GetPartitionStatsVersion() == 0 {
 		return false
 	}
 
@@ -397,7 +397,7 @@ func (si *statsInspector) triggerBM25StatsTask() {
 			}
 		}
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			if !seg.GetIsSorted() && !seg.GetIsSortedByNamespace() {
+			if !seg.GetIsSorted() && !seg.GetIsSortedByNamespace() && seg.GetPartitionStatsVersion() == 0 {
 				return false
 			}
 			if !needDoBM25(seg, needTriggerFieldIDs) {

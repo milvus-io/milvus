@@ -500,7 +500,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     // Pin the sealed published snapshot exactly once for this request.
     query_context->set_read_snapshot(segment->CaptureReadSnapshot());
 
-    query_context->set_search_info(node.search_info_);
+    auto search_info = node.search_info_;
+    search_info.clustering_search_hints = clustering_search_hints_;
+    query_context->set_search_info(search_info);
     query_context->set_placeholder_group(placeholder_group_);
     if (enable_expr_cache_) {
         query_context->set_enable_expr_cache(true);

@@ -534,6 +534,7 @@ message SearchRequest {
     // If true, enable expression filter cache for two-stage search.
     // Stage 1 caches filter bitset, Stage 2 reuses it to skip re-execution.
     bool enable_expr_cache = 8;
+    map<int64, SegmentClusterSearchHints> clustering_search_hints = 9;
 }
 
 message QueryRequest {
@@ -842,6 +843,8 @@ message SyncAction {
     int64 TargetVersion = 9;
     repeated int64 droppedInTarget = 10;
     msg.MsgPosition checkpoint = 11;
+    // For snapshot-owned layouts, UpdateVersion activates complete bindings
+    // with the segment view. UpdatePartitionStats may only prefetch that format.
     map<int64, int64> partition_stats_versions = 12;
     msg.MsgPosition deleteCP = 13;
     map<int64, int64> sealed_segment_row_count = 14; // segmentID -> row count, same as sealedInTarget
@@ -980,6 +983,8 @@ message ChannelTarget {
   repeated PartitionTarget partition_targets = 4;
   msg.MsgPosition seek_position = 5;
   msg.MsgPosition delete_checkpoint = 6;
+  // Exact stats versions bound to this persisted target, per partition.
+  map<int64, int64> partition_stats_versions = 7;
 }
 
 message CollectionTarget {
@@ -1193,4 +1198,26 @@ message ListLoadedSegmentsRequest {
 message ListLoadedSegmentsResponse {
     common.Status status = 1;
     repeated int64 segmentIDs = 2;
+}
+
+// Per-query hints use segment public row coordinates. Missing hints mean
+// ordinary search; present hints with no ranges mean a verified empty scope.
+message ClusterSearchHint {
+  int64 row_offset = 1;
+  int64 row_count = 2;
+  float centroid_distance = 3;
+}
+
+message ClusterSearchHintList {
+  repeated ClusterSearchHint ranges = 1;
+}
+
+message QueryClusterSearchHints {
+  ClusterSearchHintList hints = 1;
+}
+
+message SegmentClusterSearchHints {
+  int64 snapshot_version = 1;
+  int64 num_rows = 2;
+  repeated QueryClusterSearchHints queries = 3;
 }

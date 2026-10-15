@@ -2843,6 +2843,9 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		// are populated correctly there (the compactor sees the stats
 		// blob size); the receiver does not recompute.
 		segmentInfo.Stats = seg.GetStats()
+		if result.GetPartitionStatsVersion() > 0 {
+			segmentInfo.PartitionStatsVersion = result.GetPartitionStatsVersion()
+		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
 		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetIsSorted(), segment.GetStorageVersion(), segmentMetricFormatLabel(segment), segment.GetNumOfRows())
@@ -3176,7 +3179,9 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 // snapshot). Callers must hold the DataView Collection lock (lock order:
 // DataView -> segMu).
 func (m *meta) loadableProjection(ctx context.Context, collectionID int64) ([]dataview.LoadableSegment, error) {
-	segments := m.SelectSegments(ctx, WithCollection(collectionID))
+	m.segMu.RLock()
+	segments := m.projectClusteringSegmentsLocked(m.segments.GetSegmentsBySelector(WithCollection(collectionID)))
+	m.segMu.RUnlock()
 	loadable := make([]dataview.LoadableSegment, 0, len(segments))
 	for _, segment := range segments {
 		if segment.GetLevel() == datapb.SegmentLevel_L0 ||

@@ -170,6 +170,8 @@ message AnalyzeRequest {
   int64 max_cluster_size = 17;
   int64 task_slot = 18;
   repeated common.KeyValuePair plugin_context = 19;
+  string cluster_type = 20;
+  map<string, string> cluster_params = 21;
 }
 
 message CreateStatsRequest {
@@ -257,6 +259,8 @@ message AnalyzeResult {
   index.JobState state = 2;
   string fail_reason = 3;
   string centroids_file = 4;
+  // Analyze generation. Results from older attempts must never be adopted.
+  int64 version = 5;
 }
 
 message AnalyzeResults {

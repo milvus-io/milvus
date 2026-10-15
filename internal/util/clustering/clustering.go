@@ -63,15 +63,16 @@ func GetClusteringKeyField(collectionSchema *schemapb.CollectionSchema) *schemap
 		if field.IsPartitionKey {
 			partitionKeyField = field
 		}
-		// todo support other vector type
-		// if typeutil.IsVectorType(field.GetDataType()) {
-		if field.DataType == schemapb.DataType_FloatVector {
+		if typeutil.IsDenseFloatVectorType(field.GetDataType()) {
 			vectorFields = append(vectorFields, field)
 		}
 	}
 	// in some server mode, we regard partition key field or vector field as clustering key by default.
 	// here is the priority: clusteringKey > partitionKey > vector field(only single vector)
 	if clusteringKeyField != nil {
+		if !typeutil.IsClusteringKeyType(clusteringKeyField.GetDataType()) {
+			return nil
+		}
 		if typeutil.IsVectorType(clusteringKeyField.GetDataType()) &&
 			!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
 			return nil

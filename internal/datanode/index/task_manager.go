@@ -241,6 +241,7 @@ func (m *TaskManager) deleteAllIndexTasks() []*IndexTaskInfo {
 }
 
 type AnalyzeTaskInfo struct {
+	Version       int64
 	Cancel        context.CancelFunc
 	State         indexpb.JobState
 	FailReason    string
@@ -270,11 +271,11 @@ func (m *TaskManager) LoadAnalyzeTaskState(clusterID string, taskID typeutil.Uni
 	return task.State
 }
 
-func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.UniqueID, state indexpb.JobState, failReason string) {
+func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.UniqueID, version int64, state indexpb.JobState, failReason string) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if task, ok := m.analyzeTasks[key]; ok {
+	if task, ok := m.analyzeTasks[key]; ok && task.Version == version {
 		mlog.Info(m.ctx, "store analyze task state", mlog.String("clusterID", clusterID), mlog.Int64("TaskID", taskID),
 			mlog.String("state", state.String()), mlog.String("fail reason", failReason))
 		task.State = state
@@ -285,12 +286,13 @@ func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.Un
 func (m *TaskManager) StoreAnalyzeFilesAndStatistic(
 	ClusterID string,
 	taskID typeutil.UniqueID,
+	version int64,
 	centroidsFile string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if info, ok := m.analyzeTasks[key]; ok {
+	if info, ok := m.analyzeTasks[key]; ok && info.Version == version {
 		info.CentroidsFile = centroidsFile
 		return
 	}
@@ -302,6 +304,7 @@ func (m *TaskManager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.Uniqu
 
 	if info, ok := m.analyzeTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
 		return &AnalyzeTaskInfo{
+			Version:       info.Version,
 			Cancel:        info.Cancel,
 			State:         info.State,
 			FailReason:    info.FailReason,

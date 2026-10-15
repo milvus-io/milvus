@@ -19,12 +19,14 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"sync"
 	"time"
 
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -38,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CompactionTriggerType int8
@@ -137,9 +140,10 @@ var _ TriggerManager = (*CompactionTriggerManager)(nil)
 // so that when the certain TriggerType happens, the corresponding triggers can
 // trigger the correct compaction plans.
 type CompactionTriggerManager struct {
-	inspector CompactionInspector
-	handler   Handler
-	allocator allocator.Allocator
+	versionManager IndexEngineVersionManager
+	inspector      CompactionInspector
+	handler        Handler
+	allocator      allocator.Allocator
 
 	meta     *meta
 	policies map[TickerType]CompactionPolicy
@@ -160,11 +164,12 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	versionManager IndexEngineVersionManager,
 ) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
-		allocator: alloc,
-		handler:   handler,
-		inspector: inspector,
-		meta:      meta,
-		policies:  make(map[TickerType]CompactionPolicy),
+		versionManager: versionManager,
+		allocator:      alloc,
+		handler:        handler,
+		inspector:      inspector,
+		meta:           meta,
+		policies:       make(map[TickerType]CompactionPolicy),
 	}
 	// Initialize policies and keep separate pointers for frequently accessed ones
 
@@ -519,6 +524,16 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 
+	clusteringView := view.(*ClusteringSegmentsView)
+	if typeutil.IsVectorType(clusteringView.clusteringKeyField.GetDataType()) {
+		clusteringView, err = prepareClusteringView(ctx, m.meta, clusteringView, collection.Schema.GetEnableNamespace())
+		if err != nil {
+			log.Warn(ctx, "defer clustering input selection", mlog.Err(err))
+			return
+		}
+		view = clusteringView
+	}
+
 	expectedSegmentSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
 	totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view, expectedSegmentSize)
 	if err != nil {
@@ -556,6 +571,15 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 		MaxSize:                expectedSegmentSize,
 	}
+	task.Schema = proto.Clone(collection.Schema).(*schemapb.CollectionSchema)
+	task.ClusteringKeyField = proto.Clone(clusteringView.clusteringKeyField).(*schemapb.FieldSchema)
+	if typeutil.IsVectorType(task.ClusteringKeyField.GetDataType()) {
+		task.BasePartitionStatsVersion = clusteringView.basePartitionStatsVersion
+		task.ClusteringPlanParams = maps.Clone(paramtable.Get().KnowhereConfig.GetCompactionPlanParams())
+		task.ClusteringIndexParams = maps.Clone(paramtable.Get().KnowhereConfig.GetClusterIndexParams())
+		task.ClusteringIndexEngineVersion = m.versionManager.ResolveVecIndexVersion()
+	}
+
 	err = m.inspector.enqueueCompaction(task)
 	if err != nil {
 		log.Warn(ctx, "Failed to execute compaction task",

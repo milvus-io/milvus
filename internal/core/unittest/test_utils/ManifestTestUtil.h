@@ -92,7 +92,8 @@ class V3SegmentTestData {
                       int64_t dim,
                       const std::string& root_path,
                       const std::string& base_path,
-                      const std::string& column_group_pattern = "")
+                      const std::string& column_group_pattern = "",
+                      uint64_t batch_seed_step = 1)
         : schema_(schema),
           // Keys are complete paths: the loon local filesystem is rooted at
           // "/" and base_path lives under root_path (see LoonFSRootPath).
@@ -117,7 +118,8 @@ class V3SegmentTestData {
         std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
         batches.reserve(n_batch);
         for (int64_t i = 0; i < n_batch; ++i) {
-            auto dataset = milvus::segcore::DataGen(schema_, per_batch, 42 + i);
+            auto dataset = milvus::segcore::DataGen(
+                schema_, per_batch, 42 + i * batch_seed_step);
             auto batch = milvus::segcore::ConvertToArrowRecordBatch(
                 dataset, dim, arrow_schema);
             // Remap to storage names (field IDs internally, mappings externally).

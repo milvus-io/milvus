@@ -37,6 +37,7 @@ type snapshotCleanup func()
 
 // snapshot records segment distribution with ref count.
 type snapshot struct {
+	statsBindings map[int64]*partitionStatsBinding
 	partitions    typeutil.Set[int64]
 	dist          []SnapshotItem
 	growing       []SegmentEntry

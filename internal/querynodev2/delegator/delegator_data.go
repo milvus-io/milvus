@@ -1323,7 +1323,8 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 }
 
 func (sd *shardDelegator) SyncTargetVersion(action *querypb.SyncAction, partitions []int64) {
-	sd.distribution.SyncTargetVersion(action, partitions)
+	bindings := sd.loadPartitionStats(context.Background(), action.GetPartitionStatsVersions())
+	sd.distribution.SyncTargetVersion(action, partitions, bindings)
 	// clean delete buffer after distribution becomes serviceable
 	if sd.distribution.queryView.Serviceable() {
 		checkpoint := action.GetCheckpoint()

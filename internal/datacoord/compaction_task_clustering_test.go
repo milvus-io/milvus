@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -324,6 +325,7 @@ func (s *ClusteringCompactionTaskSuite) generateBasicTask(vectorClusteringKey bo
 		pk = &schemapb.FieldSchema{
 			FieldID:         101,
 			Name:            FloatVecField,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
 			IsPrimaryKey:    false,
 			DataType:        schemapb.DataType_FloatVector,
 			IsClusteringKey: true,
@@ -504,14 +506,16 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining))
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:    101,
+				ID:           101,
+				CollectionID: 1, PartitionID: 10,
 				State: commonpb.SegmentState_Flushed,
 				Level: datapb.SegmentLevel_L1,
 			},
 		})
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:                    102,
+				ID:           102,
+				CollectionID: 1, PartitionID: 10,
 				State:                 commonpb.SegmentState_Flushed,
 				Level:                 datapb.SegmentLevel_L2,
 				PartitionStatsVersion: 10000,
@@ -1305,4 +1309,35 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).Return(nil)
 		s.NoError(task.doCompact(9, cluster))
 	})
+}
+
+func (s *ClusteringCompactionTaskSuite) TestClusteringPlannerParametersFrozen() {
+	field := &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}}
+	for _, id := range []int64{10, 20} {
+		s.NoError(s.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "ch", State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, NumOfRows: 2})))
+	}
+	spec := &datapb.CompactionTask{
+		PlanID: 90, Type: datapb.CompactionType_ClusteringCompaction, CollectionID: 1, PartitionID: 2, Channel: "ch", Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}, ClusteringKeyField: field,
+		InputSegments: []int64{10, 20}, TotalRows: 4, MaxSegmentRows: 10, AnalyzeTaskID: 80, AnalyzeVersion: 3, ClusteringPlanParams: map[string]string{"random_state": "42"},
+	}
+	analyze := &indexpb.AnalyzeTask{TaskID: 80, CollectionID: 1, PartitionID: 2, FieldID: 100, FieldType: schemapb.DataType_FloatVector, Dim: 2, SegmentIDs: []int64{10, 20}, State: indexpb.JobState_JobStateFinished, Version: 3, CentroidsFile: "complete", ClusterType: "CARDINAL_KMEANS"}
+	s.Require().NoError(s.meta.GetAnalyzeMeta().AddAnalyzeTask(analyze))
+	task := newClusteringCompactionTask(spec, s.mockAlloc, s.meta, s.handler, s.analyzeScheduler, newMockVersionManager())
+	pt := paramtable.Get()
+	old := pt.KnowhereConfig.ClusterType.GetValue()
+	pt.Save(pt.KnowhereConfig.ClusterType.Key, "changed-after-analyze")
+	s.T().Cleanup(func() { pt.Save(pt.KnowhereConfig.ClusterType.Key, old) })
+	for i := 0; i < 2; i++ {
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		params, err := compaction.ParseParamsFromJSON(plan.GetJsonParams())
+		s.Require().NoError(err)
+		s.Equal("CARDINAL_KMEANS", params.ClusteringPlan.ClusterType)
+		s.Equal(map[string]string{"random_state": "42"}, params.ClusteringPlan.Params)
+		s.Equal(map[int64]int64{10: 2, 20: 2}, params.ClusteringPlan.SegmentRows)
+		params.ClusteringPlan.Params["random_state"] = "other"
+	}
+	spec.AnalyzeVersion = 4
+	_, err := task.BuildCompactionRequest()
+	s.ErrorIs(err, merr.ErrCompactionPlanConflict)
 }

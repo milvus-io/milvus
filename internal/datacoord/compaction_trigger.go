@@ -1068,7 +1068,7 @@ func isFlush(segment *SegmentInfo) bool {
 }
 
 func canTriggerSortCompaction(segment *SegmentInfo) bool {
-	return segment.GetState() == commonpb.SegmentState_Flushed &&
+	return segment.GetPartitionStatsVersion() == 0 && segment.GetState() == commonpb.SegmentState_Flushed &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
 		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) &&
 		!segment.GetIsImporting() &&
