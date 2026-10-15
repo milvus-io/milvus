@@ -120,7 +120,8 @@ func CheckAutoIndexConfig() {
 	CheckAutoIndexHelper(autoIndexCfg.IndexParams.Key, autoIndexCfg.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
 	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.DeduplicateIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
-	CheckAutoIndexHelper(autoIndexCfg.SparseIndexParams.Key, autoIndexCfg.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector)
+	CheckAutoIndexHelper(autoIndexCfg.SparseIPIndexParams.Key, GetSparseAutoIndexParams("", schemapb.FunctionType_Unknown), schemapb.DataType_SparseFloatVector)
+	CheckAutoIndexHelper(autoIndexCfg.SparseBM25IndexParams.Key, GetSparseAutoIndexParams("", schemapb.FunctionType_BM25), schemapb.DataType_SparseFloatVector)
 	CheckAutoIndexHelper(autoIndexCfg.LargeTopKIndexParams.Key, autoIndexCfg.LargeTopKIndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 }
 
