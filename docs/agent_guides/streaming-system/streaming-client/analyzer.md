@@ -27,6 +27,12 @@ ReleaseCollection releases query resources, not this WAL key.
 Shared runner initialization preserves tracing values but does not inherit the
 request that first triggered it: cancelling one wait does not fail other waiters.
 Resource preparation retains its own snapshot-fetch and per-file download limits.
+Default analyzers on schemas with no file-resource IDs bypass preparation, so an
+unrelated broken resource does not prevent their runner initialization. Explicit
+analyzer or multi-analyzer configuration still prepares conservatively: older
+schemas and MinHash fields without enable_analyzer may lack resource IDs.
+Resource-dependent initialization continues to require the full snapshot; a
+failed download is not silently replaced with stale inventory.
 
 ## Execution and lifetime
 
