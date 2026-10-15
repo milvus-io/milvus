@@ -46,70 +46,62 @@ type FilesystemMetrics struct {
 	MultiPartUploadFinished int64
 }
 
-// FilesystemMetricsEntry identifies one cached filesystem and its metrics.
+// FilesystemMetricsEntry identifies one metrics source of a cached filesystem.
 type FilesystemMetricsEntry struct {
 	DisplayKey string
+	Source     string
 	FilesystemMetrics
 }
 
-// originMetricsSource is milvus-storage's metrics source for requests served by
-// the filesystem itself. Talon reports its own reads under a separate source,
-// which is not exported here.
-const originMetricsSource = "origin"
-
-func toFilesystemMetrics(m C.LoonFilesystemMetricsSnapshot) FilesystemMetrics {
-	return FilesystemMetrics{
-		ReadCount:               int64(m.read_count),
-		WriteCount:              int64(m.write_count),
-		ReadBytes:               int64(m.read_bytes),
-		WriteBytes:              int64(m.write_bytes),
-		GetFileInfoCount:        int64(m.get_file_info_count),
-		FailedCount:             int64(m.failed_count),
-		MultiPartUploadCreated:  int64(m.multi_part_upload_created),
-		MultiPartUploadFinished: int64(m.multi_part_upload_finished),
-	}
-}
-
-// getMetricsFromHandle retrieves the origin metrics of a filesystem handle and
-// destroys the handle.
-func getMetricsFromHandle(cFilesystem C.FileSystemHandle) (*FilesystemMetrics, error) {
+// getMetricsFromHandle retrieves metrics by source and releases the handle.
+func getMetricsFromHandle(cFilesystem C.FileSystemHandle) (map[string]FilesystemMetrics, error) {
 	defer C.loon_filesystem_destroy(cFilesystem)
-	var cSources C.LoonFilesystemMetricsSources
-	if err := HandleLoonFFIResult(C.loon_filesystem_get_metrics_sources(cFilesystem, &cSources)); err != nil {
+	var sources C.LoonFilesystemMetricsSources
+	metricsResult := C.loon_filesystem_get_metrics_sources(cFilesystem, &sources)
+	if err := HandleLoonFFIResult(metricsResult); err != nil {
 		return nil, merr.Wrap(err, "failed to get filesystem metrics")
 	}
-	defer C.loon_filesystem_free_metrics_sources(&cSources)
+	defer C.loon_filesystem_free_metrics_sources(&sources)
 
-	for _, entry := range unsafe.Slice(cSources.entries, int(cSources.count)) {
-		if C.GoString(entry.source) == originMetricsSource {
-			fsMetrics := toFilesystemMetrics(entry.metrics)
-			return &fsMetrics, nil
-		}
+	metrics := make(map[string]FilesystemMetrics, int(sources.count))
+	for _, entry := range unsafe.Slice(sources.entries, int(sources.count)) {
+		metrics[C.GoString(entry.source)] = metricsFromSnapshot(entry.metrics)
 	}
-	return nil, merr.WrapErrServiceInternalMsg("filesystem reports no %s metrics", originMetricsSource)
+	return metrics, nil
 }
 
-// ListFilesystemMetrics returns the origin metrics of every filesystem currently
-// held by the cache.
+// ListFilesystemMetrics returns each source of every cached filesystem.
 func ListFilesystemMetrics() ([]FilesystemMetricsEntry, error) {
-	var cSources C.LoonFilesystemMetricsSources
-	if err := HandleLoonFFIResult(C.loon_filesystem_list_metrics_sources(&cSources)); err != nil {
+	var sources C.LoonFilesystemMetricsSources
+	result := C.loon_filesystem_list_metrics_sources(&sources)
+	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.Wrap(err, "failed to list filesystem metrics")
 	}
-	defer C.loon_filesystem_free_metrics_sources(&cSources)
+	defer C.loon_filesystem_free_metrics_sources(&sources)
 
-	entries := unsafe.Slice(cSources.entries, int(cSources.count))
+	entries := unsafe.Slice(sources.entries, int(sources.count))
 	metricsList := make([]FilesystemMetricsEntry, 0, len(entries))
 	for _, entry := range entries {
-		if C.GoString(entry.source) != originMetricsSource {
-			continue
-		}
 		metricsList = append(metricsList, FilesystemMetricsEntry{
 			DisplayKey:        C.GoString(entry.display_key),
-			FilesystemMetrics: toFilesystemMetrics(entry.metrics),
+			Source:            C.GoString(entry.source),
+			FilesystemMetrics: metricsFromSnapshot(entry.metrics),
 		})
 	}
 	return metricsList, nil
+}
+
+func metricsFromSnapshot(snapshot C.LoonFilesystemMetricsSnapshot) FilesystemMetrics {
+	return FilesystemMetrics{
+		ReadCount:               int64(snapshot.read_count),
+		WriteCount:              int64(snapshot.write_count),
+		ReadBytes:               int64(snapshot.read_bytes),
+		WriteBytes:              int64(snapshot.write_bytes),
+		GetFileInfoCount:        int64(snapshot.get_file_info_count),
+		FailedCount:             int64(snapshot.failed_count),
+		MultiPartUploadCreated:  int64(snapshot.multi_part_upload_created),
+		MultiPartUploadFinished: int64(snapshot.multi_part_upload_finished),
+	}
 }
 
 // Property keys exported by milvus-storage/ffi_c.h.
@@ -272,9 +264,9 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	return props, nil
 }
 
-// GetFilesystemMetricsWithConfig retrieves metrics from a cached filesystem
+// GetFilesystemMetricsWithConfig retrieves metrics by source from a cached filesystem
 // using full storage config properties for proper cache resolution.
-func GetFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (*FilesystemMetrics, error) {
+func GetFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (map[string]FilesystemMetrics, error) {
 	if storageConfig == nil {
 		return nil, merr.WrapErrStorageMsg("storageConfig is required")
 	}
