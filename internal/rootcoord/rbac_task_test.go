@@ -174,3 +174,100 @@ func TestExecuteOperatePrivilegeGroupTaskStepsRemovePrivilegesByName(t *testing.
 		refreshRequests[0].GetOpKey(),
 	)
 }
+
+// A privilege the role still holds through a built-in group must not be revoked
+// from the proxy cache when it is removed from a custom group: the built-in
+// group is expanded into the same policy keys at grant time.
+func TestExecuteOperatePrivilegeGroupTaskStepsRemoveKeepsBuiltinGroupPrivilege(t *testing.T) {
+	ctx := context.Background()
+	groupName := "group1"
+	roleName := "role1"
+	dbName := util.DefaultDBName
+	objectName := "collection1"
+
+	newMeta := func(builtinObjectName string) *mockMetaTable {
+		meta := newMockMetaTable()
+		meta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return []*milvuspb.PrivilegeGroupInfo{
+				{
+					GroupName: groupName,
+					Privileges: []*milvuspb.PrivilegeEntity{
+						{Name: "Query"},
+						{Name: "Load"},
+					},
+				},
+			}, nil
+		}
+		meta.GetPrivilegeGroupRolesFunc = func(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error) {
+			return []*milvuspb.RoleEntity{{Name: roleName}}, nil
+		}
+		meta.SelectGrantFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+			return []*milvuspb.GrantEntity{
+				{
+					Role:       &milvuspb.RoleEntity{Name: roleName},
+					ObjectName: objectName,
+					Grantor: &milvuspb.GrantorEntity{
+						User:      &milvuspb.UserEntity{Name: "root"},
+						Privilege: &milvuspb.PrivilegeEntity{Name: groupName},
+					},
+					DbName: dbName,
+				},
+				{
+					Role:       &milvuspb.RoleEntity{Name: roleName},
+					ObjectName: builtinObjectName,
+					Grantor: &milvuspb.GrantorEntity{
+						User:      &milvuspb.UserEntity{Name: "root"},
+						Privilege: &milvuspb.PrivilegeEntity{Name: "CollectionReadOnly"},
+					},
+					DbName: dbName,
+				},
+			}, nil
+		}
+		meta.OperatePrivilegeGroupFunc = func(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+			return nil
+		}
+		return meta
+	}
+
+	run := func(t *testing.T, builtinObjectName string) []*proxypb.RefreshPolicyInfoCacheRequest {
+		core := newTestCore(withMeta(newMeta(builtinObjectName)))
+		core.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+
+		var (
+			mu              sync.Mutex
+			refreshRequests []*proxypb.RefreshPolicyInfoCacheRequest
+		)
+		proxy := newMockProxy()
+		proxy.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			refreshRequests = append(refreshRequests, request)
+			return merr.Success(), nil
+		}
+		core.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
+
+		err := executeOperatePrivilegeGroupTaskSteps(ctx, core, &milvuspb.PrivilegeGroupInfo{
+			GroupName:  groupName,
+			Privileges: []*milvuspb.PrivilegeEntity{{Name: "Query"}},
+		}, milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup)
+		require.NoError(t, err)
+
+		mu.Lock()
+		defer mu.Unlock()
+		return refreshRequests
+	}
+
+	t.Run("same collection: built-in group still covers Query, nothing to revoke", func(t *testing.T) {
+		require.Empty(t, run(t, objectName))
+	})
+
+	t.Run("other collection: Query on collection1 is still revoked", func(t *testing.T) {
+		refreshRequests := run(t, "collection2")
+		require.Len(t, refreshRequests, 1)
+		require.Equal(t, int32(typeutil.CacheRevokePrivilege), refreshRequests[0].GetOpType())
+		require.Equal(t,
+			funcutil.PolicyForPrivilege(roleName, util.GetObjectType("Query"), objectName, util.PrivilegeNameForMetastore("Query"), dbName),
+			refreshRequests[0].GetOpKey(),
+		)
+	})
+}

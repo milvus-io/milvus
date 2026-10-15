@@ -117,7 +117,12 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 
 func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *milvuspb.PrivilegeGroupInfo, operateType milvuspb.OperatePrivilegeGroupType) error {
 	if err := func() error {
-		groups, err := core.meta.ListPrivilegeGroups(ctx)
+		// Expand with the built-in groups as well, the same set the grant/revoke
+		// path and ListPolicy use to build the proxy policy cache. A privilege that
+		// a role still holds through a built-in group (e.g. Query via
+		// CollectionReadOnly) must survive its removal from a custom group;
+		// expanding only the custom groups made it look revoked.
+		groups, err := core.getDefaultAndCustomPrivilegeGroups(ctx)
 		if err != nil && !common.IsIgnorableError(err) {
 			mlog.Warn(ctx, "fail to list privilege groups", mlog.Err(err))
 			return err
