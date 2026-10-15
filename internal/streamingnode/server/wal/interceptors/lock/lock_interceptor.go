@@ -38,6 +38,7 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 				r.glock.Unlock()
 			}
 		} else {
+			r.glock.RLock()
 			r.vchannelLocker.Lock(vchannel)
 			return func() {
 				// For exclusive messages, we need to fail all transactions at the vchannel.
@@ -50,6 +51,7 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 				// the append operation of exclusive message should be low rate, so it's acceptable to fail all transactions at the vchannel.
 				r.txnManager.FailTxnAtVChannel(vchannel)
 				r.vchannelLocker.Unlock(vchannel)
+				r.glock.RUnlock()
 			}
 		}
 	}
