@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -34,6 +35,8 @@ import (
 )
 
 func TestAssignChannelToWALLocatedFirst(t *testing.T) {
+	snmanager.ResetStreamingNodeManager()
+	t.Cleanup(snmanager.ResetStreamingNodeManager)
 	b := mock_balancer.NewMockBalancer(t)
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		versions := []typeutil.VersionInt64Pair{
@@ -64,7 +67,10 @@ func TestAssignChannelToWALLocatedFirst(t *testing.T) {
 		}
 		<-ctx.Done()
 		return context.Cause(ctx)
-	})
+	}).Maybe()
+	b.EXPECT().GetLatestWALLocated(mock.Anything, "pchannel").Return(int64(1), true)
+	b.EXPECT().GetLatestWALLocated(mock.Anything, "pchannel2").Return(int64(2), true)
+	b.EXPECT().GetLatestWALLocated(mock.Anything, "pchannel3").Return(int64(3), true)
 	balance.Register(b)
 
 	channels := []*meta.DmChannel{
@@ -76,7 +82,7 @@ func TestAssignChannelToWALLocatedFirst(t *testing.T) {
 	var scoreDelta map[int64]int
 	nodes := []int64{1, 2}
 
-	notFounChannels, plans, scoreDelta := assignChannelToWALLocatedFirstForNodeInfo(channels, nodes)
+	notFounChannels, plans, scoreDelta := assignChannelToWALLocatedFirstForNodeInfo(context.Background(), channels, nodes)
 	assert.Len(t, notFounChannels, 1)
 	assert.Equal(t, notFounChannels[0].GetChannelName(), "pchannel3_v1")
 	assert.Len(t, plans, 2)

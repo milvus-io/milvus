@@ -143,7 +143,7 @@ func (p *ScoreBasedAssignPolicy) AssignSegment(
 	}
 
 	// Calculate each node's score
-	nodeItemsMap := p.ConvertToNodeItemsBySegment(collectionID, nodes)
+	nodeItemsMap := p.ConvertToNodeItemsBySegmentWithContext(ctx, collectionID, nodes)
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -169,7 +169,10 @@ func (p *ScoreBasedAssignPolicy) AssignSegment(
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		// For each segment, pick the node with the least score
-		targetNode := queue.Pop().(*NodeItem)
+		targetNode := popPlanningSegmentTarget(ctx, &queue, s)
+		if targetNode == nil {
+			continue
+		}
 
 		scoreChanges := p.CalculateSegmentScore(s)
 		sourceNode := nodeItemsMap[s.Node]
@@ -199,11 +202,16 @@ func (p *ScoreBasedAssignPolicy) AssignSegment(
 			ToScore:      int64(targetNode.getPriority()),
 			SegmentScore: int64(scoreChanges),
 		}
+		if ledger := PlanningLedgerFromContext(ctx); ledger != nil && !ledger.ReserveSegment(plan) {
+			queue.Push(targetNode)
+			continue
+		}
 		plans = append(plans, plan)
 
 		// Update the sourceNode and targetNode's score
 		if sourceNode != nil {
 			sourceNode.AddCurrentScoreDelta(-scoreChanges)
+			queue.Fix(sourceNode)
 		}
 		targetNode.AddCurrentScoreDelta(scoreChanges)
 
@@ -220,6 +228,10 @@ func (p *ScoreBasedAssignPolicy) AssignSegment(
 
 // ConvertToNodeItemsBySegment creates node items with comprehensive scores
 func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64, nodeIDs []int64) map[int64]*NodeItem {
+	return p.ConvertToNodeItemsBySegmentWithContext(context.Background(), collectionID, nodeIDs)
+}
+
+func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegmentWithContext(ctx context.Context, collectionID int64, nodeIDs []int64) map[int64]*NodeItem {
 	status := p.getWorkloadStatus()
 	delta := p.scheduler.GetSegmentTaskDeltaSnapshot(nodeIDs, collectionID)
 
@@ -231,6 +243,9 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64,
 
 	for _, node := range nodeIDs {
 		score := p.calculateScoreBySegment(collectionID, node, status, delta)
+		if ledger := PlanningLedgerFromContext(ctx); ledger != nil {
+			score = int(ledger.Rows(node, collectionID)) + int(float64(ledger.Rows(node, -1))*params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
+		}
 		NodeItem := NewNodeItem(score, node)
 		nodeScoreMap[node] = &NodeItem
 		totalScore += score
@@ -323,7 +338,7 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 	}
 
 	// Calculate each node's score
-	nodeItemsMap := p.ConvertToNodeItemsByChannel(collectionID, nodes)
+	nodeItemsMap := p.ConvertToNodeItemsByChannelWithContext(ctx, collectionID, nodes)
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -337,22 +352,27 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 	plans := make([]ChannelAssignPlan, 0)
 	for _, c := range channels {
 		var targetNode *NodeItem
-		needPushBack := false
 
 		// Balance scenario: prefer WAL location but can fall back to score-based
 		// Handle WAL location for streaming service
 		targetNode = nil
 		if streamingutil.IsStreamingServiceEnabled() {
-			nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
+			if ctx.Err() != nil {
+				break
+			}
+			nodeID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, c.GetChannelName())
+			if err != nil {
+				continue
+			}
 			if item, ok := nodeItemsMap[nodeID]; ok {
 				targetNode = item
+				queue.Remove(targetNode)
 			}
 		}
 
 		if targetNode == nil {
 			// Fall back to priority queue if WAL node not found
 			targetNode = queue.Pop().(*NodeItem)
-			needPushBack = true
 		}
 
 		scoreChanges := p.CalculateChannelScore(c, collectionID)
@@ -363,9 +383,7 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 			evaluator := &commonScoreBasedBenefitEvaluator{}
 			if !evaluator.HasEnoughBenefitForNodes(sourceNode, targetNode, scoreChanges) {
 				// Push back without changes if no enough benefit
-				if needPushBack {
-					queue.Push(targetNode)
-				}
+				queue.Push(targetNode)
 				continue
 			}
 		}
@@ -385,18 +403,21 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 			ToScore:      int64(targetNode.getPriority()),
 			ChannelScore: int64(scoreChanges),
 		}
+		if ledger := PlanningLedgerFromContext(ctx); ledger != nil && !ledger.ReserveChannel(plan) {
+			queue.Push(targetNode)
+			continue
+		}
 		plans = append(plans, plan)
 
 		// Update scores
 		if sourceNode != nil {
 			sourceNode.AddCurrentScoreDelta(-scoreChanges)
+			queue.Fix(sourceNode)
 		}
 		targetNode.AddCurrentScoreDelta(scoreChanges)
 
-		// Push back the updated node if it was popped from queue
-		if needPushBack {
-			queue.Push(targetNode)
-		}
+		// Both WAL-preferred and fallback targets were removed before updating.
+		queue.Push(targetNode)
 	}
 
 	return plans
@@ -404,6 +425,10 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 
 // ConvertToNodeItemsByChannel creates node items with channel scores
 func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsByChannel(collectionID int64, nodeIDs []int64) map[int64]*NodeItem {
+	return p.ConvertToNodeItemsByChannelWithContext(context.Background(), collectionID, nodeIDs)
+}
+
+func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsByChannelWithContext(ctx context.Context, collectionID int64, nodeIDs []int64) map[int64]*NodeItem {
 	status := p.getWorkloadStatus()
 
 	totalScore := 0
@@ -414,6 +439,9 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsByChannel(collectionID int64,
 
 	for _, node := range nodeIDs {
 		score := p.calculateScoreByChannel(collectionID, node, status)
+		if ledger := PlanningLedgerFromContext(ctx); ledger != nil {
+			score = int(ledger.ChannelScore(node, collectionID, params.Params.QueryCoordCfg.CollectionChannelCountFactor.GetAsFloat()))
+		}
 		NodeItem := NewNodeItem(score, node)
 		nodeScoreMap[node] = &NodeItem
 		totalScore += score

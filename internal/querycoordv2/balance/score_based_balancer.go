@@ -129,7 +129,7 @@ func (b *ScoreBasedBalancer) balanceSegments(ctx context.Context, br *balanceRep
 // to nodes with lower scores. Redundant segments (appearing multiple times in distribution)
 // are skipped to avoid conflicts.
 func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []assign.SegmentAssignPlan {
-	nodeItemsMap := b.assignPolicy.ConvertToNodeItemsBySegment(replica.GetCollectionID(), onlineNodes)
+	nodeItemsMap := assign.ConvertSegmentNodeItems(ctx, b.assignPolicy, replica.GetCollectionID(), onlineNodes)
 	for _, item := range nodeItemsMap {
 		br.AddNodeItem(item)
 	}
@@ -203,7 +203,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 // It identifies channels on nodes with scores above their assigned quota and moves them
 // to nodes with lower scores. Redundant channels are skipped to avoid conflicts.
 func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []assign.ChannelAssignPlan {
-	nodeItemsMap := b.assignPolicy.ConvertToNodeItemsByChannel(replica.GetCollectionID(), onlineNodes)
+	nodeItemsMap := assign.ConvertChannelNodeItems(ctx, b.assignPolicy, replica.GetCollectionID(), onlineNodes)
 	// Add nodes to balance report for logging
 	for _, item := range nodeItemsMap {
 		br.AddNodeItem(item)
@@ -231,7 +231,7 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 			br.AddRecord(StrRecordf("node %d skip balance since current score(%f) lower than assigned one (%f)", node, currentScore, assignedScore))
 			continue
 		}
-		channels = sortIfChannelAtWALLocated(channels)
+		channels = sortIfChannelAtWALLocated(ctx, channels)
 
 		for _, ch := range channels {
 			channelScore := b.assignPolicy.CalculateChannelScore(ch, replica.GetCollectionID())

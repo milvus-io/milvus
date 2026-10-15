@@ -18,16 +18,23 @@ package assign
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // TestScoreBasedAssignPolicy_AssignSegment_BasicFunctionality tests basic segment assignment
@@ -351,6 +358,10 @@ func TestScoreBasedAssignPolicy_ChannelOnlyCollectionRowsAndDelegatorOverhead(t 
 
 	nodeItems := policy.ConvertToNodeItemsBySegment(100, []int64{1})
 	assert.Greater(t, nodeItems[1].GetCurrentScore(), float64(11))
+	ctx := WithPlanningLedger(context.Background(), NewPlanningLedger(nodeManager, dist, mockScheduler, 8))
+	projected := ConvertSegmentNodeItems(ctx, policy, 100, []int64{1})
+	assert.Equal(t, nodeItems[1].GetCurrentScore(), projected[1].GetCurrentScore(), "ledger must preserve growing-row and delegator score semantics")
+	assert.Equal(t, nodeItems[1].GetAssignedScore(), projected[1].GetAssignedScore(), "ledger must preserve node quota semantics")
 }
 
 // TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality tests basic channel assignment
@@ -656,4 +667,97 @@ func TestScoreBasedAssignPolicy_WorkloadStatusOnDemandUpdate(t *testing.T) {
 	// Should be new pointer
 	assert.NotEqual(t, thirdStatus, fourthStatus, "Status should be refreshed when channel version changed")
 	assert.Greater(t, policy.version, secondVersion)
+}
+
+func TestScoreBasedAssignPolicy_AssignSegment_RepairsSourcePriority(t *testing.T) {
+	paramtable.Init()
+	cfg := &paramtable.Get().QueryCoordCfg
+	for key, value := range map[string]string{
+		cfg.GlobalRowCountFactor.Key:             "0.1",
+		cfg.ScoreUnbalanceTolerationFactor.Key:   "0.05",
+		cfg.ReverseUnbalanceTolerationFactor.Key: "1.3",
+		cfg.BalanceSegmentBatchSize.Key:          "2",
+	} {
+		original := paramtable.Get().GetWithDefault(key, "")
+		paramtable.Get().Save(key, value)
+		t.Cleanup(func() { paramtable.Get().Save(key, original) })
+	}
+	nodeManager, scheduler, dist := newHeapRegressionAssignmentFixture(t, 4)
+	policy := newScoreBasedAssignPolicy(nodeManager, scheduler, dist, meta.NewMeta(nil, nil, nodeManager))
+	collectionRows := []int64{0, 0, 70, 10}
+	otherRows := []int64{0, 400, 230, 490}
+	var segments []*meta.Segment
+	for i := range collectionRows {
+		node := int64(i + 1)
+		main := &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: node, CollectionID: 100, NumOfRows: collectionRows[i]}, Node: node}
+		other := &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: node + 10, CollectionID: 200, NumOfRows: otherRows[i]}, Node: node}
+		dist.SegmentDistManager.Update(node, main, other)
+		if collectionRows[i] > 0 {
+			segments = append(segments, main)
+		}
+	}
+	// Scores are [0,40,100,60], with quota 50. Moving 70 rows from 3
+	// to 1 lowers the still-queued source below node 2; the next target is 3.
+	plans := policy.AssignSegment(context.Background(), 100, segments, []int64{1, 2, 3, 4}, false)
+	require.Len(t, plans, 2)
+	assert.Equal(t, int64(1), plans[0].To)
+	assert.Equal(t, int64(3), plans[1].To)
+	assert.Equal(t, int64(3), plans[0].From)
+	assert.Equal(t, int64(4), plans[1].From)
+}
+
+func newHeapRegressionAssignmentFixture(t *testing.T, nodeCount int) (*session.NodeManager, *task.MockScheduler, *meta.DistributionManager) {
+	t.Helper()
+	nodeManager := session.NewNodeManager()
+	scheduler := task.NewMockScheduler(t)
+	scheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
+	scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	for node := int64(1); node <= int64(nodeCount); node++ {
+		info := session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: node, Version: common.Version})
+		info.SetState(session.NodeStateNormal)
+		nodeManager.Add(info)
+	}
+	return nodeManager, scheduler, meta.NewDistributionManager(nodeManager)
+}
+
+func mockHeapRegressionWALLocations(t *testing.T) {
+	t.Helper()
+	streaming := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
+	t.Cleanup(func() { streaming.UnPatch() })
+	sqns := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).Return(typeutil.NewUniqueSet(1, 2, 3)).Build()
+	t.Cleanup(func() { sqns.UnPatch() })
+	wal := mockey.Mock((*snmanager.StreamingNodeManager).GetLatestWALLocated).To(func(_ *snmanager.StreamingNodeManager, _ context.Context, channel string) (int64, error) {
+		if channel == "wal_v1" || channel == "wal2_v1" {
+			return 1, nil
+		}
+		return 4, nil // Another replica owns the fallback channel's WAL node.
+	}).Build()
+	t.Cleanup(func() { wal.UnPatch() })
+}
+
+func TestScoreBasedAssignPolicy_AssignChannel_WALThenFallback(t *testing.T) {
+	paramtable.Init()
+	cfg := &paramtable.Get().QueryCoordCfg
+	original := cfg.CollectionChannelCountFactor.GetValue()
+	paramtable.Get().Save(cfg.CollectionChannelCountFactor.Key, "10")
+	t.Cleanup(func() { paramtable.Get().Save(cfg.CollectionChannelCountFactor.Key, original) })
+	mockHeapRegressionWALLocations(t)
+	nodeManager, scheduler, dist := newHeapRegressionAssignmentFixture(t, 3)
+	policy := newScoreBasedAssignPolicy(nodeManager, scheduler, dist, meta.NewMeta(nil, nil, nodeManager))
+	channels := []*meta.DmChannel{
+		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "wal_v1", CollectionID: 100}, Node: 3},
+		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "fallback_v1", CollectionID: 100}, Node: 3},
+	}
+	node3Channels := append([]*meta.DmChannel{}, channels...)
+	for i := 0; i < 5; i++ {
+		node3Channels = append(node3Channels, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: fmt.Sprintf("other%d_v1", i), CollectionID: 200}, Node: 3})
+	}
+	dist.ChannelDistManager.Update(3, node3Channels...)
+	dist.ChannelDistManager.Update(2, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: "other_v1", CollectionID: 200}, Node: 2})
+	// Scores [0,1,25]: after WAL moves 10 from 3 to 1, fallback must
+	// choose 2 rather than the previously-minimal WAL target still in the heap.
+	plans := policy.AssignChannel(context.Background(), 100, channels, []int64{1, 2, 3}, false)
+	require.Len(t, plans, 2)
+	assert.Equal(t, int64(1), plans[0].To)
+	assert.Equal(t, int64(2), plans[1].To)
 }

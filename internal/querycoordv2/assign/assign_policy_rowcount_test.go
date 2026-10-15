@@ -501,3 +501,24 @@ func TestRowCountBasedAssignPolicy_WorkloadStatusOnDemandUpdate(t *testing.T) {
 	assert.NotEqual(t, thirdStatus, fourthStatus, "Status should be refreshed when channel version changed")
 	assert.Greater(t, policy.version, secondVersion)
 }
+
+func TestRowCountBasedAssignPolicy_AssignChannel_WALThenFallback(t *testing.T) {
+	paramtable.Init()
+	mockHeapRegressionWALLocations(t)
+	nodeManager, scheduler, dist := newHeapRegressionAssignmentFixture(t, 2)
+	policy := newRowCountBasedAssignPolicy(nodeManager, scheduler, dist)
+	dist.ChannelDistManager.Update(2, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: "existing_v1", CollectionID: 200}, Node: 2})
+	channels := []*meta.DmChannel{
+		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "wal_v1", CollectionID: 100}},
+		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "wal2_v1", CollectionID: 100}},
+		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "fallback_v1", CollectionID: 100}},
+	}
+	// Node 1 starts at zero, receives two WAL-preferred channels, and must
+	// yield the fallback to node 2 (one existing channel). This has no ties.
+	plans := policy.AssignChannel(context.Background(), 100, channels, []int64{1, 2}, false)
+	if assert.Len(t, plans, 3) {
+		assert.Equal(t, int64(1), plans[0].To)
+		assert.Equal(t, int64(1), plans[1].To)
+		assert.Equal(t, int64(2), plans[2].To)
+	}
+}

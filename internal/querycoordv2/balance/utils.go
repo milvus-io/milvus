@@ -223,21 +223,30 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 // Channels located at their WAL nodes are placed at the end of the list, making them less likely
 // to be selected for movement. This optimization reduces unnecessary channel migrations when
 // a channel is already at its optimal location for streaming.
-func sortIfChannelAtWALLocated(channels []*meta.DmChannel) []*meta.DmChannel {
+func sortIfChannelAtWALLocated(ctx context.Context, channels []*meta.DmChannel) []*meta.DmChannel {
 	if !streamingutil.IsStreamingServiceEnabled() {
 		return channels
 	}
-	weighter := func(ch *meta.DmChannel) int {
-		nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(ch.GetChannelName())
+	weights := make(map[*meta.DmChannel]int, len(channels))
+	for _, ch := range channels {
+		if ctx.Err() != nil {
+			break
+		}
+		nodeID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, ch.GetChannelName())
+		if err != nil {
+			// Keep the channel in load counts. Assignment will defer it until
+			// WAL metadata is available; prefer moving known remote channels.
+			weights[ch] = 1
+			continue
+		}
 		if ch.Node == nodeID {
 			// if node is the node where the WAL is located, put it to the tail of the channels.
 			// so assign 1 to the node the WAL is located.
-			return 1
+			weights[ch] = 1
 		}
-		return 0
 	}
-	sort.Slice(channels, func(i, j int) bool {
-		return weighter(channels[i]) < weighter(channels[j])
+	sort.SliceStable(channels, func(i, j int) bool {
+		return weights[channels[i]] < weights[channels[j]]
 	})
 	return channels
 }

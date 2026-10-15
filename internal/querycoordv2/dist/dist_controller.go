@@ -74,6 +74,8 @@ func (dc *ControllerImpl) SyncAll(ctx context.Context) {
 		wg.Add(1)
 		go func(handler *distHandler) {
 			defer wg.Done()
+			handler.reportMu.Lock()
+			defer handler.reportMu.Unlock()
 			resp, err := handler.getDistribution(ctx)
 			if err != nil {
 				mlog.Warn(ctx, "SyncAll come across err when getting data distribution", mlog.Err(err))

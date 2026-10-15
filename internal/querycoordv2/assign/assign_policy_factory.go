@@ -116,7 +116,7 @@ func (f *AssignPolicyFactory) GetPolicy(policyType string) AssignPolicy {
 
 	switch policyType {
 	case PolicyTypeRoundRobin:
-		policy = newRoundRobinAssignPolicy(f.nodeManager, f.scheduler, f.targetMgr)
+		policy = newRoundRobinAssignPolicy(f.nodeManager, f.scheduler, f.targetMgr, f.dist)
 	case PolicyTypeRowCount:
 		policy = newRowCountBasedAssignPolicy(f.nodeManager, f.scheduler, f.dist)
 	case PolicyTypeScoreBased:

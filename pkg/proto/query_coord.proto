@@ -722,6 +722,11 @@ message GetDataDistributionResponse {
     repeated string removed_channel_names = 11;
     int64 total_segment_count = 12;
     int64 total_channel_count = 13;
+    // Absent on older nodes or when a complete resource snapshot is unavailable.
+    QueryNodeLoadResourceReport load_resource_report = 14;
+    // Distinguishes a failed resource snapshot from an older node without the
+    // reporting capability, including on its very first heartbeat.
+    bool load_resource_report_supported = 15;
 }
 
 message LeaderView {
@@ -1193,4 +1198,28 @@ message ListLoadedSegmentsRequest {
 message ListLoadedSegmentsResponse {
     common.Status status = 1;
     repeated int64 segmentIDs = 2;
+}
+
+// Physical usage and full outstanding loading reservations are separate values.
+// Adding them is conservative: physical usage may already include part of a
+// loading reservation. Estimates are not measurements of additional free space.
+message QueryNodeLoadResourceReport {
+    uint64 memory_usage_bytes = 1;
+    uint64 disk_usage_bytes = 2;
+    uint64 loading_memory_bytes = 3;
+    uint64 loading_disk_bytes = 4;
+    repeated LoadingSegmentInfo loading_segments = 5;
+    // Physical usage includes reclaimable cache in tiered mode. QueryNode's
+    // native resource admission, rather than a coordinator RSS fit, is decisive.
+    bool tiered_eviction_enabled = 6;
+}
+
+// Entries remain present through resource release and failure cleanup, even if
+// the segment has already become visible in distribution.
+message LoadingSegmentInfo {
+    int64 segment_id = 1;
+    int64 collection_id = 2;
+    int64 num_rows = 3;
+    uint64 estimated_memory_bytes = 4;
+    uint64 estimated_disk_bytes = 5;
 }

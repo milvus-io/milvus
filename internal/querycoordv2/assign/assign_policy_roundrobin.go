@@ -28,12 +28,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// RoundRobinAssignPolicy implements a simple round-robin assignment strategy
-// for both segments and channels
+// RoundRobinAssignPolicy retains legacy round-robin assignment without a
+// planning context, and uses bounded largest-first placement for recovery.
 type RoundRobinAssignPolicy struct {
 	nodeManager *session.NodeManager
 	scheduler   task.Scheduler
 	targetMgr   meta.TargetManagerInterface
+	dist        *meta.DistributionManager
 }
 
 // newRoundRobinAssignPolicy creates a new RoundRobinAssignPolicy
@@ -42,11 +43,17 @@ func newRoundRobinAssignPolicy(
 	nodeManager *session.NodeManager,
 	scheduler task.Scheduler,
 	targetMgr meta.TargetManagerInterface,
+	distribution ...*meta.DistributionManager,
 ) *RoundRobinAssignPolicy {
+	var dist *meta.DistributionManager
+	if len(distribution) > 0 {
+		dist = distribution[0]
+	}
 	return &RoundRobinAssignPolicy{
 		nodeManager: nodeManager,
 		scheduler:   scheduler,
 		targetMgr:   targetMgr,
+		dist:        dist,
 	}
 }
 
@@ -68,6 +75,19 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 	}
 	if len(nodes) == 0 {
 		return nil
+	}
+	ledger := PlanningLedgerFromContext(ctx)
+	if ledger == nil && forceAssign {
+		// Recovery bypasses balance-benefit checks, but must not load onto nodes
+		// that are stopping, penalized, or have not completed report admission.
+		nodes = newCommonSegmentNodeFilter(p.nodeManager).FilterNodes(ctx, nodes, false)
+		if len(nodes) == 0 {
+			return nil
+		}
+		ledger = NewPlanningLedger(p.nodeManager, p.dist, p.scheduler, paramtable.Get().QueryCoordCfg.BalanceMaxPendingLoads.GetAsInt())
+	}
+	if ledger != nil {
+		return AssignRecoverySegments(ctx, ledger, segments, nodes, balanceBatchSize)
 	}
 
 	// Create a copy of nodes to avoid race condition when sorting
@@ -119,12 +139,29 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 	if len(nodes) == 0 {
 		return nil
 	}
+	ledger := PlanningLedgerFromContext(ctx)
+	if ledger != nil {
+		nodes = ledger.readyChannelTargets(nodes)
+	}
+	if len(nodes) == 0 {
+		return nil
+	}
 
 	// Handle WAL-based assignment if streaming service is enabled
 	plans := make([]ChannelAssignPlan, 0)
 	scoreDelta := make(map[int64]int)
 	if streamingutil.IsStreamingServiceEnabled() {
-		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(channels, nodes)
+		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(ctx, channels, nodes)
+	}
+	if ledger != nil {
+		reserved := plans[:0]
+		for _, plan := range plans {
+			if ledger.ReserveChannel(plan) {
+				reserved = append(reserved, plan)
+			}
+		}
+		plans = reserved
+		scoreDelta = nil
 	}
 
 	// Create a copy of nodes to avoid race condition when sorting
@@ -138,6 +175,10 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 		// Base load: current channels + scheduler task delta
 		load1 := p.calculateChannelLoad(nodes[i])
 		load2 := p.calculateChannelLoad(nodes[j])
+		if ledger := PlanningLedgerFromContext(ctx); ledger != nil {
+			load1 = int(ledger.ChannelScore(nodes[i], -1, 1))
+			load2 = int(ledger.ChannelScore(nodes[j], -1, 1))
+		}
 
 		// Add WAL-based assignment delta
 		delta1, delta2 := scoreDelta[nodes[i]], scoreDelta[nodes[j]]
@@ -157,6 +198,9 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 			Channel: c,
 			From:    -1,
 			To:      nodes[i%len(nodes)],
+		}
+		if ledger := PlanningLedgerFromContext(ctx); ledger != nil && !ledger.ReserveChannel(plan) {
+			continue
 		}
 		plans = append(plans, plan)
 	}

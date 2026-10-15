@@ -30,5 +30,6 @@ func RegisterTestChannelManager(pchannels []string, controlChannelPchannel strin
 			Pchannel: controlChannelPchannel,
 		},
 	}
+	cm.publishWALOwners()
 	register(cm)
 }

@@ -84,6 +84,10 @@ type collectionBalanceItem struct {
 	collectionID int64
 	rowCount     int
 	sortOrder    string
+
+	// Replicas already considered in this queue round do not consume the check
+	// budget again while their siblings wait. A new round clears this set.
+	checkedReplicas map[int64]struct{}
 }
 
 // The priority is determined by the BalanceTriggerOrder configuration:
@@ -97,8 +101,10 @@ func newCollectionBalanceItem(collectionID int64, rowCount int, sortOrder string
 		priority = -rowCount
 	}
 
+	base := &assign.BaseItem{}
+	base.SetPriority(priority)
 	return &collectionBalanceItem{
-		BaseItem:        &assign.BaseItem{},
+		BaseItem:        base,
 		collectionID:    collectionID,
 		rowCount:        rowCount,
 		sortOrder:       sortOrder,
@@ -112,6 +118,7 @@ func (c *collectionBalanceItem) getPriority() int {
 
 func (c *collectionBalanceItem) setPriority(priority int) {
 	c.balancePriority = priority
+	c.BaseItem.SetPriority(priority)
 }
 
 // BalanceChecker checks the cluster distribution and generates balance tasks.
@@ -141,6 +148,8 @@ type BalanceChecker struct {
 	// autoBalanceTs records the timestamp of the last auto balance operation
 	// to ensure balance operations don't happen too frequently
 	autoBalanceTs time.Time
+	epochSequence uint64
+	epochs        map[string]*balanceEpoch
 }
 
 func NewBalanceChecker(meta *meta.Meta,
@@ -324,6 +333,41 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context, collect
 	})
 }
 
+// Pending drain work takes precedence over new ordinary Moves in its RG, even
+// when the stopping planner cannot admit a task or has not reached that
+// collection within its check budget. Empty RO membership alone is not demand.
+func (b *BalanceChecker) stoppingDemandResourceGroups(ctx context.Context) map[string]struct{} {
+	blocked := make(map[string]struct{})
+	for _, collectionID := range b.meta.GetAll(ctx) {
+		for _, replica := range b.meta.GetByCollection(ctx, collectionID) {
+			rg := replica.GetResourceGroup()
+			if _, draining := blocked[rg]; draining {
+				continue
+			}
+			for _, nodeID := range replica.GetRONodes() {
+				if len(b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(nodeID))) > 0 {
+					blocked[rg] = struct{}{}
+					break
+				}
+			}
+			if _, draining := blocked[rg]; draining {
+				continue
+			}
+			channelRONodes := replica.GetRONodes()
+			if streamingutil.UseStreamingQueryNodeAsDelegator() {
+				_, channelRONodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
+			}
+			for _, nodeID := range channelRONodes {
+				if len(b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID), meta.WithNodeID2Channel(nodeID))) > 0 {
+					blocked[rg] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+	return blocked
+}
+
 // generateBalanceTasksFromReplicas generates balance tasks for the given replicas.
 // This method is the core of the balance operation that:
 //  1. Uses the balancer to create segment and channel assignment plans
@@ -354,12 +398,33 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 		if replica == nil {
 			continue
 		}
+		if b.planningBlocks(ctx, replica, isStoppingBalance) {
+			continue
+		}
 		sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
 		segmentPlans = append(segmentPlans, sPlans...)
 		channelPlans = append(channelPlans, cPlans...)
 		if len(segmentPlans) != 0 || len(channelPlans) != 0 {
 			balance.PrintNewBalancePlans(replica.GetCollectionID(), replica.GetID(), sPlans, cPlans)
 		}
+	}
+	// A batch limit applies to the entire checker epoch, including every source
+	// and replica. Roll back reservations for plans which will not be admitted.
+	if len(segmentPlans) > config.segmentBatchSize {
+		if ledger := assign.PlanningLedgerFromContext(ctx); ledger != nil {
+			for _, plan := range segmentPlans[max(0, config.segmentBatchSize):] {
+				ledger.UndoSegment(plan)
+			}
+		}
+		segmentPlans = segmentPlans[:max(0, config.segmentBatchSize)]
+	}
+	if len(channelPlans) > config.channelBatchSize {
+		if ledger := assign.PlanningLedgerFromContext(ctx); ledger != nil {
+			for _, plan := range channelPlans[max(0, config.channelBatchSize):] {
+				ledger.UndoChannel(plan)
+			}
+		}
+		channelPlans = channelPlans[:max(0, config.channelBatchSize)]
 	}
 
 	// Set LoadPriority based on balance type:
@@ -394,6 +459,8 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 		}
 	}
 
+	reconcileSegmentPlans(ctx, segmentPlans, segmentTasks)
+	reconcileChannelPlans(ctx, channelPlans, channelTasks)
 	return segmentTasks, channelTasks
 }
 
@@ -438,13 +505,60 @@ func (b *BalanceChecker) processBalanceQueue(
 	if pq == nil || pq.Len() == 0 {
 		pq = constructQueueFunc(ctx)
 	}
+	// Restore deferred items after this invocation, allowing other RGs to make
+	// progress without repeatedly popping the same blocked collection.
+	deferred := make([]*collectionBalanceItem, 0)
+	defer func() {
+		for _, item := range deferred {
+			pq.Push(item)
+		}
+	}()
+	seen := make(map[int64]struct{})
+	refreshed := false
 
 	generatedSegmentTaskNum := 0
 	generatedChannelTaskNum := 0
 	for generatedSegmentTaskNum < config.segmentBatchSize &&
 		generatedChannelTaskNum < config.channelBatchSize &&
-		checkCollectionCount < config.maxCheckCollectionCount &&
-		pq.Len() > 0 {
+		checkCollectionCount < config.maxCheckCollectionCount {
+		if pq.Len() == 0 {
+			if refreshed || len(deferred) == 0 {
+				break
+			}
+			refreshed = true
+			for _, item := range deferred {
+				item.checkedReplicas = nil
+			}
+			pq = constructQueueFunc(ctx)
+			// New-round work must not displace the old deferred collections in
+			// blocked RGs. Keep only currently eligible replicas in fresh items.
+			var fresh []*collectionBalanceItem
+			for pq.Len() > 0 {
+				item := pq.Pop().(*collectionBalanceItem)
+				if _, visited := seen[item.collectionID]; visited {
+					continue
+				}
+				eligible := false
+				item.checkedReplicas = make(map[int64]struct{})
+				for _, rid := range getReplicasFunc(ctx, item.collectionID) {
+					replica := b.meta.Get(ctx, rid)
+					if replica != nil && b.planningBlocks(ctx, replica, isStoppingBalance) {
+						item.checkedReplicas[rid] = struct{}{}
+					} else {
+						eligible = true
+					}
+				}
+				if eligible {
+					fresh = append(fresh, item)
+				}
+			}
+			for _, item := range fresh {
+				pq.Push(item)
+			}
+			if pq.Len() == 0 {
+				break
+			}
+		}
 		// Break if balanceOnMultipleCollections is disabled and we already have tasks
 		if !config.balanceOnMultipleCollections && (generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0) {
 			mlog.Debug(ctx, "Balance on multiple collections disabled, stopping after first collection")
@@ -452,17 +566,46 @@ func (b *BalanceChecker) processBalanceQueue(
 		}
 
 		item := pq.Pop().(*collectionBalanceItem)
+		seen[item.collectionID] = struct{}{}
 		checkCollectionCount++
 
 		replicasToBalance := getReplicasFunc(ctx, item.collectionID)
+		if item.checkedReplicas == nil {
+			item.checkedReplicas = make(map[int64]struct{})
+		}
+		var ready, blocked []int64
+		for _, rid := range replicasToBalance {
+			if _, checked := item.checkedReplicas[rid]; checked {
+				continue
+			}
+			replica := b.meta.Get(ctx, rid)
+			if replica != nil && b.planningBlocks(ctx, replica, isStoppingBalance) {
+				blocked = append(blocked, rid)
+			} else {
+				ready = append(ready, rid)
+				item.checkedReplicas[rid] = struct{}{}
+			}
+		}
+		if len(blocked) > 0 {
+			deferred = append(deferred, item)
+		}
+		replicasToBalance = ready
 		if len(replicasToBalance) == 0 {
+			if len(blocked) > 0 {
+				// A recovery/epoch gate did not invoke the balancer. Preserve the check
+				// budget for other RGs, even when its configured limit is one.
+				checkCollectionCount--
+			}
 			continue
 		}
 
-		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance)
-		generatedSegmentTaskNum += len(newSegmentTasks)
-		generatedChannelTaskNum += len(newChannelTasks)
-		b.submitTasks(newSegmentTasks, newChannelTasks)
+		remainingConfig := config
+		remainingConfig.segmentBatchSize -= generatedSegmentTaskNum
+		remainingConfig.channelBatchSize -= generatedChannelTaskNum
+		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, remainingConfig, isStoppingBalance)
+		acceptedSegments, acceptedChannels := b.submitTasks(newSegmentTasks, newChannelTasks)
+		generatedSegmentTaskNum += acceptedSegments
+		generatedChannelTaskNum += acceptedChannels
 	}
 	return generatedSegmentTaskNum, generatedChannelTaskNum
 }
@@ -470,14 +613,25 @@ func (b *BalanceChecker) processBalanceQueue(
 // submitTasks submits the generated balance tasks to the scheduler for execution.
 // This method handles the final step of the balance process by adding all
 // generated tasks to the task scheduler, which will execute them asynchronously.
-func (b *BalanceChecker) submitTasks(segmentTasks, channelTasks []task.Task) {
-	for _, task := range segmentTasks {
-		b.scheduler.Add(task)
+func (b *BalanceChecker) submitTasks(segmentTasks, channelTasks []task.Task) (int, int) {
+	acceptedSegments, acceptedChannels := 0, 0
+	for _, group := range [][]task.Task{segmentTasks, channelTasks} {
+		for _, t := range group {
+			if err := b.scheduler.Add(t); err != nil {
+				assign.UndoTask(t.Context(), t)
+				t.Cancel(err)
+				continue
+			}
+			assign.CommitTask(t.Context(), t)
+			b.trackEpochWork(t)
+			if _, channel := t.(*task.ChannelTask); channel {
+				acceptedChannels++
+			} else {
+				acceptedSegments++
+			}
+		}
 	}
-
-	for _, task := range channelTasks {
-		b.scheduler.Add(task)
-	}
+	return acceptedSegments, acceptedChannels
 }
 
 // Check is the main entry point for balance operations.
@@ -511,6 +665,15 @@ func (b *BalanceChecker) submitTasks(segmentTasks, channelTasks []task.Task) {
 // The method tracks execution time and logs warnings for slow operations
 // to help identify performance bottlenecks in large clusters.
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
+	if !b.nodeManager.LoadReportSyncReady() {
+		return nil
+	}
+	b.epochSequence++
+	b.advanceEpochs(time.Now())
+	ctx = assign.WithPlanningLedgerFactory(ctx, func() *assign.PlanningLedger {
+		return assign.NewPlanningLedger(b.nodeManager, b.dist, b.scheduler, paramtable.Get().QueryCoordCfg.BalanceMaxPendingLoads.GetAsInt())
+	})
+	defer assign.ReleasePlanningLedger(ctx)
 	// Performance monitoring: track execution time
 	start := time.Now()
 	defer func() {
@@ -556,6 +719,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		if time.Since(b.autoBalanceTs) <= config.autoBalanceInterval {
 			return nil
 		}
+		if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+			// Keep this separate from the controller recovery set: direct Check
+			// callers must retain their compatibility pending-load guard.
+			ctx = context.WithValue(ctx, stoppingDemandRGsKey{}, b.stoppingDemandResourceGroups(ctx))
+		}
 
 		generatedSegmentTaskNum, generatedChannelTaskNum := b.processBalanceQueue(ctx,
 			balance.GetGlobalBalancerFactory().GetBalancer(),
@@ -567,9 +735,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		)
 
 		if generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0 {
-			// clean up the stopping balance queue when normal balance generated tasks
-			// make sure that next time when trigger stopping balance, a new stopping balance round will be started
-			b.stoppingBalanceQueue = nil
+			// Ordinary work in another RG must not discard deferred draining
+			// collections. Only an exhausted stopping queue starts a new round.
+			if b.stoppingBalanceQueue != nil && b.stoppingBalanceQueue.Len() == 0 {
+				b.stoppingBalanceQueue = nil
+			}
 		}
 		b.autoBalanceTs = time.Now()
 	}

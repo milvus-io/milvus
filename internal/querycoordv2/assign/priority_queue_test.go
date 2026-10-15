@@ -228,3 +228,69 @@ func TestHeapQueue_Swap(t *testing.T) {
 	assert.Equal(t, 20, hq[0].getPriority())
 	assert.Equal(t, 10, hq[1].getPriority())
 }
+
+func TestPriorityQueueFixAndMembership(t *testing.T) {
+	var pq PriorityQueue // The zero value supports insertion, too.
+	items := []*BaseItem{{priority: 10}, {priority: 20}, {priority: 30}, {priority: 40}}
+	for _, item := range items {
+		pq.Push(item)
+	}
+	items[2].setPriority(5) // Decrease a non-root item.
+	assert.True(t, pq.Fix(items[2]))
+	assert.Same(t, items[2], pq.Pop())
+	assert.False(t, pq.Fix(items[2]))
+	assert.False(t, pq.Remove(items[2]))
+
+	items[0].setPriority(50) // Increase the root; duplicate Push must repair it.
+	pq.Push(items[0])
+	assert.Equal(t, 3, pq.Len())
+	assert.Same(t, items[1], pq.Pop())
+	assert.True(t, pq.Remove(items[0]))
+	assert.False(t, pq.Remove(items[0]))
+	assert.Same(t, items[3], pq.Pop())
+	assert.Empty(t, pq.indices)
+
+	pq.Push(items[2]) // A popped item can be inserted again.
+	assert.Same(t, items[2], pq.Pop())
+}
+
+func TestPriorityQueueRemoveMaintainsIndices(t *testing.T) {
+	for _, removedIndex := range []int{0, 3, 6} {
+		pq := NewPriorityQueue()
+		items := make([]*BaseItem, 7)
+		for i := range items {
+			items[i] = &BaseItem{priority: i}
+			pq.Push(items[i])
+		}
+		assert.True(t, pq.Remove(items[removedIndex]))
+		for i, item := range items {
+			if i == removedIndex {
+				continue
+			}
+			assert.True(t, pq.Fix(item))
+			assert.Same(t, item, pq.Pop())
+		}
+		assert.Empty(t, pq.indices)
+	}
+}
+
+func TestPriorityQueueSharedItemsHaveIndependentIndices(t *testing.T) {
+	first, second := NewPriorityQueue(), NewPriorityQueue()
+	shared := &BaseItem{priority: 20}
+	low := &BaseItem{priority: 10}
+	high := &BaseItem{priority: 30}
+	first.Push(low)
+	first.Push(shared)
+	second.Push(shared)
+	second.Push(high)
+
+	shared.setPriority(5)
+	assert.True(t, first.Fix(shared))
+	assert.True(t, second.Fix(shared))
+	assert.True(t, first.Remove(shared))
+	assert.False(t, first.Fix(shared))
+	assert.True(t, second.Fix(shared))
+	assert.Same(t, shared, second.Pop())
+	assert.Same(t, low, first.Pop())
+	assert.Same(t, high, second.Pop())
+}

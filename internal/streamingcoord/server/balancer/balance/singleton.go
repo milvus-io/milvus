@@ -34,6 +34,19 @@ func GetWithContext(ctx context.Context) (balancer.Balancer, error) {
 	return s.GetWithContext(ctx)
 }
 
+// TryGet returns the registered balancer without waiting for startup. Planning
+// snapshots can defer work when it is unavailable instead of holding their
+// admission lock until streaming initialization finishes.
+func TryGet() (balancer.Balancer, bool) {
+	singletonMu.RLock()
+	s := singleton
+	singletonMu.RUnlock()
+	if !s.Ready() {
+		return nil, false
+	}
+	return s.Get(), true
+}
+
 func Release() {
 	singletonMu.RLock()
 	s := singleton

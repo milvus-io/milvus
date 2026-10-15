@@ -783,9 +783,12 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
 	// test again
 	dist = suite.checker.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	toLoad, loadPriorities, toRelease, toUpdate = suite.checker.getSealedSegmentDiff(ctx, collectionID, replica, dist)
-	// verify results
-	suite.Equal(0, len(toLoad))
-	suite.Equal(0, len(loadPriorities))
+	// Promotion removes Next, but both Current segments are still missing from
+	// distribution. Recover both at HIGH priority using the Current fallback.
+	suite.ElementsMatch([]int64{segment1.GetID(), segment2.GetID()}, lo.Map(toLoad, func(segment *datapb.SegmentInfo, _ int) int64 {
+		return segment.GetID()
+	}))
+	suite.Equal([]commonpb.LoadPriority{commonpb.LoadPriority_HIGH, commonpb.LoadPriority_HIGH}, loadPriorities)
 	suite.Equal(0, len(toRelease))
 	suite.Equal(0, len(toUpdate))
 }

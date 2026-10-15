@@ -185,7 +185,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(ctx context.Context, br *balanceR
 		channelsToMove := make([]*meta.DmChannel, 0)
 		for _, node := range rwNodes {
 			channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
-			channels = sortIfChannelAtWALLocated(channels)
+			channels = sortIfChannelAtWALLocated(ctx, channels)
 
 			if len(channels) <= average {
 				nodeWithLessChannel = append(nodeWithLessChannel, node)

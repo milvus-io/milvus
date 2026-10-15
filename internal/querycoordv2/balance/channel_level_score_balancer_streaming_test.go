@@ -186,7 +186,7 @@ func TestChannelLevelScoreBalancer_StreamingChannelPlanTakesPriority(t *testing.
 	mockSQNodes := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).
 		Return(typeutil.NewUniqueSet(339, 333)).Build()
 	defer mockSQNodes.UnPatch()
-	mockWALLocated := mockey.Mock((*snmanager.StreamingNodeManager).GetWALLocated).Return(int64(333)).Build()
+	mockWALLocated := mockey.Mock((*snmanager.StreamingNodeManager).GetLatestWALLocated).Return(int64(333), nil).Build()
 	defer mockWALLocated.UnPatch()
 
 	dist.ChannelDistManager.Update(339,

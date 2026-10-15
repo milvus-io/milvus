@@ -469,6 +469,7 @@ func (s *Server) Start() error {
 
 func (s *Server) startQueryCoord() error {
 	mlog.Info(s.ctx, "start watcher...")
+	s.nodeMgr.BeginLoadReportSync(paramtable.Get().QueryCoordCfg.LoadReportSyncTimeout.GetAsDuration(time.Millisecond))
 	sessions, revision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		return err

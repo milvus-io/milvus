@@ -181,10 +181,9 @@ func TestRoundRobinAssignPolicy_AssignSegment_AllNodesNotNormal(t *testing.T) {
 	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
 	assert.Nil(t, plans)
 
-	// With force assign, should proceed
+	// Recovery bypasses balance benefit, never node admission.
 	plansForced := policy.AssignSegment(context.Background(), 100, segments, nodes, true)
-	assert.NotNil(t, plansForced)
-	assert.Equal(t, 1, len(plansForced))
+	assert.Empty(t, plansForced)
 }
 
 func TestRoundRobinAssignPolicy_AssignSegment_BatchLimitOnlyForBalance(t *testing.T) {
@@ -194,6 +193,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_BatchLimitOnlyForBalance(t *testin
 
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(&task.SegmentTaskDeltaSnapshot{}).Maybe()
 
 	nodeManager := session.NewNodeManager()
 	for i := int64(1); i <= 2; i++ {
@@ -227,8 +227,33 @@ func TestRoundRobinAssignPolicy_AssignSegment_BatchLimitOnlyForBalance(t *testin
 	balancePlans = policy.AssignSegment(context.Background(), 100, segments, nodes, false)
 	assert.Nil(t, balancePlans)
 
+	for i := int64(1); i <= 2; i++ {
+		nodeManager.Get(i).SetState(session.NodeStateNormal)
+	}
 	forcePlans := policy.AssignSegment(context.Background(), 100, segments, nodes, true)
 	assert.Equal(t, 5, len(forcePlans))
+}
+
+func TestRoundRobinAssignPolicy_RecoveryUsesSharedPlanningLedger(t *testing.T) {
+	ledger := NewPlanningLedgerState(map[int64]PlanningNode{1: ledgerTestNode(10, 1000), 2: ledgerTestNode(0, 1000)}, nil, nil, nil, 2)
+	ctx := WithPlanningLedger(context.Background(), ledger)
+	// A recovery call with a ledger never falls back to legacy segment counts.
+	policy := newRoundRobinAssignPolicy(nil, nil, nil)
+	segment := func(id, collection, rows int64) *meta.Segment {
+		return &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: id, CollectionID: collection, NumOfRows: rows}}
+	}
+	first := policy.AssignSegment(ctx, 1, []*meta.Segment{segment(1, 1, 5), segment(2, 1, 60)}, []int64{1, 2}, true)
+	assert.Len(t, first, 2)
+	assert.Equal(t, int64(2), first[0].Segment.GetID())
+	assert.Equal(t, int64(2), first[0].To)
+	assert.Equal(t, int64(1), first[1].To)
+	second := policy.AssignSegment(ctx, 2, []*meta.Segment{segment(3, 2, 50)}, []int64{1, 2}, true)
+	assert.Len(t, second, 1)
+	assert.Equal(t, int64(1), second[0].To)
+	assert.True(t, ledger.UndoSegment(first[0]))
+	retry := policy.AssignSegment(ctx, 1, []*meta.Segment{segment(2, 1, 60)}, []int64{1, 2}, true)
+	assert.Len(t, retry, 1)
+	assert.Equal(t, int64(2), retry[0].To)
 }
 
 // TestRoundRobinAssignPolicy_AssignSegment_SingleNode tests with single node

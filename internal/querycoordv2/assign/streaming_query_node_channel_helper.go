@@ -26,6 +26,7 @@ import (
 )
 
 func assignChannelToWALLocatedFirstForNodeInfo(
+	ctx context.Context,
 	channels []*meta.DmChannel,
 	nodes []int64,
 ) (notFoundChannels []*meta.DmChannel, plans []ChannelAssignPlan, scoreDelta map[int64]int) {
@@ -33,7 +34,15 @@ func assignChannelToWALLocatedFirstForNodeInfo(
 	notFoundChannels = make([]*meta.DmChannel, 0)
 	scoreDelta = make(map[int64]int)
 	for _, c := range channels {
-		nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
+		if ctx.Err() != nil {
+			break
+		}
+		nodeID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, c.GetChannelName())
+		if err != nil {
+			// An unavailable assignment is not a different replica's WAL owner.
+			// Defer this channel instead of blocking planning or inventing a target.
+			continue
+		}
 		// Check if nodeID is in the list of nodeItems
 		// The nodeID may not be in the nodeItems when multi replica mode.
 		// Only one replica can be assigned to the node that wal is located.

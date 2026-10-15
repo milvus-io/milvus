@@ -3467,6 +3467,7 @@ func TestActivateDeadlinePerStepGetsFreshBudget(t *testing.T) {
 func TestExecutorActivatesDeadlineOnlyAfterAdmission(t *testing.T) {
 	paramtable.Init()
 	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
 	broker := meta.NewMockBroker(t)
 	// Any error is fine here: the point is to let the background goroutine
 	// Execute() spawns on successful admission exit quickly via task.Fail,

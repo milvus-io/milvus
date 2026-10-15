@@ -93,6 +93,8 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 	distManager := meta.NewDistributionManager(suite.nodeMgr)
 
 	scheduler := task.NewMockScheduler(suite.T())
+	scheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
+	scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	// Initialize global assign policy factory before creating checker
 	assign.InitGlobalAssignPolicyFactory(scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
@@ -386,7 +388,7 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannelsSpreadAcrossSQNodes() {
 	sqNodes := []int64{1051, 1053, 1054, 1056, 1057, 1058}
 	walNode := int64(1007) // WAL owner, not a candidate of the replica
 
-	// feed pchannel -> WAL node assignments, otherwise GetWALLocated blocks forever
+	// Supply both current WAL lookups and assignment notifications.
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(suite.T())
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
@@ -415,6 +417,7 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannelsSpreadAcrossSQNodes() {
 	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(streamingNodes, nil).Maybe()
 	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(streamingNodes, nil).Maybe()
 	b.EXPECT().Close().Return().Maybe()
+	b.EXPECT().GetLatestWALLocated(mock.Anything, mock.Anything).Return(walNode, true).Maybe()
 	balance.Register(b)
 
 	ctx := context.Background()

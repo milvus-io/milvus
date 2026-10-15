@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -82,6 +83,7 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 		streamingVersion: streamingVersion,
 		replicateConfig:  replicateConfig,
 	}
+	cm.publishWALOwners()
 
 	// Register the channel manager singleton after recovery.
 	register(cm)
@@ -209,6 +211,7 @@ type ChannelManager struct {
 
 	cond             *syncutil.ContextCond
 	channels         map[ChannelID]*PChannelMeta
+	walOwners        atomic.Pointer[walOwnerSnapshot]
 	version          typeutil.VersionInt64Pair
 	metrics          *channelMetrics
 	cchannelMeta     *streamingpb.CChannelMeta
@@ -217,6 +220,24 @@ type ChannelManager struct {
 	// 1 if streaming service has been run once.
 	streamingEnableNotifiers []*syncutil.AsyncTaskNotifier[struct{}]
 	replicateConfig          *replicateutil.ConfigHelper
+}
+
+// walOwnerSnapshot contains only immutable values from committed metadata.
+// Readers must not wait for the metadata mutex, which is held during catalog IO.
+type walOwnerSnapshot struct {
+	owners map[string]int64
+}
+
+// publishWALOwners runs under cond.L, or before the manager is published during
+// recovery. Publish once after the whole metadata batch has been committed.
+func (cm *ChannelManager) publishWALOwners() {
+	owners := make(map[string]int64, len(cm.channels))
+	for _, channel := range cm.channels {
+		if channel.IsAssignedOrAssigning() {
+			owners[channel.Name()] = channel.CurrentServerID()
+		}
+	}
+	cm.walOwners.Store(&walOwnerSnapshot{owners: owners})
 }
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
@@ -309,6 +330,7 @@ func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string
 		cm.Logger().Error(ctx, "failed to save new pchannels", mlog.Err(err))
 		return err
 	}
+	cm.publishWALOwners()
 
 	cm.Logger().Info(ctx, "dynamically added new pchannels",
 		mlog.Int("count", len(newMetas)),
@@ -546,6 +568,7 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 		c := newPChannelMetaFromProto(pchannel, cm.replicateConfig)
 		cm.channels[c.ChannelID()] = c
 	}
+	cm.publishWALOwners()
 	cm.version.Local++
 	// update metrics.
 	cm.metrics.UpdateAssignmentVersion(cm.version.Local)
@@ -554,17 +577,12 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 func (cm *ChannelManager) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
-	cm.cond.L.Lock()
-	defer cm.cond.L.Unlock()
-
-	pChannelMeta, ok := cm.channels[types.ChannelID{Name: pchannel}]
-	if !ok {
+	snapshot := cm.walOwners.Load()
+	if snapshot == nil {
 		return 0, false
 	}
-	if pChannelMeta.IsAssignedOrAssigning() {
-		return pChannelMeta.CurrentServerID(), true
-	}
-	return 0, false
+	owner, ok := snapshot.owners[pchannel]
+	return owner, ok
 }
 
 // GetLatestChannelAssignment returns the latest channel assignment.
