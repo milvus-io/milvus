@@ -19,6 +19,7 @@
 #include <algorithm>
 #include "common/FastMem.h"
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -47,6 +48,7 @@
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
+#include "milvus-storage/column_groups.h"
 #include "parquet/schema.h"
 #include "storage/BinlogReader.h"
 #include "storage/ChunkManager.h"
@@ -61,6 +63,22 @@
 #include "storage/Types.h"
 
 namespace milvus::storage {
+
+// Read or fill the payload after the raw-vector row/dimension header.
+void
+ReadRawData(const std::string& path, void* data, size_t bytes);
+
+void
+WriteRawData(const std::string& path, const void* data, size_t bytes);
+
+// Publishes a complete raw-vector file, or removes the partial file on cancellation.
+bool
+SpillRawData(const std::string& path,
+             const void* data,
+             size_t rows,
+             size_t dim,
+             size_t row_bytes,
+             const std::atomic<bool>& canceled);
 
 // Controls how parent-valid external dense-vector rows with a mixture of
 // valid and null child elements are normalized. All-null child ranges are
@@ -394,6 +412,33 @@ constexpr int64_t kStreamingInflightBytes = 512LL << 20;
 // are enough to keep fetch and decode overlapped.
 constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
 
+// Reuse manifest metadata between download admission and data loading.
+struct ManifestReadPlan {
+    std::string manifest_path;
+    std::string column_name;
+    std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups;
+    uint64_t download_bytes = 0;
+};
+
+// Reuse metadata and the task's read configuration.
+struct RawManifestChunkReadOptions {
+    std::shared_ptr<ManifestReadPlan> manifest_read_plan;
+    IndexBuildStorageConfig storage;
+};
+
+std::optional<uint64_t>
+GetManifestDownloadSize(const std::string& manifest_path,
+                        const FileManagerContext& context);
+
+// Reads a complete non-null dense column into caller-owned memory. Unsupported
+// layouts return nullopt before allocating; ordinary visitors supply defaults,
+// nullable compaction and external-column normalization.
+std::optional<size_t>
+ReadFieldDataFromManifestInto(const std::string& manifest_path,
+                              const FileManagerContext& context,
+                              size_t expected_rows,
+                              const std::function<uint8_t*()>& allocate);
+
 // Visits manifest data on the calling thread in source order. Stop prevents
 // further ReadNext calls, decode submissions, and callbacks. Decode work
 // already submitted within the bounded input-byte window is still joined via
@@ -409,7 +454,9 @@ VisitFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const FieldDataVisitor& visitor,
-    int64_t max_inflight_bytes = kStreamingInflightBytes);
+    int64_t max_inflight_bytes = kStreamingInflightBytes,
+    std::optional<RawManifestChunkReadOptions> chunk_read_options =
+        std::nullopt);
 
 // Visits a Milvus-written TEXT column of a manifest as logical UTF-8 values.
 // Such a column stores LOB-encoded cells: a value below the inline threshold
@@ -437,7 +484,9 @@ IterateFieldDataFromManifest(
     const std::function<void(FieldDataPtr)>& consumer,
     int64_t max_inflight_bytes = kStreamingInflightBytes,
     size_t max_rows = 0,
-    size_t offset = 0);
+    size_t offset = 0,
+    std::optional<RawManifestChunkReadOptions> chunk_read_options =
+        std::nullopt);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(
@@ -449,7 +498,9 @@ GetFieldDatasFromManifest(
     std::optional<DataType> element_type,
     size_t max_rows = 0,
     size_t offset = 0,
-    std::optional<StorageColumnMapping> storage_column_mapping = std::nullopt);
+    std::optional<StorageColumnMapping> storage_column_mapping = std::nullopt,
+    std::optional<RawManifestChunkReadOptions> chunk_read_options =
+        std::nullopt);
 
 std::vector<FieldDataPtr>
 GetTextFieldDatasFromManifest(

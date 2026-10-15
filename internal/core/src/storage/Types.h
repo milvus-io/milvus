@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <string>
@@ -28,6 +29,11 @@
 #include "pb/schema.pb.h"
 
 namespace milvus::storage {
+
+struct IndexBuildStorageConfig {
+    size_t concurrency{64};
+    uint64_t request_size{8ULL << 20};
+};
 
 using DataType = milvus::DataType;
 using Timestamp = milvus::Timestamp;

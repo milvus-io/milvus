@@ -40,7 +40,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetPlanID().Return(int64(1))
 		mockC.EXPECT().GetSlotUsage().Return(int64(8))
 
-		succeed, err := ex.Enqueue(mockC)
+		succeed, err := ex.Enqueue(mockC, nil)
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(ex.taskCh))
@@ -60,11 +60,11 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(int64(8))
 		mockC.EXPECT().GetChannelName().Return("ch1")
 
-		succeed, err := ex.Enqueue(mockC)
+		succeed, err := ex.Enqueue(mockC, nil)
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 
-		succeed, err = ex.Enqueue(mockC)
+		succeed, err = ex.Enqueue(mockC, merr.Wrap(merr.ErrServiceResourceInsufficient, "node full"))
 		assert.False(t, succeed)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, merr.ErrDuplicatedCompactionTask))
@@ -87,7 +87,7 @@ func TestCompactionExecutor(t *testing.T) {
 		enqueueDone := make(chan struct{})
 		go func() {
 			defer close(enqueueDone)
-			succeed, err := ex.Enqueue(mockC)
+			succeed, err := ex.Enqueue(mockC, nil)
 			assert.True(t, succeed)
 			assert.NoError(t, err)
 		}()
@@ -173,7 +173,7 @@ func TestCompactionExecutor(t *testing.T) {
 				mockC.EXPECT().GetSlotUsage().Return(int64(0)).Times(2)
 				mockC.EXPECT().GetCompactionType().Return(tc.compactionType)
 
-				succeed, err := ex.Enqueue(mockC)
+				succeed, err := ex.Enqueue(mockC, nil)
 				assert.True(t, succeed)
 				assert.NoError(t, err)
 				assert.Equal(t, tc.expectedSlotUsage, ex.Slots())
@@ -207,7 +207,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().Compact().Return(result, nil)
 		mockC.EXPECT().Complete().Return()
 
-		succeed, err := ex.Enqueue(mockC)
+		succeed, err := ex.Enqueue(mockC, nil)
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 
@@ -235,7 +235,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().Compact().Return(nil, merr.SegcoreError(2034, "mem allocate failed"))
 		mockC.EXPECT().Complete().Return()
 
-		succeed, err := ex.Enqueue(mockC)
+		succeed, err := ex.Enqueue(mockC, nil)
 		assert.True(t, succeed)
 		assert.NoError(t, err)
 
@@ -410,7 +410,7 @@ func TestCompactionExecutor(t *testing.T) {
 				mockC.EXPECT().GetSlotUsage().Return(int64(1))
 				mockC.EXPECT().GetChannelName().Return("ch1").Maybe()
 
-				ex.Enqueue(mockC)
+				ex.Enqueue(mockC, nil)
 			}(i)
 		}
 
@@ -431,7 +431,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(slotUsage).Times(2)
 		mockC.EXPECT().Complete().Return()
 
-		ex.Enqueue(mockC)
+		ex.Enqueue(mockC, nil)
 		assert.Equal(t, slotUsage, ex.Slots())
 
 		result := &datapb.CompactionPlanResult{PlanID: planID}
@@ -511,7 +511,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
 
-		ex.Enqueue(mockC)
+		ex.Enqueue(mockC, nil)
 		ex.mu.RLock()
 		assert.Equal(t, datapb.CompactionTaskState_executing, ex.tasks[planID].state)
 		ex.mu.RUnlock()
@@ -575,7 +575,7 @@ func TestCompactionExecutor(t *testing.T) {
 			}
 			mockC.EXPECT().Compact().Return(result, nil)
 
-			succeed, err := ex.Enqueue(mockC)
+			succeed, err := ex.Enqueue(mockC, nil)
 			require.True(t, succeed)
 			require.NoError(t, err)
 

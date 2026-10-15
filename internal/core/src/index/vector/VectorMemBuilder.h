@@ -75,6 +75,9 @@ class VectorMemBuilder final : public IArtifactBuilder<VectorBuildInput<T>> {
     BuilderInputSpec
     InputSpec() const override;
 
+    bool
+    TryReserveBuild() override;
+
     storage::ArtifactPtr
         Build(const VectorBuildInput<T>& input) &&
         override;

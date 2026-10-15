@@ -29,7 +29,7 @@ import (
 // fakeIndex counts Delete calls, standing in for the native index that
 // indexcgowrapper.CreateIndex hands back as a raw pointer.
 type fakeIndex struct {
-	indexcgowrapper.CodecIndex
+	indexcgowrapper.PreparedIndex
 	deleted int
 }
 

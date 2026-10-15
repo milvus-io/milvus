@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -130,12 +131,12 @@ func TestIndexInspector_inspect(t *testing.T) {
 
 func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	pt := paramtable.Get()
-	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
-	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
-	assert.NoError(t, pt.Save(heavyKey, "64"))
-	assert.NoError(t, pt.Save(scalarKey, "16"))
-	defer pt.Reset(heavyKey)
-	defer pt.Reset(scalarKey)
+	assert.NoError(t, pt.Save(pt.DataCoordCfg.IndexTaskSlotUsage.Key, "64"))
+	defer pt.Reset(pt.DataCoordCfg.IndexTaskSlotUsage.Key)
+	assert.NoError(t, pt.Save(pt.KnowhereConfig.Enable.Key, "true"))
+	defer pt.Reset(pt.KnowhereConfig.Enable.Key)
+	const gpuKey = "knowhere.HNSW.build.gpu_build"
+	defer pt.Reset(gpuKey)
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
@@ -170,6 +171,9 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
 				Binlogs: []*datapb.Binlog{{MemorySize: 200 * 1024 * 1024}},
+			}, {
+				FieldID: 102,
+				Binlogs: []*datapb.Binlog{{MemorySize: 512 * 1024 * 1024}},
 			}},
 		},
 	}
@@ -195,20 +199,36 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 		},
 	}
 
+	wantSlots := int64(4)
 	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(scheduled task.Task) {
-		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
+		assert.Equal(t, wantSlots, scheduled.GetTaskSlot())
 	}).Return()
 	inspector.reloadFromMeta()
+	for _, tc := range []struct {
+		gpuBuild string
+		slots    int64
+	}{
+		{"false", 16},
+		{"true", 1},
+	} {
+		assert.NoError(t, pt.Save(gpuKey, tc.gpuBuild))
+		meta.indexMeta.indexes[2][3].IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
+		wantSlots = tc.slots
+		if tc.gpuBuild == "true" && !vecindexmgr.VectorBuildUsesGPU("HNSW", "true") {
+			wantSlots = 16
+		}
+		inspector.reloadFromMeta()
+	}
 }
 
-func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *testing.T) {
+func TestIndexInspector_CreateIndexForSegment_UsesFieldSize(t *testing.T) {
 	pt := paramtable.Get()
-	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
-	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
-	assert.NoError(t, pt.Save(heavyKey, "64"))
-	assert.NoError(t, pt.Save(scalarKey, "16"))
-	defer pt.Reset(heavyKey)
-	defer pt.Reset(scalarKey)
+	assert.NoError(t, pt.Save(pt.DataCoordCfg.IndexTaskSlotUsage.Key, "64"))
+	defer pt.Reset(pt.DataCoordCfg.IndexTaskSlotUsage.Key)
+	assert.NoError(t, pt.Save(pt.KnowhereConfig.Enable.Key, "true"))
+	defer pt.Reset(pt.KnowhereConfig.Enable.Key)
+	const gpuKey = "knowhere.HNSW.build.gpu_build"
+	defer pt.Reset(gpuKey)
 
 	ctx := context.Background()
 	scheduler := task.NewMockGlobalScheduler(t)
@@ -238,6 +258,9 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 		Binlogs: []*datapb.FieldBinlog{{
 			FieldID: 101,
 			Binlogs: []*datapb.Binlog{{MemorySize: 200 * 1024 * 1024}},
+		}, {
+			FieldID: 102,
+			Binlogs: []*datapb.Binlog{{MemorySize: 512 * 1024 * 1024}},
 		}},
 	}}
 	meta.segments.SetSegment(segment.GetID(), segment)
@@ -256,11 +279,27 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 	inspector := newIndexInspector(ctx, nil, meta, scheduler, alloc, handler, storage, versionManager)
 	alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+	wantSlots := int64(4)
 	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(scheduled task.Task) {
-		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
+		assert.Equal(t, wantSlots, scheduled.GetTaskSlot())
 	}).Return()
 
 	assert.NoError(t, inspector.createIndexForSegment(ctx, segment, 5))
+	for _, tc := range []struct {
+		gpuBuild string
+		slots    int64
+	}{
+		{"false", 16},
+		{"true", 1},
+	} {
+		assert.NoError(t, pt.Save(gpuKey, tc.gpuBuild))
+		meta.indexMeta.indexes[2][5].IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
+		wantSlots = tc.slots
+		if tc.gpuBuild == "true" && !vecindexmgr.VectorBuildUsesGPU("HNSW", "true") {
+			wantSlots = 16
+		}
+		assert.NoError(t, inspector.createIndexForSegment(ctx, segment, 5))
+	}
 }
 
 func TestIndexInspector_isExternalCollection(t *testing.T) {

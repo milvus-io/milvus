@@ -32,6 +32,7 @@
 #include "index/contracts/query/ITextMatchReader.h"
 #include "indexbuilder/BuildSession.h"
 #include "indexbuilder/IndexBuildCapiAdapter.h"
+#include "knowhere/version.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/Util.h"
@@ -128,7 +129,7 @@ class BuildSessionTest : public ::testing::Test {
     std::shared_ptr<storage::LocalDirectory> remote_;
 };
 
-TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
+TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepStorageConfiguration) {
     for (auto purpose : {BuildPurpose::ScalarIndex, BuildPurpose::TextIndex}) {
         for (bool external_enabled : {false, true}) {
             const bool text = purpose == BuildPurpose::TextIndex;
@@ -155,12 +156,27 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
             config->set_talon_block_size(456);
             config->set_talon_max_idle_per_addr(7);
             config->set_talon_enable_for_external_table(external_enabled);
+            if (external_enabled) {
+                auto* build_config = info.mutable_build_storage_config();
+                build_config->set_concurrency(16);
+                build_config->set_request_size(16ULL << 20);
+            }
             auto prepared = AdaptBuildIndexInfo(info, purpose);
             EXPECT_EQ(prepared.request.value_type,
                       text ? DataType::TEXT : DataType::VARCHAR);
+            const auto& context = prepared.file_manager_context;
+            EXPECT_EQ(context.index_build_storage_config.concurrency,
+                      external_enabled ? 16 : 64);
+            EXPECT_EQ(context.index_build_storage_config.request_size,
+                      external_enabled ? 16ULL << 20 : 8ULL << 20);
+            EXPECT_NE(context.manifest_read_plan, nullptr);
             const auto props =
                 prepared.file_manager_context.loon_ffi_properties;
             ASSERT_NE(props, nullptr);
+            auto connections = milvus_storage::api::GetValue<uint32_t>(
+                *props, PROPERTY_FS_MAX_CONNECTIONS);
+            ASSERT_TRUE(connections.ok());
+            EXPECT_EQ(*connections, external_enabled ? 16 : 64);
             for (const auto& [key, value] :
                  std::vector<std::pair<const char*, uint32_t>>{
                      {PROPERTY_FS_TALON_SMALL_READ_THRESHOLD, 123},
@@ -181,6 +197,67 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
             ASSERT_TRUE(external.ok());
             EXPECT_EQ(*external, external_enabled ? "2" : "0");
         }
+    }
+}
+
+TEST_F(BuildSessionTest, ResidentVectorsBuildAfterSpillAndRelease) {
+    constexpr int64_t rows = 8;
+    constexpr int64_t dim = 4;
+    auto info = BuildInfo(schemapb::DataType::FloatVector,
+                          knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                          rows,
+                          3);
+    info.set_dim(dim);
+    info.set_current_index_version(
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    auto* metric = info.add_index_params();
+    metric->set_key(index::METRIC_TYPE);
+    metric->set_value("L2");
+    info.add_insert_files(InsertPath());
+    auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::VectorIndex);
+    prepared.request.staging_parent = remote_->Path();
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    std::vector<float> values(rows * dim, 1.0F);
+    data->FillFieldData(values.data(), rows);
+    WriteInsert(prepared.file_manager_context, data);
+    BuildSession session(prepared.request, prepared.file_manager_context);
+    session.LoadData();
+    ASSERT_TRUE(session.HasResidentInput());
+    ASSERT_TRUE(session.SpillInput());
+    EXPECT_TRUE(session.HasResidentInput());
+    session.ReleaseInputMemory();
+    EXPECT_FALSE(session.HasResidentInput());
+    ASSERT_NO_THROW(session.Build());
+    EXPECT_FALSE(session.Publish().Files().empty());
+}
+
+TEST_F(BuildSessionTest, AllNullVectorsReleasePreparedAllocation) {
+    constexpr int64_t rows = 8;
+    constexpr int64_t dim = 4;
+    for (const auto* type : {knowhere::IndexEnum::INDEX_HNSW,
+                             knowhere::IndexEnum::INDEX_DISKANN}) {
+        auto info = BuildInfo(schemapb::DataType::FloatVector, type, rows, 3);
+        info.set_dim(dim);
+        info.set_current_index_version(
+            knowhere::Version::GetCurrentVersion().VersionNumber());
+        info.mutable_field_schema()->set_nullable(true);
+        auto* metric = info.add_index_params();
+        metric->set_key(index::METRIC_TYPE);
+        metric->set_value("L2");
+        info.add_insert_files(InsertPath());
+        auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::VectorIndex);
+        prepared.request.staging_parent = remote_->Path();
+        auto data = storage::CreateFieldData(
+            DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+        std::vector<float> values(rows * dim);
+        const std::vector<uint8_t> validity((rows + 7) / 8, 0);
+        data->FillFieldData(values.data(), validity.data(), rows, 0);
+        WriteInsert(prepared.file_manager_context, data);
+        BuildSession session(prepared.request, prepared.file_manager_context);
+        session.LoadData();
+        EXPECT_FALSE(session.HasResidentInput());
+        ASSERT_NO_THROW(session.Build());
     }
 }
 

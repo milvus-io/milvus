@@ -36,6 +36,36 @@ class BuildInputMaterializer {
     virtual void
     Add(const FieldDataPtr& batch) = 0;
 
+    // False leaves the input intact and allows a later retry. A successful
+    // reservation belongs to the builder until Build or destruction.
+    virtual bool
+    TryReserveBuild() {
+        return true;
+    }
+
+    // After loading, input remains resident through spill until explicitly released.
+    virtual bool
+    HasResidentInput() const {
+        return true;
+    }
+
+    // True means a complete file is available; memory is still retained.
+    // False means spilling is unsupported or was canceled before completion.
+    virtual bool
+    SpillInput() {
+        return false;
+    }
+
+    // May run concurrently with SpillInput. Requests cancellation, not a join.
+    virtual void
+    StopSpill() {
+    }
+
+    // Only after SpillInput returned true and the caller joined its writer.
+    virtual void
+    ReleaseInputMemory() {
+    }
+
     virtual storage::ArtifactPtr
     Build() && = 0;
 };

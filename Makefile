@@ -71,7 +71,7 @@ ifdef USE_SVS
 	use_svs = ${USE_SVS}
 endif
 
-with_crt = OFF
+with_crt = ON
 ifdef WITH_CRT
 	with_crt = ${WITH_CRT}
 endif

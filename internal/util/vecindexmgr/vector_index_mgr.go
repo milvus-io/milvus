@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"unsafe"
 
@@ -58,6 +59,8 @@ const (
 	MvFlag uint64 = 1 << 20
 	// DiskFlag This flag indicates that the index need disk
 	DiskFlag uint64 = 1 << 21
+	// GpuBuildFlag indicates compiled support for the gpu_build option.
+	GpuBuildFlag uint64 = 1 << 23
 )
 
 type IndexType = string
@@ -263,4 +266,20 @@ func GetVecIndexMgrInstance() VecIndexMgr {
 		vecIndexMgr = newVecIndexMgr()
 	})
 	return vecIndexMgr
+}
+
+// VectorBuildUsesGPU combines the requested path with the compiled index backend.
+func VectorBuildUsesGPU(indexType, gpuBuild string) bool {
+	feature, ok := GetVecIndexMgrInstance().GetFeature(indexType)
+	if !ok {
+		return false
+	}
+	if feature&GpuFlag != 0 {
+		return true
+	}
+	if feature&GpuBuildFlag == 0 {
+		return false
+	}
+	requested, err := strconv.ParseBool(gpuBuild)
+	return err == nil && requested
 }

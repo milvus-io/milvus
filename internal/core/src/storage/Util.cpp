@@ -16,14 +16,21 @@
 
 #include <atomic>
 #include <charconv>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
+#include <folly/ScopeGuard.h>
 #include <chrono>
+#include <cmath>
 #include <deque>
 #include <filesystem>
 #include <functional>
 #include <future>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string_view>
+#include <numeric>
 #include "common/FastMem.h"
 
 #include "arrow/array/builder_binary.h"
@@ -66,6 +73,8 @@
 #include "storage/RecordBatchSize.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/ChunkRangeReader.h"
+#include "storage/artifact/LocalFileUtils.h"
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
@@ -89,6 +98,105 @@
 #include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
+
+void
+ReadRawData(const std::string& path, void* data, size_t bytes) {
+    const auto read =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager()->Read(
+            path, 2 * sizeof(uint32_t), data, bytes);
+    if (read != bytes) {
+        ThrowInfo(FileReadFailed,
+                  "incomplete raw-vector input {}: read {} bytes, expected {}",
+                  path,
+                  read,
+                  bytes);
+    }
+}
+
+void
+WriteRawData(const std::string& path, const void* data, size_t bytes) {
+    int fd = ::open(path.c_str(), O_WRONLY);
+    auto close = folly::makeGuard([&] {
+        if (fd >= 0) {
+            ::close(fd);
+        }
+    });
+    if (fd < 0 || ::lseek(fd, 2 * sizeof(uint32_t), SEEK_SET) < 0) {
+        ThrowInfo(FileOpenFailed,
+                  "failed to open vector build input {}: {}",
+                  path,
+                  strerror(errno));
+    }
+    WriteAll(fd, data, bytes, path, "vector build input");
+    if (::close(std::exchange(fd, -1)) != 0) {
+        ThrowInfo(FileWriteFailed,
+                  "failed to close vector build input {}: {}",
+                  path,
+                  strerror(errno));
+    }
+}
+
+bool
+SpillRawData(const std::string& path,
+             const void* data,
+             size_t rows,
+             size_t dim,
+             size_t row_bytes,
+             const std::atomic<bool>& canceled) {
+    const auto partial = path + ".partial";
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    const int fd =
+        ::open(partial.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "cannot create spilled input: {}",
+                  strerror(errno));
+    }
+    auto cleanup = folly::makeGuard([&] {
+        ::close(fd);
+        std::error_code ignored;
+        std::filesystem::remove(partial, ignored);
+    });
+    AssertInfo(rows <= std::numeric_limits<uint32_t>::max() && dim > 0 &&
+                   dim <= std::numeric_limits<uint32_t>::max(),
+               "spilled input does not fit the raw-vector file header");
+    const uint32_t header[] = {uint32_t(rows), uint32_t(dim)};
+    WriteAll(fd, header, sizeof(header), partial, "spilled input");
+    const auto* values = static_cast<const char*>(data);
+    const size_t bytes = rows * row_bytes;
+    constexpr size_t chunk_bytes = 8 << 20;
+    for (size_t offset = 0; offset < bytes;) {
+        if (canceled.load()) {
+            return false;
+        }
+        const auto count = std::min(chunk_bytes, bytes - offset);
+        WriteAll(fd, values + offset, count, partial, "spilled input");
+        // Bound dirty page-cache memory independently of the retained input.
+        int status;
+        do {
+            status = ::fdatasync(fd);
+        } while (status != 0 && errno == EINTR);
+        if (status != 0) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "cannot flush spilled input: {}",
+                      strerror(errno));
+        }
+        const int error =
+            ::posix_fadvise(fd, offset, count, POSIX_FADV_DONTNEED);
+        if (error != 0) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "cannot release spill cache: {}",
+                      strerror(error));
+        }
+        offset += count;
+    }
+    if (canceled.load()) {
+        return false;
+    }
+    std::filesystem::rename(partial, path);
+    return true;
+}
 
 namespace {
 
@@ -1970,6 +2078,151 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     return field_data_list;
 }
 
+std::optional<uint64_t>
+GetManifestDownloadSize(const std::string& manifest_path,
+                        const FileManagerContext& context) {
+    const auto& properties = context.loon_ffi_properties;
+    AssertInfo(properties != nullptr, "manifest reader properties are missing");
+    const auto& field = context.fieldDataMeta;
+    auto column = field.field_schema.external_field();
+    const auto mapping = context.storage_column_mappings.find(field.field_id);
+    if (mapping != context.storage_column_mappings.end()) {
+        column = mapping->second.storage_column_name;
+    }
+    if (column.empty()) {
+        column = std::to_string(field.field_id);
+    }
+    const auto& plan = context.manifest_read_plan;
+    if (plan && plan->column_groups && plan->manifest_path == manifest_path &&
+        plan->column_name == column) {
+        return plan->download_bytes;
+    }
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        GetLoonManifest(manifest_path, properties)->columnGroups());
+    uint64_t bytes = 0;
+    for (const auto& group : *groups) {
+        if (std::find(group->columns.begin(), group->columns.end(), column) ==
+            group->columns.end()) {
+            continue;
+        }
+        // Admission uses whole-file sizes, including partially referenced files.
+        // Readers still honor the manifest's row ranges when loading data.
+        for (const auto& file : group->files) {
+            auto size = [&]() -> arrow::Result<int64_t> {
+                auto known_size = file.Get<int64_t>(
+                    milvus_storage::api::kPropertyFileSize, -1);
+                if (known_size >= 0) {
+                    return known_size;
+                }
+                ARROW_ASSIGN_OR_RAISE(
+                    auto fs,
+                    milvus_storage::FilesystemCache::getInstance().get(
+                        *properties, file.path));
+                ARROW_ASSIGN_OR_RAISE(
+                    auto uri, milvus_storage::StorageUri::Parse(file.path));
+                ARROW_ASSIGN_OR_RAISE(auto info, fs->GetFileInfo(uri.key));
+                return info.size();
+            }();
+            if (!size.ok()) {
+                ThrowInfo(ArrowStatusToErrorCode(size),
+                          "Cannot get download file size for {}: {}",
+                          file.path,
+                          size.status().ToString());
+            }
+            if (size.ValueOrDie() < 0) {
+                return std::nullopt;
+            }
+            bytes += static_cast<uint64_t>(size.ValueOrDie());
+        }
+        break;
+    }
+    if (plan) {
+        plan->manifest_path = manifest_path;
+        plan->column_name = column;
+        plan->column_groups = std::move(groups);
+        plan->download_bytes = bytes;
+    }
+    return bytes;
+}
+
+std::optional<size_t>
+ReadFieldDataFromManifestInto(const std::string& manifest_path,
+                              const FileManagerContext& context,
+                              size_t expected_rows,
+                              const std::function<uint8_t*()>& allocate) {
+    const auto& schema = context.fieldDataMeta.field_schema;
+    const auto type = static_cast<DataType>(schema.data_type());
+    const auto mapping =
+        context.storage_column_mappings.find(context.fieldDataMeta.field_id);
+    if (schema.nullable() || !IsVectorDataType(type) ||
+        type == DataType::VECTOR_ARRAY || IsSparseFloatVectorDataType(type) ||
+        !schema.external_field().empty() ||
+        (mapping != context.storage_column_mappings.end() &&
+         mapping->second.is_external_column)) {
+        return std::nullopt;
+    }
+    GetManifestDownloadSize(manifest_path, context);
+    const auto& plan = context.manifest_read_plan;
+    if (!plan || !plan->column_groups) {
+        return std::nullopt;
+    }
+    for (size_t i = 0; i < plan->column_groups->size(); ++i) {
+        const auto& group = plan->column_groups->at(i);
+        if (std::find(group->columns.begin(),
+                      group->columns.end(),
+                      plan->column_name) == group->columns.end()) {
+            continue;
+        }
+        if (group->format != LOON_FORMAT_PARQUET) {
+            return std::nullopt;
+        }
+        uint64_t source_rows = 0;
+        for (const auto& file : group->files) {
+            source_rows += file.end_index - file.start_index;
+        }
+        if (source_rows != expected_rows) {
+            return std::nullopt;
+        }
+        auto read = [&]() -> arrow::Result<size_t> {
+            auto columns = std::make_shared<std::vector<std::string>>(
+                std::vector<std::string>{plan->column_name});
+            auto reader = milvus_storage::api::Reader::create(
+                plan->column_groups,
+                nullptr,
+                columns,
+                *context.loon_ffi_properties);
+            // Open file metadata together before planning the admitted reads.
+            ARROW_ASSIGN_OR_RAISE(
+                auto chunks, reader->get_chunk_reader_async(i, columns).get());
+            const auto row_bytes =
+                vector_bytes_per_element(type, context.indexMeta.dim);
+            ChunkRangeReadOptions options;
+            options.storage = context.index_build_storage_config;
+            options.preserve_order = false;
+            options.destination =
+                std::span<uint8_t>{allocate(), expected_rows * row_bytes};
+            ARROW_ASSIGN_OR_RAISE(auto ranges,
+                                  ChunkRangeReader::Create(*chunks, options));
+            size_t rows = 0;
+            for (;;) {
+                ARROW_ASSIGN_OR_RAISE(auto range, ranges->Next());
+                if (!range) {
+                    break;
+                }
+                rows += range->row_count;
+            }
+            return rows;
+        }();
+        if (!read.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(read.status()),
+                      "failed to read manifest input: {}",
+                      read.status().ToString());
+        }
+        return read.ValueOrDie();
+    }
+    return std::nullopt;
+}
+
 // Shared implementation of the manifest read paths. `max_rows == 0` streams
 // the whole column through the record batch reader; a positive `max_rows`
 // takes the chunk-reader page starting at `offset` (#50088). The public
@@ -1986,16 +2239,13 @@ VisitFieldDataFromManifestPaged(
     const FieldDataVisitor& visitor,
     int64_t max_inflight_bytes,
     size_t max_rows,
-    size_t offset) {
+    size_t offset,
+    std::optional<RawManifestChunkReadOptions> chunk_read_options) {
     AssertInfo(max_inflight_bytes > 0,
                "max_inflight_bytes must be positive, got {}",
                max_inflight_bytes);
     AssertInfo(static_cast<bool>(visitor),
                "manifest field-data visitor is empty");
-    auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
-    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
-        loon_manifest->columnGroups());
-
     // Determine the column name to use. New index-build callers pass the
     // storage column mapping through FileManagerContext. The fallback keeps
     // direct test callers and older internal paths on the existing behavior.
@@ -2015,6 +2265,17 @@ VisitFieldDataFromManifestPaged(
     if (column_name.empty()) {
         column_name = std::to_string(field_meta.field_id);
     }
+
+    auto plan =
+        chunk_read_options ? chunk_read_options->manifest_read_plan : nullptr;
+    const bool reuse_plan = plan && plan->column_groups &&
+                            plan->manifest_path == manifest_path &&
+                            plan->column_name == column_name;
+    auto column_groups =
+        reuse_plan ? plan->column_groups
+                   : std::make_shared<milvus_storage::api::ColumnGroups>(
+                         GetLoonManifest(manifest_path, loon_ffi_properties)
+                             ->columnGroups());
 
     // TODO remove manual check after loon support read null for non-exists field
     auto column_exists = [&](const std::string& name) {
@@ -2083,6 +2344,50 @@ VisitFieldDataFromManifestPaged(
         ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
     }
     std::shared_ptr<arrow::RecordBatch> batch;
+    std::shared_ptr<arrow::RecordBatchReader> record_batch_reader;
+    std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader;
+    std::unique_ptr<milvus::storage::ChunkRangeReader> chunk_range_reader;
+
+    // Share the task's request limit across every file in the projected group.
+    // Ordinary manifest readers keep the packed RecordBatchReader path.
+    if (max_rows == 0 && chunk_read_options.has_value() &&
+        IsVectorDataType(data_type.value())) {
+        auto chunk_reader_result = reader->get_chunk_reader(
+            static_cast<int64_t>(column_group_index), needed_cols_ptr);
+        if (chunk_reader_result.ok()) {
+            chunk_reader = std::move(chunk_reader_result.ValueOrDie());
+            milvus::storage::ChunkRangeReadOptions range_options;
+            range_options.storage = chunk_read_options->storage;
+            // FieldData consumers do not receive row offsets, so this
+            // compatibility path must remain logically ordered.
+            range_options.preserve_order = true;
+            auto range_reader_result =
+                ChunkRangeReader::Create(*chunk_reader, range_options);
+            if (range_reader_result.ok()) {
+                chunk_range_reader =
+                    std::move(range_reader_result).ValueOrDie();
+            } else if (!range_reader_result.status().IsNotImplemented()) {
+                ThrowInfo(ArrowStatusToErrorCode(range_reader_result.status()),
+                          "Failed to open manifest chunk-range reader: {}",
+                          range_reader_result.status().ToString());
+            }
+        } else if (!chunk_reader_result.status().IsNotImplemented()) {
+            ThrowInfo(ArrowStatusToErrorCode(chunk_reader_result.status()),
+                      "Failed to open manifest chunk reader: {}",
+                      chunk_reader_result.status().ToString());
+        }
+    }
+
+    if (max_rows == 0 && !chunk_range_reader) {
+        auto reader_result = reader->get_record_batch_reader("");
+        if (!reader_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(reader_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get record batch reader: {}",
+                      error.what());
+        }
+        record_batch_reader = reader_result.ValueOrDie();
+    }
 
     // Decode batches on a background thread pool while this thread keeps
     // draining the record batch reader. ReadNext must stay single-threaded
@@ -2220,17 +2525,19 @@ VisitFieldDataFromManifestPaged(
     auto element_type_v = element_type.value();
     bool stopped = false;
     if (max_rows == 0) {  // read all with record batches
-        auto reader_result = reader->get_record_batch_reader("");
-        if (!reader_result.ok()) {
-            auto error = milvus_storage::ToSegcoreError(reader_result.status());
-            ThrowInfo(error.get_error_code(),
-                      "Failed to get record batch reader: {}",
-                      error.what());
-        }
-        auto record_batch_reader = reader_result.ValueOrDie();
         while (!stopped) {
+            std::shared_ptr<arrow::RecordBatch> batch;
             auto fetch_start = now_ns();
-            auto status = record_batch_reader->ReadNext(&batch);
+            arrow::Status status;
+            if (chunk_range_reader) {
+                auto next = chunk_range_reader->NextBatch();
+                status = next.status();
+                if (next.ok()) {
+                    batch = std::move(next).ValueOrDie();
+                }
+            } else {
+                status = record_batch_reader->ReadNext(&batch);
+            }
             auto fetch_elapsed = now_ns() - fetch_start;
             fetch_ns += fetch_elapsed;
             fetch_max_ns = std::max(fetch_max_ns, fetch_elapsed);
@@ -2507,7 +2814,8 @@ VisitFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const FieldDataVisitor& visitor,
-    int64_t max_inflight_bytes) {
+    int64_t max_inflight_bytes,
+    std::optional<RawManifestChunkReadOptions> chunk_read_options) {
     return VisitFieldDataFromManifestPaged(manifest_path,
                                            loon_ffi_properties,
                                            field_meta,
@@ -2518,7 +2826,8 @@ VisitFieldDataFromManifest(
                                            visitor,
                                            max_inflight_bytes,
                                            /*max_rows=*/0,
-                                           /*offset=*/0);
+                                           /*offset=*/0,
+                                           std::move(chunk_read_options));
 }
 
 void
@@ -2533,7 +2842,8 @@ IterateFieldDataFromManifest(
     const std::function<void(FieldDataPtr)>& consumer,
     int64_t max_inflight_bytes,
     size_t max_rows,
-    size_t offset) {
+    size_t offset,
+    std::optional<RawManifestChunkReadOptions> chunk_read_options) {
     const auto outcome = VisitFieldDataFromManifestPaged(
         manifest_path,
         loon_ffi_properties,
@@ -2548,7 +2858,8 @@ IterateFieldDataFromManifest(
         },
         max_inflight_bytes,
         max_rows,
-        offset);
+        offset,
+        std::move(chunk_read_options));
     switch (outcome) {
         case VisitOutcome::Exhausted:
         case VisitOutcome::FieldMissing:
@@ -2569,7 +2880,8 @@ GetFieldDatasFromManifest(
     std::optional<DataType> element_type,
     size_t max_rows,
     size_t offset,
-    std::optional<StorageColumnMapping> storage_column_mapping) {
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    std::optional<RawManifestChunkReadOptions> chunk_read_options) {
     std::vector<FieldDataPtr> field_datas;
     IterateFieldDataFromManifest(
         manifest_path,
@@ -2582,13 +2894,10 @@ GetFieldDatasFromManifest(
         [&](FieldDataPtr field_data) {
             field_datas.push_back(std::move(field_data));
         },
-        // Every decoded batch is retained below, so a large in-flight window
-        // would only pin extra source arrow batches on top of the full
-        // column. Keep it small; overlap still happens, the peak does not
-        // grow by half a gigabyte per concurrent build.
         kAccumulatingInflightBytes,
         max_rows,
-        offset);
+        offset,
+        std::move(chunk_read_options));
     return field_datas;
 }
 

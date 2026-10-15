@@ -52,7 +52,7 @@ type indexBuildTask struct {
 	ctx    context.Context
 
 	cm             storage.ChunkManager
-	index          indexcgowrapper.CodecIndex
+	index          indexcgowrapper.PreparedIndex
 	req            *workerpb.CreateJobRequest
 	newTypeParams  map[string]string
 	newIndexParams map[string]string
@@ -97,26 +97,14 @@ func (it *indexBuildTask) parseParams() {
 }
 
 func (it *indexBuildTask) Reset() {
-	// Reset runs from processTask's deferred cleanup on every exit path, including
-	// the canceled one where PostExecute -- the only other place that releases the
-	// index -- is skipped. Without this the native index built by Execute is never
-	// freed. Delete is idempotent, so releasing here after a normal PostExecute is
-	// a no-op.
+	// Keep task identity and result bookkeeping alive until the scheduler has
+	// published the final state and returned its slot reservation.
 	if it.index != nil {
 		if err := it.index.Delete(); err != nil {
 			mlog.Warn(it.ctx, "failed to release index object on task reset", mlog.Err(err))
 		}
 	}
-	it.ident = ""
-	it.cancel = nil
-	it.ctx = nil
-	it.cm = nil
 	it.index = nil
-	it.req = nil
-	it.newTypeParams = nil
-	it.newIndexParams = nil
-	it.tr = nil
-	it.manager = nil
 }
 
 // Ctx is the context of index tasks.
@@ -268,7 +256,29 @@ func redactBuildIndexParamsForLog(params *indexcgopb.BuildIndexInfo) *indexcgopb
 	return redacted
 }
 
-func (it *indexBuildTask) Execute(ctx context.Context) error {
+func (it *indexBuildTask) PlanDownload(ctx context.Context) (uint64, error) {
+	if it.index == nil {
+		if err := it.createBuilder(ctx); err != nil {
+			return 0, err
+		}
+	}
+	return it.index.GetDownloadSize()
+}
+
+func (it *indexBuildTask) LoadData(ctx context.Context) error {
+	if it.index == nil {
+		if err := it.createBuilder(ctx); err != nil {
+			return err
+		}
+	}
+	if err := it.index.LoadData(); err != nil {
+		return err
+	}
+	it.tr.RecordSpan()
+	return nil
+}
+
+func (it *indexBuildTask) createBuilder(ctx context.Context) error {
 	log := mlog.With(
 		mlog.String("clusterID", it.req.GetClusterID()),
 		mlog.FieldBuildID(it.req.GetBuildID()),
@@ -359,6 +369,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		StorageConfig:             storageConfig,
 		IndexParams:               mapToKVPairs(it.newIndexParams),
 		TypeParams:                mapToKVPairs(it.newTypeParams),
+		BuildStorageConfig:        getIndexBuildStorageConfig(),
 		StorePath:                 it.req.GetStorePath(),
 		StoreVersion:              it.req.GetStoreVersion(),
 		IndexStorePathVersion:     it.req.GetIndexStorePathVersion(),
@@ -386,17 +397,58 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	var err error
-	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
+	it.index, err = indexcgowrapper.CreateIndexBuilder(ctx, buildIndexParams)
 	if err != nil {
-		log.Warn(ctx, "failed to build index", mlog.Err(err))
 		return err
 	}
-
-	buildIndexLatency := it.tr.RecordSpan()
-	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
-
-	log.Info(ctx, "Successfully build index")
 	return nil
+}
+
+func (it *indexBuildTask) Execute(ctx context.Context) error {
+	if it.index == nil {
+		return merr.WrapErrServiceInternalMsg("index input has not been prepared")
+	}
+	started := time.Now()
+	if err := it.index.Build(); err != nil {
+		return err
+	}
+	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(time.Since(started).Seconds())
+	it.tr.RecordSpan()
+	return nil
+}
+
+func (it *indexBuildTask) UsesGPU() bool {
+	if !it.IsVectorIndex() {
+		return false
+	}
+	indexType, gpuBuild := GetIndexType(it.req.GetIndexParams()), ""
+	for _, param := range it.req.GetTypeParams() {
+		if param.GetKey() == "gpu_build" {
+			gpuBuild = param.GetValue()
+		}
+	}
+	for _, param := range it.req.GetIndexParams() {
+		if param.GetKey() == "gpu_build" {
+			gpuBuild = param.GetValue()
+		}
+	}
+	return vecindexmgr.VectorBuildUsesGPU(indexType, gpuBuild)
+}
+
+func (it *indexBuildTask) HasResidentInput() bool {
+	return it.index == nil || it.index.HasResidentInput()
+}
+
+func (it *indexBuildTask) TryReserveBuild() (bool, error) {
+	return it.index.TryReserveBuild()
+}
+
+func (it *indexBuildTask) SpillInput(ctx context.Context) (bool, error) {
+	return it.index.SpillInput(ctx)
+}
+
+func (it *indexBuildTask) ReleaseInputMemory() error {
+	return it.index.ReleaseInputMemory()
 }
 
 func (it *indexBuildTask) PostExecute(ctx context.Context) error {

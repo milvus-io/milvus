@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -311,8 +312,60 @@ func (suite *UtilSuite) TestCalculateIndexTaskSlot() {
 
 	// Existing vector indexes must keep using the same heavy curve after the
 	// helper started accepting the complete parameter set.
-	hnswParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
+	hnswParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}, {Key: "gpu_build", Value: "false"}}
 	suite.Equal(int64(16), calculateIndexTaskSlot(200*mib, 1, hnswParams))
+}
+
+func (suite *UtilSuite) TestCalculateVectorIndexTaskSlot() {
+	pt := paramtable.Get()
+	key := pt.DataCoordCfg.IndexTaskSlotUsage.Key
+	suite.NoError(pt.Save(key, "64"))
+	defer pt.Reset(key)
+
+	cpuParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}, {Key: "gpu_build", Value: "false"}}
+	gpuParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}, {Key: "gpu_build", Value: "true"}}
+	const mib = int64(1 << 20)
+	for _, tc := range []struct {
+		name      string
+		fieldSize int64
+		cpuSlots  int64
+		gpuSlots  int64
+	}{
+		{"empty", 0, 1, 1},
+		{"10_mib", 10 * mib, 1, 1},
+		{"above_10_mib", 10*mib + 1, 4, 1},
+		{"100_mib", 100 * mib, 4, 1},
+		{"above_100_mib", 100*mib + 1, 16, 1},
+		{"256_mib", 256 * mib, 16, 1},
+		{"above_256_mib", 256*mib + 1, 16, 2},
+		{"below_512_mib", 512*mib - 1, 16, 2},
+		{"512_mib", 512 * mib, 16, 2},
+		{"above_512_mib", 512*mib + 1, 64, 3},
+		{"600_mib", 600 * mib, 64, 3},
+		{"below_one_gib", 1024*mib - 1, 64, 4},
+		{"one_gib", 1024 * mib, 128, 4},
+		{"six_gib", 6 * 1024 * mib, 768, 24},
+	} {
+		suite.Run(tc.name, func() {
+			suite.Equal(tc.cpuSlots, calculateIndexTaskSlot(tc.fieldSize, 1, cpuParams))
+			if vecindexmgr.VectorBuildUsesGPU("HNSW", "true") {
+				suite.Equal(tc.gpuSlots, calculateIndexTaskSlot(tc.fieldSize, 1, gpuParams))
+			} else {
+				suite.Equal(tc.cpuSlots, calculateIndexTaskSlot(tc.fieldSize, 1, gpuParams))
+			}
+		})
+	}
+	// Explicit CPU builds retain the master's configurable weight.
+	suite.NoError(pt.Save(key, "32"))
+	suite.Equal(int64(64), calculateIndexTaskSlot(1024*mib, 1, cpuParams))
+	expected := int64(64)
+	if vecindexmgr.VectorBuildUsesGPU("HNSW", "true") {
+		expected = 4
+	}
+	suite.Equal(expected, calculateIndexTaskSlot(1024*mib, 1, gpuParams))
+	// Later values win, as they do when DataNode constructs its parameter map.
+	params := append(cpuParams, &commonpb.KeyValuePair{Key: "gpu_build", Value: "true"})
+	suite.Equal(expected, calculateIndexTaskSlot(1024*mib, 1, params))
 }
 
 func (suite *UtilSuite) TestEstimateFMIndexBuildPeakBytes() {

@@ -60,6 +60,13 @@ type emptyIndex struct {
 	deleted bool
 }
 
+func (*emptyIndex) GetDownloadSize() (uint64, error)         { return 0, nil }
+func (*emptyIndex) HasResidentInput() bool                   { return false }
+func (*emptyIndex) LoadData() error                          { return nil }
+func (*emptyIndex) TryReserveBuild() (bool, error)           { return true, nil }
+func (*emptyIndex) SpillInput(context.Context) (bool, error) { return false, nil }
+func (*emptyIndex) ReleaseInputMemory() error                { return nil }
+func (*emptyIndex) Build() error                             { return nil }
 func (index *emptyIndex) Delete() error {
 	index.deleted = true
 	return nil
@@ -154,6 +161,8 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
+	err = t.LoadData(context.Background())
+	suite.NoError(err)
 	err = t.Execute(context.Background())
 	suite.NoError(err)
 	err = t.PostExecute(context.Background())
@@ -172,13 +181,13 @@ func (suite *IndexBuildTaskSuite) TestExecuteDoesNotLogStorageCredentials() {
 	externalSpecSecret := statsLogSentinel("INDEX", "EXTERNAL", "SPEC", "SENTINEL")
 	externalSpec := `{"format":"parquet","extfs":{"future_secret":"` + externalSpecSecret + `"}}`
 
-	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(_ context.Context, params *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndexBuilder).To(func(_ context.Context, params *indexcgopb.BuildIndexInfo) (indexcgowrapper.PreparedIndex, error) {
 		suite.Equal(accessKey, params.GetStorageConfig().GetAccessKeyID())
 		suite.Equal(secretKey, params.GetStorageConfig().GetSecretAccessKey())
 		suite.Equal(caCert, params.GetStorageConfig().GetSslCACert())
 		suite.Contains(params.GetStorageConfig().GetGcpCredentialJSON(), gcpCredential)
 		suite.Equal(externalSpec, params.GetExternalSpec())
-		return nil, nil
+		return &emptyIndex{}, nil
 	}).Build()
 	defer createIndexPatch.UnPatch()
 
@@ -217,7 +226,7 @@ func (suite *IndexBuildTaskSuite) TestExecuteDoesNotLogStorageCredentials() {
 	}
 	task.newTypeParams = map[string]string{"dim": "128"}
 
-	err := task.Execute(ctx)
+	err := task.LoadData(ctx)
 	suite.NoError(err)
 	output := logs.String()
 	suite.NotContains(output, accessKey)
@@ -272,10 +281,10 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 	defer cancel()
 
 	var captured *indexcgopb.BuildIndexInfo
-	patch := mockey.Mock(indexcgowrapper.CreateIndex).To(
-		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+	patch := mockey.Mock(indexcgowrapper.CreateIndexBuilder).To(
+		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.PreparedIndex, error) {
 			captured = info
-			return nil, nil
+			return &emptyIndex{}, nil
 		}).Build()
 	defer patch.UnPatch()
 
@@ -305,7 +314,7 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 	task.newTypeParams = map[string]string{"dim": "128"}
 	task.tr = timerecord.NewTimeRecorder("test-max-connections")
 
-	err := task.Execute(ctx)
+	err := task.LoadData(ctx)
 	suite.NoError(err)
 	suite.Require().NotNil(captured)
 	suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())

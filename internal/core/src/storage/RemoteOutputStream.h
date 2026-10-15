@@ -21,8 +21,10 @@ namespace milvus::storage {
 
 class RemoteOutputStream : public milvus::OutputStream {
  public:
+    // request_size bounds each storage write; 0 preserves caller-sized writes.
     explicit RemoteOutputStream(
-        std::shared_ptr<arrow::io::OutputStream>&& output_stream);
+        std::shared_ptr<arrow::io::OutputStream>&& output_stream,
+        size_t request_size = 0);
 
     ~RemoteOutputStream() override;
 
@@ -33,13 +35,22 @@ class RemoteOutputStream : public milvus::OutputStream {
     Write(const void* data, size_t size) override;
 
     size_t
+    Write(const std::shared_ptr<arrow::Buffer>& buffer);
+
+    size_t
     Write(int fd, size_t size) override;
 
     void
     Close() override;
 
  private:
+    size_t
+    DoWrite(const void* data,
+            size_t size,
+            const std::shared_ptr<arrow::Buffer>& buffer = nullptr);
+
     std::shared_ptr<arrow::io::OutputStream> output_stream_;
+    size_t request_size_;
 };
 
 }  // namespace milvus::storage

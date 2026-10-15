@@ -107,6 +107,40 @@ func Test_VecIndex_DataType_Support(t *testing.T) {
 	}
 }
 
+func TestVectorBuildUsesGPU(t *testing.T) {
+	original := GetVecIndexMgrInstance()
+	vecIndexMgr = &vecIndexMgrImpl{features: map[string]uint64{
+		"HNSW":                  Float32Flag | GpuBuildFlag,
+		"IVF_FLAT":              Float32Flag,
+		"GPU_CAGRA":             Float32Flag | GpuFlag,
+		"SPARSE_INVERTED_INDEX": SparseFloat32Flag,
+		"SPARSE_WAND":           SparseFloat32Flag,
+	}}
+	t.Cleanup(func() { vecIndexMgr = original })
+	for _, tc := range []struct {
+		index  string
+		option string
+		want   bool
+	}{
+		{"HNSW", "", false},
+		{"HNSW", "invalid", false},
+		{"HNSW", "false", false},
+		{"HNSW", "true", true},
+		{"HNSW", "0", false},
+		{"HNSW", "1", true},
+		{"IVF_FLAT", "true", false},
+		{"GPU_CAGRA", "", true},
+		{"GPU_CAGRA", "false", true},
+		{"SPARSE_INVERTED_INDEX", "true", false},
+		{"SPARSE_WAND", "", false},
+		{"UNKNOWN", "true", false},
+	} {
+		if got := VectorBuildUsesGPU(tc.index, tc.option); got != tc.want {
+			t.Errorf("VectorBuildUsesGPU(%q, %q) = %v, want %v", tc.index, tc.option, got, tc.want)
+		}
+	}
+}
+
 func Test_VecIndex_IsNoTrainIndex(t *testing.T) {
 	mgr := GetVecIndexMgrInstance()
 	tests := []struct {

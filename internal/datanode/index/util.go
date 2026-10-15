@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -66,6 +67,14 @@ func mapToKVPairs(m map[string]string) []*commonpb.KeyValuePair {
 		})
 	}
 	return kvs
+}
+
+func getIndexBuildStorageConfig() *indexcgopb.IndexBuildStorageConfig {
+	cfg := &paramtable.Get().DataNodeCfg
+	return &indexcgopb.IndexBuildStorageConfig{
+		Concurrency: uint64(max(1, cfg.IndexBuildStorageConcurrency.GetAsInt64())),
+		RequestSize: uint64(max(1, cfg.IndexBuildStorageRequestSize.GetAsSize())),
+	}
 }
 
 func CalculateNodeSlots() int64 {

@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "common/Common.h"
 #include "common/Slice.h"
 #include "storage/ChunkManager.h"
@@ -177,6 +178,42 @@ TEST(V1ArtifactIOTest, RoundTripsSlicedEntryThroughProductionTransport) {
     EXPECT_EQ(source.ReadEntry("payload"),
               (std::vector<uint8_t>(payload.begin(), payload.end())));
 
+    sink.ReleaseLocalStaging();
+}
+
+TEST(V1ArtifactIOTest, RetainsRawBufferUntilUpload) {
+    auto remote_root = LocalDirectory::CreateOwned(
+        std::filesystem::temp_directory_path().string(),
+        "milvus-filesink-stream-test-XXXXXX",
+        "V1 artifact stream test");
+    StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = remote_root->Path() + "/";
+    auto chunk_manager = CreateChunkManager(storage_config);
+    auto filesystem = InitArrowFileSystem(storage_config);
+    FieldDataMeta field_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {
+        3, 100, 1000, 1, "artifact_io", "field", DataType::INT64, 1, false};
+    FileManagerContext context(
+        field_meta, index_meta, chunk_manager, filesystem);
+
+    V1DiskSink sink(context);
+    auto buffer = arrow::Buffer::FromString("payload");
+    std::weak_ptr<arrow::Buffer> retained = buffer;
+    sink.WriteRawEntry("payload", std::move(buffer));
+    EXPECT_FALSE(retained.expired());
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator(remote_root->Path())) {
+        EXPECT_FALSE(entry.is_regular_file());
+    }
+    const auto stats = sink.Finish();
+    EXPECT_TRUE(retained.expired());
+    ASSERT_EQ(stats.Files().size(), 1);
+    auto input = filesystem->OpenInputFile(stats.Files().front().file_name);
+    ASSERT_TRUE(input.ok()) << input.status();
+    auto bytes = (*input)->ReadAt(0, 7);
+    ASSERT_TRUE(bytes.ok()) << bytes.status();
+    EXPECT_EQ((*bytes)->ToString(), "payload");
     sink.ReleaseLocalStaging();
 }
 

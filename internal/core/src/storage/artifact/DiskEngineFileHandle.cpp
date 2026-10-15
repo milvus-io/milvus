@@ -180,7 +180,8 @@ class RestrictedDiskEngineFileManager final
     }
 
     std::shared_ptr<milvus::OutputStream>
-    OpenOutputStream(const std::string& filename) override {
+    OpenOutputStream(const std::string& filename,
+                     size_t /*file_size*/ = 0) override {
         try {
             ThrowInfo(FileWriteFailed,
                       "stream-loading disk vector index attempted to open "

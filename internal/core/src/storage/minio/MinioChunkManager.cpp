@@ -17,8 +17,12 @@
 #include "storage/minio/MinioChunkManager.h"
 #include "storage/minio/GuardedS3EndpointProvider.h"
 
+#include <arrow/util/cpu_info.h>
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
+#include <aws/crt/io/Bootstrap.h>
+#include <aws/crt/io/EventLoopGroup.h>
+#include <aws/crt/io/HostResolver.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -82,6 +86,22 @@ ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options) {
                 });
         return Aws::MakeShared<GoogleHttpClientFactory>(
             GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
+    };
+}
+
+static void
+ConfigureClientBootstrap(Aws::SDKOptions& options) {
+    // Both initialization paths must configure the first process-wide SDK instance.
+    options.ioOptions.clientBootstrap_create_fn = [] {
+        Aws::Crt::Io::EventLoopGroup event_loops(static_cast<uint16_t>(
+            std::clamp(arrow::internal::CpuInfo::GetInstance()->num_cores(),
+                       1,
+                       65535)));
+        Aws::Crt::Io::DefaultHostResolver resolver(event_loops, 8, 60);
+        auto bootstrap = std::make_shared<Aws::Crt::Io::ClientBootstrap>(
+            event_loops, resolver);
+        bootstrap->EnableBlockingShutdown();
+        return bootstrap;
     };
 }
 
@@ -172,6 +192,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
         sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
             return std::make_shared<AwsLogger>(log_level);
         };
+        ConfigureClientBootstrap(sdk_options_);
         Aws::InitAPI(sdk_options_);
     }
 }
@@ -225,6 +246,7 @@ MinioChunkManager::InitSDKAPIDefault(const std::string& log_level_str,
         sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
             return std::make_shared<AwsLogger>(log_level);
         };
+        ConfigureClientBootstrap(sdk_options_);
         Aws::InitAPI(sdk_options_);
     }
 }

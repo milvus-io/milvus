@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -46,6 +48,8 @@
 #include "storage/Types.h"
 
 namespace milvus::storage {
+
+struct ManifestReadPlan;
 
 // Normalize path to be consistent with Go's path.Join behavior.
 // This handles two issues:
@@ -129,6 +133,8 @@ struct FileManagerContext {
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
     std::string stats_base_path;
     StorageColumnMappings storage_column_mappings;
+    IndexBuildStorageConfig index_build_storage_config{};
+    std::shared_ptr<ManifestReadPlan> manifest_read_plan;
 };
 
 #define FILEMANAGER_TRY try {
@@ -240,8 +246,9 @@ class FileManagerImpl : public milvus::FileManager {
      * remote object path.
      */
     std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& local_full_file_path) override final {
-        return OpenOutputStream(local_full_file_path, /*is_index_file=*/true);
+    OpenOutputStream(const std::string& local_full_file_path,
+                     size_t /*file_size*/ = 0) override final {
+        return CreateOutputStream(local_full_file_path, /*is_index_file=*/true);
     }
 
     std::shared_ptr<InputStream>
@@ -263,9 +270,9 @@ class FileManagerImpl : public milvus::FileManager {
                 std::move(remote_file.ValueOrDie())));
     }
 
-    std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& local_full_file_path,
-                     bool is_index_file) {
+    std::shared_ptr<RemoteOutputStream>
+    CreateOutputStream(const std::string& local_full_file_path,
+                       bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open output stream");
         auto local_file_name = GetFileName(local_full_file_path);
         auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
@@ -287,14 +294,25 @@ class FileManagerImpl : public milvus::FileManager {
                 }
             }
         }
-        auto remote_stream = fs_->OpenOutputStream(remote_file_path);
+        auto upload_sizable =
+            std::dynamic_pointer_cast<milvus_storage::UploadSizable>(fs_);
+        auto remote_stream =
+            upload_sizable ? upload_sizable->OpenOutputStreamWithUploadSize(
+                                 remote_file_path,
+                                 nullptr,
+                                 index_build_storage_config_.request_size)
+                           : fs_->OpenOutputStream(remote_file_path);
+        if (remote_stream.status().IsNotImplemented()) {
+            remote_stream = fs_->OpenOutputStream(remote_file_path);
+        }
         if (!remote_stream.ok()) {
             ThrowInfo(ArrowStatusToErrorCode(remote_stream.status()),
                       "failed to open remote stream, reason: {}",
                       remote_stream.status().ToString());
         }
         return std::make_shared<milvus::storage::RemoteOutputStream>(
-            std::move(remote_stream.ValueOrDie()));
+            std::move(remote_stream.ValueOrDie()),
+            index_build_storage_config_.request_size);
     }
 
     std::unique_ptr<IndexEntryWriter>
@@ -317,7 +335,7 @@ class FileManagerImpl : public milvus::FileManager {
             }
         }
         return std::make_unique<IndexEntryDirectStreamWriter>(
-            OpenOutputStream(filename, is_index_file));
+            CreateOutputStream(filename, is_index_file));
     }
 
     virtual std::string
@@ -413,6 +431,8 @@ class FileManagerImpl : public milvus::FileManager {
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
     StorageColumnMappings storage_column_mappings_;
+    IndexBuildStorageConfig index_build_storage_config_{};
+    std::shared_ptr<ManifestReadPlan> manifest_read_plan_;
 
     // stats base path computed by Go caller; when non-empty, overrides
     // the internally computed remote prefix for text/json stats files.

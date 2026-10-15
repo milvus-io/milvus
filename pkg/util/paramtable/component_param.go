@@ -8441,6 +8441,8 @@ type dataNodeConfig struct {
 	MaxVecIndexBuildConcurrency    ParamItem `refreshable:"true"`
 	JSONStatsBuildMaxWorkers       ParamItem `refreshable:"true"`
 	JSONStatsBuildMaxInflightBytes ParamItem `refreshable:"true"`
+	IndexBuildStorageConcurrency   ParamItem `refreshable:"false"`
+	IndexBuildStorageRequestSize   ParamItem `refreshable:"false"`
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
@@ -9077,6 +9079,23 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		},
 	}
 	p.JSONStatsBuildMaxInflightBytes.Init(base.mgr)
+	p.IndexBuildStorageConcurrency = ParamItem{
+		Key:          "indexNode.build.storage.concurrency",
+		Version:      "3.0.0",
+		DefaultValue: "64",
+		Doc:          "Maximum concurrent requests per index task, applied separately to reads and writes. Also sets the storage client connection limit.",
+		Export:       true,
+	}
+	p.IndexBuildStorageConcurrency.Init(base.mgr)
+
+	p.IndexBuildStorageRequestSize = ParamItem{
+		Key:          "indexNode.build.storage.requestSize",
+		Version:      "3.0.0",
+		DefaultValue: "8388608",
+		Doc:          "Target bytes per storage request. Reads include whole row groups and may exceed this size; writes use it as the upload part size.",
+		Export:       true,
+	}
+	p.IndexBuildStorageRequestSize.Init(base.mgr)
 
 	p.WorkerSlotUnit = ParamItem{
 		Key:          "dataNode.workerSlotUnit",

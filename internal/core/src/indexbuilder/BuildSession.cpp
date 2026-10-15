@@ -40,6 +40,7 @@
 #include "indexbuilder/VectorBuildMaterializer.h"
 #include "indexbuilder/VectorDiskBuildMaterializer.h"
 #include "milvus-storage/common/extend_status.h"
+#include "milvus-storage/reader.h"
 #include "storage/DataCodec.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/Util.h"
@@ -410,7 +411,10 @@ VisitBuildField(const BuildSource& build_source,
                     element_type,
                     std::move(mapping),
                     visitor,
-                    manifest_inflight_bytes);
+                    manifest_inflight_bytes,
+                    storage::RawManifestChunkReadOptions{
+                        .manifest_read_plan = context.manifest_read_plan,
+                        .storage = context.index_build_storage_config});
             }
         },
         build_source);
@@ -550,21 +554,105 @@ BuildSession::BuildSession(BuildRequest request,
     : req_(std::move(request)),
       file_manager_context_(std::move(file_manager_context)),
       field_spec_(AdaptBuildField(file_manager_context_)) {
+    build_context_.build_id = file_manager_context_.indexMeta.build_id;
     NormalizeAndValidateRequest();
 }
 
+BuildSession::~BuildSession() = default;
+
 void
 BuildSession::BuildFromSource() {
+    LoadData();
+    Build();
+}
+
+void
+BuildSession::LoadData() {
     AssertInfo(state_ == State::Ready,
-               "index-build session cannot build more than once");
+               "index-build session cannot load input more than once");
+    state_ = State::Failed;
+    materializer_ = Materialize();
+    state_ = State::Loaded;
+}
+
+void
+BuildSession::Build() {
+    AssertInfo(state_ == State::Loaded,
+               "index-build session requires prepared input");
     try {
-        product_.emplace(RunToArtifact());
+        if (materializer_) {
+            product_.emplace(
+                BuildProduct::FromArtifact(std::move(*materializer_).Build()));
+        } else {
+            product_.emplace(BuildProduct::SkippedEmpty());
+        }
+        materializer_.reset();
         state_ =
             product_->IsSkippedEmpty() ? State::SkippedEmpty : State::Artifact;
+    } catch (const SegcoreError& error) {
+        materializer_.reset();
+        state_ = State::Failed;
+        if (error.get_error_code() != DataIsEmpty) {
+            throw;
+        }
+        product_.emplace(BuildProduct::SkippedEmpty());
+        state_ = State::SkippedEmpty;
     } catch (...) {
+        materializer_.reset();
         product_.reset();
         state_ = State::Failed;
         throw;
+    }
+}
+
+uint64_t
+BuildSession::GetDownloadSize() const {
+    if (const auto* source = std::get_if<ManifestBuildSource>(&req_.source)) {
+        auto bytes = storage::GetManifestDownloadSize(source->manifest_path,
+                                                      file_manager_context_);
+        if (bytes.has_value()) {
+            return *bytes;
+        }
+    } else if (const auto* source =
+                   std::get_if<V1BinlogBuildSource>(&req_.source)) {
+        uint64_t bytes = 0;
+        for (const auto& file : source->files) {
+            bytes += file_manager_context_.chunkManagerPtr->Size(file);
+        }
+        return bytes;
+    }
+    // Legacy column-group lists do not identify the indexed field's files.
+    return file_manager_context_.index_build_storage_config.concurrency *
+           file_manager_context_.index_build_storage_config.request_size;
+}
+
+bool
+BuildSession::HasResidentInput() const {
+    return !materializer_ || materializer_->HasResidentInput();
+}
+
+bool
+BuildSession::TryReserveBuild() {
+    AssertInfo(state_ == State::Loaded, "index input is not prepared");
+    return !materializer_ || materializer_->TryReserveBuild();
+}
+
+bool
+BuildSession::SpillInput() {
+    return materializer_ && materializer_->SpillInput();
+}
+
+void
+BuildSession::StopSpill() {
+    if (materializer_) {
+        materializer_->StopSpill();
+    }
+}
+
+void
+BuildSession::ReleaseInputMemory() {
+    if (materializer_) {
+        materializer_->ReleaseInputMemory();
     }
 }
 
@@ -741,8 +829,8 @@ BuildSession::ValidateInputSpec(const index::BuilderInputSpec& spec) const {
     }
 }
 
-BuildProduct
-BuildSession::RunToArtifact() {
+std::unique_ptr<BuildInputMaterializer>
+BuildSession::Materialize() {
     try {
         const auto add_missing_rows = [&](auto& materializer,
                                           int64_t missing_rows) {
@@ -882,7 +970,8 @@ BuildSession::RunToArtifact() {
                     field_spec_.nullable,
                     req_.expected_rows,
                     req_.family,
-                    req_.params);
+                    req_.params,
+                    &build_context_);
             };
             auto materializer = make_materializer();
             const auto spec = materializer->InputSpec();
@@ -890,7 +979,10 @@ BuildSession::RunToArtifact() {
             const auto vector_side_input = PrepareVectorSideInputPlan(
                 req_, field_spec_, file_manager_context_, spec);
 
-            materialize_primary(materializer, make_materializer, "disk vector");
+            if (!ReadDenseInput(*materializer)) {
+                materialize_primary(
+                    materializer, make_materializer, "disk vector");
+            }
             materializer->FinishPrimary();
             if (materializer->RequiresEngineBuild() &&
                 vector_side_input.has_value()) {
@@ -901,7 +993,7 @@ BuildSession::RunToArtifact() {
                                                 materializer->PrimaryLayout());
                 materializer->SetScalarInfo(std::move(scalar_info));
             }
-            return BuildProduct::FromArtifact(std::move(*materializer).Build());
+            return materializer;
         }
 
         if (req_.family == index::families::kVectorMem) {
@@ -912,15 +1004,18 @@ BuildSession::RunToArtifact() {
                     file_manager_context_.indexMeta.dim,
                     req_.expected_rows,
                     req_.family,
-                    req_.params);
+                    req_.params,
+                    &build_context_);
             };
             auto materializer = make_materializer();
             const auto spec = materializer->InputSpec();
             ValidateInputSpec(spec);
             const auto vector_side_input = PrepareVectorSideInputPlan(
                 req_, field_spec_, file_manager_context_, spec);
-            materialize_primary(
-                materializer, make_materializer, "resident vector");
+            if (!ReadDenseInput(*materializer)) {
+                materialize_primary(
+                    materializer, make_materializer, "resident vector");
+            }
             if (vector_side_input.has_value()) {
                 auto scalar_info =
                     MaterializeVectorScalarInfo(*vector_side_input,
@@ -929,7 +1024,7 @@ BuildSession::RunToArtifact() {
                                                 materializer->PrimaryLayout());
                 materializer->SetScalarInfo(std::move(scalar_info));
             }
-            return BuildProduct::FromArtifact(std::move(*materializer).Build());
+            return materializer;
         }
 
         const auto make_materializer = [&] {
@@ -942,13 +1037,31 @@ BuildSession::RunToArtifact() {
         auto materializer = make_materializer();
         ValidateInputSpec(materializer->InputSpec());
         materialize_primary(materializer, make_materializer, "scalar");
-        return BuildProduct::FromArtifact(std::move(*materializer).Build());
+        return materializer;
     } catch (const SegcoreError& error) {
         if (error.get_error_code() == DataIsEmpty) {
-            return BuildProduct::SkippedEmpty();
+            return nullptr;
         }
         throw;
     }
+}
+
+template <typename Materializer>
+bool
+BuildSession::ReadDenseInput(Materializer& materializer) {
+    const auto* source = std::get_if<ManifestBuildSource>(&req_.source);
+    if (!source) {
+        return false;
+    }
+    auto rows = storage::ReadFieldDataFromManifestInto(
+        source->manifest_path, file_manager_context_, req_.expected_rows, [&] {
+            return materializer.AllocateInput();
+        });
+    if (!rows) {
+        return false;
+    }
+    materializer.FinishInput(*rows);
+    return true;
 }
 
 storage::ArtifactStats

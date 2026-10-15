@@ -27,6 +27,33 @@ CreateIndex(CIndex* res_index,
             const uint64_t len);
 
 CStatus
+CreateIndexBuilder(CIndex* res_index,
+                   const uint8_t* serialized_build_index_info,
+                   const uint64_t len);
+
+// Output pointers are required except has_resident_input in LoadIndexData.
+CStatus
+GetIndexDownloadSize(CIndex index, uint64_t* bytes);
+
+CStatus
+LoadIndexData(CIndex index, bool* has_resident_input);
+
+CStatus
+TryReserveIndexBuild(CIndex index, bool* admitted);
+
+CStatus
+SpillIndexInput(CIndex index, bool* complete);
+
+CStatus
+StopIndexSpill(CIndex index);
+
+CStatus
+ReleaseIndexInputMemory(CIndex index);
+
+CStatus
+BuildIndex(CIndex index);
+
+CStatus
 DeleteIndex(CIndex index);
 
 CStatus

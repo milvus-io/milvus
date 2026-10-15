@@ -15,11 +15,13 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -30,6 +32,7 @@
 #include "index/contracts/Registry.h"
 #include "index/contracts/build/IArtifactBuilder.h"
 #include "index/contracts/build/VectorBuildInput.h"
+#include "indexbuilder/BuildInputMaterializer.h"
 #include "storage/artifact/Artifact.h"
 
 namespace milvus::indexbuilder {
@@ -126,17 +129,59 @@ class VectorScalarInfoAccumulator {
     std::unique_ptr<Impl> impl_;
 };
 
+// Dense input shared by memory and disk materializers. Spill preserves memory
+// for a final admission check; only ReleaseMemory drops the resident allocation.
+// The caller joins Spill before release, load, move or destruction.
+class VectorInput {
+ public:
+    VectorInput(size_t bytes, std::string path = {});
+    ~VectorInput();
+
+    uint8_t*
+    Data() const {
+        return data_.get();
+    }
+
+    bool
+    OnDisk() const {
+        return on_disk_;
+    }
+
+    bool
+    Spill(size_t rows, size_t dim, size_t row_bytes);
+
+    void
+    StopSpill() {
+        stop_spill_.store(true);
+    }
+
+    void
+    ReleaseMemory();
+
+    void
+    Load();
+
+ private:
+    std::unique_ptr<uint8_t[]> data_;
+    size_t bytes_;
+    std::string path_;
+    bool owns_file_;
+    bool on_disk_{false};
+    std::atomic<bool> stop_spill_{false};
+};
+
 // Owns one complete compact resident tensor and every side view consumed by one
 // typed vector builder. FieldData batches are released after Add.
-class VectorBuildMaterializer final {
+class VectorBuildMaterializer final : public BuildInputMaterializer {
  public:
     VectorBuildMaterializer(DataType field_type,
                             DataType value_type,
                             int64_t dim,
                             int64_t expected_rows,
                             const index::IndexFamily& family,
-                            const index::BuildParams& params);
-    ~VectorBuildMaterializer();
+                            const index::BuildParams& params,
+                            milvus::OpContext* op_context = nullptr);
+    ~VectorBuildMaterializer() override;
 
     VectorBuildMaterializer(VectorBuildMaterializer&&) noexcept;
     VectorBuildMaterializer&
@@ -147,10 +192,10 @@ class VectorBuildMaterializer final {
     operator=(const VectorBuildMaterializer&) = delete;
 
     const index::BuilderInputSpec&
-    InputSpec() const;
+    InputSpec() const override;
 
     void
-    Add(const FieldDataPtr& batch);
+    Add(const FieldDataPtr& batch) override;
 
     const VectorPrimaryLayout&
     PrimaryLayout() const;
@@ -158,8 +203,34 @@ class VectorBuildMaterializer final {
     void
     SetScalarInfo(VectorScalarInfo scalar_info);
 
+    bool
+    TryReserveBuild() override;
+
+    bool
+    HasResidentInput() const override {
+        return input_ ? input_->Data() != nullptr : layout_.PhysicalRows() != 0;
+    }
+
+    // Complete non-null dense input can be decoded into this allocation
+    // without retaining a second column-sized set of source batches.
+    uint8_t*
+    AllocateInput();
+
+    void
+    FinishInput(size_t rows);
+
+    bool
+    SpillInput() override;
+
+    void
+    StopSpill() override;
+
+    void
+    ReleaseInputMemory() override;
+
     storage::ArtifactPtr
-    Build() &&;
+        Build() &&
+        override;
 
  private:
     template <typename T>
@@ -217,6 +288,8 @@ class VectorBuildMaterializer final {
     std::optional<VectorScalarInfo> scalar_info_;
     bool consumed_{false};
     State state_;
+    milvus::OpContext* op_context_{nullptr};
+    std::unique_ptr<VectorInput> input_;
 };
 
 }  // namespace milvus::indexbuilder

@@ -259,10 +259,31 @@ CStatus
 CreateIndex(CIndex* res_index,
             const uint8_t* serialized_build_index_info,
             const uint64_t len) {
+    auto status =
+        CreateIndexBuilder(res_index, serialized_build_index_info, len);
+    if (status.error_code != Success) {
+        return status;
+    }
+    status = LoadIndexData(*res_index, nullptr);
+    if (status.error_code == Success) {
+        status = BuildIndex(*res_index);
+    }
+    if (status.error_code != Success) {
+        delete static_cast<milvus::indexbuilder::BuildSession*>(*res_index);
+        *res_index = nullptr;
+    }
+    return status;
+}
+
+CStatus
+CreateIndexBuilder(CIndex* res_index,
+                   const uint8_t* serialized_build_index_info,
+                   const uint64_t len) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        AssertInfo(res_index != nullptr, "index output handle was null");
+        AssertInfo(res_index != nullptr, "index output pointer is null");
+        *res_index = nullptr;
         auto build_index_info =
             std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
         auto res =
@@ -280,9 +301,85 @@ CreateIndex(CIndex* res_index,
         auto session = std::make_unique<milvus::indexbuilder::BuildSession>(
             std::move(prepared.request),
             std::move(prepared.file_manager_context));
-        session->BuildFromSource();
         *res_index = session.release();
         return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+GetIndexDownloadSize(CIndex index, uint64_t* bytes) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        AssertInfo(bytes != nullptr, "download size output is null");
+        *bytes = RequireBuildSession(index).GetDownloadSize();
+        return SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+LoadIndexData(CIndex index, bool* has_resident_input) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        auto& session = RequireBuildSession(index);
+        session.LoadData();
+        if (has_resident_input != nullptr) {
+            *has_resident_input = session.HasResidentInput();
+        }
+        return SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+TryReserveIndexBuild(CIndex index, bool* admitted) {
+    try {
+        auto& session = RequireBuildSession(index);
+        AssertInfo(admitted != nullptr, "reservation output is null");
+        *admitted = session.TryReserveBuild();
+        return SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+SpillIndexInput(CIndex index, bool* complete) {
+    try {
+        auto& session = RequireBuildSession(index);
+        AssertInfo(complete != nullptr, "spill output is null");
+        *complete = session.SpillInput();
+        return SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+StopIndexSpill(CIndex index) {
+    try {
+        auto& session = RequireBuildSession(index);
+        session.StopSpill();
+        return SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+ReleaseIndexInputMemory(CIndex index) {
+    try {
+        auto& session = RequireBuildSession(index);
+        session.ReleaseInputMemory();
+        return SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+BuildIndex(CIndex index) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        RequireBuildSession(index).Build();
+        return SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
 }
