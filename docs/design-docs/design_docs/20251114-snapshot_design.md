@@ -130,6 +130,34 @@ type StorageV2SegmentManifest struct {
   - is_sorted (whether segment data is sorted by primary key)
 - Uses Avro format to provide schema evolution support
 
+### Snapshot format compatibility
+
+V0 (missing `format_version`) and V1-V5 manifests use raw Avro binary.
+Readers select the exact historical writer schema: V2 adds index path version,
+V3 adds commit timestamp, V4 adds field groups and format, and V5 adds the
+manifest index marker. Existing upstream segment metadata retains that marker.
+
+V6 writes one record per Avro Object Container File (OCF), embedding the full
+writer schema and using the null (uncompressed) codec. The record fields remain
+those of V5; V6 changes the container encoding rather than the segment model.
+
+`format_version` is a writer format identifier, not a reader ceiling. OCF
+readers use the embedded writer schema and skip fields absent from the current
+Go structure. Metadata readers likewise ignore unknown JSON fields.
+
+Future format changes MUST consider compatibility with existing V6 readers.
+Keep OCF framing and supported codecs; preserve existing field names, types,
+and meanings; and make added fields safe for older readers to ignore. A
+change to storage layouts, index interpretation, or other required restore
+semantics needs explicit reader handling and compatibility tests before the
+new writer format is introduced. Embedded schemas describe binary encoding;
+they cannot establish semantic restore compatibility. There is no separate
+minimum-reader or feature-negotiation protocol.
+
+Historical raw binary manifests continue to require an exact V0-V5 version;
+V6+ raw binary manifests are rejected. Old unmodified readers cannot read OCF
+snapshots. OCF corruption must not fall back to historical binary decoding.
+
 **StorageV2 Support**: For segments using Milvus's newer storage format, additional manifest paths are stored in `StorageV2ManifestList`. This enables seamless snapshot/restore for both legacy and new storage formats.
 
 ### Write Process (SnapshotWriter)
@@ -139,7 +167,7 @@ type StorageV2SegmentManifest struct {
    a. Create manifest directory: manifests/{snapshot_id}/
    b. For each segment, call writeSegmentManifest():
       - Convert SegmentDescription to Avro ManifestEntry
-      - Serialize to Avro binary format
+      - Serialize to Avro OCF with the writer schema
       - Write to S3: manifests/{snapshot_id}/{segment_id}.avro
    c. Collect StorageV2 manifest paths (if applicable)
    d. Call writeMetadataFile()
