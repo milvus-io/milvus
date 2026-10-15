@@ -1117,3 +1117,35 @@ func TestParseManifestBodyKey(t *testing.T) {
 		assert.False(t, ok, bad)
 	}
 }
+
+// A store failure that a retry does not fix keeps its own merr code. Other
+// store failures, such as a throttle or a generic IO failure, are marked as
+// pkerr.ErrUnavailable.
+func TestStoreFailureClassification(t *testing.T) {
+	cases := []struct {
+		name        string
+		err         error
+		unavailable bool
+		code        int32
+	}{
+		{"throttle", merr.WrapErrIoTooManyRequests("k", errors.New("slow down")), true, merr.Code(merr.ErrServiceUnavailable)},
+		{"io failed", merr.WrapErrIoFailed("k", errors.New("connection refused")), true, merr.Code(merr.ErrServiceUnavailable)},
+		{"untyped", errors.New("x"), true, merr.Code(merr.ErrServiceUnavailable)},
+		{"permission denied", merr.WrapErrIoPermissionDenied("k", errors.New("access denied")), false, merr.Code(merr.ErrIoPermissionDenied)},
+		{"bucket not found", merr.WrapErrIoBucketNotFound("k", errors.New("no such bucket")), false, merr.Code(merr.ErrIoBucketNotFound)},
+		{"invalid credentials", merr.WrapErrIoInvalidCredentials("k", errors.New("expired token")), false, merr.Code(merr.ErrIoInvalidCredentials)},
+		{"entity too large", merr.WrapErrIoEntityTooLarge("k", errors.New("too large")), false, merr.Code(merr.ErrIoEntityTooLarge)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, _, s := claimed(t, 3)
+			s.WriteErr = c.err
+			_, err := m.CommitFlush(context.Background(), flush(3, 10, 1))
+			require.Error(t, err)
+			assert.Equal(t, c.unavailable, errors.Is(err, pkerr.ErrUnavailable), "%v", err)
+			got := pkerr.ToMerr(err)
+			assert.Equal(t, c.code, merr.Code(got), "%v", got)
+			assert.Equal(t, c.unavailable, merr.IsRetryableErr(got), "%v", got)
+		})
+	}
+}
