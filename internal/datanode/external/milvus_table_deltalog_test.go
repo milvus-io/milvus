@@ -1037,11 +1037,10 @@ func TestGetMilvusTableSourcePKFieldMetadataErrors(t *testing.T) {
 		wantErr error
 	}{
 		{"corrupt_metadata", `{`, nil, merr.ErrDataIntegrity},
-		{"unsupported_version", `{"format_version":99999}`, nil, merr.ErrOperationNotSupported},
 		{"read_timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, parseErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(tc.data))
+			_, parseErr := snapshotio.ParseSnapshotMetadata([]byte(tc.data))
 			if tc.readErr != nil {
 				parseErr = tc.readErr
 			}

@@ -19,10 +19,12 @@
 package snapshotio
 
 import (
+	"bytes"
 	"strings"
 	"sync"
 
 	"github.com/iskorotkov/avro/v2"
+	"github.com/iskorotkov/avro/v2/ocf"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -34,8 +36,16 @@ import (
 )
 
 const (
-	// SnapshotFormatVersion is the current snapshot metadata and manifest format.
-	SnapshotFormatVersion = 5
+	// SnapshotFormatVersion identifies snapshots written by this implementation.
+	// Future readers must retain V0-V5 binary decoding and V6 OCF support.
+	// Future writers must preserve compatibility with V6 readers: keep OCF
+	// framing and supported codecs, preserve existing field names, types and
+	// meanings, and make new fields safe to ignore. Embedded schemas only
+	// describe encoding; incompatible restore semantics need explicit reader
+	// handling before a future writer format is introduced.
+	SnapshotFormatVersion = 6
+	// SelfDescribingManifestVersion is the first format requiring OCF manifests.
+	SelfDescribingManifestVersion = 6
 )
 
 var (
@@ -105,7 +115,8 @@ func ManifestSchemaV5() (avro.Schema, error) {
 	return manifestSchemaV5, manifestSchemaV5Err
 }
 
-// ManifestSchemaByVersion returns the Avro schema for a snapshot format version.
+// ManifestSchemaByVersion selects historical raw binary schemas.
+// OCF manifests carry their own writer schema.
 func ManifestSchemaByVersion(version int) (avro.Schema, error) {
 	switch version {
 	case 0, 1:
@@ -123,14 +134,11 @@ func ManifestSchemaByVersion(version int) (avro.Schema, error) {
 	}
 }
 
-// ValidateFormatVersion checks if a snapshot metadata version can be read.
+// ValidateFormatVersion validates the identifier, not a reader ceiling.
+// OCF embeds the writer schema; future changes must preserve compatibility.
 func ValidateFormatVersion(version int) error {
-	if version == 0 {
-		return nil
-	}
-	if version > SnapshotFormatVersion {
-		return merr.WrapErrOperationNotSupportedMsg("snapshot format version %d is too new, current supported version: %d (please upgrade Milvus)",
-			version, SnapshotFormatVersion)
+	if version < 0 {
+		return merr.WrapErrServiceInternalMsg("invalid snapshot format version: %d", version)
 	}
 	return nil
 }
@@ -144,17 +152,8 @@ func ParseSnapshotMetadata(data []byte) (*datapb.SnapshotMetadata, error) {
 	if err := opts.Unmarshal(data, metadata); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "failed to parse metadata JSON")
 	}
-	return metadata, nil
-}
-
-// ParseSnapshotMetadataWithVersionCheck deserializes metadata and rejects unsupported versions.
-func ParseSnapshotMetadataWithVersionCheck(data []byte) (*datapb.SnapshotMetadata, error) {
-	metadata, err := ParseSnapshotMetadata(data)
-	if err != nil {
-		return nil, err
-	}
 	if err := ValidateFormatVersion(int(metadata.GetFormatVersion())); err != nil {
-		return nil, err
+		return nil, merr.Wrap(err, "invalid snapshot metadata")
 	}
 	return metadata, nil
 }
@@ -180,10 +179,9 @@ type ManifestEntry struct {
 	CommitTimestamp   int64                   `avro:"commit_timestamp"`
 	ManifestHasIndex  bool                    `avro:"manifest_has_index"`
 
-	// manifestHasIndexPresent is derived from the snapshot format version and
-	// is intentionally not serialized. Version 5 always sets it; older records
-	// leave it false so their missing marker remains distinguishable from an
-	// explicit false value.
+	// manifestHasIndexPresent follows the embedded OCF writer schema or the
+	// legacy binary format version. It is not serialized, so an absent marker
+	// remains distinguishable from an explicit false value.
 	manifestHasIndexPresent bool
 }
 
@@ -272,21 +270,68 @@ type AvroJSONKeyIndexEntry struct {
 	Stats   *AvroJSONKeyStats `avro:"stats"`
 }
 
-// MarshalSegmentManifest serializes a segment description as a snapshot manifest.
+// MarshalSegmentManifest writes one segment in an OCF with its complete writer schema.
 func MarshalSegmentManifest(segment *datapb.SegmentDescription) ([]byte, error) {
 	avroSchema, err := ManifestSchema()
 	if err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to get manifest schema")
 	}
-	data, err := avro.Marshal(avroSchema, SegmentToManifestEntry(segment))
+	var buf bytes.Buffer
+	encoder, err := ocf.NewEncoderWithSchema(avroSchema, &buf, ocf.WithSchemaMarshaler(ocf.FullSchemaMarshaler))
 	if err != nil {
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to create avro container")
+	}
+	if err := encoder.Encode(SegmentToManifestEntry(segment)); err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to serialize entry to avro")
 	}
-	return data, nil
+	if err := encoder.Close(); err != nil {
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to finalize avro container")
+	}
+	return buf.Bytes(), nil
 }
 
-// ParseSegmentManifest deserializes a snapshot segment manifest Avro file.
+// ParseSegmentManifest uses embedded writer schemas for OCF files and exact
+// historical schemas for legacy raw binary files.
 func ParseSegmentManifest(data []byte, formatVersion int) (*datapb.SegmentDescription, error) {
+	if err := ValidateFormatVersion(formatVersion); err != nil {
+		return nil, merr.Wrap(err, "incompatible snapshot format")
+	}
+	if bytes.HasPrefix(data, []byte{'O', 'b', 'j', 1}) {
+		decoder, err := ocf.NewDecoder(bytes.NewReader(data))
+		if err != nil {
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to read avro container header")
+		}
+		if !decoder.HasNext() {
+			if err := decoder.Error(); err != nil {
+				return nil, merr.WrapErrServiceInternalErr(err, "failed to read avro container")
+			}
+			return nil, merr.WrapErrServiceInternalMsg("empty avro manifest container")
+		}
+		var record ManifestEntry
+		if err := decoder.Decode(&record); err != nil {
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to parse avro data")
+		}
+		if decoder.HasNext() {
+			return nil, merr.WrapErrServiceInternalMsg("avro manifest container contains multiple records")
+		}
+		if err := decoder.Error(); err != nil {
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to read avro container")
+		}
+		// OCF presence follows the embedded schema, independent of the outer
+		// snapshot version; older schemas do not carry the sticky index marker.
+		if schema, ok := decoder.Schema().(*avro.RecordSchema); ok {
+			for _, field := range schema.Fields() {
+				if field.Name() == "manifest_has_index" {
+					record.manifestHasIndexPresent = true
+					break
+				}
+			}
+		}
+		return ManifestEntryToSegment(record), nil
+	}
+	if formatVersion >= SelfDescribingManifestVersion {
+		return nil, merr.WrapErrServiceInternalMsg("snapshot format %d requires an avro container", formatVersion)
+	}
 	avroSchema, err := ManifestSchemaByVersion(formatVersion)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to get manifest schema for version %d", formatVersion)
