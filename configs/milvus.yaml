@@ -1252,10 +1252,7 @@ common:
       # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
       partialNullPolicy: error
     externalSparseVector:
-      # Positive byte budget per sparse normalization call; requires a restart.
-      # Includes output, offsets/validity and sorting/encoding scratch. Excludes source data,
-      # allocator overhead and concurrent calls. Reused ordered Binary arrays are exempt.
-      conversionMemoryLimit: 268435456 # 256 MiB
+      conversionMemoryLimit: 268435456 # Positive byte budget for estimated additional buffers per external sparse-vector normalization call. Includes output, Arrow offsets/validity, sorting and encoding scratch; excludes source data, allocator overhead and other concurrent calls. Ordered Binary arrays reused without conversion are exempt. Requires a restart.
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
