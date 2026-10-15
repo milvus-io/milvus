@@ -144,7 +144,8 @@ class TrackingVirtualPKChunkedColumn : public VirtualPKChunkedColumn {
     }
 
     TakeCellPin
-    MakeTakeCellPin(milvus::OpContext*) const override {
+    MakeTakeCellPin(milvus::OpContext*,
+                    const std::vector<int64_t>* = nullptr) const override {
         ++make_take_pin_calls;
         return {};
     }

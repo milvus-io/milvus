@@ -214,12 +214,6 @@ class VortexColumn final : public ChunkedColumnInterface {
                     int64_t count = 0) const override;
 
     void
-    BulkRawJsonAt(milvus::OpContext* op_ctx,
-                  std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets,
-                  int64_t count) const override;
-
-    void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
                   const uint32_t* row_offsets,

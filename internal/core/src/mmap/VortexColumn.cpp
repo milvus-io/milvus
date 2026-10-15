@@ -3633,45 +3633,6 @@ VortexColumn::BulkRawStringAt(
 }
 
 void
-VortexColumn::BulkRawJsonAt(milvus::OpContext* op_ctx,
-                            std::function<void(Json, size_t, bool)> fn,
-                            const int64_t* offsets,
-                            int64_t count) const {
-    if (data_type_ != DataType::JSON) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::BulkRawJsonAt only supports JSON fields");
-    }
-    if (offsets == nullptr) {
-        BulkStringLikeAt(
-            op_ctx,
-            [&](std::string_view value, size_t index, bool valid) {
-                fn(valid ? Json(MakePaddedJson(value)) : Json{}, index, valid);
-            },
-            offsets,
-            count);
-        return;
-    }
-    if (count == 0) {
-        return;
-    }
-    auto take =
-        Take(op_ctx,
-             TakeOptions{OffsetView::From(offsets, count), TargetType::Json});
-    AssertInfo(take != nullptr,
-               "vortex JSON take is unsupported for type {}",
-               data_type_);
-    const auto owned = take->GetOwn();
-    const auto* values = owned.values.data_as<Json>();
-    for (int64_t i = 0; i < count; ++i) {
-        if (take->IsValid(i)) {
-            fn(values[i], i, true);
-        } else {
-            fn(Json{}, i, false);
-        }
-    }
-}
-
-void
 VortexColumn::BulkRawBsonAt(
     milvus::OpContext* op_ctx,
     std::function<void(BsonView, uint32_t, uint32_t)> fn,
