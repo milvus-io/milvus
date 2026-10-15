@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -80,8 +81,8 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 		metrics:          metrics,
 		cchannelMeta:     cchannelMeta,
 		streamingVersion: streamingVersion,
-		replicateConfig:  replicateConfig,
 	}
+	cm.replicateConfig.Store(replicateConfig)
 
 	// Register the channel manager singleton after recovery.
 	register(cm)
@@ -216,7 +217,9 @@ type ChannelManager struct {
 	// null if no streaming service has been run.
 	// 1 if streaming service has been run once.
 	streamingEnableNotifiers []*syncutil.AsyncTaskNotifier[struct{}]
-	replicateConfig          *replicateutil.ConfigHelper
+	// replicateConfig is replaced whole, never modified in place, so a reader
+	// that needs only a snapshot of it skips cond.L.
+	replicateConfig atomic.Pointer[replicateutil.ConfigHelper]
 }
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
@@ -260,15 +263,14 @@ func (cm *ChannelManager) IsStreamingVersionAtLeast(version int64) bool {
 	return cm.streamingVersion != nil && cm.streamingVersion.Version >= version
 }
 
-// ReplicateRole returns the replicate role of the channel manager.
+// ReplicateRole returns the replicate role of the channel manager. It does not
+// take cond.L, which is held across etcd writes: the broadcaster checks the
+// role while holding its resource-key locks.
 func (cm *ChannelManager) ReplicateRole() replicateutil.Role {
-	cm.cond.L.Lock()
-	defer cm.cond.L.Unlock()
-
-	if cm.replicateConfig == nil {
-		return replicateutil.RolePrimary
+	if config := cm.replicateConfig.Load(); config != nil {
+		return config.GetCurrentCluster().Role()
 	}
-	return cm.replicateConfig.GetCurrentCluster().Role()
+	return replicateutil.RolePrimary
 }
 
 // AddPChannels adds new PChannels dynamically. Channels that already exist are skipped.
@@ -290,7 +292,7 @@ func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string
 		} else {
 			meta = NewPChannelMeta(name, types.AccessModeRW)
 		}
-		meta.availableInReplication = isChannelAvailableInReplication(name, cm.replicateConfig)
+		meta.availableInReplication = isChannelAvailableInReplication(name, cm.replicateConfig.Load())
 		cm.channels[id] = meta
 		cm.metrics.AssignPChannelStatus(meta)
 		newMetas = append(newMetas, meta.CopyForWrite().IntoRawMeta())
@@ -303,7 +305,7 @@ func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string
 	if err := resource.Resource().StreamingCatalog().SavePChannels(ctx, newMetas); err != nil {
 		// Rollback in-memory changes on persist failure
 		for _, m := range newMetas {
-			c := newPChannelMetaFromProto(m, cm.replicateConfig)
+			c := newPChannelMetaFromProto(m, cm.replicateConfig.Load())
 			delete(cm.channels, c.ChannelID())
 		}
 		cm.Logger().Error(ctx, "failed to save new pchannels", mlog.Err(err))
@@ -466,7 +468,7 @@ func (cm *ChannelManager) AssignPChannels(ctx context.Context, pChannelToStreami
 	}
 	updates := make(map[ChannelID]*PChannelMeta, len(pChannelMetas))
 	for _, pchannel := range pChannelMetas {
-		meta := newPChannelMetaFromProto(pchannel, cm.replicateConfig)
+		meta := newPChannelMetaFromProto(pchannel, cm.replicateConfig.Load())
 		updates[meta.ChannelID()] = meta
 		cm.metrics.AssignPChannelStatus(meta)
 	}
@@ -499,7 +501,7 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []C
 
 	// Update metrics.
 	for _, pchannel := range pChannelMetas {
-		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig))
+		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig.Load()))
 	}
 	return nil
 }
@@ -525,7 +527,7 @@ func (cm *ChannelManager) MarkAsUnavailable(ctx context.Context, pChannels []typ
 		return err
 	}
 	for _, pchannel := range pChannelMetas {
-		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig))
+		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig.Load()))
 	}
 	return nil
 }
@@ -543,7 +545,7 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 
 	// update in-memory copy and increase the version.
 	for _, pchannel := range pChannelMetas {
-		c := newPChannelMetaFromProto(pchannel, cm.replicateConfig)
+		c := newPChannelMetaFromProto(pchannel, cm.replicateConfig.Load())
 		cm.channels[c.ChannelID()] = c
 	}
 	cm.version.Local++
@@ -603,7 +605,7 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
-	if cm.replicateConfig != nil && proto.Equal(config.GetReplicateConfiguration(), cm.replicateConfig.GetReplicateConfiguration()) {
+	if current := cm.replicateConfig.Load(); current != nil && proto.Equal(config.GetReplicateConfiguration(), current.GetReplicateConfiguration()) {
 		// check if the replicate configuration is changed.
 		// if not changed, return it directly.
 		return nil
@@ -642,10 +644,10 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 
 	cm.Logger().Info(ctx, "Saved replicate configuration", replicateutil.ConfigLogField(config.GetReplicateConfiguration()))
 
-	cm.replicateConfig = config
+	cm.replicateConfig.Store(config)
 	// Recompute availableInReplication for all channels after config update
 	for _, ch := range cm.channels {
-		ch.availableInReplication = isChannelAvailableInReplication(ch.Name(), cm.replicateConfig)
+		ch.availableInReplication = isChannelAvailableInReplication(ch.Name(), config)
 	}
 	cm.cond.UnsafeBroadcast()
 	cm.version.Local++
@@ -657,8 +659,8 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 func (cm *ChannelManager) getNewIncomingTask(newConfig *replicateutil.ConfigHelper, appendResults map[string]*message.AppendResult) []*streamingpb.ReplicatePChannelMeta {
 	incoming := newConfig.GetCurrentCluster()
 	var current *replicateutil.MilvusCluster
-	if cm.replicateConfig != nil {
-		current = cm.replicateConfig.GetCurrentCluster()
+	if config := cm.replicateConfig.Load(); config != nil {
+		current = config.GetCurrentCluster()
 	}
 	incomingReplicatingTasks := make([]*streamingpb.ReplicatePChannelMeta, 0, len(incoming.TargetClusters()))
 	for _, targetCluster := range incoming.TargetClusters() {
@@ -729,8 +731,8 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 	cm.cond.L.Unlock()
 
 	var replicateConfig *commonpb.ReplicateConfiguration
-	if cm.replicateConfig != nil {
-		replicateConfig = cm.replicateConfig.GetReplicateConfiguration()
+	if config := cm.replicateConfig.Load(); config != nil {
+		replicateConfig = config.GetReplicateConfiguration()
 	}
 	return version, cb(WatchChannelAssignmentsCallbackParam{
 		StreamingVersion: cm.streamingVersion,
