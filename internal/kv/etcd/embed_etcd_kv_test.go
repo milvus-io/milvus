@@ -717,6 +717,9 @@ func TestEmbedEtcd(te *testing.T) {
 
 	te.Run("WalkKeysWithPrefixSnapshot", func(t *testing.T) {
 		ctx := context.Background()
+		const requestTimeout = 2 * time.Second
+		oldTimeout := param.EtcdCfg.RequestTimeout.SwapTempValue("2000")
+		t.Cleanup(func() { param.EtcdCfg.RequestTimeout.SwapTempValue(oldTimeout) })
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory("/etcd/test/keys", &param.EtcdCfg)
 		require.NoError(t, err)
 		defer metaKv.Close()
@@ -727,7 +730,7 @@ func TestEmbedEtcd(te *testing.T) {
 		defer client.Close()
 		for name, backend := range map[string]kv.MetaKv{
 			"embedded": metaKv,
-			"client":   embed_etcd_kv.NewEtcdKV(client, "/etcd/test/client-keys"),
+			"client":   embed_etcd_kv.NewEtcdKV(client, "/etcd/test/client-keys", embed_etcd_kv.WithRequestTimeout(requestTimeout)),
 		} {
 			t.Run(name, func(t *testing.T) {
 				defer backend.RemoveWithPrefix(ctx, "")
@@ -740,12 +743,25 @@ func TestEmbedEtcd(te *testing.T) {
 					keys = append(keys, string(key))
 					if len(keys) == 1 {
 						require.NoError(t, backend.MultiSaveAndRemove(ctx, map[string]string{"names/b": "tags"}, []string{"names/c"}))
+						// Later pages must get a fresh timeout without losing the snapshot.
+						time.Sleep(requestTimeout + 100*time.Millisecond)
 					}
 					return nil
 				}))
 				require.Equal(t, []string{backend.GetPath("names/a"), backend.GetPath("names/c")}, keys)
 				err := walker.WalkKeysWithPrefix(ctx, "names/", 1, func([]byte) error { return context.Canceled })
 				require.ErrorIs(t, err, context.Canceled)
+
+				canceled, cancel := context.WithCancel(ctx)
+				defer cancel()
+				visited := 0
+				err = walker.WalkKeysWithPrefix(canceled, "names/", 1, func([]byte) error {
+					visited++
+					cancel()
+					return nil
+				})
+				require.Error(t, err)
+				require.Equal(t, 1, visited)
 			})
 		}
 	})

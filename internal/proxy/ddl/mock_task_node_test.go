@@ -50,16 +50,8 @@ func (n *mockTaskNode) LBPolicy() shardclient.LBPolicy       { return n.lbPolicy
 func (n *mockTaskNode) ShardMgr() shardclient.ShardClientMgr { return nil }
 func (n *mockTaskNode) ChMgr() channelmgr.ChannelsMgr        { return n.chMgr }
 func (n *mockTaskNode) TsoAllocator() taskmodel.TsoAllocator { return nil }
-func (n *mockTaskNode) ResolveRLSEnforcement(ctx context.Context, _ metacache.Cache, rlsEnabled, rlsForce, skipRLS bool, _, _, _ string) (bool, error) {
-	if !rlsEnabled || !skipRLS {
-		return rlsEnabled, nil
-	}
-	if rlsForce {
-		return false, merr.WrapErrPrivilegeNotPermitted(
-			"%s operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
-			"import", "")
-	}
-	return false, nil
+func (n *mockTaskNode) CheckSkipRLSPrivilege(_ context.Context, _ metacache.Cache, _, _, _ string) error {
+	return nil
 }
 
 func (n *mockTaskNode) CheckManageRLSPrivilege(ctx context.Context, _ metacache.Cache, _ *milvuspb.AlterCollectionRequest, dbName, collectionName string) error {

@@ -777,11 +777,6 @@ func TestRLSMode(t *testing.T) {
 		mode, err := GetRLSMode(properties...)
 		assert.NoError(t, err)
 		assert.Equal(t, expected, mode)
-		assert.Equal(t, expected == RLSModeAutoSkip, mode.AutoSkip("", false))
-		assert.False(t, mode.AutoSkip("alice", false))
-		assert.False(t, mode.AutoSkip(" ", false))
-		assert.False(t, mode.AutoSkip("", true))
-		assert.False(t, mode.AutoSkip("alice", true))
 	}
 	for _, value := range []string{"", "true", "false", "force", "auto", " AutoSkip"} {
 		_, err := GetRLSMode(&commonpb.KeyValuePair{Key: RLSModeKey, Value: value})

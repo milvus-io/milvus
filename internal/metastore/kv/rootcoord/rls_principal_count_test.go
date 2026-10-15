@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -30,13 +31,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestRLSPrincipalNamesAndLegacyCountUseKeysOnly(t *testing.T) {
+func TestRLSPrincipalNamesUseKeysOnly(t *testing.T) {
 	ctx := context.Background()
 	kv := memkv.NewMemoryKV()
 	catalog := NewCatalog(kv)
 	names := []string{"alice", "team/a user", "user%2F", "用户"}
 	for _, name := range names {
-		// Enumeration and legacy counting must not decode or materialize tag values.
+		// Enumeration must not decode or materialize tag values.
 		require.NoError(t, kv.Save(ctx, buildRLSPrincipalKey(20, name), "not a protobuf"))
 	}
 	require.NoError(t, kv.Save(ctx, buildRLSPrincipalKey(201, "other collection"), "not a protobuf"))
@@ -51,10 +52,9 @@ func TestRLSPrincipalNamesAndLegacyCountUseKeysOnly(t *testing.T) {
 	require.Equal(t, names, actual)
 	count, err := catalog.GetRLSPrincipalCount(ctx, 20)
 	require.NoError(t, err)
-	require.Equal(t, int64(len(names)), count)
-	stored, err := kv.Load(ctx, BuildRLSPrincipalCountKey(20))
-	require.NoError(t, err)
-	require.Equal(t, "4", stored)
+	require.Zero(t, count)
+	_, err = kv.Load(ctx, BuildRLSPrincipalCountKey(20))
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 
 	// An existing counter is authoritative; subsequent reads must not scan keys.
 	require.NoError(t, kv.Save(ctx, BuildRLSPrincipalCountKey(20), "5000000000"))
@@ -71,6 +71,34 @@ func TestRLSPrincipalNamesAndLegacyCountUseKeysOnly(t *testing.T) {
 	actual, err = catalog.ListRLSPrincipalNames(ctx, 20)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	require.Nil(t, actual)
+}
+
+func TestRLSPrincipalCountOnlyReadsCounter(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		value   string
+		loadErr error
+		count   int64
+		wantErr error
+	}{
+		{name: "missing is zero", loadErr: merr.ErrIoKeyNotFound},
+		{name: "persisted zero", value: "0"},
+		{name: "persisted count", value: "5000000000", count: 5000000000},
+		{name: "read failure", loadErr: merr.ErrServiceUnavailable, wantErr: merr.ErrServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			kv := mocks.NewTxnKV(t)
+			kv.EXPECT().Load(ctx, BuildRLSPrincipalCountKey(20)).Return(test.value, test.loadErr).Once()
+			count, err := NewCatalog(kv).GetRLSPrincipalCount(ctx, 20)
+			if test.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, test.wantErr)
+			}
+			require.Equal(t, test.count, count)
+		})
+	}
 }
 
 // Simulate both a rejected transaction and a lost response after it committed.
@@ -106,12 +134,20 @@ func TestRLSPrincipalCountMutationRetries(t *testing.T) {
 		Tags: map[string]rlsutil.TagValue{"tenant": rlsutil.NewInt64TagValue(1)},
 	}
 
-	kv.failBeforeCommit = true
-	_, err := catalog.SaveRLSPrincipal(ctx, principal)
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	count, err := catalog.GetRLSPrincipalCount(ctx, 20)
+	count, err := catalog.DropRLSPrincipal(ctx, 20, "alice")
 	require.NoError(t, err)
 	require.Zero(t, count)
+	_, err = kv.Load(ctx, BuildRLSPrincipalCountKey(20))
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+
+	kv.failBeforeCommit = true
+	_, err = catalog.SaveRLSPrincipal(ctx, principal)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	count, err = catalog.GetRLSPrincipalCount(ctx, 20)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	_, err = kv.Load(ctx, BuildRLSPrincipalCountKey(20))
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 	_, err = catalog.GetRLSPrincipal(ctx, 20, "alice")
 	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 

@@ -139,8 +139,6 @@ func (kv *EmbedEtcdKV) WalkKeysWithPrefix(ctx context.Context, prefix string, pa
 
 func (kv *EmbedEtcdKV) walkWithPrefix(ctx context.Context, prefix string, paginationSize int, keysOnly bool, fn func([]byte, []byte) error) error {
 	prefix = kv.GetPath(prefix)
-	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
-	defer cancel()
 
 	batch := int64(paginationSize)
 	opts := []clientv3.OpOption{
@@ -154,7 +152,9 @@ func (kv *EmbedEtcdKV) walkWithPrefix(ctx context.Context, prefix string, pagina
 		opts = append(opts, clientv3.WithKeysOnly())
 	}
 	for {
+		ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 		resp, err := kv.client.Get(ctx1, key, opts...)
+		cancel()
 		if err != nil {
 			return merr.WrapErrIoFailed(key, err)
 		}

@@ -286,24 +286,6 @@ func checkManageRLSPrivilege(ctx context.Context, metaCache Cache, req *milvuspb
 	return err
 }
 
-// resolveRLSEnforcement returns whether RLS remains enabled after processing a
-// request-scoped bypass. Force mode takes precedence over both authorization
-// configuration and SkipRLS privileges.
-func resolveRLSEnforcement(ctx context.Context, metaCache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
-	if !rlsEnabled || !skipRLS {
-		return rlsEnabled, nil
-	}
-	if rlsForce {
-		return false, merr.WrapErrPrivilegeNotPermitted(
-			"%s operation denied by RLS: skip_rls is not allowed when rls.mode is Force on collection %s",
-			operation, collectionName)
-	}
-	if err := checkSkipRLSPrivilege(ctx, metaCache, dbName, collectionName, operation); err != nil {
-		return false, err
-	}
-	return false, nil
-}
-
 func resolveRBACObjectName(ctx context.Context, metaCache Cache, dbName, objectType, objectName string) string {
 	if !Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() || objectType != commonpb.ObjectType_Collection.String() || objectName == util.AnyWord || objectName == "" {
 		return objectName

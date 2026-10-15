@@ -226,8 +226,7 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	it.insertMsg.CollectionName = collectionName
 	it.insertMsg.CollectionID = collID
 	principalName, enforceRLS, err := rlsutil.ResolveEnforcement(colInfo.RlsEnabled, it.rlsPrincipal, it.skipRLS, colInfo.RlsMode, collectionName, "insert", func() error {
-		_, err := it.node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), true, false, true, canonicalDBName, collectionName, "insert")
-		return err
+		return it.node.CheckSkipRLSPrivilege(ctx, it.GetMetaCache(), canonicalDBName, collectionName, "insert")
 	})
 	if err != nil {
 		return err

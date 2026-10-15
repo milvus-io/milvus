@@ -797,8 +797,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 			if t.node == nil {
 				return merr.WrapErrServiceInternalMsg("query task has no host node for SkipRLS authorization")
 			}
-			_, err := t.node.ResolveRLSEnforcement(ctx, t.GetMetaCache(), true, false, true, canonicalDBName, colInfo.Schema.GetName(), "query")
-			return err
+			return t.node.CheckSkipRLSPrivilege(ctx, t.GetMetaCache(), canonicalDBName, colInfo.Schema.GetName(), "query")
 		})
 		if err != nil {
 			return err

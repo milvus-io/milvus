@@ -52,7 +52,7 @@ func TestResolveEnforcement(t *testing.T) {
 							wantEnforce := false
 							// Reproduce the pre-refactor composition, including validation
 							// order and exact errors, as the behavior-preservation oracle.
-							previousEnabled := enabled && !mode.AutoSkip(principal, skip)
+							previousEnabled := enabled && !(mode == common.RLSModeAutoSkip && principal == "" && !skip)
 							if previousEnabled && skip {
 								if mode == common.RLSModeForce {
 									wantErr = merr.WrapErrPrivilegeNotPermitted("query operation denied by RLS: skip_rls is not allowed when rls.mode is Force on collection coll")

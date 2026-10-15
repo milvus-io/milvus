@@ -310,8 +310,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 			if t.node == nil {
 				return merr.WrapErrServiceInternalMsg("search task has no host node for SkipRLS authorization")
 			}
-			_, err := t.node.ResolveRLSEnforcement(t.ctx, t.GetMetaCache(), true, false, true, t.rlsDBName, t.rlsCollectionName, operation)
-			return err
+			return t.node.CheckSkipRLSPrivilege(t.ctx, t.GetMetaCache(), t.rlsDBName, t.rlsCollectionName, operation)
 		})
 		if err != nil {
 			return err

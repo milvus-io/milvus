@@ -136,7 +136,7 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrServiceUnavailable("RLS import enforcement is unavailable until the cluster upgrade completes")
 	}
 	_, _, err = rlsutil.ResolveEnforcement(rlsEnabled, rlsPrincipal, requestedSkipRLS, colInfo.RlsMode, canonicalCollectionName, "import", func() error {
-		_, err := node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), true, false, true, canonicalDBName, canonicalCollectionName, "import")
+		err := node.CheckSkipRLSPrivilege(ctx, it.GetMetaCache(), canonicalDBName, canonicalCollectionName, "import")
 		it.skipRLS = err == nil
 		return err
 	})

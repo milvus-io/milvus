@@ -1993,8 +1993,7 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		canonicalDBName = it.req.GetDbName()
 	}
 	_, it.rlsEnabled, err = rlsutil.ResolveEnforcement(colInfo.RlsEnabled, it.req.GetRlsPrincipal(), it.req.GetSkipRls(), colInfo.RlsMode, colInfo.Schema.GetName(), "upsert", func() error {
-		_, err := it.node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), true, false, true, canonicalDBName, colInfo.Schema.GetName(), "upsert")
-		return err
+		return it.node.CheckSkipRLSPrivilege(ctx, it.GetMetaCache(), canonicalDBName, colInfo.Schema.GetName(), "upsert")
 	})
 	if err != nil {
 		return err

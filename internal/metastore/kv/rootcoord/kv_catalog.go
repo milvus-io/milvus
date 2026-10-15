@@ -2480,8 +2480,7 @@ func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, pri
 	return count, err
 }
 
-// GetRLSPrincipalCount recovers the counter, initializing legacy collections
-// once from keys only. Call before serving requests or under the collection guard.
+// GetRLSPrincipalCount reads the persisted counter; an absent counter means zero.
 func (kc *Catalog) GetRLSPrincipalCount(ctx context.Context, collectionID int64) (int64, error) {
 	key := BuildRLSPrincipalCountKey(collectionID)
 	value, err := kc.Txn.Load(ctx, key)
@@ -2495,17 +2494,10 @@ func (kc *Catalog) GetRLSPrincipalCount(ctx context.Context, collectionID int64)
 		}
 		return count, nil
 	}
-	if !errors.Is(err, merr.ErrIoKeyNotFound) {
-		return 0, err
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return 0, nil
 	}
-	var count int64
-	if err := kc.walkRLSPrincipalKeys(ctx, collectionID, func(_ []byte) error {
-		count++
-		return nil
-	}); err != nil {
-		return 0, err
-	}
-	return count, kc.Txn.Save(ctx, key, strconv.FormatInt(count, 10))
+	return 0, err
 }
 
 func (kc *Catalog) walkRLSPrincipalKeys(ctx context.Context, collectionID int64, fn func([]byte) error) error {

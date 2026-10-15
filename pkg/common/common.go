@@ -833,11 +833,6 @@ func GetRLSMode(kvs ...*commonpb.KeyValuePair) (RLSMode, error) {
 	}
 }
 
-// AutoSkip never turns an explicit skip into an unauthenticated bypass.
-func (mode RLSMode) AutoSkip(principal string, skip bool) bool {
-	return mode == RLSModeAutoSkip && principal == "" && !skip
-}
-
 func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
 	var value string
 	found := false
