@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -13,12 +14,25 @@ import (
 // The cache owns decoded bodies only, never messages, payloads or Ack handles.
 // Its byte budget is an estimate of retained data, not a process heap limit.
 var globalBodyCache = sync.OnceValue(func() *bodyCacheManager {
-	return newBodyCacheManager(256<<20, 30*time.Second, time.Second)
+	return newBodyCacheManager(128<<20, 30*time.Second, time.Second)
 })
 
-// All slot fields are protected by the manager's mutex. Transaction clones
-// share the slot, while mutable messages never carry one.
+const (
+	bodyCacheShardCount    = 16
+	bodyCacheEvictionBatch = 128
+	bodyCacheEntryOverhead = 256
+)
+
+var bodyCacheNextShard atomic.Uint32
+
+func newBodyCacheSlot() *bodyCacheSlot {
+	return &bodyCacheSlot{shard: bodyCacheNextShard.Add(1) % bodyCacheShardCount}
+}
+
+// The shard is fixed at construction; all other fields are protected by that
+// shard's mutex. Transaction clones share the slot, even if their TimeTick changes.
 type bodyCacheSlot struct {
+	shard      uint32
 	body       proto.Message
 	loading    *bodyCacheAttempt
 	element    *list.Element
@@ -33,15 +47,20 @@ type bodyCacheAttempt struct {
 	canceled bool
 }
 
-type bodyCacheManager struct {
+type bodyCacheShard struct {
 	mu      sync.Mutex
-	entries list.List // least recently used first
-	bytes   int64
-	budget  int64
-	idle    time.Duration
-	closed  bool
-	stop    chan struct{}
-	done    chan struct{}
+	entries list.List // least recently used first, within this shard
+}
+
+type bodyCacheManager struct {
+	shards    [bodyCacheShardCount]bodyCacheShard
+	bytes     atomic.Int64 // includes short-lived reservations before publication
+	budget    int64
+	idle      time.Duration
+	closed    atomic.Bool
+	closeOnce sync.Once
+	stop      chan struct{}
+	done      chan struct{}
 }
 
 func newBodyCacheManager(budget int64, idle, interval time.Duration) *bodyCacheManager {
@@ -50,7 +69,8 @@ func newBodyCacheManager(budget int64, idle, interval time.Duration) *bodyCacheM
 	return m
 }
 
-func (m *bodyCacheManager) get(ctx context.Context, slot *bodyCacheSlot, decode func() (proto.Message, error)) (proto.Message, error) {
+func (m *bodyCacheManager) get(ctx context.Context, slot *bodyCacheSlot, decode func() (proto.Message, int, error)) (proto.Message, error) {
+	shard := &m.shards[slot.shard]
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -58,12 +78,12 @@ func (m *bodyCacheManager) get(ctx context.Context, slot *bodyCacheSlot, decode 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		m.mu.Lock()
+		shard.mu.Lock()
 		if slot.body != nil {
 			body := slot.body
 			slot.lastAccess = time.Now()
-			m.entries.MoveToBack(slot.element)
-			m.mu.Unlock()
+			shard.entries.MoveToBack(slot.element)
+			shard.mu.Unlock()
 			return body, nil
 		}
 		attempt := slot.loading
@@ -71,7 +91,7 @@ func (m *bodyCacheManager) get(ctx context.Context, slot *bodyCacheSlot, decode 
 			// Keep the lock to install this caller's construction attempt.
 			break
 		}
-		m.mu.Unlock()
+		shard.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -88,34 +108,32 @@ func (m *bodyCacheManager) get(ctx context.Context, slot *bodyCacheSlot, decode 
 	}
 	attempt := &bodyCacheAttempt{done: make(chan struct{})}
 	slot.loading = attempt
-	m.mu.Unlock()
+	shard.mu.Unlock()
 
-	body, err := decode()
-	// Estimate outside the global lock. Include a fixed overhead so empty
-	// protobufs and registry entries are also bounded. Encoded size alone
-	// undercounts object/slice overhead; the multiplier is still approximate.
-	var size int64
+	body, payloadBytes, err := decode()
+	// Account for the plaintext bytes already consumed by the decoder, without
+	// traversing the decoded protobuf again. This is still a heap estimate.
+	size := int64(bodyCacheEntryOverhead) + 2*int64(payloadBytes)
+	reserved := false
 	if err == nil {
-		size = 256 + 2*int64(proto.Size(body))
+		reserved = m.reserve(ctx, size, int(slot.shard))
 	} else {
 		body = nil
 	}
-	m.mu.Lock()
-	if err == nil && !m.closed && size <= m.budget {
-		// Every admitted entry can be evicted: existing readers own their
-		// references. Make room before publishing this completed decode.
-		for size > m.budget-m.bytes {
-			m.remove(m.entries.Front().Value.(*bodyCacheSlot))
+	shard.mu.Lock()
+	if reserved {
+		if m.closed.Load() {
+			m.bytes.Add(-size)
+		} else {
+			slot.body, slot.bytes, slot.lastAccess = body, size, time.Now()
+			slot.element = shard.entries.PushBack(slot)
 		}
-		slot.body, slot.bytes, slot.lastAccess = body, size, time.Now()
-		slot.element = m.entries.PushBack(slot)
-		m.bytes += size
 	}
 	attempt.body, attempt.err = body, err
 	attempt.canceled = err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err())
 	slot.loading = nil
 	close(attempt.done)
-	m.mu.Unlock()
+	shard.mu.Unlock()
 	return body, err
 }
 
@@ -133,34 +151,101 @@ func (m *bodyCacheManager) run(interval time.Duration) {
 	}
 }
 
-func (m *bodyCacheManager) recycle(now time.Time) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for e := m.entries.Front(); e != nil; e = m.entries.Front() {
-		slot := e.Value.(*bodyCacheSlot)
-		if now.Sub(slot.lastAccess) < m.idle {
-			break
+// tryReserve uses a shared byte budget without a process-wide LRU lock. Hits
+// never touch this counter; even a body larger than budget/shardCount can fit.
+func (m *bodyCacheManager) tryReserve(size int64) bool {
+	for used := m.bytes.Load(); size <= m.budget-used; used = m.bytes.Load() {
+		if m.bytes.CompareAndSwap(used, used+size) {
+			return true
 		}
-		m.remove(slot)
+	}
+	return false
+}
+
+func (m *bodyCacheManager) reserve(ctx context.Context, size int64, first int) bool {
+	if size > m.budget || m.closed.Load() {
+		return false
+	}
+	if m.tryReserve(size) {
+		return true
+	}
+	// Bound pressure work even if other publishers continuously refill shards.
+	// A reservation not yet published cannot be evicted; bypass residency if
+	// competing publishers leave no room after this bounded pass.
+	remaining := m.bytes.Load() / bodyCacheEntryOverhead
+	for remaining > 0 {
+		removed := int64(0)
+		for n := range len(m.shards) {
+			if ctx.Err() != nil || m.closed.Load() {
+				return false
+			}
+			shard := &m.shards[(first+n)%len(m.shards)]
+			shard.mu.Lock()
+			count := int64(0)
+			for count < min(int64(bodyCacheEvictionBatch), remaining) && m.bytes.Load() > m.budget-size {
+				e := shard.entries.Front()
+				if e == nil {
+					break
+				}
+				m.remove(shard, e.Value.(*bodyCacheSlot))
+				count++
+			}
+			shard.mu.Unlock()
+			remaining -= count
+			removed += count
+			if m.tryReserve(size) {
+				return true
+			}
+		}
+		if removed == 0 {
+			return false
+		}
+	}
+	return false
+}
+
+func (m *bodyCacheManager) recycle(now time.Time) {
+	for i := range m.shards {
+		for !m.closed.Load() && m.recycleBatch(&m.shards[i], now) {
+		}
 	}
 }
 
+// recycleBatch bounds each lock hold independently of the expired population.
+func (m *bodyCacheManager) recycleBatch(shard *bodyCacheShard, now time.Time) bool {
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	for range bodyCacheEvictionBatch {
+		e := shard.entries.Front()
+		if e == nil {
+			return false
+		}
+		slot := e.Value.(*bodyCacheSlot)
+		if !now.IsZero() && now.Sub(slot.lastAccess) < m.idle {
+			return false
+		}
+		m.remove(shard, slot)
+	}
+	return true
+}
+
 // remove only drops the cache's reference; readers may still hold the body.
-func (m *bodyCacheManager) remove(slot *bodyCacheSlot) {
-	m.entries.Remove(slot.element)
-	m.bytes -= slot.bytes
+// The caller holds this shard's lock, and never another shard's lock.
+func (m *bodyCacheManager) remove(shard *bodyCacheShard, slot *bodyCacheSlot) {
+	shard.entries.Remove(slot.element)
+	m.bytes.Add(-slot.bytes)
 	slot.body, slot.element, slot.bytes = nil, nil, 0
 }
 
 func (m *bodyCacheManager) close() {
-	m.mu.Lock()
-	if !m.closed {
-		m.closed = true
+	m.closeOnce.Do(func() {
+		m.closed.Store(true)
 		close(m.stop)
-		for e := m.entries.Front(); e != nil; e = m.entries.Front() {
-			m.remove(e.Value.(*bodyCacheSlot))
+		for i := range m.shards {
+			// Closed managers cannot admit new bodies. Expire even freshly hit entries.
+			for m.recycleBatch(&m.shards[i], time.Time{}) {
+			}
 		}
-	}
-	m.mu.Unlock()
+	})
 	<-m.done
 }
