@@ -20,7 +20,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/snapshot/snapshottest"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -198,28 +198,20 @@ func refIDs(refs []TableRef) []int64 {
 	return ids
 }
 
-// parseSSTKey returns the table ID of an object key directly under basePath.
-func parseSSTKey(basePath, key string) (int64, bool) {
-	name, ok := strings.CutPrefix(key, basePath+"/")
-	if !ok {
-		return 0, false
-	}
-	name, ok = strings.CutSuffix(name, sst.Extension)
-	if !ok {
-		return 0, false
-	}
-	id, err := strconv.ParseInt(name, 10, 64)
-	return id, err == nil
-}
-
 func storeIDs(t *testing.T, store *snapshottest.Store) []int64 {
 	var ids []int64
 	for _, k := range store.Keys() {
-		id, ok := parseSSTKey(testSSTBasePath, k)
+		id, ok := objpath.ParseSSTKey(testSSTBasePath, k)
 		require.True(t, ok, k)
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// TestSSTKeyExtension checks that objpath writes the extension of
+// sst.Extension.
+func TestSSTKeyExtension(t *testing.T) {
+	assert.True(t, strings.HasSuffix(objpath.SSTKey("base", 1), sst.Extension))
 }
 
 func TestHandoverNormal(t *testing.T) {

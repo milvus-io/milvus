@@ -28,15 +28,14 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
+	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
-
-	"github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -163,7 +162,7 @@ func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID in
 		cancel:       cancel,
 		lifetime:     typeutil.NewLifetime(),
 		ready:        make(chan struct{}),
-		sstBasePath:  metautil.BuildPKIndexSSTBasePath(cfg.StorageRootPath, collectionID, vchannel),
+		sstBasePath:  objpath.SSTBasePath(cfg.StorageRootPath, collectionID, vchannel),
 		heapPos:      -1,
 	}
 	idx.notFresh.Store(leftover)
@@ -473,7 +472,7 @@ func (idx *Index) resolveLocal(ctx context.Context, basePath string, id sst.ID, 
 	if err := os.MkdirAll(idx.committedDir, 0o755); err != nil {
 		return "", pkindex.MarkIO(err, "create committed dir %s", idx.committedDir)
 	}
-	if err := idx.ch.m.cfg.Store.DownloadFile(ctx, snapshot.SSTKey(basePath, id), path); err != nil {
+	if err := idx.ch.m.cfg.Store.DownloadFile(ctx, objpath.SSTKey(basePath, int64(id)), path); err != nil {
 		return "", err
 	}
 	idx.logger.Info(ctx, "downloaded a committed primary key index table", mlog.Int64("sstID", int64(id)))

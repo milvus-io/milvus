@@ -106,21 +106,20 @@ later change (see [Not done in this change](#not-done-in-this-change)):
 | `ServiceInternal`, `ParameterInvalid`, `DataIntegrity` | `ErrRejected` |
 | `ServiceUnavailable`, `ServiceNotReady`, a timeout, a cancel | retryable, unchanged |
 
-The streaming node computes the SST base path of a vchannel itself, with the
-shared helper `metautil.BuildPKIndexSSTBasePath(rootPath, collectionID,
-vchannel)`: `<rootPath>/pk_index/<collectionID>/<vchannel>/sst`, where
-`rootPath` is `ChunkManager.RootPath()`. This follows how the streaming node
-builds binlog paths with `metautil.BuildInsertLogPath`. The handover uploads
-under the computed path. The manifest records its own `SSTBasePath`, and the
-install downloads with it. When the two differ, the commit is `ErrRejected`.
-The helper and the constant `common.PKIndexPath` are byte-identical to the
-copies in the manifest service change. The change that merges second drops
-its copy at the rebase.
+The streaming node computes the SST base path of a vchannel itself, with
+`objpath.SSTBasePath(rootPath, collectionID, vchannel)`:
+`<rootPath>/pk_index/<collectionID>/<vchannel>/sst`, where `rootPath` is
+`ChunkManager.RootPath()`. The handover uploads under the computed path. The
+manifest records its own `SSTBasePath`, and the install downloads with it.
+When the two differ, the commit is `ErrRejected`.
 
-`snapshot.SSTKey` builds the object key of a table:
-`<sst_base_path>/<id>.sst`. The manifest service and its garbage collection
-use the same format. A test fixes the format, and the adapter change checks
-it against the key function of the manifest service.
+`objpath.SSTKey` builds the object key of a table:
+`<sst_base_path>/<id>.sst`. The package `internal/pkindex/core/objpath` builds
+and parses all object keys of the primary key index. The manifest service and
+its garbage collection use the same package, so both sides use one key
+format. `objpath` and the constant `common.PKIndexPath` are byte-identical to
+the copies in the manifest service change. The change that merges second
+drops its copy at the rebase.
 
 When the `Manager` has no `Committer`, no `Channel` claims, and no `Index`
 hands over. The indexes still deduplicate the writes, and they stay out of
@@ -729,7 +728,7 @@ Unit tests cover these cases:
   of the `LastAcked` heap, and still deduplicates the writes.
 - Fatal errors: `ErrFenced`, `ErrRejected` and `ErrCorrupted` are fatal.
   Other errors are retryable, also a merr code that no adapter translated.
-- Object key: `SSTKey` gives `<sst_base_path>/<id>.sst`.
+- Object key: `objpath.SSTKey` gives `<sst_base_path>/<id>.sst`.
 - Duplicate CreateCollection: an `Add` of an `Index` that exists reports
   that it created nothing, so the rollback after a failed append does not
   remove the `Index` in use.

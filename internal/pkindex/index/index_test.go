@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -252,7 +253,7 @@ func TestNoManifestAndNoLeftoverIsFresh(t *testing.T) {
 	assert.Equal(t, idx.SSTBasePath(), m.SSTBasePath)
 	keys := env.store.Keys()
 	for _, ref := range m.Tables {
-		assert.Contains(t, keys, snapshot.SSTKey(idx.SSTBasePath(), ref.ID))
+		assert.Contains(t, keys, objpath.SSTKey(idx.SSTBasePath(), int64(ref.ID)))
 	}
 	assert.Empty(t, env.fatalList())
 }

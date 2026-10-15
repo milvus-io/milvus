@@ -28,15 +28,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
-
-	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/internal/pkindex/snapshot/snapshottest"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -53,7 +52,7 @@ var farFuture = time.Now().Add(24 * time.Hour)
 const testStorageRoot = "root"
 
 func testBasePath(vchannel string) string {
-	return metautil.BuildPKIndexSSTBasePath(testStorageRoot, testCollectionID, vchannel)
+	return objpath.SSTBasePath(testStorageRoot, testCollectionID, vchannel)
 }
 
 // fakeClient applies claims, lookups and flushes the way the manifest

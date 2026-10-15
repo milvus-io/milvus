@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
@@ -163,7 +164,7 @@ func Commit(ctx context.Context, t Target, store TableStore, c Committer, p *Pen
 	if p.Request != nil && (p.UploadedAt.IsZero() || time.Since(p.UploadedAt) > reuploadAfter) {
 		start := time.Now()
 		for _, ref := range p.Request.AddTables {
-			if err := store.UploadFile(ctx, SSTKey(t.SSTBasePath(), ref.ID), p.Local[ref.ID]); err != nil {
+			if err := store.UploadFile(ctx, objpath.SSTKey(t.SSTBasePath(), int64(ref.ID)), p.Local[ref.ID]); err != nil {
 				return err
 			}
 		}

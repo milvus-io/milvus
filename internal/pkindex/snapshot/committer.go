@@ -18,7 +18,6 @@ package snapshot
 
 import (
 	"context"
-	"strconv"
 
 	"github.com/cockroachdb/errors"
 
@@ -46,7 +45,7 @@ type ManifestView struct {
 	// Version goes up by one with each change of the manifest. The first
 	// flush of a vchannel creates the manifest at version 1.
 	Version int64
-	// SSTBasePath is the object key prefix of the tables. See SSTKey.
+	// SSTBasePath is the object key prefix of the tables. See objpath.SSTKey.
 	SSTBasePath string
 	// CheckpointTimeTick is the time tick that the tables cover.
 	CheckpointTimeTick uint64
@@ -107,9 +106,3 @@ type Committer interface {
 // MaxRecoveryManifests is the largest number of refs in one
 // GetRecoveryManifests call.
 const MaxRecoveryManifests = 10000
-
-// SSTKey returns the object key of table id under basePath:
-// <basePath>/<id>.sst. The manifest service uses the same format.
-func SSTKey(basePath string, id sst.ID) string {
-	return basePath + "/" + strconv.FormatInt(int64(id), 10) + sst.Extension
-}
