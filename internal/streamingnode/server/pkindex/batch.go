@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package authority
+package pkindex
 
 // Batch collects changes in memory. Nothing reaches the engine before Authority.Write.
 // Changes are applied in the order of the Put and Delete calls that collected them.
