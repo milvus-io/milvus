@@ -197,8 +197,8 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
 	// Prepare has already replaced request EZ properties with the database's EZ.
-	if _, hasEZ := hookutil.ParseEzIDFromProperties(t.Req.GetProperties()); hasEZ && typeutil.HasTextField(schema) {
-		return merr.WrapErrParameterInvalidMsg("TEXT fields are not supported with CMEK")
+	if err := validateTextWithCMEK(schema, t.Req.GetProperties()); err != nil {
+		return err
 	}
 
 	// For external collections, validate the source URL scheme allowlist and
