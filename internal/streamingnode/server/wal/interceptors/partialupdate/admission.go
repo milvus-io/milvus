@@ -61,12 +61,41 @@ func (s *partialUpdateState) registerTxnCleanup(session *txn.TxnSession, timetic
 		return
 	}
 	txnID := session.TxnContext().TxnID
-	if !s.markTxnCleanup(txnID) {
+	s.txnMu.Lock()
+	txnState := s.txnLocked(txnID)
+	if txnState.cleanupRegistered {
+		s.txnMu.Unlock()
 		return
 	}
+	txnState.cleanupRegistered = true
+	txnState.session = session
+	s.txnMu.Unlock()
+
+	// Session cleanup holds the session mutex, so register outside txnMu.
+	// CDC may replace a session while replaying the same source transaction.
 	session.RegisterCleanup(func() {
-		s.deleteTxn(txnID)
+		s.txnMu.Lock()
+		defer s.txnMu.Unlock()
+		if s.txns[txnID] == txnState {
+			delete(s.txns, txnID)
+		}
 	}, timetick)
+}
+
+// prepareTxnBegin follows the session created by TimeTick before the WAL append.
+// A replayed Begin can reuse the source TxnID with a new session. Its write set
+// and recovery flags must start empty, and cleanup must belong to that session.
+// A failed Begin remains incomplete until another Begin is durably appended.
+func (s *partialUpdateState) prepareTxnBegin(session *txn.TxnSession) {
+	if session == nil {
+		return
+	}
+	txnID := session.TxnContext().TxnID
+	s.txnMu.Lock()
+	defer s.txnMu.Unlock()
+	if current := s.txns[txnID]; current == nil || current.session != session {
+		s.txns[txnID] = &pendingTxn{session: session}
+	}
 }
 
 // completeTxnWriteSet requires every guarded body to have its PKs tracked.
@@ -176,6 +205,7 @@ func (s *partialUpdateState) publishCommit(msg message.MutableMessage, txnState 
 // write set, including the recovered durable prefix. A body suffix without its
 // Begin or a recovery decode failure must not masquerade as a complete set.
 type pendingTxn struct {
+	session            *txn.TxnSession
 	pks                primarykey.Keys
 	meta               *messagespb.PartialUpdateCAS
 	collectionID       int64
@@ -272,17 +302,6 @@ func (s *partialUpdateState) recordTxnFence(txnID message.TxnID, collectionID in
 	s.txnLocked(txnID).fenceCollection = collectionID
 }
 
-func (s *partialUpdateState) markTxnCleanup(txnID message.TxnID) bool {
-	s.txnMu.Lock()
-	defer s.txnMu.Unlock()
-	txnState := s.txnLocked(txnID)
-	if txnState.cleanupRegistered {
-		return false
-	}
-	txnState.cleanupRegistered = true
-	return true
-}
-
 func (s *partialUpdateState) getTxn(txnID message.TxnID) *pendingTxn {
 	s.txnMu.RLock()
 	defer s.txnMu.RUnlock()
@@ -291,6 +310,7 @@ func (s *partialUpdateState) getTxn(txnID message.TxnID) *pendingTxn {
 		return nil
 	}
 	return &pendingTxn{
+		session:            txnState.session,
 		pks:                txnState.pks.Clone(),
 		meta:               cloneCASMeta(txnState.meta),
 		collectionID:       txnState.collectionID,

@@ -32,9 +32,9 @@ func TestPartialUpdateRecoveryLocksDurablePrefixAndNewSuffix(t *testing.T) {
 	_, err = env.append(newCommitTxnMessage("v1", 1, 0), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		for _, pk := range []int64{10, 20} {
 			key := pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: pk}
-			require.False(t, env.partial.state.rowLocks.pks.TryLock(key), "durable prefix and suffix must remain locked during Commit WAL I/O")
-			require.True(t, env.partial.state.rowLocks.pks.TryRLock(key), "ordinary recovery must use shared row locks")
-			env.partial.state.rowLocks.pks.RUnlock(key)
+			require.False(t, testPKMutex(t, env.partial.state.rowLocks, key).TryLock(), "durable prefix and suffix must remain locked during Commit WAL I/O")
+			require.True(t, testPKMutex(t, env.partial.state.rowLocks, key).TryRLock(), "ordinary recovery must use shared row locks")
+			testPKMutex(t, env.partial.state.rowLocks, key).RUnlock()
 		}
 		return env.nextMessageID(), nil
 	})
@@ -59,7 +59,7 @@ func TestPartialUpdateRecoveryReplicatedCASKeepsCommittedSourceWrites(t *testing
 	_, err = env.append(commit, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		for _, pk := range []int64{10, 20} {
 			key := pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: pk}
-			require.False(t, env.partial.state.rowLocks.pks.TryLock(key))
+			require.False(t, testPKMutex(t, env.partial.state.rowLocks, key).TryLock())
 		}
 		return env.nextMessageID(), nil
 	})

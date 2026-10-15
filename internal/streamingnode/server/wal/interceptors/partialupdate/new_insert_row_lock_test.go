@@ -55,9 +55,9 @@ func TestPartialUpdateChainNewInsertBlocksSamePKCASUntilPublication(t *testing.T
 			}()
 			receiveCommitValue(t, atWAL)
 			key := pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: 10}
-			require.False(t, env.partial.state.rowLocks.pks.TryLock(key), "new insert did not hold its PK lock through WAL append")
-			require.True(t, env.partial.state.rowLocks.pks.TryRLock(key), "ordinary insert must take a shared PK lock")
-			env.partial.state.rowLocks.pks.RUnlock(key)
+			require.False(t, testPKMutex(t, env.partial.state.rowLocks, key).TryLock(), "new insert did not hold its PK lock through WAL append")
+			require.True(t, testPKMutex(t, env.partial.state.rowLocks, key).TryRLock(), "ordinary insert must take a shared PK lock")
+			testPKMutex(t, env.partial.state.rowLocks, key).RUnlock()
 			casDone := make(chan error, 1)
 			go func() {
 				_, err := env.append(newChainTestCASCommit(t, cas), nil)

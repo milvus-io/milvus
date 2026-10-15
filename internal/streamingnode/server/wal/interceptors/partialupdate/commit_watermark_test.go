@@ -183,8 +183,8 @@ func TestPartialUpdateCommitExpiresDuringRealGuardWait(t *testing.T) {
 			require.NoError(t, err)
 			guards := env.partial.state.rowLocks
 			key := pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: 10}
-			guards.pks.Lock(key)
-			unlock := func() { guards.pks.Unlock(key) }
+			testPKMutex(t, guards, key).Lock()
+			unlock := func() { testPKMutex(t, guards, key).Unlock() }
 			var once sync.Once
 			defer once.Do(unlock)
 			waiting := make(chan uint64, 1)

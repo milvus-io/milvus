@@ -158,7 +158,11 @@ func (i *appendInterceptor) appendWrite(
 	}
 
 	if msg.TxnContext() != nil {
-		i.state.registerTxnCleanup(txn.GetTxnSessionFromContext(ctx), msg.TimeTick())
+		session := txn.GetTxnSessionFromContext(ctx)
+		if msg.MessageType() == message.MessageTypeBeginTxn {
+			i.state.prepareTxnBegin(session)
+		}
+		i.state.registerTxnCleanup(session, msg.TimeTick())
 	}
 
 	msgID, err := appendOp(ctx, msg)
