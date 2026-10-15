@@ -370,7 +370,7 @@ func (s *rawDataSuite) flushConsumerCollection(ctx context.Context, description 
 	collection := description.GetCollectionName()
 	flush, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{DbName: s.dbName, CollectionNames: []string{collection}})
 	s.Require().NoError(merr.CheckRPCCall(flush, err))
-	ids := flush.GetCollSegIDs()[collection].GetData()
+	ids := flush.GetFlushCollSegIDs()[collection].GetData()
 	s.Require().NotEmpty(ids)
 	s.WaitForFlush(ctx, ids, flush.GetCollFlushTs()[collection], s.dbName, collection)
 	return s.rawFlushedSegments(collection, ids)
