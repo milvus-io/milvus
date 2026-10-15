@@ -24,6 +24,9 @@ Segments. Query resource-group scope does not restrict this WAL/schema operation
 CreateCollection registers a WAL function-runner key, WAL recovery rebuilds it,
 AlterCollection updates it, and DropCollection/WAL teardown releases it.
 ReleaseCollection releases query resources, not this WAL key.
+Shared runner initialization preserves tracing values but does not inherit the
+request that first triggered it: cancelling one wait does not fail other waiters.
+Resource preparation retains its own snapshot-fetch and per-file download limits.
 
 ## Execution and lifetime
 

@@ -360,7 +360,10 @@ func (e *functionRunnerEntry) ensureRunner(ctx context.Context) error {
 		return nil
 	}
 	if runInit {
-		go e.runInit(ctx, init)
+		// Initialization is shared by all waiters. Keep trace values, but do not
+		// let the electing request cancel another caller's initialization.
+		// Prepare bounds its coordinator fetch and each resource download.
+		go e.runInit(context.WithoutCancel(ctx), init)
 	}
 	return e.waitInit(ctx, init)
 }
