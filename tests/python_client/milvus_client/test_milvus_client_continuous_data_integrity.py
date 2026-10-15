@@ -2,6 +2,7 @@ import json
 import os
 import queue
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -826,6 +827,7 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                 progress.emit(lane, epoch + 1, "payload_construction", budget, oracle)
                 with _continuous_writer_context(
                     RemoteBulkWriter(
+                        local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
                         schema=schema,
                         remote_path=f"continuous_integrity/{collection_name}/epoch_{epoch + 1}",
                         connect_param=RemoteBulkWriter.ConnectParam(

@@ -52,15 +52,12 @@
 #include "futures/Executor.h"
 #include "futures/future_c.h"
 #include "gtest/gtest.h"
-#include "index/IndexInfo.h"
-#include "index/IndexStats.h"
 #include "index/Meta.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/JsonStatsBuildMemoryBudget.h"
-#include "index/json_stats/bson_inverted.h"
-#include "index/json_stats/utils.h"
-#include "indexbuilder/IndexCreatorBase.h"
 #include "milvus-storage/format/parquet/file_reader.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/bson_inverted.h"
+#include "segcore/json_stats/utils.h"
+#include "segcore/json_stats/JsonStatsBuildMemoryBudget.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
@@ -77,7 +74,6 @@
 #include "test_utils/Constants.h"
 
 using namespace milvus::index;
-using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
 
@@ -148,7 +144,7 @@ class BuildKeyStatsAccessor {
         return files;
     }
 
-    static IndexStatsPtr
+    static storage::ArtifactStats
     UploadBsonIndex(JsonKeyStats& stats) {
         return stats.bson_inverted_index_->UploadIndex();
     }
@@ -447,9 +443,12 @@ BuildMaterializeSnapshot(const std::vector<JsonStatsRowRange>& row_ranges,
     auto load_disk_file_manager =
         std::make_shared<storage::DiskFileManagerImpl>(test_index.context);
     BsonInvertedIndex loaded_bson_index(load_disk_file_manager);
-    loaded_bson_index.LoadIndex(bson_stats->GetIndexFiles(),
-                                milvus::proto::common::LoadPriority::HIGH,
-                                false);
+    std::vector<std::string> bson_files;
+    for (const auto& file : bson_stats.Files()) {
+        bson_files.push_back(file.file_name);
+    }
+    loaded_bson_index.LoadIndex(
+        bson_files, milvus::proto::common::LoadPriority::HIGH, false);
     for (const auto& path : shared_paths) {
         loaded_bson_index.TermQuery(
             path,
@@ -1428,14 +1427,16 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         auto build_index = std::make_shared<JsonKeyStats>(ctx, false);
         build_index->Build(config);
 
-        auto create_index_result = build_index->Upload(config);
-        auto memSize = create_index_result->GetMemSize();
-        auto serializedSize = create_index_result->GetSerializedSize();
-        ASSERT_GT(memSize, 0);
-        ASSERT_GT(serializedSize, 0);
-        index_files = create_index_result->GetIndexFiles();
+        const auto upload_stats = build_index->Upload(config);
+        ASSERT_GT(upload_stats.MemSize(), 0);
+        int64_t serialized_size = 0;
+        for (const auto& file : upload_stats.Files()) {
+            serialized_size += file.file_size;
+            index_files.push_back(file.file_name);
+        }
+        ASSERT_GT(serialized_size, 0);
+        ASSERT_FALSE(index_files.empty());
 
-        index::CreateIndexInfo index_info{};
         config["index_files"] = index_files;
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
@@ -1503,12 +1504,6 @@ INSTANTIATE_TEST_SUITE_P(JsonKeyStatsTestSuite,
 TEST_P(JsonKeyStatsTest, TestBasicOperations) {
     // Test Count
     EXPECT_EQ(index_->Count(), size_);
-
-    // Test Size
-    EXPECT_EQ(index_->Size(), size_);
-
-    // Test HasRawData
-    EXPECT_FALSE(index_->HasRawData());
 }
 
 TEST_P(JsonKeyStatsTest, TestExecuteForSharedData) {
@@ -1694,12 +1689,16 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         build_index_ = std::make_shared<JsonKeyStats>(ctx, false);
         build_index_->Build(config);
 
-        auto create_index_result = build_index_->Upload(config);
-        auto memSize = create_index_result->GetMemSize();
-        auto serializedSize = create_index_result->GetSerializedSize();
-        ASSERT_GT(memSize, 0);
-        ASSERT_GT(serializedSize, 0);
-        index_files_ = create_index_result->GetIndexFiles();
+        const auto upload_stats = build_index_->Upload(config);
+        ASSERT_GT(upload_stats.MemSize(), 0);
+        int64_t serialized_size = 0;
+        index_files_.clear();
+        for (const auto& file : upload_stats.Files()) {
+            serialized_size += file.file_size;
+            index_files_.push_back(file.file_name);
+        }
+        ASSERT_GT(serialized_size, 0);
+        ASSERT_FALSE(index_files_.empty());
     }
 
     void
@@ -1730,8 +1729,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     void
     VerifyBasicOperations() {
         EXPECT_EQ(load_index_->Count(), data_.size());
-        EXPECT_EQ(load_index_->Size(), data_.size());
-        EXPECT_FALSE(load_index_->HasRawData());
+        EXPECT_EQ(load_index_->Count(), data_.size());
     }
 
     void
@@ -2104,7 +2102,7 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestLoadWithoutMetaFile) {
 
     // Basic operations should still work
     EXPECT_EQ(load_index_->Count(), data_.size());
-    EXPECT_EQ(load_index_->Size(), data_.size());
+    EXPECT_EQ(load_index_->Count(), data_.size());
 
     // Note: GetShreddingFields may return empty because key_field_map_ is empty
     // when both meta.json and parquet metadata are missing/empty.
@@ -2305,7 +2303,7 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestSingleRow) {
     Load();
 
     EXPECT_EQ(load_index_->Count(), 1);
-    EXPECT_EQ(load_index_->Size(), 1);
+    EXPECT_EQ(load_index_->Count(), 1);
 }
 
 // Test with all null values in JSON

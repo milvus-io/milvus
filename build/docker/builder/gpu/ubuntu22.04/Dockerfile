@@ -31,7 +31,7 @@ RUN uv python install 3.12.13 && \
 
 
 # Install go
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.6.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.9.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
 # Install conan
 # Install rust
 RUN curl https://sh.rustup.rs -sSf | \

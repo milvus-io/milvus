@@ -23,7 +23,7 @@ ENV UV_PYTHON_BIN_DIR=/usr/local/bin
 ENV PYTHON=python3.12
 
 RUN yum install -y wget libgomp libaio libatomic tzdata && \
-    yum upgrade -y openssl openssl-libs && \
+    yum upgrade -y openssl openssl-libs curl tar zlib glibc && \
     rm -rf /var/cache/yum/*
 
 RUN uv --no-cache python install 3.12.13 && \

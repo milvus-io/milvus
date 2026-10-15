@@ -25,7 +25,7 @@ ENV PYTHON=python3.12
 RUN dnf install -y dnf-plugins-core && \
     dnf config-manager --set-enabled crb && \
     dnf install -y wget libgomp libaio libatomic tzdata && \
-    dnf upgrade -y openssl openssl-libs && \
+    dnf upgrade -y openssl openssl-libs curl tar zlib glibc && \
     rm -rf /var/cache/dnf/*
 
 RUN uv --no-cache python install 3.12.13 && \

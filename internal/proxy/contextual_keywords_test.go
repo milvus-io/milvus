@@ -140,9 +140,9 @@ func TestFieldNameKeywordPolicy(t *testing.T) {
 		})
 		require.NoError(t, err)
 		add := &addCollectionFieldTask{
-			oldSchema:                 keywordValidationSchemaForTest(),
 			AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{Schema: field},
 		}
+		add.SetOldSchema(keywordValidationSchemaForTest())
 		requireKeywordValidationForTest(t, add.PreExecute(context.Background()), reserved)
 
 		// Struct sub-fields already use the shared field-name validator.
@@ -157,11 +157,11 @@ func TestFieldNameKeywordPolicy(t *testing.T) {
 		structSchema.StructArrayFields = []*schemapb.StructArrayFieldSchema{structField}
 		requireKeywordValidationForTest(t, createKeywordSchemaForTest(t, structSchema), reserved)
 		addStruct := &addCollectionStructFieldTask{
-			oldSchema: keywordValidationSchemaForTest(),
 			AddCollectionStructFieldRequest: &milvuspb.AddCollectionStructFieldRequest{
 				StructArrayFieldSchema: structField,
 			},
 		}
+		addStruct.SetOldSchema(keywordValidationSchemaForTest())
 		requireKeywordValidationForTest(t, addStruct.PreExecute(context.Background()), reserved)
 	}
 
@@ -188,11 +188,11 @@ func TestStructArrayFieldKeywordPolicy(t *testing.T) {
 		requireKeywordValidationForTest(t, createKeywordSchemaForTest(t, schema), reserved)
 
 		add := &addCollectionStructFieldTask{
-			oldSchema: keywordValidationSchemaForTest(),
 			AddCollectionStructFieldRequest: &milvuspb.AddCollectionStructFieldRequest{
 				StructArrayFieldSchema: keywordStructFieldForTest(name),
 			},
 		}
+		add.SetOldSchema(keywordValidationSchemaForTest())
 		requireKeywordValidationForTest(t, add.PreExecute(context.Background()), reserved)
 	}
 
@@ -256,9 +256,9 @@ func TestFieldNameErrorClassification(t *testing.T) {
 		})
 		require.NoError(t, err)
 		add := &addCollectionFieldTask{
-			oldSchema:                 keywordValidationSchemaForTest(),
 			AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{Schema: field},
 		}
+		add.SetOldSchema(keywordValidationSchemaForTest())
 		requireInputValidationErrorForTest(t, add.PreExecute(context.Background()), merr.ErrParameterInvalid, 1100)
 	})
 }

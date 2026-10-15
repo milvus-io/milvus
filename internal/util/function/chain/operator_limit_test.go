@@ -75,7 +75,7 @@ func (s *LimitOpTestSuite) TestLimitBasic() {
 
 	op := NewLimitOp(3, 0)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -92,7 +92,7 @@ func (s *LimitOpTestSuite) TestLimitWithOffset() {
 
 	op := NewLimitOp(2, 2)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -109,7 +109,7 @@ func (s *LimitOpTestSuite) TestLimitOffsetExceedsChunkSize() {
 	// Offset larger than chunk size - should return 0 rows
 	op := NewLimitOp(10, 100)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -123,7 +123,7 @@ func (s *LimitOpTestSuite) TestLimitLargerThanData() {
 	// Limit larger than data - should return all rows
 	op := NewLimitOp(100, 0)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -137,7 +137,7 @@ func (s *LimitOpTestSuite) TestLimitMultiChunk() {
 
 	op := NewLimitOp(2, 0)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -166,7 +166,7 @@ func (s *LimitOpTestSuite) TestLimitEmptyChunk() {
 
 	op := NewLimitOp(10, 0)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
