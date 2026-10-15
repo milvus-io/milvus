@@ -363,6 +363,7 @@ message StreamingError {
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
     rpc SubscribeTransform(stream TransformRequest) returns (stream TransformResponse) {};
+    rpc ValidateAnalyzer(StreamingNodeValidateAnalyzerRequest) returns (StreamingNodeValidateAnalyzerResponse) {};
     rpc RunAnalyzer(StreamingNodeRunAnalyzerRequest) returns (StreamingNodeRunAnalyzerResponse) {};
     rpc GetCollectionSchema(StreamingNodeGetCollectionSchemaRequest) returns (StreamingNodeGetCollectionSchemaResponse) {};
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
@@ -760,7 +761,6 @@ message VChannelSummaryInsertRecord {
 // Client: log coord. There should be only one client globally to call this
 // service on all streamingnode.
 service StreamingNodeManagerService {
-    rpc ValidateRuntime(StreamingNodeManagerValidateRuntimeRequest) returns (StreamingNodeManagerValidateRuntimeResponse) {};
     // Assign is a unary RPC to assign a channel on a log node.
     // Block until the channel assignd is ready to read or write on the log
     // node. Error: If the channel already exists, return error with code
@@ -1162,23 +1162,18 @@ message VChannelTransformLogMeta {
     uint64 materialized_time_tick = 5;
 }
 
-message StreamingNodeRuntimeAnalyzerInfo {
+// Analyzer validation is collection-independent. Failures use native streaming
+// RPC errors; successful responses identify the resources to reserve before DDL.
+message StreamingAnalyzerInfo {
     string params = 1;
     string field = 2;
     string name = 3;
 }
 
-message StreamingNodeRuntimeAnalyzerValidation {
-    repeated StreamingNodeRuntimeAnalyzerInfo analyzer_infos = 1;
+message StreamingNodeValidateAnalyzerRequest {
+    repeated StreamingAnalyzerInfo analyzer_infos = 1;
 }
 
-message StreamingNodeManagerValidateRuntimeRequest {
-    oneof validation {
-        StreamingNodeRuntimeAnalyzerValidation analyzer = 1;
-    }
-}
-
-message StreamingNodeManagerValidateRuntimeResponse {
-    common.Status status = 1;
-    repeated int64 resource_ids = 2;
+message StreamingNodeValidateAnalyzerResponse {
+    repeated int64 resource_ids = 1;
 }

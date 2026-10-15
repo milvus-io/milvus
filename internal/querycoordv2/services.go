@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -1138,42 +1139,15 @@ func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.Wrap(err, "failed to validate analyzer"))}, nil
 	}
 
-	nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Collect()
-
-	if len(nodeIDs) == 0 {
-		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrServiceUnavailable("failed to validate analyzer, no streamingnode"))}, nil
+	infos := make([]*streamingpb.StreamingAnalyzerInfo, 0, len(req.GetAnalyzerInfos()))
+	for _, info := range req.GetAnalyzerInfos() {
+		infos = append(infos, &streamingpb.StreamingAnalyzerInfo{Params: info.GetParams(), Field: info.GetField(), Name: info.GetName()})
 	}
-	if s.streamingNodeManager == nil {
-		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrServiceInternalMsg("failed to validate analyzer, streamingnode manager is nil"))}, nil
-	}
-
-	idx := s.nodeIdx.Inc() % uint32(len(nodeIDs))
-	resp, err := s.streamingNodeManager.ValidateRuntime(ctx, nodeIDs[idx], newStreamingNodeValidateAnalyzerRequest(req))
+	resp, err := streaming.WAL().AnalyzerClient().ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: infos})
 	if err != nil {
 		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
-	return &querypb.ValidateAnalyzerResponse{
-		Status:      resp.GetStatus(),
-		ResourceIds: resp.GetResourceIds(),
-	}, nil
-}
-
-func newStreamingNodeValidateAnalyzerRequest(req *querypb.ValidateAnalyzerRequest) *streamingpb.StreamingNodeManagerValidateRuntimeRequest {
-	infos := make([]*streamingpb.StreamingNodeRuntimeAnalyzerInfo, 0, len(req.GetAnalyzerInfos()))
-	for _, info := range req.GetAnalyzerInfos() {
-		infos = append(infos, &streamingpb.StreamingNodeRuntimeAnalyzerInfo{
-			Params: info.GetParams(),
-			Field:  info.GetField(),
-			Name:   info.GetName(),
-		})
-	}
-	return &streamingpb.StreamingNodeManagerValidateRuntimeRequest{
-		Validation: &streamingpb.StreamingNodeManagerValidateRuntimeRequest_Analyzer{
-			Analyzer: &streamingpb.StreamingNodeRuntimeAnalyzerValidation{
-				AnalyzerInfos: infos,
-			},
-		},
-	}
+	return &querypb.ValidateAnalyzerResponse{Status: merr.Success(), ResourceIds: resp.GetResourceIds()}, nil
 }
 
 func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {

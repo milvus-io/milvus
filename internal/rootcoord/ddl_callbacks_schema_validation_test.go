@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -64,12 +63,11 @@ func TestDDLCallbacksSchemaEvolutionRejectsUnsafeAddCollectionFieldBeforeSideEff
 			createCollectionForTest(t, ctx, core, dbName, collectionName)
 
 			analyzerCalls := 0
-			if test.expectsAnalyzer {
-				mixCoord := core.mixCoord.(*mocks.MixCoord)
-				mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Run(func(context.Context, *querypb.ValidateAnalyzerRequest) {
-					analyzerCalls++
-				}).Return(&querypb.ValidateAnalyzerResponse{Status: merr.Success()}, nil).Maybe()
-			}
+			setValidateAnalyzer := mockAnalyzerValidation(t)
+			setValidateAnalyzer(func(context.Context, []*querypb.AnalyzerInfo) ([]int64, error) {
+				analyzerCalls++
+				return nil, nil
+			})
 			broadcasts := 0
 			mockBroadcastAPI := mock_broadcaster.NewMockBroadcastAPI(t)
 			mockBroadcastAPI.EXPECT().Close().Return().Maybe()

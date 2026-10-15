@@ -79,6 +79,9 @@ type HandlerClient interface {
 	// RunAnalyzer executes an analyzer on a streaming node.
 	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
 
+	// ValidateAnalyzer prepares file resources and validates configs without a collection.
+	ValidateAnalyzer(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)
+
 	// GetCollectionSchema resolves a schema on the current primary WAL owner.
 	GetCollectionSchema(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error)
 

@@ -8495,7 +8495,9 @@ func (x *VChannelTransformLogMeta) GetMaterializedTimeTick() uint64 {
 	return 0
 }
 
-type StreamingNodeRuntimeAnalyzerInfo struct {
+// Analyzer validation is collection-independent. Failures use native streaming
+// RPC errors; successful responses identify the resources to reserve before DDL.
+type StreamingAnalyzerInfo struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -8505,8 +8507,8 @@ type StreamingNodeRuntimeAnalyzerInfo struct {
 	Name   string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 }
 
-func (x *StreamingNodeRuntimeAnalyzerInfo) Reset() {
-	*x = StreamingNodeRuntimeAnalyzerInfo{}
+func (x *StreamingAnalyzerInfo) Reset() {
+	*x = StreamingAnalyzerInfo{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_streaming_proto_msgTypes[121]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8514,13 +8516,13 @@ func (x *StreamingNodeRuntimeAnalyzerInfo) Reset() {
 	}
 }
 
-func (x *StreamingNodeRuntimeAnalyzerInfo) String() string {
+func (x *StreamingAnalyzerInfo) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StreamingNodeRuntimeAnalyzerInfo) ProtoMessage() {}
+func (*StreamingAnalyzerInfo) ProtoMessage() {}
 
-func (x *StreamingNodeRuntimeAnalyzerInfo) ProtoReflect() protoreflect.Message {
+func (x *StreamingAnalyzerInfo) ProtoReflect() protoreflect.Message {
 	mi := &file_streaming_proto_msgTypes[121]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8532,42 +8534,42 @@ func (x *StreamingNodeRuntimeAnalyzerInfo) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StreamingNodeRuntimeAnalyzerInfo.ProtoReflect.Descriptor instead.
-func (*StreamingNodeRuntimeAnalyzerInfo) Descriptor() ([]byte, []int) {
+// Deprecated: Use StreamingAnalyzerInfo.ProtoReflect.Descriptor instead.
+func (*StreamingAnalyzerInfo) Descriptor() ([]byte, []int) {
 	return file_streaming_proto_rawDescGZIP(), []int{121}
 }
 
-func (x *StreamingNodeRuntimeAnalyzerInfo) GetParams() string {
+func (x *StreamingAnalyzerInfo) GetParams() string {
 	if x != nil {
 		return x.Params
 	}
 	return ""
 }
 
-func (x *StreamingNodeRuntimeAnalyzerInfo) GetField() string {
+func (x *StreamingAnalyzerInfo) GetField() string {
 	if x != nil {
 		return x.Field
 	}
 	return ""
 }
 
-func (x *StreamingNodeRuntimeAnalyzerInfo) GetName() string {
+func (x *StreamingAnalyzerInfo) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-type StreamingNodeRuntimeAnalyzerValidation struct {
+type StreamingNodeValidateAnalyzerRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	AnalyzerInfos []*StreamingNodeRuntimeAnalyzerInfo `protobuf:"bytes,1,rep,name=analyzer_infos,json=analyzerInfos,proto3" json:"analyzer_infos,omitempty"`
+	AnalyzerInfos []*StreamingAnalyzerInfo `protobuf:"bytes,1,rep,name=analyzer_infos,json=analyzerInfos,proto3" json:"analyzer_infos,omitempty"`
 }
 
-func (x *StreamingNodeRuntimeAnalyzerValidation) Reset() {
-	*x = StreamingNodeRuntimeAnalyzerValidation{}
+func (x *StreamingNodeValidateAnalyzerRequest) Reset() {
+	*x = StreamingNodeValidateAnalyzerRequest{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_streaming_proto_msgTypes[122]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8575,13 +8577,13 @@ func (x *StreamingNodeRuntimeAnalyzerValidation) Reset() {
 	}
 }
 
-func (x *StreamingNodeRuntimeAnalyzerValidation) String() string {
+func (x *StreamingNodeValidateAnalyzerRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StreamingNodeRuntimeAnalyzerValidation) ProtoMessage() {}
+func (*StreamingNodeValidateAnalyzerRequest) ProtoMessage() {}
 
-func (x *StreamingNodeRuntimeAnalyzerValidation) ProtoReflect() protoreflect.Message {
+func (x *StreamingNodeValidateAnalyzerRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_streaming_proto_msgTypes[122]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8593,31 +8595,28 @@ func (x *StreamingNodeRuntimeAnalyzerValidation) ProtoReflect() protoreflect.Mes
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StreamingNodeRuntimeAnalyzerValidation.ProtoReflect.Descriptor instead.
-func (*StreamingNodeRuntimeAnalyzerValidation) Descriptor() ([]byte, []int) {
+// Deprecated: Use StreamingNodeValidateAnalyzerRequest.ProtoReflect.Descriptor instead.
+func (*StreamingNodeValidateAnalyzerRequest) Descriptor() ([]byte, []int) {
 	return file_streaming_proto_rawDescGZIP(), []int{122}
 }
 
-func (x *StreamingNodeRuntimeAnalyzerValidation) GetAnalyzerInfos() []*StreamingNodeRuntimeAnalyzerInfo {
+func (x *StreamingNodeValidateAnalyzerRequest) GetAnalyzerInfos() []*StreamingAnalyzerInfo {
 	if x != nil {
 		return x.AnalyzerInfos
 	}
 	return nil
 }
 
-type StreamingNodeManagerValidateRuntimeRequest struct {
+type StreamingNodeValidateAnalyzerResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// Types that are assignable to Validation:
-	//
-	//	*StreamingNodeManagerValidateRuntimeRequest_Analyzer
-	Validation isStreamingNodeManagerValidateRuntimeRequest_Validation `protobuf_oneof:"validation"`
+	ResourceIds []int64 `protobuf:"varint,1,rep,packed,name=resource_ids,json=resourceIds,proto3" json:"resource_ids,omitempty"`
 }
 
-func (x *StreamingNodeManagerValidateRuntimeRequest) Reset() {
-	*x = StreamingNodeManagerValidateRuntimeRequest{}
+func (x *StreamingNodeValidateAnalyzerResponse) Reset() {
+	*x = StreamingNodeValidateAnalyzerResponse{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_streaming_proto_msgTypes[123]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8625,13 +8624,13 @@ func (x *StreamingNodeManagerValidateRuntimeRequest) Reset() {
 	}
 }
 
-func (x *StreamingNodeManagerValidateRuntimeRequest) String() string {
+func (x *StreamingNodeValidateAnalyzerResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StreamingNodeManagerValidateRuntimeRequest) ProtoMessage() {}
+func (*StreamingNodeValidateAnalyzerResponse) ProtoMessage() {}
 
-func (x *StreamingNodeManagerValidateRuntimeRequest) ProtoReflect() protoreflect.Message {
+func (x *StreamingNodeValidateAnalyzerResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_streaming_proto_msgTypes[123]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8643,85 +8642,12 @@ func (x *StreamingNodeManagerValidateRuntimeRequest) ProtoReflect() protoreflect
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StreamingNodeManagerValidateRuntimeRequest.ProtoReflect.Descriptor instead.
-func (*StreamingNodeManagerValidateRuntimeRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use StreamingNodeValidateAnalyzerResponse.ProtoReflect.Descriptor instead.
+func (*StreamingNodeValidateAnalyzerResponse) Descriptor() ([]byte, []int) {
 	return file_streaming_proto_rawDescGZIP(), []int{123}
 }
 
-func (m *StreamingNodeManagerValidateRuntimeRequest) GetValidation() isStreamingNodeManagerValidateRuntimeRequest_Validation {
-	if m != nil {
-		return m.Validation
-	}
-	return nil
-}
-
-func (x *StreamingNodeManagerValidateRuntimeRequest) GetAnalyzer() *StreamingNodeRuntimeAnalyzerValidation {
-	if x, ok := x.GetValidation().(*StreamingNodeManagerValidateRuntimeRequest_Analyzer); ok {
-		return x.Analyzer
-	}
-	return nil
-}
-
-type isStreamingNodeManagerValidateRuntimeRequest_Validation interface {
-	isStreamingNodeManagerValidateRuntimeRequest_Validation()
-}
-
-type StreamingNodeManagerValidateRuntimeRequest_Analyzer struct {
-	Analyzer *StreamingNodeRuntimeAnalyzerValidation `protobuf:"bytes,1,opt,name=analyzer,proto3,oneof"`
-}
-
-func (*StreamingNodeManagerValidateRuntimeRequest_Analyzer) isStreamingNodeManagerValidateRuntimeRequest_Validation() {
-}
-
-type StreamingNodeManagerValidateRuntimeResponse struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Status      *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	ResourceIds []int64          `protobuf:"varint,2,rep,packed,name=resource_ids,json=resourceIds,proto3" json:"resource_ids,omitempty"`
-}
-
-func (x *StreamingNodeManagerValidateRuntimeResponse) Reset() {
-	*x = StreamingNodeManagerValidateRuntimeResponse{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_streaming_proto_msgTypes[124]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *StreamingNodeManagerValidateRuntimeResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*StreamingNodeManagerValidateRuntimeResponse) ProtoMessage() {}
-
-func (x *StreamingNodeManagerValidateRuntimeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_streaming_proto_msgTypes[124]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use StreamingNodeManagerValidateRuntimeResponse.ProtoReflect.Descriptor instead.
-func (*StreamingNodeManagerValidateRuntimeResponse) Descriptor() ([]byte, []int) {
-	return file_streaming_proto_rawDescGZIP(), []int{124}
-}
-
-func (x *StreamingNodeManagerValidateRuntimeResponse) GetStatus() *commonpb.Status {
-	if x != nil {
-		return x.Status
-	}
-	return nil
-}
-
-func (x *StreamingNodeManagerValidateRuntimeResponse) GetResourceIds() []int64 {
+func (x *StreamingNodeValidateAnalyzerResponse) GetResourceIds() []int64 {
 	if x != nil {
 		return x.ResourceIds
 	}
@@ -10092,39 +10018,24 @@ var file_streaming_proto_rawDesc = []byte{
 	0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64, 0x5f, 0x74, 0x69, 0x6d, 0x65,
 	0x5f, 0x74, 0x69, 0x63, 0x6b, 0x18, 0x05, 0x20, 0x01, 0x28, 0x04, 0x52, 0x14, 0x6d, 0x61, 0x74,
 	0x65, 0x72, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64, 0x54, 0x69, 0x6d, 0x65, 0x54, 0x69, 0x63,
-	0x6b, 0x22, 0x64, 0x0a, 0x20, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f,
-	0x64, 0x65, 0x52, 0x75, 0x6e, 0x74, 0x69, 0x6d, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65,
-	0x72, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x16, 0x0a, 0x06, 0x70, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x70, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x12, 0x14, 0x0a,
-	0x05, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x66, 0x69,
-	0x65, 0x6c, 0x64, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28,
-	0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x22, 0x89, 0x01, 0x0a, 0x26, 0x53, 0x74, 0x72, 0x65,
-	0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x52, 0x75, 0x6e, 0x74, 0x69, 0x6d, 0x65,
-	0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x69,
-	0x6f, 0x6e, 0x12, 0x5f, 0x0a, 0x0e, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x5f, 0x69,
-	0x6e, 0x66, 0x6f, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x38, 0x2e, 0x6d, 0x69, 0x6c,
-	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
-	0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64,
-	0x65, 0x52, 0x75, 0x6e, 0x74, 0x69, 0x6d, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72,
-	0x49, 0x6e, 0x66, 0x6f, 0x52, 0x0d, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x49, 0x6e,
-	0x66, 0x6f, 0x73, 0x22, 0x98, 0x01, 0x0a, 0x2a, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e,
-	0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x56, 0x61, 0x6c, 0x69,
-	0x64, 0x61, 0x74, 0x65, 0x52, 0x75, 0x6e, 0x74, 0x69, 0x6d, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65,
-	0x73, 0x74, 0x12, 0x5c, 0x0a, 0x08, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x18, 0x01,
-	0x20, 0x01, 0x28, 0x0b, 0x32, 0x3e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74,
-	0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x52, 0x75, 0x6e, 0x74, 0x69,
-	0x6d, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61,
-	0x74, 0x69, 0x6f, 0x6e, 0x48, 0x00, 0x52, 0x08, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72,
-	0x42, 0x0c, 0x0a, 0x0a, 0x76, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x22, 0x85,
-	0x01, 0x0a, 0x2b, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65,
-	0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x65, 0x52,
-	0x75, 0x6e, 0x74, 0x69, 0x6d, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x33,
-	0x0a, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1b,
-	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f,
-	0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61,
-	0x74, 0x75, 0x73, 0x12, 0x21, 0x0a, 0x0c, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x5f,
-	0x69, 0x64, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x03, 0x52, 0x0b, 0x72, 0x65, 0x73, 0x6f, 0x75,
+	0x6b, 0x22, 0x59, 0x0a, 0x15, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x41, 0x6e,
+	0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x16, 0x0a, 0x06, 0x70, 0x61,
+	0x72, 0x61, 0x6d, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x70, 0x61, 0x72, 0x61,
+	0x6d, 0x73, 0x12, 0x14, 0x0a, 0x05, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x05, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65,
+	0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x22, 0x7c, 0x0a, 0x24,
+	0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x56, 0x61, 0x6c,
+	0x69, 0x64, 0x61, 0x74, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x12, 0x54, 0x0a, 0x0e, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72,
+	0x5f, 0x69, 0x6e, 0x66, 0x6f, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x2d, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65,
+	0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x41,
+	0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x0d, 0x61, 0x6e, 0x61,
+	0x6c, 0x79, 0x7a, 0x65, 0x72, 0x49, 0x6e, 0x66, 0x6f, 0x73, 0x22, 0x4a, 0x0a, 0x25, 0x53, 0x74,
+	0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x56, 0x61, 0x6c, 0x69, 0x64,
+	0x61, 0x74, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f,
+	0x6e, 0x73, 0x65, 0x12, 0x21, 0x0a, 0x0c, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x5f,
+	0x69, 0x64, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x03, 0x52, 0x0b, 0x72, 0x65, 0x73, 0x6f, 0x75,
 	0x72, 0x63, 0x65, 0x49, 0x64, 0x73, 0x2a, 0x51, 0x0a, 0x12, 0x50, 0x43, 0x68, 0x61, 0x6e, 0x6e,
 	0x65, 0x6c, 0x41, 0x63, 0x63, 0x65, 0x73, 0x73, 0x4d, 0x6f, 0x64, 0x65, 0x12, 0x1d, 0x0a, 0x19,
 	0x50, 0x43, 0x48, 0x41, 0x4e, 0x4e, 0x45, 0x4c, 0x5f, 0x41, 0x43, 0x43, 0x45, 0x53, 0x53, 0x5f,
@@ -10308,7 +10219,7 @@ var file_streaming_proto_rawDesc = []byte{
 	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x41,
 	0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x44, 0x69, 0x73, 0x63, 0x6f, 0x76, 0x65,
 	0x72, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x28, 0x01, 0x30, 0x01, 0x32,
-	0x86, 0x07, 0x0a, 0x1b, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64,
+	0x9a, 0x08, 0x0a, 0x1b, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64,
 	0x65, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x72, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x12,
 	0x6f, 0x0a, 0x12, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x54, 0x72, 0x61, 0x6e,
 	0x73, 0x66, 0x6f, 0x72, 0x6d, 0x12, 0x28, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
@@ -10317,96 +10228,95 @@ var file_streaming_proto_rawDesc = []byte{
 	0x29, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73,
 	0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x6f,
 	0x72, 0x6d, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x28, 0x01, 0x30, 0x01,
-	0x12, 0x82, 0x01, 0x0a, 0x0b, 0x52, 0x75, 0x6e, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72,
-	0x12, 0x37, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d,
-	0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x52, 0x75, 0x6e, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a,
-	0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x38, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69,
-	0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65,
-	0x52, 0x75, 0x6e, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f,
-	0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x9a, 0x01, 0x0a, 0x13, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6c,
-	0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x12, 0x3f, 0x2e,
+	0x12, 0x91, 0x01, 0x0a, 0x10, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x65, 0x41, 0x6e, 0x61,
+	0x6c, 0x79, 0x7a, 0x65, 0x72, 0x12, 0x3c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53,
+	0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x56, 0x61, 0x6c, 0x69,
+	0x64, 0x61, 0x74, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x1a, 0x3d, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72,
+	0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61,
+	0x74, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x22, 0x00, 0x12, 0x82, 0x01, 0x0a, 0x0b, 0x52, 0x75, 0x6e, 0x41, 0x6e, 0x61, 0x6c,
+	0x79, 0x7a, 0x65, 0x72, 0x12, 0x37, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74,
+	0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x52, 0x75, 0x6e, 0x41, 0x6e,
+	0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x38, 0x2e,
 	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72,
 	0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67,
-	0x4e, 0x6f, 0x64, 0x65, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f,
-	0x6e, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x40,
-	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74,
-	0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e,
-	0x67, 0x4e, 0x6f, 0x64, 0x65, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69,
-	0x6f, 0x6e, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
-	0x22, 0x00, 0x12, 0x89, 0x01, 0x0a, 0x16, 0x47, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63,
-	0x61, 0x74, 0x65, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x12, 0x35, 0x2e,
+	0x4e, 0x6f, 0x64, 0x65, 0x52, 0x75, 0x6e, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x9a, 0x01, 0x0a, 0x13, 0x47, 0x65,
+	0x74, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x53, 0x63, 0x68, 0x65, 0x6d,
+	0x61, 0x12, 0x3f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61,
+	0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6c, 0x6c, 0x65,
+	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x73, 0x74, 0x1a, 0x40, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65,
+	0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6c, 0x6c,
+	0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x89, 0x01, 0x0a, 0x16, 0x47, 0x65, 0x74, 0x52, 0x65,
+	0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x65, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e,
+	0x74, 0x12, 0x35, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x47, 0x65, 0x74, 0x52, 0x65,
+	0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x65, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e,
+	0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x36, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e,
+	0x67, 0x2e, 0x47, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x65, 0x43, 0x68,
+	0x65, 0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x22, 0x00, 0x12, 0x83, 0x01, 0x0a, 0x14, 0x47, 0x65, 0x74, 0x53, 0x61, 0x6c, 0x76, 0x61, 0x67,
+	0x65, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x12, 0x33, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61,
+	0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x61, 0x6c, 0x76, 0x61, 0x67, 0x65, 0x43,
+	0x68, 0x65, 0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x1a, 0x34, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x61, 0x6c,
+	0x76, 0x61, 0x67, 0x65, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x52, 0x65,
+	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x60, 0x0a, 0x07, 0x50, 0x72, 0x6f, 0x64,
+	0x75, 0x63, 0x65, 0x12, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x50, 0x72, 0x6f,
+	0x64, 0x75, 0x63, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61,
+	0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x50, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x28, 0x01, 0x30, 0x01, 0x12, 0x60, 0x0a, 0x07, 0x43, 0x6f,
+	0x6e, 0x73, 0x75, 0x6d, 0x65, 0x12, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x43,
+	0x6f, 0x6e, 0x73, 0x75, 0x6d, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e,
 	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72,
-	0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x47, 0x65, 0x74, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63,
-	0x61, 0x74, 0x65, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x52, 0x65, 0x71,
-	0x75, 0x65, 0x73, 0x74, 0x1a, 0x36, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x47, 0x65,
-	0x74, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x65, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x70,
-	0x6f, 0x69, 0x6e, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x83,
-	0x01, 0x0a, 0x14, 0x47, 0x65, 0x74, 0x53, 0x61, 0x6c, 0x76, 0x61, 0x67, 0x65, 0x43, 0x68, 0x65,
-	0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x12, 0x33, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x43, 0x6f, 0x6e, 0x73, 0x75, 0x6d, 0x65, 0x52, 0x65,
+	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x28, 0x01, 0x30, 0x01, 0x32, 0xbe, 0x03, 0x0a,
+	0x1b, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61,
+	0x6e, 0x61, 0x67, 0x65, 0x72, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0x81, 0x01, 0x0a,
+	0x06, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x12, 0x39, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
 	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67,
-	0x2e, 0x47, 0x65, 0x74, 0x53, 0x61, 0x6c, 0x76, 0x61, 0x67, 0x65, 0x43, 0x68, 0x65, 0x63, 0x6b,
-	0x70, 0x6f, 0x69, 0x6e, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x34, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65,
-	0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x61, 0x6c, 0x76, 0x61, 0x67, 0x65,
-	0x43, 0x68, 0x65, 0x63, 0x6b, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
-	0x73, 0x65, 0x22, 0x00, 0x12, 0x60, 0x0a, 0x07, 0x50, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x12,
-	0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73,
-	0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x50, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67,
-	0x2e, 0x50, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
-	0x22, 0x00, 0x28, 0x01, 0x30, 0x01, 0x12, 0x60, 0x0a, 0x07, 0x43, 0x6f, 0x6e, 0x73, 0x75, 0x6d,
-	0x65, 0x12, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x43, 0x6f, 0x6e, 0x73, 0x75,
-	0x6d, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69,
-	0x6e, 0x67, 0x2e, 0x43, 0x6f, 0x6e, 0x73, 0x75, 0x6d, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
-	0x73, 0x65, 0x22, 0x00, 0x28, 0x01, 0x30, 0x01, 0x32, 0xdd, 0x04, 0x0a, 0x1b, 0x53, 0x74, 0x72,
-	0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65,
-	0x72, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0x9c, 0x01, 0x0a, 0x0f, 0x56, 0x61, 0x6c,
-	0x69, 0x64, 0x61, 0x74, 0x65, 0x52, 0x75, 0x6e, 0x74, 0x69, 0x6d, 0x65, 0x12, 0x42, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65,
-	0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e,
-	0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61,
-	0x74, 0x65, 0x52, 0x75, 0x6e, 0x74, 0x69, 0x6d, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
-	0x1a, 0x43, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d,
-	0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x56, 0x61,
-	0x6c, 0x69, 0x64, 0x61, 0x74, 0x65, 0x52, 0x75, 0x6e, 0x74, 0x69, 0x6d, 0x65, 0x52, 0x65, 0x73,
-	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x81, 0x01, 0x0a, 0x06, 0x41, 0x73, 0x73, 0x69,
-	0x67, 0x6e, 0x12, 0x39, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61,
+	0x6e, 0x61, 0x67, 0x65, 0x72, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x73, 0x74, 0x1a, 0x3a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
 	0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65,
 	0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72,
-	0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x3a, 0x2e,
-	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72,
-	0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67,
-	0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x41, 0x73, 0x73, 0x69, 0x67,
-	0x6e, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x81, 0x01, 0x0a, 0x06,
-	0x52, 0x65, 0x6d, 0x6f, 0x76, 0x65, 0x12, 0x39, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00,
+	0x12, 0x81, 0x01, 0x0a, 0x06, 0x52, 0x65, 0x6d, 0x6f, 0x76, 0x65, 0x12, 0x39, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61,
+	0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f,
+	0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x52, 0x65, 0x6d, 0x6f, 0x76, 0x65, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x3a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
 	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e,
 	0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e,
-	0x61, 0x67, 0x65, 0x72, 0x52, 0x65, 0x6d, 0x6f, 0x76, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
-	0x74, 0x1a, 0x3a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61,
-	0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x52,
-	0x65, 0x6d, 0x6f, 0x76, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12,
-	0x96, 0x01, 0x0a, 0x0d, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x53, 0x74, 0x61, 0x74, 0x75,
-	0x73, 0x12, 0x40, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61,
-	0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x43,
-	0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65, 0x71, 0x75,
-	0x65, 0x73, 0x74, 0x1a, 0x41, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e, 0x53, 0x74, 0x72,
-	0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65,
-	0x72, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65,
-	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x36, 0x5a, 0x34, 0x67, 0x69, 0x74, 0x68,
-	0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f,
-	0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x33, 0x2f, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x70, 0x62,
-	0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x61, 0x67, 0x65, 0x72, 0x52, 0x65, 0x6d, 0x6f, 0x76, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x22, 0x00, 0x12, 0x96, 0x01, 0x0a, 0x0d, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74,
+	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x40, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x2e,
+	0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x61, 0x6e,
+	0x61, 0x67, 0x65, 0x72, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x53, 0x74, 0x61, 0x74, 0x75,
+	0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x41, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e,
+	0x67, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x4e, 0x6f, 0x64, 0x65, 0x4d,
+	0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x53, 0x74, 0x61,
+	0x74, 0x75, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x36, 0x5a,
+	0x34, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76,
+	0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67,
+	0x2f, 0x76, 0x33, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
+	0x69, 0x6e, 0x67, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -10422,168 +10332,167 @@ func file_streaming_proto_rawDescGZIP() []byte {
 }
 
 var file_streaming_proto_enumTypes = make([]protoimpl.EnumInfo, 10)
-var file_streaming_proto_msgTypes = make([]protoimpl.MessageInfo, 128)
+var file_streaming_proto_msgTypes = make([]protoimpl.MessageInfo, 127)
 var file_streaming_proto_goTypes = []interface{}{
-	(PChannelAccessMode)(0),                             // 0: milvus.proto.streaming.PChannelAccessMode
-	(PChannelMetaState)(0),                              // 1: milvus.proto.streaming.PChannelMetaState
-	(BroadcastTaskState)(0),                             // 2: milvus.proto.streaming.BroadcastTaskState
-	(StreamingCode)(0),                                  // 3: milvus.proto.streaming.StreamingCode
-	(WALRateLimitState)(0),                              // 4: milvus.proto.streaming.WALRateLimitState
-	(VChannelState)(0),                                  // 5: milvus.proto.streaming.VChannelState
-	(PartitionState)(0),                                 // 6: milvus.proto.streaming.PartitionState
-	(VChannelSchemaState)(0),                            // 7: milvus.proto.streaming.VChannelSchemaState
-	(SegmentAssignmentState)(0),                         // 8: milvus.proto.streaming.SegmentAssignmentState
-	(AlterWALStage)(0),                                  // 9: milvus.proto.streaming.AlterWALStage
-	(*PChannelInfo)(nil),                                // 10: milvus.proto.streaming.PChannelInfo
-	(*PChannelAssignmentLog)(nil),                       // 11: milvus.proto.streaming.PChannelAssignmentLog
-	(*PChannelMeta)(nil),                                // 12: milvus.proto.streaming.PChannelMeta
-	(*CChannelMeta)(nil),                                // 13: milvus.proto.streaming.CChannelMeta
-	(*StreamingVersion)(nil),                            // 14: milvus.proto.streaming.StreamingVersion
-	(*VersionPair)(nil),                                 // 15: milvus.proto.streaming.VersionPair
-	(*BroadcastTask)(nil),                               // 16: milvus.proto.streaming.BroadcastTask
-	(*AckedResult)(nil),                                 // 17: milvus.proto.streaming.AckedResult
-	(*AckedCheckpoint)(nil),                             // 18: milvus.proto.streaming.AckedCheckpoint
-	(*BroadcastRequest)(nil),                            // 19: milvus.proto.streaming.BroadcastRequest
-	(*BroadcastResponse)(nil),                           // 20: milvus.proto.streaming.BroadcastResponse
-	(*BroadcastAckRequest)(nil),                         // 21: milvus.proto.streaming.BroadcastAckRequest
-	(*BroadcastAckResponse)(nil),                        // 22: milvus.proto.streaming.BroadcastAckResponse
-	(*UpdateReplicateConfigurationRequest)(nil),         // 23: milvus.proto.streaming.UpdateReplicateConfigurationRequest
-	(*UpdateReplicateConfigurationResponse)(nil),        // 24: milvus.proto.streaming.UpdateReplicateConfigurationResponse
-	(*UpdateWALBalancePolicyRequest)(nil),               // 25: milvus.proto.streaming.UpdateWALBalancePolicyRequest
-	(*WALBalancePolicyConfig)(nil),                      // 26: milvus.proto.streaming.WALBalancePolicyConfig
-	(*WALBalancePolicyNodes)(nil),                       // 27: milvus.proto.streaming.WALBalancePolicyNodes
-	(*UpdateWALBalancePolicyResponse)(nil),              // 28: milvus.proto.streaming.UpdateWALBalancePolicyResponse
-	(*AssignmentDiscoverRequest)(nil),                   // 29: milvus.proto.streaming.AssignmentDiscoverRequest
-	(*ReportAssignmentErrorRequest)(nil),                // 30: milvus.proto.streaming.ReportAssignmentErrorRequest
-	(*CloseAssignmentDiscoverRequest)(nil),              // 31: milvus.proto.streaming.CloseAssignmentDiscoverRequest
-	(*AssignmentDiscoverResponse)(nil),                  // 32: milvus.proto.streaming.AssignmentDiscoverResponse
-	(*FullStreamingNodeAssignmentWithVersion)(nil),      // 33: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion
-	(*CChannelAssignment)(nil),                          // 34: milvus.proto.streaming.CChannelAssignment
-	(*CloseAssignmentDiscoverResponse)(nil),             // 35: milvus.proto.streaming.CloseAssignmentDiscoverResponse
-	(*StreamingNodeInfo)(nil),                           // 36: milvus.proto.streaming.StreamingNodeInfo
-	(*StreamingNodeAssignment)(nil),                     // 37: milvus.proto.streaming.StreamingNodeAssignment
-	(*DeliverPolicy)(nil),                               // 38: milvus.proto.streaming.DeliverPolicy
-	(*DeliverFilter)(nil),                               // 39: milvus.proto.streaming.DeliverFilter
-	(*DeliverFilterTimeTickGT)(nil),                     // 40: milvus.proto.streaming.DeliverFilterTimeTickGT
-	(*DeliverFilterTimeTickGTE)(nil),                    // 41: milvus.proto.streaming.DeliverFilterTimeTickGTE
-	(*DeliverFilterMessageType)(nil),                    // 42: milvus.proto.streaming.DeliverFilterMessageType
-	(*StreamingError)(nil),                              // 43: milvus.proto.streaming.StreamingError
-	(*GetReplicateCheckpointRequest)(nil),               // 44: milvus.proto.streaming.GetReplicateCheckpointRequest
-	(*GetReplicateCheckpointResponse)(nil),              // 45: milvus.proto.streaming.GetReplicateCheckpointResponse
-	(*GetSalvageCheckpointRequest)(nil),                 // 46: milvus.proto.streaming.GetSalvageCheckpointRequest
-	(*GetSalvageCheckpointResponse)(nil),                // 47: milvus.proto.streaming.GetSalvageCheckpointResponse
-	(*ProduceRequest)(nil),                              // 48: milvus.proto.streaming.ProduceRequest
-	(*CreateProducerRequest)(nil),                       // 49: milvus.proto.streaming.CreateProducerRequest
-	(*ProduceMessageRequest)(nil),                       // 50: milvus.proto.streaming.ProduceMessageRequest
-	(*CloseProducerRequest)(nil),                        // 51: milvus.proto.streaming.CloseProducerRequest
-	(*ProduceResponse)(nil),                             // 52: milvus.proto.streaming.ProduceResponse
-	(*CreateProducerResponse)(nil),                      // 53: milvus.proto.streaming.CreateProducerResponse
-	(*ProduceMessageResponse)(nil),                      // 54: milvus.proto.streaming.ProduceMessageResponse
-	(*ProduceRateLimitResponse)(nil),                    // 55: milvus.proto.streaming.ProduceRateLimitResponse
-	(*ProduceMessageResponseResult)(nil),                // 56: milvus.proto.streaming.ProduceMessageResponseResult
-	(*CloseProducerResponse)(nil),                       // 57: milvus.proto.streaming.CloseProducerResponse
-	(*ConsumeRequest)(nil),                              // 58: milvus.proto.streaming.ConsumeRequest
-	(*CloseConsumerRequest)(nil),                        // 59: milvus.proto.streaming.CloseConsumerRequest
-	(*CreateConsumerRequest)(nil),                       // 60: milvus.proto.streaming.CreateConsumerRequest
-	(*CreateVChannelConsumersRequest)(nil),              // 61: milvus.proto.streaming.CreateVChannelConsumersRequest
-	(*CreateVChannelConsumerRequest)(nil),               // 62: milvus.proto.streaming.CreateVChannelConsumerRequest
-	(*CreateVChannelConsumersResponse)(nil),             // 63: milvus.proto.streaming.CreateVChannelConsumersResponse
-	(*CreateVChannelConsumerResponse)(nil),              // 64: milvus.proto.streaming.CreateVChannelConsumerResponse
-	(*CloseVChannelConsumerRequest)(nil),                // 65: milvus.proto.streaming.CloseVChannelConsumerRequest
-	(*CloseVChannelConsumerResponse)(nil),               // 66: milvus.proto.streaming.CloseVChannelConsumerResponse
-	(*ConsumeResponse)(nil),                             // 67: milvus.proto.streaming.ConsumeResponse
-	(*CreateConsumerResponse)(nil),                      // 68: milvus.proto.streaming.CreateConsumerResponse
-	(*ConsumeMessageReponse)(nil),                       // 69: milvus.proto.streaming.ConsumeMessageReponse
-	(*CloseConsumerResponse)(nil),                       // 70: milvus.proto.streaming.CloseConsumerResponse
-	(*TransformDeleteBlock)(nil),                        // 71: milvus.proto.streaming.TransformDeleteBlock
-	(*TransformDeleteEntry)(nil),                        // 72: milvus.proto.streaming.TransformDeleteEntry
-	(*TransformLogEntry)(nil),                           // 73: milvus.proto.streaming.TransformLogEntry
-	(*PChannelSummaryManifest)(nil),                     // 74: milvus.proto.streaming.PChannelSummaryManifest
-	(*SummaryCoverage)(nil),                             // 75: milvus.proto.streaming.SummaryCoverage
-	(*PChannelSummaryChunkIndexEntry)(nil),              // 76: milvus.proto.streaming.PChannelSummaryChunkIndexEntry
-	(*PChannelSummaryChunkRef)(nil),                     // 77: milvus.proto.streaming.PChannelSummaryChunkRef
-	(*PChannelSummaryChunkFooter)(nil),                  // 78: milvus.proto.streaming.PChannelSummaryChunkFooter
-	(*VChannelSummaryChunkIndex)(nil),                   // 79: milvus.proto.streaming.VChannelSummaryChunkIndex
-	(*VChannelSummaryTransformIndex)(nil),               // 80: milvus.proto.streaming.VChannelSummaryTransformIndex
-	(*VChannelSummarySectionRef)(nil),                   // 81: milvus.proto.streaming.VChannelSummarySectionRef
-	(*VChannelSummaryTransformSection)(nil),             // 82: milvus.proto.streaming.VChannelSummaryTransformSection
-	(*VChannelSummaryTransformRecord)(nil),              // 83: milvus.proto.streaming.VChannelSummaryTransformRecord
-	(*VChannelSummaryIdempotencySection)(nil),           // 84: milvus.proto.streaming.VChannelSummaryIdempotencySection
-	(*VChannelSummaryIdempotencyRecord)(nil),            // 85: milvus.proto.streaming.VChannelSummaryIdempotencyRecord
-	(*VChannelSummaryInsertSection)(nil),                // 86: milvus.proto.streaming.VChannelSummaryInsertSection
-	(*VChannelSummaryInsertRecord)(nil),                 // 87: milvus.proto.streaming.VChannelSummaryInsertRecord
-	(*StreamingNodeManagerAssignRequest)(nil),           // 88: milvus.proto.streaming.StreamingNodeManagerAssignRequest
-	(*StreamingNodeManagerAssignResponse)(nil),          // 89: milvus.proto.streaming.StreamingNodeManagerAssignResponse
-	(*StreamingNodeManagerRemoveRequest)(nil),           // 90: milvus.proto.streaming.StreamingNodeManagerRemoveRequest
-	(*StreamingNodeManagerRemoveResponse)(nil),          // 91: milvus.proto.streaming.StreamingNodeManagerRemoveResponse
-	(*StreamingNodeManagerCollectStatusRequest)(nil),    // 92: milvus.proto.streaming.StreamingNodeManagerCollectStatusRequest
-	(*StreamingNodeMetrics)(nil),                        // 93: milvus.proto.streaming.StreamingNodeMetrics
-	(*StreamingNodeWALMetrics)(nil),                     // 94: milvus.proto.streaming.StreamingNodeWALMetrics
-	(*StreamingNodeRWWALMetrics)(nil),                   // 95: milvus.proto.streaming.StreamingNodeRWWALMetrics
-	(*StreamingNodeROWALMetrics)(nil),                   // 96: milvus.proto.streaming.StreamingNodeROWALMetrics
-	(*StreamingNodeManagerCollectStatusResponse)(nil),   // 97: milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse
-	(*VChannelMeta)(nil),                                // 98: milvus.proto.streaming.VChannelMeta
-	(*CollectionInfoOfVChannel)(nil),                    // 99: milvus.proto.streaming.CollectionInfoOfVChannel
-	(*CollectionSchemaOfVChannel)(nil),                  // 100: milvus.proto.streaming.CollectionSchemaOfVChannel
-	(*PartitionInfoOfVChannel)(nil),                     // 101: milvus.proto.streaming.PartitionInfoOfVChannel
-	(*SegmentAssignmentMeta)(nil),                       // 102: milvus.proto.streaming.SegmentAssignmentMeta
-	(*L1SegmentPersistedStorage)(nil),                   // 103: milvus.proto.streaming.L1SegmentPersistedStorage
-	(*L1SegmentBinLogs)(nil),                            // 104: milvus.proto.streaming.L1SegmentBinLogs
-	(*SegmentAssignmentStat)(nil),                       // 105: milvus.proto.streaming.SegmentAssignmentStat
-	(*WALCheckpoint)(nil),                               // 106: milvus.proto.streaming.WALCheckpoint
-	(*PChannelRecoveryControlMeta)(nil),                 // 107: milvus.proto.streaming.PChannelRecoveryControlMeta
-	(*AlterWALState)(nil),                               // 108: milvus.proto.streaming.AlterWALState
-	(*ReplicateConfigurationMeta)(nil),                  // 109: milvus.proto.streaming.ReplicateConfigurationMeta
-	(*ReplicatePChannelMeta)(nil),                       // 110: milvus.proto.streaming.ReplicatePChannelMeta
-	(*StreamingNodeRunAnalyzerRequest)(nil),             // 111: milvus.proto.streaming.StreamingNodeRunAnalyzerRequest
-	(*StreamingInlineAnalyzer)(nil),                     // 112: milvus.proto.streaming.StreamingInlineAnalyzer
-	(*StreamingFieldAnalyzer)(nil),                      // 113: milvus.proto.streaming.StreamingFieldAnalyzer
-	(*StreamingNodeRunAnalyzerResponse)(nil),            // 114: milvus.proto.streaming.StreamingNodeRunAnalyzerResponse
-	(*StreamingNodeGetCollectionSchemaRequest)(nil),     // 115: milvus.proto.streaming.StreamingNodeGetCollectionSchemaRequest
-	(*StreamingNodeGetCollectionSchemaResponse)(nil),    // 116: milvus.proto.streaming.StreamingNodeGetCollectionSchemaResponse
-	(*CreateTransformStreamRequest)(nil),                // 117: milvus.proto.streaming.CreateTransformStreamRequest
-	(*TransformRequest)(nil),                            // 118: milvus.proto.streaming.TransformRequest
-	(*CreateTransformSubscriptionRequest)(nil),          // 119: milvus.proto.streaming.CreateTransformSubscriptionRequest
-	(*CloseTransformSubscriptionRequest)(nil),           // 120: milvus.proto.streaming.CloseTransformSubscriptionRequest
-	(*CloseTransformStreamRequest)(nil),                 // 121: milvus.proto.streaming.CloseTransformStreamRequest
-	(*TransformResponse)(nil),                           // 122: milvus.proto.streaming.TransformResponse
-	(*CreateTransformSubscriptionResponse)(nil),         // 123: milvus.proto.streaming.CreateTransformSubscriptionResponse
-	(*CloseTransformSubscriptionResponse)(nil),          // 124: milvus.proto.streaming.CloseTransformSubscriptionResponse
-	(*TransformSubscriptionSyncUp)(nil),                 // 125: milvus.proto.streaming.TransformSubscriptionSyncUp
-	(*TransformSubscriptionError)(nil),                  // 126: milvus.proto.streaming.TransformSubscriptionError
-	(*CloseTransformStreamResponse)(nil),                // 127: milvus.proto.streaming.CloseTransformStreamResponse
-	(*TransformMessageBatch)(nil),                       // 128: milvus.proto.streaming.TransformMessageBatch
-	(*TransformLogChunk)(nil),                           // 129: milvus.proto.streaming.TransformLogChunk
-	(*VChannelTransformLogMeta)(nil),                    // 130: milvus.proto.streaming.VChannelTransformLogMeta
-	(*StreamingNodeRuntimeAnalyzerInfo)(nil),            // 131: milvus.proto.streaming.StreamingNodeRuntimeAnalyzerInfo
-	(*StreamingNodeRuntimeAnalyzerValidation)(nil),      // 132: milvus.proto.streaming.StreamingNodeRuntimeAnalyzerValidation
-	(*StreamingNodeManagerValidateRuntimeRequest)(nil),  // 133: milvus.proto.streaming.StreamingNodeManagerValidateRuntimeRequest
-	(*StreamingNodeManagerValidateRuntimeResponse)(nil), // 134: milvus.proto.streaming.StreamingNodeManagerValidateRuntimeResponse
-	nil,                                        // 135: milvus.proto.streaming.BroadcastResponse.ResultsEntry
-	nil,                                        // 136: milvus.proto.streaming.PChannelSummaryManifest.TransformFastForwardTimeTickEntry
-	nil,                                        // 137: milvus.proto.streaming.AlterWALState.ConfigsEntry
-	(*messagespb.Message)(nil),                 // 138: milvus.proto.messages.Message
-	(*commonpb.MessageID)(nil),                 // 139: milvus.proto.common.MessageID
-	(*commonpb.ImmutableMessage)(nil),          // 140: milvus.proto.common.ImmutableMessage
-	(*commonpb.ReplicateConfiguration)(nil),    // 141: milvus.proto.common.ReplicateConfiguration
-	(*fieldmaskpb.FieldMask)(nil),              // 142: google.protobuf.FieldMask
-	(*emptypb.Empty)(nil),                      // 143: google.protobuf.Empty
-	(messagespb.MessageType)(0),                // 144: milvus.proto.messages.MessageType
-	(*commonpb.ReplicateCheckpoint)(nil),       // 145: milvus.proto.common.ReplicateCheckpoint
-	(*messagespb.TxnContext)(nil),              // 146: milvus.proto.messages.TxnContext
-	(*anypb.Any)(nil),                          // 147: google.protobuf.Any
-	(*schemapb.IDs)(nil),                       // 148: milvus.proto.schema.IDs
-	(*viewpb.DataVersion)(nil),                 // 149: milvus.proto.view.DataVersion
-	(*schemapb.CollectionSchema)(nil),          // 150: milvus.proto.schema.CollectionSchema
-	(*datapb.FieldBinlog)(nil),                 // 151: milvus.proto.data.FieldBinlog
-	(*datapb.Statistics)(nil),                  // 152: milvus.proto.data.Statistics
-	(datapb.SegmentLevel)(0),                   // 153: milvus.proto.data.SegmentLevel
-	(commonpb.WALName)(0),                      // 154: milvus.proto.common.WALName
-	(*commonpb.MilvusCluster)(nil),             // 155: milvus.proto.common.MilvusCluster
-	(*milvuspb.AnalyzerResult)(nil),            // 156: milvus.proto.milvus.AnalyzerResult
-	(*commonpb.Status)(nil),                    // 157: milvus.proto.common.Status
-	(*milvuspb.GetComponentStatesRequest)(nil), // 158: milvus.proto.milvus.GetComponentStatesRequest
-	(*milvuspb.ComponentStates)(nil),           // 159: milvus.proto.milvus.ComponentStates
+	(PChannelAccessMode)(0),                           // 0: milvus.proto.streaming.PChannelAccessMode
+	(PChannelMetaState)(0),                            // 1: milvus.proto.streaming.PChannelMetaState
+	(BroadcastTaskState)(0),                           // 2: milvus.proto.streaming.BroadcastTaskState
+	(StreamingCode)(0),                                // 3: milvus.proto.streaming.StreamingCode
+	(WALRateLimitState)(0),                            // 4: milvus.proto.streaming.WALRateLimitState
+	(VChannelState)(0),                                // 5: milvus.proto.streaming.VChannelState
+	(PartitionState)(0),                               // 6: milvus.proto.streaming.PartitionState
+	(VChannelSchemaState)(0),                          // 7: milvus.proto.streaming.VChannelSchemaState
+	(SegmentAssignmentState)(0),                       // 8: milvus.proto.streaming.SegmentAssignmentState
+	(AlterWALStage)(0),                                // 9: milvus.proto.streaming.AlterWALStage
+	(*PChannelInfo)(nil),                              // 10: milvus.proto.streaming.PChannelInfo
+	(*PChannelAssignmentLog)(nil),                     // 11: milvus.proto.streaming.PChannelAssignmentLog
+	(*PChannelMeta)(nil),                              // 12: milvus.proto.streaming.PChannelMeta
+	(*CChannelMeta)(nil),                              // 13: milvus.proto.streaming.CChannelMeta
+	(*StreamingVersion)(nil),                          // 14: milvus.proto.streaming.StreamingVersion
+	(*VersionPair)(nil),                               // 15: milvus.proto.streaming.VersionPair
+	(*BroadcastTask)(nil),                             // 16: milvus.proto.streaming.BroadcastTask
+	(*AckedResult)(nil),                               // 17: milvus.proto.streaming.AckedResult
+	(*AckedCheckpoint)(nil),                           // 18: milvus.proto.streaming.AckedCheckpoint
+	(*BroadcastRequest)(nil),                          // 19: milvus.proto.streaming.BroadcastRequest
+	(*BroadcastResponse)(nil),                         // 20: milvus.proto.streaming.BroadcastResponse
+	(*BroadcastAckRequest)(nil),                       // 21: milvus.proto.streaming.BroadcastAckRequest
+	(*BroadcastAckResponse)(nil),                      // 22: milvus.proto.streaming.BroadcastAckResponse
+	(*UpdateReplicateConfigurationRequest)(nil),       // 23: milvus.proto.streaming.UpdateReplicateConfigurationRequest
+	(*UpdateReplicateConfigurationResponse)(nil),      // 24: milvus.proto.streaming.UpdateReplicateConfigurationResponse
+	(*UpdateWALBalancePolicyRequest)(nil),             // 25: milvus.proto.streaming.UpdateWALBalancePolicyRequest
+	(*WALBalancePolicyConfig)(nil),                    // 26: milvus.proto.streaming.WALBalancePolicyConfig
+	(*WALBalancePolicyNodes)(nil),                     // 27: milvus.proto.streaming.WALBalancePolicyNodes
+	(*UpdateWALBalancePolicyResponse)(nil),            // 28: milvus.proto.streaming.UpdateWALBalancePolicyResponse
+	(*AssignmentDiscoverRequest)(nil),                 // 29: milvus.proto.streaming.AssignmentDiscoverRequest
+	(*ReportAssignmentErrorRequest)(nil),              // 30: milvus.proto.streaming.ReportAssignmentErrorRequest
+	(*CloseAssignmentDiscoverRequest)(nil),            // 31: milvus.proto.streaming.CloseAssignmentDiscoverRequest
+	(*AssignmentDiscoverResponse)(nil),                // 32: milvus.proto.streaming.AssignmentDiscoverResponse
+	(*FullStreamingNodeAssignmentWithVersion)(nil),    // 33: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion
+	(*CChannelAssignment)(nil),                        // 34: milvus.proto.streaming.CChannelAssignment
+	(*CloseAssignmentDiscoverResponse)(nil),           // 35: milvus.proto.streaming.CloseAssignmentDiscoverResponse
+	(*StreamingNodeInfo)(nil),                         // 36: milvus.proto.streaming.StreamingNodeInfo
+	(*StreamingNodeAssignment)(nil),                   // 37: milvus.proto.streaming.StreamingNodeAssignment
+	(*DeliverPolicy)(nil),                             // 38: milvus.proto.streaming.DeliverPolicy
+	(*DeliverFilter)(nil),                             // 39: milvus.proto.streaming.DeliverFilter
+	(*DeliverFilterTimeTickGT)(nil),                   // 40: milvus.proto.streaming.DeliverFilterTimeTickGT
+	(*DeliverFilterTimeTickGTE)(nil),                  // 41: milvus.proto.streaming.DeliverFilterTimeTickGTE
+	(*DeliverFilterMessageType)(nil),                  // 42: milvus.proto.streaming.DeliverFilterMessageType
+	(*StreamingError)(nil),                            // 43: milvus.proto.streaming.StreamingError
+	(*GetReplicateCheckpointRequest)(nil),             // 44: milvus.proto.streaming.GetReplicateCheckpointRequest
+	(*GetReplicateCheckpointResponse)(nil),            // 45: milvus.proto.streaming.GetReplicateCheckpointResponse
+	(*GetSalvageCheckpointRequest)(nil),               // 46: milvus.proto.streaming.GetSalvageCheckpointRequest
+	(*GetSalvageCheckpointResponse)(nil),              // 47: milvus.proto.streaming.GetSalvageCheckpointResponse
+	(*ProduceRequest)(nil),                            // 48: milvus.proto.streaming.ProduceRequest
+	(*CreateProducerRequest)(nil),                     // 49: milvus.proto.streaming.CreateProducerRequest
+	(*ProduceMessageRequest)(nil),                     // 50: milvus.proto.streaming.ProduceMessageRequest
+	(*CloseProducerRequest)(nil),                      // 51: milvus.proto.streaming.CloseProducerRequest
+	(*ProduceResponse)(nil),                           // 52: milvus.proto.streaming.ProduceResponse
+	(*CreateProducerResponse)(nil),                    // 53: milvus.proto.streaming.CreateProducerResponse
+	(*ProduceMessageResponse)(nil),                    // 54: milvus.proto.streaming.ProduceMessageResponse
+	(*ProduceRateLimitResponse)(nil),                  // 55: milvus.proto.streaming.ProduceRateLimitResponse
+	(*ProduceMessageResponseResult)(nil),              // 56: milvus.proto.streaming.ProduceMessageResponseResult
+	(*CloseProducerResponse)(nil),                     // 57: milvus.proto.streaming.CloseProducerResponse
+	(*ConsumeRequest)(nil),                            // 58: milvus.proto.streaming.ConsumeRequest
+	(*CloseConsumerRequest)(nil),                      // 59: milvus.proto.streaming.CloseConsumerRequest
+	(*CreateConsumerRequest)(nil),                     // 60: milvus.proto.streaming.CreateConsumerRequest
+	(*CreateVChannelConsumersRequest)(nil),            // 61: milvus.proto.streaming.CreateVChannelConsumersRequest
+	(*CreateVChannelConsumerRequest)(nil),             // 62: milvus.proto.streaming.CreateVChannelConsumerRequest
+	(*CreateVChannelConsumersResponse)(nil),           // 63: milvus.proto.streaming.CreateVChannelConsumersResponse
+	(*CreateVChannelConsumerResponse)(nil),            // 64: milvus.proto.streaming.CreateVChannelConsumerResponse
+	(*CloseVChannelConsumerRequest)(nil),              // 65: milvus.proto.streaming.CloseVChannelConsumerRequest
+	(*CloseVChannelConsumerResponse)(nil),             // 66: milvus.proto.streaming.CloseVChannelConsumerResponse
+	(*ConsumeResponse)(nil),                           // 67: milvus.proto.streaming.ConsumeResponse
+	(*CreateConsumerResponse)(nil),                    // 68: milvus.proto.streaming.CreateConsumerResponse
+	(*ConsumeMessageReponse)(nil),                     // 69: milvus.proto.streaming.ConsumeMessageReponse
+	(*CloseConsumerResponse)(nil),                     // 70: milvus.proto.streaming.CloseConsumerResponse
+	(*TransformDeleteBlock)(nil),                      // 71: milvus.proto.streaming.TransformDeleteBlock
+	(*TransformDeleteEntry)(nil),                      // 72: milvus.proto.streaming.TransformDeleteEntry
+	(*TransformLogEntry)(nil),                         // 73: milvus.proto.streaming.TransformLogEntry
+	(*PChannelSummaryManifest)(nil),                   // 74: milvus.proto.streaming.PChannelSummaryManifest
+	(*SummaryCoverage)(nil),                           // 75: milvus.proto.streaming.SummaryCoverage
+	(*PChannelSummaryChunkIndexEntry)(nil),            // 76: milvus.proto.streaming.PChannelSummaryChunkIndexEntry
+	(*PChannelSummaryChunkRef)(nil),                   // 77: milvus.proto.streaming.PChannelSummaryChunkRef
+	(*PChannelSummaryChunkFooter)(nil),                // 78: milvus.proto.streaming.PChannelSummaryChunkFooter
+	(*VChannelSummaryChunkIndex)(nil),                 // 79: milvus.proto.streaming.VChannelSummaryChunkIndex
+	(*VChannelSummaryTransformIndex)(nil),             // 80: milvus.proto.streaming.VChannelSummaryTransformIndex
+	(*VChannelSummarySectionRef)(nil),                 // 81: milvus.proto.streaming.VChannelSummarySectionRef
+	(*VChannelSummaryTransformSection)(nil),           // 82: milvus.proto.streaming.VChannelSummaryTransformSection
+	(*VChannelSummaryTransformRecord)(nil),            // 83: milvus.proto.streaming.VChannelSummaryTransformRecord
+	(*VChannelSummaryIdempotencySection)(nil),         // 84: milvus.proto.streaming.VChannelSummaryIdempotencySection
+	(*VChannelSummaryIdempotencyRecord)(nil),          // 85: milvus.proto.streaming.VChannelSummaryIdempotencyRecord
+	(*VChannelSummaryInsertSection)(nil),              // 86: milvus.proto.streaming.VChannelSummaryInsertSection
+	(*VChannelSummaryInsertRecord)(nil),               // 87: milvus.proto.streaming.VChannelSummaryInsertRecord
+	(*StreamingNodeManagerAssignRequest)(nil),         // 88: milvus.proto.streaming.StreamingNodeManagerAssignRequest
+	(*StreamingNodeManagerAssignResponse)(nil),        // 89: milvus.proto.streaming.StreamingNodeManagerAssignResponse
+	(*StreamingNodeManagerRemoveRequest)(nil),         // 90: milvus.proto.streaming.StreamingNodeManagerRemoveRequest
+	(*StreamingNodeManagerRemoveResponse)(nil),        // 91: milvus.proto.streaming.StreamingNodeManagerRemoveResponse
+	(*StreamingNodeManagerCollectStatusRequest)(nil),  // 92: milvus.proto.streaming.StreamingNodeManagerCollectStatusRequest
+	(*StreamingNodeMetrics)(nil),                      // 93: milvus.proto.streaming.StreamingNodeMetrics
+	(*StreamingNodeWALMetrics)(nil),                   // 94: milvus.proto.streaming.StreamingNodeWALMetrics
+	(*StreamingNodeRWWALMetrics)(nil),                 // 95: milvus.proto.streaming.StreamingNodeRWWALMetrics
+	(*StreamingNodeROWALMetrics)(nil),                 // 96: milvus.proto.streaming.StreamingNodeROWALMetrics
+	(*StreamingNodeManagerCollectStatusResponse)(nil), // 97: milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse
+	(*VChannelMeta)(nil),                              // 98: milvus.proto.streaming.VChannelMeta
+	(*CollectionInfoOfVChannel)(nil),                  // 99: milvus.proto.streaming.CollectionInfoOfVChannel
+	(*CollectionSchemaOfVChannel)(nil),                // 100: milvus.proto.streaming.CollectionSchemaOfVChannel
+	(*PartitionInfoOfVChannel)(nil),                   // 101: milvus.proto.streaming.PartitionInfoOfVChannel
+	(*SegmentAssignmentMeta)(nil),                     // 102: milvus.proto.streaming.SegmentAssignmentMeta
+	(*L1SegmentPersistedStorage)(nil),                 // 103: milvus.proto.streaming.L1SegmentPersistedStorage
+	(*L1SegmentBinLogs)(nil),                          // 104: milvus.proto.streaming.L1SegmentBinLogs
+	(*SegmentAssignmentStat)(nil),                     // 105: milvus.proto.streaming.SegmentAssignmentStat
+	(*WALCheckpoint)(nil),                             // 106: milvus.proto.streaming.WALCheckpoint
+	(*PChannelRecoveryControlMeta)(nil),               // 107: milvus.proto.streaming.PChannelRecoveryControlMeta
+	(*AlterWALState)(nil),                             // 108: milvus.proto.streaming.AlterWALState
+	(*ReplicateConfigurationMeta)(nil),                // 109: milvus.proto.streaming.ReplicateConfigurationMeta
+	(*ReplicatePChannelMeta)(nil),                     // 110: milvus.proto.streaming.ReplicatePChannelMeta
+	(*StreamingNodeRunAnalyzerRequest)(nil),           // 111: milvus.proto.streaming.StreamingNodeRunAnalyzerRequest
+	(*StreamingInlineAnalyzer)(nil),                   // 112: milvus.proto.streaming.StreamingInlineAnalyzer
+	(*StreamingFieldAnalyzer)(nil),                    // 113: milvus.proto.streaming.StreamingFieldAnalyzer
+	(*StreamingNodeRunAnalyzerResponse)(nil),          // 114: milvus.proto.streaming.StreamingNodeRunAnalyzerResponse
+	(*StreamingNodeGetCollectionSchemaRequest)(nil),   // 115: milvus.proto.streaming.StreamingNodeGetCollectionSchemaRequest
+	(*StreamingNodeGetCollectionSchemaResponse)(nil),  // 116: milvus.proto.streaming.StreamingNodeGetCollectionSchemaResponse
+	(*CreateTransformStreamRequest)(nil),              // 117: milvus.proto.streaming.CreateTransformStreamRequest
+	(*TransformRequest)(nil),                          // 118: milvus.proto.streaming.TransformRequest
+	(*CreateTransformSubscriptionRequest)(nil),        // 119: milvus.proto.streaming.CreateTransformSubscriptionRequest
+	(*CloseTransformSubscriptionRequest)(nil),         // 120: milvus.proto.streaming.CloseTransformSubscriptionRequest
+	(*CloseTransformStreamRequest)(nil),               // 121: milvus.proto.streaming.CloseTransformStreamRequest
+	(*TransformResponse)(nil),                         // 122: milvus.proto.streaming.TransformResponse
+	(*CreateTransformSubscriptionResponse)(nil),       // 123: milvus.proto.streaming.CreateTransformSubscriptionResponse
+	(*CloseTransformSubscriptionResponse)(nil),        // 124: milvus.proto.streaming.CloseTransformSubscriptionResponse
+	(*TransformSubscriptionSyncUp)(nil),               // 125: milvus.proto.streaming.TransformSubscriptionSyncUp
+	(*TransformSubscriptionError)(nil),                // 126: milvus.proto.streaming.TransformSubscriptionError
+	(*CloseTransformStreamResponse)(nil),              // 127: milvus.proto.streaming.CloseTransformStreamResponse
+	(*TransformMessageBatch)(nil),                     // 128: milvus.proto.streaming.TransformMessageBatch
+	(*TransformLogChunk)(nil),                         // 129: milvus.proto.streaming.TransformLogChunk
+	(*VChannelTransformLogMeta)(nil),                  // 130: milvus.proto.streaming.VChannelTransformLogMeta
+	(*StreamingAnalyzerInfo)(nil),                     // 131: milvus.proto.streaming.StreamingAnalyzerInfo
+	(*StreamingNodeValidateAnalyzerRequest)(nil),      // 132: milvus.proto.streaming.StreamingNodeValidateAnalyzerRequest
+	(*StreamingNodeValidateAnalyzerResponse)(nil),     // 133: milvus.proto.streaming.StreamingNodeValidateAnalyzerResponse
+	nil,                                        // 134: milvus.proto.streaming.BroadcastResponse.ResultsEntry
+	nil,                                        // 135: milvus.proto.streaming.PChannelSummaryManifest.TransformFastForwardTimeTickEntry
+	nil,                                        // 136: milvus.proto.streaming.AlterWALState.ConfigsEntry
+	(*messagespb.Message)(nil),                 // 137: milvus.proto.messages.Message
+	(*commonpb.MessageID)(nil),                 // 138: milvus.proto.common.MessageID
+	(*commonpb.ImmutableMessage)(nil),          // 139: milvus.proto.common.ImmutableMessage
+	(*commonpb.ReplicateConfiguration)(nil),    // 140: milvus.proto.common.ReplicateConfiguration
+	(*fieldmaskpb.FieldMask)(nil),              // 141: google.protobuf.FieldMask
+	(*emptypb.Empty)(nil),                      // 142: google.protobuf.Empty
+	(messagespb.MessageType)(0),                // 143: milvus.proto.messages.MessageType
+	(*commonpb.ReplicateCheckpoint)(nil),       // 144: milvus.proto.common.ReplicateCheckpoint
+	(*messagespb.TxnContext)(nil),              // 145: milvus.proto.messages.TxnContext
+	(*anypb.Any)(nil),                          // 146: google.protobuf.Any
+	(*schemapb.IDs)(nil),                       // 147: milvus.proto.schema.IDs
+	(*viewpb.DataVersion)(nil),                 // 148: milvus.proto.view.DataVersion
+	(*schemapb.CollectionSchema)(nil),          // 149: milvus.proto.schema.CollectionSchema
+	(*datapb.FieldBinlog)(nil),                 // 150: milvus.proto.data.FieldBinlog
+	(*datapb.Statistics)(nil),                  // 151: milvus.proto.data.Statistics
+	(datapb.SegmentLevel)(0),                   // 152: milvus.proto.data.SegmentLevel
+	(commonpb.WALName)(0),                      // 153: milvus.proto.common.WALName
+	(*commonpb.MilvusCluster)(nil),             // 154: milvus.proto.common.MilvusCluster
+	(*milvuspb.AnalyzerResult)(nil),            // 155: milvus.proto.milvus.AnalyzerResult
+	(*commonpb.Status)(nil),                    // 156: milvus.proto.common.Status
+	(*milvuspb.GetComponentStatesRequest)(nil), // 157: milvus.proto.milvus.GetComponentStatesRequest
+	(*milvuspb.ComponentStates)(nil),           // 158: milvus.proto.milvus.ComponentStates
 }
 var file_streaming_proto_depIdxs = []int32{
 	0,   // 0: milvus.proto.streaming.PChannelInfo.access_mode:type_name -> milvus.proto.streaming.PChannelAccessMode
@@ -10593,19 +10502,19 @@ var file_streaming_proto_depIdxs = []int32{
 	36,  // 4: milvus.proto.streaming.PChannelMeta.node:type_name -> milvus.proto.streaming.StreamingNodeInfo
 	1,   // 5: milvus.proto.streaming.PChannelMeta.state:type_name -> milvus.proto.streaming.PChannelMetaState
 	11,  // 6: milvus.proto.streaming.PChannelMeta.histories:type_name -> milvus.proto.streaming.PChannelAssignmentLog
-	138, // 7: milvus.proto.streaming.BroadcastTask.message:type_name -> milvus.proto.messages.Message
+	137, // 7: milvus.proto.streaming.BroadcastTask.message:type_name -> milvus.proto.messages.Message
 	2,   // 8: milvus.proto.streaming.BroadcastTask.state:type_name -> milvus.proto.streaming.BroadcastTaskState
 	18,  // 9: milvus.proto.streaming.BroadcastTask.acked_checkpoints:type_name -> milvus.proto.streaming.AckedCheckpoint
 	18,  // 10: milvus.proto.streaming.AckedResult.acked_checkpoints:type_name -> milvus.proto.streaming.AckedCheckpoint
-	139, // 11: milvus.proto.streaming.AckedCheckpoint.message_id:type_name -> milvus.proto.common.MessageID
-	139, // 12: milvus.proto.streaming.AckedCheckpoint.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
-	138, // 13: milvus.proto.streaming.BroadcastRequest.message:type_name -> milvus.proto.messages.Message
-	135, // 14: milvus.proto.streaming.BroadcastResponse.results:type_name -> milvus.proto.streaming.BroadcastResponse.ResultsEntry
-	140, // 15: milvus.proto.streaming.BroadcastAckRequest.message:type_name -> milvus.proto.common.ImmutableMessage
-	141, // 16: milvus.proto.streaming.UpdateReplicateConfigurationRequest.configuration:type_name -> milvus.proto.common.ReplicateConfiguration
+	138, // 11: milvus.proto.streaming.AckedCheckpoint.message_id:type_name -> milvus.proto.common.MessageID
+	138, // 12: milvus.proto.streaming.AckedCheckpoint.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
+	137, // 13: milvus.proto.streaming.BroadcastRequest.message:type_name -> milvus.proto.messages.Message
+	134, // 14: milvus.proto.streaming.BroadcastResponse.results:type_name -> milvus.proto.streaming.BroadcastResponse.ResultsEntry
+	139, // 15: milvus.proto.streaming.BroadcastAckRequest.message:type_name -> milvus.proto.common.ImmutableMessage
+	140, // 16: milvus.proto.streaming.UpdateReplicateConfigurationRequest.configuration:type_name -> milvus.proto.common.ReplicateConfiguration
 	26,  // 17: milvus.proto.streaming.UpdateWALBalancePolicyRequest.config:type_name -> milvus.proto.streaming.WALBalancePolicyConfig
 	27,  // 18: milvus.proto.streaming.UpdateWALBalancePolicyRequest.nodes:type_name -> milvus.proto.streaming.WALBalancePolicyNodes
-	142, // 19: milvus.proto.streaming.UpdateWALBalancePolicyRequest.update_mask:type_name -> google.protobuf.FieldMask
+	141, // 19: milvus.proto.streaming.UpdateWALBalancePolicyRequest.update_mask:type_name -> google.protobuf.FieldMask
 	26,  // 20: milvus.proto.streaming.UpdateWALBalancePolicyResponse.config:type_name -> milvus.proto.streaming.WALBalancePolicyConfig
 	30,  // 21: milvus.proto.streaming.AssignmentDiscoverRequest.report_error:type_name -> milvus.proto.streaming.ReportAssignmentErrorRequest
 	31,  // 22: milvus.proto.streaming.AssignmentDiscoverRequest.close:type_name -> milvus.proto.streaming.CloseAssignmentDiscoverRequest
@@ -10616,30 +10525,30 @@ var file_streaming_proto_depIdxs = []int32{
 	15,  // 27: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.version:type_name -> milvus.proto.streaming.VersionPair
 	37,  // 28: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.assignments:type_name -> milvus.proto.streaming.StreamingNodeAssignment
 	34,  // 29: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.cchannel:type_name -> milvus.proto.streaming.CChannelAssignment
-	141, // 30: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.replicate_configuration:type_name -> milvus.proto.common.ReplicateConfiguration
+	140, // 30: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.replicate_configuration:type_name -> milvus.proto.common.ReplicateConfiguration
 	14,  // 31: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.streaming_version:type_name -> milvus.proto.streaming.StreamingVersion
 	15,  // 32: milvus.proto.streaming.FullStreamingNodeAssignmentWithVersion.version_by_revision:type_name -> milvus.proto.streaming.VersionPair
 	13,  // 33: milvus.proto.streaming.CChannelAssignment.meta:type_name -> milvus.proto.streaming.CChannelMeta
 	10,  // 34: milvus.proto.streaming.StreamingNodeAssignment.secondary_channels:type_name -> milvus.proto.streaming.PChannelInfo
 	36,  // 35: milvus.proto.streaming.StreamingNodeAssignment.node:type_name -> milvus.proto.streaming.StreamingNodeInfo
 	10,  // 36: milvus.proto.streaming.StreamingNodeAssignment.channels:type_name -> milvus.proto.streaming.PChannelInfo
-	143, // 37: milvus.proto.streaming.DeliverPolicy.all:type_name -> google.protobuf.Empty
-	143, // 38: milvus.proto.streaming.DeliverPolicy.latest:type_name -> google.protobuf.Empty
-	139, // 39: milvus.proto.streaming.DeliverPolicy.start_from:type_name -> milvus.proto.common.MessageID
-	139, // 40: milvus.proto.streaming.DeliverPolicy.start_after:type_name -> milvus.proto.common.MessageID
+	142, // 37: milvus.proto.streaming.DeliverPolicy.all:type_name -> google.protobuf.Empty
+	142, // 38: milvus.proto.streaming.DeliverPolicy.latest:type_name -> google.protobuf.Empty
+	138, // 39: milvus.proto.streaming.DeliverPolicy.start_from:type_name -> milvus.proto.common.MessageID
+	138, // 40: milvus.proto.streaming.DeliverPolicy.start_after:type_name -> milvus.proto.common.MessageID
 	40,  // 41: milvus.proto.streaming.DeliverFilter.time_tick_gt:type_name -> milvus.proto.streaming.DeliverFilterTimeTickGT
 	41,  // 42: milvus.proto.streaming.DeliverFilter.time_tick_gte:type_name -> milvus.proto.streaming.DeliverFilterTimeTickGTE
 	42,  // 43: milvus.proto.streaming.DeliverFilter.message_type:type_name -> milvus.proto.streaming.DeliverFilterMessageType
-	144, // 44: milvus.proto.streaming.DeliverFilterMessageType.message_types:type_name -> milvus.proto.messages.MessageType
+	143, // 44: milvus.proto.streaming.DeliverFilterMessageType.message_types:type_name -> milvus.proto.messages.MessageType
 	3,   // 45: milvus.proto.streaming.StreamingError.code:type_name -> milvus.proto.streaming.StreamingCode
 	10,  // 46: milvus.proto.streaming.GetReplicateCheckpointRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	145, // 47: milvus.proto.streaming.GetReplicateCheckpointResponse.checkpoint:type_name -> milvus.proto.common.ReplicateCheckpoint
+	144, // 47: milvus.proto.streaming.GetReplicateCheckpointResponse.checkpoint:type_name -> milvus.proto.common.ReplicateCheckpoint
 	10,  // 48: milvus.proto.streaming.GetSalvageCheckpointRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	145, // 49: milvus.proto.streaming.GetSalvageCheckpointResponse.checkpoints:type_name -> milvus.proto.common.ReplicateCheckpoint
+	144, // 49: milvus.proto.streaming.GetSalvageCheckpointResponse.checkpoints:type_name -> milvus.proto.common.ReplicateCheckpoint
 	50,  // 50: milvus.proto.streaming.ProduceRequest.produce:type_name -> milvus.proto.streaming.ProduceMessageRequest
 	51,  // 51: milvus.proto.streaming.ProduceRequest.close:type_name -> milvus.proto.streaming.CloseProducerRequest
 	10,  // 52: milvus.proto.streaming.CreateProducerRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	138, // 53: milvus.proto.streaming.ProduceMessageRequest.message:type_name -> milvus.proto.messages.Message
+	137, // 53: milvus.proto.streaming.ProduceMessageRequest.message:type_name -> milvus.proto.messages.Message
 	53,  // 54: milvus.proto.streaming.ProduceResponse.create:type_name -> milvus.proto.streaming.CreateProducerResponse
 	54,  // 55: milvus.proto.streaming.ProduceResponse.produce:type_name -> milvus.proto.streaming.ProduceMessageResponse
 	57,  // 56: milvus.proto.streaming.ProduceResponse.close:type_name -> milvus.proto.streaming.CloseProducerResponse
@@ -10647,10 +10556,10 @@ var file_streaming_proto_depIdxs = []int32{
 	56,  // 58: milvus.proto.streaming.ProduceMessageResponse.result:type_name -> milvus.proto.streaming.ProduceMessageResponseResult
 	43,  // 59: milvus.proto.streaming.ProduceMessageResponse.error:type_name -> milvus.proto.streaming.StreamingError
 	4,   // 60: milvus.proto.streaming.ProduceRateLimitResponse.state:type_name -> milvus.proto.streaming.WALRateLimitState
-	139, // 61: milvus.proto.streaming.ProduceMessageResponseResult.id:type_name -> milvus.proto.common.MessageID
-	146, // 62: milvus.proto.streaming.ProduceMessageResponseResult.txnContext:type_name -> milvus.proto.messages.TxnContext
-	147, // 63: milvus.proto.streaming.ProduceMessageResponseResult.extra:type_name -> google.protobuf.Any
-	139, // 64: milvus.proto.streaming.ProduceMessageResponseResult.last_confirmed_id:type_name -> milvus.proto.common.MessageID
+	138, // 61: milvus.proto.streaming.ProduceMessageResponseResult.id:type_name -> milvus.proto.common.MessageID
+	145, // 62: milvus.proto.streaming.ProduceMessageResponseResult.txnContext:type_name -> milvus.proto.messages.TxnContext
+	146, // 63: milvus.proto.streaming.ProduceMessageResponseResult.extra:type_name -> google.protobuf.Any
+	138, // 64: milvus.proto.streaming.ProduceMessageResponseResult.last_confirmed_id:type_name -> milvus.proto.common.MessageID
 	62,  // 65: milvus.proto.streaming.ConsumeRequest.create_vchannel_consumer:type_name -> milvus.proto.streaming.CreateVChannelConsumerRequest
 	61,  // 66: milvus.proto.streaming.ConsumeRequest.create_vchannel_consumers:type_name -> milvus.proto.streaming.CreateVChannelConsumersRequest
 	65,  // 67: milvus.proto.streaming.ConsumeRequest.close_vchannel:type_name -> milvus.proto.streaming.CloseVChannelConsumerRequest
@@ -10667,13 +10576,13 @@ var file_streaming_proto_depIdxs = []int32{
 	63,  // 78: milvus.proto.streaming.ConsumeResponse.create_vchannels:type_name -> milvus.proto.streaming.CreateVChannelConsumersResponse
 	66,  // 79: milvus.proto.streaming.ConsumeResponse.close_vchannel:type_name -> milvus.proto.streaming.CloseVChannelConsumerResponse
 	70,  // 80: milvus.proto.streaming.ConsumeResponse.close:type_name -> milvus.proto.streaming.CloseConsumerResponse
-	140, // 81: milvus.proto.streaming.ConsumeMessageReponse.message:type_name -> milvus.proto.common.ImmutableMessage
-	148, // 82: milvus.proto.streaming.TransformDeleteBlock.primary_keys:type_name -> milvus.proto.schema.IDs
+	139, // 81: milvus.proto.streaming.ConsumeMessageReponse.message:type_name -> milvus.proto.common.ImmutableMessage
+	147, // 82: milvus.proto.streaming.TransformDeleteBlock.primary_keys:type_name -> milvus.proto.schema.IDs
 	71,  // 83: milvus.proto.streaming.TransformDeleteEntry.blocks:type_name -> milvus.proto.streaming.TransformDeleteBlock
 	72,  // 84: milvus.proto.streaming.TransformLogEntry.delete:type_name -> milvus.proto.streaming.TransformDeleteEntry
 	76,  // 85: milvus.proto.streaming.PChannelSummaryManifest.chunks:type_name -> milvus.proto.streaming.PChannelSummaryChunkIndexEntry
 	75,  // 86: milvus.proto.streaming.PChannelSummaryManifest.coverage:type_name -> milvus.proto.streaming.SummaryCoverage
-	136, // 87: milvus.proto.streaming.PChannelSummaryManifest.transform_fast_forward_time_tick:type_name -> milvus.proto.streaming.PChannelSummaryManifest.TransformFastForwardTimeTickEntry
+	135, // 87: milvus.proto.streaming.PChannelSummaryManifest.transform_fast_forward_time_tick:type_name -> milvus.proto.streaming.PChannelSummaryManifest.TransformFastForwardTimeTickEntry
 	79,  // 88: milvus.proto.streaming.PChannelSummaryChunkIndexEntry.vchannels:type_name -> milvus.proto.streaming.VChannelSummaryChunkIndex
 	79,  // 89: milvus.proto.streaming.PChannelSummaryChunkFooter.chunks:type_name -> milvus.proto.streaming.VChannelSummaryChunkIndex
 	81,  // 90: milvus.proto.streaming.VChannelSummaryChunkIndex.idempotency:type_name -> milvus.proto.streaming.VChannelSummarySectionRef
@@ -10684,9 +10593,9 @@ var file_streaming_proto_depIdxs = []int32{
 	72,  // 95: milvus.proto.streaming.VChannelSummaryTransformRecord.delete:type_name -> milvus.proto.streaming.TransformDeleteEntry
 	85,  // 96: milvus.proto.streaming.VChannelSummaryIdempotencySection.records:type_name -> milvus.proto.streaming.VChannelSummaryIdempotencyRecord
 	87,  // 97: milvus.proto.streaming.VChannelSummaryInsertSection.records:type_name -> milvus.proto.streaming.VChannelSummaryInsertRecord
-	139, // 98: milvus.proto.streaming.VChannelSummaryInsertRecord.source_message_id:type_name -> milvus.proto.common.MessageID
-	139, // 99: milvus.proto.streaming.VChannelSummaryInsertRecord.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
-	148, // 100: milvus.proto.streaming.VChannelSummaryInsertRecord.ids:type_name -> milvus.proto.schema.IDs
+	138, // 98: milvus.proto.streaming.VChannelSummaryInsertRecord.source_message_id:type_name -> milvus.proto.common.MessageID
+	138, // 99: milvus.proto.streaming.VChannelSummaryInsertRecord.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
+	147, // 100: milvus.proto.streaming.VChannelSummaryInsertRecord.ids:type_name -> milvus.proto.schema.IDs
 	10,  // 101: milvus.proto.streaming.StreamingNodeManagerAssignRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
 	10,  // 102: milvus.proto.streaming.StreamingNodeManagerRemoveRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
 	94,  // 103: milvus.proto.streaming.StreamingNodeMetrics.wals:type_name -> milvus.proto.streaming.StreamingNodeWALMetrics
@@ -10696,45 +10605,45 @@ var file_streaming_proto_depIdxs = []int32{
 	93,  // 107: milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse.metrics:type_name -> milvus.proto.streaming.StreamingNodeMetrics
 	5,   // 108: milvus.proto.streaming.VChannelMeta.state:type_name -> milvus.proto.streaming.VChannelState
 	99,  // 109: milvus.proto.streaming.VChannelMeta.collection_info:type_name -> milvus.proto.streaming.CollectionInfoOfVChannel
-	149, // 110: milvus.proto.streaming.VChannelMeta.segment_data_version_summary:type_name -> milvus.proto.view.DataVersion
+	148, // 110: milvus.proto.streaming.VChannelMeta.segment_data_version_summary:type_name -> milvus.proto.view.DataVersion
 	101, // 111: milvus.proto.streaming.CollectionInfoOfVChannel.partitions:type_name -> milvus.proto.streaming.PartitionInfoOfVChannel
 	100, // 112: milvus.proto.streaming.CollectionInfoOfVChannel.schemas:type_name -> milvus.proto.streaming.CollectionSchemaOfVChannel
-	150, // 113: milvus.proto.streaming.CollectionSchemaOfVChannel.schema:type_name -> milvus.proto.schema.CollectionSchema
+	149, // 113: milvus.proto.streaming.CollectionSchemaOfVChannel.schema:type_name -> milvus.proto.schema.CollectionSchema
 	7,   // 114: milvus.proto.streaming.CollectionSchemaOfVChannel.state:type_name -> milvus.proto.streaming.VChannelSchemaState
 	6,   // 115: milvus.proto.streaming.PartitionInfoOfVChannel.state:type_name -> milvus.proto.streaming.PartitionState
 	8,   // 116: milvus.proto.streaming.SegmentAssignmentMeta.state:type_name -> milvus.proto.streaming.SegmentAssignmentState
 	105, // 117: milvus.proto.streaming.SegmentAssignmentMeta.stat:type_name -> milvus.proto.streaming.SegmentAssignmentStat
 	103, // 118: milvus.proto.streaming.SegmentAssignmentMeta.persisted_storage:type_name -> milvus.proto.streaming.L1SegmentPersistedStorage
-	149, // 119: milvus.proto.streaming.SegmentAssignmentMeta.sealed_at_data_version:type_name -> milvus.proto.view.DataVersion
+	148, // 119: milvus.proto.streaming.SegmentAssignmentMeta.sealed_at_data_version:type_name -> milvus.proto.view.DataVersion
 	104, // 120: milvus.proto.streaming.L1SegmentPersistedStorage.binlogs:type_name -> milvus.proto.streaming.L1SegmentBinLogs
-	151, // 121: milvus.proto.streaming.L1SegmentPersistedStorage.merged_stats_binlog:type_name -> milvus.proto.data.FieldBinlog
-	152, // 122: milvus.proto.streaming.L1SegmentPersistedStorage.statistics:type_name -> milvus.proto.data.Statistics
-	151, // 123: milvus.proto.streaming.L1SegmentPersistedStorage.delta_binlog:type_name -> milvus.proto.data.FieldBinlog
-	151, // 124: milvus.proto.streaming.L1SegmentBinLogs.field_binlog:type_name -> milvus.proto.data.FieldBinlog
-	151, // 125: milvus.proto.streaming.L1SegmentBinLogs.stats_binlog:type_name -> milvus.proto.data.FieldBinlog
-	151, // 126: milvus.proto.streaming.L1SegmentBinLogs.bm25_binlog:type_name -> milvus.proto.data.FieldBinlog
-	153, // 127: milvus.proto.streaming.SegmentAssignmentStat.level:type_name -> milvus.proto.data.SegmentLevel
-	139, // 128: milvus.proto.streaming.WALCheckpoint.message_id:type_name -> milvus.proto.common.MessageID
-	141, // 129: milvus.proto.streaming.WALCheckpoint.replicate_config:type_name -> milvus.proto.common.ReplicateConfiguration
-	145, // 130: milvus.proto.streaming.WALCheckpoint.replicate_checkpoint:type_name -> milvus.proto.common.ReplicateCheckpoint
+	150, // 121: milvus.proto.streaming.L1SegmentPersistedStorage.merged_stats_binlog:type_name -> milvus.proto.data.FieldBinlog
+	151, // 122: milvus.proto.streaming.L1SegmentPersistedStorage.statistics:type_name -> milvus.proto.data.Statistics
+	150, // 123: milvus.proto.streaming.L1SegmentPersistedStorage.delta_binlog:type_name -> milvus.proto.data.FieldBinlog
+	150, // 124: milvus.proto.streaming.L1SegmentBinLogs.field_binlog:type_name -> milvus.proto.data.FieldBinlog
+	150, // 125: milvus.proto.streaming.L1SegmentBinLogs.stats_binlog:type_name -> milvus.proto.data.FieldBinlog
+	150, // 126: milvus.proto.streaming.L1SegmentBinLogs.bm25_binlog:type_name -> milvus.proto.data.FieldBinlog
+	152, // 127: milvus.proto.streaming.SegmentAssignmentStat.level:type_name -> milvus.proto.data.SegmentLevel
+	138, // 128: milvus.proto.streaming.WALCheckpoint.message_id:type_name -> milvus.proto.common.MessageID
+	140, // 129: milvus.proto.streaming.WALCheckpoint.replicate_config:type_name -> milvus.proto.common.ReplicateConfiguration
+	144, // 130: milvus.proto.streaming.WALCheckpoint.replicate_checkpoint:type_name -> milvus.proto.common.ReplicateCheckpoint
 	108, // 131: milvus.proto.streaming.WALCheckpoint.alter_wal_state:type_name -> milvus.proto.streaming.AlterWALState
-	141, // 132: milvus.proto.streaming.PChannelRecoveryControlMeta.replicate_config:type_name -> milvus.proto.common.ReplicateConfiguration
-	145, // 133: milvus.proto.streaming.PChannelRecoveryControlMeta.replicate_checkpoint:type_name -> milvus.proto.common.ReplicateCheckpoint
+	140, // 132: milvus.proto.streaming.PChannelRecoveryControlMeta.replicate_config:type_name -> milvus.proto.common.ReplicateConfiguration
+	144, // 133: milvus.proto.streaming.PChannelRecoveryControlMeta.replicate_checkpoint:type_name -> milvus.proto.common.ReplicateCheckpoint
 	108, // 134: milvus.proto.streaming.PChannelRecoveryControlMeta.alter_wal_state:type_name -> milvus.proto.streaming.AlterWALState
-	154, // 135: milvus.proto.streaming.AlterWALState.target_wal_name:type_name -> milvus.proto.common.WALName
-	137, // 136: milvus.proto.streaming.AlterWALState.configs:type_name -> milvus.proto.streaming.AlterWALState.ConfigsEntry
+	153, // 135: milvus.proto.streaming.AlterWALState.target_wal_name:type_name -> milvus.proto.common.WALName
+	136, // 136: milvus.proto.streaming.AlterWALState.configs:type_name -> milvus.proto.streaming.AlterWALState.ConfigsEntry
 	9,   // 137: milvus.proto.streaming.AlterWALState.stage:type_name -> milvus.proto.streaming.AlterWALStage
-	141, // 138: milvus.proto.streaming.ReplicateConfigurationMeta.replicate_configuration:type_name -> milvus.proto.common.ReplicateConfiguration
+	140, // 138: milvus.proto.streaming.ReplicateConfigurationMeta.replicate_configuration:type_name -> milvus.proto.common.ReplicateConfiguration
 	17,  // 139: milvus.proto.streaming.ReplicateConfigurationMeta.acked_result:type_name -> milvus.proto.streaming.AckedResult
-	155, // 140: milvus.proto.streaming.ReplicatePChannelMeta.target_cluster:type_name -> milvus.proto.common.MilvusCluster
-	145, // 141: milvus.proto.streaming.ReplicatePChannelMeta.initialized_checkpoint:type_name -> milvus.proto.common.ReplicateCheckpoint
+	154, // 140: milvus.proto.streaming.ReplicatePChannelMeta.target_cluster:type_name -> milvus.proto.common.MilvusCluster
+	144, // 141: milvus.proto.streaming.ReplicatePChannelMeta.initialized_checkpoint:type_name -> milvus.proto.common.ReplicateCheckpoint
 	112, // 142: milvus.proto.streaming.StreamingNodeRunAnalyzerRequest.inline_analyzer:type_name -> milvus.proto.streaming.StreamingInlineAnalyzer
 	113, // 143: milvus.proto.streaming.StreamingNodeRunAnalyzerRequest.field_analyzer:type_name -> milvus.proto.streaming.StreamingFieldAnalyzer
 	10,  // 144: milvus.proto.streaming.StreamingFieldAnalyzer.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	156, // 145: milvus.proto.streaming.StreamingNodeRunAnalyzerResponse.results:type_name -> milvus.proto.milvus.AnalyzerResult
-	157, // 146: milvus.proto.streaming.StreamingNodeRunAnalyzerResponse.status:type_name -> milvus.proto.common.Status
+	155, // 145: milvus.proto.streaming.StreamingNodeRunAnalyzerResponse.results:type_name -> milvus.proto.milvus.AnalyzerResult
+	156, // 146: milvus.proto.streaming.StreamingNodeRunAnalyzerResponse.status:type_name -> milvus.proto.common.Status
 	10,  // 147: milvus.proto.streaming.StreamingNodeGetCollectionSchemaRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
-	150, // 148: milvus.proto.streaming.StreamingNodeGetCollectionSchemaResponse.schema:type_name -> milvus.proto.schema.CollectionSchema
+	149, // 148: milvus.proto.streaming.StreamingNodeGetCollectionSchemaResponse.schema:type_name -> milvus.proto.schema.CollectionSchema
 	10,  // 149: milvus.proto.streaming.CreateTransformStreamRequest.pchannel:type_name -> milvus.proto.streaming.PChannelInfo
 	119, // 150: milvus.proto.streaming.TransformRequest.create:type_name -> milvus.proto.streaming.CreateTransformSubscriptionRequest
 	120, // 151: milvus.proto.streaming.TransformRequest.close_subscription:type_name -> milvus.proto.streaming.CloseTransformSubscriptionRequest
@@ -10748,49 +10657,47 @@ var file_streaming_proto_depIdxs = []int32{
 	43,  // 159: milvus.proto.streaming.TransformSubscriptionError.error:type_name -> milvus.proto.streaming.StreamingError
 	73,  // 160: milvus.proto.streaming.TransformMessageBatch.entries:type_name -> milvus.proto.streaming.TransformLogEntry
 	73,  // 161: milvus.proto.streaming.TransformLogChunk.entries:type_name -> milvus.proto.streaming.TransformLogEntry
-	131, // 162: milvus.proto.streaming.StreamingNodeRuntimeAnalyzerValidation.analyzer_infos:type_name -> milvus.proto.streaming.StreamingNodeRuntimeAnalyzerInfo
-	132, // 163: milvus.proto.streaming.StreamingNodeManagerValidateRuntimeRequest.analyzer:type_name -> milvus.proto.streaming.StreamingNodeRuntimeAnalyzerValidation
-	157, // 164: milvus.proto.streaming.StreamingNodeManagerValidateRuntimeResponse.status:type_name -> milvus.proto.common.Status
-	56,  // 165: milvus.proto.streaming.BroadcastResponse.ResultsEntry.value:type_name -> milvus.proto.streaming.ProduceMessageResponseResult
-	158, // 166: milvus.proto.streaming.StreamingNodeStateService.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
-	19,  // 167: milvus.proto.streaming.StreamingCoordBroadcastService.Broadcast:input_type -> milvus.proto.streaming.BroadcastRequest
-	21,  // 168: milvus.proto.streaming.StreamingCoordBroadcastService.Ack:input_type -> milvus.proto.streaming.BroadcastAckRequest
-	23,  // 169: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateReplicateConfiguration:input_type -> milvus.proto.streaming.UpdateReplicateConfigurationRequest
-	25,  // 170: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateWALBalancePolicy:input_type -> milvus.proto.streaming.UpdateWALBalancePolicyRequest
-	29,  // 171: milvus.proto.streaming.StreamingCoordAssignmentService.AssignmentDiscover:input_type -> milvus.proto.streaming.AssignmentDiscoverRequest
-	118, // 172: milvus.proto.streaming.StreamingNodeHandlerService.SubscribeTransform:input_type -> milvus.proto.streaming.TransformRequest
-	111, // 173: milvus.proto.streaming.StreamingNodeHandlerService.RunAnalyzer:input_type -> milvus.proto.streaming.StreamingNodeRunAnalyzerRequest
-	115, // 174: milvus.proto.streaming.StreamingNodeHandlerService.GetCollectionSchema:input_type -> milvus.proto.streaming.StreamingNodeGetCollectionSchemaRequest
-	44,  // 175: milvus.proto.streaming.StreamingNodeHandlerService.GetReplicateCheckpoint:input_type -> milvus.proto.streaming.GetReplicateCheckpointRequest
-	46,  // 176: milvus.proto.streaming.StreamingNodeHandlerService.GetSalvageCheckpoint:input_type -> milvus.proto.streaming.GetSalvageCheckpointRequest
-	48,  // 177: milvus.proto.streaming.StreamingNodeHandlerService.Produce:input_type -> milvus.proto.streaming.ProduceRequest
-	58,  // 178: milvus.proto.streaming.StreamingNodeHandlerService.Consume:input_type -> milvus.proto.streaming.ConsumeRequest
-	133, // 179: milvus.proto.streaming.StreamingNodeManagerService.ValidateRuntime:input_type -> milvus.proto.streaming.StreamingNodeManagerValidateRuntimeRequest
-	88,  // 180: milvus.proto.streaming.StreamingNodeManagerService.Assign:input_type -> milvus.proto.streaming.StreamingNodeManagerAssignRequest
-	90,  // 181: milvus.proto.streaming.StreamingNodeManagerService.Remove:input_type -> milvus.proto.streaming.StreamingNodeManagerRemoveRequest
-	92,  // 182: milvus.proto.streaming.StreamingNodeManagerService.CollectStatus:input_type -> milvus.proto.streaming.StreamingNodeManagerCollectStatusRequest
-	159, // 183: milvus.proto.streaming.StreamingNodeStateService.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
-	20,  // 184: milvus.proto.streaming.StreamingCoordBroadcastService.Broadcast:output_type -> milvus.proto.streaming.BroadcastResponse
-	22,  // 185: milvus.proto.streaming.StreamingCoordBroadcastService.Ack:output_type -> milvus.proto.streaming.BroadcastAckResponse
-	24,  // 186: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateReplicateConfiguration:output_type -> milvus.proto.streaming.UpdateReplicateConfigurationResponse
-	28,  // 187: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateWALBalancePolicy:output_type -> milvus.proto.streaming.UpdateWALBalancePolicyResponse
-	32,  // 188: milvus.proto.streaming.StreamingCoordAssignmentService.AssignmentDiscover:output_type -> milvus.proto.streaming.AssignmentDiscoverResponse
-	122, // 189: milvus.proto.streaming.StreamingNodeHandlerService.SubscribeTransform:output_type -> milvus.proto.streaming.TransformResponse
-	114, // 190: milvus.proto.streaming.StreamingNodeHandlerService.RunAnalyzer:output_type -> milvus.proto.streaming.StreamingNodeRunAnalyzerResponse
-	116, // 191: milvus.proto.streaming.StreamingNodeHandlerService.GetCollectionSchema:output_type -> milvus.proto.streaming.StreamingNodeGetCollectionSchemaResponse
-	45,  // 192: milvus.proto.streaming.StreamingNodeHandlerService.GetReplicateCheckpoint:output_type -> milvus.proto.streaming.GetReplicateCheckpointResponse
-	47,  // 193: milvus.proto.streaming.StreamingNodeHandlerService.GetSalvageCheckpoint:output_type -> milvus.proto.streaming.GetSalvageCheckpointResponse
-	52,  // 194: milvus.proto.streaming.StreamingNodeHandlerService.Produce:output_type -> milvus.proto.streaming.ProduceResponse
-	67,  // 195: milvus.proto.streaming.StreamingNodeHandlerService.Consume:output_type -> milvus.proto.streaming.ConsumeResponse
-	134, // 196: milvus.proto.streaming.StreamingNodeManagerService.ValidateRuntime:output_type -> milvus.proto.streaming.StreamingNodeManagerValidateRuntimeResponse
-	89,  // 197: milvus.proto.streaming.StreamingNodeManagerService.Assign:output_type -> milvus.proto.streaming.StreamingNodeManagerAssignResponse
-	91,  // 198: milvus.proto.streaming.StreamingNodeManagerService.Remove:output_type -> milvus.proto.streaming.StreamingNodeManagerRemoveResponse
-	97,  // 199: milvus.proto.streaming.StreamingNodeManagerService.CollectStatus:output_type -> milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse
-	183, // [183:200] is the sub-list for method output_type
-	166, // [166:183] is the sub-list for method input_type
-	166, // [166:166] is the sub-list for extension type_name
-	166, // [166:166] is the sub-list for extension extendee
-	0,   // [0:166] is the sub-list for field type_name
+	131, // 162: milvus.proto.streaming.StreamingNodeValidateAnalyzerRequest.analyzer_infos:type_name -> milvus.proto.streaming.StreamingAnalyzerInfo
+	56,  // 163: milvus.proto.streaming.BroadcastResponse.ResultsEntry.value:type_name -> milvus.proto.streaming.ProduceMessageResponseResult
+	157, // 164: milvus.proto.streaming.StreamingNodeStateService.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
+	19,  // 165: milvus.proto.streaming.StreamingCoordBroadcastService.Broadcast:input_type -> milvus.proto.streaming.BroadcastRequest
+	21,  // 166: milvus.proto.streaming.StreamingCoordBroadcastService.Ack:input_type -> milvus.proto.streaming.BroadcastAckRequest
+	23,  // 167: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateReplicateConfiguration:input_type -> milvus.proto.streaming.UpdateReplicateConfigurationRequest
+	25,  // 168: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateWALBalancePolicy:input_type -> milvus.proto.streaming.UpdateWALBalancePolicyRequest
+	29,  // 169: milvus.proto.streaming.StreamingCoordAssignmentService.AssignmentDiscover:input_type -> milvus.proto.streaming.AssignmentDiscoverRequest
+	118, // 170: milvus.proto.streaming.StreamingNodeHandlerService.SubscribeTransform:input_type -> milvus.proto.streaming.TransformRequest
+	132, // 171: milvus.proto.streaming.StreamingNodeHandlerService.ValidateAnalyzer:input_type -> milvus.proto.streaming.StreamingNodeValidateAnalyzerRequest
+	111, // 172: milvus.proto.streaming.StreamingNodeHandlerService.RunAnalyzer:input_type -> milvus.proto.streaming.StreamingNodeRunAnalyzerRequest
+	115, // 173: milvus.proto.streaming.StreamingNodeHandlerService.GetCollectionSchema:input_type -> milvus.proto.streaming.StreamingNodeGetCollectionSchemaRequest
+	44,  // 174: milvus.proto.streaming.StreamingNodeHandlerService.GetReplicateCheckpoint:input_type -> milvus.proto.streaming.GetReplicateCheckpointRequest
+	46,  // 175: milvus.proto.streaming.StreamingNodeHandlerService.GetSalvageCheckpoint:input_type -> milvus.proto.streaming.GetSalvageCheckpointRequest
+	48,  // 176: milvus.proto.streaming.StreamingNodeHandlerService.Produce:input_type -> milvus.proto.streaming.ProduceRequest
+	58,  // 177: milvus.proto.streaming.StreamingNodeHandlerService.Consume:input_type -> milvus.proto.streaming.ConsumeRequest
+	88,  // 178: milvus.proto.streaming.StreamingNodeManagerService.Assign:input_type -> milvus.proto.streaming.StreamingNodeManagerAssignRequest
+	90,  // 179: milvus.proto.streaming.StreamingNodeManagerService.Remove:input_type -> milvus.proto.streaming.StreamingNodeManagerRemoveRequest
+	92,  // 180: milvus.proto.streaming.StreamingNodeManagerService.CollectStatus:input_type -> milvus.proto.streaming.StreamingNodeManagerCollectStatusRequest
+	158, // 181: milvus.proto.streaming.StreamingNodeStateService.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
+	20,  // 182: milvus.proto.streaming.StreamingCoordBroadcastService.Broadcast:output_type -> milvus.proto.streaming.BroadcastResponse
+	22,  // 183: milvus.proto.streaming.StreamingCoordBroadcastService.Ack:output_type -> milvus.proto.streaming.BroadcastAckResponse
+	24,  // 184: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateReplicateConfiguration:output_type -> milvus.proto.streaming.UpdateReplicateConfigurationResponse
+	28,  // 185: milvus.proto.streaming.StreamingCoordAssignmentService.UpdateWALBalancePolicy:output_type -> milvus.proto.streaming.UpdateWALBalancePolicyResponse
+	32,  // 186: milvus.proto.streaming.StreamingCoordAssignmentService.AssignmentDiscover:output_type -> milvus.proto.streaming.AssignmentDiscoverResponse
+	122, // 187: milvus.proto.streaming.StreamingNodeHandlerService.SubscribeTransform:output_type -> milvus.proto.streaming.TransformResponse
+	133, // 188: milvus.proto.streaming.StreamingNodeHandlerService.ValidateAnalyzer:output_type -> milvus.proto.streaming.StreamingNodeValidateAnalyzerResponse
+	114, // 189: milvus.proto.streaming.StreamingNodeHandlerService.RunAnalyzer:output_type -> milvus.proto.streaming.StreamingNodeRunAnalyzerResponse
+	116, // 190: milvus.proto.streaming.StreamingNodeHandlerService.GetCollectionSchema:output_type -> milvus.proto.streaming.StreamingNodeGetCollectionSchemaResponse
+	45,  // 191: milvus.proto.streaming.StreamingNodeHandlerService.GetReplicateCheckpoint:output_type -> milvus.proto.streaming.GetReplicateCheckpointResponse
+	47,  // 192: milvus.proto.streaming.StreamingNodeHandlerService.GetSalvageCheckpoint:output_type -> milvus.proto.streaming.GetSalvageCheckpointResponse
+	52,  // 193: milvus.proto.streaming.StreamingNodeHandlerService.Produce:output_type -> milvus.proto.streaming.ProduceResponse
+	67,  // 194: milvus.proto.streaming.StreamingNodeHandlerService.Consume:output_type -> milvus.proto.streaming.ConsumeResponse
+	89,  // 195: milvus.proto.streaming.StreamingNodeManagerService.Assign:output_type -> milvus.proto.streaming.StreamingNodeManagerAssignResponse
+	91,  // 196: milvus.proto.streaming.StreamingNodeManagerService.Remove:output_type -> milvus.proto.streaming.StreamingNodeManagerRemoveResponse
+	97,  // 197: milvus.proto.streaming.StreamingNodeManagerService.CollectStatus:output_type -> milvus.proto.streaming.StreamingNodeManagerCollectStatusResponse
+	181, // [181:198] is the sub-list for method output_type
+	164, // [164:181] is the sub-list for method input_type
+	164, // [164:164] is the sub-list for extension type_name
+	164, // [164:164] is the sub-list for extension extendee
+	0,   // [0:164] is the sub-list for field type_name
 }
 
 func init() { file_streaming_proto_init() }
@@ -12252,7 +12159,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[121].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeRuntimeAnalyzerInfo); i {
+			switch v := v.(*StreamingAnalyzerInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12264,7 +12171,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[122].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeRuntimeAnalyzerValidation); i {
+			switch v := v.(*StreamingNodeValidateAnalyzerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12276,19 +12183,7 @@ func file_streaming_proto_init() {
 			}
 		}
 		file_streaming_proto_msgTypes[123].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeManagerValidateRuntimeRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_streaming_proto_msgTypes[124].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StreamingNodeManagerValidateRuntimeResponse); i {
+			switch v := v.(*StreamingNodeValidateAnalyzerResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12380,16 +12275,13 @@ func file_streaming_proto_init() {
 		(*TransformResponse_CloseSubscription)(nil),
 		(*TransformResponse_CloseStream)(nil),
 	}
-	file_streaming_proto_msgTypes[123].OneofWrappers = []interface{}{
-		(*StreamingNodeManagerValidateRuntimeRequest_Analyzer)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_streaming_proto_rawDesc,
 			NumEnums:      10,
-			NumMessages:   128,
+			NumMessages:   127,
 			NumExtensions: 0,
 			NumServices:   5,
 		},

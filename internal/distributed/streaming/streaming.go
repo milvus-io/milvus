@@ -114,6 +114,9 @@ type ReadOption struct {
 // AnalyzerClient exposes analyzer execution through the streaming WAL entry.
 type AnalyzerClient interface {
 	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
+
+	// ValidateAnalyzer prepares file resources and validates configs without a collection.
+	ValidateAnalyzer(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)
 }
 
 // SchemaClient resolves write or exact historical schemas through WAL ownership.

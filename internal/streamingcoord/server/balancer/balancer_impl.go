@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -91,9 +90,6 @@ type balancerImpl struct {
 	freezeNodes            *typeutil.ConcurrentSet[int64]        // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
 	primaryRGChangedCh     chan struct{}                         // primaryRGChangedCh wakes the balance loop when streaming.primaryResourceGroup changes.
 	primaryRGChangeHandler config.EventHandler
-
-	fileResourceChecker FileResourceChecker
-	checkerMu           sync.RWMutex
 }
 
 func (b *balancerImpl) watchPrimaryResourceGroupChanges() {
@@ -106,18 +102,6 @@ func (b *balancerImpl) watchPrimaryResourceGroupChanges() {
 	})
 	b.primaryRGChangeHandler = handler
 	paramtable.Get().Watch(key, handler)
-}
-
-func (b *balancerImpl) SetFileResourceChecker(checker FileResourceChecker) {
-	b.checkerMu.Lock()
-	defer b.checkerMu.Unlock()
-	b.fileResourceChecker = checker
-}
-
-func (b *balancerImpl) GetFileResourceChecker() FileResourceChecker {
-	b.checkerMu.RLock()
-	defer b.checkerMu.RUnlock()
-	return b.fileResourceChecker
 }
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
@@ -652,14 +636,8 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 		}
 	}
 
-	// check if the node sync the file resource successfully.
-	if checker := b.GetFileResourceChecker(); checker != nil {
-		for _, node := range nodeStatus {
-			if ok := checker.CheckNodeSynced(node.ServerID); !ok {
-				node.Err = types.ErrFileResource
-			}
-		}
-	}
+	// File resources are prepared by each SN consumer through the pull path.
+	// QN push acknowledgments do not describe whether an SN can own a WAL.
 	return nodeStatus, nil
 }
 

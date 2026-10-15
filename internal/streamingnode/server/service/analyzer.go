@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -11,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type analyzerProvider interface {
@@ -45,4 +47,38 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 	default:
 		return nil, status.NewInvalidArgument("analyzer source is required")
 	}
+}
+
+// ValidateAnalyzer prepares the local inventory before native config validation.
+// No collection, WAL ownership, QueryView or loaded segments are required.
+func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := fileresource.Prepare(ctx); err != nil {
+		return nil, merr.Wrap(err, "prepare analyzer file resources")
+	}
+	resourceIDs := typeutil.NewSet[int64]()
+	for _, info := range req.GetAnalyzerInfos() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if info.GetParams() != "" {
+			var params map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(info.GetParams()), &params); err != nil || params == nil {
+				return nil, status.NewInvalidArgument("analyzer parameters must be a JSON object for field: %s, name: %s", info.GetField(), info.GetName())
+			}
+		}
+		ids, err := analyzer.ValidateAnalyzer(info.GetParams(), "")
+		if err != nil {
+			err = merr.Wrapf(err, "validate analyzer failed for field: %s, name: %s", info.GetField(), info.GetName())
+			if merr.GetErrorType(err) == merr.InputError {
+				// Translate the native input classification into the streaming wire dialect.
+				return nil, status.NewInvalidArgument(err.Error())
+			}
+			return nil, err
+		}
+		resourceIDs.Insert(ids...)
+	}
+	return &streamingpb.StreamingNodeValidateAnalyzerResponse{ResourceIds: resourceIDs.Collect()}, nil
 }

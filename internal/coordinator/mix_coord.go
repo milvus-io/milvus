@@ -182,7 +182,7 @@ func (s *mixCoordImpl) initInternal() error {
 	s.queryCoordServer.SetMixCoord(s)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
 
-	if err := s.streamingCoord.Start(s.ctx, s.fileResourceObserver); err != nil {
+	if err := s.streamingCoord.Start(s.ctx); err != nil {
 		mlog.Error(s.ctx, "streamCoord start failed", mlog.Err(err))
 		return err
 	}
