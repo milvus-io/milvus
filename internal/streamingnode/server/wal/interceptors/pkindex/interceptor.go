@@ -23,7 +23,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/index"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
@@ -45,7 +44,7 @@ type txnSessions interface {
 // appendInterceptor translates WAL messages into primary key index requests and
 // appends what the index asks for. It holds no index logic of its own.
 type appendInterceptor struct {
-	ch       *index.Channel
+	ch       *snpkindex.Channel
 	registry *registry
 	sessions txnSessions
 	metrics  *pkindexMetrics
@@ -195,7 +194,7 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 
 // applyInsert reads the assigned segment back from the appended insert. The shard
 // interceptor rewrites the header downstream, so it must be decoded again here.
-func (i *appendInterceptor) applyInsert(ctx context.Context, intent *index.Intent, appended message.ImmutableMessage, timeTick uint64) {
+func (i *appendInterceptor) applyInsert(ctx context.Context, intent *snpkindex.Intent, appended message.ImmutableMessage, timeTick uint64) {
 	header := message.MustAsImmutableInsertMessageV1(appended).Header()
 	var segmentID int64
 	if partitions := header.GetPartitions(); len(partitions) > 0 {
@@ -302,7 +301,7 @@ func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg m
 }
 
 // decide calls the index and classifies its error for the WAL.
-func (i *appendInterceptor) decide(ctx context.Context, t *target, req snpkindex.Request) (*index.Intent, error) {
+func (i *appendInterceptor) decide(ctx context.Context, t *target, req snpkindex.Request) (*snpkindex.Intent, error) {
 	start := time.Now()
 	intent, err := t.idx.Decide(ctx, req)
 	if err != nil {

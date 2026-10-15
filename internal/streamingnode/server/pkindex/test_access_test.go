@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 )
 
 func TestTestAccessors(t *testing.T) {
@@ -45,9 +44,9 @@ func TestPendingTxnIDsAndDropTxn(t *testing.T) {
 	idx := env.add(ch, "v0")
 	ctx := context.Background()
 
-	intent, err := idx.Decide(ctx, snpkindex.Request{Kind: snpkindex.KindInsert, VChannel: "v0", PKs: int64PKs(1), TxnID: 7})
+	intent, err := idx.Decide(ctx, Request{Kind: KindInsert, VChannel: "v0", PKs: int64PKs(1), TxnID: 7})
 	require.NoError(t, err)
-	intent.Apply(ctx, snpkindex.Applied{SegmentID: 10})
+	intent.Apply(ctx, Applied{SegmentID: 10})
 	require.Equal(t, []int64{7}, idx.PendingTxnIDs())
 	require.False(t, idx.DirtyForTest(), "a transaction body only records pending writes")
 

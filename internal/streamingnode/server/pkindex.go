@@ -23,8 +23,8 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/index"
 	"github.com/milvus-io/milvus/internal/storage"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindexstore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -41,7 +41,7 @@ const openFileReserve = 10000
 type pkindexComponents struct {
 	// root is the local directory of the index data.
 	root   string
-	mgr    *index.Manager
+	mgr    *snpkindex.Manager
 	shared *engine.SharedResources
 }
 
@@ -63,7 +63,7 @@ func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager) *pkindex
 		CacheBytes:   cfg.PKIndexBlockCacheSize.GetAsSize(),
 		MaxOpenFiles: maxOpenFiles,
 	})
-	mgr := index.NewManager(index.ManagerConfig{
+	mgr := snpkindex.NewManager(snpkindex.ManagerConfig{
 		Root:   root,
 		Shared: shared,
 		// The resource is set before any WAL opens, so the call is safe.
@@ -78,7 +78,7 @@ func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager) *pkindex
 		// hand over. They only deduplicate the writes.
 		Committer: nil,
 		Sched:     nodescheduler.Get(),
-		Params:    index.ParamsFromConfig,
+		Params:    snpkindex.ParamsFromConfig,
 	})
 	mlog.Info(ctx, "primary key index manager created", mlog.String("root", root),
 		mlog.Int64("blockCacheBytes", cfg.PKIndexBlockCacheSize.GetAsSize()), mlog.Int("maxOpenFiles", maxOpenFiles))
@@ -86,7 +86,7 @@ func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager) *pkindex
 }
 
 // manager returns the index manager, nil when the index is off.
-func (c *pkindexComponents) manager() *index.Manager {
+func (c *pkindexComponents) manager() *snpkindex.Manager {
 	if c == nil {
 		return nil
 	}

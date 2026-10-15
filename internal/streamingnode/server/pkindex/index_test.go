@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/objpath"
@@ -269,10 +269,10 @@ func TestDecideCorruptionIsFatal(t *testing.T) {
 
 	_, err := idx.Decide(ctx, insertRequest(idx, 1))
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
 	fatals := env.fatalList()
 	require.Len(t, fatals, 1)
-	assert.True(t, errors.Is(fatals[0], pkindex.ErrCorrupted))
+	assert.True(t, errors.Is(fatals[0], pkerr.ErrCorrupted))
 
 	// A decider error that is not corruption is not fatal. The engine of
 	// another Index is closed while the Index stays open, so Decide reaches
@@ -282,7 +282,7 @@ func TestDecideCorruptionIsFatal(t *testing.T) {
 	_, err = other.Decide(ctx, insertRequest(other, 2))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, engine.ErrClosed))
-	assert.False(t, errors.Is(err, pkindex.ErrCorrupted))
+	assert.False(t, errors.Is(err, pkerr.ErrCorrupted))
 	assert.Len(t, env.fatalList(), 1)
 	// the failed Decide released the writer
 	ch.Tick(30)

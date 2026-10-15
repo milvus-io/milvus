@@ -22,7 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/pkindex/index"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
@@ -107,7 +107,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 
 // pkindexManager returns the index manager of the streaming node, nil when
 // the resource or the manager is not set.
-func pkindexManager() *index.Manager {
+func pkindexManager() *snpkindex.Manager {
 	r := resource.Resource()
 	if r == nil {
 		return nil
@@ -117,13 +117,13 @@ func pkindexManager() *index.Manager {
 
 // tailOf returns a function that reads the WAL recovery tail. The function
 // returns zeros when rs is nil.
-func tailOf(rs recovery.RecoveryStorage) func() index.WALTail {
+func tailOf(rs recovery.RecoveryStorage) func() snpkindex.WALTail {
 	if rs == nil {
-		return func() index.WALTail { return index.WALTail{} }
+		return func() snpkindex.WALTail { return snpkindex.WALTail{} }
 	}
-	return func() index.WALTail {
+	return func() snpkindex.WALTail {
 		m := rs.Metrics()
-		return index.WALTail{Bytes: m.RecoveryTailBytes, RecoveryTimeTick: m.RecoveryTimeTick}
+		return snpkindex.WALTail{Bytes: m.RecoveryTailBytes, RecoveryTimeTick: m.RecoveryTimeTick}
 	}
 }
 

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -106,3 +106,18 @@ type Committer interface {
 // MaxRecoveryManifests is the largest number of refs in one
 // GetRecoveryManifests call.
 const MaxRecoveryManifests = 10000
+
+// TableStore moves SST files between local disk and object storage.
+type TableStore interface {
+	// UploadFile writes the local file at path to key.
+	UploadFile(ctx context.Context, key, path string) error
+
+	// DownloadFile writes the object at key to the local file at path. It
+	// writes a temporary file in the same directory and renames it, so path
+	// either does not exist or holds the whole object.
+	//
+	// A missing object returns an error marked pkerr.ErrCorrupted. A manifest
+	// references the table, so a table that is gone is data corruption and
+	// not an IO failure that a retry can clear.
+	DownloadFile(ctx context.Context, key, path string) error
+}

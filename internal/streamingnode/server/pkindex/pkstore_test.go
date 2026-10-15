@@ -24,104 +24,92 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
-func newTestAuthority(t *testing.T) Authority {
+func newTestPKStore(t *testing.T) pkStore {
 	t.Helper()
 	eng := NewMemoryEngine()
-	a, err := NewAuthority("v1", eng)
-	require.NoError(t, err)
 	t.Cleanup(func() { _ = eng.Close() })
-	return a
+	return pkStore{eng: eng}
 }
 
-func TestAuthorityIsReadyAfterNew(t *testing.T) {
-	a := newTestAuthority(t)
-	select {
-	case <-a.Ready():
-	default:
-		t.Fatal("authority should be ready once the engine is created")
-	}
-}
-
-func TestAuthorityGetAndWrite(t *testing.T) {
+func TestPKStoreGetAndWrite(t *testing.T) {
 	ctx := context.Background()
-	a := newTestAuthority(t)
+	s := newTestPKStore(t)
 
-	entry, err := a.Get(ctx, Int64PK(1))
+	entry, err := s.get(ctx, Int64PK(1))
 	require.NoError(t, err)
 	require.Nil(t, entry)
 
-	b := a.NewBatch()
-	b.Put(Int64PK(1), Entry{SegmentID: 100})
-	b.Put(Int64PK(2), Entry{SegmentID: 200})
-	require.Equal(t, 2, b.Len())
+	b := &entryBatch{}
+	b.put(Int64PK(1), Entry{SegmentID: 100})
+	b.put(Int64PK(2), Entry{SegmentID: 200})
+	require.Equal(t, 2, b.len())
 
 	// nothing is visible before Write.
-	entry, err = a.Get(ctx, Int64PK(1))
+	entry, err = s.get(ctx, Int64PK(1))
 	require.NoError(t, err)
 	require.Nil(t, entry)
 
-	require.NoError(t, a.Write(ctx, b))
-	entries, err := a.MultiGet(ctx, []PK{Int64PK(2), Int64PK(3), Int64PK(1)})
+	require.NoError(t, s.write(ctx, b))
+	entries, err := s.multiGet(ctx, []PK{Int64PK(2), Int64PK(3), Int64PK(1)})
 	require.NoError(t, err)
 	require.Equal(t, []*Entry{{SegmentID: 200}, nil, {SegmentID: 100}}, entries)
 }
 
-func TestAuthorityOverwriteAndDelete(t *testing.T) {
+func TestPKStoreOverwriteAndDelete(t *testing.T) {
 	ctx := context.Background()
-	a := newTestAuthority(t)
+	s := newTestPKStore(t)
 
-	b := a.NewBatch()
-	b.Put(VarCharPK("a"), Entry{SegmentID: 1})
-	require.NoError(t, a.Write(ctx, b))
+	b := &entryBatch{}
+	b.put(VarCharPK("a"), Entry{SegmentID: 1})
+	require.NoError(t, s.write(ctx, b))
 
-	b = a.NewBatch()
-	b.Put(VarCharPK("a"), Entry{SegmentID: 2})
-	b.Delete(VarCharPK("b")) // deleting an absent key is fine
-	require.NoError(t, a.Write(ctx, b))
-	entry, err := a.Get(ctx, VarCharPK("a"))
+	b = &entryBatch{}
+	b.put(VarCharPK("a"), Entry{SegmentID: 2})
+	b.delete(VarCharPK("b")) // deleting an absent key is fine
+	require.NoError(t, s.write(ctx, b))
+	entry, err := s.get(ctx, VarCharPK("a"))
 	require.NoError(t, err)
 	require.Equal(t, &Entry{SegmentID: 2}, entry)
 
-	b = a.NewBatch()
-	b.Delete(VarCharPK("a"))
-	require.NoError(t, a.Write(ctx, b))
-	entry, err = a.Get(ctx, VarCharPK("a"))
+	b = &entryBatch{}
+	b.delete(VarCharPK("a"))
+	require.NoError(t, s.write(ctx, b))
+	entry, err = s.get(ctx, VarCharPK("a"))
 	require.NoError(t, err)
 	require.Nil(t, entry)
 }
 
-func TestAuthorityEmptyBatchAndEmptyMultiGet(t *testing.T) {
+func TestPKStoreEmptyBatchAndEmptyMultiGet(t *testing.T) {
 	ctx := context.Background()
-	a := newTestAuthority(t)
-	require.NoError(t, a.Write(ctx, a.NewBatch()))
-	entries, err := a.MultiGet(ctx, nil)
+	s := newTestPKStore(t)
+	require.NoError(t, s.write(ctx, &entryBatch{}))
+	entries, err := s.multiGet(ctx, nil)
 	require.NoError(t, err)
 	require.Empty(t, entries)
 }
 
-func TestAuthorityRejectsCorruptValue(t *testing.T) {
+func TestPKStoreRejectsCorruptValue(t *testing.T) {
 	ctx := context.Background()
 	eng := NewMemoryEngine()
 	require.NoError(t, eng.Write(ctx, []engine.Mutation{{Key: Int64PK(1).Encode(), Value: []byte{1, 2, 3}}}))
-	a := newAuthority("v1", eng)
+	s := pkStore{eng: eng}
 
-	_, err := a.Get(ctx, Int64PK(1))
+	_, err := s.get(ctx, Int64PK(1))
 	require.Error(t, err)
-	require.True(t, errors.Is(err, pkindex.ErrCorrupted))
+	require.True(t, errors.Is(err, pkerr.ErrCorrupted))
 }
 
-func TestAuthorityAfterEngineClose(t *testing.T) {
+func TestPKStoreAfterEngineClose(t *testing.T) {
 	ctx := context.Background()
 	eng := NewMemoryEngine()
-	a, err := NewAuthority("v1", eng)
-	require.NoError(t, err)
+	s := pkStore{eng: eng}
 	require.NoError(t, eng.Close())
-	_, err = a.Get(ctx, Int64PK(1))
+	_, err := s.get(ctx, Int64PK(1))
 	require.Error(t, err)
 }
 
@@ -136,7 +124,7 @@ func (e *fakeLengthEngine) MultiGet(_ context.Context, _ [][]byte) ([][]byte, er
 	return make([][]byte, e.returnLen), nil
 }
 
-func TestAuthorityMultiGetRejectsWrongLength(t *testing.T) {
+func TestPKStoreMultiGetRejectsWrongLength(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name      string
@@ -146,27 +134,11 @@ func TestAuthorityMultiGetRejectsWrongLength(t *testing.T) {
 		{"too many values", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newAuthority("v1", &fakeLengthEngine{returnLen: tc.returnLen})
-			_, err := a.MultiGet(ctx, []PK{Int64PK(1), Int64PK(2)})
+			s := pkStore{eng: &fakeLengthEngine{returnLen: tc.returnLen}}
+			_, err := s.multiGet(ctx, []PK{Int64PK(1), Int64PK(2)})
 			require.Error(t, err)
 		})
 	}
-}
-
-func TestNewTakesEngine(t *testing.T) {
-	a, err := NewAuthority("v", NewMemoryEngine())
-	require.NoError(t, err)
-	b := a.NewBatch()
-	b.Put(Int64PK(7), Entry{SegmentID: 3})
-	require.NoError(t, a.Write(context.Background(), b))
-	got, err := a.MultiGet(context.Background(), []PK{Int64PK(7)})
-	require.NoError(t, err)
-	assert.EqualValues(t, 3, got[0].SegmentID)
-}
-
-func TestNewRejectsNilEngine(t *testing.T) {
-	_, err := NewAuthority("v", nil)
-	assert.Error(t, err)
 }
 
 func TestKeyAndValueUseCodec(t *testing.T) {
@@ -177,5 +149,5 @@ func TestKeyAndValueUseCodec(t *testing.T) {
 
 func TestCorruptEntryIsMarked(t *testing.T) {
 	_, err := decodeEntry([]byte{0x7f})
-	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
 }

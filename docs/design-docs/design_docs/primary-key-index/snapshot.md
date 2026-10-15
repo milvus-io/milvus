@@ -3,7 +3,7 @@
 - **Created:** 2026-10-12
 - **Author(s):** @bigsheeper
 - **Status:** Under Review
-- **Component:** StreamingNode, `internal/pkindex/index`
+- **Component:** StreamingNode, `internal/streamingnode/server/pkindex`
 - **Related Issues:** #52305
 - **Related work:** [write path](write-path.md), [core library](core-library.md), [manifest service](manifest.md)
 
@@ -18,7 +18,7 @@ committed. The pchannel reports the minimum of these values as `LastAcked`, a
 future bound for WAL truncation.
 
 This document covers the handover, the coverage watermarks, `LastAcked`, the
-triggers and the failure handling. It also describes the index layer
+triggers and the failure handling. It also describes the structure
 (`Manager`, `Channel`, `Index`) that runs them.
 
 ## Motivation
@@ -36,24 +36,25 @@ problems stay:
 ## Components
 
 ```
-index.Manager            one per streaming node: shared engine caches, config
- └─ index.Channel        one per pchannel: the claim, the manifest lookups,
+Manager                  one per streaming node: shared engine caches, config
+ └─ Channel              one per pchannel: the claim, the manifest lookups,
      │                   the handover driver, lastAppliedTimeTick, LastAcked
-     └─ index.Index      one per vchannel: engine, decider, lastCommittedTimeTick
-          └─ handover ── upload ──▶ object storage   (index.TableStore)
-                      ── commit ──▶ manifest service (index.Committer)
+     └─ Index            one per vchannel: engine, decider, lastCommittedTimeTick
+          └─ handover ── upload ──▶ object storage   (TableStore)
+                      ── commit ──▶ manifest service (Committer)
                       ── install ─▶ engine           (InstallCommitted)
 ```
 
-- `internal/pkindex/index` holds the index layer. A handover is a behavior
+- `internal/streamingnode/server/pkindex` holds the primary key index of the
+  streaming node. A handover is a behavior
   of the `Index`: its two phases, Prepare and Commit, are methods of the
   `Index`, and the pending request is a field of it. The package also defines
   the interfaces and types that the handover exchanges with object storage
-  and the manifest service. It does not know the streaming node.
-- `index.TableStore` has two methods, `UploadFile` and `DownloadFile`. The
+  and the manifest service. It does not depend on the WAL.
+- `TableStore` has two methods, `UploadFile` and `DownloadFile`. The
   handover defines this interface for its own use. It does not use the
   object store interface of the manifest service.
-- `index.Committer` has three methods, `ClaimPChannel`,
+- `Committer` has three methods, `ClaimPChannel`,
   `GetRecoveryManifests` and `CommitFlush`. The handover defines it with its
   own types, so the handover code does not
   import the manifest service, its client or its proto. See
@@ -114,7 +115,7 @@ manifest records its own `SSTBasePath`, and the install downloads with it.
 When the two differ, the commit is `ErrRejected`.
 
 `objpath.SSTKey` builds the object key of a table:
-`<sst_base_path>/<id>.sst`. The package `internal/pkindex/core/objpath` builds
+`<sst_base_path>/<id>.sst`. The package `internal/pkindex/objpath` builds
 and parses all object keys of the primary key index. The manifest service and
 its garbage collection use the same package, so both sides use one key
 format. `objpath` and the constant `common.PKIndexPath` are byte-identical to
@@ -129,7 +130,7 @@ the `LastAcked` heap. This change does not inject a `Committer` (see
 ### Wiring into the WAL
 
 The pkindex interceptor is a thin shell. It translates WAL events into calls on
-the index layer:
+the primary key index:
 
 - Before the downstream append, the interceptor calls `Index.Decide`. `Decide`
   registers the writer with the watermark of the pchannel and returns an
@@ -572,8 +573,8 @@ reach 64 MiB and hand over through trigger 2.
 |---|---|
 | Retryable upload, download, claim, lookup or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. A claim and a lookup use `retry.Do` and read `handover.maxBackoff` when they start. A handover uses `typeutil.BackoffWithInstant`: it reads `handover.maxBackoff` when the `Index` opens and after a successful handover that follows a failure, and its wait has a jitter of ±50 %. The pending request keeps the same table IDs. |
 | Fenced (`index.ErrFenced`) on the claim, a lookup or a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
-| Corrupted (`pkerr.ErrCorrupted`) in a handover | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable. The WAL is assigned again and recovers on another node. |
-| Corrupted (`pkerr.ErrCorrupted`) in a lookup on the write path | `Decide` returns the error and calls `OnFatal`, which marks the WAL unavailable. |
+| Corrupted (`pkindex.ErrCorrupted`) in a handover | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable. The WAL is assigned again and recovers on another node. |
+| Corrupted (`pkindex.ErrCorrupted`) in a lookup on the write path | `Decide` returns the error and calls `OnFatal`, which marks the WAL unavailable. |
 | Rejected claim, lookup item or commit (`index.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, not claimed, an invalid request, a corrupted stored manifest), a returned manifest that does not have the flush in effect, or a manifest with another SST base path | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
 | Missing object on download | `DownloadFile` marks it as corrupted. A manifest lists the table, so a retry can not clear it. |
 | Local disk error when the index of an existing collection opens at WAL open | `OnFatal` marks the WAL unavailable. The streaming node and its other WALs keep running. |
@@ -620,7 +621,7 @@ Metrics:
 | `streaming.pkindex.handover.maxBackoff` | `60s` | Yes: a claim or lookup at its start, a handover when the `Index` opens or after its next success | Longest wait between two attempts of a failed handover, claim or manifest lookup. A new value does not change the wait of a handover that keeps failing. |
 | `streaming.pkindex.memTableSize` | `4m` | No, read when an `Index` opens | Memtable size of the engine of one vchannel. |
 | `streaming.walRecovery.tail.softWatermark` | `8g` | Yes, at the next driver step | Existing key. Soft pressure trigger. |
-| `dataCoord.pkindex.gc.grace` | `86400` (s) | — | Key of the manifest service. The change that injects the `Committer` sets `ReuploadAfter` of the index layer to half of it. A retry uploads again after that age. |
+| `dataCoord.pkindex.gc.grace` | `86400` (s) | — | Key of the manifest service. The change that injects the `Committer` sets `ReuploadAfter` of the primary key index to half of it. A retry uploads again after that age. |
 
 The first backoff wait (1 s) is a constant.
 
@@ -656,7 +657,7 @@ Common patterns:
 
 - **The adapter over the manifest service client and its wiring.** A later
   change, after the manifest service and this change merge, adds the
-  adapter that implements `index.Committer`. It translates the proto
+  adapter that implements `Committer`. It translates the proto
   types and the merr codes (see [Committer](#committer)), with a test for
   each error class, and the streaming node injects it into the `Manager`. It
   also sets `ReuploadAfter`. Until then no `Channel` claims and no `Index`

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
 )
 
 var _ TableStore = (*FakeStore)(nil)
@@ -57,7 +57,7 @@ func TestFakeStoreRoundTrip(t *testing.T) {
 func TestFakeStoreMissingKey(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "dst.sst")
 	err := NewFakeStore().DownloadFile(context.Background(), "missing", dst)
-	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
 	assert.NoFileExists(t, dst)
 }
 
@@ -70,13 +70,13 @@ func TestFakeStoreInjectedFailures(t *testing.T) {
 
 	s := NewFakeStore()
 	s.FailUploads(1)
-	assert.True(t, errors.Is(s.UploadFile(ctx, "a", src), pkindex.ErrIO))
+	assert.True(t, errors.Is(s.UploadFile(ctx, "a", src), pkerr.ErrIO))
 	assert.Equal(t, 0, s.Len())
 	require.NoError(t, s.UploadFile(ctx, "a", src))
 
 	s.FailDownloads(2)
-	assert.True(t, errors.Is(s.DownloadFile(ctx, "a", dst), pkindex.ErrIO))
-	assert.True(t, errors.Is(s.DownloadFile(ctx, "a", dst), pkindex.ErrIO))
+	assert.True(t, errors.Is(s.DownloadFile(ctx, "a", dst), pkerr.ErrIO))
+	assert.True(t, errors.Is(s.DownloadFile(ctx, "a", dst), pkerr.ErrIO))
 	assert.NoFileExists(t, dst)
 	require.NoError(t, s.DownloadFile(ctx, "a", dst))
 	assert.FileExists(t, dst)

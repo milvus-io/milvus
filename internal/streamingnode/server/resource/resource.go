@@ -8,8 +8,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/pkindex/index"
 	"github.com/milvus-io/milvus/internal/storage"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
@@ -40,7 +40,7 @@ func OptChunkManager(chunkManager storage.ChunkManager) optResourceInit {
 }
 
 // OptPKIndexManager provides the primary key index manager to the resource.
-func OptPKIndexManager(m *index.Manager) optResourceInit {
+func OptPKIndexManager(m *snpkindex.Manager) optResourceInit {
 	return func(r *resourceImpl) {
 		r.pkindexManager = m
 	}
@@ -120,7 +120,7 @@ type resourceImpl struct {
 	segmentStatsManager  *stats.StatsManager
 	timeTickInspector    tinspector.TimeTickSyncInspector
 	vchannelTempStorage  *vchantempstore.VChannelTempStorage
-	pkindexManager       *index.Manager
+	pkindexManager       *snpkindex.Manager
 
 	// TODO: Global flusher components, should be removed afteer flushering in wal refactoring.
 	syncMgr syncmgr.SyncManager
@@ -148,7 +148,7 @@ func (r *resourceImpl) ChunkManager() storage.ChunkManager {
 }
 
 // PKIndexManager returns the primary key index manager, nil when it is not set.
-func (r *resourceImpl) PKIndexManager() *index.Manager {
+func (r *resourceImpl) PKIndexManager() *snpkindex.Manager {
 	return r.pkindexManager
 }
 

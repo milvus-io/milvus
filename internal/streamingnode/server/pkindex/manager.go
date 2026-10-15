@@ -14,7 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+// Package pkindex is the primary key index of a streaming node. A Manager
+// holds a Channel for each pchannel, and a Channel holds an Index for each
+// vchannel. The Index makes the write path decisions with its engine (which
+// keys of an insert need a companion delete, which keys of a delete exist, how
+// the writes of a transaction take effect at its commit) and hands its tables
+// over to object storage through a Committer.
+package pkindex
 
 import (
 	"context"
@@ -31,7 +37,7 @@ import (
 // defaultBackoffBase is the first wait after a failed claim or handover.
 const defaultBackoffBase = time.Second
 
-// Params are the tunables of the index layer.
+// Params are the tunables of the primary key index of a streaming node.
 type Params struct {
 	// MemTableSize is the memtable size of the engine of one vchannel.
 	MemTableSize uint64
@@ -97,7 +103,7 @@ type ManagerConfig struct {
 	Committer Committer
 	// Sched runs the handovers of all pchannels of the node.
 	Sched nodescheduler.Scheduler
-	// Params returns the current params. The index layer calls it on every
+	// Params returns the current params. The primary key index calls it on every
 	// use, because some params are refreshable.
 	Params func() Params
 }
@@ -124,7 +130,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 	}
 }
 
-// OpenChannel opens the index layer of a pchannel.
+// OpenChannel opens the primary key index of a pchannel.
 //
 // seed is the initial lastAppliedTimeTick: the time tick of the last TimeTick
 // message when the WAL opens. tail returns the WAL recovery tail, zeros when

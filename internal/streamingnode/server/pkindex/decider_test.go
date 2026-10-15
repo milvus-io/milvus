@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestDecider(t *testing.T) (*Decider, Authority) {
+func newTestDecider(t *testing.T) (*decider, pkStore) {
 	t.Helper()
 	d, a, _ := newTestDeciderWithEngine(t)
 	return d, a
@@ -35,13 +35,12 @@ func newTestDecider(t *testing.T) (*Decider, Authority) {
 
 // newTestDeciderWithEngine also returns the memory engine, so that a test can
 // close it to make every later engine call fail.
-func newTestDeciderWithEngine(t *testing.T) (*Decider, Authority, *MemoryEngine) {
+func newTestDeciderWithEngine(t *testing.T) (*decider, pkStore, *MemoryEngine) {
 	t.Helper()
 	eng := NewMemoryEngine()
-	a, err := NewAuthority("v1", eng)
-	require.NoError(t, err)
 	t.Cleanup(func() { _ = eng.Close() })
-	return NewDecider(a, 16), a, eng
+	s := pkStore{eng: eng}
+	return newDecider(s, 16), s, eng
 }
 
 func int64PKs(values ...int64) []PK {
@@ -52,18 +51,18 @@ func int64PKs(values ...int64) []PK {
 	return pks
 }
 
-func seed(t *testing.T, a Authority, segmentID int64, values ...int64) {
+func seed(t *testing.T, a pkStore, segmentID int64, values ...int64) {
 	t.Helper()
-	b := a.NewBatch()
+	b := &entryBatch{}
 	for _, pk := range int64PKs(values...) {
-		b.Put(pk, Entry{SegmentID: segmentID})
+		b.put(pk, Entry{SegmentID: segmentID})
 	}
-	require.NoError(t, a.Write(context.Background(), b))
+	require.NoError(t, a.write(context.Background(), b))
 }
 
-func requireSegment(t *testing.T, a Authority, pk int64, segmentID int64) {
+func requireSegment(t *testing.T, a pkStore, pk int64, segmentID int64) {
 	t.Helper()
-	entry, err := a.Get(context.Background(), Int64PK(pk))
+	entry, err := a.get(context.Background(), Int64PK(pk))
 	require.NoError(t, err)
 	if segmentID == 0 {
 		require.Nil(t, entry)
@@ -272,23 +271,14 @@ func TestIntentResolvedOnce(t *testing.T) {
 	require.Panics(t, func() { intent.Discard(ctx, nil) })
 }
 
-func TestDecideHonorsContextWhileWaitingForReady(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	d := NewDecider(&notReadyAuthority{ready: make(chan struct{})}, 4)
-	_, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
-	require.ErrorIs(t, err, context.Canceled)
-}
-
 func TestDecideReturnsProbeError(t *testing.T) {
 	ctx := context.Background()
 	eng := NewMemoryEngine()
-	a, err := NewAuthority("v1", eng)
-	require.NoError(t, err)
-	d := NewDecider(a, 4)
+	a := pkStore{eng: eng}
+	d := newDecider(a, 4)
 	require.NoError(t, eng.Close()) // the memory engine fails every call after Close
 
-	_, err = d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	_, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 	require.Error(t, err)
 
 	// the stripes were released on the error path.
@@ -490,14 +480,7 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 	wg.Wait()
 
 	require.Equal(t, int64(1), misses.Load())
-	entry, err := a.Get(ctx, Int64PK(1))
+	entry, err := a.get(ctx, Int64PK(1))
 	require.NoError(t, err)
 	require.NotNil(t, entry)
 }
-
-type notReadyAuthority struct {
-	Authority
-	ready chan struct{}
-}
-
-func (a *notReadyAuthority) Ready() <-chan struct{} { return a.ready }

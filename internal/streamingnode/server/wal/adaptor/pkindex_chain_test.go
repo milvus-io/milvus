@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/index"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -57,7 +57,7 @@ const (
 // interceptor and creates the collection the chain tests write to.
 func openPKIndexWAL(t *testing.T, name string) wal.WAL {
 	setPKIndexEnabled(t, "true")
-	w := openChainWALWithPKIndex(t, name, pkindex.NewInterceptorBuilder(), index.NewManagerForTest(t, t.TempDir()))
+	w := openChainWALWithPKIndex(t, name, pkindex.NewInterceptorBuilder(), snpkindex.NewManagerForTest(t, t.TempDir()))
 	appendPKChainCreateCollection(t, w, pkChainCollectionID, pkChainPartitionID)
 	return w
 }

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/objpath"
@@ -154,10 +154,10 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
-	env.client.set(func(c *fakeClient) { c.commitErrs = []error{pkindex.MarkIO(errors.New("disk gone"), "commit")} })
+	env.client.set(func(c *fakeClient) { c.commitErrs = []error{pkerr.MarkIO(errors.New("disk gone"), "commit")} })
 	err = idx.commit(ctx, p)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, pkindex.ErrIO))
+	assert.True(t, errors.Is(err, pkerr.ErrIO))
 	objects := env.store.Len()
 	assert.Equal(t, len(p.request.AddTables), objects)
 	assert.Empty(t, env.client.appliedList())
@@ -278,7 +278,7 @@ func TestLinkCommittedReusesExistingLink(t *testing.T) {
 	assert.Equal(t, p1, p2)
 
 	_, err = linkCommitted(dir, engine.StagedTable{Info: sst.Info{ID: 43}, Path: filepath.Join(t.TempDir(), "missing")})
-	assert.True(t, errors.Is(err, pkindex.ErrIO))
+	assert.True(t, errors.Is(err, pkerr.ErrIO))
 }
 
 func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
@@ -293,7 +293,7 @@ func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
 	p.uploadedAt = old
 	env.store.FailUploads(1)
 	err = idx.commit(ctx, p)
-	assert.True(t, errors.Is(err, pkindex.ErrIO))
+	assert.True(t, errors.Is(err, pkerr.ErrIO))
 	assert.Empty(t, env.client.requestList(), "no commit after a failed re-upload")
 	assert.Equal(t, old, p.uploadedAt)
 	assert.Equal(t, 1, idx.eng.Stats().FrozenGenerations)

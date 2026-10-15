@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -28,11 +28,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/objpath"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -214,7 +213,7 @@ func (c *fakeClient) CommitFlush(ctx context.Context, args FlushArgs) (ManifestV
 	c.applied = append(c.applied, changed)
 	if c.loseNext {
 		c.loseNext = false
-		return ManifestView{}, errors.Mark(errors.New("response lost"), pkindex.ErrUnavailable)
+		return ManifestView{}, errors.Mark(errors.New("response lost"), pkerr.ErrUnavailable)
 	}
 	if c.rewrite != nil {
 		return c.rewrite(next.View), nil
@@ -287,7 +286,7 @@ func (s *countingStore) UploadFile(ctx context.Context, key, path string) error 
 func (s *countingStore) DownloadFile(ctx context.Context, key, path string) error {
 	s.downloads.Add(1)
 	if s.missing.Load() {
-		return errors.Mark(errors.Newf("object %s is missing", key), pkindex.ErrCorrupted)
+		return errors.Mark(errors.Newf("object %s is missing", key), pkerr.ErrCorrupted)
 	}
 	return s.FakeStore.DownloadFile(ctx, key, path)
 }
@@ -477,20 +476,12 @@ func waitReady(t *testing.T, idx *Index) {
 	}
 }
 
-func int64PKs(values ...int64) []snpkindex.PK {
-	pks := make([]snpkindex.PK, 0, len(values))
-	for _, v := range values {
-		pks = append(pks, snpkindex.Int64PK(v))
-	}
-	return pks
-}
-
 // insert runs an autocommit insert through Decide and Apply.
 func insert(t *testing.T, idx *Index, segmentID int64, pks ...int64) {
 	ctx := context.Background()
-	intent, err := idx.Decide(ctx, snpkindex.Request{Kind: snpkindex.KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pks...)})
+	intent, err := idx.Decide(ctx, Request{Kind: KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pks...)})
 	require.NoError(t, err)
-	intent.Apply(ctx, snpkindex.Applied{SegmentID: segmentID})
+	intent.Apply(ctx, Applied{SegmentID: segmentID})
 }
 
 // segmentOf returns the segment of pk in the engine, 0 when pk is absent.

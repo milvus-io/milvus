@@ -24,7 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/index"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -37,7 +37,7 @@ var errOpenIndex = errors.New("open the primary key index")
 
 // target is what the interceptor needs to translate the writes of one vchannel.
 type target struct {
-	idx          *index.Index
+	idx          *snpkindex.Index
 	collectionID int64
 	pkFieldID    int64
 	pkDataType   schemapb.DataType
@@ -49,13 +49,13 @@ type target struct {
 // registry turns the collection events of the WAL into calls on the index
 // Channel, and maps vchannels to their targets.
 type registry struct {
-	ch *index.Channel
+	ch *snpkindex.Channel
 
 	mu      sync.RWMutex
 	targets map[string]*target
 }
 
-func newRegistry(ch *index.Channel) *registry {
+func newRegistry(ch *snpkindex.Channel) *registry {
 	return &registry{ch: ch, targets: make(map[string]*target)}
 }
 

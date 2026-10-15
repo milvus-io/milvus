@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -26,12 +26,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 )
 
-func insertRequest(idx *Index, pks ...int64) snpkindex.Request {
-	return snpkindex.Request{Kind: snpkindex.KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pks...)}
+func insertRequest(idx *Index, pks ...int64) Request {
+	return Request{Kind: KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pks...)}
 }
 
 func TestLateApplyHoldsTheWatermark(t *testing.T) {
@@ -44,9 +42,9 @@ func TestLateApplyHoldsTheWatermark(t *testing.T) {
 	require.NoError(t, err)
 	ch.Tick(10)
 	assert.EqualValues(t, 0, idx.ch.wm.lastApplied(), "the writer is still in flight")
-	intent.Apply(ctx, snpkindex.Applied{SegmentID: 5})
+	intent.Apply(ctx, Applied{SegmentID: 5})
 	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
-	assert.Panics(t, func() { intent.Apply(ctx, snpkindex.Applied{SegmentID: 5}) })
+	assert.Panics(t, func() { intent.Apply(ctx, Applied{SegmentID: 5}) })
 	assert.Panics(t, func() { intent.Discard(ctx, nil) })
 	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
 }
@@ -92,7 +90,7 @@ func TestCompanionDeleteDecision(t *testing.T) {
 	intent, err := idx.Decide(ctx, insertRequest(idx, 1, 2))
 	require.NoError(t, err)
 	assert.Equal(t, int64PKs(1), intent.Decision().CompanionDeletePKs)
-	intent.Apply(ctx, snpkindex.Applied{SegmentID: 2})
+	intent.Apply(ctx, Applied{SegmentID: 2})
 	assert.EqualValues(t, 2, segmentOf(t, idx, 1))
 }
 
@@ -104,9 +102,9 @@ func TestWriteMarksTheIndexDirty(t *testing.T) {
 	assert.False(t, idx.dirty())
 
 	// a transaction body only records pending writes
-	body, err := idx.Decide(ctx, snpkindex.Request{Kind: snpkindex.KindInsert, VChannel: "v0", PKs: int64PKs(1), TxnID: 7})
+	body, err := idx.Decide(ctx, Request{Kind: KindInsert, VChannel: "v0", PKs: int64PKs(1), TxnID: 7})
 	require.NoError(t, err)
-	body.Apply(ctx, snpkindex.Applied{SegmentID: 3})
+	body.Apply(ctx, Applied{SegmentID: 3})
 	assert.False(t, idx.dirty())
 	assert.Equal(t, -1, idx.heapPos)
 	assert.Equal(t, []int64{7}, idx.PendingTxnIDs())
@@ -191,16 +189,16 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 			pk++
 			intent, err := idx.Decide(ctx, insertRequest(idx, pk))
 			require.NoError(t, err)
-			intent.Apply(ctx, snpkindex.Applied{SegmentID: pk})
+			intent.Apply(ctx, Applied{SegmentID: pk})
 		case op < 9:
 			// a transaction body takes no stripe lock, so it can stay open
 			// across later steps and hold the watermark back
-			intent, err := idx.Decide(ctx, snpkindex.Request{Kind: snpkindex.KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pk), TxnID: int64(i + 1)})
+			intent, err := idx.Decide(ctx, Request{Kind: KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pk), TxnID: int64(i + 1)})
 			require.NoError(t, err)
 			open = append(open, intent)
 		case op < 11 && len(open) > 0:
 			k := r.Intn(len(open))
-			open[k].Apply(ctx, snpkindex.Applied{SegmentID: 1})
+			open[k].Apply(ctx, Applied{SegmentID: 1})
 			open = append(open[:k], open[k+1:]...)
 		case op < 18:
 			tt++
@@ -216,7 +214,7 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 		prev = got
 	}
 	for _, intent := range open {
-		intent.Apply(ctx, snpkindex.Applied{SegmentID: 1})
+		intent.Apply(ctx, Applied{SegmentID: 1})
 	}
 	assert.Empty(t, env.client.applyErrList())
 	assert.Empty(t, env.fatalList())

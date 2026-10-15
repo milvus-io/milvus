@@ -16,7 +16,7 @@
 
 //go:build test
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -27,7 +27,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
 )
 
 // errFakeInjected is the cause of an injected failure of a FakeStore.
@@ -52,51 +52,51 @@ func (s *FakeStore) UploadFile(ctx context.Context, key, path string) error {
 	defer s.mu.Unlock()
 	if s.uploadFails > 0 {
 		s.uploadFails--
-		return pkindex.MarkIO(errFakeInjected, "upload %s", key)
+		return pkerr.MarkIO(errFakeInjected, "upload %s", key)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return pkindex.MarkIO(err, "read %s", path)
+		return pkerr.MarkIO(err, "read %s", path)
 	}
 	s.objects[key] = data
 	return nil
 }
 
 // DownloadFile writes the bytes under key to path through a temporary file
-// and a rename. A missing key returns an error marked pkindex.ErrCorrupted.
+// and a rename. A missing key returns an error marked pkerr.ErrCorrupted.
 func (s *FakeStore) DownloadFile(ctx context.Context, key, path string) error {
 	s.mu.Lock()
 	if s.downloadFails > 0 {
 		s.downloadFails--
 		s.mu.Unlock()
-		return pkindex.MarkIO(errFakeInjected, "download %s", key)
+		return pkerr.MarkIO(errFakeInjected, "download %s", key)
 	}
 	data, ok := s.objects[key]
 	s.mu.Unlock()
 	if !ok {
-		return errors.Mark(errors.Wrapf(os.ErrNotExist, "object %s", key), pkindex.ErrCorrupted)
+		return errors.Mark(errors.Wrapf(os.ErrNotExist, "object %s", key), pkerr.ErrCorrupted)
 	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".download-*")
 	if err != nil {
-		return pkindex.MarkIO(err, "create temp file for %s", path)
+		return pkerr.MarkIO(err, "create temp file for %s", path)
 	}
 	defer os.Remove(tmp.Name()) // no effect after the rename
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return pkindex.MarkIO(err, "write %s", tmp.Name())
+		return pkerr.MarkIO(err, "write %s", tmp.Name())
 	}
 	if err := tmp.Close(); err != nil {
-		return pkindex.MarkIO(err, "close %s", tmp.Name())
+		return pkerr.MarkIO(err, "close %s", tmp.Name())
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
-		return pkindex.MarkIO(err, "rename to %s", path)
+		return pkerr.MarkIO(err, "rename to %s", path)
 	}
 	return nil
 }
 
 // FailUploads makes the next n UploadFile calls return an error marked
-// pkindex.ErrIO.
+// pkerr.ErrIO.
 func (s *FakeStore) FailUploads(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -104,7 +104,7 @@ func (s *FakeStore) FailUploads(n int) {
 }
 
 // FailDownloads makes the next n DownloadFile calls return an error marked
-// pkindex.ErrIO.
+// pkerr.ErrIO.
 func (s *FakeStore) FailDownloads(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/index"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
@@ -203,7 +203,7 @@ func openChainWAL(t *testing.T, name string, extra interceptors.InterceptorBuild
 
 // openChainWALWithPKIndex is openChainWAL with pkMgr as the primary key index
 // manager of the streaming node resource. A nil pkMgr leaves it unset.
-func openChainWALWithPKIndex(t *testing.T, name string, extra interceptors.InterceptorBuilder, pkMgr *index.Manager) wal.WAL {
+func openChainWALWithPKIndex(t *testing.T, name string, extra interceptors.InterceptorBuilder, pkMgr *snpkindex.Manager) wal.WAL {
 	walimplstest.Reset()
 	initResourceForTestWithPKIndex(t, pkMgr)
 	b := registry.MustGetBuilder(message.WALNameTest,

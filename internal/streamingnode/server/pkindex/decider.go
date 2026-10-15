@@ -14,10 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package pkindex is the primary key index of a streaming node: the index of
-// each vchannel (Authority) and the write path decisions made with it
-// (Decider): which keys of an insert need a companion delete, which keys of a
-// delete exist, and how the writes of a transaction take effect at its commit.
 package pkindex
 
 import (
@@ -60,13 +56,13 @@ type Applied struct {
 	TimeTick uint64
 }
 
-// Decider makes the write path decisions of one vchannel on top of its Authority.
+// decider makes the write path decisions of one vchannel on top of its pkStore.
 //
 // TODO: duplicate primary keys inside one insert are not detected.
 // TODO: pick the stripe count from a throughput benchmark.
-type Decider struct {
-	authority Authority
-	stripes   *stripeLocks
+type decider struct {
+	store   pkStore
+	stripes *stripeLocks
 
 	// pendingMu guards pending and every pendingTxn in it. Lock order: stripes
 	// first, then pendingMu. No code may wait for a stripe while it holds pendingMu.
@@ -74,12 +70,12 @@ type Decider struct {
 	pending   map[int64]*pendingTxn
 }
 
-// NewDecider creates the Decider of a vchannel. It takes ownership of a.
-func NewDecider(a Authority, stripeCount int) *Decider {
-	return &Decider{
-		authority: a,
-		stripes:   newStripeLocks(stripeCount),
-		pending:   make(map[int64]*pendingTxn),
+// newDecider creates the decider of a vchannel.
+func newDecider(store pkStore, stripeCount int) *decider {
+	return &decider{
+		store:   store,
+		stripes: newStripeLocks(stripeCount),
+		pending: make(map[int64]*pendingTxn),
 	}
 }
 
@@ -87,13 +83,7 @@ func NewDecider(a Authority, stripeCount int) *Decider {
 // acquires the stripes of the affected keys, which the returned Intent holds until
 // Apply or Discard. The caller must call exactly one of them, exactly once. A panic
 // between Decide and that call ends the process, like every panic on the append path.
-func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-d.authority.Ready():
-	}
-
+func (d *decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 	intent := &Intent{d: d, req: req}
 	switch {
 	case req.Kind == KindRollbackTxn:
@@ -144,11 +134,11 @@ func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 }
 
 // present returns the keys of pks that exist in the index, in the order of pks.
-func (d *Decider) present(ctx context.Context, pks []PK) ([]PK, error) {
+func (d *decider) present(ctx context.Context, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
-	entries, err := d.authority.MultiGet(ctx, pks)
+	entries, err := d.store.multiGet(ctx, pks)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +152,7 @@ func (d *Decider) present(ctx context.Context, pks []PK) ([]PK, error) {
 }
 
 // PendingTxnIDs returns the transactions that have pending writes.
-func (d *Decider) PendingTxnIDs() []int64 {
+func (d *decider) PendingTxnIDs() []int64 {
 	d.pendingMu.Lock()
 	defer d.pendingMu.Unlock()
 	ids := make([]int64, 0, len(d.pending))
@@ -173,7 +163,7 @@ func (d *Decider) PendingTxnIDs() []int64 {
 }
 
 // DropTxn forgets the pending writes of a transaction that expired or was failed.
-func (d *Decider) DropTxn(txnID int64) {
+func (d *decider) DropTxn(txnID int64) {
 	d.pendingMu.Lock()
 	defer d.pendingMu.Unlock()
 	delete(d.pending, txnID)

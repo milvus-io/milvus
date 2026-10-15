@@ -14,28 +14,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// driveInterval is the time between two steps of the handover driver.
-const driveInterval = time.Second
-
-// Channel is the index layer of one pchannel. It owns the Index of every
+// Channel is the primary key index of one pchannel. It owns the Index of every
 // vchannel of the pchannel, the watermark that all of them share, and the
 // driver that starts their handovers.
 type Channel struct {
@@ -93,7 +89,7 @@ func newChannel(m *Manager, info types.PChannelInfo, seed uint64, tail func() WA
 // as "pchannel <name>". It wraps engine.ErrClosed, so the caller handles it
 // like a closed engine.
 func errClosed(what string) error {
-	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of %s is closed", what), pkindex.ErrUnavailable)
+	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of %s is closed", what), pkerr.ErrUnavailable)
 }
 
 // Add opens the Index of a vchannel and returns it, with whether this call
@@ -153,7 +149,7 @@ func (c *Channel) Drop(ctx context.Context, vchannel string) error {
 	c.closeIndex(ctx, vchannel)
 	dir := indexDir(c.m.cfg.Root, vchannel)
 	if err := os.RemoveAll(dir); err != nil {
-		return pkindex.MarkIO(err, "remove dir %s", dir)
+		return pkerr.MarkIO(err, "remove dir %s", dir)
 	}
 	return nil
 }
@@ -233,87 +229,6 @@ func (c *Channel) list() []*Index {
 	out := make([]*Index, 0, len(c.indexes))
 	for _, idx := range c.indexes {
 		out = append(out, idx)
-	}
-	return out
-}
-
-// startDriver starts the goroutine that runs step every driveInterval.
-func (c *Channel) startDriver() {
-	c.driverDone = make(chan struct{})
-	go func() {
-		defer close(c.driverDone)
-		ticker := time.NewTicker(driveInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case now := <-ticker.C:
-				c.step(now)
-			}
-		}
-	}()
-}
-
-// step picks the indexes that hand over now and submits their handovers.
-func (c *Channel) step(now time.Time) {
-	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return
-	}
-	defer c.lifetime.Done()
-	for _, idx := range c.pickHandovers(now) {
-		idx.submitHandover()
-	}
-}
-
-// pickHandovers returns the indexes that hand over now.
-//
-// Only the driver step calls it. It reads and changes the backoff of an
-// Index only when no handover of that Index runs. The running flag, set
-// before the submit and cleared as the last action of the handover, keeps
-// the driver and the handover task apart.
-func (c *Channel) pickHandovers(now time.Time) []*Index {
-	params := c.m.cfg.Params()
-	tail := c.tail()
-	var out []*Index
-	var oldest *Index
-	for _, idx := range c.list() {
-		idx.reapHandover()
-		if idx.running.Load() || idx.handoverStopped.Load() || !idx.readyDone() || !idx.fresh() {
-			continue
-		}
-		if now.Before(idx.backoff.NextInstant()) {
-			continue
-		}
-		// a pending request is retried first, regardless of size or tail
-		if idx.pending.Load() != nil {
-			out = append(out, idx)
-			continue
-		}
-		dirty := idx.dirty()
-		// trigger 1: the active generation is large
-		if dirty && idx.eng.Stats().ActiveBytes >= params.ActiveBytes {
-			out = append(out, idx)
-			continue
-		}
-		if dirty && (oldest == nil || idx.lastCommittedTimeTick() < oldest.lastCommittedTimeTick()) {
-			oldest = idx
-		}
-	}
-	// trigger 2: the WAL tail reaches the early threshold of the index
-	// trigger 3: the WAL is under soft pressure, a fallback for trigger 2
-	// Both need the index to hold the WAL truncation back. Else another
-	// component holds the tail, and a handover only makes a small table.
-	// The check uses the value without the clamp to ackedMax: the clamp can
-	// hide an Index that holds the truncation back.
-	//
-	// TODO: after recovery adds LastAcked to the checkpoint of the WAL
-	// recovery, RecoveryTimeTick is never above LastAcked, and these
-	// triggers never fire. Then compare with the checkpoint of the other
-	// components, without the index.
-	if oldest != nil && (tail.Bytes >= params.TailBytes || tail.Bytes >= params.SoftWatermark) &&
-		c.lastAckedUnclamped() < tail.RecoveryTimeTick {
-		out = append(out, oldest)
 	}
 	return out
 }

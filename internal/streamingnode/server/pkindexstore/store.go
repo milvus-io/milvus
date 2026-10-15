@@ -28,9 +28,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 
-	"github.com/milvus-io/milvus/internal/pkindex/index"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/storage"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -42,9 +42,9 @@ const (
 	azureBlobNotFound = "BlobNotFound"
 )
 
-var _ index.TableStore = (*Store)(nil)
+var _ snpkindex.TableStore = (*Store)(nil)
 
-// Store implements index.TableStore on a storage.ChunkManager.
+// Store implements snpkindex.TableStore on a storage.ChunkManager.
 type Store struct {
 	cm storage.ChunkManager
 }

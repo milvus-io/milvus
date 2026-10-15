@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
@@ -185,11 +185,11 @@ func committedPath(dir string, id sst.ID) string {
 // link keeps the table on local disk. It reuses a link from an earlier attempt.
 func linkCommitted(dir string, s engine.StagedTable) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", pkindex.MarkIO(err, "create committed dir %s", dir)
+		return "", pkerr.MarkIO(err, "create committed dir %s", dir)
 	}
 	path := committedPath(dir, s.Info.ID)
 	if err := os.Link(s.Path, path); err != nil && !errors.Is(err, fs.ErrExist) {
-		return "", pkindex.MarkIO(err, "link sst %d to %s", s.Info.ID, path)
+		return "", pkerr.MarkIO(err, "link sst %d to %s", s.Info.ID, path)
 	}
 	return path, nil
 }

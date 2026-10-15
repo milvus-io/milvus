@@ -113,9 +113,8 @@ internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin
         │ translates WAL messages into requests, appends what the decider asks for
         ▼
 internal/streamingnode/server/pkindex                    the index of the streaming node
-        │ Decider: probe, striped locks, pending writes of transactions
-        │ Authority: the index of one vchannel, key-value semantics
-        │            (Get, MultiGet, NewBatch, Write)
+        │ Index: the index of one vchannel; its decider does the probe, the
+        │ striped locks and the pending writes of transactions
         ▼
 Engine                                                   the storage behind it
                                                          (in-memory in this step)
@@ -292,7 +291,7 @@ insert, so WAL record and byte counts under-report such an append.
 
 ## Test plan
 
-- Unit tests of the helper, the authority, the decider and the interceptor,
+- Unit tests of the helper, the index, the decider and the interceptor,
   with a fake append operation.
 - Tests on the real interceptor chain (`wal/adaptor`): the consumer sees one
   transaction with the insert and the companion delete at the TimeTick of the

@@ -14,27 +14,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build test
+
 package pkindex
 
 import "github.com/milvus-io/milvus/internal/pkindex/engine"
 
-// Batch collects changes in memory. Nothing reaches the engine before Authority.Write.
-// Changes are applied in the order of the Put and Delete calls that collected them.
-type Batch struct {
-	muts []engine.Mutation
+// This file is compiled only with the "test" build tag. It lets the tests of
+// other packages read and seed the engine of an Index.
+
+// EngineForTest returns the engine of the Index. A write through it does not
+// mark the Index dirty.
+func (idx *Index) EngineForTest() engine.RW {
+	return idx.eng
 }
 
-// Put maps pk to e.
-func (b *Batch) Put(pk PK, e Entry) {
-	b.muts = append(b.muts, engine.Mutation{Key: pk.Encode(), Value: e.encode()})
+// DirtyForTest reports whether the Index has writes since its last rotate.
+func (idx *Index) DirtyForTest() bool {
+	return idx.dirtyFlag.Load()
 }
 
-// Delete makes pk absent.
-func (b *Batch) Delete(pk PK) {
-	b.muts = append(b.muts, engine.Mutation{Key: pk.Encode(), Delete: true})
-}
-
-// Len returns the number of collected changes.
-func (b *Batch) Len() int {
-	return len(b.muts)
+// LastAppliedTimeTickForTest returns the lastAppliedTimeTick of the pchannel
+// of the Index.
+func (idx *Index) LastAppliedTimeTickForTest() uint64 {
+	return idx.ch.wm.lastApplied()
 }

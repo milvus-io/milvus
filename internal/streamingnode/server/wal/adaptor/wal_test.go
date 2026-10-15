@@ -17,8 +17,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
-	"github.com/milvus-io/milvus/internal/pkindex/index"
 	"github.com/milvus-io/milvus/internal/storage"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
@@ -82,7 +82,7 @@ func initResourceForTest(t *testing.T) {
 
 // initResourceForTestWithPKIndex is initResourceForTest with pkMgr as the
 // primary key index manager of the resource. A nil pkMgr leaves it unset.
-func initResourceForTestWithPKIndex(t *testing.T, pkMgr *index.Manager) {
+func initResourceForTestWithPKIndex(t *testing.T, pkMgr *snpkindex.Manager) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")

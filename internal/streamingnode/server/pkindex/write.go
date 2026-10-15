@@ -20,18 +20,67 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/cockroachdb/errors"
+
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Intent is a decision that has not been confirmed yet. It belongs to one
-// append and must not be shared between goroutines.
+// Decide makes the dedup decision for req. It registers the writer with the
+// watermark of the pchannel before the decision. The caller must call Apply
+// or Discard on the returned Intent exactly once. Until then the Intent holds
+// the watermark back and keeps the Index open.
+//
+// After the Index is closed, Decide returns an error that matches
+// engine.ErrClosed, like a call on a closed engine.
+func (idx *Index) Decide(ctx context.Context, req Request) (*Intent, error) {
+	if !idx.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, errClosed("vchannel " + idx.vchannel)
+	}
+	token := idx.ch.wm.enter()
+	intent, err := idx.decider.Decide(ctx, req)
+	if err != nil {
+		idx.ch.wm.end(token)
+		idx.lifetime.Done()
+		if errors.Is(err, pkerr.ErrCorrupted) {
+			idx.logger.Error(ctx, "primary key index lookup found corrupted data, the WAL becomes unavailable", mlog.Err(err))
+			idx.ch.fatal(err)
+		}
+		return nil, err
+	}
+	intent.release = func() {
+		idx.ch.wm.end(token)
+		idx.lifetime.Done()
+	}
+	return intent, nil
+}
+
+// PendingTxnIDs returns the transactions that have pending writes.
+func (idx *Index) PendingTxnIDs() []int64 {
+	return idx.decider.PendingTxnIDs()
+}
+
+// DropTxn forgets the pending writes of a transaction that expired or was failed.
+func (idx *Index) DropTxn(txnID int64) {
+	idx.decider.DropTxn(txnID)
+}
+
+// Intent is a dedup decision that the caller confirms with Apply or gives up
+// with Discard, exactly once. It belongs to one append and must not be shared
+// between goroutines.
 type Intent struct {
-	d        *Decider
+	d        *decider
 	req      Request
 	decision Decision
 	txn      *pendingTxn // snapshot of the pending writes, for a CommitTxn
 	guard    *StripeGuard
 	lockWait time.Duration
 	resolved bool
+	// release ends the writer in the watermark and lets the Index close.
+	// It is nil for an Intent that does not come from an Index.
+	release func()
 }
 
 // Decision returns what the caller should append.
@@ -44,9 +93,17 @@ func (i *Intent) LockWait() time.Duration {
 	return i.lockWait
 }
 
-// Apply confirms the decision after the whole group of messages was appended.
+// Apply confirms the decision after the whole group of messages was appended,
+// and releases the writer. A second Apply or Discard panics.
 func (i *Intent) Apply(ctx context.Context, r Applied) {
 	i.resolve()
+	i.apply(ctx, r)
+	if i.release != nil {
+		i.release()
+	}
+}
+
+func (i *Intent) apply(ctx context.Context, r Applied) {
 	defer i.guard.Release()
 
 	switch {
@@ -56,14 +113,14 @@ func (i *Intent) Apply(ctx context.Context, r Applied) {
 		if i.txn == nil {
 			return
 		}
-		batch := i.d.authority.NewBatch()
+		batch := &entryBatch{}
 		// Deletes first. An insert of the same transaction takes effect at the same
 		// time tick and survives the delete.
 		for _, pk := range i.txn.deletes {
-			batch.Delete(pk)
+			batch.delete(pk)
 		}
 		for _, put := range i.txn.puts {
-			batch.Put(put.pk, Entry{SegmentID: put.segmentID})
+			batch.put(put.pk, Entry{SegmentID: put.segmentID})
 		}
 		i.mustWrite(ctx, batch)
 
@@ -93,29 +150,33 @@ func (i *Intent) Apply(ctx context.Context, r Applied) {
 		}
 		i.d.pendingMu.Unlock()
 	case i.req.Kind == KindInsert:
-		batch := i.d.authority.NewBatch()
+		batch := &entryBatch{}
 		for _, pk := range i.req.PKs {
-			batch.Put(pk, Entry{SegmentID: r.SegmentID})
+			batch.put(pk, Entry{SegmentID: r.SegmentID})
 		}
 		i.mustWrite(ctx, batch)
 	case i.req.Kind == KindDelete:
 		if len(i.decision.PresentPKs) == 0 {
 			return
 		}
-		batch := i.d.authority.NewBatch()
+		batch := &entryBatch{}
 		for _, pk := range i.decision.PresentPKs {
-			batch.Delete(pk)
+			batch.delete(pk)
 		}
 		i.mustWrite(ctx, batch)
 	}
 }
 
-// Discard gives the decision up after an append failure, including a redo.
-// Neither the index nor the pending writes change. Discard does not log the
-// error, the caller reports it.
+// Discard gives the decision up after an append failure, including a redo, and
+// releases the writer. Neither the index nor the pending writes change.
+// Discard does not log the error, the caller reports it. A second Apply or
+// Discard panics.
 func (i *Intent) Discard(_ context.Context, _ error) {
 	i.resolve()
 	i.guard.Release()
+	if i.release != nil {
+		i.release()
+	}
 }
 
 func (i *Intent) resolve() {
@@ -130,9 +191,9 @@ func (i *Intent) resolve() {
 // only its values are kept. An engine write is a memory operation that fails only
 // on a bug or a closed engine. Continuing would leave the index stale for these
 // keys and let duplicates through in silence, so the failure ends the process.
-func (i *Intent) mustWrite(ctx context.Context, batch *Batch) {
-	if err := i.d.authority.Write(context.WithoutCancel(ctx), batch); err != nil {
+func (i *Intent) mustWrite(ctx context.Context, batch *entryBatch) {
+	if err := i.d.store.write(context.WithoutCancel(ctx), batch); err != nil {
 		panic(fmt.Sprintf("failed to apply an appended write to the primary key index of vchannel %s (%d keys): %v",
-			i.req.VChannel, batch.Len(), err))
+			i.req.VChannel, batch.len(), err))
 	}
 }

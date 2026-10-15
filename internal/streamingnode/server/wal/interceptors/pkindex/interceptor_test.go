@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/index"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -70,8 +69,8 @@ func TestMain(m *testing.M) {
 // testIndexEnv is an index Manager over a real engine in a temporary
 // directory. No size or tail ever starts a handover.
 type testIndexEnv struct {
-	mgr       *index.Manager
-	committer *index.FakeCommitter
+	mgr       *snpkindex.Manager
+	committer *snpkindex.FakeCommitter
 	root      string
 
 	mu     sync.Mutex
@@ -84,12 +83,12 @@ func newTestIndexEnv(t *testing.T) *testIndexEnv {
 
 // newTestIndexEnvAt creates the env with root as the local root directory.
 func newTestIndexEnvAt(t *testing.T, root string) *testIndexEnv {
-	env := index.NewFakeEnv(t, root)
+	env := snpkindex.NewFakeEnv(t, root)
 	return &testIndexEnv{mgr: env.Manager, committer: env.Committer, root: root}
 }
 
 // openChannel opens the index Channel of the test pchannel.
-func (env *testIndexEnv) openChannel(seed uint64) *index.Channel {
+func (env *testIndexEnv) openChannel(seed uint64) *snpkindex.Channel {
 	ch := env.mgr.OpenChannel(types.PChannelInfo{Name: testPChannel, Term: 1}, seed, nil, env.onFatal)
 	ch.StartClaim()
 	return ch
@@ -114,7 +113,7 @@ func (env *testIndexEnv) useResource(t *testing.T) {
 
 // testEngine reads and seeds the engine of the Index of one vchannel.
 type testEngine struct {
-	idx *index.Index
+	idx *snpkindex.Index
 }
 
 // put seeds the index of one primary key, as an earlier insert would have done.
@@ -151,7 +150,7 @@ func (e *testEngine) segmentOfPK(t *testing.T, pk snpkindex.PK) (int64, bool) {
 
 // testEngines finds the Index of a vchannel in the Channel of an interceptor.
 type testEngines struct {
-	ch *index.Channel
+	ch *snpkindex.Channel
 }
 
 func (e *testEngines) of(t *testing.T, vchannel string) *testEngine {
@@ -571,7 +570,7 @@ func TestBuildPanicsWhenAnExistingCollectionHasAnUnsupportedPrimaryKey(t *testin
 // unavailable through param.OnFatal.
 func TestBuildPassesOnFatalToTheIndex(t *testing.T) {
 	env := newTestIndexEnv(t)
-	env.committer.SetClaimErr(errors.Wrap(index.ErrFenced, testVChannel))
+	env.committer.SetClaimErr(errors.Wrap(snpkindex.ErrFenced, testVChannel))
 	env.useResource(t)
 
 	fatal := make(chan error, 1)
@@ -591,7 +590,7 @@ func TestBuildPassesOnFatalToTheIndex(t *testing.T) {
 
 	select {
 	case err := <-fatal:
-		require.ErrorIs(t, err, index.ErrFenced)
+		require.ErrorIs(t, err, snpkindex.ErrFenced)
 	case <-time.After(10 * time.Second):
 		t.Fatal("OnFatal was not called after a fenced claim")
 	}
@@ -1442,9 +1441,9 @@ func TestCreateCollectionOnControlChannelHasNoTarget(t *testing.T) {
 }
 
 func TestTailOfReadsTheRecoveryMetrics(t *testing.T) {
-	require.Equal(t, index.WALTail{}, tailOf(nil)())
+	require.Equal(t, snpkindex.WALTail{}, tailOf(nil)())
 
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().Metrics().Return(recovery.RecoveryMetrics{RecoveryTimeTick: 42, RecoveryTailBytes: 1000})
-	require.Equal(t, index.WALTail{Bytes: 1000, RecoveryTimeTick: 42}, tailOf(rs)())
+	require.Equal(t, snpkindex.WALTail{Bytes: 1000, RecoveryTimeTick: 42}, tailOf(rs)())
 }

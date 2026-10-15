@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package index
+package pkindex
 
 import (
 	"context"
@@ -22,16 +22,14 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkerr "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -52,7 +50,7 @@ type Index struct {
 	pkDataType   schemapb.DataType
 	committedDir string
 	eng          *engine.Engine
-	decider      *snpkindex.Decider
+	decider      *decider
 	logger       *mlog.Logger
 
 	// ctx is canceled when the Index closes.
@@ -165,15 +163,7 @@ func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID in
 		heapPos:      -1,
 	}
 	idx.notFresh.Store(leftover)
-	a, err := snpkindex.NewAuthority(vchannel, dirtyRW{eng: eng, idx: idx})
-	if err != nil {
-		cancel()
-		if cerr := eng.Close(); cerr != nil {
-			idx.logger.Warn(ctx, "failed to close primary key index engine", mlog.Err(cerr))
-		}
-		return nil, err
-	}
-	idx.decider = snpkindex.NewDecider(a, params.LockStripes)
+	idx.decider = newDecider(pkStore{eng: dirtyRW{eng: eng, idx: idx}}, params.LockStripes)
 	return idx, nil
 }
 
@@ -191,7 +181,7 @@ func hasLeftover(dirs ...string) (bool, error) {
 			continue
 		}
 		if err != nil {
-			return false, pkindex.MarkIO(err, "list dir %s", d)
+			return false, pkerr.MarkIO(err, "list dir %s", d)
 		}
 		if len(ents) > 0 {
 			return true, nil
@@ -204,7 +194,7 @@ func hasLeftover(dirs ...string) (bool, error) {
 func wipeLocal(dirs ...string) error {
 	for _, d := range dirs {
 		if err := os.RemoveAll(d); err != nil {
-			return pkindex.MarkIO(err, "remove dir %s", d)
+			return pkerr.MarkIO(err, "remove dir %s", d)
 		}
 	}
 	return nil
@@ -261,81 +251,6 @@ func (idx *Index) close(ctx context.Context) {
 		return
 	}
 	idx.logger.Info(ctx, "primary key index closed")
-}
-
-// Decide makes the dedup decision for req. It registers the writer with the
-// watermark of the pchannel before the decision. The caller must call Apply
-// or Discard on the returned Intent exactly once. Until then the Intent holds
-// the watermark back and keeps the Index open.
-//
-// After the Index is closed, Decide returns an error that matches
-// engine.ErrClosed, like a call on a closed engine.
-func (idx *Index) Decide(ctx context.Context, req snpkindex.Request) (*Intent, error) {
-	if !idx.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, errClosed("vchannel " + idx.vchannel)
-	}
-	token := idx.ch.wm.enter()
-	inner, err := idx.decider.Decide(ctx, req)
-	if err != nil {
-		idx.ch.wm.end(token)
-		idx.lifetime.Done()
-		if errors.Is(err, pkindex.ErrCorrupted) {
-			idx.logger.Error(ctx, "primary key index lookup found corrupted data, the WAL becomes unavailable", mlog.Err(err))
-			idx.ch.fatal(err)
-		}
-		return nil, err
-	}
-	return &Intent{inner: inner, idx: idx, token: token}, nil
-}
-
-// PendingTxnIDs returns the transactions that have pending writes.
-func (idx *Index) PendingTxnIDs() []int64 {
-	return idx.decider.PendingTxnIDs()
-}
-
-// DropTxn forgets the pending writes of a transaction that expired or was failed.
-func (idx *Index) DropTxn(txnID int64) {
-	idx.decider.DropTxn(txnID)
-}
-
-// Intent is a dedup decision that the caller confirms with Apply or gives up
-// with Discard, exactly once. It belongs to one append and must not be shared
-// between goroutines.
-type Intent struct {
-	inner *snpkindex.Intent
-	idx   *Index
-	token writerToken
-}
-
-// Decision returns what the caller should append.
-func (i *Intent) Decision() snpkindex.Decision {
-	return i.inner.Decision()
-}
-
-// LockWait returns how long Decide waited for the lock stripes.
-func (i *Intent) LockWait() time.Duration {
-	return i.inner.LockWait()
-}
-
-// Apply confirms the decision after the append and releases the writer.
-// A second Apply or Discard panics.
-func (i *Intent) Apply(ctx context.Context, r snpkindex.Applied) {
-	i.inner.Apply(ctx, r)
-	i.release()
-}
-
-// Discard gives the decision up after an append failure and releases the
-// writer. A second Apply or Discard panics.
-func (i *Intent) Discard(ctx context.Context, err error) {
-	i.inner.Discard(ctx, err)
-	i.release()
-}
-
-// release ends the writer in the watermark and lets the Index close. The
-// inner Intent panics on a second Apply or Discard before release runs.
-func (i *Intent) release() {
-	i.idx.ch.wm.end(i.token)
-	i.idx.lifetime.Done()
 }
 
 // currentInstalledVersion returns the version of the installed manifest, 0
@@ -440,10 +355,10 @@ func (idx *Index) resolveLocal(ctx context.Context, basePath string, id sst.ID, 
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	} else if !os.IsNotExist(err) {
-		return "", pkindex.MarkIO(err, "stat committed sst %s", path)
+		return "", pkerr.MarkIO(err, "stat committed sst %s", path)
 	}
 	if err := os.MkdirAll(idx.committedDir, 0o755); err != nil {
-		return "", pkindex.MarkIO(err, "create committed dir %s", idx.committedDir)
+		return "", pkerr.MarkIO(err, "create committed dir %s", idx.committedDir)
 	}
 	if err := idx.ch.m.cfg.Store.DownloadFile(ctx, objpath.SSTKey(basePath, int64(id)), path); err != nil {
 		return "", err
@@ -623,5 +538,5 @@ func (idx *Index) handover(ctx context.Context) (bool, error) {
 // newer owner, the manifest service rejected a request that a retry cannot
 // fix, or stored data is corrupted.
 func isFatal(err error) bool {
-	return errors.Is(err, ErrFenced) || errors.Is(err, ErrRejected) || errors.Is(err, pkindex.ErrCorrupted)
+	return errors.Is(err, ErrFenced) || errors.Is(err, ErrRejected) || errors.Is(err, pkerr.ErrCorrupted)
 }

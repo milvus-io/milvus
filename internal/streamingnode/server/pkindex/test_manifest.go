@@ -16,7 +16,7 @@
 
 //go:build test
 
-package index
+package pkindex
 
 import (
 	"strconv"
