@@ -105,6 +105,7 @@ struct CompareElementFunc {
                TargetBitmapView res,
                const TargetBitmap& bitmap_input,
                size_t start_cursor,
+               const int32_t* offsets = nullptr) {
         // This is the original code, kept here for the documentation purposes
         // also, used for iterative filter
         if constexpr (filter_type == FilterType::random) {

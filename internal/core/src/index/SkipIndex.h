@@ -209,7 +209,6 @@ class FieldSkipMetricsView {
 // Field-addressed helper retained for standalone tests and the JsonKeyStats
 // callback interface. Sealed segment runtime state does not own this map.
 class SkipIndex {
-
  public:
     SkipIndex() = default;
 

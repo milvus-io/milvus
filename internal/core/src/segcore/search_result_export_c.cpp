@@ -167,7 +167,6 @@ GroupByColumnName(milvus::FieldId field_id) {
     return "$group_by_" + std::to_string(field_id.get());
 }
 
-
 std::vector<GroupByArrowInfo>
 ResolveGroupByArrowInfos(milvus::query::Plan* plan) {
     std::vector<GroupByArrowInfo> infos;

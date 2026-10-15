@@ -285,6 +285,8 @@ TakeTargetType(const FieldMeta& field_meta) {
         case DataType::ARRAY:
             return field_meta.is_nested_array() ? TargetType::ArrayValueView
                                                 : TargetType::ArrayView;
+        case DataType::UUID:
+            return TargetType::UUID;
         default:
             ThrowInfo(ErrorCode::Unsupported,
                       "data type {} does not support scalar Take",
