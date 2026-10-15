@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -100,4 +102,78 @@ func TestRedoInterceptorWaitUntilGrowingSegmentReadyReturnsUnrecoverableForDropp
 			require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 		})
 	}
+}
+
+// TestRedoInterceptorReportsShardFencedWhenTheInsertRacesTheFence: the redo
+// loop sits outside the vchannel lock, so a fence can land between one
+// iteration and the next. The fence tears the source's registration down, and
+// the partition lookup then fails with ErrCollectionNotFound -- the same
+// answer a vchannel this pchannel never held gives. The client must see
+// SHARD_FENCED for it, the answer the shard interceptor's own admission gives
+// once the message reaches it: the write belongs to a shard that exists and
+// the route is one routing commit behind, not a terminal error.
+func TestRedoInterceptorReportsShardFencedWhenTheInsertRacesTheFence(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
+	shardManager := shards.RecoverShardManager(&shards.ShardManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{Name: "test-channel", Term: 1},
+		WAL:         syncutil.NewFuture[wal.WAL](),
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"test-vchannel": {
+						VChannel:     "test-vchannel",
+						CollectionID: 1,
+						PartitionIDs: []int64{2},
+					},
+				},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
+			},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 100},
+		},
+		TxnManager: &testTxnManager{},
+	})
+	defer shardManager.Close()
+
+	// The fence, as the shard interceptor installs it before appending the
+	// fence record: the registration is gone, the name-keyed tombstone stays.
+	fence := message.NewSplitShardMessageBuilderV2().
+		WithVChannel("test-vchannel").
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:    1,
+			SplitTaskId:     7,
+			SourceVchannel:  "test-vchannel",
+			TargetVchannels: []string{"test-vchannel-target1", "test-vchannel-target2"},
+		}).
+		WithBody(&message.SplitShardMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(200).
+		WithLastConfirmedUseMessageID()
+	shardManager.SplitShard(message.MustAsMutableSplitShardMessageV2(fence))
+
+	interceptor := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	defer interceptor.Close()
+
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("test-vchannel").
+		WithHeader(&messagespb.InsertMessageHeader{
+			CollectionId: 1,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{PartitionId: 2, Rows: 1},
+			},
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable()
+
+	msgID, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("append must not be called on a fenced vchannel")
+		return nil, nil
+	})
+	require.Nil(t, msgID)
+	require.Error(t, err)
+	assert.True(t, status.AsStreamingError(err).IsShardFenced(), "an insert racing the fence is SHARD_FENCED, not UNRECOVERABLE: %v", err)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, status.AsStreamingError(err).Code)
 }

@@ -89,6 +89,8 @@ const (
 	DataCoord_CommitImport_FullMethodName                         = "/milvus.proto.data.DataCoord/CommitImport"
 	DataCoord_AbortImport_FullMethodName                          = "/milvus.proto.data.DataCoord/AbortImport"
 	DataCoord_HandleCommitVchannel_FullMethodName                 = "/milvus.proto.data.DataCoord/HandleCommitVchannel"
+	DataCoord_CommitShardSplit_FullMethodName                     = "/milvus.proto.data.DataCoord/CommitShardSplit"
+	DataCoord_CheckShardSplitDrained_FullMethodName               = "/milvus.proto.data.DataCoord/CheckShardSplitDrained"
 )
 
 // DataCoordClient is the client API for DataCoord service.
@@ -176,6 +178,11 @@ type DataCoordClient interface {
 	CommitImport(ctx context.Context, in *CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AbortImport(ctx context.Context, in *AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	HandleCommitVchannel(ctx context.Context, in *HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Shard split RPCs -- internal only. CommitShardSplit is the datacoord half
+	// of the SplitShard broadcast ack callback; CheckShardSplitDrained answers
+	// whether the split's sources still hold data the targets have not taken.
+	CommitShardSplit(ctx context.Context, in *CommitShardSplitRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CheckShardSplitDrained(ctx context.Context, in *CheckShardSplitDrainedRequest, opts ...grpc.CallOption) (*CheckShardSplitDrainedResponse, error)
 }
 
 type dataCoordClient struct {
@@ -782,6 +789,24 @@ func (c *dataCoordClient) HandleCommitVchannel(ctx context.Context, in *HandleCo
 	return out, nil
 }
 
+func (c *dataCoordClient) CommitShardSplit(ctx context.Context, in *CommitShardSplitRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_CommitShardSplit_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) CheckShardSplitDrained(ctx context.Context, in *CheckShardSplitDrainedRequest, opts ...grpc.CallOption) (*CheckShardSplitDrainedResponse, error) {
+	out := new(CheckShardSplitDrainedResponse)
+	err := c.cc.Invoke(ctx, DataCoord_CheckShardSplitDrained_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DataCoordServer is the server API for DataCoord service.
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
@@ -867,6 +892,11 @@ type DataCoordServer interface {
 	CommitImport(context.Context, *CommitImportRequest) (*commonpb.Status, error)
 	AbortImport(context.Context, *AbortImportRequest) (*commonpb.Status, error)
 	HandleCommitVchannel(context.Context, *HandleCommitVchannelRequest) (*commonpb.Status, error)
+	// Shard split RPCs -- internal only. CommitShardSplit is the datacoord half
+	// of the SplitShard broadcast ack callback; CheckShardSplitDrained answers
+	// whether the split's sources still hold data the targets have not taken.
+	CommitShardSplit(context.Context, *CommitShardSplitRequest) (*commonpb.Status, error)
+	CheckShardSplitDrained(context.Context, *CheckShardSplitDrainedRequest) (*CheckShardSplitDrainedResponse, error)
 }
 
 // UnimplementedDataCoordServer should be embedded to have forward compatible implementations.
@@ -1070,6 +1100,12 @@ func (UnimplementedDataCoordServer) AbortImport(context.Context, *AbortImportReq
 }
 func (UnimplementedDataCoordServer) HandleCommitVchannel(context.Context, *HandleCommitVchannelRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HandleCommitVchannel not implemented")
+}
+func (UnimplementedDataCoordServer) CommitShardSplit(context.Context, *CommitShardSplitRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CommitShardSplit not implemented")
+}
+func (UnimplementedDataCoordServer) CheckShardSplitDrained(context.Context, *CheckShardSplitDrainedRequest) (*CheckShardSplitDrainedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckShardSplitDrained not implemented")
 }
 
 // UnsafeDataCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -2271,6 +2307,42 @@ func _DataCoord_HandleCommitVchannel_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_CommitShardSplit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommitShardSplitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).CommitShardSplit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_CommitShardSplit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).CommitShardSplit(ctx, req.(*CommitShardSplitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_CheckShardSplitDrained_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckShardSplitDrainedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).CheckShardSplitDrained(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_CheckShardSplitDrained_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).CheckShardSplitDrained(ctx, req.(*CheckShardSplitDrainedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataCoord_ServiceDesc is the grpc.ServiceDesc for DataCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2541,6 +2613,14 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "HandleCommitVchannel",
 			Handler:    _DataCoord_HandleCommitVchannel_Handler,
+		},
+		{
+			MethodName: "CommitShardSplit",
+			Handler:    _DataCoord_CommitShardSplit_Handler,
+		},
+		{
+			MethodName: "CheckShardSplitDrained",
+			Handler:    _DataCoord_CheckShardSplitDrained_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
