@@ -28,8 +28,8 @@ import (
 )
 
 // writeQueryResponse writes one response while owning only one encoded batch.
-// The caller must discard buffered output or abort a committed transport on
-// error. An error envelope can replace output only before commitment.
+// The caller must abort a committed transport on error. An error envelope can
+// replace output only before commitment.
 // Metadata must exclude data; this function owns the data array's framing.
 func writeQueryResponse(ctx context.Context, w io.Writer, metadata gin.H, rows *queryResponseRows, batchRows int) error {
 	if err := ctx.Err(); err != nil {

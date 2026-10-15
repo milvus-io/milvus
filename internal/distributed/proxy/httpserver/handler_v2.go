@@ -1644,11 +1644,10 @@ const queryResponseBatchRows = 64
 func returnQueryResponse(ctx context.Context, c *gin.Context, code int, result gin.H) {
 	rows := result[HTTPReturnData].(*queryResponseRows)
 	delete(result, HTTPReturnData)
-	recorder, buffered := c.Writer.(*timeoutResponseRecorder)
 	streamWriter, streaming := c.Writer.(*streamingResponseWriter)
-	if !buffered && !streaming {
-		// Callers without the timeout recorder must finish projection before
-		// rendering, since a socket cannot replace a partially written envelope.
+	if !streaming {
+		// Direct callers without streaming failure handling must finish
+		// projection before rendering a complete response.
 		data := make([]map[string]interface{}, 0, rows.rowsNum)
 		for {
 			batch, err := rows.Next(ctx, queryResponseBatchRows)
@@ -1671,20 +1670,15 @@ func returnQueryResponse(ctx context.Context, c *gin.Context, code int, result g
 	c.Writer.WriteHeader(code)
 	if err := writeQueryResponse(ctx, c.Writer, result, rows, queryResponseBatchRows); err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to render query result", mlog.Err(err))
-		if streaming && c.Writer.Written() {
+		if c.Writer.Written() {
 			c.Set(HTTPReturnCode, merr.Code(merr.ErrInvalidSearchResult))
 			c.Set(HTTPReturnMessage, resultErrMessage(err))
 			streamWriter.failure = err
 			c.Abort()
 			return
 		}
-		if buffered && !recorder.Discard() {
-			return
-		}
-		// Batch cancellation can finish before the middleware's timer fires.
-		// Preserve its timeout envelope even when finish wins that race.
-		if errors.Is(err, context.DeadlineExceeded) {
-			HTTPAbortReturn(c, http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
+		// The streaming middleware owns the precommit timeout response.
+		if c.Request.Context().Err() != nil {
 			return
 		}
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrInvalidSearchResult), HTTPReturnMessage: resultErrMessage(err)})

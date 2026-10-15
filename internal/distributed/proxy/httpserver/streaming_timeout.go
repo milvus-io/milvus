@@ -50,39 +50,51 @@ func StreamingHTTPHandler(handler http.Handler) http.Handler {
 }
 
 // streamingResponseWriter has one application owner: the serving goroutine.
-// Only its cancellation callback touches the transport deadline. That callback
-// is joined before the writer can escape ServeHTTP or Gin can reuse its context.
+// Only cancellation callbacks touch transport deadlines concurrently. They are
+// joined before the writer can escape ServeHTTP or Gin can reuse its context.
 type streamingResponseWriter struct {
 	gin.ResponseWriter
-	ctx        context.Context
-	controller *http.ResponseController
-	deadline   time.Time
-	failure    error
-	stop       func() bool
-	stopped    chan struct{}
+	ctx          context.Context
+	controller   *http.ResponseController
+	deadline     time.Time
+	failure      error
+	stopWrite    func() bool
+	writeStopped chan struct{}
+}
+
+func (w *streamingResponseWriter) requestError() error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	// The transport deadline can wake a body read before the context timer runs.
+	// Do not commit a binding error (or success) after the same budget expired.
+	if !time.Now().Before(w.deadline) {
+		return context.DeadlineExceeded
+	}
+	return nil
 }
 
 func (w *streamingResponseWriter) prepare() error {
 	if w.failure != nil {
 		return w.failure
 	}
-	if err := w.ctx.Err(); err != nil {
+	if err := w.requestError(); err != nil {
 		return err
 	}
-	if w.stop == nil {
+	if w.stopWrite == nil {
 		// Arm only at first output. HTTP/2 deadlines set during backend work
 		// could reset an uncommitted stream before we can send its timeout body.
 		if err := w.controller.SetWriteDeadline(w.deadline); err != nil {
 			w.failure = err // Unsupported transports fail closed, never unbounded.
 			return err
 		}
-		w.stopped = make(chan struct{})
-		w.stop = context.AfterFunc(w.ctx, func() {
+		w.writeStopped = make(chan struct{})
+		w.stopWrite = context.AfterFunc(w.ctx, func() {
 			_ = w.controller.SetWriteDeadline(time.Now())
-			close(w.stopped)
+			close(w.writeStopped)
 		})
 	}
-	return w.ctx.Err()
+	return w.requestError()
 }
 
 func (w *streamingResponseWriter) Write(data []byte) (int, error) {
@@ -123,14 +135,39 @@ func (w *streamingResponseWriter) Flush() {
 	}
 }
 
-func (w *streamingResponseWriter) join() {
-	if w.stop != nil && !w.stop() {
-		<-w.stopped
+func (w *streamingResponseWriter) joinWrite() {
+	if w.stopWrite != nil && !w.stopWrite() {
+		<-w.writeStopped
 	}
+}
+
+// protectBodyRead bounds body reads by the request deadline and interrupts them
+// on early cancellation. The caller must run cleanup after response finalization.
+func (w *streamingResponseWriter) protectBodyRead() (cleanup func(), err error) {
+	if err := w.controller.SetReadDeadline(w.deadline); err != nil {
+		return nil, err
+	}
+
+	callbackDone := make(chan struct{})
+	stopCallback := context.AfterFunc(w.ctx, func() {
+		// Parent cancellation may precede the configured deadline.
+		_ = w.controller.SetReadDeadline(time.Now())
+		close(callbackDone)
+	})
+	return func() {
+		// Prevent a future callback, or wait for an already running one to finish.
+		// No callback may change the deadline after this request exits.
+		if !stopCallback() {
+			<-callbackDone
+		}
+		// Keep the deadline for net/http's unread-body cleanup. The transport
+		// resets it before HTTP/1 reuse or removes it when the HTTP/2 stream closes.
+	}, nil
 }
 
 func streamingTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Use one request deadline for body reads, handler work and response writes.
 		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
 		if value := c.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout); value != "" {
 			seconds, err := strconv.ParseInt(value, 10, 64)
@@ -157,71 +194,106 @@ func streamingTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			transport = unwrapper.Unwrap()
 		}
 		deadline, _ := ctx.Deadline()
-		writer := &streamingResponseWriter{ResponseWriter: realWriter, ctx: ctx, controller: http.NewResponseController(transport), deadline: deadline}
+		writer := &streamingResponseWriter{
+			ResponseWriter: realWriter,
+			ctx:            ctx,
+			controller:     http.NewResponseController(transport),
+			deadline:       deadline,
+		}
 		c.Writer = writer
+		var cleanupBodyRead func()
 		defer func() {
-			p := recover()
-			if p == nil && ctx.Err() == nil && writer.failure == nil && writer.Written() {
-				_ = writer.FlushError() // Observe final buffered socket errors here.
+			if cleanupBodyRead != nil {
+				cleanupBodyRead()
 			}
-			writer.join()
-			c.Writer = realWriter
-			abort := func() {
-				cancel()
-				c.Abort()
-				if state, ok := ctx.Value(streamingAbortKey{}).(*streamingAbortState); ok {
-					state.aborted = true
-					return
-				}
-				panic(http.ErrAbortHandler) // Caller must install StreamingHTTPHandler.
-			}
-			writeError := func(status int, body gin.H) bool {
-				// The request may already be expired. Bound this complete error
-				// envelope by the configured budget, not Request-Timeout: 0.
-				budget := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
-				if err := writer.controller.SetWriteDeadline(time.Now().Add(budget)); err != nil {
-					abort()
-					return false
-				}
-				HTTPAbortReturn(c, status, body)
-				if err := writer.controller.Flush(); err != nil {
-					abort()
-					return false
-				}
-				_ = writer.controller.SetWriteDeadline(time.Time{})
-				return true
-			}
-			if p != nil && p != http.ErrAbortHandler && !writer.Written() {
-				if writeError(http.StatusInternalServerError, gin.H{HTTPReturnCode: http.StatusInternalServerError}) {
-					panic(p) // Preserve Gin panic logging after a complete envelope.
-				}
+		}()
+
+		// These actions run only after the deferred cleanup restores realWriter.
+		abortResponse := func() {
+			cancel()
+			c.Abort()
+			if state, ok := ctx.Value(streamingAbortKey{}).(*streamingAbortState); ok {
+				state.aborted = true
 				return
 			}
-			if p != nil && p != http.ErrAbortHandler {
-				// Committed panics cannot pass through Gin Recovery, which would
-				// consume the transport abort. Preserve their original diagnostics
-				// and mark the request as a system failure before normal unwind.
+			panic(http.ErrAbortHandler) // Caller must install StreamingHTTPHandler.
+		}
+		writeErrorResponse := func(status int, body gin.H) bool {
+			// The request may already be expired. Give the complete error envelope
+			// a bounded write window from server configuration, not Request-Timeout: 0.
+			budget := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
+			if err := writer.controller.SetWriteDeadline(time.Now().Add(budget)); err != nil {
+				abortResponse()
+				return false
+			}
+			HTTPAbortReturn(c, status, body)
+			if err := writer.controller.Flush(); err != nil {
+				abortResponse()
+				return false
+			}
+			_ = writer.controller.SetWriteDeadline(time.Time{})
+			return true
+		}
+
+		defer func() {
+			panicValue := recover()
+
+			// Finish pending output, then stop/join the deadline callback before
+			// restoring the writer or attempting an independent error response.
+			if panicValue == nil && writer.requestError() == nil && writer.failure == nil && writer.Written() {
+				_ = writer.FlushError() // Observe final buffered socket errors here.
+			}
+			writer.joinWrite()
+			c.Writer = realWriter
+
+			// An ordinary handler panic can become a complete 500 only before
+			// commitment. Afterwards, log it here and abort the partial response.
+			if panicValue != nil && panicValue != http.ErrAbortHandler {
+				if !writer.Written() {
+					if writeErrorResponse(http.StatusInternalServerError, gin.H{HTTPReturnCode: http.StatusInternalServerError}) {
+						panic(panicValue) // Let Gin Recovery log the original panic.
+					}
+					return
+				}
 				err := merr.WrapErrServiceInternalMsg("REST handler panicked after response commitment")
 				c.Set(HTTPReturnCode, merr.Code(err))
 				c.Set(HTTPReturnMessage, err.Error())
 				_ = c.Error(err).SetType(gin.ErrorTypePrivate)
-				mlog.Error(ctx, "REST handler panicked after response commitment", mlog.Err(err), mlog.Any("panic", p), mlog.String("panic_stack", string(debug.Stack())))
-			} else if ctx.Err() != nil {
+				mlog.Error(ctx, "REST handler panicked after response commitment", mlog.Err(err), mlog.Any("panic", panicValue), mlog.String("panic_stack", string(debug.Stack())))
+				abortResponse()
+				return
+			}
+
+			requestErr := writer.requestError()
+			if requestErr != nil {
 				c.Set(HTTPReturnCode, merr.TimeoutCode)
 				c.Set(HTTPReturnMessage, "request timeout")
 			}
-			if p != nil || writer.failure != nil || (ctx.Err() != nil && writer.Written()) {
-				abort()
-				return
-			}
-			if ctx.Err() != nil {
-				writeError(http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
-				return
-			}
-			if writer.stop != nil {
-				_ = writer.controller.SetWriteDeadline(time.Time{})
+			switch {
+			case panicValue != nil || writer.failure != nil:
+				// An explicit abort or a failed transport cannot carry an error body.
+				abortResponse()
+			case requestErr != nil:
+				if writer.Written() {
+					abortResponse() // Already committed: never append an error document.
+				} else {
+					writeErrorResponse(http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
+				}
+			default:
+				// Successful response: do not leave its deadline on a reused connection.
+				if writer.stopWrite != nil {
+					_ = writer.controller.SetWriteDeadline(time.Time{})
+				}
 			}
 		}()
+		if c.Request.Body != nil && c.Request.Body != http.NoBody {
+			var err error
+			cleanupBodyRead, err = writer.protectBodyRead()
+			if err != nil {
+				writer.failure = err // Do not enter a potentially unbounded body read.
+				return
+			}
+		}
 		handler(c)
 	}
 }

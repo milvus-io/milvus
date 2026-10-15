@@ -206,19 +206,6 @@ func (w *timeoutResponseRecorder) CloseForTimeout() {
 	w.Close()
 }
 
-// Discard removes uncommitted output before a handler replaces it with an
-// error envelope. Closed recorders no longer own their pooled buffer.
-func (w *timeoutResponseRecorder) Discard() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.closed || w.body == nil {
-		return false
-	}
-	w.body.Reset()
-	w.size = timeoutRecorderNoWritten
-	return true
-}
-
 func (w *timeoutResponseRecorder) written() bool {
 	return w.size != timeoutRecorderNoWritten
 }

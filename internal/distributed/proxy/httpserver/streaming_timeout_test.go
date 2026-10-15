@@ -25,12 +25,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -51,6 +53,7 @@ import (
 type streamingRecorderWriter struct{ gin.ResponseWriter }
 
 func (w streamingRecorderWriter) SetWriteDeadline(time.Time) error { return nil }
+func (w streamingRecorderWriter) SetReadDeadline(time.Time) error  { return nil }
 
 func streamingRecorderMiddleware(c *gin.Context) {
 	c.Writer = streamingRecorderWriter{c.Writer}
@@ -88,6 +91,149 @@ func streamingTestTimeout(t *testing.T, timeout string) {
 	key := paramtable.Get().HTTPCfg.RequestTimeoutMs.Key
 	require.NoError(t, paramtable.Get().Save(key, timeout))
 	t.Cleanup(func() { paramtable.Get().Reset(key) })
+}
+
+func TestStreamingRequestBodyTimeout(t *testing.T) {
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		for _, cancellation := range []string{"deadline", "parent_cancel"} {
+			// -1 means unknown length (chunked for HTTP/1, no Content-Length for HTTP/2).
+			for _, contentLength := range []int64{1024, -1} {
+				t.Run(protocol+"/"+cancellation+"/content_length="+strconv.FormatInt(contentLength, 10), func(t *testing.T) {
+					budget := "200"
+					if cancellation == "parent_cancel" {
+						budget = "5000" // Cancellation must interrupt before this deadline.
+					}
+					streamingTestTimeout(t, budget)
+					readFinished := make(chan error, 1)
+					cancelRequest := make(chan context.CancelFunc, 1)
+					engine := gin.New()
+					engine.POST("/slow", streamingTimeoutMiddleware(func(c *gin.Context) {
+						var req struct {
+							Data []int `json:"data"`
+						}
+						err := c.ShouldBindBodyWith(&req, binding.JSON)
+						readFinished <- err
+						if err != nil {
+							// Match the binding error path: the timeout middleware must
+							// prevent this from committing a misleading JSON error.
+							HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid)})
+						}
+					}))
+					engine.GET("/healthy", streamingTimeoutMiddleware(func(c *gin.Context) {
+						HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: 0})
+					}))
+					wrapped := StreamingHTTPHandler(engine)
+					server, client := streamingTestServer(t, protocol, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if r.URL.Path == "/slow" {
+							ctx, cancel := context.WithCancel(r.Context())
+							defer cancel()
+							cancelRequest <- cancel
+							r = r.WithContext(ctx)
+						}
+						wrapped.ServeHTTP(w, r)
+					}))
+					reader, upload := io.Pipe()
+					t.Cleanup(func() { _ = upload.Close(); _ = reader.Close() })
+					request, err := http.NewRequest(http.MethodPost, server.URL+"/slow", reader)
+					require.NoError(t, err)
+					request.Header.Set("Content-Type", "application/json")
+					request.ContentLength = contentLength
+					type outcome struct {
+						response *http.Response
+						err      error
+					}
+					completed := make(chan outcome, 1)
+					go func() {
+						response, err := client.Do(request)
+						completed <- outcome{response, err}
+					}()
+					_, err = upload.Write([]byte(`{"data":[1,`))
+					require.NoError(t, err)
+					select {
+					case cancel := <-cancelRequest:
+						if cancellation == "parent_cancel" {
+							cancel()
+						}
+					case <-time.After(time.Second):
+						t.Fatal("handler did not start")
+					}
+					select {
+					case err := <-readFinished:
+						require.ErrorIs(t, err, os.ErrDeadlineExceeded)
+					case <-time.After(time.Second):
+						t.Fatal("body read remained blocked after cancellation; client has not closed its upload")
+					}
+					select {
+					case result := <-completed:
+						require.NoError(t, result.err)
+						defer result.response.Body.Close()
+						body, err := io.ReadAll(result.response.Body)
+						require.NoError(t, err)
+						require.Equal(t, http.StatusRequestTimeout, result.response.StatusCode)
+						require.EqualValues(t, merr.TimeoutCode, gjson.GetBytes(body, HTTPReturnCode).Int())
+					case <-time.After(time.Second):
+						t.Fatal("handler did not return a timeout response")
+					}
+					var reused bool
+					healthy, err := http.NewRequest(http.MethodGet, server.URL+"/healthy", nil)
+					require.NoError(t, err)
+					healthy = healthy.WithContext(httptrace.WithClientTrace(healthy.Context(), &httptrace.ClientTrace{
+						GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
+					}))
+					response, err := client.Do(healthy)
+					require.NoError(t, err)
+					defer response.Body.Close()
+					body, err := io.ReadAll(response.Body)
+					require.NoError(t, err)
+					require.JSONEq(t, `{"code":0}`, string(body))
+					if protocol != "http1" {
+						require.True(t, reused, "body timeout must not close the shared HTTP/2 connection")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestStreamingCompletedBodyKeepsConnection(t *testing.T) {
+	streamingTestTimeout(t, "100")
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			engine := gin.New()
+			engine.POST("/", streamingTimeoutMiddleware(func(c *gin.Context) {
+				var req map[string]interface{}
+				if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+					HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid)})
+					return
+				}
+				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: 0})
+			}))
+			server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
+			for i, body := range []string{`{"data":[1]}`, `{"data":`, `{"data":[2]}`} {
+				var reused bool
+				request, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(body))
+				require.NoError(t, err)
+				request = request.WithContext(httptrace.WithClientTrace(request.Context(), &httptrace.ClientTrace{
+					GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
+				}))
+				response, err := client.Do(request)
+				require.NoError(t, err)
+				result, err := io.ReadAll(response.Body)
+				response.Body.Close()
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, response.StatusCode)
+				wantCode := int64(0)
+				if i == 1 {
+					wantCode = int64(merr.Code(merr.ErrParameterInvalid))
+				}
+				require.Equal(t, wantCode, gjson.GetBytes(result, HTTPReturnCode).Int())
+				if i > 0 {
+					require.True(t, reused, "a finished request's read timer must not poison keep-alive")
+				}
+				time.Sleep(150 * time.Millisecond) // Let the previous request's deadline pass.
+			}
+		})
+	}
 }
 
 func requireStreamingAbort(t *testing.T, response *http.Response) []byte {
@@ -335,14 +481,29 @@ func TestStreamingClientDisconnect(t *testing.T) {
 }
 
 func TestStreamingUnsupportedDeadlinesFailClosed(t *testing.T) {
-	engine := gin.New()
-	engine.Use(gin.Recovery())
-	engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) { HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: 0}) }))
-	w := httptest.NewRecorder()
-	require.PanicsWithValue(t, http.ErrAbortHandler, func() {
-		StreamingHTTPHandler(engine).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
-	})
-	require.Empty(t, w.Body.String(), "unsupported deadlines must not permit unbounded real writes")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			engine := gin.New()
+			engine.Use(gin.Recovery())
+			called := false
+			engine.Handle(method, "/", streamingTimeoutMiddleware(func(c *gin.Context) {
+				called = true
+				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: 0})
+			}))
+			var body io.Reader
+			if method == http.MethodPost {
+				body = strings.NewReader(`{"data":[1]}`)
+			}
+			w := httptest.NewRecorder()
+			require.PanicsWithValue(t, http.ErrAbortHandler, func() {
+				StreamingHTTPHandler(engine).ServeHTTP(w, httptest.NewRequest(method, "/", body))
+			})
+			require.Empty(t, w.Body.String(), "unsupported deadlines must not permit unbounded I/O")
+			if method == http.MethodPost {
+				require.False(t, called, "unsupported read deadlines must fail before entering the body reader")
+			}
+		})
+	}
 }
 
 func TestStreamingCommittedFailureReturnsToHandler(t *testing.T) {
