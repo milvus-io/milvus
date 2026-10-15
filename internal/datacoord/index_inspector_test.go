@@ -202,13 +202,17 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	inspector.reloadFromMeta()
 }
 
-func TestIndexInspector_PendingIndexSegmentsDedupeEvents(t *testing.T) {
-	inspector := &indexInspector{}
+// A notification round takes only the notified segments, deduplicated; the
+// ticker also takes the pending ones, and a notification supersedes a pending
+// retry.
+func TestIndexInspector_PopIndexSegments(t *testing.T) {
+	inspector := newIndexInspector(context.Background(), nil, nil, nil, nil, nil, nil, nil)
+	inspector.requeuePendingIndexSegments(1, 2)
+	inspector.notifyIndexSegments(2, 3, 2)
 
-	inspector.enqueuePendingIndexSegments(1, 2, 1)
-
-	assert.ElementsMatch(t, []UniqueID{1, 2}, inspector.popPendingIndexSegments())
-	assert.Empty(t, inspector.popPendingIndexSegments())
+	assert.ElementsMatch(t, []UniqueID{2, 3}, inspector.popIndexSegments(false))
+	assert.ElementsMatch(t, []UniqueID{1}, inspector.popIndexSegments(true))
+	assert.Empty(t, inspector.popIndexSegments(true))
 }
 
 // Senders must not depend on the create-index loop: with only the forwarder
@@ -219,26 +223,28 @@ func TestIndexInspector_ForwardBuildIndexChWithoutCreateIndexLoop(t *testing.T) 
 
 	// The deadline bounds the senders' wait if forwarding regresses.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	inspector := &indexInspector{ctx: ctx, cancel: cancel, pendingIndexNotifyCh: make(chan struct{}, 1)}
+	defer cancel()
+	inspector := newIndexInspector(ctx, nil, nil, nil, nil, nil, nil, nil)
 	defer inspector.Stop()
 	setBuildIndexConsumerForTest(t, ctx.Done())
 	inspector.wg.Add(1)
-	go inspector.forwardBuildIndexCh(ctx)
+	go inspector.forwardBuildIndexCh(inspector.ctx)
 
 	total := 2 * cap(getBuildIndexChSingleton())
 	notifySegmentIndexBuild(lo.RangeFrom(UniqueID(0), total)...)
 
 	got := typeutil.NewUniqueSet()
 	assert.Eventually(t, func() bool {
-		got.Insert(inspector.popPendingIndexSegments()...)
+		got.Insert(inspector.popIndexSegments(false)...)
 		return got.Len() == total
 	}, 5*time.Second, 10*time.Millisecond)
-	assert.Len(t, inspector.pendingIndexNotifyCh, 1, "forwarding must wake the create-index loop")
+	assert.Len(t, inspector.notifiedIndexSegsCh, 1, "forwarding must wake the create-index loop")
 }
 
-// A segment that appears after Start is indexed through its notification alone:
-// the startup scan has already run and the tick/reconcile intervals are far
-// beyond the wait below.
+// A segment that appears after Start is indexed through its notification alone,
+// while the segment the startup scan left pending waits for the ticker: the
+// tick/reconcile intervals are far beyond the wait below, and the mocks allow a
+// single index task.
 func TestIndexInspector_StartIndexesNotifiedSegment(t *testing.T) {
 	drainBuildIndexChForTest()
 	defer drainBuildIndexChForTest()
@@ -247,11 +253,22 @@ func TestIndexInspector_StartIndexesNotifiedSegment(t *testing.T) {
 
 	ctx := context.Background()
 	const (
-		collID  = UniqueID(12)
-		segID   = UniqueID(32)
-		fieldID = UniqueID(101)
-		indexID = UniqueID(42)
+		collID       = UniqueID(12)
+		segID        = UniqueID(32)
+		pendingSegID = UniqueID(33)
+		fieldID      = UniqueID(101)
+		indexID      = UniqueID(42)
 	)
+	newFlushedSegment := func(id UniqueID) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:           id,
+			CollectionID: collID,
+			NumOfRows:    1024,
+			State:        commonpb.SegmentState_Flushed,
+			IsSorted:     true,
+			Binlogs:      []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}}
+	}
 	scheduler := task.NewMockGlobalScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
@@ -263,6 +280,7 @@ func TestIndexInspector_StartIndexesNotifiedSegment(t *testing.T) {
 			indexID: {CollectionID: collID, FieldID: fieldID, IndexID: indexID, IndexName: "default_idx"},
 		}, catalog),
 	}
+	m.segments.SetSegment(pendingSegID, newFlushedSegment(pendingSegID))
 	handler.EXPECT().GetCollection(mock.Anything, collID).Return(&collectionInfo{
 		ID:     collID,
 		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: fieldID, Name: "f101"}}},
@@ -275,22 +293,17 @@ func TestIndexInspector_StartIndexesNotifiedSegment(t *testing.T) {
 	inspector.Start()
 	defer inspector.Stop()
 
-	m.segments.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:           segID,
-		CollectionID: collID,
-		NumOfRows:    1024,
-		State:        commonpb.SegmentState_Flushed,
-		IsSorted:     true,
-		Binlogs:      []*datapb.FieldBinlog{{FieldID: fieldID}},
-	}})
+	m.segments.SetSegment(segID, newFlushedSegment(segID))
 	notifySegmentIndexBuild(segID)
 
 	assert.Eventually(t, func() bool {
 		return !m.indexMeta.IsUnIndexedSegment(collID, segID)
 	}, 5*time.Second, 10*time.Millisecond)
+	assert.True(t, m.indexMeta.IsUnIndexedSegment(collID, pendingSegID))
+	assert.ElementsMatch(t, []UniqueID{pendingSegID}, inspector.popIndexSegments(true))
 }
 
-func TestIndexInspector_ProcessPendingIndexSegmentsRequeuesStillUnindexedSegment(t *testing.T) {
+func TestIndexInspector_ProcessIndexSegmentsRequeuesStillUnindexedSegment(t *testing.T) {
 	ctx := context.Background()
 	const (
 		collID  = UniqueID(10)
@@ -344,15 +357,16 @@ func TestIndexInspector_ProcessPendingIndexSegmentsRequeuesStillUnindexedSegment
 	handler := NewNMockHandler(t)
 	handler.EXPECT().GetCollection(mock.Anything, collID).
 		Return(nil, errors.New("mock rootcoord unreachable")).Once()
-	inspector := &indexInspector{meta: m, handler: handler}
-	inspector.enqueuePendingIndexSegments(segID)
+	inspector := newIndexInspector(ctx, nil, m, nil, nil, handler, nil, nil)
+	inspector.notifyIndexSegments(segID)
 
-	inspector.processPendingIndexSegments(ctx)
+	inspector.processIndexSegments(ctx, false)
 
-	assert.ElementsMatch(t, []UniqueID{segID}, inspector.popPendingIndexSegments())
+	assert.Empty(t, inspector.popIndexSegments(false), "a deferred segment must not ride on notifications")
+	assert.ElementsMatch(t, []UniqueID{segID}, inspector.popIndexSegments(true))
 }
 
-func TestIndexInspector_ProcessPendingIndexSegmentsCreatesIndexAndRemovesPending(t *testing.T) {
+func TestIndexInspector_ProcessIndexSegmentsCreatesIndex(t *testing.T) {
 	ctx := context.Background()
 	const (
 		collID  = UniqueID(11)
@@ -402,7 +416,7 @@ func TestIndexInspector_ProcessPendingIndexSegmentsCreatesIndexAndRemovesPending
 	}})
 
 	inspector := newIndexInspector(ctx, make(chan int64, 1), m, scheduler, alloc, handler, storageCli, versionManager)
-	inspector.enqueuePendingIndexSegments(segID)
+	inspector.notifyIndexSegments(segID)
 	handler.EXPECT().GetCollection(mock.Anything, collID).Return(&collectionInfo{
 		ID: collID,
 		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -413,9 +427,9 @@ func TestIndexInspector_ProcessPendingIndexSegmentsCreatesIndexAndRemovesPending
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
 	scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
 
-	inspector.processPendingIndexSegments(ctx)
+	inspector.processIndexSegments(ctx, false)
 
-	assert.Empty(t, inspector.popPendingIndexSegments())
+	assert.Empty(t, inspector.popIndexSegments(true))
 	assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segID), indexID)
 }
 

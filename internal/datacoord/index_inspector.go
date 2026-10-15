@@ -38,10 +38,15 @@ type indexInspector struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	notifyIndexChan      chan int64
-	pendingIndexNotifyCh chan struct{}
-	pendingIndexMu       sync.Mutex
-	pendingIndexSegs     typeutil.UniqueSet
+	notifyIndexChan     chan int64
+	notifiedIndexSegsCh chan struct{}
+	pendingIndexMu      sync.Mutex
+	// notifiedIndexSegs holds the segments notified since the last round; a
+	// notification round processes exactly these.
+	notifiedIndexSegs typeutil.UniqueSet
+	// pendingIndexSegs holds the segments to retry (startup scan, failed or
+	// deferred attempts); only the ticker processes them.
+	pendingIndexSegs typeutil.UniqueSet
 
 	meta                      *meta
 	scheduler                 task.GlobalScheduler
@@ -67,7 +72,8 @@ func newIndexInspector(
 		cancel:                    cancel,
 		meta:                      meta,
 		notifyIndexChan:           notifyIndexChan,
-		pendingIndexNotifyCh:      make(chan struct{}, 1),
+		notifiedIndexSegsCh:       make(chan struct{}, 1),
+		notifiedIndexSegs:         typeutil.NewUniqueSet(),
 		pendingIndexSegs:          typeutil.NewUniqueSet(),
 		scheduler:                 scheduler,
 		allocator:                 allocator,
@@ -77,52 +83,46 @@ func newIndexInspector(
 	}
 }
 
-func (i *indexInspector) enqueuePendingIndexSegments(segIDs ...UniqueID) {
-	i.enqueuePendingIndexSegmentsWithNotify(true, segIDs...)
-}
-
-func (i *indexInspector) requeuePendingIndexSegments(segIDs ...UniqueID) {
-	i.enqueuePendingIndexSegmentsWithNotify(false, segIDs...)
-}
-
-func (i *indexInspector) enqueuePendingIndexSegmentsWithNotify(notify bool, segIDs ...UniqueID) {
+// notifyIndexSegments queues segments for the next notification round.
+func (i *indexInspector) notifyIndexSegments(segIDs ...UniqueID) {
 	if len(segIDs) == 0 {
 		return
 	}
 
 	i.pendingIndexMu.Lock()
 	defer i.pendingIndexMu.Unlock()
-	if i.pendingIndexSegs == nil {
-		i.pendingIndexSegs = typeutil.NewUniqueSet()
-	}
-	i.pendingIndexSegs.Insert(segIDs...)
-
-	if notify {
-		i.notifyPendingIndexSegments()
-	}
-}
-
-func (i *indexInspector) popPendingIndexSegments() []UniqueID {
-	i.pendingIndexMu.Lock()
-	defer i.pendingIndexMu.Unlock()
-	if len(i.pendingIndexSegs) == 0 {
-		return nil
-	}
-
-	segIDs := i.pendingIndexSegs.Collect()
-	i.pendingIndexSegs = typeutil.NewUniqueSet()
-	return segIDs
-}
-
-func (i *indexInspector) notifyPendingIndexSegments() {
-	if i.pendingIndexNotifyCh == nil {
-		return
-	}
-
+	i.notifiedIndexSegs.Insert(segIDs...)
 	select {
-	case i.pendingIndexNotifyCh <- struct{}{}:
+	case i.notifiedIndexSegsCh <- struct{}{}:
 	default:
 	}
+}
+
+// requeuePendingIndexSegments keeps segments for the ticker to retry.
+func (i *indexInspector) requeuePendingIndexSegments(segIDs ...UniqueID) {
+	i.pendingIndexMu.Lock()
+	defer i.pendingIndexMu.Unlock()
+	i.pendingIndexSegs.Insert(segIDs...)
+}
+
+// popIndexSegments takes the notified segments, plus the pending ones when
+// withPending is set. A notified segment supersedes its pending retry.
+func (i *indexInspector) popIndexSegments(withPending bool) []UniqueID {
+	i.pendingIndexMu.Lock()
+	segIDs := i.notifiedIndexSegs.Collect()
+	i.notifiedIndexSegs = typeutil.NewUniqueSet()
+	if !withPending {
+		i.pendingIndexSegs.Remove(segIDs...)
+		i.pendingIndexMu.Unlock()
+		return segIDs
+	}
+	pending := i.pendingIndexSegs
+	i.pendingIndexSegs = typeutil.NewUniqueSet()
+	i.pendingIndexMu.Unlock()
+
+	// The swapped-out backlog is owned here, so merge it outside the lock.
+	pending.Insert(segIDs...)
+	return pending.Collect()
 }
 
 func (i *indexInspector) Start() {
@@ -156,19 +156,19 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			mlog.Warn(ctx, "DataCoord context done, exit...")
 			return
 		case <-ticker.C:
-			i.processPendingIndexSegments(ctx)
-		case <-i.pendingIndexNotifyCh:
-			i.processPendingIndexSegments(ctx)
+			i.processIndexSegments(ctx, true)
+		case <-i.notifiedIndexSegsCh:
+			i.processIndexSegments(ctx, false)
 		case <-reconcileTicker.C:
-			i.enqueueUnindexedTaskSegments(ctx)
+			i.notifyIndexSegments(i.getUnIndexTaskSegments(ctx)...)
 		case collectionID := <-i.notifyIndexChan:
 			mlog.Info(ctx, "receive create index notify", mlog.FieldCollectionID(collectionID))
-			i.enqueueUnindexedTaskSegments(ctx, WithCollection(collectionID))
+			i.notifyIndexSegments(i.getUnIndexTaskSegments(ctx, WithCollection(collectionID))...)
 		}
 	}
 }
 
-// forwardBuildIndexCh moves segments from buildIndexCh into the pending set.
+// forwardBuildIndexCh moves segments from buildIndexCh into the notified set.
 // It runs apart from createIndexForSegmentLoop so that a sender waiting on a
 // full channel never waits for a create-index round to finish.
 func (i *indexInspector) forwardBuildIndexCh(ctx context.Context) {
@@ -192,7 +192,7 @@ func (i *indexInspector) forwardBuildIndexCh(ctx context.Context) {
 				}
 			}
 			mlog.Info(ctx, "receive segments to build index", mlog.Int64s("segmentIDs", segIDs))
-			i.enqueuePendingIndexSegments(segIDs...)
+			i.notifyIndexSegments(segIDs...)
 		}
 	}
 }
@@ -200,10 +200,6 @@ func (i *indexInspector) forwardBuildIndexCh(ctx context.Context) {
 func getIndexReconcileInterval() time.Duration {
 	checkInterval := Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second)
 	return checkInterval * 10
-}
-
-func (i *indexInspector) enqueueUnindexedTaskSegments(ctx context.Context, filters ...SegmentFilter) {
-	i.enqueuePendingIndexSegments(i.getUnIndexTaskSegments(ctx, filters...)...)
 }
 
 // getUnIndexTaskSegments returns the IDs of the segments that can build index
@@ -241,8 +237,8 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context, filters ...
 	return unindexedIDs
 }
 
-func (i *indexInspector) processPendingIndexSegments(ctx context.Context) {
-	segIDs := i.popPendingIndexSegments()
+func (i *indexInspector) processIndexSegments(ctx context.Context, withPending bool) {
+	segIDs := i.popIndexSegments(withPending)
 	if len(segIDs) == 0 {
 		return
 	}
@@ -261,11 +257,11 @@ func (i *indexInspector) processPendingIndexSegments(ctx context.Context) {
 	}
 
 	for collectionID, segments := range segmentsByCollection {
-		i.processPendingIndexSegmentsForCollection(ctx, collectionID, segments)
+		i.processIndexSegmentsForCollection(ctx, collectionID, segments)
 	}
 }
 
-func (i *indexInspector) processPendingIndexSegmentsForCollection(ctx context.Context, collectionID UniqueID, segments []*SegmentInfo) {
+func (i *indexInspector) processIndexSegmentsForCollection(ctx context.Context, collectionID UniqueID, segments []*SegmentInfo) {
 	segIDs := make([]UniqueID, 0, len(segments))
 	for _, segment := range segments {
 		segIDs = append(segIDs, segment.GetID())
