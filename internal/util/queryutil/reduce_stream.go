@@ -26,6 +26,7 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -161,13 +162,24 @@ type OrderedReduceStream struct {
 	closeErr        error
 }
 
-// NewReduceStream creates the bounded Plain Query OrderedReduceStream.
-func NewReduceStream(request *internalpb.RetrieveRequest, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
+// NewReduceStream creates the Query ReduceStream selected by request semantics.
+func NewReduceStream(
+	request *internalpb.RetrieveRequest,
+	schema *schemapb.CollectionSchema,
+	childStreams []ReduceStream,
+	chunkBytes int,
+) (ReduceStream, error) {
 	if request == nil {
 		return nil, merr.WrapErrServiceInternalMsg("NewReduceStream requires a Query request")
 	}
-	if request.GetIsCount() || len(request.GetGroupByFieldIds()) > 0 || len(request.GetAggregates()) > 0 {
-		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream does not support aggregation or Group By"))
+	if len(request.GetGroupByFieldIds()) > 0 {
+		if schema == nil {
+			return nil, merr.WrapErrServiceInternalMsg("Query Group By ReduceStream requires a collection schema")
+		}
+		return newUnOrderedReduceStream(request, schema, childStreams, chunkBytes)
+	}
+	if request.GetIsCount() || len(request.GetAggregates()) > 0 {
+		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream does not support global aggregation"))
 	}
 	if request.GetLimit() <= 0 {
 		return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream requires a positive limit, got %d", request.GetLimit())
@@ -358,6 +370,197 @@ func buildRetrieveChunk(units []retrieveUnit) (*internalpb.RetrieveResults, erro
 	return chunk, nil
 }
 
+// UnOrderedReduceStream merges Query Group By results without depending on child arrival order.
+type UnOrderedReduceStream struct {
+	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
+	childBuffers []*internalpb.RetrieveResults
+	reducer      *agg.GroupAggReducer
+	chunkBytes   int
+
+	outputChunks []*internalpb.RetrieveResults
+	outputIndex  int
+	metadata     *internalpb.RetrieveResults
+	closed       bool
+	finished     bool
+	closeErr     error
+}
+
+func newUnOrderedReduceStream(
+	request *internalpb.RetrieveRequest,
+	schema *schemapb.CollectionSchema,
+	childStreams []ReduceStream,
+	chunkBytes int,
+) (ReduceStream, error) {
+	if chunkBytes <= 0 {
+		return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream requires positive Chunk bytes, got %d", chunkBytes)
+	}
+	for i, childStream := range childStreams {
+		if childStream == nil {
+			return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream child stream %d is nil", i)
+		}
+	}
+	return &UnOrderedReduceStream{
+		childStreams: reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
+		childBuffers: make([]*internalpb.RetrieveResults, len(childStreams)),
+		reducer:      agg.NewGroupAggReducer(request.GetGroupByFieldIds(), request.GetAggregates(), -1, schema),
+		chunkBytes:   chunkBytes,
+	}, nil
+}
+
+func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
+	if s.finished {
+		return nil, io.EOF
+	}
+	if s.closed {
+		return nil, io.ErrClosedPipe
+	}
+
+	if s.outputChunks == nil {
+		for {
+			readyBuffers, err := s.getReadyBuffers()
+			if err != nil {
+				return nil, s.fail(err)
+			}
+			if len(readyBuffers) == 0 {
+				break
+			}
+
+			partialResults := make([]*agg.AggregationResult, len(readyBuffers))
+			for i, readyBuffer := range readyBuffers {
+				partialResults[i] = agg.NewAggregationResult(readyBuffer.GetFieldsData(), 0)
+			}
+			if err := s.reducer.Merge(partialResults); err != nil {
+				return nil, s.fail(err)
+			}
+			for i := range s.childBuffers {
+				s.childBuffers[i] = nil
+			}
+		}
+
+		reduced, err := s.reducer.Result()
+		if err != nil {
+			return nil, s.fail(err)
+		}
+		result := agg.AggResult2internalResult(reduced)
+		result.Status = merr.Success()
+		s.attachMetadata(result)
+		s.outputChunks, err = SplitRetrieveResult(result, s.chunkBytes)
+		if err != nil {
+			return nil, s.fail(err)
+		}
+		s.reducer = nil
+	}
+
+	if s.outputIndex < len(s.outputChunks) {
+		chunk := s.outputChunks[s.outputIndex]
+		s.outputChunks[s.outputIndex] = nil
+		s.outputIndex++
+		return chunk, nil
+	}
+
+	s.finished = true
+	if err := s.closeChildren(); err != nil {
+		return nil, err
+	}
+	return nil, io.EOF
+}
+
+func (s *UnOrderedReduceStream) getReadyBuffers() ([]*internalpb.RetrieveResults, error) {
+	err := s.childStreams.ReceiveAnyReady(
+		func(childIndex int) bool {
+			return s.childBuffers[childIndex] != nil
+		},
+		func(childIndex int, chunk *internalpb.RetrieveResults) error {
+			if chunk == nil {
+				return merr.WrapErrServiceInternalMsg("Query child stream %d returned a nil Chunk", childIndex)
+			}
+			if !merr.Ok(chunk.GetStatus()) {
+				return merr.Wrapf(merr.Error(chunk.GetStatus()), "Query child stream %d returned a failed Chunk", childIndex)
+			}
+			s.acceptMetadata(chunk)
+			s.childBuffers[childIndex] = chunk
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	ready := make([]*internalpb.RetrieveResults, 0, len(s.childBuffers))
+	for _, childBuffer := range s.childBuffers {
+		if childBuffer != nil {
+			ready = append(ready, childBuffer)
+		}
+	}
+	return ready, nil
+}
+
+func (s *UnOrderedReduceStream) acceptMetadata(chunk *internalpb.RetrieveResults) {
+	if s.metadata == nil {
+		s.metadata = &internalpb.RetrieveResults{Status: merr.Success(), ReqID: chunk.GetReqID()}
+		if chunk.GetBase() != nil {
+			s.metadata.Base = proto.Clone(chunk.GetBase()).(*commonpb.MsgBase)
+		}
+	}
+	s.metadata.SealedSegmentIDsRetrieved = append(s.metadata.SealedSegmentIDsRetrieved, chunk.GetSealedSegmentIDsRetrieved()...)
+	s.metadata.ChannelIDsRetrieved = append(s.metadata.ChannelIDsRetrieved, chunk.GetChannelIDsRetrieved()...)
+	s.metadata.GlobalSealedSegmentIDs = append(s.metadata.GlobalSealedSegmentIDs, chunk.GetGlobalSealedSegmentIDs()...)
+	s.metadata.AllRetrieveCount += chunk.GetAllRetrieveCount()
+	s.metadata.HasMoreResult = s.metadata.GetHasMoreResult() || chunk.GetHasMoreResult()
+	s.metadata.ScannedRemoteBytes += chunk.GetScannedRemoteBytes()
+	s.metadata.ScannedTotalBytes += chunk.GetScannedTotalBytes()
+	s.metadata.MvccTimestamp = max(s.metadata.GetMvccTimestamp(), chunk.GetMvccTimestamp())
+	s.metadata.CostAggregation = mergeQueryCost(s.metadata.GetCostAggregation(), chunk.GetCostAggregation())
+}
+
+func (s *UnOrderedReduceStream) attachMetadata(chunk *internalpb.RetrieveResults) {
+	if s.metadata == nil {
+		return
+	}
+	metadata := s.metadata
+	chunk.Base = metadata.GetBase()
+	chunk.ReqID = metadata.GetReqID()
+	chunk.SealedSegmentIDsRetrieved = append([]int64(nil), metadata.GetSealedSegmentIDsRetrieved()...)
+	chunk.ChannelIDsRetrieved = append([]string(nil), metadata.GetChannelIDsRetrieved()...)
+	chunk.GlobalSealedSegmentIDs = append([]int64(nil), metadata.GetGlobalSealedSegmentIDs()...)
+	chunk.CostAggregation = metadata.GetCostAggregation()
+	chunk.AllRetrieveCount = metadata.GetAllRetrieveCount()
+	chunk.HasMoreResult = metadata.GetHasMoreResult()
+	chunk.ScannedRemoteBytes = metadata.GetScannedRemoteBytes()
+	chunk.ScannedTotalBytes = metadata.GetScannedTotalBytes()
+	chunk.MvccTimestamp = metadata.GetMvccTimestamp()
+	s.metadata = nil
+}
+
+func (s *UnOrderedReduceStream) fail(err error) error {
+	return errors.Join(err, s.Close())
+}
+
+func (s *UnOrderedReduceStream) Close() error {
+	if s.closed {
+		return s.closeErr
+	}
+	s.closed = true
+	return s.closeChildren()
+}
+
+func (s *UnOrderedReduceStream) closeChildren() error {
+	for i := range s.childBuffers {
+		s.childBuffers[i] = nil
+	}
+	for i := range s.outputChunks {
+		s.outputChunks[i] = nil
+	}
+	s.reducer = nil
+	s.metadata = nil
+	s.closeErr = s.childStreams.Close()
+	return s.closeErr
+}
+
+func (s *UnOrderedReduceStream) Interrupt() (*internalpb.RetrieveResults, error) {
+	return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream Interrupt is not implemented"))
+}
+
 // SplitRetrieveResult splits one materialized Query result into byte-threshold Chunks.
 func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]*internalpb.RetrieveResults, error) {
 	if result == nil {
@@ -366,7 +569,7 @@ func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]
 	if chunkBytes <= 0 {
 		return nil, merr.WrapErrServiceInternalMsg("Query Chunk bytes must be positive, got %d", chunkBytes)
 	}
-	rowCount := typeutil.GetSizeOfIDs(result.GetIds())
+	rowCount := GetRowCount(result)
 	if rowCount == 0 {
 		return []*internalpb.RetrieveResults{proto.Clone(result).(*internalpb.RetrieveResults)}, nil
 	}

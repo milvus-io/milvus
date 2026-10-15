@@ -109,6 +109,54 @@ func (s *ChildStreams[T]) ReceiveUntilReady(
 	}
 }
 
+// ReceiveAnyReady receives until one active child's Buffer has a Unit.
+func (s *ChildStreams[T]) ReceiveAnyReady(
+	hasUnit func(childIndex int) bool,
+	acceptChunk func(childIndex int, chunk T) error,
+) error {
+	for {
+		active := false
+		for i, stream := range s.streams {
+			if s.drained[i] {
+				continue
+			}
+			active = true
+			if hasUnit(i) {
+				return nil
+			}
+			if s.receiving[i] {
+				continue
+			}
+
+			s.receiving[i] = true
+			go func(childIndex int, childStream ChildStream[T]) {
+				chunk, err := childStream.Recv()
+				s.completions <- childRecvCompletion[T]{
+					childIndex: childIndex,
+					chunk:      chunk,
+					err:        err,
+				}
+			}(i, stream)
+		}
+		if !active {
+			return nil
+		}
+
+		received := <-s.completions
+		s.receiving[received.childIndex] = false
+		if errors.Is(received.err, io.EOF) {
+			s.drained[received.childIndex] = true
+			continue
+		}
+		if received.err != nil {
+			return merr.Wrapf(received.err, "child stream %d Recv failed", received.childIndex)
+		}
+		if err := acceptChunk(received.childIndex, received.chunk); err != nil {
+			return err
+		}
+	}
+}
+
 // IsDrained reports whether a child stream returned EOF.
 func (s *ChildStreams[T]) IsDrained(childIndex int) bool {
 	return s.drained[childIndex]

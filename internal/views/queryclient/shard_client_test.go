@@ -236,7 +236,7 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	}
 	client := newTestShardClient(1, shardID, plan, queryService)
 
-	stream, shardPlan, err := client.QueryStream(context.Background(), shardID.VChannel, request, 32)
+	stream, shardPlan, err := client.QueryStream(context.Background(), shardID.VChannel, request, nil, 32)
 
 	require.NoError(t, err)
 	require.Equal(t, shardID, shardPlan.ShardID)
