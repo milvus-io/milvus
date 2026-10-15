@@ -134,8 +134,9 @@ under the metadata lock. On success:
 
 Downloads and native resource-table activation must succeed before the local
 version advances. A failed preparation therefore retries with the last applied
-version. Unchanged responses avoid transferring the list; they still perform an
-RPC, and Coordinator currently still reads the complete metadata snapshot.
+version. Coordinator compares versions under the metadata lock before enumerating
+resources, so unchanged responses avoid both list allocation and transfer. Pulls
+still perform an RPC; there is no TTL that can hide a newly committed version.
 
 New StreamingNodes require a Coordinator that supports this RPC, and the new DDL
 validation path requires StreamingNodes that support `ValidateAnalyzer`. Existing RPC
