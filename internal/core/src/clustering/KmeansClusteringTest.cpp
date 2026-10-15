@@ -19,7 +19,6 @@
 
 #include "common/Tracer.h"
 #include "common/EasyAssert.h"
-#include "index/InvertedIndexTantivy.h"
 #include "common/Schema.h"
 #include "index/Utils.h"
 #include "pb/schema.pb.h"
@@ -377,8 +376,14 @@ prepare_storage_v2(const std::string& root_path,
 
     auto write_one_segment = [&](int64_t seg_idx,
                                  const std::string& base_path) {
-        auto paths = std::vector<std::string>{
-            fmt::format("{}_group0.parquet", base_path)};
+        // The V2 read path routes column-group files through the insert-binlog
+        // reader, whose path parser (storage::ParseBinlogSequence) requires a
+        // purely numeric filename -- matching production's
+        // metautil.BuildInsertLogPath layout (.../<segment>/<columnGroup>/<logID>).
+        // Lay the single column group out as "<base_path>/0/0" so the trailing
+        // component is a valid binlog log-id.
+        auto paths =
+            std::vector<std::string>{fmt::format("{}/0/0", base_path)};
         for (auto& p : paths)
             boost::filesystem::create_directories(
                 boost::filesystem::path(p).parent_path());
@@ -698,10 +703,22 @@ test_run_unified(const std::string& storage_version, bool train_full = false) {
     config["num_clusters"] = 100;
     // every cluster must have at least 98% of the average cluster size.
     config["min_cluster_ratio"] = 0.98;  // very high threshold
-    for (auto& [seg_id, n] :
-         config["num_rows"].get<std::map<int64_t, int64_t>>()) {
-        // Reduce number of points in segments so it is < min_safe_vectors
-        n = 1;  // tiny segment to trigger exception
+    // Shrink the per-segment row counts so the clustering job rejects the
+    // request before running full KMeans. NOTE: get<std::map>() returns a copy,
+    // so the counts must be written back into the json config to take effect
+    // (mutating the temporary was a silent no-op that left training to run over
+    // the full dataset -- the dominant cost of this test).
+    {
+        auto num_rows =
+            config["num_rows"].get<std::map<int64_t, int64_t>>();
+        for (auto& [seg_id, n] : num_rows) {
+            n = 1;  // tiny segment to trigger exception
+        }
+        config["num_rows"] = num_rows;
+        // train_size drives how many vectors the trainer samples; keep it in
+        // sync with the shrunken segments so no full-dataset training happens.
+        config["train_size"] =
+            static_cast<int64_t>(num_rows.size()) * dim * sizeof(T);
     }
     EXPECT_THROW({ clusteringJob->Run<T>(transforConfigToPB(config)); },
                  SegcoreError);
