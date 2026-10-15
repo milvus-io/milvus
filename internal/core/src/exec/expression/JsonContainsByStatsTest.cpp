@@ -53,6 +53,7 @@
 #include "parquet/arrow/writer.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "mmap/ChunkedColumnGroup.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
@@ -1503,10 +1504,18 @@ class ShreddedOnlyGroupBySegment : public segcore::ChunkedSegmentSealedImpl {
         return stats_;
     }
 
-    std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId, int64_t) const override {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "valid shredded group-by must not access raw JSON");
+    std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field_id) const override {
+        auto group = std::make_shared<ChunkedColumnGroup>(
+            stats_->Count(),
+            1,
+            [](milvus::OpContext*)
+                -> std::unique_ptr<cachinglayer::Translator<GroupChunk>> {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "valid shredded group-by must not access raw JSON");
+            });
+        return std::make_shared<ProxyChunkColumn>(
+            std::move(group), field_id, (*get_schema_snapshot())[field_id]);
     }
 
  private:

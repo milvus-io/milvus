@@ -574,26 +574,35 @@ class SegmentExpr : public Expr {
     // keeps every call identical to the pre-pin behavior.
     int64_t
     ChunkSize(FieldId field_id, int64_t chunk_id) const {
-        return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id)
-                         : segment_->chunk_size(field_id, chunk_id);
+        return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id, op_ctx_)
+                         : segment_->chunk_size(field_id, chunk_id, op_ctx_);
     }
 
     int64_t
     NumRowsUntilChunk(FieldId field_id, int64_t chunk_id) const {
-        return snapshot_ ? snapshot_->num_rows_until_chunk(field_id, chunk_id)
-                         : segment_->num_rows_until_chunk(field_id, chunk_id);
+        return snapshot_ ? snapshot_->num_rows_until_chunk(
+                               field_id, chunk_id, op_ctx_)
+                         : segment_->num_rows_until_chunk(
+                               field_id, chunk_id, op_ctx_);
     }
 
     std::pair<int64_t, int64_t>
     GetChunkByOffset(FieldId field_id, int64_t offset) const {
-        return snapshot_ ? snapshot_->get_chunk_by_offset(field_id, offset)
-                         : segment_->get_chunk_by_offset(field_id, offset);
+        return snapshot_
+                   ? snapshot_->get_chunk_by_offset(field_id, offset, op_ctx_)
+                   : segment_->get_chunk_by_offset(field_id, offset, op_ctx_);
     }
 
     int64_t
     NumChunkData(FieldId field_id) const {
-        return snapshot_ ? snapshot_->num_chunk_data(field_id)
-                         : segment_->num_chunk_data(field_id);
+        return snapshot_ ? snapshot_->num_chunk_data(field_id, op_ctx_)
+                         : segment_->num_chunk_data(field_id, op_ctx_);
+    }
+
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const {
+        return snapshot_ ? snapshot_->GetStructElementOffsets(field_id)
+                         : segment_->GetStructElementOffsets(field_id);
     }
 
     // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
@@ -1189,8 +1198,7 @@ class SegmentExpr : public Expr {
     // and elem_count is the total number of elements in those rows
     std::pair<int64_t, int64_t>
     GetNextBatchSizeForElementLevel() {
-        auto struct_element_offsets =
-            segment_->GetStructElementOffsets(field_id_);
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "StructElementOffsets not found for field {}",
                    field_id_.get());
@@ -1267,8 +1275,7 @@ class SegmentExpr : public Expr {
         TargetBitmap result;
         TargetBitmap valid;
         if (element_level_result) {
-            auto struct_element_offsets =
-                segment_->GetStructElementOffsets(field_id_);
+            auto struct_element_offsets = GetStructElementOffsets(field_id_);
             AssertInfo(struct_element_offsets != nullptr,
                        "array offsets are required for element-level index");
             const auto data_pos = current_index_chunk_pos_;
@@ -2313,8 +2320,7 @@ class SegmentExpr : public Expr {
             EnsureRawDataPrefetched();
         }
 
-        auto struct_element_offsets =
-            segment_->GetStructElementOffsets(field_id_);
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "StructElementOffsets not found for field {}",
                    field_id_.get());
@@ -2456,8 +2462,7 @@ class SegmentExpr : public Expr {
                       "Json element type is not supported for "
                       "element-level filtering");
 
-        auto struct_element_offsets =
-            segment_->GetStructElementOffsets(field_id_);
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "StructElementOffsets not found for field {}",
                    field_id_.get());
@@ -2963,6 +2968,18 @@ class SegmentExpr : public Expr {
     GetFieldRowValidity(int64_t row_count) const {
         TargetBitmap valid_result(row_count, true);
         if (row_count == 0) {
+            return valid_result;
+        }
+
+        auto offsets = GetStructElementOffsets(field_id_);
+        if (offsets && offsets->HasRowValidity()) {
+            AssertInfo(row_count <= offsets->GetRowCount(),
+                       "struct validity row count {} exceeds mapping rows {}",
+                       row_count,
+                       offsets->GetRowCount());
+            for (int64_t i = 0; i < row_count; ++i) {
+                valid_result[i] = offsets->IsRowValid(i);
+            }
             return valid_result;
         }
 
@@ -4002,8 +4019,7 @@ class SegmentExpr : public Expr {
         // The prefetch worker can race with compound-expression cursor moves,
         // so inspect immutable initial-batch geometry rather than live cursor
         // state. A leading zero-element batch must not touch ARRAY payloads.
-        auto struct_element_offsets =
-            segment_->GetStructElementOffsets(field_id_);
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "StructElementOffsets not found for field {}",
                    field_id_.get());

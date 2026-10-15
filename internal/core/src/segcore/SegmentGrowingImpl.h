@@ -226,7 +226,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // count of chunk that has raw data
     int64_t
-    num_chunk_data(FieldId field_id) const final {
+    num_chunk_data(FieldId field_id, OpContext* = nullptr) const final {
         auto size = get_insert_record().ack_responder_.GetAck();
         return upper_div(size, segcore_config_.get_chunk_rows());
     }
@@ -237,18 +237,24 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const final {
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               OpContext* = nullptr) const final {
         return segcore_config_.get_chunk_rows();
     }
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        OpContext* = nullptr) const override {
         auto size_per_chunk = segcore_config_.get_chunk_rows();
         return {offset / size_per_chunk, offset % size_per_chunk};
     }
 
     int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         OpContext* = nullptr) const override {
         return chunk_id * segcore_config_.get_chunk_rows();
     }
 

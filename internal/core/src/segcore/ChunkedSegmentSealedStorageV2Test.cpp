@@ -34,8 +34,11 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <future>
+#include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <string>
 #include <thread>
@@ -208,6 +211,13 @@ LazyManifestTestGroupPattern(const SchemaPtr& schema) {
                                : user_fields + other_groups;
 }
 
+std::string
+PerFieldManifestTestGroupPattern(const SchemaPtr& schema) {
+    auto pattern = LazyManifestTestGroupPattern(schema);
+    std::replace(pattern.begin(), pattern.end(), '|', ',');
+    return pattern;
+}
+
 class StorageV2CellTargetGuard {
  public:
     explicit StorageV2CellTargetGuard(int64_t bytes)
@@ -247,6 +257,111 @@ AddWarmupProperty(milvus::proto::schema::CollectionSchema& schema_proto,
     auto* prop = schema_proto.add_properties();
     prop->set_key(key);
     prop->set_value(value);
+}
+
+// Hold the first storage open until the test releases it. The storage API
+// drains issued opens on cancellation, so delaying its future lets the test
+// cancel deterministically while expression construction is awaiting metadata.
+class BlockingMetadataReader : public milvus_storage::api::Reader {
+ public:
+    using OpenResult =
+        arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>;
+
+    explicit BlockingMetadataReader(
+        std::shared_ptr<milvus_storage::api::Reader> reader)
+        : reader_(std::move(reader)) {
+    }
+
+    std::shared_ptr<milvus_storage::api::ColumnGroups>
+    get_column_groups() const override {
+        return reader_->get_column_groups();
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatchReader>>
+    get_record_batch_reader(const std::string& predicate) const override {
+        return reader_->get_record_batch_reader(predicate);
+    }
+
+    OpenResult
+    get_chunk_reader(int64_t index,
+                     const std::shared_ptr<std::vector<std::string>>& columns)
+        const override {
+        ++sync_calls;
+        if (block_next_.exchange(false)) {
+            auto gate = release_.getSemiFuture();
+            started_.set_value();
+            std::move(gate).get();
+        }
+        return reader_->get_chunk_reader(index, columns);
+    }
+
+    folly::SemiFuture<OpenResult>
+    get_chunk_reader_async(int64_t index,
+                           const std::shared_ptr<std::vector<std::string>>&
+                               columns) const override {
+        ++async_calls;
+        if (!block_next_.exchange(false)) {
+            return reader_->get_chunk_reader_async(index, columns);
+        }
+        auto gate = release_.getSemiFuture();
+        started_.set_value();
+        return std::move(gate).deferValue(
+            [reader = reader_, index, columns](folly::Unit) {
+                return reader->get_chunk_reader(index, columns);
+            });
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Table>>
+    take(const std::vector<int64_t>& rows,
+         size_t parallelism,
+         const std::shared_ptr<std::vector<std::string>>& columns) override {
+        return reader_->take(rows, parallelism, columns);
+    }
+
+    void
+    set_keyretriever(const std::function<std::string(const std::string&)>&
+                         callback) override {
+        reader_->set_keyretriever(callback);
+    }
+
+    std::future<void>
+    Started() {
+        return started_.get_future();
+    }
+
+    void
+    Arm() {
+        async_calls = 0;
+        sync_calls = 0;
+        block_next_ = true;
+    }
+
+    void
+    Release() {
+        std::call_once(released_, [&] { release_.setValue(folly::Unit{}); });
+    }
+
+    mutable std::atomic<int> async_calls{0};
+    mutable std::atomic<int> sync_calls{0};
+
+ private:
+    std::shared_ptr<milvus_storage::api::Reader> reader_;
+    mutable std::atomic<bool> block_next_{false};
+    mutable std::promise<void> started_;
+    mutable folly::Promise<folly::Unit> release_;
+    std::once_flag released_;
+};
+
+expr::TypedExprPtr
+MakeStructMatchExpr(FieldId label) {
+    expr::ColumnInfo column(label, DataType::ARRAY, DataType::INT32, {}, true);
+    column.element_level_ = true;
+    proto::plan::GenericValue value;
+    value.set_int64_val(std::numeric_limits<int32_t>::lowest());
+    auto predicate = std::make_shared<expr::UnaryRangeFilterExpr>(
+        column, proto::plan::OpType::GreaterEqual, value);
+    return std::make_shared<expr::MatchExpr>(
+        "items", expr::MatchType::MatchAny, 0, predicate);
 }
 }  // namespace
 
@@ -847,6 +962,211 @@ TEST_P(TestLazyManifest, LazyManifestNullableVectorMaterializesOnRetrieve) {
     ASSERT_EQ(actual_valid.size(), expected_valid.size());
     for (int64_t i = 0; i < kNumRows; ++i) {
         EXPECT_EQ(actual_valid[i], expected_valid[i]) << "row " << i;
+    }
+}
+
+TEST_P(TestLazyManifest, StructOffsetsBuiltBeforePublicationAndDoNotReloadRaw) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    auto schema = GenChunkedSegmentTestSchema(GetParam());
+    auto label =
+        schema->AddDebugArrayField("items[label]", DataType::INT32, true);
+    auto score =
+        schema->AddDebugArrayField("items[score]", DataType::INT64, true);
+    constexpr int64_t rows = 64;
+    auto path = UniqueManifestTestPath(std::string("lazy_struct_offsets_") +
+                                       (GetParam() ? "varchar" : "int64"));
+    auto fs = GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, path);
+    milvus::test::V3SegmentTestData data(
+        schema,
+        1,
+        rows,
+        128,
+        TestLocalPath,
+        path,
+        PerFieldManifestTestGroupPattern(schema));
+    auto segment =
+        CreateV3ManifestSegment(data, 3192 + (GetParam() ? 100 : 0), 0, schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto state = sealed->TestGetPublishedStateSnapshot();
+    auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(
+        state->runtime->fields.at(label));
+    ASSERT_NE(proxy, nullptr);
+    EXPECT_TRUE(proxy->IsLazy());
+    EXPECT_TRUE(proxy->IsMaterialized());
+    auto entry = state->runtime->struct_element_offsets_map.at(label);
+    EXPECT_EQ(entry, state->runtime->struct_element_offsets_map.at(score));
+    ASSERT_NE(entry, nullptr);
+
+    auto offsets = entry;
+    const int64_t first_row = 0;
+    EXPECT_TRUE(proxy->CellsLoaded(&first_row, 1));
+    auto other = std::dynamic_pointer_cast<ProxyChunkColumn>(
+        state->runtime->fields.at(score));
+    ASSERT_NE(other, nullptr);
+    EXPECT_FALSE(other->IsMaterialized());
+    proxy->ManualEvictCache();
+    EXPECT_FALSE(proxy->CellsLoaded(&first_row, 1));
+    auto snapshot = segment->CaptureReadSnapshot();
+    EXPECT_EQ(snapshot->GetStructElementOffsets(score), offsets);
+    EXPECT_EQ(segment->GetStructElementOffsets(label), offsets);
+    EXPECT_FALSE(proxy->CellsLoaded(&first_row, 1));
+    EXPECT_FALSE(other->IsMaterialized());
+    EXPECT_EQ(offsets->GetRowCount(), rows);
+    ASSERT_TRUE(offsets->HasRowValidity());
+    for (int64_t i = 0; i < rows; ++i) {
+        EXPECT_EQ(offsets->IsRowValid(i), i % 2 == 0);
+        auto [start, end] = offsets->ElementIDRangeOfRow(i);
+        EXPECT_EQ(end - start, i % 2 == 0 ? 10 : 0);
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    const auto previous_async =
+        storagev2translator::StorageV2AsyncLoadEnabled();
+    auto restore_async = folly::makeGuard([&] {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(previous_async);
+    });
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    for (bool async_enabled : {false, true}) {
+        SCOPED_TRACE(async_enabled);
+        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
+        auto schema = GenChunkedSegmentTestSchema(GetParam());
+        schema->AddDebugArrayField("items[source]", DataType::INT32, true);
+        auto label =
+            schema->AddDebugArrayField("items[label]", DataType::INT32, true);
+        constexpr int64_t rows = 64;
+        auto path = UniqueManifestTestPath("lazy_match_during_open");
+        auto fs = GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard(fs, path);
+        milvus::test::V3SegmentTestData data(
+            schema,
+            1,
+            rows,
+            128,
+            TestLocalPath,
+            path,
+            PerFieldManifestTestGroupPattern(schema));
+        auto segment = CreateV3ManifestSegment(
+            data,
+            3194 + (GetParam() ? 100 : 0) + (async_enabled ? 1000 : 0),
+            0,
+            schema);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        auto current = sealed->TestGetPublishedStateSnapshot();
+        auto reader =
+            std::make_shared<BlockingMetadataReader>(current->runtime->reader);
+        auto groups = reader->get_column_groups();
+        size_t index = 0;
+        const auto name = schema->get_storage_column_name(label);
+        for (; index < groups->size(); ++index) {
+            const auto& columns = groups->at(index)->columns;
+            if (std::find(columns.begin(), columns.end(), name) !=
+                columns.end()) {
+                break;
+            }
+        }
+        ASSERT_LT(index, groups->size());
+        // Stage on an empty segment; the existing segment already owns this field.
+        // Publish the resulting cold column below as a replacement generation.
+        auto staging_segment = CreateSealedSegment(schema);
+        auto* staging =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(staging_segment.get());
+        ASSERT_NE(staging, nullptr);
+        auto column = staging->TestStageLoadColumnGroupWithReader(
+            groups,
+            storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties(),
+            index,
+            {label},
+            *current->load_info,
+            schema,
+            reader,
+            /*eager_load=*/false);
+        auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
+        ASSERT_NE(proxy, nullptr);
+        ASSERT_TRUE(proxy->IsLazy());
+        ASSERT_FALSE(proxy->IsMaterialized());
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        // Preserve the cold column rather than using the ordinary raw-column
+        // loader, whose size accounting materializes variable-length columns.
+        auto entry = current->runtime->struct_element_offsets_map.at(label);
+        ASSERT_NE(entry, nullptr);
+        runtime->fields.insert_or_assign(label, column);
+        runtime->struct_to_element_offsets.insert_or_assign("items", entry);
+        runtime->struct_element_offsets_map.insert_or_assign(label, entry);
+        runtime->variable_fields_avg_size.erase(label);
+        sealed->TestPublishRuntimeResourceState(std::move(runtime));
+        ASSERT_FALSE(proxy->IsMaterialized());
+        auto read = segment->CaptureReadSnapshot();
+        folly::CancellationSource cancellation;
+        OpContext ctx(cancellation.getToken());
+        exec::QueryContext context(
+            "lazy_match_open", segment.get(), rows, MAX_TIMESTAMP);
+        context.set_op_context(&ctx);
+        context.set_read_snapshot(read);
+        auto match = MakeStructMatchExpr(label);
+        folly::CancellationSource pre_cancelled;
+        pre_cancelled.requestCancellation();
+        OpContext pre_cancelled_ctx(pre_cancelled.getToken());
+        context.set_op_context(&pre_cancelled_ctx);
+        EXPECT_THROW(exec::CompileExpression(match, &context, {}, false),
+                     SegcoreError);
+        EXPECT_FALSE(proxy->IsMaterialized());
+        EXPECT_EQ(reader->sync_calls + reader->async_calls, 0);
+        context.set_op_context(&ctx);
+        reader->Arm();
+        auto started = reader->Started();
+        auto compilation = std::async(std::launch::async, [&] {
+            return exec::CompileExpression(match, &context, {}, false);
+        });
+        // Release before the future's destructor even if an assertion fails.
+        auto release = folly::makeGuard([&] { reader->Release(); });
+        ASSERT_EQ(started.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        cancellation.requestCancellation();
+        reader->Release();
+        try {
+            (void)compilation.get();
+            FAIL() << "expected cancellation after draining the metadata open";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+        EXPECT_EQ(reader->async_calls, async_enabled ? 1 : 0);
+        EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 1);
+        EXPECT_FALSE(proxy->IsMaterialized());
+        ASSERT_NE(entry, nullptr);
+
+        OpContext fresh_ctx;
+        context.set_op_context(&fresh_ctx);
+        auto physical = exec::CompileExpression(match, &context, {}, false);
+        ASSERT_NE(physical, nullptr);
+        EXPECT_EQ(reader->async_calls, async_enabled ? 2 : 0);
+        EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 2);
+        EXPECT_TRUE(proxy->IsMaterialized());
+        exec::ExecContext exec_context(&context);
+        exec::EvalCtx eval_context(&exec_context);
+        VectorPtr result;
+        physical->Eval(eval_context, result);
+        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+        ASSERT_NE(output, nullptr);
+        ASSERT_EQ(output->size(), rows);
+        TargetBitmapView values(output->GetRawData(), rows);
+        TargetBitmapView validity(output->GetValidRawData(), rows);
+        for (int64_t i = 0; i < rows; ++i) {
+            EXPECT_EQ(values[i], i % 2 == 0);
+            EXPECT_EQ(validity[i], i % 2 == 0);
+        }
+        EXPECT_EQ(segment->GetStructElementOffsets(label), entry);
     }
 }
 
