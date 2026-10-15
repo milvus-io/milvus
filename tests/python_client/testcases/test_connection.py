@@ -58,7 +58,7 @@ class TestConnectionParams(TestcaseBase):
         data = {"port": "-1", "host": "hostlocal"}
         self.connection_wrap.add_connection(_kwargs=data, check_task=ct.CheckTasks.err_res,
                                             check_items={ct.err_code: 999,
-                                                         ct.err_msg: "port number -1 out of range, valid range [0, 65535)"})
+                                                         ct.err_msg: "Type of 'port' must be str or int"})
 
         # get addr of default alias
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
@@ -1030,8 +1030,11 @@ class TestConnectAddressInvalid(TestcaseBase):
         expected: connected is False
         """
         address = "{}:{}".format(host, port)
+        err_msg = "illegal connection params or server unavailable"
+        if port == "65536":
+            err_msg = f"Illegal address: {address}"
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
-                                                  ct.err_msg: "illegal connection params or server unavailable"})
+                                                  ct.err_msg: err_msg})
 
 
