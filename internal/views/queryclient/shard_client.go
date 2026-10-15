@@ -44,6 +44,7 @@ func newShardViewQueryClient(
 type ShardSearchRequest struct {
 	VChannel string
 	Req      *internalpb.SearchRequest
+	MVCC     *viewpb.QueryPlanMVCC
 	Reducer  reducer.SearchResultReducer
 }
 
@@ -51,6 +52,7 @@ type ShardSearchRequest struct {
 type ShardQueryRequest struct {
 	VChannel string
 	Req      *internalpb.RetrieveRequest
+	MVCC     *viewpb.QueryPlanMVCC
 	Reducer  reducer.RetrieveResultReducer
 }
 
@@ -60,6 +62,7 @@ type ShardQueryRequest struct {
 func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		consistencyLevel: req.Req.ConsistencyLevel,
+		mvcc:             req.MVCC,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -92,6 +95,7 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*ShardPlan, error) {
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		consistencyLevel: req.Req.ConsistencyLevel,
+		mvcc:             req.MVCC,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -129,6 +133,7 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 // Both Search and Query use the same executeShard loop, differing only in these callbacks.
 type shardExecParams struct {
 	consistencyLevel commonpb.ConsistencyLevel
+	mvcc             *viewpb.QueryPlanMVCC
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
 	// dispatchNode executes a Phase 2 RPC on a single work node.
@@ -208,17 +213,20 @@ func (s *shardViewQueryClient) executeGetQueryPlan(
 	planReq *viewpb.GetQueryPlanRequest,
 	params *shardExecParams,
 ) (*viewpb.QueryPlan, error) {
-	switch params.consistencyLevel {
-	case commonpb.ConsistencyLevel_Strong, commonpb.ConsistencyLevel_Session:
-		planReq.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{
-			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
-		}
-	default:
-		planReq.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{
-			ConsistencyLevel: params.consistencyLevel,
+	if params.mvcc != nil {
+		planReq.Mvcc = &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: proto.Clone(params.mvcc).(*viewpb.QueryPlanMVCC)}
+	} else {
+		switch params.consistencyLevel {
+		case commonpb.ConsistencyLevel_Strong, commonpb.ConsistencyLevel_Session:
+			planReq.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{
+				ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			}
+		default:
+			planReq.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{
+				ConsistencyLevel: params.consistencyLevel,
+			}
 		}
 	}
-
 	resp, err := s.queryPlanClient.GetQueryPlan(ctx, targetShardID, planReq)
 	if err != nil {
 		return nil, err

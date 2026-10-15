@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reranker"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // ViewQueryClient executes queries using the two-phase query process.
@@ -39,6 +40,8 @@ type ViewQueryClient interface {
 // are populated by the Proxy from the API-level request and collection schema.
 type SearchRequest struct {
 	Req *internalpb.SearchRequest
+	// MVCC optionally supplies fixed executor read frontiers across retries.
+	MVCC *viewpb.QueryPlanMVCC
 
 	// OutputFieldNames are the user-requested output field names,
 	// resolved from Req.OutputFieldsId by the Proxy using the collection schema.
@@ -65,6 +68,8 @@ type SearchResult struct {
 // QueryRequest wraps an internal retrieve request with orchestration metadata.
 type QueryRequest struct {
 	Req *internalpb.RetrieveRequest
+	// MVCC optionally supplies fixed executor read frontiers across retries.
+	MVCC *viewpb.QueryPlanMVCC
 
 	// OutputFieldNames are the user-requested output field names,
 	// resolved from Req.OutputFieldsId by the Proxy using the collection schema.

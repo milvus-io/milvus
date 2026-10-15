@@ -7,6 +7,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -27,6 +28,8 @@ type LegacyClient interface {
 
 type LegacySearchRequest struct {
 	Req *internalpb.SearchRequest
+	// MVCC, when supplied, overrides consistency-level sampling across retries.
+	MVCC *viewpb.QueryPlanMVCC
 }
 
 type LegacySearchResult struct {
@@ -36,6 +39,10 @@ type LegacySearchResult struct {
 
 type LegacyQueryRequest struct {
 	Req *internalpb.RetrieveRequest
+	// Schema is the immutable read schema used to build Req.
+	Schema *schemapb.CollectionSchema
+	// MVCC fixes the read boundary across replanning; nil samples by consistency.
+	MVCC *viewpb.QueryPlanMVCC
 	// Plans binds an internal requery to the original Search attempt. Non-nil
 	// (including empty) never resolves a new schema, view or MVCC.
 	Plans []ShardPlan
@@ -100,6 +107,7 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (*L
 			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
 				VChannel: vchannels[i],
 				Req:      req.Req,
+				MVCC:     req.MVCC,
 				Reducer:  collector,
 			})
 			if err != nil {
@@ -112,8 +120,12 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (*L
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	results, err := collector.Reduce(ctx, req.Req, shardPlans)
+	if err != nil {
+		return nil, err
+	}
 	return &LegacySearchResult{
-		Results: collector.Results(),
+		Results: results,
 		Plans:   shardPlans,
 	}, nil
 }
@@ -136,6 +148,7 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (*Leg
 			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
 				VChannel: vchannels[i],
 				Req:      req.Req,
+				MVCC:     req.MVCC,
 				Reducer:  collector,
 			})
 			if err != nil {
@@ -148,8 +161,12 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (*Leg
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	results, err := collector.Reduce(ctx, req, shardPlans)
+	if err != nil {
+		return nil, err
+	}
 	return &LegacyQueryResult{
-		Results: collector.Results(),
+		Results: results,
 		Plans:   shardPlans,
 	}, nil
 }
@@ -190,17 +207,6 @@ func (c *legacySearchCollector) Finish() (*internalpb.SearchResults, error) {
 	return nil, merr.WrapErrServiceInternalMsg("legacy search collector does not reduce results")
 }
 
-func (c *legacySearchCollector) Results() []*internalpb.SearchResults {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	results := make([]*internalpb.SearchResults, 0)
-	for _, shardResults := range c.results {
-		results = append(results, shardResults...)
-	}
-	return results
-}
-
 type legacyQueryCollector struct {
 	mu      sync.Mutex
 	results map[string][]*internalpb.RetrieveResults
@@ -237,17 +243,6 @@ func (c *legacyQueryCollector) Finish() (*internalpb.RetrieveResults, error) {
 	return nil, merr.WrapErrServiceInternalMsg("legacy query collector does not reduce results")
 }
 
-func (c *legacyQueryCollector) Results() []*internalpb.RetrieveResults {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	results := make([]*internalpb.RetrieveResults, 0)
-	for _, shardResults := range c.results {
-		results = append(results, shardResults...)
-	}
-	return results
-}
-
 // Requery failure aborts the whole parent operation. Retrying Phase 1 here would
 // mix its old reduced search results with a new schema or data snapshot.
 func (c *legacyClient) queryRetainedPlans(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error) {
@@ -274,5 +269,9 @@ func (c *legacyClient) queryRetainedPlans(ctx context.Context, req *LegacyQueryR
 	if err := group.Wait(); err != nil {
 		return nil, err
 	}
-	return &LegacyQueryResult{Results: collector.Results(), Plans: req.Plans}, nil
+	results, err := collector.Reduce(ctx, req, req.Plans)
+	if err != nil {
+		return nil, err
+	}
+	return &LegacyQueryResult{Results: results, Plans: req.Plans}, nil
 }

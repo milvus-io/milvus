@@ -70,6 +70,7 @@ func TestQueryTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 		},
 	}
 	task := &QueryTask{
+		schema: &schemaInfo{},
 		RetrieveRequest: &internalpb.RetrieveRequest{
 			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgID(1)),
 			CollectionID: 1,
@@ -133,6 +134,7 @@ func TestQueryViewRecordsFinalReadFrontiersIncludingEmptyShards(t *testing.T) {
 			{ShardID: qviews.ShardID{VChannel: "transform"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 300}},
 		}}, nil).Build()
 		task := &QueryTask{
+			schema:          &schemaInfo{},
 			RetrieveRequest: &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()}, request: &milvuspb.QueryRequest{},
 			viewQueryClient: &fakeLegacyViewQueryClient{legacy: legacy}, actualChannelsMvcc: typeutil.NewConcurrentMap[string, uint64](),
 		}

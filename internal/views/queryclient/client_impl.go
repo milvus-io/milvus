@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/queryclient/reranker"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 const defaultMaxRetries = 3
@@ -129,7 +130,7 @@ func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (*
 	// TODO: set fieldPlan.SearchFields into req.Req.OutputFieldsId
 	// (requires field name → ID resolution from collection schema).
 	_ = fieldPlan
-	shardPlans, err := c.searchAllShards(ctx, vchannels, req.Req, searchReducer)
+	shardPlans, err := c.searchAllShards(ctx, vchannels, req.Req, req.MVCC, searchReducer)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +208,7 @@ func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (*Qu
 	// === Stage: Search/Query (per-shard pipelined) ===
 	// TODO: set fieldPlan.SearchFields into req.Req.OutputFieldsId
 	_ = fieldPlan
-	shardPlans, err := c.queryAllShards(ctx, vchannels, req.Req, retrieveReducer)
+	shardPlans, err := c.queryAllShards(ctx, vchannels, req.Req, req.MVCC, retrieveReducer)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +240,7 @@ func (c *viewQueryClientImpl) searchAllShards(
 	ctx context.Context,
 	vchannels []string,
 	req *internalpb.SearchRequest,
+	mvcc *viewpb.QueryPlanMVCC,
 	searchReducer reducer.SearchResultReducer,
 ) ([]ShardPlan, error) {
 	shardPlans := make([]ShardPlan, len(vchannels))
@@ -249,6 +251,7 @@ func (c *viewQueryClientImpl) searchAllShards(
 			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
 				VChannel: vchannels[i],
 				Req:      req,
+				MVCC:     mvcc,
 				Reducer:  searchReducer,
 			})
 			if err != nil {
@@ -269,6 +272,7 @@ func (c *viewQueryClientImpl) queryAllShards(
 	ctx context.Context,
 	vchannels []string,
 	req *internalpb.RetrieveRequest,
+	mvcc *viewpb.QueryPlanMVCC,
 	retrieveReducer reducer.RetrieveResultReducer,
 ) ([]ShardPlan, error) {
 	shardPlans := make([]ShardPlan, len(vchannels))
@@ -279,6 +283,7 @@ func (c *viewQueryClientImpl) queryAllShards(
 			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
 				VChannel: vchannels[i],
 				Req:      req,
+				MVCC:     mvcc,
 				Reducer:  retrieveReducer,
 			})
 			if err != nil {

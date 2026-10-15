@@ -789,6 +789,7 @@ func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context, serialized
 	// complete batch before producing any deletes, so query retries have no
 	// write side effects and failed/oversized reads cannot silently delete a prefix.
 	result, err := dr.viewQueryClient.Legacy().Query(ctx, &queryclient.LegacyQueryRequest{
+		Schema: dr.schema.CollectionSchema,
 		Req: &internalpb.RetrieveRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),

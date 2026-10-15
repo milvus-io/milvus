@@ -18,7 +18,7 @@ processing semantics:
 
 The first QueryView integration should not move those responsibilities into
 `internal/views/queryclient`. Instead, `queryclient` adds a `Legacy()` domain
-that only replaces the raw query execution stage currently implemented by
+that replaces shard execution and shard-local reduction currently implemented by
 `queryTask.Execute` and `searchTask.Execute`.
 
 The integration boundary is:
@@ -27,7 +27,7 @@ The integration boundary is:
 Proxy task
   -> queryclient.Legacy().Search/Query
        -> QueryView two-phase execution
-       -> raw internalpb results
+       -> one reduced internalpb result per shard
   -> existing SearchPipeline / QueryPipeline
        -> reduce / rerank / aggregation / render
 ```
@@ -55,8 +55,8 @@ existing Proxy query path:
 
 The first `Legacy()` implementation does not:
 
-- implement reducer, reranker, renderer, or field-fetch planning inside
-  `queryclient`;
+- move cross-shard reduction, reranker, renderer, or field-fetch planning into
+  the legacy domain;
 - optimize Search requery with `RequeryOnView`;
 - preserve old QueryNode leader routing or look-aside balancing semantics;
 - use `preferredNodes` for requery locality;
@@ -101,6 +101,7 @@ Search request and result:
 ```go
 type LegacySearchRequest struct {
     Req *internalpb.SearchRequest
+    MVCC *viewpb.QueryPlanMVCC // optional fixed frontiers, retained across retry
 }
 
 type LegacySearchResult struct {
@@ -114,6 +115,9 @@ Query request and result:
 ```go
 type LegacyQueryRequest struct {
     Req *internalpb.RetrieveRequest
+    Schema *schemapb.CollectionSchema // exact immutable request schema
+    MVCC *viewpb.QueryPlanMVCC // optional fixed frontiers
+    Plans []ShardPlan // non-nil reuses the original search plans
 }
 
 type LegacyQueryResult struct {
@@ -203,28 +207,42 @@ into `queryTask.resultBuf`.
 The legacy domain uses local collectors that adapt raw `ViewQueryService`
 responses to the existing shard client reducer interface.
 
-Search collector behavior:
+Collectors validate status and retain node results by shard. `ResetShard`
+discards the failed attempt's bucket after its workers have completed. Once all
+shards succeed, QueryViewClient reduces each bucket independently:
 
-```text
-Add(shardID, SearchOnViewResponse)
-  -> validate legacy_results status
-  -> append legacy_results under shardID
+- Query uses the same `RunDelegatorQueryPipeline` as the legacy shard handler,
+  with the request's immutable Schema. This preserves timestamp-aware PK
+  deduplication, ORDER BY, aggregation, limits and empty-field behavior.
+- Search uses the existing `ReduceSearchOnQueryNode` reduction. Advanced worker
+  responses are already envelopes: first group their `SubResults` by `ReqIndex`,
+  reduce each sub-search across workers, then assemble one shard envelope.
+- A single worker is already node-reduced and can pass through. Empty shards
+  still return their successful plan as an MVCC proof.
+- Preserve scan counters, cost accounting, result flags and the successful
+  plan's channel MVCC. Do not substitute a newer frontier after execution.
 
-ResetShard(shardID)
-  -> drop all results collected for that shard
+Only shard-local reduction moves into this client. Proxy continues to perform
+cross-shard reduction, reranking, shaping and rendering. Query reduction also
+applies to retained-plan requery; a failed retained plan propagates to the parent
+operation rather than silently selecting a different snapshot.
 
-Results()
-  -> flatten all shard buckets into []*internalpb.SearchResults
-```
+### Explicit MVCC
 
-Query collector behavior is identical, using `QueryOnViewResponse` and
-`*internalpb.RetrieveResults`.
+Legacy and full Search/Query requests accept optional `MVCC`. When non-nil,
+Phase 1 uses `query_plan_mvcc` instead of `consistency_level` on every attempt.
+Phase 2 receives the plan unchanged; SN reads at its growing frontier and QN at
+its transforming frontier. A per-attempt clone protects the caller's value.
+Nil preserves ordinary consistency-based sampling. `Plans` takes precedence
+for retained-plan requery and preserves its original MVCC.
 
-`ResetShard` is required because the shard execution layer may retry a shard
-after a retryable QueryView error. Without shard-scoped reset, partial results
-from a failed attempt could be mixed with the successful retry.
-
-Collectors are thread-safe because Phase 2 fanout calls `Add` concurrently.
+This temporary entry accepts valid executor frontiers, not an arbitrary scalar
+query timestamp. **TODO: Iterator snapshot adaptation.** The SDK stores a
+single snapshot and sends it as `guarantee_timestamp`. Copying that scalar into
+both frontiers can wait indefinitely when no TransformLog reaches that position.
+Decouple the fixed logical read timestamp from the executor catch-up proof before
+connecting this adapter. The entry does not pin physical Views across pages or
+extend historical-data retention guarantees.
 
 ## 8. Proxy Integration
 
@@ -284,25 +302,12 @@ query, not by preserving old leader-local requery affinity.
 
 ## 9. Requery Behavior
 
-SearchPipeline requery currently builds a `queryTask` and calls `Proxy.query`.
-
-Under the first QueryView integration, if `queryTask.Execute` is backed by
-`Legacy().Query`, requery automatically uses the same QueryView Query path:
-
-```text
-SearchPipeline requery
-  -> queryTask
-  -> Legacy().Query
-  -> QueryPipeline
-  -> return fields to SearchPipeline organize stage
-```
-
-This is intentionally not optimized. It may query more shards than necessary,
-but keeps requery correctness behind the existing Query path and avoids adding
-`RequeryOnView` execution before the primary Search/Query path is stable.
-
-Future optimization can use `LegacySearchResult.Plans` and implement
-`RequeryOnView` against the original query plan.
+SearchPipeline binds internal requery to the parent's schema and `ShardPlan`s.
+`Legacy().Query` with non-nil `Plans` dispatches directly to those exact work
+nodes, View versions and MVCCs without Phase 1. It then performs the same
+shard-local Query reduction. Failure aborts the parent operation; this path
+cannot silently switch to a newer schema or snapshot. `RequeryOnView` remains
+a separate future optimization.
 
 ## 10. Error Handling
 

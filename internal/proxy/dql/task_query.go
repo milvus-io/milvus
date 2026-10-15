@@ -1118,9 +1118,11 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 }
 
 func (t *QueryTask) executeByQueryView(ctx context.Context) error {
-	result, err := t.viewQueryClient.Legacy().Query(ctx, &queryclient.LegacyQueryRequest{
-		Req: t.RetrieveRequest, Plans: t.queryViewPlans,
-	})
+	request := &queryclient.LegacyQueryRequest{
+		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
+	}
+
+	result, err := t.viewQueryClient.Legacy().Query(ctx, request)
 	if err != nil {
 		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
 	}
