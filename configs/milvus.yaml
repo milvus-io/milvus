@@ -1911,6 +1911,7 @@ function:
           enable: true # Whether to enable voyageai model service
           url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
+    requestTimeout: 10m # Total RunAnalyzer/ValidateAnalyzer client wait, including discovery, preparation and retries. Earlier caller deadlines take precedence. Increase for large inventories.
     local_resource_path: /var/lib/milvus/analyzer
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
     runner_concurrency: 8 # The concurrency for each function runner to tokenize text
