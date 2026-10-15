@@ -168,7 +168,7 @@ func TestNoHandoverBeforeTheClaim(t *testing.T) {
 	block := make(chan struct{})
 	env.client.set(func(c *fakeClient) { c.claimBlock = block })
 	ch := env.channel(0)
-	created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
 	idx := ch.Get("v0")
@@ -227,7 +227,7 @@ func TestNewCollectionBeforeTheClaimWaitsForIt(t *testing.T) {
 	block := make(chan struct{})
 	env.client.set(func(c *fakeClient) { c.claimBlock = block })
 	ch := env.recoveredChannel(0, "v0")
-	created, err := ch.Add(context.Background(), "v1", testCollectionID, schemapb.DataType_Int64)
+	_, created, err := ch.Add(context.Background(), "v1", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
 	assert.False(t, ch.Get("v1").readyDone())
@@ -334,7 +334,7 @@ func TestFencedClaimIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.client.set(func(c *fakeClient) { c.claimErrs = []error{errors.Wrap(snapshot.ErrFenced, "v0")} })
 	ch := env.channel(0)
-	created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
 	err = env.waitFatal()
@@ -462,7 +462,7 @@ func TestRejectedClaimIsFatal(t *testing.T) {
 		c.claimErrs = []error{errors.Wrap(snapshot.ErrRejected, "schema mismatch")}
 	})
 	ch := env.channel(0)
-	created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
 	err = env.waitFatal()
@@ -559,7 +559,7 @@ func TestClosedChannelAndIndex(t *testing.T) {
 	idx := env.add(ch, "v0")
 	ch.Close()
 
-	_, err := ch.Add(context.Background(), "v1", testCollectionID, schemapb.DataType_Int64)
+	_, _, err := ch.Add(context.Background(), "v1", testCollectionID, schemapb.DataType_Int64)
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 	_, err = idx.Decide(context.Background(), insertRequest(idx, 1))
 	assert.True(t, errors.Is(err, engine.ErrClosed))
@@ -574,7 +574,7 @@ func TestManagerCloseClosesChannels(t *testing.T) {
 	env.mgr.Close()
 	assert.Nil(t, ch.Get("v0"))
 	closed := env.channel(0)
-	_, err := closed.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	_, _, err := closed.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 }
 
@@ -595,7 +595,7 @@ func TestAddOfAnExistingIndexReportsNotCreated(t *testing.T) {
 	idx := env.add(ch, "v0")
 	insert(t, idx, 10, 1)
 
-	created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	assert.False(t, created, "a caller that rolls back must not remove the Index in use")
 	assert.Same(t, idx, ch.Get("v0"))

@@ -204,9 +204,9 @@ func Commit(ctx context.Context, t Target, store TableStore, c Committer, p *Pen
 	return nil
 }
 
-// sstFileName is the local file name of a committed table.
-func sstFileName(id sst.ID) string {
-	return strconv.FormatInt(int64(id), 10) + sst.Extension
+// CommittedPath returns the local file of committed table id under dir.
+func CommittedPath(dir string, id sst.ID) string {
+	return filepath.Join(dir, strconv.FormatInt(int64(id), 10)+sst.Extension)
 }
 
 // linkCommitted hard-links a staged table into dir and returns the path of
@@ -216,7 +216,7 @@ func linkCommitted(dir string, s engine.StagedTable) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", pkindex.MarkIO(err, "create committed dir %s", dir)
 	}
-	path := filepath.Join(dir, sstFileName(s.Info.ID))
+	path := CommittedPath(dir, s.Info.ID)
 	if err := os.Link(s.Path, path); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", pkindex.MarkIO(err, "link sst %d to %s", s.Info.ID, path)
 	}

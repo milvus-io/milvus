@@ -415,7 +415,7 @@ func TestNoCommitterDedupsButNeverHandsOver(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.mgr.cfg.Committer = nil
 	ch := env.channel(0)
-	created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
 	idx := ch.Get("v0")

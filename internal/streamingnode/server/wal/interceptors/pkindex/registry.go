@@ -107,13 +107,9 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	}
 	// The engine open does disk IO, so it runs outside mu. Writes of other
 	// vchannels keep reading the registry meanwhile.
-	created, err := r.ch.Add(ctx, vchannel, collectionID, pkField.GetDataType())
+	idx, created, err := r.ch.Add(ctx, vchannel, collectionID, pkField.GetDataType())
 	if err != nil {
 		return false, errors.Mark(errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel), errOpenIndex)
-	}
-	idx := r.ch.Get(vchannel)
-	if idx == nil {
-		return false, merr.WrapErrServiceInternalMsg("primary key index of vchannel %s is removed while it is created", vchannel)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

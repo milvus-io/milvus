@@ -250,7 +250,7 @@ func TestHandoverNormal(t *testing.T) {
 		assert.NotZero(t, ref.TableFormat)
 		assert.Equal(t, codec.EncodeInt64PK(1), ref.MinKey)
 		assert.Equal(t, codec.EncodeInt64PK(3), ref.MaxKey)
-		path := filepath.Join(target.committedDir, sstFileName(ref.ID))
+		path := CommittedPath(target.committedDir, ref.ID)
 		assert.FileExists(t, path)
 		assert.Equal(t, path, p.Local[ref.ID])
 	}

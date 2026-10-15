@@ -20,7 +20,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -276,7 +275,7 @@ func (idx *Index) close(ctx context.Context) {
 // engine.ErrClosed, like a call on a closed engine.
 func (idx *Index) Decide(ctx context.Context, req snpkindex.Request) (*Intent, error) {
 	if !idx.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of vchannel %s is closed", idx.vchannel), pkindex.ErrUnavailable)
+		return nil, errClosed("vchannel " + idx.vchannel)
 	}
 	token := idx.ch.wm.enter()
 	inner, err := idx.decider.Decide(ctx, req)
@@ -466,7 +465,7 @@ func (idx *Index) resolveLocal(ctx context.Context, basePath string, id sst.ID, 
 	if p, ok := known[id]; ok {
 		return p, nil
 	}
-	path := filepath.Join(idx.committedDir, strconv.FormatInt(int64(id), 10)+sst.Extension)
+	path := snapshot.CommittedPath(idx.committedDir, id)
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	} else if !os.IsNotExist(err) {

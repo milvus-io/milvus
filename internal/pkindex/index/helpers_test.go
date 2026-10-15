@@ -403,7 +403,7 @@ func (env *testEnv) channel(seed uint64) *Channel {
 func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *Channel {
 	ch := env.openChannel(seed)
 	for _, v := range vchannels {
-		created, err := ch.Add(context.Background(), v, testCollectionID, schemapb.DataType_Int64)
+		_, created, err := ch.Add(context.Background(), v, testCollectionID, schemapb.DataType_Int64)
 		require.NoError(env.t, err)
 		require.True(env.t, created)
 	}
@@ -447,7 +447,7 @@ func (env *testEnv) waitFatal() error {
 
 // add opens the Index of vchannel and waits until it is ready.
 func (env *testEnv) add(ch *Channel, vchannel string) *Index {
-	created, err := ch.Add(context.Background(), vchannel, testCollectionID, schemapb.DataType_Int64)
+	_, created, err := ch.Add(context.Background(), vchannel, testCollectionID, schemapb.DataType_Int64)
 	require.NoError(env.t, err)
 	require.True(env.t, created)
 	idx := ch.Get(vchannel)

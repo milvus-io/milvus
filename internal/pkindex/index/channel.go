@@ -89,30 +89,31 @@ func newChannel(m *Manager, info types.PChannelInfo, seed uint64, tail func() WA
 	}
 }
 
-// errChannelClosed reports a call on a closed Channel. It wraps
-// engine.ErrClosed, so the caller handles it like a closed engine.
-func errChannelClosed(pchannel string) error {
-	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of pchannel %s is closed", pchannel), pkindex.ErrUnavailable)
+// errClosed reports a call on a closed Channel or Index. what names it, such
+// as "pchannel <name>". It wraps engine.ErrClosed, so the caller handles it
+// like a closed engine.
+func errClosed(what string) error {
+	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of %s is closed", what), pkindex.ErrUnavailable)
 }
 
-// Add opens the Index of a vchannel and reports whether this call opened it.
-// It does nothing and returns false when the Index exists, so a caller that
-// rolls back after a failure removes only an Index that it opened. It
-// returns the error of the engine open.
-func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, pkDataType schemapb.DataType) (bool, error) {
+// Add opens the Index of a vchannel and returns it, with whether this call
+// opened it. It returns the existing Index and false when the Index exists,
+// so a caller that rolls back after a failure removes only an Index that it
+// opened. It returns the error of the engine open.
+func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, pkDataType schemapb.DataType) (*Index, bool, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return false, errChannelClosed(c.info.Name)
+		return nil, false, errClosed("pchannel " + c.info.Name)
 	}
 	defer c.lifetime.Done()
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 
-	if c.Get(vchannel) != nil {
-		return false, nil
+	if idx := c.Get(vchannel); idx != nil {
+		return idx, false, nil
 	}
 	idx, err := openIndex(ctx, c, vchannel, collectionID, pkDataType)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	c.mu.Lock()
 	c.indexes[vchannel] = idx
@@ -123,7 +124,7 @@ func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, 
 		// vchannel name, so no manifest can exist for it.
 		idx.markReady(ctx, false)
 	}
-	return true, nil
+	return idx, true, nil
 }
 
 // Remove closes the Index of a vchannel. It waits for a running handover
@@ -144,7 +145,7 @@ func (c *Channel) Remove(ctx context.Context, vchannel string) {
 // embeds the id of its collection.
 func (c *Channel) Drop(ctx context.Context, vchannel string) error {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return errChannelClosed(c.info.Name)
+		return errClosed("pchannel " + c.info.Name)
 	}
 	defer c.lifetime.Done()
 	c.opMu.Lock()
