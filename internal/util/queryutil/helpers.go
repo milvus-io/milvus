@@ -1809,11 +1809,11 @@ func getFieldValue(fd *schemapb.FieldData, rowIdx int) (any, bool) {
 	return nil, true
 }
 
-// getRowCount returns the number of rows in the result.
-func getRowCount(result *internalpb.RetrieveResults) int {
+// GetRowCount returns the number of rows in the result.
+func GetRowCount(result *internalpb.RetrieveResults) int {
 	// Try to get count from IDs first (most reliable)
-	if result.GetIds() != nil {
-		return typeutil.GetSizeOfIDs(result.GetIds())
+	if idCount := typeutil.GetSizeOfIDs(result.GetIds()); idCount > 0 {
+		return idCount
 	}
 
 	// Fall back to field data
@@ -1877,7 +1877,7 @@ func getRowCount(result *internalpb.RetrieveResults) int {
 	}
 	if fd.GetStructArrays() != nil && len(fd.GetStructArrays().GetFields()) > 0 {
 		// Use the first sub-field's row count
-		return getRowCount(&internalpb.RetrieveResults{
+		return GetRowCount(&internalpb.RetrieveResults{
 			FieldsData: []*schemapb.FieldData{fd.GetStructArrays().GetFields()[0]},
 		})
 	}

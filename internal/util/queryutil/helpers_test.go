@@ -102,7 +102,7 @@ func TestGetRowCountNullableCompactVectorWithoutIDsUsesLogicalRows(t *testing.T)
 		},
 	}
 
-	assert.Equal(t, 3, getRowCount(result))
+	assert.Equal(t, 3, GetRowCount(result))
 }
 
 // =========================================================================
@@ -2375,7 +2375,7 @@ func TestGetRowCount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, getRowCount(tt.result))
+			assert.Equal(t, tt.expected, GetRowCount(tt.result))
 		})
 	}
 }
@@ -2629,7 +2629,7 @@ func TestGetRowCount_AdditionalTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, getRowCount(tt.result))
+			assert.Equal(t, tt.expected, GetRowCount(tt.result))
 		})
 	}
 }

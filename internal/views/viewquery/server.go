@@ -223,9 +223,10 @@ func (s *Server) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStr
 		return status.Error(codes.InvalidArgument, "QueryOnViewStream first message must contain a request")
 	}
 	legacyRequest := request.GetLegacyReq()
-	if legacyRequest == nil || legacyRequest.GetLimit() <= 0 || legacyRequest.GetIsCount() ||
-		len(legacyRequest.GetGroupByFieldIds()) > 0 || len(legacyRequest.GetAggregates()) > 0 {
-		return status.Error(codes.InvalidArgument, "QueryOnViewStream supports bounded Plain Query only")
+	hasGroupBy := legacyRequest != nil && len(legacyRequest.GetGroupByFieldIds()) > 0
+	if legacyRequest == nil || legacyRequest.GetIsCount() ||
+		(!hasGroupBy && (legacyRequest.GetLimit() <= 0 || len(legacyRequest.GetAggregates()) > 0)) {
+		return status.Error(codes.InvalidArgument, "QueryOnViewStream supports bounded Plain Query or Query Group By")
 	}
 
 	response, err := s.queryOnView(stream.Context(), request)

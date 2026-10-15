@@ -143,6 +143,40 @@ func TestReduceWithValidGroupResults(t *testing.T) {
 	assert.Equal(t, int64(3), out.GetAllRetrieveCount())
 }
 
+func TestGroupAggReducerMergesIncrementalResults(t *testing.T) {
+	reducer := makeGroupAggReducer()
+	makeResult := func(keys []string, values []int64) *AggregationResult {
+		return NewAggregationResult([]*schemapb.FieldData{
+			{
+				Type: schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: keys}},
+				}},
+			},
+			{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}},
+				}},
+			},
+		}, int64(len(keys)))
+	}
+
+	require.NoError(t, reducer.Merge([]*AggregationResult{makeResult([]string{"a", "b"}, []int64{10, 5})}))
+	require.NoError(t, reducer.Merge([]*AggregationResult{makeResult([]string{"a", "c"}, []int64{20, 7})}))
+
+	result, err := reducer.Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(4), result.GetAllRetrieveCount())
+	keys := result.GetFieldDatas()[0].GetScalars().GetStringData().GetData()
+	values := result.GetFieldDatas()[1].GetScalars().GetLongData().GetData()
+	actual := make(map[string]int64, len(keys))
+	for i, key := range keys {
+		actual[key] = values[i]
+	}
+	require.Equal(t, map[string]int64{"a": 30, "b": 5, "c": 7}, actual)
+}
+
 // TestReduceEmptyResults verifies that reduce returns an empty result for empty input.
 func TestReduceEmptyResults(t *testing.T) {
 	reducer := makeGroupAggReducer()

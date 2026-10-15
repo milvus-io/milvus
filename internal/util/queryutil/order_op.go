@@ -101,7 +101,7 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 		}
 	}
 
-	rowCount := getRowCount(result)
+	rowCount := GetRowCount(result)
 	if rowCount <= 1 {
 		return []any{result}, nil
 	}
