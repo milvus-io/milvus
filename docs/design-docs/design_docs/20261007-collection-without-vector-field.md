@@ -42,7 +42,9 @@ The change set is:
    satisfies them without a special case;
 5. a per-collection segment size target derived from a new row target,
    `dataCoord.segment.maxRows` (default 4,000,000):
-   `expectedSize = min(maxSize, maxRows × estimated bytes per row)`, computed
+   `expectedSize = min(maxSize, maxRows × estimated bytes per row)` (schema
+   estimate plus the two system fields, the same bytes that binlog
+   `MemorySize` counts), computed
    in the existing `getExpectedSegmentSize` that every DataCoord size
    consumer already reads, and in the StreamingNode seal limitation. The
    planner, the output writer and import stay byte-only. Collections whose
@@ -89,7 +91,8 @@ while eight segments of 5.5 M rows stall 5.8 s under the same delete.
   fail with one user-facing error at the Proxy entry, before `anns_field`
   resolution.
 - Segment sealing, compaction output sizing and import segment assignment
-  bound both bytes and rows per segment.
+  use a per-collection byte target that bounds the rows per segment of a
+  narrow-row collection.
 - The predicate and the gate are the only new concepts. `DescribeCollection`
   output is unchanged; old clients observe nothing new.
 
@@ -105,9 +108,10 @@ while eight segments of 5.5 M rows stall 5.8 s under the same delete.
 - Making the quick-setup paths (`MilvusClient.create_collection(dimension=...)`,
   Go SDK `SimpleCreateCollectionOptions`, REST `quickCreate`) produce a
   collection without a vector. Their semantics are "vector collection".
-- Parallelising delete application inside a segment, or replacing the schema
-  based `EstimateSizePerRecord` callers. Both are independent follow-ups and
-  are listed at the end.
+- Parallelising delete application inside a segment, or removing the
+  remaining batching-heuristic callers of the schema-based
+  `EstimateSizePerRecord`. Both are independent follow-ups and are listed at
+  the end.
 
 ## Definitions
 
@@ -275,6 +279,10 @@ Consequences of waiting for scalar indexes at handoff, for every collection:
   availability.
 - **Small segments.** Segments below `minSegmentNumRowsToEnableIndex` are not
   indexed and are exempt, as today.
+- **Index on a field added later.** Segments written before `add_field` have
+  no binlog for the field; the index task for them is finished without a
+  build (`task_index.go`, "stale schema" handling), so `handoffReady` is not
+  blocked by an index whose field the segment predates.
 - **Index failure.** A segment whose scalar index build fails terminally never
   satisfies `handoffReady`. Under the staging design the group moves to
   `FAILED` (transition 4) and the parents stay published; without staging the
@@ -299,8 +307,9 @@ compaction targets and candidate buckets use binlog `MemorySize`
 (`getExpectedSegmentSize`, `SegmentInfo.getSegmentSize`); import splits
 by preimport-measured memory size (`AssignSegments`); QueryCoord admission
 and the QueryNode loader use `MemorySize`. The schema-based
-`EstimateSizePerRecord` no longer determines segment size (its remaining
-callers are batching heuristics; see Follow-ups).
+`EstimateSizePerRecord` no longer determines segment size on master (its
+remaining callers are batching heuristics); Section 3.3 uses it for one
+purpose only, to derive the per-collection target from the schema.
 
 A vector field makes the byte cap also an implicit row cap: at 3 KB per row
 (dim 768 float32) a 1 GB segment holds about 350 k rows; at 512 B (dim 128)
@@ -338,7 +347,8 @@ p.SegmentMaxRows = ParamItem{
     Version:      "2.7.0",
     DefaultValue: "4000000",
     Doc:          "Target number of rows per sealed segment. The per-collection segment size target is " +
-                  "min(dataCoord.segment.maxSize, maxRows * estimated bytes per row of the schema); seal, " +
+                  "min(dataCoord.segment.maxSize, maxRows * estimated bytes per row of the schema including " +
+                  "the RowID and Timestamp system fields); seal, " +
                   "compaction and import all use that target. Collections whose rows are wider than " +
                   "maxSize / maxRows are unaffected. 0 disables the row target.",
     Export:       true,
@@ -350,7 +360,7 @@ recommends, and the point where a 10 % single-request delete on one segment
 (400 k keys × 8 µs = 3.2 s) sits at the tsafe lag limit. 5,000,000 (Druid)
 is equally defensible; the difference is at the margin.
 
-The target applies to every collection. Vector collections with dim > 64
+The target applies to every collection. Vector collections with dim > 61
 float32 have an estimated row width above 268 B and keep `maxSize`
 (Compatibility lists the ones that do not).
 
@@ -366,14 +376,21 @@ import (`GetSegmentMaxSize`, `import_util.go:143`) and `CompactionPlan.max_size`
 The row target enters through this one function:
 
 ```
-rowWidth(c)      = EstimateSizePerRecord(schema(c))        // pkg/util/typeutil/schema.go:134
+rowWidth(c)      = EstimateSizePerRecord(schema(c)) + 16     // pkg/util/typeutil/schema.go:134, plus RowID and Timestamp (int64 each)
 expectedSize(c)  = min( baseSize(c), maxRows × rowWidth(c) )   // baseSize = maxSize or diskSegmentMaxSize
                                                                 // maxRows = 0 → baseSize
 ```
 
-At defaults: `int64 + int32` (12 B) → 48 MB; `int64 + 4 × int64` (40 B) →
-160 MB; `int64 + varchar(max 256) + JSON` → the estimate exceeds 268 B and the
-target stays 1 GiB; `FLOAT_VECTOR` dim 128 (520 B) → 1 GiB.
+The 16 B are added because the planner's bytes are binlog `MemorySize`, which
+includes the two system-field binlogs: the measured 29 B per row of Section 4
+for `int64 + int32` plus a 1 B placeholder vector is 13 B of user data plus
+16 B. Without them the target for the narrowest schemas would be about 2×
+tighter than intended (simulated: 1.7 M rows per segment instead of 4 M).
+
+At defaults: `int64 + int32` (28 B) → 112 MB; `int64 + 4 × int64` (56 B) →
+224 MB; `int64 + varchar(max 256) + JSON` → the estimate exceeds 268 B and the
+target stays 1 GiB; `FLOAT_VECTOR` dim 128 (536 B) → 1 GiB. The boundary is
+268 B per row, that is 252 B of user data next to the system fields.
 
 Properties:
 
@@ -387,15 +404,20 @@ Properties:
   on outputs alone would cause (Alternatives) cannot occur.
 - **Wide rows are unchanged.** `maxRows × rowWidth ≥ maxSize` whenever
   `rowWidth ≥ 268 B`, so every existing collection with a dense vector of
-  dim > 64 float32 keeps today's target and today's plans.
-- **Estimation error is one-sided.** `EstimateSizePerRecord` is exact for
-  fixed-width fields and counts nullable fields at full width; variable-length
+  dim > 61 float32 keeps today's target and today's plans.
+- **Estimation error is bounded in both directions and never cycles.**
+  `EstimateSizePerRecord` is exact for fixed-width fields (the null bitmap of
+  a nullable column is the only omission, 1 bit per row); variable-length
   fields use the `custom` length policy, measured at 3.68× the stored size on
   the `varchar + JSON` schema of Section 4; sparse vectors are counted at 150
-  non-zeros. Every error raises `rowWidth`, raises `expectedSize` towards
-  `maxSize`, and so weakens the target; none makes it smaller than intended.
-  The collections where the estimate is loose (variable-length) are the ones
-  that hold at most about 5 M rows per GiB (Section 4) and do not need it.
+  non-zeros. An over-estimate raises `expectedSize` towards `maxSize` and
+  weakens the target; the collections where the estimate is loose
+  (variable-length) are the ones that hold at most about 5 M rows per GiB
+  (Section 4) and do not need it. An under-estimate tightens the target; its
+  floor is a primary key alone, `(8 + 16) × 4 M = 96 MB`. Both directions
+  were simulated (estimate 0.43× to 30× the stored width): rows per segment
+  scale with the ratio and no plan re-merges a full output, because the
+  planner and the writer still share one number.
 - **Schema change.** Adding a field raises `rowWidth` and `expectedSize`;
   segments that were full under the old target are classified small under the
   new one and merged once, as happens today when `maxSize` is raised. Rows
@@ -424,6 +446,7 @@ compaction output that is already full.
 | 268 B (two-tier), ≥ 300 B (both) | identical to today | identical to today | identical to today |
 | 50 B, ingest 0.7 M – 9 M rows / interval | 64 – 70 | 1.0 – 1.6 | 0.9 – 1.6, 0 churn, no segment above `maxRows` |
 | 50 B, estimate k× actual (k = 2, 4, 10, 30) | — | — | 0 churn; rows per segment rise linearly to `k × maxRows`, capped at `maxSize / width` |
+| 28 B, estimate 0.43× and 0.6× actual (system fields omitted) | — | — | 0 churn; 1.7 M and 2.0–2.4 M rows per segment |
 | 13 B → 50 B schema change at interval 40 | — | — | all 80 M pre-change rows merged exactly once, 0 churn after; old rows per output up to 14 M |
 | 50 B, 30 % deleted at interval 40 | 58, 273–280 churn plans | 1.35 (legacy) / 1.69 (two-tier), 0 | same as two-dimensional fullness |
 
@@ -544,8 +567,10 @@ is bounded (4 M rows × ~80 B = 320 MB).
 - **Smaller segments for narrow-row collections.** Collections whose
   estimated row width is below `maxSize / maxRows` = 268 B at defaults will
   seal, compact and import smaller segments after the upgrade:
-  `BINARY_VECTOR` with dim ≤ 2048, `FLOAT16` / `BFLOAT16` with dim ≤ 128,
-  `FLOAT_VECTOR` with dim ≤ 64, `INT8_VECTOR` with dim ≤ 256. Sparse-only
+  with an `int64` primary key and nothing else, a vector of at most 244 B:
+  `FLOAT_VECTOR` dim ≤ 61, `FLOAT16` / `BFLOAT16` dim ≤ 122, `INT8_VECTOR`
+  dim ≤ 244, `BINARY_VECTOR` dim ≤ 1952; any further field raises the
+  estimate and narrows the list. Sparse-only
   collections are estimated at 150 non-zeros per row, above 268 B, and are
   unaffected whatever their actual density. Existing segments are not re-split; new
   segments are smaller, and existing full segments are not re-merged because
@@ -618,7 +643,7 @@ is bounded (4 M rows × ~80 B = 320 MB).
 6. Gate off → create rejected with the legacy error.
 7. REST v2 create / insert / upsert / query / delete.
 8. Size target: import 12 M rows of `int64 + int32` → ≥ 3 segments;
-   streaming insert past `expectedSize × sealProportion` (about 5.8 MB) →
+   streaming insert past `expectedSize × sealProportion` (about 13 MB) →
    seal observed; after the periodic trigger has run, outputs at
    `expectedSize` are not re-compacted (segment IDs stable across two trigger
    intervals); the same schema with a dense vector of dim 128 added seals at
