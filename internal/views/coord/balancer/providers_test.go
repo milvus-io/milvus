@@ -122,6 +122,12 @@ func TestRecoveredLoadIdentityAvoidsRebuildButDetectsRealChanges(t *testing.T) {
 	changed := cfg.Clone()
 	changed.LoadFields[0].IndexId++
 	require.NoError(t, after.Put(t.Context(), changed))
+	require.Equal(t, oldVersion, after.Snapshot().ConfigVersion(1), "QueryView does not bind an index version")
+	require.Empty(t, policy.Plan(cache, []qviews.ShardID{id}).Prepares)
+	require.Contains(t, reusableResources(newPlanningContext(cache), id, segment, []int64{1}), int64(1))
+	changed = cfg.Clone()
+	changed.LoadFields[0].FieldId++
+	require.NoError(t, after.Put(t.Context(), changed))
 	plan := policy.Plan(cache, []qviews.ShardID{id})
 	require.Contains(t, plan.Prepares, id, "config change must be mandatory even with autoBalance disabled")
 	require.NotEqual(t, oldVersion, plan.Prepares[id].Build().Meta.LoadInfoVersion)

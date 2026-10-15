@@ -19,7 +19,9 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -45,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -570,100 +573,16 @@ func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 }
 
 func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
-	mlog.Info(context.TODO(), "load balance request received",
-		mlog.Int64s("source", req.GetSourceNodeIDs()),
-		mlog.Int64s("dest", req.GetDstNodeIDs()),
-		mlog.Int64s("segments", req.GetSealedSegmentIDs()))
-
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to load balance"
-		mlog.Warn(ctx, msg, mlog.Err(err))
-		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
+		return merr.Status(err), nil
 	}
-
-	// Verify request
 	if len(req.GetSourceNodeIDs()) != 1 {
-		err := merr.WrapErrParameterInvalid("only 1 source node", fmt.Sprintf("%d source nodes", len(req.GetSourceNodeIDs())))
-		msg := "source nodes can only contain 1 node"
-		mlog.Warn(ctx, msg, mlog.Int("source-nodes-num", len(req.GetSourceNodeIDs())))
-		return merr.Status(err), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("only 1 source node is allowed")), nil
 	}
-	if s.meta.CalculateLoadPercentage(ctx, req.GetCollectionID()) < 100 {
-		err := merr.WrapErrCollectionNotFullyLoaded(req.GetCollectionID())
-		msg := "can't balance segments of not fully loaded collection"
-		mlog.Warn(ctx, msg)
-		return merr.Status(err), nil
-	}
-	srcNode := req.GetSourceNodeIDs()[0]
-	replica := s.meta.GetByCollectionAndNode(ctx, req.GetCollectionID(), srcNode)
-	if replica == nil || !replica.ContainRWNode(srcNode) {
-		err := merr.WrapErrNodeNotFound(srcNode, fmt.Sprintf("source node not found in any replica of collection %d", req.GetCollectionID()))
-		msg := "source node not found in any replica"
-		mlog.Warn(ctx, msg)
-		return merr.Status(err), nil
-	}
-	if err := s.isStoppingNode(ctx, srcNode); err != nil {
-		return merr.Status(merr.Wrapf(err, "can't balance, because the source node[%d] is invalid", srcNode)), nil
-	}
-
-	// when no dst node specified, default to use all other nodes in same
-	dstNodeSet := typeutil.NewUniqueSet()
-	if len(req.GetDstNodeIDs()) == 0 {
-		dstNodeSet.Insert(replica.GetRWNodes()...)
-	} else {
-		for _, dstNode := range req.GetDstNodeIDs() {
-			if !replica.Contains(dstNode) {
-				err := merr.WrapErrNodeNotFound(dstNode, "destination node not found in the same replica")
-				mlog.Warn(context.TODO(), "failed to balance to the destination node", mlog.Err(err))
-				return merr.Status(err), nil
-			}
-			dstNodeSet.Insert(dstNode)
-		}
-	}
-
-	// check whether dstNode is healthy
-	for dstNode := range dstNodeSet {
-		if err := s.isStoppingNode(ctx, dstNode); err != nil {
-			return merr.Status(merr.Wrapf(err, "can't balance, because the destination node[%d] is invalid", dstNode)), nil
-		}
-	}
-
-	// check sealed segment list
-	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(req.GetCollectionID()), meta.WithNodeID(srcNode))
-	segmentsMap := lo.SliceToMap(segments, func(s *meta.Segment) (int64, *meta.Segment) {
-		return s.GetID(), s
-	})
-
-	toBalance := typeutil.NewSet[*meta.Segment]()
-	if len(req.GetSealedSegmentIDs()) == 0 {
-		toBalance.Insert(segments...)
-	} else {
-		// check whether sealed segment exist
-		for _, segmentID := range req.GetSealedSegmentIDs() {
-			segment, ok := segmentsMap[segmentID]
-			if !ok {
-				err := merr.WrapErrSegmentNotFound(segmentID, "segment not found in source node")
-				return merr.Status(err), nil
-			}
-
-			// Only balance segments in targets
-			existInTarget := s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
-			if !existInTarget {
-				mlog.Info(context.TODO(), "segment doesn't exist in current target, skip it", mlog.Int64("segmentID", segmentID))
-				continue
-			}
-			toBalance.Insert(segment)
-		}
-	}
-
-	err := s.balanceSegments(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), true, false)
-	if err != nil {
-		msg := "failed to balance segments"
-		mlog.Warn(ctx, msg, mlog.Err(err))
-		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
-	}
-
-	return merr.Success(), nil
+	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	err := qvresource.Resource().Balance(ctx, req.GetCollectionID(), req.GetSourceNodeIDs()[0], req.GetDstNodeIDs(), req.GetSealedSegmentIDs())
+	return merr.Status(err), nil
 }
 
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
@@ -720,30 +639,34 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 }
 
 func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	mlog.Info(context.TODO(), "get replicas request received", mlog.Bool("with-shard-nodes", req.GetWithShardNodes()))
-
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to get replicas"
-		mlog.Warn(ctx, msg, mlog.Err(err))
-		return &milvuspb.GetReplicasResponse{
-			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
-		}, nil
+		return &milvuspb.GetReplicasResponse{Status: merr.Status(err)}, nil
 	}
-
-	resp := &milvuspb.GetReplicasResponse{
-		Status:   merr.Success(),
-		Replicas: make([]*milvuspb.ReplicaInfo, 0),
+	// QueryViews use the WAL owner for planning, not a QueryNode delegator.
+	assignments, err := s.qviewsRuntime.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+	if err != nil {
+		return &milvuspb.GetReplicasResponse{Status: merr.Status(err)}, nil
 	}
-
-	replicas := s.meta.GetByCollection(ctx, req.GetCollectionID())
-	if len(replicas) == 0 {
-		return resp, nil
+	replicas, err := qvresource.Resource().Replicas(ctx, req.GetCollectionID(), req.GetWithShardNodes())
+	if err != nil {
+		return &milvuspb.GetReplicasResponse{Status: merr.Status(err)}, nil
 	}
-
 	for _, replica := range replicas {
-		resp.Replicas = append(resp.Replicas, s.fillReplicaInfo(ctx, replica, req.GetWithShardNodes()))
+		for _, shard := range replica.ShardReplicas {
+			for _, assignment := range assignments.Assignments {
+				if _, ok := assignment.Channels[funcutil.ToPhysicalChannel(shard.DmChannelName)]; !ok {
+					continue
+				}
+				shard.LeaderID, shard.LeaderAddr = assignment.NodeInfo.ServerID, assignment.NodeInfo.Address
+				replica.NodeIds = append(replica.NodeIds, shard.LeaderID)
+				shard.NodeIds = append(shard.NodeIds, shard.LeaderID)
+				break
+			}
+		}
+		slices.Sort(replica.NodeIds)
+		replica.NodeIds = slices.Compact(replica.NodeIds)
 	}
-	return resp, nil
+	return &milvuspb.GetReplicasResponse{Status: merr.Success(), Replicas: replicas}, nil
 }
 
 func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {

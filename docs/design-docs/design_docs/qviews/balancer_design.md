@@ -205,6 +205,46 @@ with a missing/unready DataView waits or retries, rather than releasing views.
 The full hook, replay, and lock contracts are in
 [Balancer Cache](balancer_cache.md#5-source-hooks-and-publication).
 
+#### Management APIs
+
+The existing `GetReplicas` and `LoadBalance` RPCs remain available. Their
+implementations use the package-level Coordinator QueryView resources, not the
+legacy replica metadata, current target, segment distribution, or task scheduler.
+
+`GetReplicas` reports all replica identities from the current LoadConfig. QN
+ownership comes from the Balancer's retained replica layout; serving shard nodes
+come from the latest Up placements. A configured shard without an Up view is not
+advertised as serving. During handoff, a serving node outside the new target
+remains visible until its Up placement retires. The shard leader fields identify
+the current primary WAL owner (SN), not a QN delegator. As in the existing API,
+replica node lists include leaders; QN migration eligibility is determined from
+the QN layout separately. Configuration identity is rechecked after the snapshot,
+including release/reload with identical configuration content.
+
+`LoadBalance` requires complete current-config shard coverage. It validates the
+source QN, destination QNs in the same replica target, and requested segments in
+the source's Up placement before accepting any replacement views. An omitted
+destination list selects other eligible QNs of that replica; an omitted segment
+list selects all source segments. An ongoing handoff or stale layout returns a
+retriable error instead of overriding newer work.
+
+Manual placement is serialized with automatic reconciliation and uses the same
+`ShardViewManager.AddPreparing` lifecycle. It preserves the source view's data,
+schema, load configuration, Manifest identities and transform cursors, changing
+only requested segment assignments. The normal Preparing/Up/Down protocol keeps
+old service and references until handoff. Load/release is serialized with view
+acceptance through the collection config lock; the lock is released before
+waiting for workers.
+
+The RPC remains synchronous: success requires an Up view at least as new as
+each accepted migration and the requested destination assignments. A release,
+configuration change, failed preparation or superseding incompatible placement
+cannot report success. Waiting subscribes before acceptance and rechecks after
+reading state to avoid lost notifications. The request deadline and existing
+segment-task timeout bound the wait. Timeout does not roll back accepted views;
+multi-shard application is not an atomic transaction. Manual placement is a
+one-time operation, not a permanent constraint on later automatic balancing.
+
 ### 2.2 BalancePolicy
 
 Policy retains the batch algorithm but takes a read-only cache interface:

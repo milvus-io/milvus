@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // LoadConfigStore persists and serves the per-collection desired load state.
@@ -333,6 +334,17 @@ func (s *LoadConfigStore) GetConfigWithVersion(collectionID int64) (*LoadConfig,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.configs[collectionID], s.versions[collectionID]
+}
+
+// WithCurrentConfig serializes acceptance of a management operation with
+// load/release. The callback must not mutate this store or wait for workers.
+func (s *LoadConfigStore) WithCurrentConfig(cfg *LoadConfig, accept func() error) error {
+	s.collectionLocks.Lock(cfg.CollectionID)
+	defer s.collectionLocks.Unlock(cfg.CollectionID)
+	if s.GetConfig(cfg.CollectionID) != cfg {
+		return merr.WrapErrServiceUnavailableMsg("load configuration changed during management operation")
+	}
+	return accept()
 }
 
 // LoadConfigListener receives immutable committed configs and their stable content
