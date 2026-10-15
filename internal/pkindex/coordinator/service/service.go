@@ -26,8 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifestmanager"
-	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -38,7 +37,7 @@ import (
 // server before its manager exists; it answers ServiceNotReady until
 // SetManager is called.
 type Service struct {
-	mgr atomic.Pointer[manifestmanager.Manager]
+	mgr atomic.Pointer[manifest.Manager]
 }
 
 var _ pkindexpb.PKIndexCoordServiceServer = (*Service)(nil)
@@ -47,9 +46,9 @@ var _ pkindexpb.PKIndexCoordServiceServer = (*Service)(nil)
 func New() *Service { return &Service{} }
 
 // SetManager sets the manager that serves the requests.
-func (s *Service) SetManager(m *manifestmanager.Manager) { s.mgr.Store(m) }
+func (s *Service) SetManager(m *manifest.Manager) { s.mgr.Store(m) }
 
-func (s *Service) manager() (*manifestmanager.Manager, error) {
+func (s *Service) manager() (*manifest.Manager, error) {
 	if m := s.mgr.Load(); m != nil {
 		return m, nil
 	}
@@ -84,12 +83,7 @@ func (s *Service) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushReq
 	if err != nil {
 		return &pkindexpb.CommitFlushResponse{Status: merr.Status(err)}, nil
 	}
-	got, err := m.CommitFlush(ctx, req.GetCollectionId(), req.GetVchannel(), manifest.Flush{
-		PKDataType:         req.GetPkDataType(),
-		PChannelTerm:       req.GetPchannelTerm(),
-		AddSSTs:            req.GetAddSsts(),
-		CheckpointTimeTick: req.GetCheckpointTimeTick(),
-	})
+	got, err := m.CommitFlush(ctx, req)
 	if err != nil {
 		return &pkindexpb.CommitFlushResponse{Status: merr.Status(toMerr(err, req.GetVchannel()))}, nil
 	}
@@ -127,20 +121,20 @@ func (s *Service) GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRe
 
 // validateRecoveryTargets checks that there are 1 to maxRecoveryTargets
 // targets, each valid and none repeated, and returns them.
-func validateRecoveryTargets(in []*pkindexpb.ManifestTarget) ([]manifestmanager.Target, error) {
+func validateRecoveryTargets(in []*pkindexpb.ManifestTarget) ([]manifest.Target, error) {
 	if len(in) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("targets must not be empty")
 	}
 	if len(in) > maxRecoveryTargets {
 		return nil, merr.WrapErrParameterInvalidMsg("at most %d targets in one request, got %d", maxRecoveryTargets, len(in))
 	}
-	targets := make([]manifestmanager.Target, 0, len(in))
-	seen := make(map[manifestmanager.Target]struct{}, len(in))
+	targets := make([]manifest.Target, 0, len(in))
+	seen := make(map[manifest.Target]struct{}, len(in))
 	for _, t := range in {
 		if err := validateTarget(t.GetCollectionId(), t.GetVchannel()); err != nil {
 			return nil, err
 		}
-		target := manifestmanager.Target{CollectionID: t.GetCollectionId(), VChannel: t.GetVchannel()}
+		target := manifest.Target{CollectionID: t.GetCollectionId(), VChannel: t.GetVchannel()}
 		if _, ok := seen[target]; ok {
 			return nil, merr.WrapErrParameterInvalidMsg("target collection %d vchannel %q is repeated", target.CollectionID, target.VChannel)
 		}

@@ -27,14 +27,14 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifestmanager"
-	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex/core/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
-var testLayout = manifest.Layout{RootPath: "files"}
+const testRoot = "files"
 
 var testConfig = Config{Interval: time.Minute, Grace: time.Hour, RetainVersions: 2, RetainDuration: time.Hour}
 
@@ -42,9 +42,9 @@ var testConfig = Config{Interval: time.Minute, Grace: time.Hour, RetainVersions:
 // versions and a clock that the test moves.
 type env struct {
 	now      time.Time
-	pointers *manifestmanager.FakeMetaStore
+	pointers *manifest.FakeMetaStore
 	store    *manifest.FakeObjectStore
-	mgr      *manifestmanager.Manager
+	mgr      *manifest.Manager
 	gc       *GC
 	// inFlight is the in-flight compaction output hook of the GC; nil means none.
 	inFlight InFlightOutputs
@@ -52,11 +52,11 @@ type env struct {
 
 func newEnv(t *testing.T, cfg Config) *env {
 	e := &env{now: time.Unix(1_000_000, 0)}
-	e.pointers = manifestmanager.NewFakeMetaStore()
+	e.pointers = manifest.NewFakeMetaStore()
 	e.store = manifest.NewFakeObjectStore()
 	e.store.Now = func() time.Time { return e.now }
-	e.mgr = manifestmanager.New(e.pointers, e.store, testLayout)
-	g, err := New(e.pointers, e.store, testLayout, cfg, func(ctx context.Context, collectionID int64, vchannel string) ([]int64, error) {
+	e.mgr = manifest.New(e.pointers, e.store, testRoot)
+	g, err := New(e.pointers, e.store, testRoot, cfg, func(ctx context.Context, collectionID int64, vchannel string) ([]int64, error) {
 		if e.inFlight == nil {
 			return nil, nil
 		}
@@ -76,7 +76,7 @@ func (e *env) claim(t *testing.T, vchannel string) {
 }
 
 func sstKey(vchannel string, id int64) string {
-	return manifest.SSTKey(testLayout.SSTBasePath(1, vchannel), id)
+	return objpath.SSTKey(objpath.SSTBasePath(testRoot, 1, vchannel), id)
 }
 
 func refs(ids ...int64) []*pkindexpb.SSTRef {
@@ -93,8 +93,11 @@ func (e *env) upload(t *testing.T, vchannel string, ids ...int64) {
 	}
 }
 
-func flushWith(t *testing.T, m *manifestmanager.Manager, vchannel string, tick uint64, ids ...int64) {
-	_, err := m.CommitFlush(context.Background(), 1, vchannel, manifest.Flush{PChannelTerm: 1, PKDataType: schemapb.DataType_Int64, AddSSTs: refs(ids...), CheckpointTimeTick: tick})
+func flushWith(t *testing.T, m *manifest.Manager, vchannel string, tick uint64, ids ...int64) {
+	_, err := m.CommitFlush(context.Background(), &pkindexpb.CommitFlushRequest{
+		CollectionId: 1, Vchannel: vchannel, PchannelTerm: 1,
+		PkDataType: schemapb.DataType_Int64, AddSsts: refs(ids...), CheckpointTimeTick: tick,
+	})
 	require.NoError(t, err)
 }
 
@@ -110,7 +113,7 @@ func (e *env) has(key string) bool {
 // bodies returns the manifest body keys of a vchannel.
 func (e *env) bodies(t *testing.T, vchannel string) []string {
 	keys := []string{}
-	err := e.store.Walk(context.Background(), testLayout.ManifestDir(1, vchannel)+"/", func(k string, _ time.Time) bool {
+	err := e.store.Walk(context.Background(), objpath.ManifestDir(testRoot, 1, vchannel)+"/", func(k string, _ time.Time) bool {
 		keys = append(keys, k)
 		return true
 	})
@@ -126,6 +129,15 @@ func (e *env) pointer(t *testing.T, vchannel string) *pkindexpb.ManifestPointer 
 	p := &pkindexpb.ManifestPointer{}
 	require.NoError(t, proto.Unmarshal([]byte(v), p))
 	return p
+}
+
+// current returns the current manifest of a vchannel from the stores.
+func (e *env) current(t *testing.T, vchannel string) *pkindexpb.Manifest {
+	b, err := e.store.Read(context.Background(), e.pointer(t, vchannel).GetBodyKey())
+	require.NoError(t, err)
+	m := &pkindexpb.Manifest{}
+	require.NoError(t, proto.Unmarshal(b, m))
+	return m
 }
 
 func (e *env) writeBody(t *testing.T, key string, m *pkindexpb.Manifest) {
@@ -174,8 +186,7 @@ func TestBodyRetention(t *testing.T) {
 	require.NoError(t, e.gc.RunOnce(ctx))
 	assert.Len(t, e.bodies(t, "v"), 2, "keeps RetainVersions bodies")
 
-	cur, _, err := e.mgr.Get(ctx, 1, "v")
-	require.NoError(t, err)
+	cur := e.current(t, "v")
 	for _, s := range cur.GetSsts() {
 		assert.True(t, e.has(sstKey("v", s.GetId())))
 	}
@@ -196,7 +207,7 @@ func TestBodyRetentionKeepsRecentBodies(t *testing.T) {
 	require.NoError(t, e.gc.RunOnce(ctx))
 	got := map[int64]bool{}
 	for _, k := range e.bodies(t, "v") {
-		v, ok := manifest.ParseManifestBodyKey(testLayout.ManifestDir(1, "v"), k)
+		v, ok := objpath.ParseManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), k)
 		require.True(t, ok)
 		got[v] = true
 	}
@@ -209,7 +220,7 @@ func TestKeepsCASLosersWithinRetainedVersions(t *testing.T) {
 	e.claim(t, "v")
 	e.flush(t, "v", 10, 1)
 	e.upload(t, "v", 9)
-	loser := testLayout.ManifestBodyKey(1, "v", 2, "loser")
+	loser := objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), 2, "loser")
 	e.writeBody(t, loser, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
 	e.now = e.now.Add(3 * time.Hour)
 
@@ -226,14 +237,17 @@ func TestGCDoesNotDependOnManagerCache(t *testing.T) {
 	e.flush(t, "v", 10, 1) // version 2, in the cache of e.mgr
 
 	// another coordinator commits newer versions; the cache of e.mgr is stale
-	other := manifestmanager.New(e.pointers, e.store, testLayout)
+	other := manifest.New(e.pointers, e.store, testRoot)
 	flushWith(t, other, "v", 20, 2) // version 3
 	// version 4
 	_, err := other.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
 	require.NoError(t, err)
 	flushWith(t, other, "v", 30, 4) // version 5
 	flushWith(t, other, "v", 40, 5) // version 6
-	stale, _, err := e.mgr.Get(ctx, 1, "v")
+	// a retry of the applied flush at checkpoint 10 returns the cached version
+	stale, err := e.mgr.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{
+		CollectionId: 1, Vchannel: "v", PchannelTerm: 1, PkDataType: schemapb.DataType_Int64, CheckpointTimeTick: 10,
+	})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, stale.GetVersion())
 
@@ -254,10 +268,10 @@ func TestOrphanBodyAfterGrace(t *testing.T) {
 	e.claim(t, "v")
 	e.upload(t, "v", 9, 10)
 	// bodies of commits that never swapped the pointer
-	oldOrphan := testLayout.ManifestBodyKey(1, "v", 2, "old")
+	oldOrphan := objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), 2, "old")
 	e.writeBody(t, oldOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
 	e.now = e.now.Add(2 * time.Hour)
-	youngOrphan := testLayout.ManifestBodyKey(1, "v", 2, "young")
+	youngOrphan := objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), 2, "young")
 	e.writeBody(t, youngOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(10)})
 	e.now = e.now.Add(10 * time.Minute)
 
@@ -340,7 +354,7 @@ func TestUndecodableRetainedBodySkipsSSTSweep(t *testing.T) {
 	e.upload(t, "v", 1, 2, 9)
 	var v1, v2 string
 	for _, k := range e.bodies(t, "v") {
-		switch v, _ := manifest.ParseManifestBodyKey(testLayout.ManifestDir(1, "v"), k); v {
+		switch v, _ := objpath.ParseManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), k); v {
 		case 1:
 			v1 = k
 		case 2:
@@ -361,10 +375,10 @@ func TestForeignObjectsAreKept(t *testing.T) {
 	ctx := context.Background()
 	e.claim(t, "v")
 	foreign := []string{
-		testLayout.SSTBasePath(1, "v") + "/x.tmp",
-		testLayout.SSTBasePath(1, "v") + "/sub/7.sst",
-		testLayout.ManifestDir(1, "v") + "/x.tmp",
-		testLayout.ManifestDir(1, "v") + "/1.pb",
+		objpath.SSTBasePath(testRoot, 1, "v") + "/x.tmp",
+		objpath.SSTBasePath(testRoot, 1, "v") + "/sub/7.sst",
+		objpath.ManifestDir(testRoot, 1, "v") + "/x.tmp",
+		objpath.ManifestDir(testRoot, 1, "v") + "/1.pb",
 	}
 	for _, k := range foreign {
 		require.NoError(t, e.store.Write(ctx, k, []byte("x")))
@@ -416,14 +430,14 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"retain duration": {Interval: time.Minute, Grace: time.Hour, RetainDuration: -1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := New(manifestmanager.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testLayout, cfg, nil)
+			_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot, cfg, nil)
 			assert.True(t, errors.Is(err, ErrInvalidConfig))
 		})
 	}
 }
 
 func TestNewAcceptsMinGrace(t *testing.T) {
-	_, err := New(manifestmanager.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testLayout,
+	_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot,
 		Config{Interval: time.Minute, Grace: MinGrace}, nil)
 	assert.NoError(t, err)
 }
@@ -466,15 +480,15 @@ func TestLayoutMismatchSkipsVChannel(t *testing.T) {
 	// or sst_base_path is not the layout's
 	cases := map[string]func(m *pkindexpb.Manifest) string{
 		"body key outside the manifest dir": func(m *pkindexpb.Manifest) string {
-			return testLayout.ManifestDir(1, "other") + "/" + "9-x.pb"
+			return objpath.ManifestDir(testRoot, 1, "other") + "/" + "9-x.pb"
 		},
 		"sst base path differs": func(m *pkindexpb.Manifest) string {
-			m.SstBasePath = testLayout.SSTBasePath(1, "other")
-			return testLayout.ManifestBodyKey(1, "bad", m.GetVersion(), "x")
+			m.SstBasePath = objpath.SSTBasePath(testRoot, 1, "other")
+			return objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "bad"), m.GetVersion(), "x")
 		},
 		"empty sst base path": func(m *pkindexpb.Manifest) string {
 			m.SstBasePath = ""
-			return testLayout.ManifestBodyKey(1, "bad", m.GetVersion(), "x")
+			return objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "bad"), m.GetVersion(), "x")
 		},
 	}
 	for name, change := range cases {
@@ -574,7 +588,7 @@ func TestRetainedBodyReadFailureSkipsSSTSweep(t *testing.T) {
 	e.upload(t, "v", 1, 2, 9)
 	var v1, v2 string
 	for _, k := range e.bodies(t, "v") {
-		switch v, _ := manifest.ParseManifestBodyKey(testLayout.ManifestDir(1, "v"), k); v {
+		switch v, _ := objpath.ParseManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), k); v {
 		case 1:
 			v1 = k
 		case 2:
