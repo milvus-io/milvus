@@ -143,7 +143,7 @@ Recovery claims a pchannel once each time it opens the pchannel, with
 `ClaimPChannel(pchannel, pchannel_term)`. One claim covers all vchannels of the
 pchannel. The claim does not change any manifest. The service rejects a name
 that is not a pchannel name, for example a vchannel name, with
-`ParameterInvalid`: a claim on such a name would create a record that no flush
+`ServiceInternal`: a claim on such a name would create a record that no flush
 checks.
 
 | Condition | Result |
@@ -339,7 +339,7 @@ reads the body from object storage.
   default limit of operations in one etcd transaction. A failed batch read
   fails the entries of that batch only.
 - A request has 1 to 10000 targets without duplicates. Other requests get
-  `ParameterInvalid`. A caller with more vchannels sends more requests.
+  `ServiceInternal`. A caller with more vchannels sends more requests.
 - The coordinator reads only the meta kv, not object storage. The body is
   immutable: its key has a UUID and it is never overwritten. GC keeps the
   current body, the newest versions and the bodies of the last
@@ -384,13 +384,13 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | Error | Source | merr code | Retryable |
 |---|---|---|---|
 | Service has no manager yet | Service start | `ServiceNotReady` | Yes |
-| `collection_id` is not positive, or `vchannel` is empty, `.`, `..`, or contains `/` | Request check, `CommitFlush`, each target of `GetRecoveryManifests` | `ParameterInvalid` | No (caller bug) |
-| `pchannel` is empty, `.`, `..`, contains `/`, or is not a pchannel name | Request check, `ClaimPChannel` | `ParameterInvalid` | No (caller bug) |
-| No targets, more than 10000 targets, or a repeated target | Request check, `GetRecoveryManifests` | `ParameterInvalid` | No (caller bug) |
-| `pchannel_term` is not positive | Request check, `ClaimPChannel`, `CommitFlush` | `ParameterInvalid` | No (caller bug) |
-| The `vchannel` name has no pchannel part | Request check, `CommitFlush` | `ParameterInvalid` | No (caller bug) |
-| `pk_data_type` is not `Int64` or `VarChar` | Request check, `CommitFlush` | `ParameterInvalid` | No (caller bug) |
-| `checkpoint_time_tick` is 0 | Request check, `CommitFlush` | `ParameterInvalid` | No (caller bug) |
+| `collection_id` is not positive, or `vchannel` is empty, `.`, `..`, or contains `/` | Request check, `CommitFlush`, each target of `GetRecoveryManifests` | `ServiceInternal` | No (caller bug) |
+| `pchannel` is empty, `.`, `..`, contains `/`, or is not a pchannel name | Request check, `ClaimPChannel` | `ServiceInternal` | No (caller bug) |
+| No targets, more than 10000 targets, or a repeated target | Request check, `GetRecoveryManifests` | `ServiceInternal` | No (caller bug) |
+| `pchannel_term` is not positive | Request check, `ClaimPChannel`, `CommitFlush` | `ServiceInternal` | No (caller bug) |
+| The `vchannel` name has no pchannel part | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
+| `pk_data_type` is not `Int64` or `VarChar` | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
+| `checkpoint_time_tick` is 0 | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `ErrFenced` | Claim, flush | `ChannelNotAvailable` | No. Stop the writes on the pchannel |
 | Meta kv or object storage failure (`ErrUnavailable`) | Load, write, read-back, walk | `ServiceUnavailable` | Yes |
 | Object storage failure that a retry does not fix: permission denied, bucket not found, invalid credentials, entity too large | Load, write | Its own code (`IoPermissionDenied`, `IoBucketNotFound`, `IoInvalidCredentials`, `IoEntityTooLarge`) | No |
@@ -413,6 +413,9 @@ Notes:
 - `GetRecoveryManifests` returns a load error of one target in the status of
   its entry, with the same codes. The status of the response covers only the
   request check and the service state.
+- The requests come from streaming nodes, not from users. A request that
+  fails a request check is a caller bug or a version mismatch, so it gets
+  `ServiceInternal`, not `ParameterInvalid`, which marks a user input error.
 - The edit errors are caller bugs. A correct caller does not send them.
   `ErrNotClaimed` from a flush means that the caller did not claim the
   pchannel with its term first.

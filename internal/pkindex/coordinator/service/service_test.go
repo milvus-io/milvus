@@ -162,7 +162,7 @@ func TestRecoveryManifestsInvalidTargets(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			resp, err := s.GetRecoveryManifests(ctx, req)
 			require.NoError(t, err)
-			assertCode(t, resp.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
+			assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 			assert.Empty(t, resp.GetEntries())
 		})
 	}
@@ -362,14 +362,14 @@ func TestInvalidTarget(t *testing.T) {
 			req.CollectionId = c.collectionID
 			flush, err := s.CommitFlush(ctx, req)
 			require.NoError(t, err)
-			assertCode(t, flush.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
+			assertCode(t, flush.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 
 			get, err := s.GetRecoveryManifests(ctx, &pkindexpb.GetRecoveryManifestsRequest{Targets: []*pkindexpb.ManifestTarget{
 				{CollectionId: 1, Vchannel: vch},
 				{CollectionId: c.collectionID, Vchannel: c.vchannel},
 			}})
 			require.NoError(t, err)
-			assertCode(t, get.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
+			assertCode(t, get.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 		})
 	}
 }
@@ -389,7 +389,7 @@ func TestInvalidClaim(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			resp, err := s.ClaimPChannel(context.Background(), req)
 			require.NoError(t, err)
-			assertCode(t, resp.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
+			assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 		})
 	}
 }
@@ -413,7 +413,7 @@ func TestInvalidFlush(t *testing.T) {
 			change(req)
 			resp, err := s.CommitFlush(context.Background(), req)
 			require.NoError(t, err)
-			assertCode(t, resp.GetStatus(), merr.Code(merr.ErrParameterInvalid), false)
+			assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 		})
 	}
 }
