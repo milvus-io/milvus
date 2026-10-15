@@ -791,6 +791,27 @@ func TestQueryTask_all(t *testing.T) {
 	})
 }
 
+func TestTranslateOrderByFieldsCompletesGroupOrder(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 201, Name: "region", DataType: schemapb.DataType_Int64},
+		{FieldID: 202, Name: "event_time", DataType: schemapb.DataType_Timestamptz},
+	}}
+	fields, err := translateOrderByFields(
+		[]string{"region:desc:nulls_last"}, []int64{201, 202}, schema)
+	require.NoError(t, err)
+	require.Len(t, fields, 2)
+	assert.Equal(t, int64(201), fields[0].GetFieldId())
+	assert.False(t, fields[0].GetAscending())
+	assert.False(t, fields[0].GetNullsFirst())
+	assert.Equal(t, int64(202), fields[1].GetFieldId())
+	assert.True(t, fields[1].GetAscending())
+	assert.False(t, fields[1].GetNullsFirst())
+
+	fields, err = translateOrderByFields(nil, []int64{201, 202}, schema)
+	require.NoError(t, err)
+	assert.Empty(t, fields)
+}
+
 func Test_translateToOutputFieldIDs(t *testing.T) {
 	type testCases struct {
 		name          string

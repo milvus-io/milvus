@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -395,6 +396,106 @@ func TestNewQueryPipeline_GroupByOrderBy(t *testing.T) {
 	assert.NotNil(t, result)
 	// After agg remap: should have user's output_fields [val, count(*)]
 	assert.Equal(t, 2, len(result.GetFieldsData()))
+}
+
+func TestGroupByLimitPreservesAggregateAcrossWorkers(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 201, Name: "region", DataType: schemapb.DataType_Int64},
+		{FieldID: 202, Name: "city", DataType: schemapb.DataType_Int64},
+		{FieldID: 203, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	groupBy := []int64{201, 202}
+	aggregates := []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 203}}
+	sumAggs, err := agg.NewAggregate("sum", 203, "sum(value)", schemapb.DataType_Int64)
+	require.NoError(t, err)
+	outputMap, err := agg.NewAggregationFieldMap(
+		[]string{"region", "city", "sum(value)"},
+		[]string{"region", "city"}, sumAggs,
+	)
+	require.NoError(t, err)
+
+	partial := func(cities ...int64) *internalpb.RetrieveResults {
+		regions := make([]int64, len(cities))
+		values := make([]int64, len(cities))
+		for i := range cities {
+			regions[i], values[i] = 1, 1
+		}
+		return &internalpb.RetrieveResults{FieldsData: []*schemapb.FieldData{
+			makeTestInt64Field(201, "region", regions),
+			makeTestInt64Field(202, "city", cities),
+			makeTestInt64Field(203, "sum(value)", values),
+		}}
+	}
+	partialOrder := []*orderby.OrderByField{
+		orderby.NewOrderByField(201, "region", schemapb.DataType_Int64),
+	}
+	completeOrder := []*orderby.OrderByField{
+		partialOrder[0],
+		orderby.NewOrderByField(202, "city", schemapb.DataType_Int64),
+	}
+
+	for _, tc := range []struct {
+		name    string
+		orderBy []*orderby.OrderByField
+		workers [][]*internalpb.RetrieveResults
+	}{
+		{
+			name: "without order by",
+			workers: [][]*internalpb.RetrieveResults{
+				{partial(2), partial(1)},
+				{partial(1), partial(2)},
+			},
+		},
+		{
+			name:    "order by subset of group keys",
+			orderBy: partialOrder,
+			workers: [][]*internalpb.RetrieveResults{
+				{partial(2, 1)},
+				{partial(1, 2)},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workerResults := make([]*internalpb.RetrieveResults, len(tc.workers))
+			for i, segments := range tc.workers {
+				worker, err := queryutil.BuildQueryReducePipeline(
+					"worker", schema, 1, reduce.IReduceNoOrder,
+					tc.orderBy, groupBy, aggregates, 0,
+				)
+				require.NoError(t, err)
+				msg, err := worker.Run(context.Background(), nil,
+					queryutil.OpMsg{queryutil.PipelineInput: segments})
+				require.NoError(t, err)
+				workerResults[i] = msg[queryutil.PipelineOutput].(*internalpb.RetrieveResults)
+			}
+
+			proxyOrder := tc.orderBy
+			if len(proxyOrder) > 0 {
+				proxyOrder = completeOrder // QueryTask passes the order completed during plan creation.
+			}
+			proxy, err := NewQueryPipeline(schema, 1, 0, reduce.IReduceNoOrder,
+				proxyOrder, groupBy, aggregates, outputMap, nil)
+			require.NoError(t, err)
+			result, err := proxy.Execute(context.Background(), workerResults)
+			require.NoError(t, err)
+			require.Len(t, result.GetFieldsData(), 3)
+			require.Equal(t, []int64{2}, result.GetFieldsData()[2].GetScalars().GetLongData().GetData())
+			if len(tc.orderBy) > 0 {
+				require.Equal(t, []int64{1}, result.GetFieldsData()[1].GetScalars().GetLongData().GetData())
+			}
+		})
+	}
+
+	// Proxy must apply the same tie order even when a worker returns both
+	// groups; otherwise it can select a group pruned on another worker.
+	proxy, err := NewQueryPipeline(schema, 1, 0, reduce.IReduceNoOrder,
+		completeOrder,
+		groupBy, aggregates, outputMap, nil)
+	require.NoError(t, err)
+	result, err := proxy.Execute(context.Background(), []*internalpb.RetrieveResults{partial(2, 1)})
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, result.GetFieldsData()[1].GetScalars().GetLongData().GetData())
 }
 
 // =========================================================================
