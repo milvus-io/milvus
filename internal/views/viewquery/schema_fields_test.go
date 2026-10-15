@@ -57,3 +57,22 @@ func TestSchemaBindingRejectsMVCCSchemaAndFieldChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestRequeryDependenciesAreValidatedWithoutChangingSearchProjection(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, IsPrimaryKey: true}, {FieldID: 101}, {FieldID: 102},
+	}, Functions: []*schemapb.FunctionSchema{{OutputFieldIds: []int64{102}, InputFieldIds: []int64{103}}}}
+	search := &internalpb.SearchRequest{SchemaVersion: 1, OutputFieldsId: []int64{101}}
+	fields, err := ReferencedSchemaFields(search, schema, 102)
+	require.NoError(t, err)
+	require.Equal(t, []int64{100, 101, 102, 103}, fields)
+	require.Equal(t, []int64{101}, search.OutputFieldsId)
+	mvcc := &viewpb.QueryPlanMVCC{
+		GrowingTimetick: 20, TransformingTimetick: 10,
+		SchemaBinding: &viewpb.QuerySchemaBinding{SchemaVersion: 1, GrowingTimetick: 20, TransformingTimetick: 10, FieldIds: fields},
+	}
+	requery := &internalpb.RetrieveRequest{SchemaVersion: 1, OutputFieldsId: []int64{101, 102}}
+	require.NoError(t, ValidateSchemaBinding(requery, mvcc, schema))
+	requery.OutputFieldsId = append(requery.OutputFieldsId, 104)
+	require.Error(t, ValidateSchemaBinding(requery, mvcc, schema))
+}

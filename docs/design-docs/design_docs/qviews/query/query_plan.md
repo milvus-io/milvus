@@ -178,6 +178,31 @@ defined by [TransformLog View Module](../../wal/transform_log_view_module.md).
 Future Update and DeleteByExpr messages should advance the transforming wait
 position through TransformLog payload entries.
 
+### Complete-prefix certificates for CAS reads
+
+`read_proof_after` requests a new enough complete WAL prefix while keeping the
+two execution frontiers distinct. It is only valid with consistency-based MVCC.
+The TimeTick sync operator publishes a read-certificate projection after its
+successful ordered ACK batch has been published to WAB. The projection consumes
+those exact successful appends, excludes transaction bodies until CommitTxn,
+and captures its Growing/Transform frontiers and confirmation TimeTick R under
+one lock. Append-time frontiers may include later writes and are not used to
+construct this certificate. Failed publication cannot certify a prefix.
+
+Normal idle TimeTicks advance only R in this projection, not the execution
+frontiers. Planning triggers the existing Inspector sync and waits on publication
+notifications for a prefix at or after the requested minimum. No consumer-side
+barrier, polling, or forced TransformLog progress is introduced. Recovery seeds
+per-channel projections; a new owner must publish its own prefix before serving
+a certificate. Query lifetime cancellation also cancels the wait. WAL retirement
+cancellation is returned as retryable `OnShutdown`; an actual caller cancellation
+remains cancellation. The client then reacquires the plan and certificate from
+the replacement owner.
+
+The plan carries R as `QueryPlanMVCC.read_proof_timetick`. SN/QN still wait and
+execute at the separately captured Growing/Transform frontiers. CAS uses R to
+validate subsequent writes within the existing retained conflict history.
+
 ## 6. Work Node Construction
 
 `QueryPlan.work_nodes` is a wire-level plan field consumed by query client for

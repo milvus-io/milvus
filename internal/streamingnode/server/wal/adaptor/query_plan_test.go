@@ -2,12 +2,14 @@ package adaptor
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -19,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -189,38 +192,84 @@ func TestQueryPlanBarrierPreservesRequestedSnapshot(t *testing.T) {
 	})
 }
 
-func TestQueryPlanBarrierDoesNotHoldWALShutdown(t *testing.T) {
-	mockey.PatchConvey("owner cancellation releases the pending plan and lease", t, func() {
-		owner, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v", ReplicaId: 1}
-		released := make(chan struct{})
-		lease := &snview.QueryViewLease{Meta: meta, Release: func() { close(released) }}
-		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
-		entered := make(chan struct{})
-		mockey.Mock((*walAdaptorImpl).resolveQueryPlanMVCC).To(func(_ *walAdaptorImpl, ctx context.Context, _ *viewpb.GetQueryPlanRequest, _ string) (*viewpb.QueryPlanMVCC, error) {
-			close(entered)
-			<-ctx.Done()
-			return nil, ctx.Err()
-		}).Build()
-		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: owner, lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
-		done := make(chan error, 1)
-		go func() {
-			_, err := w.GetQueryPlan(t.Context(), &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 100}})
-			done <- err
-		}()
-		select {
-		case <-entered:
-		case <-time.After(time.Second):
-			t.Fatal("plan did not start waiting")
-		}
+func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
+	for _, ownerCanceled := range []bool{true, false} {
+		mockey.PatchConvey("owner cancellation releases the pending plan and lease", t, func() {
+			caller, cancelCaller := context.WithCancel(t.Context())
+			defer cancelCaller()
+			owner, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v", ReplicaId: 1}
+			released := make(chan struct{})
+			lease := &snview.QueryViewLease{Meta: meta, Release: func() { close(released) }}
+			mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+			entered := make(chan struct{})
+			mockey.Mock((*walAdaptorImpl).resolveQueryPlanMVCC).To(func(_ *walAdaptorImpl, ctx context.Context, _ *viewpb.GetQueryPlanRequest, _ string) (*viewpb.QueryPlanMVCC, error) {
+				close(entered)
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}).Build()
+			w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: owner, lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
+			done := make(chan error, 1)
+			go func() {
+				_, err := w.GetQueryPlan(caller, &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 100}})
+				done <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("plan did not start waiting")
+			}
+			if ownerCanceled {
+				cancel()
+			} else {
+				cancelCaller()
+			}
+			select {
+			case err := <-done:
+				if ownerCanceled {
+					require.True(t, viewerror.AsViewError(err).IsOnShutdown())
+					wire := viewerror.NewGRPCStatusFromViewError(viewerror.AsViewError(err)).Err()
+					require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("GetQueryPlan", wire)).IsRetryable())
+				} else {
+					require.ErrorIs(t, err, context.Canceled)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("plan kept waiting after WAL shutdown")
+			}
+			<-released
+		})
+	}
+}
+
+func TestQueryPlanReadProofKeepsDualMVCC(t *testing.T) {
+	resource.InitForTest(t)
+	mockey.PatchConvey("CAS certificate is not an executor timestamp", t, func() {
+		manager := mvcc.NewMVCCManager(0)
+		manager.ApplyRecoveryBarrier("v", 10)
+		insert := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.FormatInt(int64(message.MessageTypeInsert), 10), "_vc": "v"}).WithTimeTick(20).IntoImmutableMessage(nil)
+		tick := message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(100).IntoImmutableMessage(nil)
+		manager.PublishReadProof([]message.ImmutableMessage{insert}, tick)
+		channel := types.PChannelInfo{AccessMode: types.AccessModeRW}
+		mockey.Mock((*roWALAdaptorImpl).Channel).To(func(*roWALAdaptorImpl) types.PChannelInfo { return channel }).Build()
+		mockey.Mock(mockey.GetMethod(resource.Resource().TimeTickInspector(), "TriggerSync")).Return().Build()
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
+		req := &viewpb.GetQueryPlanRequest{ReadProofAfter: 90, Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}}
+		plan, err := w.resolveQueryPlanMVCC(t.Context(), req, "v")
+		require.NoError(t, err)
+		require.EqualValues(t, 20, plan.GrowingTimetick)
+		require.EqualValues(t, 10, plan.TransformingTimetick)
+		require.EqualValues(t, 100, plan.ReadProofTimetick)
+		req.ReadProofAfter = 200
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		select {
-		case err := <-done:
-			require.ErrorIs(t, err, context.Canceled)
-		case <-time.After(time.Second):
-			t.Fatal("plan kept waiting after WAL shutdown")
-		}
-		<-released
+		_, err = w.resolveQueryPlanMVCC(ctx, req, "v")
+		require.ErrorIs(t, err, context.Canceled)
+		channel.AccessMode = types.AccessModeRO
+		_, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
+		require.Error(t, err)
+		req.Mvcc = &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 100}
+		_, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
+		require.Error(t, err)
 	})
 }

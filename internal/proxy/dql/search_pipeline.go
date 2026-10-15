@@ -1249,11 +1249,9 @@ type requeryOperator struct {
 	node taskmodel.TaskNode
 }
 
-func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
-	pkField, err := t.schema.GetPkField()
-	if err != nil {
-		return nil, err
-	}
+// requeryOutputFields is shared by Phase 1 dependency validation and field refill.
+// These internal dependencies do not change the final user output projection.
+func (t *SearchTask) requeryOutputFields() []string {
 	outputFieldNames := typeutil.NewSet(t.translatedOutputFields...)
 	if t.GetIsAdvanced() && t.rerankMeta != nil {
 		outputFieldNames.Insert(t.rerankMeta.GetInputFieldNames()...)
@@ -1272,6 +1270,14 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		if len(highlightDynFields) > 0 {
 			outputFieldNames.Insert(highlightDynFields...)
 		}
+	}
+	return outputFieldNames.Collect()
+}
+
+func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
+	pkField, err := t.schema.GetPkField()
+	if err != nil {
+		return nil, err
 	}
 	queryChannelsNode := make(map[string]int64)
 	if t.queryChannelsNode != nil {
@@ -1293,7 +1299,7 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		queryViewPlans:     t.queryViewPlans,
 		traceCtx:           t.TraceCtx(),
 		rlsPredicate:       t.rlsPredicate,
-		outputFieldNames:   outputFieldNames.Collect(),
+		outputFieldNames:   t.requeryOutputFields(),
 		timestamp:          t.BeginTs(),
 		dbName:             dbName,
 		collectionName:     collectionName,

@@ -252,6 +252,22 @@ Complex Delete uses its allocated query timestamp. TTL uses the same fixed time.
 These entries do not pin physical Views across pages or extend historical-data
 retention. Compaction/GC history guarantees remain a separate TODO.
 
+### Partial-update read certificates
+
+Internal Partial Update keeps independent Growing and Transform execution
+frontiers. It requests `read_proof_after` at the new read task's timestamp.
+Primary WAL supplies the latest published complete prefix at or after that
+minimum, with the matching executor frontiers and `read_proof_timetick=R`.
+Proxy records R from each final successful shard plan, including empty shards,
+and passes it to existing WAL CAS checks. A missing certificate fails closed;
+Proxy never substitutes the maximum executor frontier or a later local TSO.
+
+A new CAS reread creates a new task and fresh minimum. Phase 2 retries keep the
+same plan; full replanning replaces both the read result and its certificate.
+Existing WAL owner-term, conflict-window and relative-operation retry guards
+remain in force. This mode is separate from Iterator's fixed BarrierMVCC and
+does not require either executor to advance to R.
+
 ## 8. Proxy Integration
 
 ### 8.1 Query Task
@@ -310,6 +326,13 @@ The QueryView path does not fill `queryChannelsNode` with old QueryNode leader
 information. Search requery executes Query against the retained Search plans.
 
 ## 9. Requery Behavior
+
+Before Phase 1, Proxy declares the union of all later-stage field dependencies
+through `required_field_ids`, using the same dependency collection as requery.
+This includes hidden ordering fields, rerank inputs and highlight fields; it
+does not add them to the user output projection or force eager field retrieval.
+SN expands these physical dependencies and validates them with the original
+request against schema history. Requery cannot add an undeclared field.
 
 SearchPipeline binds internal requery to the parent's schema and `ShardPlan`s.
 `Legacy().Query` with non-nil `Plans` dispatches directly to those exact work

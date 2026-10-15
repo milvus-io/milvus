@@ -27,7 +27,9 @@ type LegacyClient interface {
 }
 
 type LegacySearchRequest struct {
-	Req *internalpb.SearchRequest
+	// RequiredFieldIDs includes fields needed by later stages without fetching them now.
+	RequiredFieldIDs []int64
+	Req              *internalpb.SearchRequest
 	// MVCC, when supplied, overrides consistency-level sampling across retries.
 	MVCC *viewpb.QueryPlanMVCC
 	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
@@ -41,7 +43,9 @@ type LegacySearchResult struct {
 }
 
 type LegacyQueryRequest struct {
-	Req *internalpb.RetrieveRequest
+	// ReadProofAfter requests a WAL-certified read prefix for internal CAS reads.
+	ReadProofAfter uint64
+	Req            *internalpb.RetrieveRequest
 	// Schema is the immutable read schema used to build Req.
 	Schema *schemapb.CollectionSchema
 	// MVCC fixes the read boundary across replanning; nil samples by consistency.
@@ -111,11 +115,12 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (*L
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				VChannel:    vchannels[i],
-				Req:         req.Req,
-				MVCC:        req.MVCC,
-				BarrierMVCC: req.BarrierMVCC,
-				Reducer:     collector,
+				RequiredFieldIDs: req.RequiredFieldIDs,
+				VChannel:         vchannels[i],
+				Req:              req.Req,
+				MVCC:             req.MVCC,
+				BarrierMVCC:      req.BarrierMVCC,
+				Reducer:          collector,
 			})
 			if err != nil {
 				return err
@@ -153,11 +158,12 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (*Leg
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
-				VChannel:    vchannels[i],
-				Req:         req.Req,
-				MVCC:        req.MVCC,
-				BarrierMVCC: req.BarrierMVCC,
-				Reducer:     collector,
+				ReadProofAfter: req.ReadProofAfter,
+				VChannel:       vchannels[i],
+				Req:            req.Req,
+				MVCC:           req.MVCC,
+				BarrierMVCC:    req.BarrierMVCC,
+				Reducer:        collector,
 			})
 			if err != nil {
 				return err

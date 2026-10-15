@@ -1137,6 +1137,9 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 		BarrierMVCC: t.MvccTimestamp,
 	}
 
+	if t.actualChannelsMvcc != nil {
+		request.ReadProofAfter = t.BeginTs()
+	}
 	result, err := t.viewQueryClient.Legacy().Query(ctx, request)
 	if err != nil {
 		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
@@ -1146,10 +1149,16 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	}
 	// Plans belong to the final successful shard attempts, including shards
 	// with no rows/workers. Worker results cannot supply a complete read proof.
-	// The two frontiers project one WAL prefix onto growing and transform
-	// execution; their maximum is the last mutation/barrier in that prefix.
+	// The certificate describes complete WAL coverage; executor frontiers may
+	// remain old on an idle channel and are not a fresh CAS read timestamp.
 	for _, plan := range result.Plans {
-		t.RecordChannelMvcc(plan.ShardID.VChannel, max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick()))
+		if t.actualChannelsMvcc != nil {
+			proof := plan.Mvcc.GetReadProofTimetick()
+			if proof < request.ReadProofAfter || proof == 0 {
+				return merr.WrapErrServiceUnavailableMsg("query plan is missing the requested WAL read certificate")
+			}
+			t.RecordChannelMvcc(plan.ShardID.VChannel, proof)
+		}
 	}
 	return nil
 }

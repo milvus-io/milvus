@@ -1529,9 +1529,14 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 }
 
 func (t *SearchTask) executeByQueryView(ctx context.Context) error {
+	fields, err := translateToOutputFieldIDs(t.requeryOutputFields(), t.schema.CollectionSchema)
+	if err != nil {
+		return err
+	}
 	result, err := t.viewQueryClient.Legacy().Search(ctx, &queryclient.LegacySearchRequest{
-		Req:         t.SearchRequest,
-		BarrierMVCC: t.MvccTimestamp,
+		Req:              t.SearchRequest,
+		RequiredFieldIDs: fields,
+		BarrierMVCC:      t.MvccTimestamp,
 	})
 	if err != nil {
 		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)

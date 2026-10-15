@@ -22,8 +22,11 @@ import (
 // plan and request, including nested expressions, aggregate/order/group fields
 // and function inputs. Reflect over messages so a new Expr node containing a
 // ColumnInfo does not silently bypass removal validation.
-func ReferencedSchemaFields(request proto.Message, schema *schemapb.CollectionSchema) ([]int64, error) {
+func ReferencedSchemaFields(request proto.Message, schema *schemapb.CollectionSchema, requiredFields ...int64) ([]int64, error) {
 	fields := make(map[int64]struct{})
+	for _, field := range requiredFields {
+		fields[field] = struct{}{}
+	}
 	if err := collectSchemaFields(request.ProtoReflect(), fields, schema); err != nil {
 		return nil, err
 	}

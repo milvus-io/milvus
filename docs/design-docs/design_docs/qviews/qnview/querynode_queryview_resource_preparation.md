@@ -266,6 +266,13 @@ Schema, or replace its Schema during Reopen. A query context binds:
 borrowed Schema + immutable LoadScope + pinned physical ReadState + MVCC
 ```
 
+Boost scoring and Arrow field refill borrow the same pinned ReadState as Search
+and Retrieve. They never substitute the physical parent's latest segment. The
+operation handle covers synchronous scoring, native asynchronous completion and
+result conversion; these adapters introduce no separate resource owner. Boost
+constructs its native query context with the plan's borrowed Schema and a captured
+physical read snapshot, just like Search and Retrieve.
+
 The plan and View must agree on the logical schema. Queries never fall back to a
 Segment's latest schema or invoke LazyCheckSchema to mutate shared resources.
 Preparation establishes the required capabilities before Ready; execution can

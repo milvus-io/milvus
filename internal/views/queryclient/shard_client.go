@@ -42,20 +42,22 @@ func newShardViewQueryClient(
 
 // ShardSearchRequest contains the parameters for a shard-level search execution.
 type ShardSearchRequest struct {
-	VChannel    string
-	Req         *internalpb.SearchRequest
-	MVCC        *viewpb.QueryPlanMVCC
-	BarrierMVCC uint64
-	Reducer     reducer.SearchResultReducer
+	RequiredFieldIDs []int64
+	VChannel         string
+	Req              *internalpb.SearchRequest
+	MVCC             *viewpb.QueryPlanMVCC
+	BarrierMVCC      uint64
+	Reducer          reducer.SearchResultReducer
 }
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
 type ShardQueryRequest struct {
-	VChannel    string
-	Req         *internalpb.RetrieveRequest
-	MVCC        *viewpb.QueryPlanMVCC
-	BarrierMVCC uint64
-	Reducer     reducer.RetrieveResultReducer
+	ReadProofAfter uint64
+	VChannel       string
+	Req            *internalpb.RetrieveRequest
+	MVCC           *viewpb.QueryPlanMVCC
+	BarrierMVCC    uint64
+	Reducer        reducer.RetrieveResultReducer
 }
 
 // Search executes Phase 1 + Phase 2 for a single shard's search.
@@ -68,9 +70,10 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 		barrierMVCC:      req.BarrierMVCC,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
-				CollectionId: req.Req.CollectionID,
-				ShardId:      targetShardID.IntoProto(),
-				PartitionIds: req.Req.PartitionIDs,
+				CollectionId:     req.Req.CollectionID,
+				ShardId:          targetShardID.IntoProto(),
+				PartitionIds:     req.Req.PartitionIDs,
+				RequiredFieldIds: req.RequiredFieldIDs,
 				Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{
 					LegacySearchRequest: req.Req,
 				},
@@ -102,9 +105,10 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 		barrierMVCC:      req.BarrierMVCC,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
-				CollectionId: req.Req.CollectionID,
-				ShardId:      targetShardID.IntoProto(),
-				PartitionIds: req.Req.PartitionIDs,
+				CollectionId:   req.Req.CollectionID,
+				ShardId:        targetShardID.IntoProto(),
+				PartitionIds:   req.Req.PartitionIDs,
+				ReadProofAfter: req.ReadProofAfter,
 				Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{
 					LegacyRetrieveRequest: req.Req,
 				},

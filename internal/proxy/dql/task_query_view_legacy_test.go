@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -103,6 +104,7 @@ func TestSearchTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 		},
 	}
 	task := &SearchTask{
+		schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{}},
 		SearchRequest: &internalpb.SearchRequest{
 			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgID(2)),
 			CollectionID: 1,
@@ -130,8 +132,8 @@ func TestQueryViewRecordsFinalReadFrontiersIncludingEmptyShards(t *testing.T) {
 	mockey.PatchConvey("final successful plans supply CAS proofs", t, func() {
 		legacy := &fakeLegacyQueryClient{}
 		mockey.Mock((*fakeLegacyQueryClient).Query).Return(&queryclient.LegacyQueryResult{Plans: []queryclient.ShardPlan{
-			{ShardID: qviews.ShardID{VChannel: "insert"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 200, TransformingTimetick: 100}},
-			{ShardID: qviews.ShardID{VChannel: "transform"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 300}},
+			{ShardID: qviews.ShardID{VChannel: "insert"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 200, TransformingTimetick: 100, ReadProofTimetick: 400}},
+			{ShardID: qviews.ShardID{VChannel: "transform"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 300, ReadProofTimetick: 500}},
 		}}, nil).Build()
 		task := &QueryTask{
 			schema:          &schemaInfo{},
@@ -141,9 +143,9 @@ func TestQueryViewRecordsFinalReadFrontiersIncludingEmptyShards(t *testing.T) {
 		require.NoError(t, task.Execute(t.Context()))
 		ts, ok := task.actualChannelsMvcc.Get("insert")
 		require.True(t, ok)
-		require.Equal(t, uint64(200), ts)
+		require.Equal(t, uint64(400), ts)
 		ts, ok = task.actualChannelsMvcc.Get("transform")
 		require.True(t, ok)
-		require.Equal(t, uint64(300), ts)
+		require.Equal(t, uint64(500), ts)
 	})
 }

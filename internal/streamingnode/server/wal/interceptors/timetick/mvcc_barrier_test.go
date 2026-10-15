@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -37,7 +38,7 @@ func TestMVCCBarrierSyncPersistenceAndDelivery(t *testing.T) {
 				defer buffer.Close()
 				future := syncutil.NewFuture[wal.WAL]()
 				future.Set(&mock_wal.MockWAL{})
-				op := newTimeTickSyncOperator(&interceptors.InterceptorBuildParam{ChannelInfo: types.PChannelInfo{Name: "barrier", Term: 1}, WAL: future, LastTimeTickMessage: initial, LastConfirmedMessageID: id, WriteAheadBuffer: buffer})
+				op := newTimeTickSyncOperator(&interceptors.InterceptorBuildParam{MVCCManager: mvcc.NewMVCCManager(ts), ChannelInfo: types.PChannelInfo{Name: "barrier", Term: 1}, WAL: future, LastTimeTickMessage: initial, LastConfirmedMessageID: id, WriteAheadBuffer: buffer})
 				defer op.Close()
 				if busy {
 					acker, err := op.AckManager().Allocate(ctx)

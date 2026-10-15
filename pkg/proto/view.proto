@@ -217,6 +217,9 @@ message QueryPlanMVCC {
     uint64 transforming_timetick = 2;
     // Installed by Phase 1 after validating schema history through the fixed MVCC.
     QuerySchemaBinding schema_binding = 3;
+    // Complete WAL prefix certified together with these executor frontiers.
+    // Used for partial-update CAS, not as an executor wait/read timestamp.
+    uint64 read_proof_timetick = 4;
 }
 
 // QuerySchemaBinding prevents Phase 2 and requery from changing the schema,
@@ -244,6 +247,11 @@ service QueryPlanService {
 }
 
 message GetQueryPlanRequest {
+    // Request a complete WAL read certificate at or after this timestamp.
+    // Only valid with consistency-based MVCC, not explicit snapshot modes.
+    uint64 read_proof_after = 9;
+    // Dependencies of later requery/render stages; validation only, not projection.
+    repeated int64 required_field_ids = 10;
     int64 collection_id = 1;
     ShardID shard_id = 2;
     // Mutually exclusive MVCC source:
