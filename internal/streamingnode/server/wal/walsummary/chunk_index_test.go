@@ -2,6 +2,7 @@ package walsummary
 
 import (
 	"context"
+	"io"
 	"math"
 	"strings"
 	"sync"
@@ -339,4 +340,25 @@ func TestChunkCacheValidatesColdObject(t *testing.T) {
 			require.Nil(t, leaf.loading)
 		})
 	}
+}
+
+func TestChunkCacheCancellationDoesNotMaskObjectError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	index := newChunkIndex(1024)
+	chunk := &indexedChunk{}
+	var attempt *chunkLoad
+	patch := mockey.Mock((*Store).readChunkPayload).To(func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+		index.cache.mu.Lock()
+		attempt = chunk.loading
+		index.cache.mu.Unlock()
+		cancel()
+		return nil, io.ErrUnexpectedEOF
+	}).Build()
+	defer patch.UnPatch()
+	_, err := index.cache.read(ctx, &Store{}, chunk)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.False(t, attempt.canceled, "independent waiters must receive the object error")
+	require.ErrorIs(t, attempt.err, io.ErrUnexpectedEOF)
+	require.Nil(t, chunk.payload)
 }

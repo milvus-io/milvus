@@ -3,6 +3,7 @@ package walsummary
 import (
 	"container/list"
 	"context"
+	"errors"
 	"sort"
 	"sync"
 
@@ -99,6 +100,9 @@ func (c *chunkCache) read(ctx context.Context, store *Store, chunk *indexedChunk
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-loading.done:
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				// A canceled loader must not cancel other subscriptions. They
 				// retry ownership using their own context; other failures propagate.
 				if loading.canceled {
@@ -118,7 +122,7 @@ func (c *chunkCache) read(ctx context.Context, store *Store, chunk *indexedChunk
 			loading.payload, loading.err = store.readChunkPayload(ctx, chunk.PChannelSummaryChunkIndexEntry)
 			<-c.loadSlots
 		}
-		loading.canceled = ctx.Err() != nil && loading.err != nil
+		loading.canceled = ctx.Err() != nil && errors.Is(loading.err, ctx.Err())
 		c.mu.Lock()
 		if loading.err == nil && !chunk.retired {
 			c.putLocked(chunk, loading.payload)
