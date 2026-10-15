@@ -337,6 +337,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bstr"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f7dc094d718f2e1c1559ad110e27eeaae14a5465d3d56dd6dbd793079fbd530"
+dependencies = [
+ "memchr",
+ "regex-automata",
+ "serde_core",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1200,6 +1211,91 @@ name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
+name = "globset"
+version = "0.4.19"
+source = "git+https://github.com/BurntSushi/ripgrep.git?rev=e89fff89ac9af12e8d4ce9d5fd07beb408ca730f#e89fff89ac9af12e8d4ce9d5fd07beb408ca730f"
+dependencies = [
+ "aho-corasick",
+ "bstr",
+ "log",
+ "regex-automata",
+ "regex-syntax 0.8.6",
+]
+
+[[package]]
+name = "grep"
+version = "0.4.1"
+source = "git+https://github.com/BurntSushi/ripgrep.git?rev=e89fff89ac9af12e8d4ce9d5fd07beb408ca730f#e89fff89ac9af12e8d4ce9d5fd07beb408ca730f"
+dependencies = [
+ "grep-cli",
+ "grep-matcher",
+ "grep-printer",
+ "grep-regex",
+ "grep-searcher",
+]
+
+[[package]]
+name = "grep-cli"
+version = "0.1.12"
+source = "git+https://github.com/BurntSushi/ripgrep.git?rev=e89fff89ac9af12e8d4ce9d5fd07beb408ca730f#e89fff89ac9af12e8d4ce9d5fd07beb408ca730f"
+dependencies = [
+ "bstr",
+ "globset",
+ "libc",
+ "log",
+ "termcolor",
+ "winapi-util",
+]
+
+[[package]]
+name = "grep-matcher"
+version = "0.1.9"
+source = "git+https://github.com/BurntSushi/ripgrep.git?rev=e89fff89ac9af12e8d4ce9d5fd07beb408ca730f#e89fff89ac9af12e8d4ce9d5fd07beb408ca730f"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "grep-printer"
+version = "0.3.1"
+source = "git+https://github.com/BurntSushi/ripgrep.git?rev=e89fff89ac9af12e8d4ce9d5fd07beb408ca730f#e89fff89ac9af12e8d4ce9d5fd07beb408ca730f"
+dependencies = [
+ "bstr",
+ "grep-matcher",
+ "grep-searcher",
+ "log",
+ "serde",
+ "serde_json",
+ "termcolor",
+]
+
+[[package]]
+name = "grep-regex"
+version = "0.1.14"
+source = "git+https://github.com/BurntSushi/ripgrep.git?rev=e89fff89ac9af12e8d4ce9d5fd07beb408ca730f#e89fff89ac9af12e8d4ce9d5fd07beb408ca730f"
+dependencies = [
+ "bstr",
+ "grep-matcher",
+ "log",
+ "regex-automata",
+ "regex-syntax 0.8.6",
+]
+
+[[package]]
+name = "grep-searcher"
+version = "0.1.17"
+source = "git+https://github.com/BurntSushi/ripgrep.git?rev=e89fff89ac9af12e8d4ce9d5fd07beb408ca730f#e89fff89ac9af12e8d4ce9d5fd07beb408ca730f"
+dependencies = [
+ "bstr",
+ "encoding_rs",
+ "encoding_rs_io",
+ "grep-matcher",
+ "log",
+ "memchr",
+ "memmap2 0.9.8",
+]
 
 [[package]]
 name = "h2"
@@ -2816,6 +2912,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "milvus-grep-core"
+version = "0.1.0"
+dependencies = [
+ "cbindgen",
+ "grep",
+ "memchr",
+ "regex-syntax 0.8.6",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4051,6 +4157,7 @@ dependencies = [
  "lingua",
  "log",
  "md5",
+ "milvus-grep-core",
  "once_cell",
  "pinyin",
  "prost",
@@ -4264,6 +4371,15 @@ dependencies = [
  "once_cell",
  "rustix 1.1.2",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "termcolor"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
+dependencies = [
+ "winapi-util",
 ]
 
 [[package]]

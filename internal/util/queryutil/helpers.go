@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -69,8 +70,12 @@ func comparePK(a, b any) int {
 // the merge logic. Pass nil to fall back to template-based inference
 // (backward compatible for tests and callers without schema).
 func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedRows []rowRef, schema *schemapb.CollectionSchema) (*internalpb.RetrieveResults, error) {
+	extra, err := selectExtraResults(results, selectedRows)
+	if err != nil {
+		return nil, err
+	}
 	if len(selectedRows) == 0 || len(results) == 0 {
-		return &internalpb.RetrieveResults{}, nil
+		return &internalpb.RetrieveResults{ExtraResults: extra}, nil
 	}
 
 	// Use first result as template for field count / metadata
@@ -136,7 +141,8 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 	}
 
 	merged := &internalpb.RetrieveResults{
-		FieldsData: make([]*schemapb.FieldData, numFields),
+		ExtraResults: extra,
+		FieldsData:   make([]*schemapb.FieldData, numFields),
 	}
 
 	// Build merged IDs
@@ -812,13 +818,27 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 // This is more efficient than sliceRetrieveResults for contiguous ranges since it uses
 // direct sub-slicing instead of element-by-element copying.
 func rangeSliceRetrieveResults(result *internalpb.RetrieveResults, start, end int) (*internalpb.RetrieveResults, error) {
+	var extra *commonpb.ResultData
+	if result.GetExtraResults() != nil {
+		refs := make([]rowRef, 0, max(0, end-start))
+		for i := start; i < end; i++ {
+			refs = append(refs, rowRef{rowIdx: int64(i)})
+		}
+		var err error
+		extra, err = selectExtraResults([]*internalpb.RetrieveResults{result}, refs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if start >= end {
-		return &internalpb.RetrieveResults{}, nil
+		return &internalpb.RetrieveResults{ExtraResults: extra}, nil
 	}
 
 	newResult := &internalpb.RetrieveResults{
-		Ids:        rangeSliceIDs(result.GetIds(), start, end),
-		FieldsData: make([]*schemapb.FieldData, len(result.GetFieldsData())),
+		ExtraResults: extra,
+		Ids:          rangeSliceIDs(result.GetIds(), start, end),
+		FieldsData:   make([]*schemapb.FieldData, len(result.GetFieldsData())),
 	}
 
 	for i, fd := range result.GetFieldsData() {
@@ -1488,6 +1508,14 @@ func (c *rowSizeCalculator) withArrowRecord(rec arrow.Record) *rowSizeCalculator
 
 func (c *rowSizeCalculator) rowSize(rowIdx int64) int64 {
 	var size int64
+	for _, chain := range c.result.GetExtraResults().GetFields() {
+		for _, column := range chain.GetObjectValue().GetFields() {
+			values := column.GetListValue().GetValues()
+			if rowIdx >= 0 && rowIdx < int64(len(values)) {
+				size += int64(proto.Size(values[rowIdx])) + 16
+			}
+		}
+	}
 	for fieldIdx, fd := range c.result.GetFieldsData() {
 		size += calcFieldElementSizeWithCompactIndex(fd, int(rowIdx), c.compactIndices[fieldIdx])
 	}

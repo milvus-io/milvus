@@ -288,6 +288,13 @@ message RetrieveResults {
   // Actual MVCC snapshot used by a successful channel query, including empty results.
   // Zero means the QueryNode did not report a snapshot.
   uint64 mvcc_timestamp = 20;
+
+  // Generic producer-defined result values. Query-chain columns are lists under
+  // fields[chain_name].object_value.fields[output_column], aligned with ids.
+  // Reducers must apply the same row selection/permutation to these lists and
+  // ordinary fields; arbitrary scalar/object values have no implicit merge rule.
+  // Preserve declared empty output lists on successful zero-row responses.
+  common.ResultData extra_results = 21;
 }
 
 message LoadIndex {

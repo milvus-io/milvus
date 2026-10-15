@@ -272,6 +272,15 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
                        int64_t* offsets,
                        int64_t len);
 
+// Read PK and requested system fields for selected offsets, before reduction.
+CFuture*
+AsyncRetrieveIdentitiesByOffsets(CTraceContext c_trace,
+                                 CSegmentInterface c_segment,
+                                 CRetrievePlan c_plan,
+                                 int64_t* offsets,
+                                 int64_t len,
+                                 bool take_for_output_allowed);
+
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
 

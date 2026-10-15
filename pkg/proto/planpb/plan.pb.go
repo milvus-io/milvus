@@ -3832,13 +3832,16 @@ type PlanNode struct {
 	//	*PlanNode_VectorAnns
 	//	*PlanNode_Predicates
 	//	*PlanNode_Query
-	Node                    isPlanNode_Node           `protobuf_oneof:"node"`
-	OutputFieldIds          []int64                   `protobuf:"varint,3,rep,packed,name=output_field_ids,json=outputFieldIds,proto3" json:"output_field_ids,omitempty"`
-	DynamicFields           []string                  `protobuf:"bytes,5,rep,name=dynamic_fields,json=dynamicFields,proto3" json:"dynamic_fields,omitempty"`
-	Scorers                 []*ScoreFunction          `protobuf:"bytes,6,rep,name=scorers,proto3" json:"scorers,omitempty"`
-	PlanOptions             *PlanOption               `protobuf:"bytes,7,opt,name=plan_options,json=planOptions,proto3" json:"plan_options,omitempty"`
-	ScoreOption             *ScoreOption              `protobuf:"bytes,8,opt,name=score_option,json=scoreOption,proto3" json:"score_option,omitempty"`
-	Namespace               *string                   `protobuf:"bytes,9,opt,name=namespace,proto3,oneof" json:"namespace,omitempty"`
+	Node           isPlanNode_Node  `protobuf_oneof:"node"`
+	OutputFieldIds []int64          `protobuf:"varint,3,rep,packed,name=output_field_ids,json=outputFieldIds,proto3" json:"output_field_ids,omitempty"`
+	DynamicFields  []string         `protobuf:"bytes,5,rep,name=dynamic_fields,json=dynamicFields,proto3" json:"dynamic_fields,omitempty"`
+	Scorers        []*ScoreFunction `protobuf:"bytes,6,rep,name=scorers,proto3" json:"scorers,omitempty"`
+	PlanOptions    *PlanOption      `protobuf:"bytes,7,opt,name=plan_options,json=planOptions,proto3" json:"plan_options,omitempty"`
+	ScoreOption    *ScoreOption     `protobuf:"bytes,8,opt,name=score_option,json=scoreOption,proto3" json:"score_option,omitempty"`
+	Namespace      *string          `protobuf:"bytes,9,opt,name=namespace,proto3,oneof" json:"namespace,omitempty"`
+	// Worker-owned chains: Search L0/L1 or QueryScan-stage chains for a QueryPlanNode.
+	// Query chains retain raw expression arguments and output_columns here; do
+	// not duplicate their configuration in the enclosing RetrieveRequest.
 	QuerynodeFunctionChains []*schemapb.FunctionChain `protobuf:"bytes,10,rep,name=querynode_function_chains,json=querynodeFunctionChains,proto3" json:"querynode_function_chains,omitempty"`
 }
 

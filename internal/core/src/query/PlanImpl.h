@@ -118,6 +118,8 @@ struct Placeholder {
     }
 };
 
+enum class RetrieveMode { Normal = 0, Candidates = 1 };
+
 struct RetrievePlan {
  public:
     explicit RetrievePlan(SchemaPtr schema) : schema_(std::move(schema)) {
@@ -134,6 +136,12 @@ struct RetrievePlan {
     std::vector<FieldId> access_entries_;
     std::vector<std::string> target_dynamic_fields_;
     bool take_for_output_allowed_{true};
+    // Request-local execution option, set before segment fan-out. Candidate
+    // retrieval ignores the result limit and returns offsets without field data.
+    // Explicit retrieval by offsets continues to use field_ids_ unchanged.
+    RetrieveMode mode_{RetrieveMode::Normal};
+    // Maximum selected candidate offsets; zero disables this cap.
+    int64_t max_candidate_rows_{0};
 };
 
 using PlanPtr = std::unique_ptr<Plan>;

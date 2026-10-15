@@ -21,6 +21,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -200,8 +202,13 @@ func (p *QueryPipeline) Execute(ctx context.Context, results []*internalpb.Retri
 
 	output := finalMsg[chanOutput].(*internalpb.RetrieveResults)
 	result := &milvuspb.QueryResults{
-		Status:     merr.Success(),
-		FieldsData: output.GetFieldsData(),
+		Status:       merr.Success(),
+		FieldsData:   output.GetFieldsData(),
+		ExtraResults: output.GetExtraResults(),
+	}
+
+	if result.ExtraResults != nil && int64(proto.Size(result)) > paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64() {
+		return nil, merr.WrapErrParameterTooLarge("query results including computed columns exceed maxOutputSize")
 	}
 
 	// Propagate element-level indices for element_filter queries

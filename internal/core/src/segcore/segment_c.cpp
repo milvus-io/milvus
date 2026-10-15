@@ -1204,20 +1204,27 @@ DeleteRetrieveArrowResult(CRetrieveArrowResult* result) {
     delete result;
 }
 
-CFuture*  // Future<CRetrieveResult>
-AsyncRetrieveByOffsets(CTraceContext c_trace,
-                       CSegmentInterface c_segment,
-                       CRetrievePlan c_plan,
-                       int64_t* offsets,
-                       int64_t len) {
+static CFuture*
+AsyncRetrieveByOffsetsImpl(CTraceContext c_trace,
+                           CSegmentInterface c_segment,
+                           CRetrievePlan c_plan,
+                           int64_t* offsets,
+                           int64_t len,
+                           bool identities_only,
+                           bool identity_take_allowed) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
     auto future = milvus::futures::Future<CRetrieveResult>::async(
         milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
-        [c_trace, segment, plan, offsets, len](
-            folly::CancellationToken cancel_token) {
+        [c_trace,
+         segment,
+         plan,
+         offsets,
+         len,
+         identities_only,
+         identity_take_allowed](folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span(
@@ -1234,7 +1241,16 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
                 plan->schema_, internal_segment, plan->access_entries_);
 
             auto retrieve_result =
-                segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
+                identities_only
+                    ? internal_segment->RetrieveIdentitiesByOffsets(
+                          &trace_ctx,
+                          plan,
+                          offsets,
+                          len,
+                          identity_take_allowed,
+                          cancel_token)
+                    : segment->Retrieve(
+                          &trace_ctx, plan, offsets, len, cancel_token);
 
             auto c_result = CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));
@@ -1243,6 +1259,27 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
         });
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
+}
+
+CFuture*
+AsyncRetrieveByOffsets(CTraceContext trace,
+                       CSegmentInterface segment,
+                       CRetrievePlan plan,
+                       int64_t* offsets,
+                       int64_t len) {
+    return AsyncRetrieveByOffsetsImpl(
+        trace, segment, plan, offsets, len, false, false);
+}
+
+CFuture*
+AsyncRetrieveIdentitiesByOffsets(CTraceContext trace,
+                                 CSegmentInterface segment,
+                                 CRetrievePlan plan,
+                                 int64_t* offsets,
+                                 int64_t len,
+                                 bool take_for_output_allowed) {
+    return AsyncRetrieveByOffsetsImpl(
+        trace, segment, plan, offsets, len, true, take_for_output_allowed);
 }
 
 int64_t

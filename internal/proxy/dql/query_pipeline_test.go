@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -486,4 +487,32 @@ func TestNewQueryPipeline_GroupByOrderBy_InvalidField(t *testing.T) {
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestQueryPipelineComputedColumnsStayAligned(t *testing.T) {
+	makeResult := func(ids []int64) *internalpb.RetrieveResults {
+		values := make([]*commonpb.ResultValue, len(ids))
+		for i, id := range ids {
+			values[i] = &commonpb.ResultValue{Value: &commonpb.ResultValue_Uint64Value{Uint64Value: uint64(id)}}
+		}
+		return &internalpb.RetrieveResults{
+			Ids: makeTestIntIDs(ids), FieldsData: []*schemapb.FieldData{makeTestInt64Field(100, "pk", ids)},
+			ExtraResults: &commonpb.ResultData{Fields: map[string]*commonpb.ResultValue{"scan": {Value: &commonpb.ResultValue_ObjectValue{ObjectValue: &commonpb.ResultData{Fields: map[string]*commonpb.ResultValue{"matches": {Value: &commonpb.ResultValue_ListValue{ListValue: &commonpb.ResultList{Values: values}}}}}}}}},
+		}
+	}
+	for _, offset := range []int64{1, 100} {
+		pipeline, err := NewQueryPipeline(testSchema(), 1, offset, reduce.IReduceNoOrder, nil, nil, nil, nil, []int64{100})
+		require.NoError(t, err)
+		result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{makeResult([]int64{1, 3}), makeResult([]int64{2, 4})})
+		require.NoError(t, err)
+		list := result.ExtraResults.GetFields()["scan"].GetObjectValue().GetFields()["matches"].GetListValue()
+		require.NotNil(t, list)
+		if offset == 1 {
+			require.Equal(t, []int64{2}, result.FieldsData[0].GetScalars().GetLongData().GetData())
+			require.Len(t, list.Values, 1)
+			require.Equal(t, uint64(2), list.Values[0].GetUint64Value())
+		} else {
+			require.Empty(t, list.Values)
+		}
+	}
 }

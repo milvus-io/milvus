@@ -23,6 +23,7 @@ package types
 // =============================================================================
 
 const (
+	OpTypeGrep    = "grep"
 	OpTypeMap     = "map"
 	OpTypeFilter  = "filter"
 	OpTypeSort    = "sort"
