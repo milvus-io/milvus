@@ -31,7 +31,7 @@ func TestAckWaitsForCallbackWithoutHoldingTaskOrManagerLock(t *testing.T) {
 
 	meta := catalog.NewCataLog(nil)
 	patch := mockey.Mock(mockey.GetMethod(meta, "SaveBroadcastTask")).Return(nil).Build()
-	t.Cleanup(patch.UnPatch)
+	t.Cleanup(func() { patch.UnPatch() })
 	resource.InitForTest(resource.OptStreamingCatalog(meta))
 
 	metrics := newBroadcasterMetrics()
@@ -202,7 +202,7 @@ func TestFastAckResolvesCallbackOutsideTaskLock(t *testing.T) {
 
 	meta := catalog.NewCataLog(nil)
 	patch := mockey.Mock(mockey.GetMethod(meta, "SaveBroadcastTask")).Return(nil).Build()
-	t.Cleanup(patch.UnPatch)
+	t.Cleanup(func() { patch.UnPatch() })
 	resource.InitForTest(resource.OptStreamingCatalog(meta))
 
 	metrics := newBroadcasterMetrics()
@@ -279,7 +279,7 @@ func TestAckOnceCallbackFailureRemainsRetryable(t *testing.T) {
 
 	meta := catalog.NewCataLog(nil)
 	patch := mockey.Mock(mockey.GetMethod(meta, "SaveBroadcastTask")).Return(nil).Build()
-	t.Cleanup(patch.UnPatch)
+	t.Cleanup(func() { patch.UnPatch() })
 	resource.InitForTest(resource.OptStreamingCatalog(meta))
 
 	var callbackCalls atomic.Int32

@@ -3,9 +3,10 @@ package walsummary
 import (
 	"container/list"
 	"context"
-	"errors"
 	"sort"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
