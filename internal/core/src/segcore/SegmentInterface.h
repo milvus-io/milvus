@@ -810,7 +810,8 @@ class SegmentInternalInterface : public SegmentInterface {
     FillOrderByResult(
         const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
-        RetrieveResult& retrieveResult) const;
+        RetrieveResult& retrieveResult,
+        milvus::OpContext* op_ctx) const;
 
     void
     FillTargetEntry(
