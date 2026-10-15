@@ -40,12 +40,16 @@ func (s *RawDataV3Suite) TestTextAdmission() {
 		reject     bool
 	}{
 		{name: "encrypted_text", dbName: s.dbName, fieldType: schemapb.DataType_Text, reject: true},
-		{name: "encrypted_text_cannot_override_ez", dbName: s.dbName, fieldType: schemapb.DataType_Text,
-			properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "0"}}, reject: true},
+		{
+			name: "encrypted_text_cannot_override_ez", dbName: s.dbName, fieldType: schemapb.DataType_Text,
+			properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "0"}}, reject: true,
+		},
 		{name: "encrypted_non_text", dbName: s.dbName, fieldType: schemapb.DataType_Int64},
 		{name: "plain_text", dbName: "default", fieldType: schemapb.DataType_Text},
-		{name: "plain_text_ignores_request_ez", dbName: "default", fieldType: schemapb.DataType_Text,
-			properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: strconv.FormatInt(s.ezID, 10)}}},
+		{
+			name: "plain_text_ignores_request_ez", dbName: "default", fieldType: schemapb.DataType_Text,
+			properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: strconv.FormatInt(s.ezID, 10)}},
+		},
 	} {
 		s.Run(test.name, func() {
 			ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), time.Minute)
