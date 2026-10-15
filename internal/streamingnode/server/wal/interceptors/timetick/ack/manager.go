@@ -62,6 +62,29 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 		metricsGuard.Done(0, err)
 		return nil, err
 	}
+	return ta.newAckerLocked(ts, metricsGuard), nil
+}
+
+// AllocateFresh allocates a timestamp from a freshly fetched TSO batch. Used
+// for message types whose time tick must be greater than every tick any node
+// had received before this call (MessageType.IsFreshTimeTick).
+func (ta *AckManager) AllocateFresh(ctx context.Context) (*Acker, error) {
+	metricsGuard := ta.metrics.StartAllocateTimeTick()
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+
+	ts, err := resource.Resource().TSOAllocator().AllocateFresh(ctx)
+	if err != nil {
+		metricsGuard.Done(0, err)
+		return nil, err
+	}
+	return ta.newAckerLocked(ts, metricsGuard), nil
+}
+
+// newAckerLocked creates a new Acker for the given timestamp, pushes it onto
+// the not-yet-acknowledged heap, and finalizes the allocation metrics.
+// Callers must hold ta.mu.
+func (ta *AckManager) newAckerLocked(ts uint64, metricsGuard *metricsutil.AllocateTimeTickMetricsGuard) *Acker {
 	ta.lastAllocatedTimeTick = ts
 
 	// create new timestampAck for ack process.
@@ -72,8 +95,8 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 		manager:      ta,
 	}
 	ta.notAckHeap.Push(acker)
-	metricsGuard.Done(ts, err)
-	return acker, nil
+	metricsGuard.Done(ts, nil)
+	return acker
 }
 
 // SyncAndGetAcknowledged syncs the ack records with allocator, and get the last all acknowledged info.

@@ -1469,6 +1469,111 @@ func Test_WatchChannels(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
+func Test_CommitShardSplit(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().CommitShardSplit(mock1.Anything, mock1.Anything).Return(merr.Success(), nil)
+	_, err = client.CommitShardSplit(ctx, &datapb.CommitShardSplitRequest{})
+	assert.Nil(t, err)
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().CommitShardSplit(mock1.Anything, mock1.Anything).Return(
+		merr.Status(merr.ErrServiceNotReady), nil)
+
+	rsp, err := client.CommitShardSplit(ctx, &datapb.CommitShardSplitRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().CommitShardSplit(mock1.Anything, mock1.Anything).Return(merr.Success(), mockErr)
+
+	_, err = client.CommitShardSplit(ctx, &datapb.CommitShardSplitRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	_, err = client.CommitShardSplit(ctx, &datapb.CommitShardSplitRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func Test_CheckShardSplitDrained(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success -- the drained bit must survive the wrapper, not just the status
+	mockDC.EXPECT().CheckShardSplitDrained(mock1.Anything, mock1.Anything).Return(
+		&datapb.CheckShardSplitDrainedResponse{Status: merr.Success(), Drained: true}, nil)
+	rsp, err := client.CheckShardSplitDrained(ctx, &datapb.CheckShardSplitDrainedRequest{})
+	assert.Nil(t, err)
+	assert.True(t, rsp.GetDrained())
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().CheckShardSplitDrained(mock1.Anything, mock1.Anything).Return(
+		&datapb.CheckShardSplitDrainedResponse{Status: merr.Status(merr.ErrServiceNotReady)}, nil)
+
+	rsp, err = client.CheckShardSplitDrained(ctx, &datapb.CheckShardSplitDrainedRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().CheckShardSplitDrained(mock1.Anything, mock1.Anything).Return(
+		&datapb.CheckShardSplitDrainedResponse{Status: merr.Success()}, mockErr)
+
+	_, err = client.CheckShardSplitDrained(ctx, &datapb.CheckShardSplitDrainedRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	_, err = client.CheckShardSplitDrained(ctx, &datapb.CheckShardSplitDrainedRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
 func Test_GetFlushState(t *testing.T) {
 	paramtable.Init()
 

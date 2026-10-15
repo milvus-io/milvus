@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -1917,6 +1918,19 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	clonedColl.Properties = properties
 	// add field will change the schema
 	clonedColl.Schema = req.GetSchema()
+	// A shard split and its adoption change the vchannel list while the
+	// collection lives, and rootcoord announces the new list only through this
+	// broadcast. Every datacoord reader of the cached list -- the split trigger,
+	// flush, import, force merge -- would otherwise keep the pre-split shards
+	// until a restart reloaded the cache. A request without a list leaves the
+	// cached one: a collection always has at least one vchannel.
+	if vchannels := req.GetVChannels(); len(vchannels) > 0 && !slices.Equal(vchannels, clonedColl.VChannelNames) {
+		mlog.Info(ctx, "the altered collection changes its vchannels",
+			mlog.FieldCollectionID(req.GetCollectionID()),
+			mlog.Strings("oldVChannels", clonedColl.VChannelNames),
+			mlog.Strings("newVChannels", vchannels))
+		clonedColl.VChannelNames = slices.Clone(vchannels)
+	}
 	s.meta.AddCollection(clonedColl)
 	return merr.Success(), nil
 }
@@ -2357,6 +2371,25 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 	return nil
 }
 
+// checkSnapshotSupported refuses a snapshot of a collection that has been shard
+// split, which a non-zero routing modulus says. A snapshot records only the
+// vchannel list and the shard count: while a split source is still listed the
+// two disagree and a restore fails on the channel count, and once it is
+// delisted a restore would silently rebuild the collection under the legacy
+// hash % shards placement over rows laid out by residue.
+//
+// The request is valid and the topology was produced by Milvus itself, so this
+// is a capability the build lacks, not the caller's fault: it rides the
+// non-retriable ErrOperationNotSupported, not an InputError code.
+func checkSnapshotSupported(coll *milvuspb.DescribeCollectionResponse) error {
+	if modulus := coll.GetRoutingModulus(); modulus != 0 {
+		return merr.WrapErrOperationNotSupportedMsg(
+			"snapshot is not supported for collection %s (id=%d) because it has been shard split (routing modulus %d)",
+			coll.GetCollectionName(), coll.GetCollectionID(), modulus)
+	}
+	return nil
+}
+
 func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -2444,6 +2477,23 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 
 	// Business-channel Acks prove L1/L0 persistence through each snapshot fence.
+
+	// Refuse a collection that has been shard split. Checked under the exclusive
+	// collection-name lock. A SplitShard broadcast must be issued under the same
+	// key (an obligation on its issuer, which does not exist on this branch) and
+	// then holds it until its ack callback has committed the routing; given
+	// that, the modulus read here cannot change before this snapshot's own
+	// callback runs.
+	collDesc, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+	if err != nil {
+		mlog.Warn(ctx, "CreateSnapshot: failed to describe collection after lock", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	if err := checkSnapshotSupported(collDesc); err != nil {
+		mlog.Warn(ctx, "CreateSnapshot refused", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
 	// Broadcast CreateSnapshot message via DDL framework
 	// Snapshot ID is allocated in the callback
 	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
