@@ -377,8 +377,16 @@ EscapeBraces(const std::string& input) {
 
 // Return nullptr for valid data, otherwise a static reason. Callers decide the
 // error code and context. Validation neither allocates nor copies the row.
+// When is_sorted is supplied, report ordering instead of rejecting it. The
+// caller must sort and reject duplicate indices before consuming such a row.
 [[nodiscard]] inline const char*
-ValidateSparseRow(const void* data, size_t size, bool validate_values = true) {
+ValidateSparseRow(const void* data,
+                  size_t size,
+                  bool validate_values = true,
+                  bool* is_sorted = nullptr) {
+    if (is_sorted) {
+        *is_sorted = true;
+    }
     const auto element_size =
         knowhere::sparse::SparseRow<SparseValueType>::element_size();
     if (size % element_size != 0) {
@@ -406,7 +414,10 @@ ValidateSparseRow(const void* data, size_t size, bool validate_values = true) {
             return "Invalid sparse row: id should be smaller than uint32 max";
         }
         if (offset > 0 && index <= previous) {
-            return "Invalid sparse row: id should be strict ascending";
+            if (!is_sorted) {
+                return "Invalid sparse row: id should be strict ascending";
+            }
+            *is_sorted = false;
         }
         previous = index;
     }

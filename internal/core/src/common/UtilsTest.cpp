@@ -209,6 +209,43 @@ TEST(Util_Common, SparseRowValidationRejectsInvalidData) {
     }
 }
 
+TEST(Util_Common, SparseRowValidationReportsOrdering) {
+    using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
+    bool sorted = false;
+    EXPECT_EQ(milvus::ValidateSparseRow(nullptr, 0, true, &sorted), nullptr);
+    EXPECT_TRUE(sorted);
+    SparseRow ordered(std::vector<std::pair<uint32_t, float>>{{0, 0}, {3, 1}});
+    EXPECT_EQ(milvus::ValidateSparseRow(
+                  ordered.data(), ordered.data_byte_size(), true, &sorted),
+              nullptr);
+    EXPECT_TRUE(sorted);
+    for (auto entries :
+         {std::vector<std::pair<uint32_t, float>>{{3, 1}, {2, 2}},
+          {{2, 1}, {2, 2}},
+          {{3, 1}, {2, 2}, {3, 3}}}) {
+        SparseRow row(entries);
+        EXPECT_EQ(milvus::ValidateSparseRow(
+                      row.data(), row.data_byte_size(), true, &sorted),
+                  nullptr);
+        EXPECT_FALSE(sorted);
+        // Reporting order must not relax validation for existing callers.
+        EXPECT_NE(milvus::ValidateSparseRow(row.data(), row.data_byte_size()),
+                  nullptr);
+    }
+    // Continue validating values after discovering an unordered pair.
+    for (auto entries :
+         {std::vector<std::pair<uint32_t, float>>{{3, 1}, {2, 2}, {1, -1}},
+          {{3, 1}, {2, 2}, {1, std::numeric_limits<float>::infinity()}},
+          {{3, 1}, {2, 2}, {1, std::numeric_limits<float>::quiet_NaN()}},
+          {{3, 1}, {2, 2}, {std::numeric_limits<uint32_t>::max(), 1}}}) {
+        SparseRow row(entries);
+        EXPECT_NE(milvus::ValidateSparseRow(
+                      row.data(), row.data_byte_size(), true, &sorted),
+                  nullptr);
+    }
+    EXPECT_NE(milvus::ValidateSparseRow(nullptr, 1, true, &sorted), nullptr);
+}
+
 TEST(SimilarityCorelation, Naive) {
     ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::IP));
     ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::COSINE));
