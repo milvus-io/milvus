@@ -20,8 +20,17 @@ type (
 	Append = func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
 )
 
+// MessageRowLock coordinates writes before their visibility timestamp is
+// allocated. CommitTxn is presented only after all its admitted bodies finish.
+// The returned context may retain decoded write metadata for later interceptors.
+// The release function runs after transaction, acknowledgement and MVCC publication.
+type MessageRowLock interface {
+	Acquire(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error)
+}
+
 // InterceptorBuildParam is the parameter to build a interceptor.
 type InterceptorBuildParam struct {
+	Context                context.Context // WAL-open context for synchronous recovery.
 	ChannelInfo            types.PChannelInfo
 	WAL                    *syncutil.Future[wal.WAL]    // The wal final object, can be used after interceptor is ready.
 	LastTimeTickMessage    message.ImmutableMessage     // The last time tick message in wal.
@@ -32,6 +41,7 @@ type InterceptorBuildParam struct {
 	TxnManager             *txn.TxnManager              // The transaction manager for the wal, used to manage the transactions.
 	ShardManager           shards.ShardManager          // The shard manager for the wal, used to manage the shards, segment assignment, partition.
 	ReplicateManager       replicates.ReplicatesManager // The replicates manager for the wal, used to manage the replicates.
+	RowLock                MessageRowLock               // Optional per-write admission before timestamp allocation.
 }
 
 // Clear release the resources in the interceptor build param.

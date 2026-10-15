@@ -10,14 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -27,7 +25,6 @@ const (
 
 func newTestInterceptor() *lockAppendInterceptor {
 	return &lockAppendInterceptor{
-		enableCAS:      true,
 		channel:        types.PChannelInfo{Name: testPChannelName},
 		vchannelLocker: lock.NewKeyLock[string](),
 		txnManager:     new(txn.TxnManager),
@@ -125,6 +122,8 @@ func TestAcquireLockGuard(t *testing.T) {
 		assert.True(t, interceptor.glock.TryRLock())
 		interceptor.glock.RUnlock()
 		assert.False(t, interceptor.vchannelLocker.TryLock(testVChannel))
+		assert.True(t, interceptor.vchannelLocker.TryRLock(testVChannel), "CAS commit must keep the shard lock shareable")
+		interceptor.vchannelLocker.RUnlock(testVChannel)
 		assert.True(t, interceptor.vchannelLocker.TryLock("other-vchannel"))
 		interceptor.vchannelLocker.Unlock("other-vchannel")
 		guard()
@@ -185,7 +184,7 @@ func TestAcquireLockGuard(t *testing.T) {
 	})
 }
 
-func TestPartialUpdateCASCommitWaitsForSameVChannelWriter(t *testing.T) {
+func TestPartialUpdateCASCommitSharesShardLockWithWriter(t *testing.T) {
 	interceptor := newTestInterceptor()
 	writer := newLockTestInsertMessage(testVChannel)
 	commit := newLockTestCASCommit(t, testVChannel)
@@ -214,18 +213,12 @@ func TestPartialUpdateCASCommitWaitsForSameVChannelWriter(t *testing.T) {
 
 	select {
 	case <-commitEntered:
+	case <-time.After(time.Second):
 		close(releaseWriter)
-		require.NoError(t, <-writerDone)
-		t.Fatal("CAS commit entered while a same-vchannel writer still held the read lock")
-	case <-time.After(20 * time.Millisecond):
+		t.Fatal("CAS commit still acquired an exclusive shard lock")
 	}
 	close(releaseWriter)
 	require.NoError(t, <-writerDone)
-	select {
-	case <-commitEntered:
-	case <-time.After(time.Second):
-		t.Fatal("CAS commit did not resume after the writer released the lock")
-	}
 	require.NoError(t, <-commitDone)
 }
 
@@ -339,49 +332,10 @@ func newLockTestCASCommit(t *testing.T, vchannel string) message.MutableMessage 
 	return msg
 }
 
-func TestCASDisabledCommitSharesVChannelLock(t *testing.T) {
-	interceptor := newTestInterceptor()
-	interceptor.enableCAS = false
-	guard := interceptor.acquireLockGuard(context.Background(), newLockTestInsertMessage(testVChannel))
-	defer guard()
-	done := make(chan struct{})
-	commit := newLockTestCASCommit(t, testVChannel)
-	go func() {
-		unlock := interceptor.acquireLockGuard(context.Background(), commit)
-		unlock()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("disabled CAS commit blocked behind a shared writer")
-	}
-}
-
-func TestLockInterceptorCachesCASConfig(t *testing.T) {
-	paramtable.Init()
-	params := paramtable.Get()
-	key := params.StreamingCfg.PartialUpdateEnableCAS.Key
-	old := params.StreamingCfg.PartialUpdateEnableCAS.GetValue()
-	defer params.Save(key, old)
-	builder := NewInterceptorBuilder()
-	for _, value := range []string{"true", "false"} {
-		require.NoError(t, params.Save(key, value))
-		interceptor := builder.Build(&interceptors.InterceptorBuildParam{}).(*lockAppendInterceptor)
-		next := "true"
-		if value == "true" {
-			next = "false"
-		}
-		require.NoError(t, params.Save(key, next))
-		require.Equal(t, value == "true", interceptor.enableCAS)
-	}
-}
-
-func TestCASDisabledPreservesStructuralExclusiveLock(t *testing.T) {
+func TestManualFlushKeepsStructuralExclusiveLock(t *testing.T) {
 	patch := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
 	defer patch.UnPatch()
 	interceptor := newTestInterceptor()
-	interceptor.enableCAS = false
 	msg := message.NewManualFlushMessageBuilderV2().
 		WithVChannel(testVChannel).
 		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).

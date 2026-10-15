@@ -33,7 +33,7 @@ func extractPKs(msg message.MutableMessage) ([]any, bool, error) {
 	return keys.toAny(), true, err
 }
 
-func extractPKsWithContext(ctx context.Context, msg message.MutableMessage) (primaryKeys, bool, error) {
+func extractPKsWithContext(ctx context.Context, msg message.BasicMessage) (primaryKeys, bool, error) {
 	if msg == nil {
 		return primaryKeys{}, false, nil
 	}
@@ -56,7 +56,7 @@ func extractPKsFromInsert(msg message.MutableMessage, fieldID int64) ([]any, err
 	return keys.toAny(), err
 }
 
-func extractPKsFromInsertWithContext(ctx context.Context, msg message.MutableMessage, fieldID int64) (primaryKeys, error) {
+func extractPKsFromInsertWithContext(ctx context.Context, msg message.BasicMessage, fieldID int64) (primaryKeys, error) {
 	if msg == nil || fieldID <= 0 {
 		return primaryKeys{}, status.NewUnrecoverableError("partial update insert primary key field id is invalid")
 	}
@@ -79,7 +79,7 @@ func extractPKsFromCASInsert(
 
 func extractPKsFromCASInsertWithContext(
 	ctx context.Context,
-	msg message.MutableMessage,
+	msg message.BasicMessage,
 	descriptorGetter primaryKeyDescriptorGetter,
 ) (primaryKeys, casInsertScope, string, error) {
 	if descriptorGetter == nil {
@@ -87,14 +87,13 @@ func extractPKsFromCASInsertWithContext(
 			"partial update primary key descriptor getter is unavailable",
 		)
 	}
-	insertMsg, err := message.AsMutableInsertMessageV1(msg)
+	header, err := insertHeader(msg)
 	if err != nil {
 		return primaryKeys{}, casInsertScope{}, "", status.NewUnrecoverableError(
 			"decode partial update insert message failed: %v",
 			err,
 		)
 	}
-	header := insertMsg.Header()
 	if header.GetCollectionId() == 0 {
 		return primaryKeys{}, casInsertScope{}, "", status.NewUnrecoverableError(
 			"partial update CAS insert collection id is empty",
@@ -161,17 +160,16 @@ func extractPKsFromOrdinaryInsert(msg message.MutableMessage, descriptorGetter p
 
 func extractPKsFromOrdinaryInsertWithContext(
 	ctx context.Context,
-	msg message.MutableMessage,
+	msg message.BasicMessage,
 	descriptorGetter primaryKeyDescriptorGetter,
 ) (pks primaryKeys, fenceCollectionID int64, err error) {
 	if descriptorGetter == nil {
 		return primaryKeys{}, 0, status.NewUnrecoverableError("partial update primary key descriptor getter is unavailable")
 	}
-	insertMsg, err := message.AsMutableInsertMessageV1(msg)
+	header, err := insertHeader(msg)
 	if err != nil {
 		return primaryKeys{}, 0, status.NewUnrecoverableError("decode insert message for partial update tracking failed: %v", err)
 	}
-	header := insertMsg.Header()
 	schemaVersion := latestCollectionSchemaVersion
 	if header.SchemaVersion != nil {
 		schemaVersion = header.GetSchemaVersion()
@@ -212,8 +210,25 @@ func extractPKsFromOrdinaryInsertWithContext(
 	return keys, 0, err
 }
 
-func decodeInsertBody(ctx context.Context, msg message.MutableMessage) (*msgpb.InsertRequest, error) {
-	if _, err := message.AsMutableInsertMessageV1(msg); err != nil {
+// Recovery bodies are immutable. Decode their headers with the matching typed
+// reader rather than passing them to a mutable-message conversion.
+func insertHeader(msg message.BasicMessage) (*message.InsertMessageHeader, error) {
+	if immutable, ok := msg.(message.ImmutableMessage); ok {
+		insert, err := message.AsImmutableInsertMessageV1(immutable)
+		if err != nil {
+			return nil, err
+		}
+		return insert.Header(), nil
+	}
+	insert, err := message.AsMutableInsertMessageV1(msg)
+	if err != nil {
+		return nil, err
+	}
+	return insert.Header(), nil
+}
+
+func decodeInsertBody(ctx context.Context, msg message.BasicMessage) (*msgpb.InsertRequest, error) {
+	if _, err := insertHeader(msg); err != nil {
 		return nil, status.NewUnrecoverableError("decode partial update insert message failed: %v", err)
 	}
 	payload, err := message.DecodePayload(ctx, msg)
@@ -227,9 +242,15 @@ func decodeInsertBody(ctx context.Context, msg message.MutableMessage) (*msgpb.I
 	return body, nil
 }
 
-func decodeDeleteBody(ctx context.Context, msg message.MutableMessage) (*msgpb.DeleteRequest, error) {
-	if _, err := message.AsMutableDeleteMessageV1(msg); err != nil {
-		return nil, status.NewUnrecoverableError("decode partial update delete message failed: %v", err)
+func decodeDeleteBody(ctx context.Context, msg message.BasicMessage) (*msgpb.DeleteRequest, error) {
+	var headerErr error
+	if immutable, ok := msg.(message.ImmutableMessage); ok {
+		_, headerErr = message.AsImmutableDeleteMessageV1(immutable)
+	} else {
+		_, headerErr = message.AsMutableDeleteMessageV1(msg)
+	}
+	if headerErr != nil {
+		return nil, status.NewUnrecoverableError("decode partial update delete message failed: %v", headerErr)
 	}
 	payload, err := message.DecodePayload(ctx, msg)
 	if err != nil {
@@ -391,13 +412,20 @@ func decodePayloadError(kind string, err error) error {
 }
 
 // extractCollectionFenceID extracts collections affected by wide data mutations.
-func extractCollectionFenceID(msg message.MutableMessage) (int64, bool) {
+func extractCollectionFenceID(msg message.BasicMessage) (int64, bool) {
 	if msg == nil {
 		return 0, false
 	}
 
 	switch msg.MessageType() {
 	case message.MessageTypeTruncateCollection:
+		if immutable, ok := msg.(message.ImmutableMessage); ok {
+			truncateMsg, err := message.AsImmutableTruncateCollectionMessageV2(immutable)
+			if err != nil {
+				return 0, true
+			}
+			return truncateMsg.Header().GetCollectionId(), true
+		}
 		truncateMsg, err := message.AsMutableTruncateCollectionMessageV2(msg)
 		if err != nil {
 			return 0, true
@@ -414,9 +442,16 @@ func extractCollectionFenceID(msg message.MutableMessage) (int64, bool) {
 
 // extractDropCollectionID identifies the collection whose fence can be
 // discarded after DropCollection is durably appended.
-func extractDropCollectionID(msg message.MutableMessage) (int64, bool) {
+func extractDropCollectionID(msg message.BasicMessage) (int64, bool) {
 	if msg == nil || msg.MessageType() != message.MessageTypeDropCollection {
 		return 0, false
+	}
+	if immutable, ok := msg.(message.ImmutableMessage); ok {
+		dropMsg, err := message.AsImmutableDropCollectionMessageV1(immutable)
+		if err != nil {
+			return 0, true
+		}
+		return dropMsg.Header().GetCollectionId(), true
 	}
 	dropMsg, err := message.AsMutableDropCollectionMessageV1(msg)
 	if err != nil {
