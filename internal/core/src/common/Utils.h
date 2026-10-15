@@ -20,6 +20,7 @@
 
 #include <cstring>
 #include <cmath>
+#include <concepts>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -245,10 +246,36 @@ EscapeBraces(const std::string& input) {
     return result;
 }
 
+// Adds unsigned integers and clamps overflow to the result type's maximum
+// value. Operands may differ in type; the result uses their common type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingAdd(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
+    constexpr auto max = std::numeric_limits<T>::max();
+    return rhs > max - lhs ? max : lhs + rhs;
+}
+
+// Multiplies unsigned integers and clamps overflow to the result type's
+// maximum value. Operands may differ in type; the result uses their common
+// type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingMultiply(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
+    constexpr auto max = std::numeric_limits<T>::max();
+    return lhs != 0 && rhs > max / lhs ? max : lhs * rhs;
+}
+
 // Return nullptr for valid data, otherwise a static reason. Callers decide the
 // error code and context. Validation neither allocates nor copies the row.
+// When is_sorted is supplied, report ordering instead of rejecting it. The
+// caller must sort and reject duplicate indices before consuming such a row.
 [[nodiscard]] inline const char*
-ValidateSparseRow(const void* data, size_t size) {
+ValidateSparseRow(const void* data, size_t size, bool* is_sorted = nullptr) {
+    if (is_sorted) {
+        *is_sorted = true;
+    }
     const auto element_size =
         knowhere::sparse::SparseRow<SparseValueType>::element_size();
     if (size % element_size != 0) {
@@ -272,7 +299,10 @@ ValidateSparseRow(const void* data, size_t size) {
             return "Invalid sparse row: id should be smaller than uint32 max";
         }
         if (offset > 0 && index <= previous) {
-            return "Invalid sparse row: id should be strict ascending";
+            if (!is_sorted) {
+                return "Invalid sparse row: id should be strict ascending";
+            }
+            *is_sorted = false;
         }
         previous = index;
     }

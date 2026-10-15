@@ -80,6 +80,25 @@ TEST(Util_Common, CheckPlusOverflowKeepsSystemClassification) {
     }
 }
 
+TEST(Util_Common, SaturatingAddReturnsExactSum) {
+    EXPECT_EQ(milvus::SaturatingAdd(uint32_t{40}, uint32_t{2}), uint32_t{42});
+}
+
+TEST(Util_Common, SaturatingAddClampsOnOverflow) {
+    constexpr auto max = std::numeric_limits<uint64_t>::max();
+    EXPECT_EQ(milvus::SaturatingAdd(max - 1, uint64_t{2}), max);
+}
+
+TEST(Util_Common, SaturatingMultiplyReturnsExactProduct) {
+    EXPECT_EQ(milvus::SaturatingMultiply(uint32_t{6}, uint32_t{7}),
+              uint32_t{42});
+}
+
+TEST(Util_Common, SaturatingMultiplyClampsOnOverflow) {
+    constexpr auto max = std::numeric_limits<uint64_t>::max();
+    EXPECT_EQ(milvus::SaturatingMultiply(max / 2 + 1, uint64_t{2}), max);
+}
+
 TEST(Util_Common, SparseRowValidationAndCopy) {
     using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
     SparseRow source(std::vector<std::pair<uint32_t, float>>{
@@ -150,6 +169,43 @@ TEST(Util_Common, SparseRowValidationRejectsInvalidData) {
         EXPECT_NO_THROW(milvus::CopyAndWrapSparseRow(
             source.data(), source.data_byte_size(), false));
     }
+}
+
+TEST(Util_Common, SparseRowValidationReportsOrdering) {
+    using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
+    bool sorted = false;
+    EXPECT_EQ(milvus::ValidateSparseRow(nullptr, 0, &sorted), nullptr);
+    EXPECT_TRUE(sorted);
+    SparseRow ordered(std::vector<std::pair<uint32_t, float>>{{0, 0}, {3, 1}});
+    EXPECT_EQ(milvus::ValidateSparseRow(
+                  ordered.data(), ordered.data_byte_size(), &sorted),
+              nullptr);
+    EXPECT_TRUE(sorted);
+    for (auto entries :
+         {std::vector<std::pair<uint32_t, float>>{{3, 1}, {2, 2}},
+          {{2, 1}, {2, 2}},
+          {{3, 1}, {2, 2}, {3, 3}}}) {
+        SparseRow row(entries);
+        EXPECT_EQ(milvus::ValidateSparseRow(
+                      row.data(), row.data_byte_size(), &sorted),
+                  nullptr);
+        EXPECT_FALSE(sorted);
+        // Reporting order must not relax validation for existing callers.
+        EXPECT_NE(milvus::ValidateSparseRow(row.data(), row.data_byte_size()),
+                  nullptr);
+    }
+    // Continue validating values after discovering an unordered pair.
+    for (auto entries :
+         {std::vector<std::pair<uint32_t, float>>{{3, 1}, {2, 2}, {1, -1}},
+          {{3, 1}, {2, 2}, {1, std::numeric_limits<float>::infinity()}},
+          {{3, 1}, {2, 2}, {1, std::numeric_limits<float>::quiet_NaN()}},
+          {{3, 1}, {2, 2}, {std::numeric_limits<uint32_t>::max(), 1}}}) {
+        SparseRow row(entries);
+        EXPECT_NE(milvus::ValidateSparseRow(
+                      row.data(), row.data_byte_size(), &sorted),
+                  nullptr);
+    }
+    EXPECT_NE(milvus::ValidateSparseRow(nullptr, 1, &sorted), nullptr);
 }
 
 TEST(SimilarityCorelation, Naive) {

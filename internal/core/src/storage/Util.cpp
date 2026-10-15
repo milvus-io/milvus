@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <string_view>
 #include <chrono>
 #include <cmath>
 #include <deque>
@@ -90,6 +91,7 @@ namespace milvus::storage {
 namespace {
 
 std::atomic<bool> external_vector_partial_null_as_row_null{false};
+std::atomic<int64_t> external_sparse_conversion_memory_limit{256LL << 20};
 
 }  // namespace
 
@@ -102,6 +104,22 @@ SetExternalVectorPartialNullAsRowNull(bool enabled) {
 bool
 GetExternalVectorPartialNullAsRowNull() {
     return external_vector_partial_null_as_row_null.load(
+        std::memory_order_relaxed);
+}
+
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes) {
+    if (bytes <= 0) {
+        return false;
+    }
+    external_sparse_conversion_memory_limit.store(bytes,
+                                                  std::memory_order_relaxed);
+    return true;
+}
+
+int64_t
+GetExternalSparseConversionMemoryLimit() {
+    return external_sparse_conversion_memory_limit.load(
         std::memory_order_relaxed);
 }
 
@@ -3321,29 +3339,6 @@ NormalizeExternalSparseVector(const std::shared_ptr<arrow::Array>& array,
                   row,
                   reason);
     };
-    if (array->type_id() == arrow::Type::BINARY) {
-        // Internal/generated columns retain their trusted, zero-copy path.
-        // Source-mapped binary columns must be validated before native readers
-        // consume them without validation.
-        if (field_meta.get_external_field().empty()) {
-            return array;
-        }
-        auto binary = std::static_pointer_cast<arrow::BinaryArray>(array);
-        for (int64_t row = 0; row < binary->length(); ++row) {
-            if (binary->IsNull(row)) {
-                if (!field_meta.is_nullable()) {
-                    invalid(row, "null in a non-nullable field");
-                }
-                continue;
-            }
-            auto bytes = binary->GetView(row);
-            if (const auto* error =
-                    ValidateSparseRow(bytes.data(), bytes.size())) {
-                invalid(row, error);
-            }
-        }
-        return array;
-    }
     auto check_status = [&](const arrow::Status& status) {
         if (!status.ok()) {
             ThrowInfo(
@@ -3353,7 +3348,30 @@ NormalizeExternalSparseVector(const std::shared_ptr<arrow::Array>& array,
                 status.ToString());
         }
     };
-
+    using SparseRow = knowhere::sparse::SparseRow<SparseValueType>;
+    using Entry = std::pair<uint32_t, SparseValueType>;
+    const auto element_size = static_cast<int64_t>(SparseRow::element_size());
+    const auto type_id = array->type_id();
+    const bool binary = type_id == arrow::Type::BINARY ||
+                        type_id == arrow::Type::BINARY_VIEW ||
+                        type_id == arrow::Type::LARGE_BINARY;
+    if (binary && field_meta.get_external_field().empty()) {
+        // Preserve the trusted internal/generated path, including variants.
+        return CanonicalizeArrowVariants(array);
+    }
+    auto binary_view = [&](int64_t row) -> std::string_view {
+        switch (type_id) {
+            case arrow::Type::BINARY_VIEW:
+                return std::static_pointer_cast<arrow::BinaryViewArray>(array)
+                    ->GetView(row);
+            case arrow::Type::LARGE_BINARY:
+                return std::static_pointer_cast<arrow::LargeBinaryArray>(array)
+                    ->GetView(row);
+            default:
+                return std::static_pointer_cast<arrow::BinaryArray>(array)
+                    ->GetView(row);
+        }
+    };
     std::shared_ptr<arrow::Array> indices, values;
     std::shared_ptr<arrow::Array> index_lists, value_lists;
     std::shared_ptr<arrow::MapArray> map;
@@ -3381,17 +3399,19 @@ NormalizeExternalSparseVector(const std::shared_ptr<arrow::Array>& array,
         }
         indices = list_values(index_lists);
         values = list_values(value_lists);
-    } else {
+    } else if (!binary) {
         AssertExternalArrowType(
             array, "binary, map or struct<indices, values>", field_meta);
     }
-    const auto index_type = indices->type_id();
-    if (index_type != arrow::Type::INT32 && index_type != arrow::Type::UINT32 &&
-        index_type != arrow::Type::INT64 && index_type != arrow::Type::UINT64) {
+    const auto index_type = indices ? indices->type_id() : arrow::Type::NA;
+    if (!binary && index_type != arrow::Type::INT32 &&
+        index_type != arrow::Type::UINT32 && index_type != arrow::Type::INT64 &&
+        index_type != arrow::Type::UINT64) {
         invalid(-1, "indices must be int32, uint32, int64 or uint64");
     }
-    const auto value_type = values->type_id();
-    if (value_type != arrow::Type::FLOAT && value_type != arrow::Type::DOUBLE) {
+    const auto value_type = values ? values->type_id() : arrow::Type::NA;
+    if (!binary && value_type != arrow::Type::FLOAT &&
+        value_type != arrow::Type::DOUBLE) {
         invalid(-1, "values must be float32 or float64");
     }
     auto list_range = [](const std::shared_ptr<arrow::Array>& list,
@@ -3404,111 +3424,238 @@ NormalizeExternalSparseVector(const std::shared_ptr<arrow::Array>& array,
         return {a->value_offset(row), a->value_length(row)};
     };
 
-    arrow::BinaryBuilder builder;
-    check_status(builder.Reserve(array->length()));
-    std::vector<std::pair<uint32_t, float>> entries;
+    struct RowRange {
+        int64_t count = 0;
+        int64_t index_start = 0;
+        int64_t value_start = 0;
+        const uint8_t* bytes = nullptr;
+    };
+    auto row_range = [&](int64_t row) -> RowRange {
+        if (binary) {
+            auto bytes = binary_view(row);
+            if (bytes.size() % element_size != 0) {
+                invalid(row, "Invalid size for sparse row data");
+            }
+            return {static_cast<int64_t>(bytes.size() / element_size),
+                    0,
+                    0,
+                    reinterpret_cast<const uint8_t*>(bytes.data())};
+        }
+        if (map) {
+            return {map->value_length(row),
+                    map->value_offset(row),
+                    map->value_offset(row)};
+        }
+        const bool indices_null = index_lists->IsNull(row);
+        const bool values_null = value_lists->IsNull(row);
+        if (indices_null && values_null) {
+            return {};  // A present struct with two null lists is empty.
+        }
+        if (indices_null || values_null) {
+            invalid(row, "indices or values is null in a valid row");
+        }
+        auto [start, size] = list_range(index_lists, row);
+        auto [other_start, other_size] = list_range(value_lists, row);
+        if (size != other_size) {
+            invalid(row, "indices and values have different lengths");
+        }
+        return {size, start, other_start};
+    };
+    auto read_entry =
+        [&](int64_t row, const RowRange& range, int64_t j) -> Entry {
+        if (binary) {
+            uint32_t index;
+            SparseValueType value;
+            const auto* bytes = range.bytes + j * element_size;
+            std::memcpy(&index, bytes, sizeof(index));
+            std::memcpy(&value, bytes + sizeof(index), sizeof(value));
+            return {index, value};
+        }
+        const auto i = range.index_start + j;
+        const auto v = range.value_start + j;
+        if (indices->IsNull(i) || values->IsNull(v)) {
+            invalid(row, "null index or weight");
+        }
+        uint64_t index = 0;
+        switch (index_type) {
+            case arrow::Type::INT32:
+                index =
+                    std::static_pointer_cast<arrow::Int32Array>(indices)->Value(
+                        i);
+                break;
+            case arrow::Type::UINT32:
+                index = std::static_pointer_cast<arrow::UInt32Array>(indices)
+                            ->Value(i);
+                break;
+            case arrow::Type::INT64:
+                index =
+                    std::static_pointer_cast<arrow::Int64Array>(indices)->Value(
+                        i);
+                break;
+            case arrow::Type::UINT64:
+                index = std::static_pointer_cast<arrow::UInt64Array>(indices)
+                            ->Value(i);
+                break;
+            default:
+                break;  // Types were checked before processing any rows.
+        }
+        // Negative signed values become large uint64 values and fail here.
+        if (index >= std::numeric_limits<uint32_t>::max()) {
+            invalid(row, "index must be in [0, 2^32-1)");
+        }
+        double value =
+            value_type == arrow::Type::FLOAT
+                ? std::static_pointer_cast<arrow::FloatArray>(values)->Value(v)
+                : std::static_pointer_cast<arrow::DoubleArray>(values)->Value(
+                      v);
+        if (!std::isfinite(value) || value < 0 ||
+            value > std::numeric_limits<float>::max()) {
+            invalid(row, "weight must be finite, non-negative and fit float32");
+        }
+        return {static_cast<uint32_t>(index),
+                static_cast<SparseValueType>(value)};
+    };
+    auto row_is_sorted = [&](int64_t row, const RowRange& range) {
+        bool sorted = true;
+        if (binary) {
+            if (const auto* error = ValidateSparseRow(
+                    range.bytes, range.count * element_size, &sorted)) {
+                invalid(row, error);
+            }
+        } else {
+            uint32_t previous = 0;
+            for (int64_t j = 0; j < range.count; ++j) {
+                auto [index, value] = read_entry(row, range, j);
+                if (j > 0 && index <= previous) {
+                    sorted = false;
+                }
+                previous = index;
+            }
+        }
+        return sorted;
+    };
+
+    // Preflight without per-row allocations: validate values, size the output
+    // and find the largest sort buffer. Recheck ordering when encoding a mixed
+    // batch instead of retaining an unbounded array of row descriptors.
+    int64_t output_bytes = 0;
+    int64_t max_count = 0;
+    int64_t max_unsorted_count = 0;
+    bool all_sorted = true;
     for (int64_t row = 0; row < array->length(); ++row) {
         if (array->IsNull(row)) {
             if (!field_meta.is_nullable()) {
                 invalid(row, "null in a non-nullable field");
             }
-            check_status(builder.AppendNull());
             continue;
         }
-        int64_t index_start, value_start, count;
-        if (map) {
-            index_start = value_start = map->value_offset(row);
-            count = map->value_length(row);
-        } else {
-            if (index_lists->IsNull(row) || value_lists->IsNull(row)) {
-                invalid(row, "indices or values is null in a valid row");
-            }
-            auto [start, size] = list_range(index_lists, row);
-            auto [other_start, other_size] = list_range(value_lists, row);
-            if (size != other_size) {
-                invalid(row, "indices and values have different lengths");
-            }
-            index_start = start;
-            value_start = other_start;
-            count = size;
-        }
-        // Arrow Binary uses int32 offsets. Check before allocating or narrowing.
-        const auto element_size = static_cast<int64_t>(
-            knowhere::sparse::SparseRow<SparseValueType>::element_size());
-        if (count > (INT32_MAX - builder.value_data_length()) / element_size) {
+        auto range = row_range(row);
+        if (range.count >
+            (arrow::BinaryBuilder::memory_limit() - output_bytes) /
+                element_size) {
             ThrowInfo(InsufficientResource,
                       "external sparse vector batch exceeds binary capacity{}",
                       FieldErrorSuffix(field_meta));
         }
+        output_bytes += range.count * element_size;
+        max_count = std::max(max_count, range.count);
+        if (!row_is_sorted(row, range)) {
+            all_sorted = false;
+            max_unsorted_count = std::max(max_unsorted_count, range.count);
+        }
+    }
+    if (type_id == arrow::Type::BINARY && all_sorted) {
+        return array;
+    }
+
+    const auto block_count =
+        std::min<int64_t>(binary ? max_unsorted_count : max_count, 1024);
+    auto padded_bytes = [](uint64_t bytes) {
+        constexpr uint64_t alignment = arrow::kDefaultBufferAlignment;
+        return milvus::SaturatingAdd(bytes, alignment - 1) / alignment *
+               alignment;
+    };
+    const auto rows =
+        std::max<uint64_t>(array->length(), arrow::kMinBuilderCapacity);
+    const auto offset_bytes = padded_bytes(milvus::SaturatingMultiply(
+        milvus::SaturatingAdd(rows, uint64_t{1}), uint64_t{sizeof(int32_t)}));
+    // Charge both offset buffers conservatively: Finish may shrink the reserved
+    // buffer. Account for Arrow padding, validity bits, sort scratch and encoding
+    // scratch. Source buffers and allocator bookkeeping are not owned here.
+    uint64_t required_bytes = padded_bytes(output_bytes);
+    required_bytes = milvus::SaturatingAdd(
+        required_bytes, milvus::SaturatingMultiply(offset_bytes, uint64_t{2}));
+    required_bytes =
+        milvus::SaturatingAdd(required_bytes, padded_bytes((rows + 7) / 8));
+    required_bytes = milvus::SaturatingAdd(
+        required_bytes, uint64_t(max_unsorted_count) * sizeof(Entry));
+    required_bytes = milvus::SaturatingAdd(
+        required_bytes, uint64_t(block_count) * element_size);
+    const auto budget = GetExternalSparseConversionMemoryLimit();
+    if (required_bytes > static_cast<uint64_t>(budget)) {
+        // This conversion size is unsupported under the configured limit.
+        // Unsupported terminates index tasks; ConfigInvalid would retry them.
+        // Actual allocation failures remain transient MemAllocateFailed errors.
+        ThrowInfo(Unsupported,
+                  "external sparse vector conversion{} requires {} bytes, "
+                  "budget {} bytes "
+                  "(common.storage.externalSparseVector.conversionMemoryLimit)",
+                  FieldErrorSuffix(field_meta),
+                  required_bytes,
+                  budget);
+    }
+
+    // Reserve each buffer once, after validation and admission. In particular,
+    // no whole-row scratch is allocated for ordered Map/Struct inputs.
+    std::vector<Entry> entries;
+    entries.reserve(max_unsorted_count);
+    SparseRow block(block_count);
+    arrow::BinaryBuilder builder;
+    check_status(builder.Reserve(array->length()));
+    check_status(builder.ReserveData(output_bytes));
+    auto append_row = [&](int64_t count, auto&& entry_at) {
+        check_status(builder.AppendEmptyValue());
+        for (int64_t offset = 0; offset < count; offset += block_count) {
+            const auto length = std::min(block_count, count - offset);
+            for (int64_t j = 0; j < length; ++j) {
+                auto [index, value] = entry_at(offset + j);
+                block.set_at(j, index, value);
+            }
+            check_status(builder.ExtendCurrent(
+                static_cast<const uint8_t*>(block.data()),
+                static_cast<int32_t>(length * element_size)));
+        }
+    };
+    for (int64_t row = 0; row < array->length(); ++row) {
+        if (array->IsNull(row)) {
+            check_status(builder.AppendNull());
+            continue;
+        }
+        auto range = row_range(row);
+        if (all_sorted || row_is_sorted(row, range)) {
+            if (binary) {
+                check_status(builder.Append(binary_view(row)));
+            } else {
+                append_row(range.count, [&](int64_t j) {
+                    return read_entry(row, range, j);
+                });
+            }
+            continue;
+        }
         entries.clear();
-        entries.reserve(count);
-        for (int64_t j = 0; j < count; ++j) {
-            const auto i = index_start + j;
-            const auto v = value_start + j;
-            if (indices->IsNull(i) || values->IsNull(v)) {
-                invalid(row, "null index or weight");
-            }
-            uint64_t index = 0;
-            switch (index_type) {
-                case arrow::Type::INT32:
-                    index = std::static_pointer_cast<arrow::Int32Array>(indices)
-                                ->Value(i);
-                    break;
-                case arrow::Type::UINT32:
-                    index =
-                        std::static_pointer_cast<arrow::UInt32Array>(indices)
-                            ->Value(i);
-                    break;
-                case arrow::Type::INT64:
-                    index = std::static_pointer_cast<arrow::Int64Array>(indices)
-                                ->Value(i);
-                    break;
-                case arrow::Type::UINT64:
-                    index =
-                        std::static_pointer_cast<arrow::UInt64Array>(indices)
-                            ->Value(i);
-                    break;
-                default:
-                    break;  // Types were checked before processing any rows.
-            }
-            // Negative signed values become large uint64 values and fail here.
-            if (index >= std::numeric_limits<uint32_t>::max()) {
-                invalid(row, "index must be in [0, 2^32-1)");
-            }
-            double value =
-                value_type == arrow::Type::FLOAT
-                    ? std::static_pointer_cast<arrow::FloatArray>(values)
-                          ->Value(v)
-                    : std::static_pointer_cast<arrow::DoubleArray>(values)
-                          ->Value(v);
-            if (!std::isfinite(value) || value < 0 ||
-                value > std::numeric_limits<float>::max()) {
-                invalid(row,
-                        "weight must be finite, non-negative and fit float32");
-            }
-            entries.emplace_back(static_cast<uint32_t>(index),
-                                 static_cast<float>(value));
+        for (int64_t j = 0; j < range.count; ++j) {
+            entries.push_back(read_entry(row, range, j));
         }
-        auto by_index = [](const auto& a, const auto& b) {
-            return a.first < b.first;
-        };
-        if (!std::is_sorted(entries.begin(), entries.end(), by_index)) {
-            std::sort(entries.begin(), entries.end(), by_index);
-        }
-        knowhere::sparse::SparseRow<SparseValueType> sparse(entries.size());
-        for (size_t j = 0; j < entries.size(); ++j) {
-            if (j > 0 && entries[j - 1].first == entries[j].first) {
+        std::sort(
+            entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+                return a.first < b.first;
+            });
+        for (size_t j = 1; j < entries.size(); ++j) {
+            if (entries[j - 1].first == entries[j].first) {
                 invalid(row, "duplicate index");
             }
-            sparse.set_at(j, entries[j].first, entries[j].second);
         }
-        if (entries.empty()) {
-            check_status(builder.Append("", 0));
-        } else {
-            check_status(
-                builder.Append(static_cast<const uint8_t*>(sparse.data()),
-                               static_cast<int32_t>(sparse.data_byte_size())));
-        }
+        append_row(range.count, [&](int64_t j) { return entries[j]; });
     }
     std::shared_ptr<arrow::Array> result;
     check_status(builder.Finish(&result));
@@ -3522,6 +3669,12 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
                              bool nullable,
                              DataType element_type,
                              const FieldMeta& field_meta) {
+    // Sparse conversion must inspect the original buffers before allocating:
+    // canonicalizing BinaryView/LargeBinary here would bypass its budget.
+    if (IsSparseFloatVectorDataType(data_type)) {
+        return NormalizeExternalSparseVector(array_in, field_meta);
+    }
+
     // Single view-variant elimination pass: STRING_VIEW/LARGE_STRING -> STRING,
     // BINARY_VIEW/LARGE_BINARY -> BINARY, LARGE_LIST/LIST_VIEW -> LIST
     // (recursive into list inner). Downstream branches only need to dispatch
@@ -3541,10 +3694,6 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
     }
 
     ValidateScalarArrowType(data_type, array, field_meta);
-
-    if (IsSparseFloatVectorDataType(data_type)) {
-        return NormalizeExternalSparseVector(array, field_meta);
-    }
 
     // Dense vectors
     if (IsVectorDataType(data_type) &&

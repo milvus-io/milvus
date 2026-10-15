@@ -368,6 +368,29 @@ The reader normalizes `large_string`/`string_view` and
 vector-list inputs, `large_list`/`list_view` are also accepted. Sparse Struct
 children accept `list` or `large_list`.
 
+Sparse Map, Struct, and source-backed Binary rows are normalized to ascending
+indices without modifying the source. Duplicate indices, indices outside
+`[0, UINT32_MAX)`, and negative or non-finite weights are rejected; weights must
+also fit in float32. Binary rows must contain complete `(uint32, float32)` pairs.
+Already ordered Binary arrays are reused; arrays containing unordered rows are
+rebuilt. Nullable fields accept null rows, and empty rows remain empty vectors;
+a non-null Struct with both child lists null also represents an empty vector,
+regardless of field nullability. A single null child list or null indices or
+weights within a list are rejected.
+
+Sparse normalization validates rows and estimates additional buffer memory before
+allocation. Ordered Map/Struct rows are encoded directly; only unordered rows
+need sorting scratch. Output capacity and the largest sorting buffer are reserved
+once. `common.storage.externalSparseVector.conversionMemoryLimit` limits the
+estimated buffers per field array conversion (default 256 MiB, positive bytes,
+restart required), including output data, Arrow offsets/validity and sorting/
+encoding scratch. Exceeding the budget fails with `Unsupported` before
+those buffers are allocated, terminating index tasks instead of retrying them.
+BinaryView/LargeBinary inputs are inspected directly and charged for their Binary
+output, without an intermediate canonicalized copy. The budget excludes source
+data, allocator overhead and concurrent conversions; it is not a process-wide
+memory limit. Ordered Binary arrays reused without conversion are exempt.
+
 **Implementation**: `pkg/util/typeutil/schema.go`
 
 - External collections are identified by source-backed fields with `external_field`.
