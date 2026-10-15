@@ -153,7 +153,7 @@ func TestUUIDDelete(t *testing.T) {
 
 	// query, verify delete success
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("id in [\"%s\", \"%s\"]", genUUID(0), genUUID(1))).
-		WithConsistencyLevel(entity.ClStrong))
+		WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	require.Zero(t, queryRes.ResultCount)
 
@@ -164,7 +164,7 @@ func TestUUIDDelete(t *testing.T) {
 
 	// query, verify delete success
 	queryRes, err = mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("id >= \"%s\"", genUUID(0))).
-		WithConsistencyLevel(entity.ClStrong))
+		WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	require.Equal(t, nb-5, queryRes.ResultCount)
 }
