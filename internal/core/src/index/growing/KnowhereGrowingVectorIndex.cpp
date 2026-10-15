@@ -184,8 +184,12 @@ KnowhereGrowingVectorIndex<T>::CreateEngine() const {
                               /*use_knowhere_build_pool=*/true);
     }();
     engine.SetDim(dim_);
-    ConfigureMRL(
-        engine, dim_, build_params_, std::move(view_data));
+    knowhere::ViewDataScopeOp view_data_scope;
+    if (view_data) {
+        view_data_scope = [view_data = std::move(view_data)](
+                              milvus::OpContext*) { return view_data; };
+    }
+    ConfigureMRL(engine, dim_, build_params_, std::move(view_data_scope));
     return engine;
 }
 
