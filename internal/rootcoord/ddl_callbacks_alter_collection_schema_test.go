@@ -746,16 +746,13 @@ func TestDDLCallbacksAlterCollectionSchemaAnalyzerFileResourceRefs(t *testing.T)
 	}
 	meta.fileResourceRefCnt = map[int64]int{}
 
-	mixCoord := core.mixCoord.(*imocks.MixCoord)
-	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
-		infos := req.GetAnalyzerInfos()
-		return len(infos) == 1 &&
+	setValidateAnalyzer := mockAnalyzerValidation(t)
+	setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+		require.True(t, len(infos) == 1 &&
 			infos[0].GetField() == fieldName &&
-			infos[0].GetParams() == `{"tokenizer":"standard"}`
-	})).Return(&querypb.ValidateAnalyzerResponse{
-		Status:      merr.Success(),
-		ResourceIds: []int64{resourceID},
-	}, nil).Once()
+			infos[0].GetParams() == `{"tokenizer":"standard"}`)
+		return []int64{resourceID}, nil
+	})
 
 	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, &schemapb.FieldSchema{
 		Name:     fieldName,

@@ -247,3 +247,56 @@ func TestAnalyzerUsesSharedGRPCRetryPolicy(t *testing.T) {
 			conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_RunAnalyzer_FullMethodName).RetryPolicy)
 	})
 }
+
+func (*analyzerRPC) ValidateAnalyzer(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest, ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+	panic("unpatched")
+}
+
+func TestValidateAnalyzerDiscovery(t *testing.T) {
+	for _, scenario := range []string{"retry", "invalid", "unimplemented", "cancel"} {
+		mockey.PatchConvey(scenario, t, func() {
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			calls := 0
+			mockey.Mock((*analyzerRPC).ValidateAnalyzer).To(func(_ *analyzerRPC, ctx context.Context, _ *streamingpb.StreamingNodeValidateAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+				_, targeted := contextutil.GetPickServerID(ctx)
+				require.False(t, targeted)
+				calls++
+				switch scenario {
+				case "retry":
+					if calls == 1 {
+						return nil, status.NewInner("inventory not ready")
+					}
+				case "invalid":
+					return nil, status.NewInvalidArgument("invalid tokenizer")
+				case "unimplemented":
+					return nil, grpcstatus.Error(codes.Unimplemented, "older SN")
+				case "cancel":
+					cancel()
+					return nil, status.NewInner("not ready")
+				}
+				return &streamingpb.StreamingNodeValidateAnalyzerResponse{ResourceIds: []int64{42}}, nil
+			}).Build()
+			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}, watcher: &analyzerWatcher{}}
+			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			switch scenario {
+			case "retry":
+				require.NoError(t, err)
+				require.Equal(t, []int64{42}, resp.ResourceIds)
+				require.Equal(t, 2, calls)
+			case "invalid":
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Equal(t, 1, calls)
+			case "unimplemented":
+				require.Equal(t, codes.Unimplemented, grpcstatus.Code(err))
+				require.Equal(t, 1, calls)
+			case "cancel":
+				require.ErrorIs(t, err, context.Canceled)
+			}
+			client.lifetime.SetState(typeutil.LifetimeStateStopped)
+			_, err = client.ValidateAnalyzer(context.Background(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			require.True(t, status.AsStreamingError(err).IsOnShutdown())
+		})
+	}
+}

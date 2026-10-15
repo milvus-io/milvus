@@ -1591,10 +1591,10 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 	t.Run("normal with analyzer", func(t *testing.T) {
 		mixcoord := mocks.NewMixCoord(t)
-		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
-			Status:      merr.Status(nil),
-			ResourceIds: []int64{1, 2, 3},
-		}, nil)
+		setValidateAnalyzer := mockAnalyzerValidation(t)
+		setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+			return []int64{1, 2, 3}, nil
+		})
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
@@ -1647,10 +1647,10 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 	t.Run("normal with file resource observer", func(t *testing.T) {
 		mixcoord := mocks.NewMixCoord(t)
-		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
-			Status:      merr.Status(nil),
-			ResourceIds: []int64{1, 2, 3},
-		}, nil)
+		setValidateAnalyzer := mockAnalyzerValidation(t)
+		setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+			return []int64{1, 2, 3}, nil
+		})
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
@@ -1699,7 +1699,6 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 		// with file resource observer
 		fileResourceObserver := NewMockFileResourceObserver(t)
-		fileResourceObserver.EXPECT().CheckAllQnReady().Return(nil)
 
 		task.fileResourceObserver = fileResourceObserver
 		err = task.prepareSchema(context.TODO())
