@@ -374,7 +374,10 @@ BuildDisk(const std::string& raw_path,
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = build.mmap;
     options.mmap_dir_path = staging_dir;
-    options.vector_data_view = build.view_data;
+    options.vector_data_view_scope =
+        [view_data = build.view_data](milvus::OpContext*) {
+            return view_data;
+        };
     opened.base =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
