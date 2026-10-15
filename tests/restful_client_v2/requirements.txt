@@ -1,7 +1,7 @@
 --find-links https://test.pypi.org/simple/pymilvus/
 requests>=2.32.4
 urllib3>=2.5.0
-pytest==8.3.4
+pytest==9.0.3
 pytest_tagging==1.6.0
 PyYAML==6.0.2
 numpy==2.2.6
