@@ -113,6 +113,35 @@ func TestTimeTickRowLockExpiryRejectsPreparedCommitAfterCleanup(t *testing.T) {
 	requireCommitAckerError(t, impl, err)
 }
 
+func TestTimeTickFinalTimestampFailureRejectsPreparedCommitAsExpired(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	allocErr := errors.New("final timestamp allocation failed")
+	released := false
+	impl.buildParam.RowLock = testMessageRowLock(func(ctx context.Context, _ message.MutableMessage) (context.Context, func(), error) {
+		require.Equal(t, message.TxnStateOnCommit, session.State())
+		// The provisional timestamp is already allocated; fail only the final one.
+		patch := mockey.Mock(mockey.GetMethod(resource.Resource().TSOAllocator(), "Allocate")).To(func(context.Context) (uint64, error) {
+			return 0, allocErr
+		}).Build()
+		t.Cleanup(func() { patch.UnPatch() })
+		return ctx, func() { released = true }, nil
+	})
+
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("commit without a final timestamp reached the WAL")
+		return nil, nil
+	})
+	require.True(t, txn.IsCommitAdmissionRejected(err))
+	// The session is rolled back, so the client must replay the transaction
+	// rather than retry a CommitTxn that would fail with an invalid state.
+	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	require.ErrorContains(t, err, allocErr.Error())
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+	require.True(t, released)
+}
+
 func TestTimeTickRowLockFailureRejectsPreparedCommit(t *testing.T) {
 	impl := newTestTimeTickAppendInterceptor(t)
 	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")

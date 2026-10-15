@@ -38,10 +38,15 @@ func (i *appendInterceptor) recoverTransactions(param *interceptors.InterceptorB
 			if body.TimeTick() > lastBodyTS {
 				lastBodyTS = body.TimeTick()
 			}
+		}
+		for _, body := range bodies {
 			if err := i.recoverBody(ctx, txnID, body); err != nil {
+				// The commit is rejected either way; stop decoding so that
+				// the shared budget is left for the other transactions.
 				i.state.txnMu.Lock()
 				i.state.txnLocked(txnID).recoveryIncomplete = true
 				i.state.txnMu.Unlock()
+				break
 			}
 		}
 		i.state.txnMu.Lock()

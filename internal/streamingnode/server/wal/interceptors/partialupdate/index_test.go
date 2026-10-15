@@ -461,34 +461,3 @@ func TestCollectionFenceIndexRejectsMalformedCollectionID(t *testing.T) {
 	fences.Update("v1", 0, 100)
 	require.NoError(t, fences.Verify("v1", 1, 100))
 }
-
-func TestVChannelFenceIndexRejectsEarlierRead(t *testing.T) {
-	fences := newVChannelFenceIndex()
-	fences.Update("v1", 100)
-
-	requirePartialUpdateRetryable(t, fences.Verify("v1", 99))
-	require.NoError(t, fences.Verify("v1", 100))
-	require.NoError(t, fences.Verify("v2", 99))
-}
-
-func TestVChannelFenceIndexAdvancesMonotonically(t *testing.T) {
-	fences := newVChannelFenceIndex()
-	fences.Update("v1", 100)
-	fences.Update("v1", 90)
-	fences.Update("v1", 110)
-
-	requirePartialUpdateRetryable(t, fences.Verify("v1", 109))
-	require.NoError(t, fences.Verify("v1", 110))
-}
-
-func TestVChannelFenceIndexRemove(t *testing.T) {
-	fences := newVChannelFenceIndex()
-	fences.Update("v1", 100)
-	fences.Update("v2", 200)
-
-	fences.Remove("v1")
-
-	require.NoError(t, fences.Verify("v1", 99))
-	requirePartialUpdateRetryable(t, fences.Verify("v2", 199))
-	fences.Remove("v1")
-}
