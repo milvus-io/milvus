@@ -76,7 +76,10 @@ func TestPublishFilesystemMetricsCompatibility(t *testing.T) {
 	for _, family := range gathered {
 		require.Contains(t, expected, family.GetName())
 		require.Len(t, family.Metric, 1)
+		require.Len(t, family.Metric[0].Label, 2)
 		require.Equal(t, filesystemKey, family.Metric[0].Label[0].GetValue())
+		require.Equal(t, "source", family.Metric[0].Label[1].GetName())
+		require.Equal(t, "origin", family.Metric[0].Label[1].GetValue())
 		require.Equal(t, expected[family.GetName()], family.Metric[0].GetGauge().GetValue())
 	}
 }
@@ -90,14 +93,18 @@ func TestFilesystemMetricsCollector(t *testing.T) {
 	)
 	metricsList := []FilesystemMetrics{
 		{
-			DisplayKey: localKey, ReadCount: 1, WriteCount: 2,
+			DisplayKey: localKey, Source: "origin", ReadCount: 1, WriteCount: 2,
 			ReadBytes: 3, WriteBytes: 4, GetFileInfoCount: 5,
 			FailedCount: 6, MultiPartUploadCreated: 7, MultiPartUploadFinished: 8,
 		},
 		{
-			DisplayKey: remoteKey, ReadCount: 11, WriteCount: 12,
+			DisplayKey: remoteKey, Source: "origin", ReadCount: 11, WriteCount: 12,
 			ReadBytes: 13, WriteBytes: 14, GetFileInfoCount: 15,
-			FailedCount: 16, MultiPartUploadCreated: 17, MultiPartUploadFinished: 18,
+			FailedCount: 0, MultiPartUploadCreated: 17, MultiPartUploadFinished: 18,
+		},
+		{
+			DisplayKey: remoteKey, Source: "talon", ReadCount: 2,
+			ReadBytes: 32, FailedCount: 1,
 		},
 	}
 	SetFilesystemMetricsCollectFn(func() []FilesystemMetrics { return metricsList })
@@ -105,15 +112,18 @@ func TestFilesystemMetricsCollector(t *testing.T) {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(&filesystemMetricsCollector{})
 
-	expected := map[string]map[string]float64{
-		"milvus_storage_filesystem_read_count":                 {localKey: 1, remoteKey: 11},
-		"milvus_storage_filesystem_write_count":                {localKey: 2, remoteKey: 12},
-		"milvus_storage_filesystem_read_bytes":                 {localKey: 3, remoteKey: 13},
-		"milvus_storage_filesystem_write_bytes":                {localKey: 4, remoteKey: 14},
-		"milvus_storage_filesystem_get_file_info_count":        {localKey: 5, remoteKey: 15},
-		"milvus_storage_filesystem_failed_count":               {localKey: 6, remoteKey: 16},
-		"milvus_storage_filesystem_multi_part_upload_created":  {localKey: 7, remoteKey: 17},
-		"milvus_storage_filesystem_multi_part_upload_finished": {localKey: 8, remoteKey: 18},
+	local := filesystemMetricsKey{fs: localKey, source: "origin"}
+	origin := filesystemMetricsKey{fs: remoteKey, source: "origin"}
+	talon := filesystemMetricsKey{fs: remoteKey, source: "talon"}
+	expected := map[string]map[filesystemMetricsKey]float64{
+		"milvus_storage_filesystem_read_count":                 {local: 1, origin: 11, talon: 2},
+		"milvus_storage_filesystem_write_count":                {local: 2, origin: 12, talon: 0},
+		"milvus_storage_filesystem_read_bytes":                 {local: 3, origin: 13, talon: 32},
+		"milvus_storage_filesystem_write_bytes":                {local: 4, origin: 14, talon: 0},
+		"milvus_storage_filesystem_get_file_info_count":        {local: 5, origin: 15, talon: 0},
+		"milvus_storage_filesystem_failed_count":               {local: 6, origin: 0, talon: 1},
+		"milvus_storage_filesystem_multi_part_upload_created":  {local: 7, origin: 17, talon: 0},
+		"milvus_storage_filesystem_multi_part_upload_finished": {local: 8, origin: 18, talon: 0},
 	}
 
 	gathered, err := registry.Gather()
@@ -124,13 +134,29 @@ func TestFilesystemMetricsCollector(t *testing.T) {
 		require.True(t, ok, family.GetName())
 		require.Len(t, family.Metric, len(values))
 		for _, metric := range family.Metric {
-			var filesystemKey string
+			var key filesystemMetricsKey
+			require.Len(t, metric.Label, 2)
 			for _, label := range metric.Label {
-				if label.GetName() == filesystemKeyLabelName {
-					filesystemKey = label.GetValue()
+				switch label.GetName() {
+				case filesystemKeyLabelName:
+					key.fs = label.GetValue()
+				case filesystemSourceLabelName:
+					key.source = label.GetValue()
 				}
 			}
-			require.Equal(t, values[filesystemKey], metric.GetGauge().GetValue())
+			require.Contains(t, values, key)
+			require.Equal(t, values[key], metric.GetGauge().GetValue())
+		}
+	}
+
+	// Removing one source must not remove another source for the same filesystem.
+	metricsList = metricsList[:2]
+	gathered, err = registry.Gather()
+	require.NoError(t, err)
+	for _, family := range gathered {
+		require.Len(t, family.Metric, 2)
+		for _, metric := range family.Metric {
+			require.Equal(t, "origin", metric.Label[1].GetValue())
 		}
 	}
 
@@ -170,7 +196,7 @@ func TestFilesystemMetricsCollectorWithoutMetrics(t *testing.T) {
 func TestFilesystemMetricsCollectorsShareCacheOwnership(t *testing.T) {
 	prepareFilesystemMetricsTest(t)
 
-	metricsList := []FilesystemMetrics{{DisplayKey: "cache-a", ReadCount: 1}}
+	metricsList := []FilesystemMetrics{{DisplayKey: "cache-a", Source: "origin", ReadCount: 1}}
 	SetFilesystemMetricsCollectFn(func() []FilesystemMetrics { return metricsList })
 
 	registryA := prometheus.NewRegistry()
@@ -181,7 +207,7 @@ func TestFilesystemMetricsCollectorsShareCacheOwnership(t *testing.T) {
 	_, err := registryA.Gather()
 	require.NoError(t, err)
 
-	metricsList = []FilesystemMetrics{{DisplayKey: "cache-b", ReadCount: 2}}
+	metricsList = []FilesystemMetrics{{DisplayKey: "cache-b", Source: "origin", ReadCount: 2}}
 	gathered, err := registryB.Gather()
 	require.NoError(t, err)
 	for _, family := range gathered {
@@ -193,7 +219,10 @@ func TestFilesystemMetricsCollectorsShareCacheOwnership(t *testing.T) {
 func TestPublishFilesystemMetricsTakesOwnershipFromCache(t *testing.T) {
 	prepareFilesystemMetricsTest(t)
 
-	metricsList := []FilesystemMetrics{{DisplayKey: "shared-key", ReadCount: 1}}
+	metricsList := []FilesystemMetrics{
+		{DisplayKey: "shared-key", Source: "origin", ReadCount: 1},
+		{DisplayKey: "shared-key", Source: "talon", ReadCount: 2},
+	}
 	SetFilesystemMetricsCollectFn(func() []FilesystemMetrics { return metricsList })
 
 	registry := prometheus.NewRegistry()
@@ -202,9 +231,21 @@ func TestPublishFilesystemMetricsTakesOwnershipFromCache(t *testing.T) {
 	require.NoError(t, err)
 
 	PublishFilesystemMetrics("shared-key", 99, 0, 0, 0, 0, 0, 0, 0)
+	metricsList = metricsList[1:]
+	gathered, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range gathered {
+		require.Len(t, family.Metric, 2)
+		if family.GetName() == "milvus_storage_filesystem_read_count" {
+			expected := map[string]float64{"origin": 99, "talon": 2}
+			for _, metric := range family.Metric {
+				require.Equal(t, expected[metric.Label[1].GetValue()], metric.GetGauge().GetValue())
+			}
+		}
+	}
 	metricsList = nil
 
-	gathered, err := registry.Gather()
+	gathered, err = registry.Gather()
 	require.NoError(t, err)
 	var readCount float64
 	for _, family := range gathered {
@@ -222,10 +263,10 @@ func TestFilesystemMetricsCollectorConcurrentRegistrationAndGather(t *testing.T)
 
 	callbacks := []func() []FilesystemMetrics{
 		func() []FilesystemMetrics {
-			return []FilesystemMetrics{{DisplayKey: "fs-a", ReadCount: 1}}
+			return []FilesystemMetrics{{DisplayKey: "fs-a", Source: "origin", ReadCount: 1}}
 		},
 		func() []FilesystemMetrics {
-			return []FilesystemMetrics{{DisplayKey: "fs-b", ReadCount: 2}}
+			return []FilesystemMetrics{{DisplayKey: "fs-b", Source: "talon", ReadCount: 2}}
 		},
 	}
 	SetFilesystemMetricsCollectFn(callbacks[0])
