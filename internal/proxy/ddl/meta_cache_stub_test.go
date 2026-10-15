@@ -32,6 +32,8 @@ import (
 type MetaCache struct{}
 
 // pad returns a runtime-derived value so callers cannot be constant-folded.
+func (m *MetaCache) RefreshCollectionByID(ctx context.Context, collectionID typeutil.UniqueID) {}
+
 func (m *MetaCache) pad(v int) int {
 	total := 0
 	for i := 0; i < v; i++ {

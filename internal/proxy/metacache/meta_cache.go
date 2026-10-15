@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -75,6 +76,14 @@ type Cache interface {
 	// ListShardLocation() map[int64]nodeInfo
 	RemoveCollection(ctx context.Context, database, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID typeutil.UniqueID) []string
+	// RefreshCollectionByID drops the cached entry of one collection so that
+	// its next lookup describes it again. It is not an invalidation: it does
+	// not drain in-flight fills (see MetaCache.fillMu), so it never waits for a
+	// describe of any other collection, and a fill of this one that read an
+	// older snapshot may still write it back afterwards. For a caller that
+	// learned its entry is stale from a refusal it retries -- a write refused
+	// by a shard split's fence -- rather than from a DDL broadcast.
+	RefreshCollectionByID(ctx context.Context, collectionID typeutil.UniqueID)
 	// InvalidateCollectionMeta atomically applies the O(1) collection-cache
 	// invalidations carried by one expiration request: resolution by real name
 	// or alias, eviction by forwarded id, and optional alias-hint removal.
@@ -127,6 +136,51 @@ type CollectionInfo struct {
 	ShardsNum             int32
 	Aliases               []string
 	Properties            []*commonpb.KeyValuePair
+	// Shard routing facts as the coordinator reported them. DescribeCollection
+	// returns them as they are; the write path routes by SplitRouting, which is
+	// derived from them.
+	ShardInfos     []*schemapb.CollectionShardInfo
+	RoutingModulus uint64
+	ShardBy        string
+	// SplitRouting is the routing of a collection that has been split (a
+	// non-zero RoutingModulus), derived once per describe so the write path does
+	// no per-request derivation. Nil for a collection that has never been split,
+	// which keeps the legacy hash % shardNum placement.
+	SplitRouting *SplitRouting
+}
+
+// SplitRouting is how the writes of a split collection are placed.
+type SplitRouting struct {
+	// Table maps a primary key's residue to the vchannel owning it. Nil when the
+	// routing meta is malformed; Err then says why, and the write path refuses
+	// the collection rather than place its rows by position.
+	Table *routing.ResidueTable
+	Err   error
+	// Fenced lists the shards a split has fenced and not yet retired (state
+	// Splitting). They own no residue and refuse every write, but their
+	// idempotency windows still answer for the keyed inserts they took before
+	// the fence.
+	Fenced []string
+}
+
+// NewSplitRouting derives the routing of a split collection from its describe
+// response, or returns nil for one that has never been split.
+func NewSplitRouting(collection *milvuspb.DescribeCollectionResponse) *SplitRouting {
+	if collection.GetRoutingModulus() == 0 {
+		return nil
+	}
+	vchannels := collection.GetVirtualChannelNames()
+	table, err := routing.TableFromMeta(vchannels, collection.GetShardInfos(), collection.GetRoutingModulus())
+	if err != nil {
+		return &SplitRouting{Err: err}
+	}
+	var fenced []string
+	for i, info := range collection.GetShardInfos() {
+		if info.GetState() == schemapb.ShardState_ShardSplitting && i < len(vchannels) {
+			fenced = append(fenced, vchannels[i])
+		}
+	}
+	return &SplitRouting{Table: table, Fenced: fenced}
 }
 
 type DatabaseInfo struct {
@@ -672,6 +726,10 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaIn
 		ShardsNum:             collection.ShardsNum,
 		Aliases:               collection.Aliases,
 		Properties:            collection.Properties,
+		ShardInfos:            collection.GetShardInfos(),
+		RoutingModulus:        collection.GetRoutingModulus(),
+		ShardBy:               collection.GetShardBy(),
+		SplitRouting:          NewSplitRouting(collection),
 	}
 }
 
@@ -1408,6 +1466,19 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID type
 	defer m.mu.Unlock()
 
 	return m.removeCollectionByID(ctx, collectionID)
+}
+
+// RefreshCollectionByID evicts the collection's entry under m.mu alone. A
+// racing fill is tolerated as evictCollectionEntryLocked allows: a fill writes
+// its entry and hints together under m.mu, so it either lands before the
+// eviction and is removed with its hints, or after it and stays -- at worst a
+// snapshot as old as the one just dropped, which the caller's next refusal
+// refreshes again. Taking fillMu instead would make every retry of every
+// refused write wait for the slowest describe in flight on the proxy.
+func (m *MetaCache) RefreshCollectionByID(ctx context.Context, collectionID typeutil.UniqueID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removeCollectionByID(ctx, collectionID)
 }
 
 // evictCollectionEntryLocked is THE single eviction routine: it removes the

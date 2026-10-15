@@ -559,6 +559,16 @@ func (r *recoveryStorageImpl) observeModulesMessage(
 		r.summaryManager.ObserveMessage(ctx, retained.Message())
 	}
 	r.vchannelManager.ObserveMessage(ctx, retained)
+	// A message that ends its vchannel's traffic for good has to ask the
+	// summary to seal what that vchannel staged. Nothing else will: the
+	// summary seals on its own only at FlushMaxBytes, and LastAcked caps the
+	// published checkpoint (see vchannel.RequiresSummarySeal). Asked AFTER the
+	// observation above, so the sealed span's coverage includes this message,
+	// and outside every module lock -- RequestFlushThrough takes the summary's
+	// own lock and submits tasks.
+	if r.summaryManager != nil && vchannel.RequiresSummarySeal(retained.Message()) {
+		r.summaryManager.RequestFlushThrough(retained.Message().TimeTick())
+	}
 }
 
 // startLiveScanner continues the same stream after its startup barrier.

@@ -45,18 +45,22 @@ func (it *InsertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 	}
 
 	log := mlog.With(mlog.String("collectionName", it.insertMsg.GetCollectionName()))
-	channelNames, err := it.chMgr.GetVChannels(it.collectionID)
+	route, err := resolveWriteRoute(ctx, it.GetMetaCache(), it.insertMsg.GetDbName(), it.insertMsg.GetCollectionName(), it.collectionID)
 	if err != nil {
 		log.Warn(ctx, "get vChannels for idempotent autoID assignment failed",
 			mlog.Int64("collectionID", it.collectionID),
 			mlog.Err(err))
 		return err
 	}
-	it.vChannels = channelNames
-	if err := it.reassignAutoIDForStableIdempotency(primaryFieldSchema, channelNames); err != nil {
+	if err := it.reassignAutoIDForStableIdempotency(primaryFieldSchema, route); err != nil {
 		log.Warn(ctx, "stabilize idempotent autoID assignment failed", mlog.Err(err))
 		return err
 	}
+	// Execute keeps the pinning true for the rows it has yet to place when the
+	// routing changes under it -- a collection of one shard included, which a
+	// split turns into two.
+	it.stableAutoIDPrimary = primaryFieldSchema
+	it.stableAutoIDRouteKey = autoIDRouteKey(route)
 	return nil
 }
 
