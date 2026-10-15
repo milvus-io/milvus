@@ -1380,3 +1380,15 @@ func TestImportIdempotencyParams(t *testing.T) {
 		params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
 		2*params.StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse())
 }
+
+func TestPartialUpdateEnableCASConfig(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable())
+	item := &params.StreamingCfg.PartialUpdateEnableCAS
+	assert.Equal(t, "streaming.partialUpdate.enableCAS", item.Key)
+	assert.Equal(t, "3.0.4", item.Version)
+	assert.False(t, item.Export)
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, params.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}

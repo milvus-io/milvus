@@ -47,12 +47,14 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	}
 	pkDescriptorGetter, _ := param.ShardManager.(primaryKeyDescriptorGetter)
 	return &appendInterceptor{
+		enableCAS:          paramtable.Get().StreamingCfg.PartialUpdateEnableCAS.GetAsBool(),
 		state:              state,
 		pkDescriptorGetter: pkDescriptorGetter,
 	}
 }
 
 type appendInterceptor struct {
+	enableCAS          bool
 	state              *partialUpdateState
 	pkDescriptorGetter primaryKeyDescriptorGetter
 }
@@ -66,6 +68,9 @@ func (i *appendInterceptor) DoAppend(
 	msg message.MutableMessage,
 	appendOp interceptors.Append,
 ) (message.MessageID, error) {
+	if !i.enableCAS {
+		return appendOp(ctx, msg)
+	}
 	switch msg.MessageType() {
 	case message.MessageTypeCommitTxn:
 		return i.appendCommit(ctx, msg, appendOp)
