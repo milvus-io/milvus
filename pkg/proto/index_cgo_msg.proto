@@ -79,6 +79,13 @@ message OptionalFieldInfo {
   int32 element_type = 5;
 }
 
+message IndexBuildStorageConfig {
+  reserved 1 to 7;
+  reserved "download_task_pool_size", "multipart_upload_part_size", "max_inflight_upload_parts", "max_connections";
+  uint64 concurrency = 8;
+  uint64 request_size = 9;
+}
+
 message BuildIndexInfo {
   string clusterID = 1;
   int64 buildID = 2;
@@ -118,6 +125,7 @@ message BuildIndexInfo {
   // External collection fields (empty for regular collections)
   string external_source = 33;
   string external_spec = 34;
+  IndexBuildStorageConfig build_storage_config = 35;
 }
 
 message StoragePluginContext {

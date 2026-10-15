@@ -17,6 +17,8 @@
 #pragma once
 
 #include <exception>
+#include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -28,10 +30,15 @@
 #include "index/vector/VectorDiskArtifactFile.h"
 #include "storage/artifact/LocalDirectory.h"
 
+namespace arrow {
+class Buffer;
+}
+
 namespace milvus::index {
 
-// Build-only FileManager. It records completed files inside one owned staging
-// directory and never publishes or opens remote storage.
+// Adapts engine file operations to local files and buffered output. The artifact
+// takes completed buffers for publication; the manager never invokes the engine
+// or uploads data.
 class VectorDiskBuildFileManager final
     : public milvus::FileManager,
       public std::enable_shared_from_this<VectorDiskBuildFileManager> {
@@ -39,6 +46,11 @@ class VectorDiskBuildFileManager final
     explicit VectorDiskBuildFileManager(
         std::shared_ptr<storage::LocalDirectory> local_files);
     ~VectorDiskBuildFileManager() override = default;
+
+    // The builder supplies format-specific input preparation for LoadFile and
+    // clears it before returning. Tensor consumers never invoke this loader.
+    void
+    SetFileLoader(std::function<void(const std::string&)> loader);
 
     bool
     LoadFile(const std::string& filename) override;
@@ -53,7 +65,8 @@ class VectorDiskBuildFileManager final
     std::shared_ptr<milvus::InputStream>
     OpenInputStream(const std::string& filename) override;
     std::shared_ptr<milvus::OutputStream>
-    OpenOutputStream(const std::string& filename) override;
+    OpenOutputStream(const std::string& filename,
+                     size_t file_size = 0) override;
 
     const std::string&
     Directory() const;
@@ -61,39 +74,33 @@ class VectorDiskBuildFileManager final
     IndexPrefix() const;
 
     void
-    RegisterOwnedFile(const std::string& filename);
-    void
     RegisterOwnedFile(const std::string& filename,
-                      VectorDiskFileTransport transport);
-    void
-    BeginOutput(const std::string& filename);
-    void
-    CompleteOutput(const std::string& filename, size_t size);
+                      VectorDiskFileTransport transport =
+                          VectorDiskFileTransport::LegacySliced);
     std::vector<VectorDiskArtifactFile>
-    Files() const;
+    LocalFiles() const;
+    std::map<std::string, std::shared_ptr<arrow::Buffer>>
+    TakeOutput();
+    void
+    ResetOutput();
     void
     RethrowFirstFailure() const;
 
     // FileManager's bool/optional API and some knowhere backends collapse an
-    // exception into a status. Streams record at the throw site as well, so
-    // the builder/loader can restore the original typed failure afterwards.
+    // exception into a status. Retain the original typed failure for the
+    // builder or artifact to rethrow after the engine returns.
     void
     RecordFailure(std::exception_ptr failure) noexcept;
 
  private:
-    void
-    AbortOutput(const std::string& filename) noexcept;
-    void
-    RegisterCompletedFileLocked(const std::string& filename,
-                                size_t size,
-                                VectorDiskFileTransport transport);
+    class BufferedOutput;
 
     std::shared_ptr<storage::LocalDirectory> local_files_;
     mutable std::mutex mutex_;
     std::unordered_map<std::string, VectorDiskArtifactFile> files_;
-    std::unordered_map<std::string, size_t> pending_meta_;
-    std::unordered_map<std::string, size_t> open_outputs_;
     std::exception_ptr first_failure_;
+    std::function<void(const std::string&)> file_loader_;
+    std::map<std::string, std::shared_ptr<BufferedOutput>> output_streams_;
 };
 
 }  // namespace milvus::index

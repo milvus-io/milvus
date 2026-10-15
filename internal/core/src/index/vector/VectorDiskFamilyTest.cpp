@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "common/Utils.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
@@ -37,6 +38,8 @@
 #include "index/contracts/build/VectorBuildInput.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/KnowhereEngine.h"
+#include "index/vector/VectorDiskBuildFileManager.h"
+#include "indexbuilder/VectorDiskBuildMaterializer.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/FileManager.h"
@@ -118,7 +121,8 @@ BuildDisk(const std::string& raw_path,
           int64_t dim = kDim,
           int64_t logical_rows = kRows,
           const std::string& offsets_path = {},
-          bool mmap = false) {
+          bool mmap = false,
+          const T* tensor = nullptr) {
     auto adapted = AdaptIndexType({
         .index_type = knowhere::IndexEnum::INDEX_DISKANN,
         .field_type =
@@ -140,7 +144,9 @@ BuildDisk(const std::string& raw_path,
         BuilderRegistry<PreparedVectorBuildFiles<T>>::Instance().Create(
             adapted.family, adapted.params);
     ASSERT_NE(builder, nullptr);
-    PreparedVectorBuildFiles<T> input{.raw_path = raw_path};
+    PreparedVectorBuildFiles<T> input{.raw_path = raw_path,
+                                      .tensor = tensor,
+                                      .raw_file_complete = tensor == nullptr};
     if (!offsets_path.empty()) {
         input.embedding_offsets_path = offsets_path;
     }
@@ -197,14 +203,22 @@ BuildDisk(const std::string& raw_path,
 
 template <typename T>
 void
-RunOrdinaryDiskSearch(bool mmap) {
+RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     auto files = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_disk_family_XXXXXX", "vector disk family test");
     const auto raw_path = files->Path() + "/raw";
     auto values = MakeRows<T>();
-    WriteRaw(raw_path, values, kRows, kDim);
+    WriteRaw(raw_path, resident ? std::vector<T>{} : values, kRows, kDim);
     OpenedDiskIndex<T> opened;
-    BuildDisk(raw_path, files->Path(), opened, "L2", kDim, kRows, {}, mmap);
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              "L2",
+              kDim,
+              kRows,
+              {},
+              mmap,
+              resident ? values.data() : nullptr);
     ASSERT_NE(opened.base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
@@ -252,6 +266,135 @@ RunOrdinaryDiskSearch(bool mmap) {
 
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {
     RunOrdinaryDiskSearch<float>(false);
+}
+
+TEST(VectorDiskFamilyTest, ResidentInputBuildLoadSearch) {
+    RunOrdinaryDiskSearch<float>(false, true);
+}
+
+TEST(VectorDiskFamilyTest, BufferedOutputPreservesClosedStreamAndMetadata) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_output_XXXXXX", "vector output test");
+    auto manager = std::make_shared<VectorDiskBuildFileManager>(files);
+    const auto path = files->Path() + "/index";
+    auto stream = manager->OpenOutputStream(path, 7);
+    EXPECT_EQ(stream->Write("pay", 3), 3);
+    EXPECT_EQ(stream->Tell(), 3);
+    EXPECT_EQ(stream->Write("load", 4), 4);
+    stream->Close();
+    EXPECT_NO_THROW(stream->Close());
+    EXPECT_EQ(stream->Tell(), 7);
+    EXPECT_TRUE(manager->AddFileMeta({path, 7}));
+    EXPECT_TRUE(manager->LocalFiles().empty());
+    EXPECT_FALSE(std::filesystem::exists(path));
+
+    auto output = manager->TakeOutput();
+    ASSERT_EQ(output.size(), 1);
+    EXPECT_EQ(output.at(path)->ToString(), "payload");
+    EXPECT_TRUE(manager->TakeOutput().empty());
+    manager->ResetOutput();
+    EXPECT_EQ(output.at(path)->ToString(), "payload");
+}
+
+TEST(VectorDiskFamilyTest, FailedOutputCanBeDiscardedBeforeRetry) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_output_retry_XXXXXX", "vector output retry test");
+    auto manager = std::make_shared<VectorDiskBuildFileManager>(files);
+    const auto path = files->Path() + "/index";
+    auto stream = manager->OpenOutputStream(path, 7);
+    stream->Write("pay", 3);
+    EXPECT_FALSE(manager->AddFileMeta({path, 7}));
+    EXPECT_ANY_THROW(manager->RethrowFirstFailure());
+    manager->ResetOutput();
+    EXPECT_NO_THROW(manager->RethrowFirstFailure());
+
+    stream = manager->OpenOutputStream(path, 7);
+    stream->Write("payload", 7);
+    stream->Close();
+    ASSERT_TRUE(manager->AddFileMeta({path, 7}));
+    auto output = manager->TakeOutput();
+    ASSERT_EQ(output.size(), 1);
+    EXPECT_EQ(output.at(path)->ToString(), "payload");
+}
+
+TEST(VectorDiskFamilyTest,
+     BufferedOutputRetainsWriteFailureWithoutOwningManager) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_output_error_XXXXXX", "vector output error test");
+    auto manager = std::make_shared<VectorDiskBuildFileManager>(files);
+    auto stream = manager->OpenOutputStream(files->Path() + "/index");
+    try {
+        stream->Write(-1, 1);
+        FAIL() << "invalid source descriptor must fail";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FileReadFailed);
+        try {
+            manager->RethrowFirstFailure();
+            FAIL() << "the manager must retain the stream failure";
+        } catch (const SegcoreError& retained) {
+            EXPECT_EQ(retained.get_error_code(), error.get_error_code());
+            EXPECT_STREQ(retained.what(), error.what());
+        }
+    }
+    manager->ResetOutput();
+    stream = manager->OpenOutputStream(files->Path() + "/retry");
+    stream->Close();
+    EXPECT_ANY_THROW(stream->Write("x", 1));
+    EXPECT_ANY_THROW(manager->RethrowFirstFailure());
+    std::weak_ptr<VectorDiskBuildFileManager> owner = manager;
+    manager.reset();
+    EXPECT_TRUE(owner.expired());
+}
+
+TEST(VectorDiskFamilyTest, PreparedInputStaysResidentUntilReleased) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_input_XXXXXX", "vector disk input test");
+    auto adapted = AdaptIndexType({
+        .index_type = knowhere::IndexEnum::INDEX_DISKANN,
+        .field_type = DataType::VECTOR_FLOAT,
+        .element_type = DataType::NONE,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, "L2"},
+                   {DIM_KEY, kDim},
+                   {DISK_ANN_MAX_DEGREE, "24"},
+                   {DISK_ANN_SEARCH_LIST_SIZE, "56"},
+                   {DISK_ANN_PQ_CODE_BUDGET, "0.001"},
+                   {DISK_ANN_BUILD_DRAM_BUDGET, "2"},
+                   {DISK_ANN_BUILD_THREAD_NUM, "2"}},
+    });
+    adapted.params["local_dir"] = files->Path();
+    for (bool direct : {false, true}) {
+        indexbuilder::VectorDiskBuildMaterializer materializer(
+            files->Path(),
+            DataType::VECTOR_FLOAT,
+            DataType::VECTOR_FLOAT,
+            kDim,
+            false,
+            kRows,
+            adapted.family,
+            adapted.params);
+        const auto values = MakeRows<float>();
+        if (direct) {
+            std::memcpy(materializer.AllocateInput(),
+                        values.data(),
+                        values.size() * sizeof(float));
+            materializer.FinishInput(kRows);
+        } else {
+            auto batch = storage::CreateFieldData(
+                DataType::VECTOR_FLOAT, DataType::NONE, false, kDim);
+            batch->FillFieldData(values.data(), kRows);
+            materializer.Add(batch);
+        }
+        materializer.FinishPrimary();
+        EXPECT_TRUE(materializer.HasResidentInput());
+        ASSERT_TRUE(materializer.SpillInput());
+        EXPECT_TRUE(materializer.HasResidentInput());
+        materializer.ReleaseInputMemory();
+        EXPECT_FALSE(materializer.HasResidentInput());
+        auto artifact = std::move(materializer).Build();
+        ASSERT_NE(artifact, nullptr);
+    }
 }
 
 TEST(VectorDiskFamilyTest, Float16BuildLoadSearch) {

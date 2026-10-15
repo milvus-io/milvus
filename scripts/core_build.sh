@@ -100,7 +100,7 @@ BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 USE_DYNAMIC_SIMD="ON"
 USE_SVS="OFF"
-WITH_CRT="OFF"
+WITH_CRT="ON"
 TANTIVY_FEATURES=""
 INDEX_ENGINE="KNOWHERE"
 ENABLE_AZURE_FS="ON"
@@ -182,7 +182,7 @@ parameter:
 -a: build milvus with AddressSanitizer(default: false)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
 -S: build milvus with SVS/Intel Scalable Vector Search(default: OFF)
--R: build milvus-storage with AWS S3 CRT read path(default: OFF)
+-R: build milvus-storage with AWS S3 CRT read path(default: ON)
 -f: build milvus with tantivy features(default: '')
 -h: help
 

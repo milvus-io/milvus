@@ -17,13 +17,17 @@
 #include "indexbuilder/VectorBuildMaterializer.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <optional>
 #include <span>
 #include <string>
 #include <type_traits>
 #include <utility>
+
+#include <unistd.h>
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -33,6 +37,8 @@
 #include "index/contracts/build/VectorBuildInput.h"
 #include "index/vector/VectorBuilderUtils.h"
 #include "index/vector/VectorTypeUtils.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/Util.h"
 
 namespace milvus::indexbuilder {
 
@@ -332,18 +338,78 @@ VectorScalarInfoAccumulator::Finish() && {
     return impl_->Finish();
 }
 
+VectorInput::VectorInput(size_t bytes, std::string path)
+    : data_(std::make_unique_for_overwrite<uint8_t[]>(bytes)),
+      bytes_(bytes),
+      path_(std::move(path)),
+      owns_file_(path_.empty()) {
+}
+
+VectorInput::~VectorInput() {
+    if (owns_file_ && !path_.empty()) {
+        std::error_code ignored;
+        std::filesystem::remove(path_, ignored);
+        std::filesystem::remove(path_ + ".partial", ignored);
+    }
+}
+
+bool
+VectorInput::Spill(size_t rows, size_t dim, size_t row_bytes) {
+    if (on_disk_) {
+        return true;
+    }
+    if (path_.empty()) {
+        const auto& directory =
+            storage::LocalChunkManagerSingleton::GetInstance()
+                .GetChunkManager()
+                ->GetRootPath();
+        std::filesystem::create_directories(directory);
+        auto path = directory + "/index-input-XXXXXX";
+        const int fd = ::mkstemp(path.data());
+        if (fd < 0) {
+            ThrowInfo(FileWriteFailed,
+                      "cannot create spilled input: {}",
+                      strerror(errno));
+        }
+        ::close(fd);
+        path_ = std::move(path);
+    }
+    bytes_ = rows * row_bytes;
+    on_disk_ = storage::SpillRawData(
+        path_, data_.get(), rows, dim, row_bytes, stop_spill_);
+    return on_disk_;
+}
+
+void
+VectorInput::ReleaseMemory() {
+    AssertInfo(on_disk_, "cannot release input before its spill completes");
+    data_.reset();
+}
+
+void
+VectorInput::Load() {
+    if (!data_) {
+        AssertInfo(on_disk_, "vector input has no complete backing file");
+        auto data = std::make_unique_for_overwrite<uint8_t[]>(bytes_);
+        storage::ReadRawData(path_, data.get(), bytes_);
+        data_ = std::move(data);
+    }
+}
+
 VectorBuildMaterializer::VectorBuildMaterializer(
     DataType field_type,
     DataType value_type,
     int64_t dim,
     int64_t expected_rows,
     const index::IndexFamily& family,
-    const index::BuildParams& params)
+    const index::BuildParams& params,
+    milvus::OpContext* op_context)
     : field_type_(field_type),
       value_type_(value_type),
       dim_(dim),
       observed_dim_(dim),
-      expected_rows_(expected_rows) {
+      expected_rows_(expected_rows),
+      op_context_(op_context) {
     index::DispatchPhysicalVectorDataType(
         value_type,
         [&]<typename T>() {
@@ -373,7 +439,9 @@ VectorBuildMaterializer::VectorBuildMaterializer(
       embedding_offsets_(std::move(other.embedding_offsets_)),
       scalar_info_(std::move(other.scalar_info_)),
       consumed_(other.consumed_),
-      state_(std::move(other.state_)) {
+      state_(std::move(other.state_)),
+      op_context_(other.op_context_),
+      input_(std::move(other.input_)) {
     other.state_.emplace<0>();
 }
 
@@ -395,6 +463,8 @@ VectorBuildMaterializer::operator=(VectorBuildMaterializer&& other) noexcept {
     scalar_info_ = std::move(other.scalar_info_);
     consumed_ = other.consumed_;
     state_ = std::move(other.state_);
+    op_context_ = other.op_context_;
+    input_ = std::move(other.input_);
     other.state_.emplace<0>();
     return *this;
 }
@@ -484,9 +554,78 @@ VectorBuildMaterializer::SetScalarInfo(VectorScalarInfo scalar_info) {
     scalar_info_.emplace(std::move(scalar_info));
 }
 
+bool
+VectorBuildMaterializer::TryReserveBuild() {
+    AssertOpen("reserve");
+    return std::visit(
+        [](auto& state) {
+            using S = std::decay_t<decltype(state)>;
+            if constexpr (std::is_same_v<S, std::monostate>) {
+                return false;
+            } else {
+                return state.builder->TryReserveBuild();
+            }
+        },
+        state_);
+}
+
+uint8_t*
+VectorBuildMaterializer::AllocateInput() {
+    AssertOpen("allocate input for");
+    AssertInfo(field_type_ != DataType::VECTOR_ARRAY &&
+                   !IsSparseFloatVectorDataType(value_type_) &&
+                   layout_.LogicalRows() == 0,
+               "direct input requires an empty dense vector materializer");
+    const auto row_bytes = vector_bytes_per_element(value_type_, dim_);
+    const auto rows =
+        index::vector_builder::CheckedSize(expected_rows_, "expected row");
+    AssertInfo(
+        row_bytes > 0 && rows <= std::numeric_limits<size_t>::max() / row_bytes,
+        "vector input size overflows size_t");
+    if (!input_) {
+        input_ = std::make_unique<VectorInput>(rows * row_bytes);
+    }
+    return input_->Data();
+}
+
+void
+VectorBuildMaterializer::FinishInput(size_t rows) {
+    AssertOpen("finish input for");
+    AssertInfo(input_ && rows == static_cast<size_t>(expected_rows_) &&
+                   layout_.LogicalRows() == 0,
+               "direct vector input has {} rows, expected {}",
+               rows,
+               expected_rows_);
+    layout_.Append(rows, {});
+}
+
+bool
+VectorBuildMaterializer::SpillInput() {
+    AssertOpen("spill");
+    return input_ && input_->Spill(layout_.PhysicalRows(),
+                                   dim_,
+                                   vector_bytes_per_element(value_type_, dim_));
+}
+
+void
+VectorBuildMaterializer::StopSpill() {
+    if (input_) {
+        input_->StopSpill();
+    }
+}
+
+void
+VectorBuildMaterializer::ReleaseInputMemory() {
+    AssertInfo(input_ != nullptr, "vector input is not spillable");
+    input_->ReleaseMemory();
+}
+
 storage::ArtifactPtr
 VectorBuildMaterializer::Build() && {
     AssertOpen("build");
+    if (input_) {
+        input_->Load();
+    }
     consumed_ = true;
     AssertInfo(layout_.LogicalRows() == index::vector_builder::CheckedSize(
                                             expected_rows_, "expected row"),
@@ -675,26 +814,24 @@ VectorBuildMaterializer::AppendBatch(TypedState<T>& state,
                    batch->get_dim(),
                    dim_);
         const auto elements = BatchElementCount<T>(*batch, valid_rows);
-        if (state.values.empty() && layout_.LogicalRows() == 0 &&
-            !batch->IsNullable()) {
-            const auto row_elements =
-                vector_bytes_per_element(value_type_, dim_) / sizeof(ValueType);
-            const auto expected = index::vector_builder::CheckedSize(
-                expected_rows_, "expected row");
-            AssertInfo(row_elements == 0 ||
-                           expected <= std::numeric_limits<size_t>::max() /
-                                           row_elements,
-                       "vector tensor element count overflows size_t");
-            state.values.reserve(expected * row_elements);
+        if (!input_) {
+            AllocateInput();
         }
         const auto* begin = static_cast<const ValueType*>(batch->Data());
         AssertInfo(begin != nullptr || elements == 0,
                    "vector batch has null physical data");
         if (elements != 0) {
-            state.values.insert(state.values.end(), begin, begin + elements);
+            const auto offset = layout_.PhysicalRows() *
+                                vector_bytes_per_element(value_type_, dim_);
+            std::memcpy(
+                input_->Data() + offset, begin, elements * sizeof(ValueType));
         }
     }
     layout_.Append(batch->Length(), validity);
+    if (layout_.LogicalRows() == static_cast<size_t>(expected_rows_) &&
+        layout_.PhysicalRows() == 0) {
+        input_.reset();
+    }
 }
 
 template <typename T>
@@ -703,7 +840,13 @@ VectorBuildMaterializer::BuildTyped(
     TypedState<T>& state,
     std::span<const index::VectorScalarFieldGroups> field_views) {
     using ValueType = typename TypedState<T>::ValueType;
-    const std::span<const ValueType> physical_values = state.values;
+    const std::span<const ValueType> physical_values =
+        input_ ? std::span<const ValueType>(
+                     reinterpret_cast<const ValueType*>(input_->Data()),
+                     layout_.PhysicalRows() *
+                         vector_bytes_per_element(value_type_, dim_) /
+                         sizeof(ValueType))
+               : std::span<const ValueType>(state.values);
     const auto physical_rows = field_type_ == DataType::VECTOR_ARRAY
                                    ? embedding_offsets_.back()
                                    : layout_.PhysicalRows();
@@ -722,6 +865,7 @@ VectorBuildMaterializer::BuildTyped(
         .parent_validity = layout_.Validity(),
         .embedding_offsets = offsets,
         .scalar_fields = field_views,
+        .op_context = op_context_,
     };
     auto builder = std::move(state.builder);
     try {

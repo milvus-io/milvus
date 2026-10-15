@@ -238,7 +238,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 1,
 			State:  datapb.CompactionTaskState_completed,
 		}, nil)
-		s.node.compactionExecutor.Enqueue(mockC)
+		s.node.compactionExecutor.Enqueue(mockC, nil)
 
 		mockC2 := compactor.NewMockCompactor(s.T())
 		mockC2.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
@@ -251,7 +251,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 2,
 			State:  datapb.CompactionTaskState_failed,
 		}, nil)
-		s.node.compactionExecutor.Enqueue(mockC2)
+		s.node.compactionExecutor.Enqueue(mockC2, nil)
 
 		s.Eventually(func() bool {
 			stat, err := s.node.GetCompactionState(s.ctx, nil)

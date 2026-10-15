@@ -583,6 +583,18 @@ func calculateIndexTaskSlot(fieldSize, numRows int64, indexParams []*commonpb.Ke
 	}
 	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
 	isHeavyIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+	if isHeavyIndex {
+		var gpuBuild string
+		for _, param := range indexParams {
+			if param.GetKey() == "gpu_build" {
+				gpuBuild = param.GetValue()
+			}
+		}
+		if vecindexmgr.VectorBuildUsesGPU(indexType, gpuBuild) {
+			// Each pipeline stage reserves 2x input bytes in 512 MiB slots.
+			return max(ceilDiv(fieldSize, 256<<20), 1)
+		}
+	}
 	if !isHeavyIndex {
 		defaultSlots = Params.DataCoordCfg.ScalarIndexTaskSlotUsage.GetAsInt64()
 	}

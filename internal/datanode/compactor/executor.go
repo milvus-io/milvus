@@ -36,7 +36,7 @@ const (
 
 type Executor interface {
 	Start(ctx context.Context)
-	Enqueue(task Compactor) (bool, error)
+	Enqueue(task Compactor, admissionErr error) (bool, error)
 	Slots() int64
 	RemoveTask(planID int64)                                // Deprecated in 2.6
 	GetResults(planID int64) []*datapb.CompactionPlanResult // Deprecated in 2.6
@@ -77,7 +77,7 @@ func NewExecutor() *executor {
 	}
 }
 
-func getTaskSlotUsage(task Compactor) int64 {
+func GetTaskSlotUsage(task Compactor) int64 {
 	// Calculate slot usage
 	taskSlotUsage := task.GetSlotUsage()
 	// compatible for old datacoord or unexpected request
@@ -101,7 +101,7 @@ func getTaskSlotUsage(task Compactor) int64 {
 	return taskSlotUsage
 }
 
-func (e *executor) Enqueue(task Compactor) (bool, error) {
+func (e *executor) Enqueue(task Compactor, admissionErr error) (bool, error) {
 	e.mu.Lock()
 
 	planID := task.GetPlanID()
@@ -115,8 +115,13 @@ func (e *executor) Enqueue(task Compactor) (bool, error) {
 		return false, merr.WrapErrDuplicatedCompactionTask()
 	}
 
+	if admissionErr != nil {
+		e.mu.Unlock()
+		return false, admissionErr
+	}
+
 	// Update slots and add task
-	e.usingSlots += getTaskSlotUsage(task)
+	e.usingSlots += GetTaskSlotUsage(task)
 	e.tasks[planID] = &taskState{
 		compactor: task,
 		state:     datapb.CompactionTaskState_executing,
@@ -155,7 +160,7 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 		}
 
 		// Adjust slot usage
-		e.usingSlots -= getTaskSlotUsage(task.compactor)
+		e.usingSlots -= GetTaskSlotUsage(task.compactor)
 		if e.usingSlots < 0 {
 			e.usingSlots = 0
 		}

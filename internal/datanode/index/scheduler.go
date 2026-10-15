@@ -58,7 +58,6 @@ type IndexTaskQueue struct {
 	maxTaskNum int64
 
 	utBufChan chan struct{} // to block scheduler
-	usingSlot atomic.Int64
 
 	sched *TaskScheduler
 }
@@ -79,8 +78,17 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
+	if queue.sched.ctx.Err() != nil {
+		return errCancel
+	}
 	if queue.utFull() {
 		return merr.Wrap(merr.ErrServiceResourceInsufficient, "index task queue is full")
+	}
+	// Vector index tasks acquire slots at each executable stage.
+	if !queue.sched.usesStageSlots(t) {
+		if !queue.sched.acquireSlots(t) {
+			return merr.Wrap(merr.ErrServiceResourceInsufficient, "insufficient task slots")
+		}
 	}
 	queue.unissuedTasks.PushBack(t)
 	select {
@@ -91,7 +99,7 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 }
 
 func (queue *IndexTaskQueue) GetUsingSlot() int64 {
-	return queue.usingSlot.Load()
+	return queue.sched.usingSlot.Load()
 }
 
 func (queue *IndexTaskQueue) GetActiveSlot() int64 {
@@ -99,8 +107,8 @@ func (queue *IndexTaskQueue) GetActiveSlot() int64 {
 	defer queue.atLock.Unlock()
 
 	slots := int64(0)
-	for _, t := range queue.activeTasks {
-		slots += t.GetSlot()
+	for name := range queue.activeTasks {
+		slots += queue.sched.taskSlots(name)
 	}
 	return slots
 }
@@ -137,14 +145,15 @@ func (queue *IndexTaskQueue) AddActiveTask(t Task) {
 // PopActiveTask pops a task from activateTask and the task will be executed.
 func (queue *IndexTaskQueue) PopActiveTask(tName string) Task {
 	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
 
 	t, ok := queue.activeTasks[tName]
 	if ok {
 		delete(queue.activeTasks, tName)
-		queue.usingSlot.Sub(t.GetSlot())
+		queue.atLock.Unlock()
+		queue.sched.releaseSlots(t)
 		return t
 	}
+	queue.atLock.Unlock()
 	mlog.Debug(queue.sched.ctx, "task was not found in the active task list", mlog.String("TaskName", tName))
 	return nil
 }
@@ -159,7 +168,6 @@ func (queue *IndexTaskQueue) Enqueue(t Task) error {
 		return err
 	}
 
-	queue.usingSlot.Add(t.GetSlot())
 	return nil
 }
 
@@ -189,8 +197,6 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 
 		utBufChan: make(chan struct{}, 1024),
 		sched:     sched,
-
-		usingSlot: atomic.Int64{},
 	}
 }
 
@@ -201,18 +207,95 @@ type TaskScheduler struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	downloadTasks chan Task
+	buildWakeup   chan struct{}
+	slotMu        sync.Mutex
+	heldSlots     map[string]int64
+	usingSlot     atomic.Int64
+	externalSlots func() int64
+	totalSlots    func() int64
 }
 
 // NewTaskScheduler creates a new task scheduler of indexing tasks.
 func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		ctx:    ctx1,
-		cancel: cancel,
+		ctx:           ctx1,
+		cancel:        cancel,
+		downloadTasks: make(chan Task, 1024),
+		buildWakeup:   make(chan struct{}, 1),
+		heldSlots:     make(map[string]int64),
+		externalSlots: func() int64 { return 0 },
+		totalSlots:    CalculateNodeSlots,
 	}
 	s.TaskQueue = NewIndexBuildTaskQueue(s)
 
 	return s
+}
+
+func (sched *TaskScheduler) usesStageSlots(t Task) bool {
+	_, ok := t.(PreparedTask)
+	return ok && t.IsVectorIndex()
+}
+
+// SetExternalSlotUsage connects stage admission to the same node-wide slot
+// accounting reported by QuerySlot. Call before starting the scheduler.
+func (sched *TaskScheduler) SetExternalSlotUsage(usage func() int64) {
+	sched.externalSlots = usage
+}
+
+// AdmitTask serializes non-index enqueueing with stage admission. The owner
+// checks duplicate requests before applying the capacity error; a retry does not
+// consume additional slots. enqueue must publish its slot usage before returning.
+func (sched *TaskScheduler) AdmitTask(slots int64, enqueue func(error) error) error {
+	sched.slotMu.Lock()
+	defer sched.slotMu.Unlock()
+	var admissionErr error
+	if !sched.slotsAvailable(slots) {
+		select {
+		case sched.buildWakeup <- struct{}{}:
+		default:
+		}
+		admissionErr = merr.Wrap(merr.ErrServiceResourceInsufficient, "insufficient task slots")
+	}
+	return enqueue(admissionErr)
+}
+
+func (sched *TaskScheduler) slotsAvailable(slots int64) bool {
+	used := sched.usingSlot.Load() + sched.externalSlots()
+	// Keep oversized tasks executable on an otherwise idle node, as in the
+	// coordinator's existing best-effort admission. They run alone.
+	return used == 0 || slots <= sched.totalSlots()-used
+}
+
+func (sched *TaskScheduler) acquireSlots(t Task) bool {
+	sched.slotMu.Lock()
+	defer sched.slotMu.Unlock()
+	if _, ok := sched.heldSlots[t.Name()]; ok {
+		return true
+	}
+	if !sched.slotsAvailable(t.GetSlot()) {
+		return false
+	}
+	sched.heldSlots[t.Name()] = t.GetSlot()
+	sched.usingSlot.Add(t.GetSlot())
+	return true
+}
+
+func (sched *TaskScheduler) releaseSlots(t Task) {
+	sched.slotMu.Lock()
+	if slots, ok := sched.heldSlots[t.Name()]; ok {
+		delete(sched.heldSlots, t.Name())
+		sched.usingSlot.Sub(slots)
+	}
+	sched.slotMu.Unlock()
+}
+
+func (sched *TaskScheduler) taskSlots(name string) int64 {
+	sched.slotMu.Lock()
+	defer sched.slotMu.Unlock()
+	return sched.heldSlots[name]
 }
 
 func getStateFromError(err error) indexpb.JobState {
@@ -244,92 +327,115 @@ func getStateFromError(err error) indexpb.JobState {
 	return indexpb.JobState_JobStateRetry
 }
 
-func (sched *TaskScheduler) processTask(t Task) {
-	wrap := func(fn func(ctx context.Context) error) error {
-		select {
-		case <-t.Ctx().Done():
-			return errCancel
-		default:
-			return fn(t.Ctx())
-		}
-	}
+type taskExecution struct {
+	task       Task
+	indexTask  *indexBuildTask
+	started    time.Time
+	usesGPU    bool
+	stopCancel func() bool
+}
 
-	defer func() {
+func (sched *TaskScheduler) beginTask(t Task) *taskExecution {
+	sched.TaskQueue.AddActiveTask(t)
+	exec := &taskExecution{task: t, started: time.Now()}
+	if ibt, ok := t.(*indexBuildTask); ok {
+		exec.indexTask = ibt
+		costCPUNum := taskcost.EstimateIndexBuildCPUNum(ibt.IsVectorIndex())
+		ibt.manager.StoreIndexTaskExecutionStart(ibt.req.GetClusterID(), ibt.req.GetBuildID(), taskcost.NowMs(), costCPUNum)
+	}
+	return exec
+}
+
+func (sched *TaskScheduler) runStep(t Task, fn func(context.Context) error) error {
+	select {
+	case <-sched.ctx.Done():
+		return errCancel
+	case <-t.Ctx().Done():
+		return errCancel
+	default:
+		return fn(t.Ctx())
+	}
+}
+
+func (sched *TaskScheduler) finishTask(exec *taskExecution, err error) {
+	t := exec.task
+	if exec.stopCancel != nil {
+		exec.stopCancel()
+	}
+	if _, ok := t.(PreparedTask); ok {
+		// Index input owners must be released before returning memory slots.
 		t.Reset()
 		debug.FreeOSMemory()
-	}()
-	sched.TaskQueue.AddActiveTask(t)
-	defer sched.TaskQueue.PopActiveTask(t.Name())
-	var (
-		indexTask  *indexBuildTask
-		costCPUNum int64
-		execStart  time.Time
-	)
-	if ibt, ok := t.(*indexBuildTask); ok {
-		indexTask = ibt
-		costCPUNum = taskcost.EstimateIndexBuildCPUNum(indexTask.IsVectorIndex())
-		// execStart carries a monotonic clock reading; CostTimeMs derived from
-		// it is immune to wall-clock steps. ExecStartMs/ExecEndMs stay wall-clock
-		// timestamps for external exposure.
-		execStart = time.Now()
-		indexTask.manager.StoreIndexTaskExecutionStart(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), taskcost.NowMs(), costCPUNum)
-		mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()), mlog.Int64("costCPUNum", costCPUNum))
 	} else {
-		mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()))
+		defer func() {
+			t.Reset()
+			debug.FreeOSMemory()
+		}()
 	}
+	state, reason := indexpb.JobState_JobStateFinished, ""
+	if err != nil {
+		state, reason = getStateFromError(err), err.Error()
+		mlog.Warn(t.Ctx(), "process task failed", mlog.String("task", t.Name()), mlog.Err(err))
+	}
+	if exec.indexTask != nil {
+		exec.indexTask.SetStateWithCost(state, reason, taskcost.NowMs(), taskcost.ElapsedMs(exec.started))
+	} else {
+		t.SetState(state, reason)
+	}
+	sched.TaskQueue.PopActiveTask(t.Name())
+}
 
-	pipelines := []func(context.Context) error{t.PreExecute, t.Execute, t.PostExecute}
-	for _, fn := range pipelines {
-		if err := wrap(fn); err != nil {
-			if indexTask != nil {
-				costTimeMs := taskcost.ElapsedMs(execStart)
-				// End bookkeeping and final state must land in one critical
-				// section, so a concurrent QueryTask never sees a final cost
-				// paired with an in-progress state.
-				indexTask.SetStateWithCost(getStateFromError(err), err.Error(), taskcost.NowMs(), costTimeMs)
-				mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
-			} else {
-				t.SetState(getStateFromError(err), err.Error())
-				mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err))
-			}
+func (sched *TaskScheduler) processTask(t Task) {
+	exec := sched.beginTask(t)
+	var err error
+	defer func() { sched.finishTask(exec, err) }()
+	steps := []func(context.Context) error{t.PreExecute, t.Execute, t.PostExecute}
+	for _, fn := range steps {
+		if err = sched.runStep(t, fn); err != nil {
 			return
 		}
-	}
-	if indexTask != nil {
-		costTimeMs := taskcost.ElapsedMs(execStart)
-		indexTask.SetStateWithCost(indexpb.JobState_JobStateFinished, "", taskcost.NowMs(), costTimeMs)
-		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
-	} else {
-		t.SetState(indexpb.JobState_JobStateFinished, "")
-		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()))
 	}
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {
 	mlog.Debug(sched.ctx, "TaskScheduler start build loop ...")
 	defer sched.wg.Done()
+	defer close(sched.downloadTasks)
+	defer func() {
+		for t := sched.TaskQueue.PopUnissuedTask(); t != nil; t = sched.TaskQueue.PopUnissuedTask() {
+			sched.finishTask(sched.beginTask(t), errCancel)
+		}
+	}()
 	for {
 		select {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.TaskQueue.utChan():
 			t := sched.TaskQueue.PopUnissuedTask()
-			go func(t Task) {
-				if t.IsVectorIndex() {
-					GetVecIndexBuildPool().Submit(func() (any, error) {
-						sched.processTask(t)
-						return nil, nil
-					})
-				} else {
-					sched.processTask(t)
+			if t == nil {
+				continue
+			}
+			if _, ok := t.(PreparedTask); ok {
+				select {
+				case sched.downloadTasks <- t:
+				case <-sched.ctx.Done():
+					sched.finishTask(sched.beginTask(t), errCancel)
 				}
-			}(t)
+				continue
+			}
+			sched.wg.Add(1)
+			go func() {
+				defer sched.wg.Done()
+				sched.processTask(t)
+			}()
 		}
 	}
 }
 
 // Start stats the task scheduler of indexing tasks.
 func (sched *TaskScheduler) Start() error {
+	sched.wg.Add(1)
+	go sched.pipelineLoop()
 	sched.wg.Add(1)
 	go sched.indexBuildLoop()
 	return nil

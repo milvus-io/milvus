@@ -46,6 +46,13 @@ class IArtifactBuilder {
         return {};
     }
 
+    // A successful reservation is retained by the builder until Build or
+    // destruction. A busy device leaves the prepared input available to retry.
+    virtual bool
+    TryReserveBuild() {
+        return true;
+    }
+
     // The builder borrows the complete input and everything referenced by its
     // views for this synchronous call. It may traverse the input more than once,
     // but neither the builder nor the returned Artifact may retain borrowed input

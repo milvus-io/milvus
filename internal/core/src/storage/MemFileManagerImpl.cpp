@@ -59,6 +59,8 @@ MemFileManagerImpl::MemFileManagerImpl(
     plugin_context_ = fileManagerContext.plugin_context;
     stats_base_path_ = fileManagerContext.stats_base_path;
     storage_column_mappings_ = fileManagerContext.storage_column_mappings;
+    index_build_storage_config_ = fileManagerContext.index_build_storage_config;
+    manifest_read_plan_ = fileManagerContext.manifest_read_plan;
 }
 
 bool
@@ -299,6 +301,9 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
             return GetTextFieldDatasFromManifest(
                 manifest_path_str, loon_ffi_properties_, field_meta_);
         }
+        RawManifestChunkReadOptions options;
+        options.manifest_read_plan = manifest_read_plan_;
+        options.storage = index_build_storage_config_;
         return GetFieldDatasFromManifest(manifest_path_str,
                                          loon_ffi_properties_,
                                          field_meta_,
@@ -307,7 +312,8 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          element_type,
                                          max_rows,
                                          offset,
-                                         storage_column_mapping);
+                                         storage_column_mapping,
+                                         options);
     }
 
     auto& remote_files = segment_insert_files.value();

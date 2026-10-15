@@ -14,8 +14,8 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION 16e873b1 )
-set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
+set( KNOWHERE_VERSION dd14fe9af7e212abebabb588c5af5b8ddb5d2338 )
+set( GIT_REPOSITORY  "https://github.com/marcelo-cjl/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
@@ -37,8 +37,12 @@ endif()
 
 if ( MILVUS_GPU_VERSION STREQUAL "ON" )
     set(WITH_CUVS ON CACHE BOOL "" FORCE )
+    set(WITH_GPU ON CACHE BOOL "" FORCE )
     set(raft_DIR "${FETCHCONTENT_BASE_DIR}/raft-build" CACHE PATH "Path to raft build directory" FORCE)
     set(rmm_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" CACHE PATH "Path to rmm build directory" FORCE)
+else ()
+    set(WITH_CUVS OFF CACHE BOOL "" FORCE )
+    set(WITH_GPU OFF CACHE BOOL "" FORCE )
 endif ()
 
 if ( WITH_SVS STREQUAL "ON" )

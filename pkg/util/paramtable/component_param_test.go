@@ -1268,6 +1268,8 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
 		Params := &params.DataNodeCfg
+		assert.Equal(t, 64, Params.IndexBuildStorageConcurrency.GetAsInt())
+		assert.Equal(t, int64(8*1024*1024), Params.IndexBuildStorageRequestSize.GetAsSize())
 
 		SetNodeID(2)
 

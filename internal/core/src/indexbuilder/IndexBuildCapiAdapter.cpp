@@ -313,7 +313,6 @@ ConfigureTextParams(index::BuildParams& params,
 
 storage::FileManagerContext
 MakeFileManagerContext(const proto::indexcgo::BuildIndexInfo& info,
-                       const storage::StorageConfig& storage_config,
                        const index::BuildParams& params,
                        DataType field_type) {
     storage::FieldDataMeta field_meta{info.collectionid(),
@@ -332,10 +331,25 @@ MakeFileManagerContext(const proto::indexcgo::BuildIndexInfo& info,
                                   IndexNonEncoding(params),
                                   info.index_store_path_version()};
 
+    storage::IndexBuildStorageConfig build_storage_config;
+    const auto& proto_config = info.build_storage_config();
+    if (proto_config.concurrency() > 0) {
+        build_storage_config.concurrency = proto_config.concurrency();
+    }
+    if (proto_config.request_size() > 0) {
+        build_storage_config.request_size = proto_config.request_size();
+    }
+    auto storage_config = AdaptStorageConfig(info.storage_config());
+    // Configure both clients before construction; upload retains this filesystem.
+    storage_config.max_connections = static_cast<uint32_t>(
+        std::min(build_storage_config.concurrency,
+                 static_cast<size_t>(std::numeric_limits<uint32_t>::max())));
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
     storage::FileManagerContext context(
         field_meta, index_meta, chunk_manager, std::move(fs));
+    context.index_build_storage_config = build_storage_config;
+    context.manifest_read_plan = std::make_shared<storage::ManifestReadPlan>();
     if (!info.stats_base_path().empty()) {
         context.set_stats_base_path(info.stats_base_path());
     }
@@ -430,9 +444,7 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
         .json_path = json_path,
     };
 
-    auto storage_config = AdaptStorageConfig(info.storage_config());
-    auto context = MakeFileManagerContext(
-        info, storage_config, request.params, field_type);
+    auto context = MakeFileManagerContext(info, request.params, field_type);
     return {.request = std::move(request),
             .file_manager_context = std::move(context)};
 }

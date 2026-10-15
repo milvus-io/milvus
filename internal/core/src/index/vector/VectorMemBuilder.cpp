@@ -419,6 +419,14 @@ VectorMemBuilder<T>::InputSpec() const {
 }
 
 template <typename T>
+bool
+VectorMemBuilder<T>::TryReserveBuild() {
+    EnsureOpen("reserve");
+    return vector_builder::TryReserveBuild(
+        engine_.native_index, build_params_, engine_.Dim());
+}
+
+template <typename T>
 storage::ArtifactPtr
 VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
     EnsureOpen("build");
@@ -491,8 +499,8 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
         }
 
         auto config = PrepareBuildConfig(build_params_);
-        const auto status =
-            engine.native_index.Build(dataset, config, engine.UseBuildPool());
+        const auto status = engine.native_index.Build(
+            dataset, config, engine.UseBuildPool(), input.op_context);
         if (status != knowhere::Status::success) {
             ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                       "failed to build memory vector index: status {} ({})",

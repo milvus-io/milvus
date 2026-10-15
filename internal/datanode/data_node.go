@@ -215,6 +215,9 @@ func (node *DataNode) Init() error {
 
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
+		node.taskScheduler.SetExternalSlotUsage(func() int64 {
+			return node.compactionExecutor.Slots() + node.importScheduler.Slots()
+		})
 
 		err := index.InitSegcore(serverID)
 		if err != nil {

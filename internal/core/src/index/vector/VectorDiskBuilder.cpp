@@ -28,6 +28,8 @@
 #include <utility>
 #include <vector>
 
+#include <folly/ScopeGuard.h>
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -45,7 +47,7 @@
 #include "index/vector/VectorParamUtils.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "storage/artifact/LocalFileUtils.h"
-#include "knowhere/binaryset.h"
+#include "storage/Util.h"
 #include "knowhere/comp/index_param.h"
 
 namespace milvus::index {
@@ -327,6 +329,14 @@ VectorDiskBuilder<T>::InputSpec() const {
 }
 
 template <typename T>
+bool
+VectorDiskBuilder<T>::TryReserveBuild() {
+    EnsureOpen("reserve");
+    return vector_builder::TryReserveBuild(
+        engine_->native_index, build_params_, engine_->Dim());
+}
+
+template <typename T>
 storage::ArtifactPtr
 VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
     EnsureOpen("build");
@@ -449,7 +459,32 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
             }
             NormalizeDiskAnnBuildThreads(config, engine_->KnowhereIndexType());
 
-            const auto status = engine_->native_index.Build({}, config);
+            auto dataset = input.tensor ? knowhere::GenDataSet(
+                                              raw.rows, raw.dim, input.tensor)
+                                        : knowhere::DataSetPtr{};
+            if constexpr (!std::is_same_v<T, sparse_u32_f32>) {
+                if (input.tensor && !input.raw_file_complete) {
+                    // File-only engines request the payload through LoadFile.
+                    // Tensor consumers leave the prepared header untouched.
+                    file_manager_->SetFileLoader(
+                        [path = input.raw_path,
+                         data = input.tensor,
+                         size = raw.rows *
+                                vector_bytes_per_element(
+                                    PhysicalVectorDataType<T>(), raw.dim)](
+                            const std::string& filename) mutable {
+                            if (filename != path || data == nullptr) {
+                                return;
+                            }
+                            storage::WriteRawData(path, data, size);
+                            data = nullptr;
+                        });
+                }
+            }
+            auto input_guard = folly::makeGuard(
+                [manager = file_manager_] { manager->SetFileLoader({}); });
+            const auto status = engine_->native_index.Build(
+                dataset, config, true, input.op_context);
             file_manager_->RethrowFirstFailure();
             if (status != knowhere::Status::success) {
                 ThrowInfo(KnowhereBuildStatusToErrorCode(status),
@@ -457,32 +492,16 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
                           static_cast<int>(status),
                           knowhere::Status2String(status));
             }
-            knowhere::BinarySet entries;
-            const auto serialize_status =
-                engine_->native_index.Serialize(entries);
-            file_manager_->RethrowFirstFailure();
-            if (serialize_status != knowhere::Status::success) {
-                ThrowInfo(KnowhereStatusToErrorCode(serialize_status),
-                          "failed to serialize disk vector index: status {} "
-                          "({})",
-                          static_cast<int>(serialize_status),
-                          knowhere::Status2String(serialize_status));
-            }
-            AssertInfo(entries.binary_map_.empty(),
-                       "disk vector index {} unexpectedly returned in-memory "
-                       "serialized entries",
-                       engine_->KnowhereIndexType());
         }
 
         file_manager_->RethrowFirstFailure();
-        auto files = file_manager_->Files();
-        AssertInfo(!files.empty(),
-                   "vector disk build produced no artifact files");
-
         auto artifact = std::make_unique<VectorDiskArtifact>(
-            std::move(local_files_), std::move(files));
+            all_null || publish_empty_embedding_list ? nullptr
+                                                     : std::move(engine_),
+            std::move(file_manager_));
         engine_.reset();
         file_manager_.reset();
+        local_files_.reset();
         build_params_.clear();
         return artifact;
     } catch (...) {

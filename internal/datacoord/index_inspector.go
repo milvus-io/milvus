@@ -212,7 +212,6 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 	fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
 	fieldSize := segment.getFieldBinlogSize(fieldID)
-	taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
 	if isVectorIndex && Params.KnowhereConfig.Enable.GetAsBool() {
@@ -227,6 +226,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		mlog.Info(ctx, "override index type", mlog.String("indexType", indexType), mlog.String("newIndexType", newIndexType))
 		indexType = newIndexType
 	}
+	taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 	segIndex := &model.SegmentIndex{
 		SegmentID:             segment.ID,
@@ -275,6 +275,15 @@ func (i *indexInspector) reloadFromMeta() {
 			}
 
 			indexParams := i.meta.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
+			indexType := GetIndexType(indexParams)
+			if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
+				var err error
+				indexParams, err = Params.KnowhereConfig.UpdateIndexParams(indexType, paramtable.BuildStage, indexParams)
+				if err != nil {
+					mlog.Warn(i.ctx, "failed to restore index task parameters", mlog.FieldBuildID(segIndex.BuildID), mlog.Err(err))
+					continue
+				}
+			}
 			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
 			fieldSize := segment.getFieldBinlogSize(fieldID)
 			taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)

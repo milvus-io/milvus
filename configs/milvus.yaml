@@ -860,6 +860,10 @@ indexCoord:
 indexNode:
   scheduler:
     buildParallel: 1
+  build:
+    storage:
+      concurrency: 64 # concurrent requests per task, applied separately to reads and writes
+      requestSize: 8388608 # target bytes per request; reads include whole row groups
 
 dataCoord:
   channel:

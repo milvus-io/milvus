@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type utilSuite struct {
@@ -76,6 +77,21 @@ func (s *utilSuite) Test_getFieldDataSizeFromBinlogs() {
 
 	// Nil insert logs
 	s.Equal(uint64(0), getFieldDataSizeFromBinlogs(nil, vectorFieldID))
+}
+
+func (s *utilSuite) Test_getIndexBuildStorageConfig() {
+	paramtable.Init()
+	params := paramtable.Get()
+	concurrency := &params.DataNodeCfg.IndexBuildStorageConcurrency
+	requestSize := &params.DataNodeCfg.IndexBuildStorageRequestSize
+	s.Require().NoError(params.Save(concurrency.Key, "16"))
+	s.T().Cleanup(func() { params.Reset(concurrency.Key) })
+	s.Require().NoError(params.Save(requestSize.Key, "16MB"))
+	s.T().Cleanup(func() { params.Reset(requestSize.Key) })
+
+	config := getIndexBuildStorageConfig()
+	s.Equal(uint64(16), config.GetConcurrency())
+	s.Equal(uint64(16*1024*1024), config.GetRequestSize())
 }
 
 func Test_utilSuite(t *testing.T) {

@@ -297,6 +297,7 @@ func TestIndexTaskScheduler(t *testing.T) {
 	paramtable.Init()
 
 	scheduler := NewTaskScheduler(context.TODO())
+	scheduler.totalSlots = func() int64 { return 1024 }
 	scheduler.Start()
 
 	tasks := make([]Task, 0)
@@ -324,6 +325,7 @@ func TestIndexTaskScheduler(t *testing.T) {
 	assert.Equal(t, tasks[len(tasks)-1].Ctx().(*stagectx).curstate, fakeTaskState(fakeTaskSavedIndexes))
 
 	scheduler = NewTaskScheduler(context.TODO())
+	scheduler.totalSlots = func() int64 { return 1024 }
 	tasks = make([]Task, 0, 1024)
 	for i := 0; i < 1024; i++ {
 		tasks = append(tasks, newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished))
@@ -367,6 +369,11 @@ func newSchedulerIndexBuildTask(t *testing.T, manager *TaskManager, buildID int6
 func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
 	paramtable.Init()
 
+	planMock := mockey.Mock((*indexBuildTask).PlanDownload).Return(uint64(0), nil).Build()
+	defer planMock.UnPatch()
+	loadMock := mockey.Mock((*indexBuildTask).LoadData).Return(nil).Build()
+	defer loadMock.UnPatch()
+
 	t.Run("success records execution cost", func(t *testing.T) {
 		manager := NewTaskManager(context.Background())
 		task := newSchedulerIndexBuildTask(t, manager, 1001)
@@ -378,8 +385,12 @@ func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
 		postMock := mockey.Mock((*indexBuildTask).PostExecute).Return(nil).Build()
 		defer postMock.UnPatch()
 
-		scheduler := NewTaskScheduler(context.Background())
-		scheduler.processTask(task)
+		scheduler := newPipelineScheduler(t)
+		assert.NoError(t, scheduler.TaskQueue.Enqueue(task))
+		assert.Eventually(t, func() bool {
+			return task.GetState() != indexpb.JobState(commonpb.IndexState_InProgress)
+		}, 5*time.Second, time.Millisecond)
+		scheduler.Close()
 
 		info := manager.GetIndexTaskInfo("test-cluster", 1001)
 		assert.NotNil(t, info)
@@ -398,8 +409,12 @@ func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
 		preMock := mockey.Mock((*indexBuildTask).PreExecute).Return(expectedErr).Build()
 		defer preMock.UnPatch()
 
-		scheduler := NewTaskScheduler(context.Background())
-		scheduler.processTask(task)
+		scheduler := newPipelineScheduler(t)
+		assert.NoError(t, scheduler.TaskQueue.Enqueue(task))
+		assert.Eventually(t, func() bool {
+			return task.GetState() != indexpb.JobState(commonpb.IndexState_InProgress)
+		}, 5*time.Second, time.Millisecond)
+		scheduler.Close()
 
 		info := manager.GetIndexTaskInfo("test-cluster", 1002)
 		assert.NotNil(t, info)
@@ -424,8 +439,12 @@ func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
 		postMock := mockey.Mock((*indexBuildTask).PostExecute).Return(nil).Build()
 		defer postMock.UnPatch()
 
-		scheduler := NewTaskScheduler(context.Background())
-		scheduler.processTask(task)
+		scheduler := newPipelineScheduler(t)
+		assert.NoError(t, scheduler.TaskQueue.Enqueue(task))
+		assert.Eventually(t, func() bool {
+			return task.GetState() != indexpb.JobState(commonpb.IndexState_InProgress)
+		}, 5*time.Second, time.Millisecond)
+		scheduler.Close()
 
 		info := manager.GetIndexTaskInfo("test-cluster", 1003)
 		assert.NotNil(t, info)

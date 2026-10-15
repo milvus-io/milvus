@@ -376,7 +376,12 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(merr.WrapErrServiceInternalMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
-	succeed, err := node.compactionExecutor.Enqueue(task)
+	var succeed bool
+	err = node.taskScheduler.AdmitTask(compactor.GetTaskSlotUsage(task), func(admissionErr error) error {
+		var err error
+		succeed, err = node.compactionExecutor.Enqueue(task, admissionErr)
+		return err
+	})
 	if succeed {
 		return merr.Success(), nil
 	} else {
@@ -449,7 +454,18 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	} else {
 		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm)
 	}
-	node.importTaskMgr.Add(task)
+	if err := node.taskScheduler.AdmitTask(task.GetSlots(), func(admissionErr error) error {
+		if node.importTaskMgr.Get(task.GetTaskID()) != nil {
+			return nil
+		}
+		if admissionErr != nil {
+			return admissionErr
+		}
+		node.importTaskMgr.Add(task)
+		return nil
+	}); err != nil {
+		return merr.Status(err), nil
+	}
 
 	mlog.Info(context.TODO(), "datanode added preimport task")
 	return merr.Success(), nil
@@ -475,7 +491,18 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	} else {
 		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm)
 	}
-	node.importTaskMgr.Add(task)
+	if err := node.taskScheduler.AdmitTask(task.GetSlots(), func(admissionErr error) error {
+		if node.importTaskMgr.Get(task.GetTaskID()) != nil {
+			return nil
+		}
+		if admissionErr != nil {
+			return admissionErr
+		}
+		node.importTaskMgr.Add(task)
+		return nil
+	}); err != nil {
+		return merr.Status(err), nil
+	}
 
 	mlog.Info(context.TODO(), "datanode added import task")
 	return merr.Success(), nil
@@ -652,7 +679,18 @@ func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRe
 		sourceBucket,
 		targetBucket,
 	)
-	node.importTaskMgr.Add(task)
+	if err := node.taskScheduler.AdmitTask(task.GetSlots(), func(admissionErr error) error {
+		if node.importTaskMgr.Get(task.GetTaskID()) != nil {
+			return nil
+		}
+		if admissionErr != nil {
+			return admissionErr
+		}
+		node.importTaskMgr.Add(task)
+		return nil
+	}); err != nil {
+		return merr.Status(err), nil
+	}
 
 	mlog.Info(context.TODO(), "datanode added copy segment task")
 	return merr.Success(), nil
