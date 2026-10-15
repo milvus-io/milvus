@@ -281,17 +281,32 @@ class ReaderStringColumn : public ChunkedVariableColumn<std::string> {
     }
 
  protected:
-    TakeCellPin
-    MakeTakeCellPin(milvus::OpContext* ctx) const override {
-        auto pin = ChunkedVariableColumn::MakeTakeCellPin(ctx);
-        return [pin = std::move(pin), stats = stats_](int64_t chunk) {
+    TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
+        if (batch_cell_ids != nullptr) {
+            if (!batch_cell_ids->empty()) {
+                if (stats_->fail_pin) {
+                    ThrowInfo(ErrorCode::FileReadFailed,
+                              "injected string Take failure");
+                }
+                ++stats_->pins;
+            }
+            return ChunkedVariableColumn::MakeTakeCellAccess(ctx,
+                                                             batch_cell_ids);
+        }
+        auto access =
+            ChunkedVariableColumn::MakeTakeCellAccess(ctx, batch_cell_ids);
+        return TakeCellPin([pin = std::move(std::get<TakeCellPin>(access)),
+                            stats = stats_](int64_t chunk) {
             if (stats->fail_pin) {
                 ThrowInfo(ErrorCode::FileReadFailed,
                           "injected string Take failure");
             }
             ++stats->pins;
             return pin(chunk);
-        };
+        });
     }
 
  private:
