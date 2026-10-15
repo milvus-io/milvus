@@ -27,8 +27,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifestmanager"
-	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex/core/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
@@ -71,9 +71,9 @@ type InFlightOutputs func(ctx context.Context, collectionID int64, vchannel stri
 // bodies outside the retention and the SSTs that no retained body references.
 // It reads the current version from the meta store, never from a cache.
 type GC struct {
-	meta     manifestmanager.MetaStore
+	meta     manifest.MetaStore
 	store    manifest.ObjectStore
-	layout   manifest.Layout
+	rootPath string
 	cfg      Config
 	inFlight InFlightOutputs
 	now      func() time.Time
@@ -82,16 +82,16 @@ type GC struct {
 	wg     sync.WaitGroup
 }
 
-// New returns a GC over the pointers in meta and the objects in store, at
-// the keys of layout. It returns ErrInvalidConfig when cfg.Interval is not
+// New returns a GC over the pointers in meta and the objects in store, under
+// rootPath of the object storage. It returns ErrInvalidConfig when cfg.Interval is not
 // positive, cfg.Grace is below MinGrace, or a retention value is negative.
-func New(meta manifestmanager.MetaStore, store manifest.ObjectStore, layout manifest.Layout,
+func New(meta manifest.MetaStore, store manifest.ObjectStore, rootPath string,
 	cfg Config, inFlight InFlightOutputs,
 ) (*GC, error) {
 	if cfg.Interval <= 0 || cfg.Grace < MinGrace || cfg.RetainVersions < 0 || cfg.RetainDuration < 0 {
 		return nil, errors.Wrapf(ErrInvalidConfig, "%+v", cfg)
 	}
-	return &GC{meta: meta, store: store, layout: layout, cfg: cfg, inFlight: inFlight, now: time.Now}, nil
+	return &GC{meta: meta, store: store, rootPath: rootPath, cfg: cfg, inFlight: inFlight, now: time.Now}, nil
 }
 
 // Start runs one round every cfg.Interval until ctx is done or Close is
@@ -152,8 +152,9 @@ func (g *GC) RunOnce(ctx context.Context) error {
 // runVChannel collects one vchannel. It reads the in-flight compaction
 // outputs, then the pointer and the current body, then the other manifest
 // bodies, then the SSTs. It deletes nothing when the current body key is not
-// directly under the layout's manifest dir or the current sst_base_path is not
-// the layout's. It deletes the bodies outside the retention, and, when every
+// directly under the manifest dir of the vchannel or the current
+// sst_base_path is not the SST base path of the vchannel (see objpath). It
+// deletes the bodies outside the retention, and, when every
 // retained body could be read, the SSTs older than Grace that are neither
 // referenced by a retained body nor an in-flight output.
 func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel string) error {
@@ -171,8 +172,8 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 	if err != nil || cur == nil {
 		return err
 	}
-	dir := g.layout.ManifestDir(collectionID, vchannel)
-	if _, ok := manifest.ParseManifestBodyKey(dir, curKey); !ok || cur.GetSstBasePath() != g.layout.SSTBasePath(collectionID, vchannel) {
+	dir := objpath.ManifestDir(g.rootPath, collectionID, vchannel)
+	if _, ok := objpath.ParseManifestBodyKey(dir, curKey); !ok || cur.GetSstBasePath() != objpath.SSTBasePath(g.rootPath, collectionID, vchannel) {
 		mlog.Warn(ctx, "pkindex gc skips vchannel whose manifest does not match the layout",
 			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel),
 			mlog.String("bodyKey", curKey), mlog.String("sstBasePath", cur.GetSstBasePath()))
@@ -183,7 +184,7 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 	minKept := cur.GetVersion() - int64(g.cfg.RetainVersions) + 1
 	var kept, drop []string
 	err = g.store.Walk(ctx, dir+"/", func(key string, mod time.Time) bool {
-		version, ok := manifest.ParseManifestBodyKey(dir, key)
+		version, ok := objpath.ParseManifestBodyKey(dir, key)
 		if !ok || key == curKey {
 			return true
 		}
@@ -214,7 +215,7 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 	} else {
 		base := cur.GetSstBasePath()
 		err = g.store.Walk(ctx, base+"/", func(key string, mod time.Time) bool {
-			id, ok := manifest.ParseSSTKey(base, key)
+			id, ok := objpath.ParseSSTKey(base, key)
 			if !ok {
 				return true
 			}

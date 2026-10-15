@@ -27,8 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifestmanager"
-	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -40,10 +39,10 @@ const (
 	vch = "p_1v0"
 )
 
-func newService() (*Service, *manifestmanager.FakeMetaStore, *manifest.FakeObjectStore) {
-	p, st := manifestmanager.NewFakeMetaStore(), manifest.NewFakeObjectStore()
+func newService() (*Service, *manifest.FakeMetaStore, *manifest.FakeObjectStore) {
+	p, st := manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore()
 	s := New()
-	s.SetManager(manifestmanager.New(p, st, manifest.Layout{RootPath: "files"}))
+	s.SetManager(manifest.New(p, st, "files"))
 	return s, p, st
 }
 
@@ -277,7 +276,7 @@ func TestMissingBody(t *testing.T) {
 
 	// a new service over the same pointers and an empty object store has no cache
 	other := New()
-	other.SetManager(manifestmanager.New(p, manifest.NewFakeObjectStore(), manifest.Layout{RootPath: "files"}))
+	other.SetManager(manifest.New(p, manifest.NewFakeObjectStore(), "files"))
 	flush, err := other.CommitFlush(ctx, flushReq(vch, 1, 2, 2))
 	require.NoError(t, err)
 	assertCode(t, flush.GetStatus(), merr.Code(merr.ErrDataIntegrity), false)
@@ -314,6 +313,7 @@ func TestToMerr(t *testing.T) {
 		{"fenced", manifest.ErrFenced, merr.Code(merr.ErrChannelNotAvailable), false},
 		{"wrapped fenced", errors.Wrap(manifest.ErrFenced, "context"), merr.Code(merr.ErrChannelNotAvailable), false},
 		{"not claimed", manifest.ErrNotClaimed, merr.Code(merr.ErrServiceInternal), false},
+		{"no manifest", manifest.ErrNoManifest, merr.Code(merr.ErrServiceInternal), false},
 		{"checkpoint regressed", manifest.ErrCheckpointRegressed, merr.Code(merr.ErrServiceInternal), false},
 		{"duplicate sst", manifest.ErrDuplicateSST, merr.Code(merr.ErrServiceInternal), false},
 		{"stale edit", manifest.ErrStaleEdit, merr.Code(merr.ErrServiceInternal), false},

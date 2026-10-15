@@ -26,8 +26,7 @@ import (
 	"google.golang.org/grpc"
 
 	pkindexgc "github.com/milvus-io/milvus/internal/pkindex/coordinator/gc"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifestmanager"
-	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
@@ -41,7 +40,7 @@ import (
 // Its keys are relative to the root path of the meta kv.
 type metaKVStore struct{ kv kv.MetaKv }
 
-var _ manifestmanager.MetaStore = metaKVStore{}
+var _ manifest.MetaStore = metaKVStore{}
 
 func (p metaKVStore) Load(ctx context.Context, key string) (string, bool, error) {
 	v, err := p.kv.Load(ctx, key)
@@ -125,14 +124,14 @@ func (s chunkManagerStore) MultiRemove(ctx context.Context, keys []string) error
 func (s *Server) initPKIndex(cm storage.ChunkManager) {
 	meta := metaKVStore{kv: s.kv}
 	store := chunkManagerStore{cm: cm}
-	layout := manifest.Layout{RootPath: cm.RootPath()}
+	rootPath := cm.RootPath()
 	cfg := pkindexgc.Config{
 		Interval:       Params.DataCoordCfg.PKIndexGCInterval.GetAsDuration(time.Second),
 		Grace:          Params.DataCoordCfg.PKIndexGCGrace.GetAsDuration(time.Second),
 		RetainVersions: Params.DataCoordCfg.PKIndexManifestRetainVersions.GetAsInt(),
 		RetainDuration: Params.DataCoordCfg.PKIndexManifestRetainDuration.GetAsDuration(time.Second),
 	}
-	gc, err := pkindexgc.New(meta, store, layout, cfg,
+	gc, err := pkindexgc.New(meta, store, rootPath, cfg,
 		// TODO: pass the outputs of the in-flight compactions of the primary
 		// key index SSTs when that compaction exists.
 		// TODO: add to the live set the tables that a streaming node still
@@ -143,7 +142,7 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 	} else {
 		s.pkindexGC = gc
 	}
-	s.pkindexService.SetManager(manifestmanager.New(meta, store, layout))
+	s.pkindexService.SetManager(manifest.New(meta, store, rootPath))
 }
 
 // RegisterPKIndexCoordGRPCService registers the primary key index manifest service on server.

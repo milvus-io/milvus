@@ -29,8 +29,9 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
 	pkindexservice "github.com/milvus-io/milvus/internal/pkindex/coordinator/service"
-	"github.com/milvus-io/milvus/internal/pkindex/core/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex/core/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -108,15 +109,15 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	s := chunkManagerStore{cm: cm}
-	layout := manifest.Layout{RootPath: cm.RootPath()}
+	root := cm.RootPath()
 
-	_, err := s.Read(ctx, layout.ManifestBodyKey(1, "ch_v0", 1, "n"))
+	_, err := s.Read(ctx, objpath.ManifestBodyKey(objpath.ManifestDir(root, 1, "ch_v0"), 1, "n"))
 	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
 
 	written := []string{
-		layout.ManifestBodyKey(1, "ch_v0", 1, "n1"),
-		layout.ManifestBodyKey(1, "ch_v0", 2, "n2"),
-		manifest.SSTKey(layout.SSTBasePath(1, "ch_v0"), 7),
+		objpath.ManifestBodyKey(objpath.ManifestDir(root, 1, "ch_v0"), 1, "n1"),
+		objpath.ManifestBodyKey(objpath.ManifestDir(root, 1, "ch_v0"), 2, "n2"),
+		objpath.SSTKey(objpath.SSTBasePath(root, 1, "ch_v0"), 7),
 	}
 	for _, key := range written {
 		require.NoError(t, s.Write(ctx, key, []byte(key)))
@@ -126,7 +127,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	assert.Equal(t, []byte(written[0]), b)
 
 	var walked []string
-	require.NoError(t, s.Walk(ctx, layout.ManifestDir(1, "ch_v0")+"/", func(key string, _ time.Time) bool {
+	require.NoError(t, s.Walk(ctx, objpath.ManifestDir(root, 1, "ch_v0")+"/", func(key string, _ time.Time) bool {
 		walked = append(walked, key)
 		return true
 	}))
@@ -134,7 +135,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	assert.Equal(t, written[:2], walked)
 
 	walked = nil
-	require.NoError(t, s.Walk(ctx, layout.SSTBasePath(1, "ch_v0")+"/", func(key string, _ time.Time) bool {
+	require.NoError(t, s.Walk(ctx, objpath.SSTBasePath(root, 1, "ch_v0")+"/", func(key string, _ time.Time) bool {
 		walked = append(walked, key)
 		return true
 	}))
