@@ -721,7 +721,7 @@ func appendSection(buf *bytes.Buffer, section proto.Message, recordCount int) (*
 	offset := uint64(buf.Len())
 	payload, err := marshalIntoBuffer(buf, section)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("failed to marshal summary section: " + err.Error())
+		return nil, merr.Wrap(err, "failed to marshal summary section")
 	}
 	return &streamingpb.VChannelSummarySectionRef{
 		Offset:      offset,

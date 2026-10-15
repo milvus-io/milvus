@@ -169,7 +169,7 @@ func TestIdempotencyIndexRecovery(t *testing.T) {
 	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
 	streaming.SetWALForTest(operator)
 
-	bm := newBroadcastTaskManager([]*streamingpb.BroadcastTask{
+	bm := newBroadcastTaskManager(context.Background(), []*streamingpb.BroadcastTask{
 		createImportBroadcastTaskProto(100, "import/1/pending",
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, []byte{0x00}),
 		createImportBroadcastTaskProto(200, "import/1/tombstone",
@@ -254,7 +254,7 @@ func newBroadcastTaskManagerForTest(t *testing.T, protos ...*streamingpb.Broadca
 	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
 	streaming.SetWALForTest(operator)
 
-	bm := newBroadcastTaskManager(protos)
+	bm := newBroadcastTaskManager(context.Background(), protos)
 	t.Cleanup(bm.Close)
 	return bm
 }
@@ -734,7 +734,7 @@ func newBroadcastTaskManagerWithEntrypointForTest(t *testing.T, protos ...*strea
 	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
 	streaming.SetWALForTest(operator)
 
-	bm := newBroadcastTaskManager(protos)
+	bm := newBroadcastTaskManager(context.Background(), protos)
 	t.Cleanup(bm.Close)
 	return bm
 }
