@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -3512,4 +3513,76 @@ func TestExecutorActivatesDeadlineOnlyAfterAdmission(t *testing.T) {
 	assert.True(t, admitted, "Execute must admit the task once the pool is clear")
 	_, ok = task.Context().Deadline()
 	assert.True(t, ok, "Execute must have armed the deadline on successful admission")
+}
+
+// A segment attributed by its target to a shard other than the channel
+// datacoord records for it -- a split target's segment served by the split
+// source during the lineage window -- is loaded through the shard the task
+// targets. A segment whose recorded channel is the task's shard is unchanged.
+func (suite *TaskSuite) TestLoadSegmentTaskLoadsThroughTaskShard() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	partition := int64(100)
+	source := Params.CommonCfg.RootCoordDml.GetValue() + "-split-source"
+	target := Params.CommonCfg.RootCoordDml.GetValue() + "-split-target"
+	channel := &datapb.VchannelInfo{CollectionID: suite.collection, ChannelName: source}
+	attributed, normal := suite.loadSegments[0], suite.loadSegments[1]
+	recorded := map[int64]string{attributed: target, normal: source}
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name:   "TestLoadSegmentTaskLoadsThroughTaskShard",
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector}},
+		},
+	}, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{{CollectionID: suite.collection}}, nil)
+	for segment, insertChannel := range recorded {
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{{
+			ID: segment, CollectionID: suite.collection, PartitionID: partition, InsertChannel: insertChannel,
+		}}, nil)
+		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
+	}
+	loaded := make(map[int64]string)
+	var mu sync.Mutex
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			for _, info := range req.GetInfos() {
+				loaded[info.GetSegmentID()] = info.GetInsertChannel()
+			}
+			return merr.Success(), nil
+		})
+
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      source,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	// the target groups both segments under the source.
+	segments := []*datapb.SegmentInfo{
+		{ID: attributed, InsertChannel: source, PartitionID: 1},
+		{ID: normal, InsertChannel: source, PartitionID: 1},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+	for _, segment := range []int64{attributed, normal} {
+		task, err := NewSegmentTask(ctx, timeout, WrapIDSource(0), suite.collection, suite.replica,
+			commonpb.LoadPriority_LOW, NewSegmentAction(targetNode, ActionTypeGrow, source, segment))
+		suite.NoError(err)
+		suite.NoError(suite.scheduler.Add(task))
+	}
+
+	suite.dispatchAndWait(targetNode)
+
+	mu.Lock()
+	defer mu.Unlock()
+	suite.Equal(map[int64]string{attributed: source, normal: source}, loaded)
 }

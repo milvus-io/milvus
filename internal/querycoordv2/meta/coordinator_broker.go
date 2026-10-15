@@ -42,6 +42,9 @@ import (
 
 type Broker interface {
 	DescribeCollection(ctx context.Context, collectionID UniqueID) (*milvuspb.DescribeCollectionResponse, error)
+	// DescribeCollectionInternal is DescribeCollection that also answers for a
+	// collection that is not available any more, such as one being dropped.
+	DescribeCollectionInternal(ctx context.Context, collectionID UniqueID) (*milvuspb.DescribeCollectionResponse, error)
 	GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
 	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
@@ -65,6 +68,19 @@ func NewCoordinatorBroker(
 }
 
 func (broker *CoordinatorBroker) DescribeCollection(ctx context.Context, collectionID UniqueID) (*milvuspb.DescribeCollectionResponse, error) {
+	return broker.describeCollection(ctx, collectionID, broker.mixCoord.DescribeCollection)
+}
+
+// DescribeCollectionInternal answers also for a collection that is not
+// available any more (e.g. Dropping), which DescribeCollection reports as not
+// found.
+func (broker *CoordinatorBroker) DescribeCollectionInternal(ctx context.Context, collectionID UniqueID) (*milvuspb.DescribeCollectionResponse, error) {
+	return broker.describeCollection(ctx, collectionID, broker.mixCoord.DescribeCollectionInternal)
+}
+
+func (broker *CoordinatorBroker) describeCollection(ctx context.Context, collectionID UniqueID,
+	describe func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error),
+) (*milvuspb.DescribeCollectionResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
@@ -75,7 +91,7 @@ func (broker *CoordinatorBroker) DescribeCollection(ctx context.Context, collect
 		// please do not specify the collection name alone after database feature.
 		CollectionID: collectionID,
 	}
-	resp, err := broker.mixCoord.DescribeCollection(ctx, req)
+	resp, err := describe(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		mlog.Warn(ctx, "failed to get collection schema", mlog.Err(err))
 		return nil, err

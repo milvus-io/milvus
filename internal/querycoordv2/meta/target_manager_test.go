@@ -21,13 +21,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -35,6 +38,7 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -953,4 +957,491 @@ func BenchmarkTargetManager(b *testing.B) {
 
 func TestTargetManager(t *testing.T) {
 	suite.Run(t, new(TargetManagerSuite))
+}
+
+// TestNewTargetManagerWithSplitState_RefusesNilCache pins that the split-aware
+// constructor never builds a target manager silently missing the window marks.
+func (suite *TargetManagerSuite) TestNewTargetManagerWithSplitState_RefusesNilCache() {
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		NewTargetManagerWithSplitState(NewMockBroker(suite.T()), suite.meta, nil)
+	}()
+	err, ok := recovered.(error)
+	suite.True(ok, "expected a panic with an error, got %v", recovered)
+	suite.ErrorIs(err, merr.ErrServiceInternal)
+}
+
+// splitShardStates builds a DescribeCollection response whose shard_infos are
+// parallel to the given vchannels.
+func splitShardStates(channels []string, states ...schemapb.ShardState) *milvuspb.DescribeCollectionResponse {
+	infos := make([]*schemapb.CollectionShardInfo, 0, len(states))
+	for _, state := range states {
+		infos = append(infos, &schemapb.CollectionShardInfo{State: state})
+	}
+	return &milvuspb.DescribeCollectionResponse{VirtualChannelNames: channels, ShardInfos: infos}
+}
+
+// TestUpdateNextTarget_MarksSplitWindowTargets pins QC1: the shard states are
+// read BEFORE the recovery info, and a pull marks each channel it lists that the
+// read did not see Normal, Splitting or Dropped. That never misses a target a
+// racing fence added after the read; an adoption racing the pull over-marks.
+func (suite *TargetManagerSuite) TestUpdateNextTarget_MarksSplitWindowTargets() {
+	ctx := suite.ctx
+	collectionID := int64(1000)
+	channelNames := []string{"src", "t1", "t2"}
+	vchannels := lo.Map(channelNames, func(name string, _ int) *datapb.VchannelInfo {
+		return &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name}
+	})
+	segments := []*datapb.SegmentInfo{
+		{ID: 1, CollectionID: collectionID, PartitionID: 100, InsertChannel: "src"},
+	}
+
+	suite.Run("a pull taken while a target is Creating marks it", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, time.Minute))
+		described := false
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
+			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
+				described = true
+				return splitShardStates(channelNames,
+					schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardNormal), nil
+			}).Once()
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).RunAndReturn(
+			func(context.Context, int64, ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+				suite.True(described, "the shard states must be read before the recovery info is pulled")
+				return vchannels, segments, nil
+			}).Once()
+
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.Equal(typeutil.NewSet("t1"), mgr.next.getCollectionTarget(collectionID).windowTargets)
+		suite.Equal(typeutil.NewSet("t1"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+
+		// the mark belongs to the pulled snapshot, so trimming a partition off
+		// that snapshot must not wash it out.
+		mgr.RemovePartitionFromNextTarget(ctx, collectionID, 101)
+		suite.Equal(typeutil.NewSet("t1"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+		suite.Empty(mgr.GetSplitWindowTargets(ctx, collectionID+1, NextTarget))
+	})
+
+	suite.Run("a pull racing the fence marks the targets the state read did not list", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, time.Minute))
+		// the state read commits before the fence: only the source, still Normal.
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+			splitShardStates(channelNames[:1], schemapb.ShardState_ShardNormal), nil).Once()
+		// the pull reads after the fence: it lists the targets, data under the source.
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
+
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.Equal(typeutil.NewSet("t1", "t2"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+	})
+
+	suite.Run("a pull racing the adoption over-marks the adopted targets", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, time.Minute))
+		// the state read commits before the adoption: targets still Creating.
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+			splitShardStates(channelNames,
+				schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating), nil).Once()
+		// the pull reads after it: the source is delisted.
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels[1:], nil, nil).Once()
+
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		// an over-mark: the window-end refresh lifts it.
+		suite.Equal(typeutil.NewSet("t1", "t2"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+	})
+
+	suite.Run("a failed state read falls back to the cached read and still marks a racing fence", func() {
+		broker := NewMockBroker(suite.T())
+		cache := NewShardSplitStateCache(broker, time.Minute)
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, cache)
+		// an earlier cached query saw the pre-fence meta.
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+			splitShardStates(channelNames[:1], schemapb.ShardState_ShardNormal), nil).Once()
+		suite.Empty(cache.CreatingTargetChannels(ctx, collectionID))
+		// the fresh read fails; the pull, taken after the fence, still happens.
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Once()
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
+
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.Equal(typeutil.NewSet("t1", "t2"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+	})
+
+	suite.Run("a failed state read on a warm collection that is not splitting marks nothing", func() {
+		broker := NewMockBroker(suite.T())
+		cache := NewShardSplitStateCache(broker, time.Minute)
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, cache)
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+			splitShardStates(channelNames[:1], schemapb.ShardState_ShardNormal), nil).Once()
+		suite.Empty(cache.CreatingTargetChannels(ctx, collectionID))
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Once()
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels[:1], segments, nil).Once()
+
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.NotNil(mgr.next.getCollectionTarget(collectionID))
+		suite.Empty(mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+	})
+
+	suite.Run("a pull with no split leaves the mark empty", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, time.Minute))
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+			splitShardStates(channelNames[:1], schemapb.ShardState_ShardNormal), nil).Once()
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels[:1], segments, nil).Once()
+
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.NotNil(mgr.next.getCollectionTarget(collectionID))
+		suite.Empty(mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+	})
+
+	suite.Run("a failed state read is retried together with the pull", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, time.Minute))
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+			splitShardStates(channelNames,
+				schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating), nil).Once()
+		// the pull happens once, and only after a successful state read.
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
+
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.Equal(typeutil.NewSet("t1", "t2"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+	})
+
+	suite.Run("no next target is built when the states cannot be read", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, time.Minute))
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Maybe()
+		// GetRecoveryInfoV2 has no expectation: an unmarked pull must never happen.
+		timeoutCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+
+		suite.Error(mgr.UpdateCollectionNextTarget(timeoutCtx, collectionID))
+		suite.Nil(mgr.next.getCollectionTarget(collectionID))
+	})
+}
+
+// TestUpdateCurrentTarget_SplitWindowSnapshot pins Task 17's promotion rule: a
+// next target pulled inside a shard split window becomes the current target
+// WITHOUT its window targets, so the collection is serviceable from the source
+// for the whole window -- but only while the collection's shard states still
+// describe exactly that window.
+func (suite *TargetManagerSuite) TestUpdateCurrentTarget_SplitWindowSnapshot() {
+	ctx := suite.ctx
+	collectionID := int64(1000)
+	names := []string{"src", "t1", "t2"}
+	vchannels := lo.Map(names, func(name string, _ int) *datapb.VchannelInfo {
+		return &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name}
+	})
+	// datacoord attributes the targets' flushed data to the still-listed source.
+	segments := []*datapb.SegmentInfo{
+		{ID: 1, CollectionID: collectionID, PartitionID: 100, InsertChannel: "src"},
+		{ID: 2, CollectionID: collectionID, PartitionID: 101, InsertChannel: "src"},
+	}
+	windowStates := func() *milvuspb.DescribeCollectionResponse {
+		return splitShardStates(names,
+			schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	}
+
+	suite.Run("the window snapshot is promoted without its window targets", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, 0))
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
+			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) { return windowStates(), nil })
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+
+		exclusions, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID, NextTarget)
+		suite.True(promotable)
+		suite.Equal(typeutil.NewSet("t1", "t2"), exclusions)
+
+		suite.True(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+		suite.ElementsMatch([]string{"src"}, lo.Keys(mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget)))
+		suite.ElementsMatch([]int64{1, 2}, lo.Keys(mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget)))
+		// the promoted copy carries no mark of its own: nothing holds it back.
+		suite.Empty(mgr.GetSplitWindowTargets(ctx, collectionID, CurrentTarget))
+		// every partition of the collection is still answered for, so a load of
+		// either of them can finish.
+		suite.True(mgr.IsCurrentTargetExist(ctx, collectionID, 100))
+		suite.True(mgr.IsCurrentTargetExist(ctx, collectionID, 101))
+
+		// the next target is NOT consumed: the window targets must stay in a
+		// target, or the channel checker would release them once they appear in
+		// dist at adoption.
+		suite.True(mgr.IsNextTargetExist(ctx, collectionID))
+		suite.ElementsMatch(names, lo.Keys(mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget)))
+		suite.Equal(typeutil.NewSet("t1", "t2"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+
+		// re-promoting the same snapshot is a no-op that still reports ready.
+		suite.True(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+		suite.True(mgr.IsNextTargetExist(ctx, collectionID))
+		suite.ElementsMatch([]string{"src"}, lo.Keys(mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget)))
+	})
+
+	suite.Run("a marked channel that is no longer Creating refuses the promotion", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, 0))
+		adopted := false
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
+			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
+				if adopted {
+					return splitShardStates(names,
+						schemapb.ShardState_ShardDropped, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal), nil
+				}
+				return windowStates(), nil
+			})
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+
+		adopted = true
+		exclusions, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID, NextTarget)
+		suite.False(promotable)
+		suite.Empty(exclusions)
+		suite.False(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+		suite.False(mgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID))
+		suite.True(mgr.IsNextTargetExist(ctx, collectionID))
+	})
+
+	suite.Run("a fenced source the pull no longer lists refuses the promotion", func() {
+		// The state read is behind the pull: it still calls src a fenced source,
+		// but src was delisted at adoption and the pull lists only the targets.
+		// Excluding them would report a collection Loaded that serves nothing.
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, 0))
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
+			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) { return windowStates(), nil })
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels[1:], nil, nil).Once()
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.Equal(typeutil.NewSet("t1", "t2"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+
+		_, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID, NextTarget)
+		suite.False(promotable)
+		suite.False(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+		suite.False(mgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID))
+	})
+
+	suite.Run("a mark with no fenced source behind it refuses the promotion", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, 0))
+		// the state read never listed t1/t2, so the pull marks them; by the time
+		// the promotion asks, nothing is fenced and they read Creating.
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+			splitShardStates(names,
+				schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating), nil)
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.Equal(typeutil.NewSet("t1", "t2"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+
+		_, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID, NextTarget)
+		suite.False(promotable)
+		suite.False(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+	})
+
+	suite.Run("a cascaded split keeps the untouched shard and the new source", func() {
+		cascaded := []string{"t1", "t1a", "t1b", "t2"}
+		cascadedChannels := lo.Map(cascaded, func(name string, _ int) *datapb.VchannelInfo {
+			return &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name}
+		})
+		cascadedSegments := []*datapb.SegmentInfo{
+			{ID: 3, CollectionID: collectionID, PartitionID: 100, InsertChannel: "t1"},
+			{ID: 4, CollectionID: collectionID, PartitionID: 100, InsertChannel: "t2"},
+		}
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, 0))
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+			splitShardStates(cascaded,
+				schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating,
+				schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardNormal), nil)
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(cascadedChannels, cascadedSegments, nil).Once()
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.Equal(typeutil.NewSet("t1a", "t1b"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+
+		suite.True(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+		suite.ElementsMatch([]string{"t1", "t2"}, lo.Keys(mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget)))
+		suite.ElementsMatch([]int64{3, 4}, lo.Keys(mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget)))
+	})
+
+	suite.Run("a target of a split that has already adopted refuses the promotion", func() {
+		// Two splits run at once (dataCoord.shardSplit.maxConcurrentTasks > 1;
+		// the concurrency gate is per vchannel): A -> A1,A2 and B -> B1,B2. B
+		// adopts first, so B1/B2 are Normal and B is delisted, while A is still
+		// fenced. A pull whose state read predates B's adoption marks all four
+		// targets, and conditions 2 and 3 both pass -- A is a fenced source and
+		// it is one of the channels that would stay. Only condition 1 refuses,
+		// and it has to: B1/B2 are the ONLY servers of B's key range, so
+		// excluding them would leave that range in no target while the
+		// collection reports Loaded and GetShardLeaders lists A alone.
+		all := []string{"A", "A1", "A2", "B1", "B2"}
+		pulled := lo.Map(all, func(name string, _ int) *datapb.VchannelInfo {
+			return &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name}
+		})
+		pulledSegments := []*datapb.SegmentInfo{
+			{ID: 5, CollectionID: collectionID, PartitionID: 100, InsertChannel: "A"},
+			{ID: 6, CollectionID: collectionID, PartitionID: 100, InsertChannel: "B1"},
+			{ID: 7, CollectionID: collectionID, PartitionID: 100, InsertChannel: "B2"},
+		}
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, 0))
+		bAdopted := false
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
+			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
+				if bAdopted {
+					return splitShardStates(all,
+						schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating,
+						schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardNormal,
+						schemapb.ShardState_ShardNormal), nil
+				}
+				// before B's adoption: B is still fenced and its targets Creating.
+				return splitShardStates([]string{"A", "A1", "A2", "B", "B1", "B2"},
+					schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating,
+					schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardSplitting,
+					schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating), nil
+			})
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(pulled, pulledSegments, nil).Once()
+
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+		suite.Equal(typeutil.NewSet("A1", "A2", "B1", "B2"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+
+		bAdopted = true
+		// condition 2 passes: A is Splitting and is one of the channels that stay.
+		// condition 3 passes: there is a fenced source. Only condition 1 refuses.
+		exclusions, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID, NextTarget)
+		suite.False(promotable, "B1/B2 have been adopted and are the only servers of B's range")
+		suite.Empty(exclusions)
+		suite.False(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+		suite.False(mgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID))
+	})
+
+	suite.Run("a pull with no window targets is promoted whole and consumes the next target", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, 0))
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+			splitShardStates(names,
+				schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal), nil)
+		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
+		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+
+		exclusions, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID, NextTarget)
+		suite.True(promotable)
+		suite.Empty(exclusions)
+		suite.True(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+		suite.ElementsMatch(names, lo.Keys(mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget)))
+		suite.False(mgr.IsNextTargetExist(ctx, collectionID))
+	})
+
+	suite.Run("an unknown collection excludes nothing and stays promotable", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, 0))
+		exclusions, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID+999, NextTarget)
+		suite.True(promotable)
+		suite.Empty(exclusions)
+	})
+
+	suite.Run("a target manager without a split state cache refuses to exclude", func() {
+		broker := NewMockBroker(suite.T())
+		mgr := NewTargetManager(broker, suite.meta)
+		marked := NewCollectionTarget(map[int64]*datapb.SegmentInfo{}, map[string]*DmChannel{
+			"src": DmChannelFromVChannel(vchannels[0]),
+			"t1":  DmChannelFromVChannel(vchannels[1]),
+		}, []int64{100})
+		marked.windowTargets = typeutil.NewSet("t1")
+		mgr.next.updateCollectionTarget(collectionID, marked)
+
+		_, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID, NextTarget)
+		suite.False(promotable)
+		suite.False(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+	})
+}
+
+// TestUpdateCurrentTarget_RefusesAnEmptyNarrowedTarget pins the defense in depth
+// inside the promotion: the exclusion rule always leaves a fenced source, so an
+// exclusion covering every channel cannot happen -- but promoting the empty
+// result would leave the collection with a current target that lists nothing.
+func (suite *TargetManagerSuite) TestUpdateCurrentTarget_RefusesAnEmptyNarrowedTarget() {
+	ctx := suite.ctx
+	collectionID := int64(1000)
+	names := []string{"src", "t1"}
+	vchannels := lo.Map(names, func(name string, _ int) *datapb.VchannelInfo {
+		return &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name}
+	})
+	broker := NewMockBroker(suite.T())
+	mgr := NewTargetManagerWithSplitState(broker, suite.meta, NewShardSplitStateCache(broker, 0))
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+		splitShardStates(names, schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating), nil)
+	broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, nil, nil).Once()
+	suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+
+	everything := typeutil.NewSet(names...)
+	patch := mockey.Mock((*TargetManager).splitWindowExclusions).Return(everything, true).Build()
+	defer patch.UnPatch()
+
+	suite.False(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+	suite.False(mgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID))
+	suite.True(mgr.IsNextTargetExist(ctx, collectionID), "the next target is left alone")
+}
+
+// TestSplitWindowExclusionsWithoutReadableStates pins that an unreadable shard
+// state refuses the exclusion rather than guessing at the window.
+func (suite *TargetManagerSuite) TestSplitWindowExclusionsWithoutReadableStates() {
+	ctx := suite.ctx
+	collectionID := int64(1000)
+	names := []string{"src", "t1"}
+	vchannels := lo.Map(names, func(name string, _ int) *datapb.VchannelInfo {
+		return &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name}
+	})
+	broker := NewMockBroker(suite.T())
+	cache := NewShardSplitStateCache(broker, 0)
+	mgr := NewTargetManagerWithSplitState(broker, suite.meta, cache)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+		splitShardStates(names, schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating), nil).Once()
+	broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, nil, nil).Once()
+	suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
+	suite.Equal(typeutil.NewSet("t1"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
+
+	// a cache that holds no read (a restarted querycoord) and a coordinator that
+	// is unreachable: the states cannot be read at all. An invalidated entry
+	// would not do, since it stays the fallback of a failed refresh.
+	unreachable := NewMockBroker(suite.T())
+	unreachable.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+		nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing"))
+	mgr.splitStates = NewShardSplitStateCache(unreachable, 0)
+
+	_, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID, NextTarget)
+	suite.False(promotable)
+	suite.False(mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+}
+
+// TestWithoutChannels pins that narrowing a target drops the excluded channels
+// and the segments attributed to them, and keeps everything else.
+func (suite *TargetManagerSuite) TestWithoutChannels() {
+	collectionID := int64(1000)
+	segments := map[int64]*datapb.SegmentInfo{
+		1: {ID: 1, CollectionID: collectionID, PartitionID: 100, InsertChannel: "src", NumOfRows: 10},
+		2: {ID: 2, CollectionID: collectionID, PartitionID: 101, InsertChannel: "t1", NumOfRows: 20},
+	}
+	channels := map[string]*DmChannel{
+		"src": DmChannelFromVChannel(&datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "src"}),
+		"t1":  DmChannelFromVChannel(&datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "t1"}),
+	}
+	full := NewCollectionTarget(segments, channels, []int64{100, 101})
+	full.windowTargets = typeutil.NewSet("t1")
+
+	suite.Same(full, full.withoutChannels(nil), "an empty exclusion returns the same target")
+
+	narrowed := full.withoutChannels(typeutil.NewSet("t1"))
+	suite.Equal(full.GetTargetVersion(), narrowed.GetTargetVersion())
+	suite.ElementsMatch([]string{"src"}, narrowed.GetAllDmChannelNames())
+	suite.ElementsMatch([]int64{1}, narrowed.GetAllSegmentIDs())
+	suite.EqualValues(10, narrowed.GetRowCount())
+	suite.Empty(narrowed.SplitWindowTargets())
+	// the partition set is not narrowed: partition 101 is still a partition of
+	// this collection even with no segment left on a served channel.
+	suite.True(narrowed.partitions.Contain(101))
+	// the original is untouched.
+	suite.ElementsMatch([]string{"src", "t1"}, full.GetAllDmChannelNames())
+
+	// a partial exclusion keeps what it did not cover marked.
+	partial := full.withoutChannels(typeutil.NewSet("src"))
+	suite.Equal(typeutil.NewSet("t1"), partial.SplitWindowTargets())
 }
