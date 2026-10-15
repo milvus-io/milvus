@@ -96,7 +96,10 @@ legacy file-resource push distribution remain unchanged.
 
 The validation response contains only resource IDs. Errors use streaming gRPC
 interceptors: invalid analyzer configuration is an unrecoverable invalid argument;
-resource preparation and native system failures remain retriable. HandlerClient
+transient native system failures remain retriable, while native errors marked
+non-retriable become terminal streaming system errors. Deterministically invalid
+analyzer options are classified as input errors at their Rust origin; internal
+failures are not relabeled as bad user parameters. HandlerClient
 uses its existing readiness/retry loop, returns Unimplemented immediately, and
 maps invalid arguments to the public DDL parameter-error contract. No independent
 retry loop, discovery mechanism, or shutdown lifecycle is introduced.

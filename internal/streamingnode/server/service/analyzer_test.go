@@ -215,7 +215,7 @@ func TestValidateAnalyzerNativeTransport(t *testing.T) {
 		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		for _, params := range []string{`{"tokenizer":"standard"}`, `{"tokenizer":"not_a_tokenizer"}`, `{"tokenizer":`, `[]`, `null`} {
+		for _, params := range []string{`{"tokenizer":"standard"}`, `{"tokenizer":"not_a_tokenizer"}`, `{"type":"klingon"}`, `{"tokenizer":"standard","filter":[{"type":"stemmer","language":"xx"}]}`, `{"tokenizer":"standard","filter":["unknown_filter"]}`, `{"tokenizer":"standard","unknown_option":true}`, `{"tokenizer":`, `[]`, `null`} {
 			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: params, Field: "body"}}})
 			if params == `{"tokenizer":"standard"}` {
 				require.NoError(t, err)
@@ -226,9 +226,17 @@ func TestValidateAnalyzerNativeTransport(t *testing.T) {
 				require.True(t, status.AsStreamingError(err).IsInvalidArgument(), "%s: %v", params, err)
 			}
 		}
-		mockey.Mock(analyzer.ValidateAnalyzer).Return(nil, merr.ErrServiceUnavailable).Build()
+		var nativeErr error = merr.ErrServiceUnavailable
+		mockey.Mock(analyzer.ValidateAnalyzer).To(func(string, string) ([]int64, error) {
+			return nil, nativeErr
+		}).Build()
 		_, err = client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: "{}"}}})
 		require.Error(t, err)
-		require.False(t, status.AsStreamingError(err).IsUnrecoverable(), "system failures must remain retriable")
+		require.False(t, status.AsStreamingError(err).IsUnrecoverable(), "transient system failures must remain retriable")
+		nativeErr = merr.ErrServiceInternal
+		_, err = client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: "{}"}}})
+		require.Error(t, err)
+		require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+		require.False(t, status.AsStreamingError(err).IsInvalidArgument(), "terminal system failures must not be blamed on the user")
 	})
 }

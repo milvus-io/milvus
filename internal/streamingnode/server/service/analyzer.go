@@ -76,6 +76,11 @@ func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streami
 				// Translate the native input classification into the streaming wire dialect.
 				return nil, status.NewInvalidArgument(err.Error())
 			}
+			if !merr.IsRetryableErr(err) {
+				// Preserve terminal system failures as system errors. In particular,
+				// do not turn every native failure into a user parameter error.
+				return nil, status.NewUnrecoverableError(err.Error())
+			}
 			return nil, err
 		}
 		resourceIDs.Insert(ids...)
