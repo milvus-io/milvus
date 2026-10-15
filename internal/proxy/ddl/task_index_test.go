@@ -767,7 +767,7 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create diskann index", func(t *testing.T) {
-		cit3 := &createIndexTask{
+		cit3 := &CreateIndexTask{
 			Condition: nil,
 			req: &milvuspb.CreateIndexRequest{
 				Base:           nil,
@@ -780,7 +780,7 @@ func Test_parseIndexParams(t *testing.T) {
 						Value: "DISKANN",
 					},
 					{
-						Key:   MetricTypeKey,
+						Key:   common.MetricTypeKey,
 						Value: "IP",
 					},
 					{
