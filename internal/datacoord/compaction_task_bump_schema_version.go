@@ -114,6 +114,7 @@ func (t *bumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
+		EnableManifestDelta:       true,
 	}
 	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
@@ -259,7 +260,13 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
 	if err != nil || result == nil {
-		if errors.Is(err, merr.ErrNodeNotFound) {
+		if errors.Is(err, merr.ErrCompactionResultNotFound) {
+			if dropErr := cluster.DropCompaction(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID()); dropErr != nil {
+				log.Warn(context.TODO(), "bumpSchemaVersionTask failed to drop task with unavailable result", mlog.Err(dropErr))
+				return
+			}
+		}
+		if errors.Is(err, merr.ErrNodeNotFound) || errors.Is(err, merr.ErrCompactionResultNotFound) {
 			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
 				log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 			}
@@ -299,7 +306,7 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
 		return
 	case datapb.CompactionTaskState_timeout:
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout), setFailReason("DataNode reported compaction timeout"))
 		if err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 			return
@@ -307,7 +314,7 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_failed:
 		log.Warn(context.TODO(), "bumpSchemaVersionTask fail in datanode")
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
-			setFailReason("compaction failed in datanode")); err != nil {
+			setFailReason(compactionFailReason(result))); err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 		}
 	default:
@@ -363,7 +370,6 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 	if err := binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
 		return err
 	}
-
 	var newSegmentIDs []UniqueID
 	if isMaterializationResult(result) {
 		// In-place schema-bump materialization: DataCoord runs the StorageV3
@@ -390,6 +396,13 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 		case getBuildIndexChSingleton() <- newSegID:
 		default:
 		}
+	}
+
+	// The SegmentMeta mutation is committed (schema bump rewrites manifests);
+	// schedule an asynchronous DataView snapshot reconciliation so consumers
+	// observe the new manifest versions.
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))

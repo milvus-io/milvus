@@ -145,7 +145,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -197,7 +197,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch
 
 	bfs := pkoracle.NewBloomFilterSet()
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -266,7 +266,7 @@ func (s *PackWriterV3Suite) TestResolveInsertWriterFormatsUsesColumnGroupFormats
 	}
 	bw := NewBulkPackWriterV3(nil, s.schema, s.cm, s.logIDAlloc,
 		packed.DefaultWriteBufferSize, 0, s.storageConfig, columnGroups,
-		packed.MarshalManifestPath("files/missing-manifest-segment", 42))
+		packed.MarshalManifestPath(path.Join(s.rootPath, "missing-manifest-segment"), 42))
 	bw.initialManifestPath = bw.manifestPath
 
 	writerFormat, schemaBasedFormats, err := bw.resolveInsertWriterFormats()
@@ -287,7 +287,7 @@ func (s *PackWriterV3Suite) TestResolveInsertWriterFormatsRequiresFormatsForExis
 	}
 	bw := NewBulkPackWriterV3(nil, s.schema, s.cm, s.logIDAlloc,
 		packed.DefaultWriteBufferSize, 0, s.storageConfig, columnGroups,
-		packed.MarshalManifestPath("files/existing-manifest-segment", 42))
+		packed.MarshalManifestPath(path.Join(s.rootPath, "existing-manifest-segment"), 42))
 	bw.initialManifestPath = bw.manifestPath
 
 	_, _, err := bw.resolveInsertWriterFormats()
@@ -303,7 +303,7 @@ func (s *PackWriterV3Suite) TestWriteEmptyInsertData() {
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	bfs := pkoracle.NewBloomFilterSet()
@@ -333,7 +333,7 @@ func (s *PackWriterV3Suite) TestNoPkField() {
 	segmentID := int64(789)
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
@@ -361,7 +361,7 @@ func (s *PackWriterV3Suite) TestWriteInsertDataError() {
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	mc := metacache.NewMockMetaCache(s.T())
@@ -410,7 +410,7 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -459,7 +459,7 @@ func (s *PackWriterV3Suite) TestV3InheritsV2Fields() {
 	segmentID := int64(789)
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	mc := metacache.NewMockMetaCache(s.T())
@@ -523,7 +523,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -613,7 +613,7 @@ func (s *PackWriterV3Suite) TestWrite_PropagatesPriorStatsReadError() {
 
 	bfs := pkoracle.NewBloomFilterSet()
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil, metacache.NewEmptySegmentStats())
@@ -692,7 +692,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -770,7 +770,7 @@ func (s *PackWriterV3Suite) TestWrite_SingleVersionBumpAcrossSections() {
 
 	bfs := pkoracle.NewBloomFilterSet()
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil, metacache.NewEmptySegmentStats())
@@ -846,7 +846,7 @@ func (s *PackWriterV3Suite) TestWrite_RetryDoesNotLeakVersionBumps() {
 
 	bfs := pkoracle.NewBloomFilterSet()
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(s.rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)

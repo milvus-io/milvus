@@ -16,7 +16,16 @@
 
 #pragma once
 
-#include "knowhere/comp/index_param.h"
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+// Index parameter and metadata keys. User-facing index-type names below are
+// distinct from persisted registry family names in Families.h; the adapter maps
+// between them. Keep vector-only configuration headers out of this shared file.
+//
+// TODO: move kOverrideRootPathForUT into storage. Production FileManager reads
+// this test hook, creating a storage-to-index dependency unrelated to indexing.
 
 namespace milvus::index {
 constexpr const char* OPERATOR_TYPE = "operator_type";
@@ -42,6 +51,9 @@ constexpr const char* BITMAP_INDEX_VALID_BITSET = "valid_bitset";
 constexpr const char* INDEX_TYPE = "index_type";
 constexpr const char* METRIC_TYPE = "metric_type";
 constexpr const char* EMB_LIST = "embedding_list";
+constexpr const char* FILE_NAMES = "file_names";
+constexpr const char* HAS_NULL = "has_null";
+constexpr const char* INDEX_NULL_OFFSET = "index_null_offset";
 
 // scalar index type
 constexpr const char* ASCENDING_SORT = "STL_SORT";
@@ -104,6 +116,8 @@ constexpr const char* EMB_LIST_RAW_INDEX_FILE_NAME = "emb_list_raw_index";
 constexpr const char* EMB_LIST_OFFSETS_PATH = "emb_list_offset_file_path";
 constexpr const char* VALID_DATA_PATH_KEY = "valid_data_file_path";
 
+inline constexpr std::size_t kBitmapFrozenBatchBytes = 16 * 1024 * 1024;
+
 // JSON path index file names
 constexpr const char* INDEX_NON_EXIST_OFFSET_FILE_NAME =
     "json_index_non_exist_offsets";
@@ -133,8 +147,4 @@ constexpr const char* DISK_ANN_QUERY_BEAMWIDTH = "beamwidth";
 // HNSW query params
 constexpr const char* HNSW_QUERY_EF = "ef";
 
-// UT-only: when non-empty, overrides rcm_->GetRootPath() in
-// GetRemoteIndexObjectPrefix/GetRemoteTextLogPrefix to avoid
-// absolute path duplication with SubTreeFileSystem in tests.
-extern std::string kOverrideRootPathForUT;
 }  // namespace milvus::index

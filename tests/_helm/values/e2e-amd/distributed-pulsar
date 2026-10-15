@@ -76,7 +76,14 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     common:
+      fileResource:
+        mode:
+          proxy: sync
       storage:
         enablev2: true
         # enable storage v3
@@ -98,6 +105,9 @@ extraConfigFiles:
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    function:
+      pyUDF:
+        enabled: true
     quotaAndLimits:
       flushRate:
         collection:

@@ -62,6 +62,15 @@ func (plan *SearchPlan) GetTopK() int64 {
 	return int64(topK)
 }
 
+func (plan *SearchPlan) GetGroupSize() int64 {
+	groupSize := C.GetGroupSize(plan.cSearchPlan)
+	return int64(groupSize)
+}
+
+func (plan *SearchPlan) SetTakeForOutputAllowed(allowed bool) {
+	C.SetSearchPlanTakeForOutputAllowed(plan.cSearchPlan, C.bool(allowed))
+}
+
 func (plan *SearchPlan) setMetricType(metricType string) {
 	cmt := C.CString(metricType)
 	defer C.free(unsafe.Pointer(cmt))
@@ -229,6 +238,10 @@ func (plan *RetrievePlan) ShouldIgnoreNonPk() bool {
 
 func (plan *RetrievePlan) SetIgnoreNonPk(ignore bool) {
 	plan.ignoreNonPk = ignore
+}
+
+func (plan *RetrievePlan) SetTakeForOutputAllowed(allowed bool) {
+	C.SetRetrievePlanTakeForOutputAllowed(plan.cRetrievePlan, C.bool(allowed))
 }
 
 func (plan *RetrievePlan) IsIgnoreNonPk() bool {

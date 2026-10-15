@@ -228,11 +228,11 @@ func TestCompactionExecutor(t *testing.T) {
 
 		planID := int64(2)
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-		mockC.EXPECT().GetPlanID().Return(planID).Times(3)
+		mockC.EXPECT().GetPlanID().Return(planID)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
-		mockC.EXPECT().Compact().Return(nil, errors.New("compaction failed"))
+		mockC.EXPECT().Compact().Return(nil, merr.SegcoreError(2034, "mem allocate failed"))
 		mockC.EXPECT().Complete().Return()
 
 		succeed, err := ex.Enqueue(mockC)
@@ -246,7 +246,16 @@ func TestCompactionExecutor(t *testing.T) {
 		ex.mu.RUnlock()
 		assert.True(t, exists)
 		assert.Equal(t, datapb.CompactionTaskState_failed, task.state)
-		assert.Nil(t, task.result)
+		// The typed failure must survive into the result so DataCoord can
+		// persist the code/reason and decide retryability, instead of the old
+		// bare failed state with a nil result.
+		assert.NotNil(t, task.result)
+		assert.Equal(t, datapb.CompactionTaskState_failed, task.result.GetState())
+		failStatus := task.result.GetFailStatus()
+		assert.NotNil(t, failStatus)
+		assert.NotZero(t, failStatus.GetCode())
+		assert.True(t, merr.IsRetryableErr(merr.Error(failStatus)),
+			"an OOM failure must carry retriable=true across the wire")
 		assert.Equal(t, int64(0), ex.Slots())
 	})
 

@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -98,7 +99,11 @@ func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	m, err := newMeta(context.TODO(), catalog, nil, broker)
+	if m != nil {
+		t.Cleanup(m.closeManifestCommitExecutor)
+	}
+	return m, err
 }
 
 func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
@@ -107,7 +112,11 @@ func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
 	catalog := datacoord.NewCatalog(catalogKV, "", rootPath)
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	m, err := newMeta(context.TODO(), catalog, nil, broker)
+	if m != nil {
+		t.Cleanup(m.closeManifestCommitExecutor)
+	}
+	return m, err
 }
 
 func newMockAllocator(t *testing.T) *allocator.MockAllocator {
@@ -160,6 +169,7 @@ func newTestScalarClusteringKeySchema() *schemapb.CollectionSchema {
 }
 
 type mockMixCoord struct {
+	rootcoordpb.UnimplementedRootCoordServer
 	state commonpb.StateCode
 	cnt   atomic.Int64
 }
@@ -183,6 +193,10 @@ func (m *mockMixCoord) DescribeDatabase(ctx context.Context, in *rootcoordpb.Des
 		DbName:           "default",
 		CreatedTimestamp: 1,
 	}, nil
+}
+
+func (m *mockMixCoord) GetRLSMetadata(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return &rootcoordpb.GetRLSMetadataResponse{Status: merr.Success()}, nil
 }
 
 func (m *mockMixCoord) Close() error {
@@ -999,7 +1013,7 @@ func (s *mockMixCoord) AllocSegment(ctx context.Context, req *datapb.AllocSegmen
 	panic("implement me")
 }
 
-func (s *mockMixCoord) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+func (s *mockMixCoord) NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error {
 	panic("implement me")
 }
 
@@ -1169,7 +1183,7 @@ func (h *mockHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
 	return nil, nil
 }
 
-func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
+func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, positions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error) {
 	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Name:         "test_snapshot",

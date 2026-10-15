@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 type ColumnBasedDataOptionSuite struct {
@@ -45,6 +46,70 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	fd := req.GetFieldsData()[0]
 	s.ElementsMatch([]int64{1, 2, 3}, fd.GetScalars().GetLongData())
 	s.ElementsMatch([]bool{true, true, true}, fd.GetScalars().GetValidData())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithIdempotencyKey() {
+	opt := NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).
+		WithIdempotencyKey("key-1")
+	s.Equal("key-1", opt.IdempotencyKey())
+
+	rowOpt := NewRowBasedInsertOption("c", map[string]any{"id": int64(1)}).
+		WithIdempotencyKey("key-1")
+	s.Equal("key-1", rowOpt.IdempotencyKey())
+
+	s.Empty(NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).IdempotencyKey())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithRLSContext() {
+	const principal = "alice"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64)),
+	}
+
+	columnOpt := NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true)
+	insertReq, err := columnOpt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, insertReq.GetRlsPrincipal())
+	s.True(insertReq.GetSkipRls())
+
+	upsertReq, err := columnOpt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, upsertReq.GetRlsPrincipal())
+	s.True(upsertReq.GetSkipRls())
+
+	rowOpt := NewRowBasedInsertOption("c", map[string]any{"id": int64(1)}).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true).
+		WithPartialUpdate(true)
+	insertReq, err = rowOpt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, insertReq.GetRlsPrincipal())
+	s.True(insertReq.GetSkipRls())
+
+	upsertReq, err = rowOpt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, upsertReq.GetRlsPrincipal())
+	s.True(upsertReq.GetSkipRls())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestUpsertRejectsIdempotencyKey() {
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64)),
+	}
+
+	_, err := NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).
+		WithIdempotencyKey("key-1").
+		UpsertRequest(coll)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.ErrorContains(err, "only supported for Insert")
+
+	_, err = NewRowBasedInsertOption("c", map[string]any{"id": int64(1)}).
+		WithIdempotencyKey("key-1").
+		UpsertRequest(coll)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.ErrorContains(err, "only supported for Insert")
 }
 
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
@@ -225,51 +290,6 @@ func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumnNilSchema() {
 	s.Error(err)
 }
 
-func (s *ColumnBasedDataOptionSuite) TestNewStructSubColumnAllSupportedTypes() {
-	// All scalar and vector sub-field types supported by newStructSubColumn; each must produce
-	// a non-nil sub-column without error. Vector types also require a valid dim.
-	dim := 8
-	cases := []*entity.Field{
-		entity.NewField().WithName("b").WithDataType(entity.FieldTypeBool),
-		entity.NewField().WithName("i8").WithDataType(entity.FieldTypeInt8),
-		entity.NewField().WithName("i16").WithDataType(entity.FieldTypeInt16),
-		entity.NewField().WithName("i32").WithDataType(entity.FieldTypeInt32),
-		entity.NewField().WithName("i64").WithDataType(entity.FieldTypeInt64),
-		entity.NewField().WithName("f").WithDataType(entity.FieldTypeFloat),
-		entity.NewField().WithName("d").WithDataType(entity.FieldTypeDouble),
-		entity.NewField().WithName("s").WithDataType(entity.FieldTypeVarChar).WithMaxLength(16),
-		entity.NewField().WithName("str").WithDataType(entity.FieldTypeString),
-		entity.NewField().WithName("fv").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim)),
-		entity.NewField().WithName("fp16").WithDataType(entity.FieldTypeFloat16Vector).WithDim(int64(dim)),
-		entity.NewField().WithName("bf16").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(int64(dim)),
-		entity.NewField().WithName("bv").WithDataType(entity.FieldTypeBinaryVector).WithDim(int64(dim)),
-		entity.NewField().WithName("i8v").WithDataType(entity.FieldTypeInt8Vector).WithDim(int64(dim)),
-	}
-	for _, f := range cases {
-		c, err := newStructSubColumn(f)
-		s.Require().NoError(err, "type %v", f.DataType)
-		s.NotNil(c)
-	}
-}
-
-func (s *ColumnBasedDataOptionSuite) TestNewStructSubColumnErrors() {
-	// Unsupported data type in a struct sub-field must error.
-	_, err := newStructSubColumn(entity.NewField().WithName("bad").WithDataType(entity.FieldTypeJSON))
-	s.Error(err)
-
-	// Vector sub-fields without dim must surface GetDim's error.
-	for _, dt := range []entity.FieldType{
-		entity.FieldTypeFloatVector,
-		entity.FieldTypeFloat16Vector,
-		entity.FieldTypeBFloat16Vector,
-		entity.FieldTypeBinaryVector,
-		entity.FieldTypeInt8Vector,
-	} {
-		_, err := newStructSubColumn(entity.NewField().WithName("no_dim").WithDataType(dt))
-		s.Error(err, "type %v", dt)
-	}
-}
-
 func (s *ColumnBasedDataOptionSuite) TestWithNamespace() {
 	collName := "namespace_write_option"
 	namespace := "tenant_a"
@@ -358,6 +378,38 @@ func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
 	s.Len(upsertReq.GetFieldsData(), 2)
 }
 
+func (s *ColumnBasedDataOptionSuite) TestRowBasedAutoIDUpsertKeepsLookupPrimaryKey() {
+	collName := "auto_id_row_upsert"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)).
+			WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(2)),
+	}
+	rows := []any{map[string]any{
+		"id":     int64(7),
+		"vector": []float32{0.1, 0.2},
+	}}
+	opt := NewRowBasedInsertOption(collName, rows...)
+
+	insertReq, err := opt.InsertRequest(coll)
+	s.Require().NoError(err)
+	for _, field := range insertReq.GetFieldsData() {
+		s.NotEqual("id", field.GetFieldName())
+	}
+
+	upsertReq, err := opt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	var primaryKey *schemapb.FieldData
+	for _, field := range upsertReq.GetFieldsData() {
+		if field.GetFieldName() == "id" {
+			primaryKey = field
+			break
+		}
+	}
+	s.Require().NotNil(primaryKey)
+	s.Equal([]int64{7}, primaryKey.GetScalars().GetLongData().GetData())
+}
+
 func TestRowBasedDataOption(t *testing.T) {
 	suite.Run(t, new(ColumnBasedDataOptionSuite))
 }
@@ -382,6 +434,16 @@ func (s *DeleteOptionSuite) TestWithNamespace() {
 	req, err := NewDeleteOption(collectionName).WithNamespace(namespace).Request()
 	s.Require().NoError(err)
 	s.Equal(namespace, req.GetNamespace())
+}
+
+func (s *DeleteOptionSuite) TestWithRLSContext() {
+	req, err := NewDeleteOption("collection").
+		WithRLSPrincipal("alice").
+		WithSkipRLS(true).
+		Request()
+	s.Require().NoError(err)
+	s.Equal("alice", req.GetRlsPrincipal())
+	s.True(req.GetSkipRls())
 }
 
 func (s *DeleteOptionSuite) TestWithTemplateParam() {

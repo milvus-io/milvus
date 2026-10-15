@@ -94,7 +94,7 @@ TEST_P(ExprTest, TestTermJson) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -193,7 +193,7 @@ TEST_P(ExprTest, TestTermJsonNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -289,7 +289,7 @@ TEST_P(ExprTest, TestTerm) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -412,7 +412,7 @@ TEST_P(ExprTest, TestTermNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -490,7 +490,7 @@ TEST_P(ExprTest, TestTermTimestamptz) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());

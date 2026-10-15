@@ -17,6 +17,7 @@
 package snapshotio
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestManifestSchemaByVersion(t *testing.T) {
@@ -45,6 +47,8 @@ func TestManifestSchemaByVersion(t *testing.T) {
 	assert.Contains(t, AvroSchemaV3(), "commit_timestamp")
 	assert.NotContains(t, AvroSchemaV3(), "child_fields")
 	assert.Contains(t, AvroSchemaV4(), "child_fields")
+	assert.NotContains(t, AvroSchemaV4(), "manifest_has_index")
+	assert.Contains(t, AvroSchemaV5(), "manifest_has_index")
 
 	currentSchema, err := ManifestSchemaByVersion(SnapshotFormatVersion)
 	require.NoError(t, err)
@@ -66,17 +70,29 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 	assert.Equal(t, int32(3), metadata.GetFormatVersion())
 	assert.Equal(t, int64(10), metadata.GetSnapshotInfo().GetId())
 
-	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":4}`))
+	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(fmt.Sprintf(`{"format_version":%d}`, SnapshotFormatVersion)))
 	require.NoError(t, err)
 	assert.Equal(t, int32(SnapshotFormatVersion), metadata.GetFormatVersion())
 
-	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":99}`))
+	futureVersion := SnapshotFormatVersion + 1
+	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(fmt.Sprintf(`{"format_version":%d}`, futureVersion)))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "incompatible snapshot format")
+	assert.Contains(t, err.Error(), fmt.Sprintf("snapshot format version %d is too new", futureVersion))
+	assert.Contains(t, err.Error(), fmt.Sprintf("current supported version: %d", SnapshotFormatVersion))
+	assert.Contains(t, err.Error(), "please upgrade Milvus")
+	assert.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	assert.Equal(t, int32(3000), merr.Status(err).GetCode())
+	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+	assert.False(t, merr.Status(err).GetRetriable())
 
 	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse metadata JSON")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Equal(t, int32(1009), merr.Status(err).GetCode())
+	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+	assert.False(t, merr.Status(err).GetRetriable())
+	assert.NotNil(t, errors.Unwrap(err), "preserve the original JSON parsing error")
 
 	assert.NoError(t, ValidateFormatVersion(0))
 	assert.NoError(t, ValidateFormatVersion(SnapshotFormatVersion))
@@ -142,11 +158,12 @@ func TestSegmentManifestRoundTrip(t *testing.T) {
 				JsonKeyStatsDataFormat: 25,
 			},
 		},
-		StartPosition:   &msgpb.MsgPosition{ChannelName: "start", MsgID: []byte{1, 2}, MsgGroup: "g1", Timestamp: 100},
-		DmlPosition:     &msgpb.MsgPosition{ChannelName: "dml", MsgID: []byte{3, 4}, MsgGroup: "g2", Timestamp: 200},
-		StorageVersion:  2,
-		IsSorted:        true,
-		CommitTimestamp: 999,
+		StartPosition:    &msgpb.MsgPosition{ChannelName: "start", MsgID: []byte{1, 2}, MsgGroup: "g1", Timestamp: 100},
+		DmlPosition:      &msgpb.MsgPosition{ChannelName: "dml", MsgID: []byte{3, 4}, MsgGroup: "g2", Timestamp: 200},
+		StorageVersion:   2,
+		IsSorted:         true,
+		CommitTimestamp:  999,
+		ManifestHasIndex: proto.Bool(false),
 	}
 
 	entry := SegmentToManifestEntry(segment)
@@ -165,6 +182,8 @@ func TestSegmentManifestRoundTrip(t *testing.T) {
 	assert.Equal(t, segment.GetStorageVersion(), parsed.GetStorageVersion())
 	assert.Equal(t, segment.GetIsSorted(), parsed.GetIsSorted())
 	assert.Equal(t, segment.GetCommitTimestamp(), parsed.GetCommitTimestamp())
+	assert.NotNil(t, parsed.ManifestHasIndex)
+	assert.False(t, parsed.GetManifestHasIndex())
 	require.Len(t, parsed.GetBinlogs(), 1)
 	assert.Equal(t, segment.GetBinlogs()[0].GetBinlogs()[0].GetLogPath(), parsed.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
 	require.Len(t, parsed.GetDeltalogs(), 1)
@@ -199,6 +218,24 @@ func TestParseSegmentManifestV2DefaultsCommitTimestamp(t *testing.T) {
 	parsed, err := ParseSegmentManifest(data, 2)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0), parsed.GetCommitTimestamp())
+}
+
+func TestParseSegmentManifestV4LeavesManifestHasIndexUnknown(t *testing.T) {
+	segment := &datapb.SegmentDescription{
+		SegmentId:        1001,
+		PartitionId:      2001,
+		SegmentLevel:     datapb.SegmentLevel_L1,
+		StorageVersion:   3,
+		ManifestHasIndex: proto.Bool(true),
+	}
+	schema, err := ManifestSchemaV4()
+	require.NoError(t, err)
+	data, err := avro.Marshal(schema, SegmentToManifestEntry(segment))
+	require.NoError(t, err)
+
+	parsed, err := ParseSegmentManifest(data, 4)
+	require.NoError(t, err)
+	assert.Nil(t, parsed.ManifestHasIndex)
 }
 
 func TestMarshalSegmentManifestErrors(t *testing.T) {

@@ -22,7 +22,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -52,7 +51,7 @@ func (c *Core) broadcastDropAlias(ctx context.Context, req *milvuspb.DropAliasRe
 			Alias:  req.GetAlias(),
 		}).
 		WithBody(&message.DropAliasMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

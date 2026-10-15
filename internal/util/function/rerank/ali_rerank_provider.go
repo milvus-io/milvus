@@ -78,13 +78,11 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 }
 
 func (provider *aliProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(provider.url, provider.modelName, query, docs, provider.params, provider.timeoutMs)
+	rerankResp, err := provider.client.Rerank(ctx, provider.url, provider.modelName, query, docs, provider.params, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}
-	scores := make([]float32, len(docs))
-	for i, rerankResult := range rerankResp.Output.Results {
-		scores[i] = rerankResult.RelevanceScore
-	}
-	return scores, nil
+	return rerankScoresByIndex(len(docs), len(rerankResp.Output.Results), func(i int) (int, float32) {
+		return rerankResp.Output.Results[i].Index, rerankResp.Output.Results[i].RelevanceScore
+	})
 }

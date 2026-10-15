@@ -191,13 +191,10 @@ func (b *mutableMesasgeBuilder[H, B]) WithVChannel(vchannel string) *mutableMesa
 // OptBuildBroadcast is the option for building broadcast message.
 type OptBuildBroadcast func(*messagespb.BroadcastHeader)
 
-// OptBuildBroadcastAckSyncUp sets the ack sync up of the broadcast message.
-// Whether the broadcast operation is need to be synced up between the streaming node and the coordinator.
-// If set, the broadcast operation will be acked after the checkpoint of current vchannel reach current message.
-// the fast ack operation can not be applied to speed up the broadcast operation, because the ack operation need to be synced up with streaming node.
-// TODO: current implementation doesn't promise the ack sync up semantic,
-// it only promise FastAck operation will not be applied, wait for 3.0 to implement the ack sync up semantic.
-// only for truncate api now.
+// OptBuildBroadcastAckSyncUp disables FastAck and waits for consuming-side Ack.
+// RecoveryStorage acknowledges only after all retained consumers have completed
+// their work and installed dirty recovery metadata. Ack does not wait for global
+// checkpoint publication; unfinished publication is recovered through WAL replay.
 func OptBuildBroadcastAckSyncUp() OptBuildBroadcast {
 	return func(bh *messagespb.BroadcastHeader) {
 		bh.AckSyncUp = true
@@ -205,11 +202,25 @@ func OptBuildBroadcastAckSyncUp() OptBuildBroadcast {
 }
 
 // WithBroadcast creates a new builder with broadcast property.
+// vchannels holds the data vchannels, the broadcaster adds the control channel when it is missing.
+// A broadcast to the control channel only uses WithControlChannelBroadcast.
 // !!! This method should only be called from coordinator side.
 func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string, opts ...OptBuildBroadcast) *mutableMesasgeBuilder[H, B] {
 	if len(vchannels) < 1 {
 		panic("broadcast message must have at least one vchannel")
 	}
+	return b.withBroadcastHeader(vchannels, opts...)
+}
+
+// WithControlChannelBroadcast creates a new builder that broadcasts to the control channel only.
+// The broadcaster adds the control channel, so the header holds no vchannel here.
+// !!! This method should only be called from coordinator side.
+func (b *mutableMesasgeBuilder[H, B]) WithControlChannelBroadcast(opts ...OptBuildBroadcast) *mutableMesasgeBuilder[H, B] {
+	return b.withBroadcastHeader(nil, opts...)
+}
+
+// withBroadcastHeader sets the broadcast header with the given vchannels.
+func (b *mutableMesasgeBuilder[H, B]) withBroadcastHeader(vchannels []string, opts ...OptBuildBroadcast) *mutableMesasgeBuilder[H, B] {
 	if b.allVChannel {
 		panic("a all vchannel message cannot set up vchannel property")
 	}
@@ -288,6 +299,31 @@ func (b *mutableMesasgeBuilder[H, B]) WithProperty(key string, val string) *muta
 func (b *mutableMesasgeBuilder[H, B]) WithProperties(kvs map[string]string) *mutableMesasgeBuilder[H, B] {
 	for key, val := range kvs {
 		b.properties.Set(key, val)
+	}
+	return b
+}
+
+// WithIdempotencyKey creates a new builder carrying the idempotency key of an
+// idempotent write. A zero key is a no-op, so callers can pass the key
+// unconditionally without materializing an empty property.
+//
+// The parameter is an `IdempotencyKey` rather than a string because a key is
+// meaningless without the scope it deduplicates within: it is built by one of the
+// New*ScopedIdempotencyKey constructors, which is what keeps a caller from
+// shipping an accidentally unscoped key.
+//
+// The key is a property rather than a per-message-type header field so that every
+// producer and consumer reads it the same way (see `IdempotencyKeyOf`), and so
+// that a broadcast message carries it without any per-type schema change.
+//
+// A deduplicated broadcast returns the ORIGINAL broadcast's per-channel append
+// results, so a caller reading `BroadcastAppendResult.GetAppendResult(...)` needs no
+// special handling for the duplicate path. The one exception is an original that has
+// not finished being acked, which leaves the results nil; a caller that dereferences
+// them without a nil check would panic there — a branch no success-path test reaches.
+func (b *mutableMesasgeBuilder[H, B]) WithIdempotencyKey(key IdempotencyKey) *mutableMesasgeBuilder[H, B] {
+	if key != "" {
+		b.properties.Set(messageIdempotencyKey, string(key))
 	}
 	return b
 }

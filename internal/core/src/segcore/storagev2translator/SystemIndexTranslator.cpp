@@ -179,16 +179,21 @@ TimestampIndexTranslator::get_cells(
     // pins to GroupChunk cells — callers read raw timestamps by pinning the
     // timestamp column directly. This avoids a DList deadlock where evicting
     // this cell would unpin GroupChunk cells under the same list_mtx_.
+    // TODO(local-format): Keep this system column Raw and preserve GetAllChunks
+    // until the full-column pointer consumer accepts a cursor and can honor its
+    // borrowed-data lifetime, with equivalent pin/loading behavior.
     auto all_chunks = column_->GetAllChunks(ctx);
     TimestampIndex index;
     if (all_chunks.size() == 1) {
         auto* fixed_chunk = static_cast<FixedWidthChunk*>(all_chunks[0].get());
         auto span = fixed_chunk->Span();
         auto* ts_ptr = static_cast<const Timestamp*>(span.data());
-        AssertInfo(static_cast<int64_t>(span.row_count()) == num_rows_,
-                   "timestamp chunk row count {} != expected {}",
-                   span.row_count(),
-                   num_rows_);
+        if (!(static_cast<int64_t>(span.row_count()) == num_rows_)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "timestamp chunk row count {} != expected {}",
+                      span.row_count(),
+                      num_rows_);
+        }
         index = build_timestamp_index(ts_ptr, num_rows_);
     } else {
         std::vector<Timestamp> temp(num_rows_);
@@ -202,10 +207,12 @@ TimestampIndexTranslator::get_cells(
                 span.row_count() * sizeof(*temp.data()));
             offset += span.row_count();
         }
-        AssertInfo(static_cast<int64_t>(offset) == num_rows_,
-                   "timestamp total row count {} != expected {}",
-                   offset,
-                   num_rows_);
+        if (!(static_cast<int64_t>(offset) == num_rows_)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "timestamp total row count {} != expected {}",
+                      offset,
+                      num_rows_);
+        }
         index = build_timestamp_index(temp.data(), num_rows_);
     }
 

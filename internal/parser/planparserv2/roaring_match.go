@@ -73,10 +73,10 @@ func validateRoaringBitmapBlob(blob []byte) (validatedRoaringBitmapBlob, error) 
 	// top. Checked before Validate so an oversized blob is rejected without
 	// decoding it.
 	//
-	// A separate proxy.maxMembershipFilterPlanSize budget bounds the aggregate
-	// serialized plans before proto.Marshal. This per-blob gate rejects one
-	// oversized bitmap before decode; the aggregate gate limits repeated
-	// otherwise-valid occurrences across the request.
+	// A separate proxy.maxMembershipFilterPlanSize budget bounds both aggregate
+	// serialized plan bytes and aggregate estimated decoded bytes across the
+	// request. This per-blob gate rejects one oversized bitmap before decode;
+	// the request-wide gate limits repeated otherwise-valid occurrences.
 	if maxSize := paramtable.Get().ProxyCfg.MaxMembershipFilterSize.GetAsInt(); len(blob) > maxSize+roaringfilter.HeaderSize {
 		bodySize := len(blob) - roaringfilter.HeaderSize
 		if bodySize < 0 {

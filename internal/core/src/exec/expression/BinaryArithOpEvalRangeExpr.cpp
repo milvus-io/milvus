@@ -809,26 +809,26 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             "division or modulus by zero in Array field arithmetic expression");
     }
 
-#define BinaryArithRangeArrayCompare(cmp)                       \
-    do {                                                        \
-        for (size_t i = 0; i < size; ++i) {                     \
-            auto offset = i;                                    \
-            if constexpr (filter_type == FilterType::random) {  \
-                offset = (offsets) ? offsets[i] : i;            \
-            }                                                   \
-            if (valid_data && !valid_data[offset]) {            \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            if (index >= data[offset].length()) {               \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            auto value = data[offset].get_data<GetType>(index); \
-            res[i] = (cmp);                                     \
-        }                                                       \
+#define BinaryArithRangeArrayCompare(cmp)                                 \
+    do {                                                                  \
+        for (size_t i = 0; i < size; ++i) {                               \
+            auto offset = i;                                              \
+            if constexpr (filter_type == FilterType::random) {            \
+                offset = (offsets) ? offsets[i] : i;                      \
+            }                                                             \
+            if (valid_data && !valid_data[offset]) {                      \
+                res[i] = false;                                           \
+                valid_res[i] = false;                                     \
+                continue;                                                 \
+            }                                                             \
+            if (index >= data[offset].length()) {                         \
+                res[i] = false;                                           \
+                valid_res[i] = false;                                     \
+                continue;                                                 \
+            }                                                             \
+            auto value = data[offset].get_data_unchecked<GetType>(index); \
+            res[i] = (cmp);                                               \
+        }                                                                 \
     } while (false)
 
     auto execute_sub_batch =
@@ -1384,7 +1384,6 @@ template <typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     OffsetVector* input) {
-    using Index = index::ScalarIndex<T>;
     typedef std::conditional_t<std::is_integral_v<T> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
@@ -1410,12 +1409,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     auto right_operand = right_operand_arg_.GetValue<HighPrecisionType>();
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
-    auto sub_batch_size = has_offset_input_ ? input->size() : size_per_chunk_;
 
     auto execute_sub_batch =
-        [ op_type, arith_type,
-          sub_batch_size ]<FilterType filter_type = FilterType::sequential>(
-            Index * index_ptr,
+        [ op_type,
+          arith_type ]<FilterType filter_type = FilterType::sequential>(
+            const index::IScalarValueReader<T>* index_ptr,
+            size_t sub_batch_size,
             HighPrecisionType value,
             HighPrecisionType right_operand,
             const int32_t* offsets = nullptr) {
@@ -2276,7 +2275,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
         return res;
     };
     if (has_offset_input_) {
-        auto res = ProcessIndexChunksByOffsets<T>(
+        auto res = ProcessValueIndexByOffsets<T>(
             execute_sub_batch, input, value, right_operand);
 
         AssertInfo(res->size() == real_batch_size,
@@ -2287,7 +2286,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
         return res;
     } else {
         auto res =
-            ProcessIndexChunks<T>(execute_sub_batch, value, right_operand);
+            ProcessValueIndex<T>(execute_sub_batch, value, right_operand);
         AssertInfo(res->size() == real_batch_size,
                    "internal error: expr processed rows {} not equal "
                    "expect batch size {}",
@@ -2981,17 +2980,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         }
     };
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, op_type, arith_type, value, right_operand](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            return skip_index.CanSkipBinaryArithRange<T>(op_ctx,
-                                                         field_id,
-                                                         chunk_id,
-                                                         op_type,
-                                                         arith_type,
-                                                         value,
-                                                         right_operand);
-        };
+    // Do not invert arithmetic predicates into a source-field range. Integer
+    // wraparound/truncation and operation-specific edge cases make that
+    // transformation unsafe in general; an empty callback conservatively
+    // disables chunk pruning for this expression family.
+    SkipChunkFn skip_index_func;
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -3038,76 +3031,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                processed_size,
                real_batch_size);
     return res_vec;
-}
-
-void
-PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
-    auto datatype = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
-        datatype = expr_->column_.element_type_;
-    }
-
-    switch (datatype) {
-        case DataType::BOOL: {
-            PrefetchRawData<bool>();
-            break;
-        }
-        case DataType::INT8: {
-            PrefetchRawData<int8_t>();
-            break;
-        }
-        case DataType::INT16: {
-            PrefetchRawData<int16_t>();
-            break;
-        }
-        case DataType::INT32: {
-            PrefetchRawData<int32_t>();
-            break;
-        }
-        case DataType::INT64: {
-            PrefetchRawData<int64_t>();
-            break;
-        }
-        case DataType::FLOAT: {
-            PrefetchRawData<float>();
-            break;
-        }
-        case DataType::DOUBLE: {
-            PrefetchRawData<double>();
-            break;
-        }
-        default: {
-            SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
-            break;
-        }
-    }
-}
-
-template <typename T>
-void
-PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
-    using H =
-        std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
-                           int64_t,
-                           T>;
-    auto skip_index = segment_->GetSkipIndex();
-    auto value = GetValueWithCastNumber<H>(expr_->value_);
-    auto right_value = GetValueWithCastNumber<H>(expr_->right_operand_);
-
-    std::vector<int64_t> chunks_may_hit;
-    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
-        auto skip =
-            skip_index->CanSkipBinaryArithRange<T>(field_id_,
-                                                   i,
-                                                   expr_->op_type_,
-                                                   expr_->arith_op_type_,
-                                                   value,
-                                                   right_value);
-        if (!skip) {
-            chunks_may_hit.push_back(i);
-        }
-    }
-    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 
 template VectorPtr

@@ -1,6 +1,7 @@
 package fastpb
 
 import (
+	"bytes"
 	"math"
 	"testing"
 
@@ -221,6 +222,44 @@ func TestMalformedWirePerField(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			diffDecode(t, c.wire, c.fresh, c.fast)
 		})
+	}
+}
+
+// TestVarintBoundaryParity exercises the shared wire primitive through scalar
+// values, packed values, length prefixes, and unknown-field skipping/merging.
+func TestVarintBoundaryParity(t *testing.T) {
+	payloads := []struct {
+		name string
+		wire []byte
+	}{
+		{"zero", []byte{0}},
+		{"max-uint64", protowire.AppendVarint(nil, math.MaxUint64)},
+		{"nonminimal-zero", append(bytes.Repeat([]byte{0x80}, 9), 0)},
+		{"truncated", bytes.Repeat([]byte{0x80}, 9)},
+		{"overflow", append(bytes.Repeat([]byte{0xff}, 9), 2)},
+		{"long-continuation", bytes.Repeat([]byte{0x80}, 1<<20)},
+	}
+	for _, payload := range payloads {
+		cases := []struct {
+			name  string
+			wire  []byte
+			fresh func() proto.Message
+			fast  func([]byte, proto.Message) error
+		}{
+			{"insert-numrows", cat(wtag(7, protowire.VarintType), payload.wire), newInsertRequest, decInsertRequest},
+			{"insert-schema-timestamp", cat(wtag(8, protowire.VarintType), payload.wire), newInsertRequest, decInsertRequest},
+			{"insert-packed-hashkeys", wfield(6, payload.wire), newInsertRequest, decInsertRequest},
+			{"retrieve-packed-segment-ids", wfield(6, payload.wire), newRetrieve, decRetrieve},
+			{"field-id", cat(wtag(5, protowire.VarintType), payload.wire), newFieldData, decFieldData},
+			{"field-name-length", cat(wtag(2, protowire.BytesType), payload.wire), newFieldData, decFieldData},
+			{"unknown-insert-field", cat(wtag(99, protowire.VarintType), payload.wire), newInsertRequest, decInsertRequest},
+			{"unknown-fielddata-field", cat(wtag(99, protowire.VarintType), payload.wire), newFieldData, decFieldData},
+		}
+		for _, c := range cases {
+			t.Run(payload.name+"/"+c.name, func(t *testing.T) {
+				diffDecode(t, c.wire, c.fresh, c.fast)
+			})
+		}
 	}
 }
 

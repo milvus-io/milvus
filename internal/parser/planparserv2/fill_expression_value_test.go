@@ -591,6 +591,9 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 	})
 
 	s.Run("failed case", func() {
+		bytesTemplate := &schemapb.TemplateValue{
+			Val: &schemapb.TemplateValue_BytesVal{BytesVal: []byte("MBF1")},
+		}
 		testcases := []testcase{
 			{`Int64Field + 6 == 12.5`, nil},
 			{`Int64Field - {offset} == {target}`, map[string]*schemapb.TemplateValue{
@@ -625,6 +628,45 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 				"offset": generateTemplateValue(schemapb.DataType_Array,
 					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 				"target": generateTemplateValue(schemapb.DataType_Int64, int64(5)),
+			}},
+			{`Int64Field + {filter} > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`0 < Int64Field + {filter}`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`{filter} + Int64Field > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`Int64Field - {filter} > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`Int64Field * {filter} > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`{filter} * Int64Field > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`Int64Field / {filter} > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`Int64Field % {filter} > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`(Int64Field & {filter}) > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`(Int64Field | {filter}) > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`(Int64Field ^ {filter}) > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`(Int64Field << {filter}) > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
+			}},
+			{`(Int64Field >> {filter}) > 0`, map[string]*schemapb.TemplateValue{
+				"filter": bytesTemplate,
 			}},
 			{`array_length(ArrayField) == {length}`, map[string]*schemapb.TemplateValue{
 				"length": generateTemplateValue(schemapb.DataType_String, "abc"),

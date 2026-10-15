@@ -156,14 +156,14 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element) {
     }
     this->seal();
 
-    // Build ArrayOffsets: each doc has array_len elements
+    // Build StructElementOffsets: each doc has array_len elements
     std::vector<int32_t> row_to_element_start = {0};
     for (int doc = 0; doc < num; doc++) {
         row_to_element_start.push_back(
             static_cast<int32_t>((doc + 1) * array_len));
     }
-    auto array_offsets =
-        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
+    auto struct_element_offsets = std::make_shared<StructElementOffsetsSealed>(
+        std::move(row_to_element_start));
 
     int total_elements = num * array_len;  // 15
 
@@ -173,8 +173,10 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element) {
         all.reset();
         BitsetTypeView view(all.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get(), std::nullopt);
+            this->map_.find_first_n_element(total_elements,
+                                            view,
+                                            struct_element_offsets.get(),
+                                            std::nullopt);
         ASSERT_EQ(doc_offsets.size(), num);
         for (size_t i = 0; i < doc_offsets.size(); i++) {
             ASSERT_EQ(elem_indices[i].size(), array_len);
@@ -189,7 +191,7 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element) {
         BitsetTypeView view(all.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
             this->map_.find_first_n_element(
-                4, view, array_offsets.get(), std::nullopt);
+                4, view, struct_element_offsets.get(), std::nullopt);
         int total = 0;
         for (auto& indices : elem_indices) {
             total += indices.size();
@@ -210,8 +212,10 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element) {
         }
         BitsetTypeView view(partial.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get(), std::nullopt);
+            this->map_.find_first_n_element(total_elements,
+                                            view,
+                                            struct_element_offsets.get(),
+                                            std::nullopt);
         ASSERT_EQ(doc_offsets.size(), num);
         for (size_t i = 0; i < doc_offsets.size(); i++) {
             ASSERT_EQ(elem_indices[i].size(), 1);
@@ -225,22 +229,26 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element) {
         none.set();
         BitsetTypeView view(none.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get(), std::nullopt);
+            this->map_.find_first_n_element(total_elements,
+                                            view,
+                                            struct_element_offsets.get(),
+                                            std::nullopt);
         ASSERT_EQ(doc_offsets.size(), 0);
         ASSERT_EQ(elem_indices.size(), 0);
         ASSERT_FALSE(has_more);
     }
 
-    // Case 5: element bitset smaller than array_offsets
+    // Case 5: element bitset smaller than struct_element_offsets
     {
         int smaller_size = total_elements - array_len;
         BitsetType small(smaller_size);
         small.reset();
         BitsetTypeView view(small.data(), smaller_size);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get(), std::nullopt);
+            this->map_.find_first_n_element(total_elements,
+                                            view,
+                                            struct_element_offsets.get(),
+                                            std::nullopt);
         int total = 0;
         for (auto& indices : elem_indices) {
             total += indices.size();
@@ -270,15 +278,15 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element_has_more) {
     }
     this->seal();
 
-    // Build ArrayOffsets: each doc has array_len elements
+    // Build StructElementOffsets: each doc has array_len elements
     // doc0: [elem0, elem1], doc1: [elem2, elem3], doc2: [elem4, elem5]
     std::vector<int32_t> row_to_element_start = {0};
     for (int doc = 0; doc < num; doc++) {
         row_to_element_start.push_back(
             static_cast<int32_t>((doc + 1) * array_len));
     }
-    auto array_offsets =
-        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
+    auto struct_element_offsets = std::make_shared<StructElementOffsetsSealed>(
+        std::move(row_to_element_start));
 
     int total_elements = num * array_len;  // 6
 
@@ -289,8 +297,10 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element_has_more) {
         all.reset();
         BitsetTypeView view(all.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get(), std::nullopt);
+            this->map_.find_first_n_element(total_elements,
+                                            view,
+                                            struct_element_offsets.get(),
+                                            std::nullopt);
         int collected = 0;
         for (auto& indices : elem_indices) {
             collected += indices.size();
@@ -312,7 +322,7 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element_has_more) {
         BitsetTypeView view(partial.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
             this->map_.find_first_n_element(
-                num, view, array_offsets.get(), std::nullopt);
+                num, view, struct_element_offsets.get(), std::nullopt);
         int collected = 0;
         for (auto& indices : elem_indices) {
             collected += indices.size();
@@ -329,7 +339,7 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element_has_more) {
         BitsetTypeView view(all.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
             this->map_.find_first_n_element(
-                3, view, array_offsets.get(), std::nullopt);
+                3, view, struct_element_offsets.get(), std::nullopt);
         int collected = 0;
         for (auto& indices : elem_indices) {
             collected += indices.size();
@@ -362,8 +372,8 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest,
         row_to_element_start.push_back(
             static_cast<int32_t>((doc + 1) * array_len));
     }
-    auto array_offsets =
-        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
+    auto struct_element_offsets = std::make_shared<StructElementOffsetsSealed>(
+        std::move(row_to_element_start));
 
     BitsetType bitset(num * array_len);
     bitset.reset();
@@ -377,14 +387,16 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest,
     cursor.last_element_offset = 1;
 
     auto [doc_offsets, elem_indices, has_more] =
-        this->map_.find_first_n_element(10, view, array_offsets.get(), cursor);
+        this->map_.find_first_n_element(
+            10, view, struct_element_offsets.get(), cursor);
     ASSERT_EQ(doc_offsets, std::vector<int64_t>({1, 2}));
     ASSERT_EQ(elem_indices[0], std::vector<int32_t>({2, 3}));
     ASSERT_EQ(elem_indices[1], std::vector<int32_t>({0, 1, 2, 3}));
     ASSERT_FALSE(has_more);
 
     auto [limited_docs, limited_indices, limited_has_more] =
-        this->map_.find_first_n_element(3, view, array_offsets.get(), cursor);
+        this->map_.find_first_n_element(
+            3, view, struct_element_offsets.get(), cursor);
     ASSERT_EQ(limited_docs, std::vector<int64_t>({1, 2}));
     ASSERT_EQ(limited_indices[0], std::vector<int32_t>({2, 3}));
     ASSERT_EQ(limited_indices[1], std::vector<int32_t>({0}));

@@ -87,19 +87,15 @@ func NewMergeOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBu
 	switch spec.strategy {
 	case MergeStrategyRRF:
 		opts = append(opts, WithRRFK(spec.rrfK))
+		if err := validateMergeInputCount(spec, len(metricTypes)); err != nil {
+			return nil, err
+		}
 		if spec.weightsSet {
-			if len(spec.weights) != len(metricTypes) {
-				return nil, merr.WrapErrParameterInvalidMsg(
-					"merge_op: weights count %d does not match search input count %d",
-					len(spec.weights), len(metricTypes))
-			}
 			opts = append(opts, WithWeights(spec.weights))
 		}
 	case MergeStrategyWeighted:
-		if len(spec.weights) != len(metricTypes) {
-			return nil, merr.WrapErrParameterInvalidMsg(
-				"merge_op: weights count %d does not match search input count %d",
-				len(spec.weights), len(metricTypes))
+		if err := validateMergeInputCount(spec, len(metricTypes)); err != nil {
+			return nil, err
 		}
 		opts = append(opts,
 			WithWeights(spec.weights),
@@ -114,6 +110,29 @@ func NewMergeOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBu
 	}
 
 	return NewMergeOp(spec.strategy, opts...), nil
+}
+
+// ValidateMergeOpRepr validates declarative Merge parameters without requiring
+// runtime search metrics. expectedInputs is supplied by the endpoint from the
+// number of recall inputs, allowing plans with explicit weights to fail before
+// execution.
+func ValidateMergeOpRepr(repr *OperatorRepr, expectedInputs int) error {
+	spec, err := parseMergeSpec(repr)
+	if err != nil {
+		return err
+	}
+	return validateMergeInputCount(spec, expectedInputs)
+}
+
+func validateMergeInputCount(spec *mergeSpec, expectedInputs int) error {
+	requiresMatchingWeights := spec.strategy == MergeStrategyWeighted ||
+		(spec.strategy == MergeStrategyRRF && spec.weightsSet)
+	if requiresMatchingWeights && len(spec.weights) != expectedInputs {
+		return merr.WrapErrParameterInvalidMsg(
+			"merge_op: weights count %d does not match search input count %d",
+			len(spec.weights), expectedInputs)
+	}
+	return nil
 }
 
 func parseMergeSpec(repr *OperatorRepr) (*mergeSpec, error) {
@@ -351,9 +370,10 @@ func (op *MergeOp) String() string {
 	return fmt.Sprintf("Merge(%s)", op.strategy)
 }
 
-// Execute delegates to ExecuteMulti with a single input.
-func (op *MergeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	return op.ExecuteMulti(ctx, []*DataFrame{input})
+// Execute cannot describe multi-input fusion with single-input row selection.
+// FuncChain dispatches MergeOp through ExecuteMulti, including one-input merges.
+func (op *MergeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error) {
+	return nil, merr.WrapErrServiceInternalMsg("merge_op: use ExecuteMulti for merge execution")
 }
 
 // ExecuteMulti merges multiple DataFrames into one.

@@ -23,8 +23,10 @@ extern "C" {
 
 typedef void* CLoadIndexInfo;
 
-bool
-IsLoadWithDisk(const char* index_type, int index_engine_version);
+CStatus
+IsLoadWithDisk(const char* index_type,
+               int index_engine_version,
+               bool* is_load_with_disk);
 
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
@@ -32,8 +34,15 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
 void
 DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info);
 
-LoadResourceRequest
-EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
+CStatus
+EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info,
+                          LoadResourceRequest* request);
+
+CStatus
+EstimateLoadIndexResourceFromSerializedInfo(
+    const uint8_t* serialized_load_index_info,
+    const uint64_t len,
+    LoadResourceRequest* load_resource_request);
 
 bool
 TryReserveLoadingResourceWithTimeout(CResourceUsage size,
@@ -59,7 +68,7 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                     const uint8_t* serialized_load_index_info,
                     const uint64_t len);
 
-void
+CStatus
 SetLoadIndexInfoShard(CLoadIndexInfo c_load_index_info, const char* shard);
 #ifdef __cplusplus
 }

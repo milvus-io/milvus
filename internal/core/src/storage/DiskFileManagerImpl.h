@@ -155,12 +155,16 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalRawDataObjectPrefix();
 
-    std::map<std::string, int64_t>
+    // Borrows manager-owned state; the view reflects later updates. Copy for
+    // an independent snapshot. Do not read concurrently with updates.
+    const std::map<std::string, int64_t>&
     GetRemotePathsToFileSize() const {
         return remote_paths_to_size_;
     }
 
-    std::vector<std::string>
+    // Borrows manager-owned state under the same contract as
+    // GetRemotePathsToFileSize().
+    const std::vector<std::string>&
     GetLocalFilePaths() const {
         return local_paths_;
     }

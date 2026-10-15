@@ -26,6 +26,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var _ func([]int64) ([]byte, error) = Build
+
 // The structural rejection suite for this format lives with the validator, in
 // pkg/util/roaringfilter, and the cross-check that a blob built here is one the
 // proxy accepts lives in internal/parser/planparserv2 (it needs both modules).
@@ -97,6 +99,40 @@ func TestBuildPreservesSignedBitPattern(t *testing.T) {
 		require.Truef(t, bitmap.Contains(c.key),
 			"member %d must map to key %#016x", c.member, c.key)
 	}
+}
+
+type namedSignedInt16 int16
+
+func requireBuildSignedMatchesBuild[T ~int | ~int8 | ~int16 | ~int32 | ~int64](
+	t *testing.T,
+	members []T,
+) {
+	t.Helper()
+	widened := make([]int64, len(members))
+	for i, member := range members {
+		widened[i] = int64(member)
+	}
+
+	want, err := Build(widened)
+	require.NoError(t, err)
+	got, err := BuildSigned(members)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestBuildSignedMatchesInt64API(t *testing.T) {
+	requireBuildSignedMatchesBuild(t, []int{-1, 0, 1, 42})
+	requireBuildSignedMatchesBuild(t, []int8{math.MinInt8, -1, 0, math.MaxInt8})
+	requireBuildSignedMatchesBuild(t, []int16{math.MinInt16, -1, 0, math.MaxInt16})
+	requireBuildSignedMatchesBuild(t, []int32{math.MinInt32, -1, 0, math.MaxInt32})
+	requireBuildSignedMatchesBuild(t, []int64{math.MinInt64, -1, 0, math.MaxInt64})
+	requireBuildSignedMatchesBuild(t, []namedSignedInt16{-1, 0, 42})
+
+	members := []int16{9, 3, -5, 1}
+	original := append([]int16(nil), members...)
+	_, err := BuildSigned(members)
+	require.NoError(t, err)
+	require.Equal(t, original, members, "BuildSigned must not reorder the caller's slice")
 }
 
 func TestBuildEmptySet(t *testing.T) {

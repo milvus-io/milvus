@@ -37,6 +37,23 @@ func vectorFieldData(rows, dim int) []*schemapb.FieldData {
 	}}
 }
 
+func int64FieldData(rows, columns int) []*schemapb.FieldData {
+	fields := make([]*schemapb.FieldData, columns)
+	for col := range fields {
+		values := make([]int64, rows)
+		for i := range values {
+			values[i] = int64(i + col)
+		}
+		fields[col] = &schemapb.FieldData{
+			Type: schemapb.DataType_Int64, FieldName: fmt.Sprintf("int64_%d", col), FieldId: int64(col + 1),
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}},
+			}},
+		}
+	}
+	return fields
+}
+
 // --- Query path: RetrieveResults ---
 
 func benchRetrieve(b *testing.B, rr *internalpb.RetrieveResults) {
@@ -72,6 +89,22 @@ func BenchmarkRetrieve_Varchar(b *testing.B) {
 
 func BenchmarkRetrieve_Vector(b *testing.B) {
 	benchRetrieve(b, &internalpb.RetrieveResults{FieldsData: vectorFieldData(1000, 768)})
+}
+
+func BenchmarkRetrieve_Int64Scalar(b *testing.B) {
+	for _, columns := range []int{1, 10} {
+		b.Run(fmt.Sprintf("columns_%d", columns), func(b *testing.B) {
+			benchRetrieve(b, &internalpb.RetrieveResults{FieldsData: int64FieldData(1000, columns)})
+		})
+	}
+}
+
+func BenchmarkRetrieve_SealedSegmentIDs(b *testing.B) {
+	ids := make([]int64, 1000)
+	for i := range ids {
+		ids[i] = 1<<59 + int64(i) // nine-byte positive varints
+	}
+	benchRetrieve(b, &internalpb.RetrieveResults{SealedSegmentIDsRetrieved: ids})
 }
 
 // --- Insert path: InsertRequest (UTF-8 validated) ---
@@ -111,6 +144,14 @@ func BenchmarkInsert_Varchar(b *testing.B) {
 func BenchmarkInsert_Vector(b *testing.B) {
 	ir := &milvuspb.InsertRequest{CollectionName: "c", FieldsData: vectorFieldData(1000, 768)}
 	benchInsert(b, ir)
+}
+
+func BenchmarkInsert_HashKeys(b *testing.B) {
+	keys := make([]uint32, 1000)
+	for i := range keys {
+		keys[i] = 0xf0000000 + uint32(i) // five-byte varints
+	}
+	benchInsert(b, &milvuspb.InsertRequest{CollectionName: "c", NumRows: 1000, HashKeys: keys})
 }
 
 // --- Upsert path: UpsertRequest (UTF-8 validated; fields 1-8 fast, 9/10/11 fold) ---

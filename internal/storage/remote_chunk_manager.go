@@ -24,7 +24,6 @@ import (
 	"strings"
 	"syscall"
 
-	cstorage "cloud.google.com/go/storage"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
@@ -321,6 +320,14 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
+	// An empty prefix matches every object in the bucket, so this API would
+	// erase the whole instance. LocalChunkManager refuses it for the same
+	// reason; the guard belongs here rather than in each caller.
+	if len(prefix) == 0 {
+		errMsg := "empty prefix is not allowed for ChunkManager remove operation"
+		mlog.Warn(ctx, errMsg)
+		return merr.WrapErrStorageMsg("%s", errMsg)
+	}
 	// removeObject in parallel.
 	runningGroup, _ := errgroup.WithContext(ctx)
 	runningGroup.SetLimit(10)
@@ -599,11 +606,12 @@ func mapObjectStorageError(fileName string, err error) error {
 		}
 	}
 
-	// GCP cloud.google.com/go/storage sentinel errors (not *googleapi.Error)
-	if errors.Is(err, cstorage.ErrObjectNotExist) {
+	// GCP cloud.google.com/go/storage sentinel errors (not *googleapi.Error).
+	// The library wraps them with a multi-%w, so plain errors.Is misses them.
+	if objectstorage.IsGcsObjectNotExist(err) {
 		return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 	}
-	if errors.Is(err, cstorage.ErrBucketNotExist) {
+	if objectstorage.IsGcsBucketNotExist(err) {
 		return merr.WrapErrIoBucketNotFound(fileName, err)
 	}
 

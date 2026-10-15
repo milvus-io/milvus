@@ -10,8 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <fmt/core.h>
+#include "test_utils/skip_metrics_test_utils.h"
 #include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
+#include <folly/system/ThreadName.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
 #include <time.h>
@@ -32,6 +35,8 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -57,17 +62,21 @@
 #include "common/protobuf_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/IndexFactory.h"
-#include "index/IndexInfo.h"
+#include "index/Families.h"
+#include "index/IndexTypeAdapter.h"
+#include "index/LoadResource.h"
+#include "index/contracts/Registry.h"
+#include "index/contracts/query/INullReader.h"
+#include "index/contracts/query/ITextMatchReader.h"
+#include "index/contracts/query/IVectorReader.h"
+#include "indexbuilder/BuildSession.h"
 #include "index/Meta.h"
 #include "index/SkipIndex.h"
-#include "index/StringIndexSort.h"
-#include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
 #include "knowhere/version.h"
+#include "milvus-storage/common/extend_status.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
@@ -81,6 +90,10 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/storagev1translator/ChunkTranslator.h"
+#include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
+#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
@@ -93,6 +106,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -103,6 +117,109 @@ using milvus::segcore::LoadIndexInfo;
 
 namespace {
 
+// Source-backed consumer fixtures publish a finished artifact before opening a
+// reader. The loader never borrows the BuildSession or its materialized input.
+index::IIndexReaderBasePtr
+BuildSourceBackedVectorIndex(Config params,
+                             storage::FileManagerContext context,
+                             int64_t row_count,
+                             const Config& load_params = Config::object(),
+                             milvus::OpContext* load_context = nullptr) {
+    const auto& schema = context.fieldDataMeta.field_schema;
+    const auto field_type = static_cast<DataType>(schema.data_type());
+    const auto element_type = static_cast<DataType>(schema.element_type());
+    auto files = params.at(INSERT_FILES_KEY).get<std::vector<std::string>>();
+    params.erase(INSERT_FILES_KEY);
+    context.indexMeta.dim = params.at(DIM_KEY).get<int64_t>();
+    params["nullable"] = schema.nullable();
+    params["num_rows"] = row_count;
+    auto adapted = index::AdaptIndexType(
+        {params.at(index::INDEX_TYPE).get<std::string>(),
+         field_type,
+         element_type,
+         knowhere::Version::GetCurrentVersion().VersionNumber(),
+         params});
+
+    indexbuilder::BuildRequest request;
+    request.family = adapted.family;
+    request.params = adapted.params;
+    request.value_type = adapted.value_type;
+    request.field_id = FieldId(context.fieldDataMeta.field_id);
+    request.source = indexbuilder::V1BinlogBuildSource{std::move(files)};
+    request.expected_rows = row_count;
+    request.staging_parent = TestLocalPath;
+
+    storage::ArtifactStats stats;
+    {
+        indexbuilder::BuildSession session(request, context);
+        session.BuildFromSource();
+        stats = session.Publish();
+    }
+    std::vector<std::string> paths;
+    paths.reserve(stats.Files().size());
+    for (const auto& file : stats.Files()) {
+        paths.push_back(file.file_name);
+    }
+    storage::LoadOptions options;
+    options.params = adapted.params;
+    options.params.merge_patch(load_params);
+    options.op_ctx = load_context;
+    context.set_for_loading_index(true);
+    return index::LoaderRegistry::Instance()
+        .Lookup(adapted.family)
+        .Load({index::IndexFiles{
+                   std::move(context),
+                   std::move(paths),
+                   index::LegacyIndexStorageConfig{
+                       adapted.family == index::families::kVectorDisk
+                           ? storage::V1SourceLayout::DiskFiles
+                           : storage::V1SourceLayout::MemoryEntries}},
+               std::move(options)});
+}
+
+std::vector<IndexCapabilityEntry>
+TestIndexEntries(const IndexInventory& inventory,
+                 FieldId field,
+                 std::string_view family = {}) {
+    std::vector<IndexCapabilityEntry> entries;
+    const auto capability = inventory.Capability(field);
+    for (const auto& entry : capability.entries()) {
+        if (family.empty() || entry.family == family) {
+            entries.push_back(entry);
+        }
+    }
+    return entries;
+}
+
+IndexInventory::RootSlot
+TestIndexSlot(const IndexInventory& inventory,
+              FieldId field,
+              std::string_view family = {},
+              std::string_view path = {}) {
+    const auto capability = inventory.Capability(field);
+    for (const auto& entry : capability.entries()) {
+        if ((family.empty() || entry.family == family) &&
+            (path.empty() || entry.json_path == path)) {
+            // Drop from a copied inventory exposes the exact retained slot
+            // without pinning a cold reader or changing the tested snapshot.
+            auto copy = inventory;
+            return copy.Drop(entry.key);
+        }
+    }
+    return nullptr;
+}
+
+IndexPin
+PinTestTextIndex(const SegmentInterface& segment, FieldId field) {
+    const auto capability = segment.IndexCapability(field);
+    for (const auto& entry : capability.entries()) {
+        if (entry.family == index::families::kText) {
+            return segment.PinIndex(nullptr, entry.key);
+        }
+    }
+    return {};
+}
+
 bool
 GetFieldBit(const BitsetType& bitset, FieldId field_id) {
     auto pos = field_id.get() - START_USER_FIELDID;
@@ -112,6 +229,32 @@ GetFieldBit(const BitsetType& bitset, FieldId field_id) {
 
 constexpr int64_t kWarmupPkFieldId = START_USER_FIELDID;
 constexpr int64_t kWarmupVectorFieldId = START_USER_FIELDID + 1;
+
+auto
+SetStorageV2AsyncLoadForTest(bool enabled) {
+    auto previous = storagev2translator::StorageV2AsyncLoadEnabled();
+    storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+    return folly::makeGuard([previous] {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(previous);
+    });
+}
+
+class LazyColumnGroupConfigGuard {
+ public:
+    explicit LazyColumnGroupConfigGuard(bool enabled)
+        : previous_(
+              SegcoreConfig::default_config().get_lazy_column_group_enabled()) {
+        SegcoreConfig::default_config().set_lazy_column_group_enabled(enabled);
+    }
+
+    ~LazyColumnGroupConfigGuard() {
+        SegcoreConfig::default_config().set_lazy_column_group_enabled(
+            previous_);
+    }
+
+ private:
+    bool previous_;
+};
 
 void
 AddWarmupProperty(milvus::proto::schema::CollectionSchema& schema_proto,
@@ -160,6 +303,16 @@ MakeWarmupTestColumnGroups() {
 
 class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
  public:
+    WarmupTestChunkReader(size_t column_count,
+                          std::shared_ptr<std::atomic<int>> estimate_calls,
+                          std::thread::id* chunk_rows_thread = nullptr,
+                          std::string* chunk_rows_thread_name = nullptr)
+        : column_count_(column_count),
+          estimate_calls_(std::move(estimate_calls)),
+          chunk_rows_thread_(chunk_rows_thread),
+          chunk_rows_thread_name_(chunk_rows_thread_name) {
+    }
+
     size_t
     total_number_of_chunks() const override {
         return 1;
@@ -187,20 +340,52 @@ class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
 
     arrow::Result<std::vector<std::vector<uint64_t>>>
     get_chunk_column_estimated_size() override {
-        return std::vector<std::vector<uint64_t>>{{1}};
+        estimate_calls_->fetch_add(1, std::memory_order_relaxed);
+        std::vector<std::vector<uint64_t>> sizes;
+        for (size_t i = 0; i < column_count_; ++i) {
+            sizes.push_back({i + 1});
+        }
+        return sizes;
     }
 
     arrow::Result<std::vector<uint64_t>>
     get_chunk_rows() override {
+        if (chunk_rows_thread_ != nullptr) {
+            *chunk_rows_thread_ = std::this_thread::get_id();
+        }
+        if (chunk_rows_thread_name_ != nullptr) {
+            *chunk_rows_thread_name_ =
+                folly::getCurrentThreadName().value_or("");
+        }
         return std::vector<uint64_t>{1};
     }
+
+ private:
+    size_t column_count_;
+    std::shared_ptr<std::atomic<int>> estimate_calls_;
+    std::thread::id* chunk_rows_thread_;
+    std::string* chunk_rows_thread_name_;
 };
 
 class WarmupTestReader : public milvus_storage::api::Reader {
  public:
     explicit WarmupTestReader(
-        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups)
-        : column_groups_(std::move(column_groups)) {
+        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups,
+        bool allow_sync_open = true,
+        arrow::Status async_open_status = arrow::Status::OK(),
+        std::thread::id* chunk_rows_thread = nullptr,
+        std::string* chunk_rows_thread_name = nullptr,
+        std::shared_ptr<std::atomic<int>> chunk_reader_calls =
+            std::make_shared<std::atomic<int>>(0),
+        std::shared_ptr<std::atomic<int>> estimate_calls =
+            std::make_shared<std::atomic<int>>(0))
+        : column_groups_(std::move(column_groups)),
+          allow_sync_open_(allow_sync_open),
+          async_open_status_(std::move(async_open_status)),
+          chunk_rows_thread_(chunk_rows_thread),
+          chunk_rows_thread_name_(chunk_rows_thread_name),
+          chunk_reader_calls_(std::move(chunk_reader_calls)),
+          estimate_calls_(std::move(estimate_calls)) {
     }
 
     std::shared_ptr<milvus_storage::api::ColumnGroups>
@@ -214,9 +399,32 @@ class WarmupTestReader : public milvus_storage::api::Reader {
     }
 
     arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>
-    get_chunk_reader(int64_t, const std::shared_ptr<std::vector<std::string>>&)
-        const override {
-        return std::make_unique<WarmupTestChunkReader>();
+    get_chunk_reader(
+        int64_t index,
+        const std::shared_ptr<std::vector<std::string>>&) const override {
+        chunk_reader_calls_->fetch_add(1, std::memory_order_relaxed);
+        if (!allow_sync_open_) {
+            return arrow::Status::Invalid(
+                "synchronous chunk reader open must not be used");
+        }
+        return MakeChunkReader(index);
+    }
+
+    folly::SemiFuture<
+        arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>>
+    get_chunk_reader_async(
+        int64_t index,
+        const std::shared_ptr<std::vector<std::string>>&) const override {
+        chunk_reader_calls_->fetch_add(1, std::memory_order_relaxed);
+        if (!async_open_status_.ok()) {
+            return folly::makeSemiFuture(
+                arrow::Result<
+                    std::unique_ptr<milvus_storage::api::ChunkReader>>(
+                    async_open_status_));
+        }
+        return folly::makeSemiFuture(
+            arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>(
+                MakeChunkReader(index)));
     }
 
     arrow::Result<std::shared_ptr<arrow::Table>>
@@ -232,15 +440,30 @@ class WarmupTestReader : public milvus_storage::api::Reader {
     }
 
  private:
+    std::unique_ptr<milvus_storage::api::ChunkReader>
+    MakeChunkReader(int64_t index) const {
+        return std::make_unique<WarmupTestChunkReader>(
+            column_groups_->at(index)->columns.size(),
+            estimate_calls_,
+            chunk_rows_thread_,
+            chunk_rows_thread_name_);
+    }
+
     std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
+    bool allow_sync_open_;
+    arrow::Status async_open_status_;
+    std::thread::id* chunk_rows_thread_;
+    std::string* chunk_rows_thread_name_;
+    std::shared_ptr<std::atomic<int>> chunk_reader_calls_;
+    std::shared_ptr<std::atomic<int>> estimate_calls_;
 };
 
 class CancellationObservingIndexTranslator
-    : public cachinglayer::Translator<index::IndexBase> {
+    : public cachinglayer::Translator<index::IIndexReaderBase> {
  public:
     CancellationObservingIndexTranslator(
         std::string key,
-        std::unique_ptr<index::IndexBase> index,
+        std::unique_ptr<index::IIndexReaderBase> index,
         folly::CancellationToken* observed_token,
         std::promise<void>* warmup_started)
         : key_(std::move(key)),
@@ -285,15 +508,15 @@ class CancellationObservingIndexTranslator
         return &meta_;
     }
 
-    std::vector<
-        std::pair<cachinglayer::cid_t, std::unique_ptr<index::IndexBase>>>
+    std::vector<std::pair<cachinglayer::cid_t,
+                          std::unique_ptr<index::IIndexReaderBase>>>
     get_cells(milvus::OpContext* ctx,
               const std::vector<cachinglayer::cid_t>& cids) override {
         AssertInfo(ctx != nullptr, "warmup context must not be null");
         *observed_token_ = ctx->cancellation_token;
         warmup_started_->set_value();
-        std::vector<
-            std::pair<cachinglayer::cid_t, std::unique_ptr<index::IndexBase>>>
+        std::vector<std::pair<cachinglayer::cid_t,
+                              std::unique_ptr<index::IIndexReaderBase>>>
             result;
         result.reserve(cids.size());
         for (auto cid : cids) {
@@ -305,21 +528,22 @@ class CancellationObservingIndexTranslator
 
  private:
     std::string key_;
-    std::unique_ptr<index::IndexBase> index_;
+    std::unique_ptr<index::IIndexReaderBase> index_;
     folly::CancellationToken* observed_token_;
     std::promise<void>* warmup_started_;
     cachinglayer::Meta meta_;
 };
 
-index::CacheIndexBasePtr
-CreateCancellationObservingCacheIndex(std::string key,
-                                      std::unique_ptr<index::IndexBase> index,
-                                      folly::CancellationToken* observed_token,
-                                      std::promise<void>* warmup_started,
-                                      cachinglayer::internal::DList* dlist) {
+IndexInventory::RootSlot
+CreateCancellationObservingCacheIndex(
+    std::string key,
+    std::unique_ptr<index::IIndexReaderBase> index,
+    folly::CancellationToken* observed_token,
+    std::promise<void>* warmup_started,
+    cachinglayer::internal::DList* dlist) {
     auto translator = std::make_unique<CancellationObservingIndexTranslator>(
         std::move(key), std::move(index), observed_token, warmup_started);
-    return std::make_shared<cachinglayer::CacheSlot<index::IndexBase>>(
+    return std::make_shared<cachinglayer::CacheSlot<index::IIndexReaderBase>>(
         std::move(translator),
         dlist,
         false,
@@ -360,13 +584,14 @@ TEST(Sealed, CreateTextIndexFromNullableScalarIndexRawData) {
         "alpha", "unused", "alpha", "beta", "unused", "gamma"};
     std::array<bool, 6> valid = {true, false, true, true, false, true};
 
-    auto scalar_index = index::CreateStringIndexSort({});
-    scalar_index->Build(values.size(), values.data(), valid.data());
+    auto scalar_index = BuildTestScalarIndex<std::string>(
+        index::families::kSort, values.size(), values.data(), valid.data());
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = text_fid.get();
     load_info.field_type = DataType::VARCHAR;
     load_info.index_params = GenIndexParams(scalar_index.get());
+    SetTestIndexMetadata(load_info, *scalar_index, index::families::kSort);
     load_info.cache_index =
         CreateTestCacheIndex("nullable-text", std::move(scalar_index));
 
@@ -377,9 +602,16 @@ TEST(Sealed, CreateTextIndexFromNullableScalarIndexRawData) {
     segment->LoadIndex(load_info);
 
     ASSERT_NO_THROW(segment->CreateTextIndex(text_fid));
-    auto text_index = segment->GetTextIndex(nullptr, text_fid);
+    auto text_index = PinTestTextIndex(*segment, text_fid);
+    ASSERT_TRUE(text_index);
+    const auto* null_reader =
+        dynamic_cast<const index::INullReader*>(text_index.get());
+    const auto* text_reader =
+        dynamic_cast<const index::ITextMatchReader*>(text_index.get());
+    ASSERT_NE(null_reader, nullptr);
+    ASSERT_NE(text_reader, nullptr);
 
-    auto nulls = text_index.get()->IsNull();
+    auto nulls = null_reader->IsNull();
     ASSERT_EQ(nulls.size(), values.size());
     EXPECT_FALSE(nulls[0]);
     EXPECT_TRUE(nulls[1]);
@@ -388,7 +620,7 @@ TEST(Sealed, CreateTextIndexFromNullableScalarIndexRawData) {
     EXPECT_TRUE(nulls[4]);
     EXPECT_FALSE(nulls[5]);
 
-    auto alpha = text_index.get()->MatchQuery("alpha", 1);
+    auto alpha = text_reader->MatchQuery("alpha", 1);
     ASSERT_EQ(alpha.size(), values.size());
     EXPECT_TRUE(alpha[0]);
     EXPECT_FALSE(alpha[1]);
@@ -423,7 +655,7 @@ TEST(Sealed, without_predicate) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     ScopedSchemaHandle handle(*schema);
     auto plan_str =
@@ -441,15 +673,7 @@ TEST(Sealed, without_predicate) {
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto pre_result = SearchResultToJson(*sr);
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
+    const auto indexing_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
 
     auto build_conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
@@ -460,24 +684,32 @@ TEST(Sealed, without_predicate) {
 
     auto database =
         knowhere::GenDataSet(N, dim, vec_col.data() + (ROW_COUNT / 2) * dim);
-    indexing->BuildWithDataset(database, build_conf);
+    auto indexing = BuildTestVectorIndex<float>(
+        database->GetRows(),
+        database->GetDim(),
+        static_cast<const float*>(database->GetTensor()),
+        indexing_type,
+        knowhere::metric::L2,
+        build_conf);
 
-    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-    EXPECT_EQ(vec_index->Count(), N);
-    EXPECT_EQ(vec_index->GetDim(), dim);
+    auto vec_index = dynamic_cast<const index::IVectorReader*>(indexing.get());
+    EXPECT_EQ(indexing->Count(), N);
+    EXPECT_EQ(vec_index->Dim(), dim);
     auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
 
-    milvus::SearchInfo searchInfo;
+    index::VectorSearchParams searchInfo;
     searchInfo.topk_ = topK;
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Query(query_dataset, searchInfo, nullptr, nullptr, result);
+    vec_index->Search(query_dataset, searchInfo, nullptr, nullptr, result);
     auto ref_result = SearchResultToJson(result);
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = fake_id.get();
     load_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
+    load_info.field_type = indexing->ValueType();
     load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
@@ -534,15 +766,7 @@ TEST(Sealed, without_search_ef_less_than_limit) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
 
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
+    const auto indexing_type = knowhere::IndexEnum::INDEX_HNSW;
 
     auto build_conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
@@ -550,11 +774,19 @@ TEST(Sealed, without_search_ef_less_than_limit) {
                        {knowhere::indexparam::EF, "10"}};
 
     auto database = knowhere::GenDataSet(N, dim, vec_col.data());
-    indexing->BuildWithDataset(database, build_conf);
+    auto indexing = BuildTestVectorIndex<float>(
+        database->GetRows(),
+        database->GetDim(),
+        static_cast<const float*>(database->GetTensor()),
+        indexing_type,
+        knowhere::metric::L2,
+        build_conf);
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = fake_id.get();
     load_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
+    load_info.field_type = indexing->ValueType();
     load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
@@ -600,7 +832,7 @@ TEST(Sealed, with_predicate) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     ScopedSchemaHandle handle(*schema);
     // counter >= 1000 AND counter < 1005
@@ -622,14 +854,7 @@ TEST(Sealed, with_predicate) {
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
+    const auto indexing_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
 
     auto build_conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
@@ -637,27 +862,35 @@ TEST(Sealed, with_predicate) {
                        {knowhere::indexparam::NLIST, "100"}};
 
     auto database = knowhere::GenDataSet(N, dim, vec_col.data());
-    indexing->BuildWithDataset(database, build_conf);
+    auto indexing = BuildTestVectorIndex<float>(
+        database->GetRows(),
+        database->GetDim(),
+        static_cast<const float*>(database->GetTensor()),
+        indexing_type,
+        knowhere::metric::L2,
+        build_conf);
 
-    auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
-    EXPECT_EQ(vec_index->Count(), N);
-    EXPECT_EQ(vec_index->GetDim(), dim);
+    auto vec_index = dynamic_cast<const index::IVectorReader*>(indexing.get());
+    EXPECT_EQ(indexing->Count(), N);
+    EXPECT_EQ(vec_index->Dim(), dim);
 
     auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
 
     auto search_conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::indexparam::NPROBE, 10}};
-    milvus::SearchInfo searchInfo;
+    index::VectorSearchParams searchInfo;
     searchInfo.topk_ = topK;
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Query(query_dataset, searchInfo, nullptr, nullptr, result);
+    vec_index->Search(query_dataset, searchInfo, nullptr, nullptr, result);
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = fake_id.get();
     load_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
+    load_info.field_type = indexing->ValueType();
     load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
@@ -709,14 +942,7 @@ TEST(Sealed, with_predicate_filter_all) {
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-    auto ivf_indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
+    const auto ivf_indexing_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
 
     auto ivf_build_conf =
         knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
@@ -724,15 +950,24 @@ TEST(Sealed, with_predicate_filter_all) {
                        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
 
     auto database = knowhere::GenDataSet(N, dim, vec_col.data());
-    ivf_indexing->BuildWithDataset(database, ivf_build_conf);
+    auto ivf_indexing = BuildTestVectorIndex<float>(
+        database->GetRows(),
+        database->GetDim(),
+        static_cast<const float*>(database->GetTensor()),
+        ivf_indexing_type,
+        knowhere::metric::L2,
+        ivf_build_conf);
 
-    auto ivf_vec_index = dynamic_cast<index::VectorIndex*>(ivf_indexing.get());
-    EXPECT_EQ(ivf_vec_index->Count(), N);
-    EXPECT_EQ(ivf_vec_index->GetDim(), dim);
+    auto ivf_vec_index =
+        dynamic_cast<const index::IVectorReader*>(ivf_indexing.get());
+    EXPECT_EQ(ivf_indexing->Count(), N);
+    EXPECT_EQ(ivf_vec_index->Dim(), dim);
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = fake_id.get();
     load_info.index_params = GenIndexParams(ivf_indexing.get());
+    SetTestIndexMetadata(load_info, *ivf_indexing, index::families::kVectorMem);
+    load_info.field_type = ivf_indexing->ValueType();
     load_info.cache_index =
         CreateTestCacheIndex("test", std::move(ivf_indexing));
     load_info.index_params["metric_type"] = "L2";
@@ -753,23 +988,26 @@ TEST(Sealed, with_predicate_filter_all) {
                        {knowhere::indexparam::EF, "200"},
                        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
 
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-    auto hnsw_indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
-    hnsw_indexing->BuildWithDataset(database, hnsw_conf);
+    const auto hnsw_indexing_type = knowhere::IndexEnum::INDEX_HNSW;
+    auto hnsw_indexing = BuildTestVectorIndex<float>(
+        database->GetRows(),
+        database->GetDim(),
+        static_cast<const float*>(database->GetTensor()),
+        hnsw_indexing_type,
+        knowhere::metric::L2,
+        hnsw_conf);
 
     auto hnsw_vec_index =
-        dynamic_cast<index::VectorIndex*>(hnsw_indexing.get());
-    EXPECT_EQ(hnsw_vec_index->Count(), N);
-    EXPECT_EQ(hnsw_vec_index->GetDim(), dim);
+        dynamic_cast<const index::IVectorReader*>(hnsw_indexing.get());
+    EXPECT_EQ(hnsw_indexing->Count(), N);
+    EXPECT_EQ(hnsw_vec_index->Dim(), dim);
 
-    LoadIndexInfo hnsw_load_info;
+    LoadIndexInfo hnsw_load_info{};
     hnsw_load_info.field_id = fake_id.get();
     hnsw_load_info.index_params = GenIndexParams(hnsw_indexing.get());
+    SetTestIndexMetadata(
+        hnsw_load_info, *hnsw_indexing, index::families::kVectorMem);
+    hnsw_load_info.field_type = hnsw_indexing->ValueType();
     hnsw_load_info.cache_index =
         CreateTestCacheIndex("test", std::move(hnsw_indexing));
     hnsw_load_info.index_params["metric_type"] = "L2";
@@ -798,14 +1036,7 @@ TEST(Sealed, SegmentInterfaceIsIndexRefineEnabledPropagatesOpContext) {
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
 
-    auto create_index_info = milvus::index::CreateIndexInfo{};
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
+    const auto indexing_type = knowhere::IndexEnum::INDEX_HNSW;
     auto build_conf =
         knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
                        {knowhere::indexparam::HNSW_M, "16"},
@@ -813,15 +1044,23 @@ TEST(Sealed, SegmentInterfaceIsIndexRefineEnabledPropagatesOpContext) {
                        {knowhere::indexparam::EF, "200"},
                        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
     auto database = knowhere::GenDataSet(N, dim, vec_col.data());
-    indexing->BuildWithDataset(database, build_conf);
+    auto indexing = BuildTestVectorIndex<float>(
+        database->GetRows(),
+        database->GetDim(),
+        static_cast<const float*>(database->GetTensor()),
+        indexing_type,
+        knowhere::metric::L2,
+        build_conf);
     auto expected_refine_enabled =
-        dynamic_cast<index::VectorIndex*>(indexing.get())
-            ->IsIndexRefineEnabled();
+        dynamic_cast<const index::IVectorReader*>(indexing.get())
+            ->RefineEnabled();
 
     milvus::OpContext* observed_ctx = nullptr;
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = fake_id.get();
     load_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
+    load_info.field_type = indexing->ValueType();
     load_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
     load_info.index_params["metric_type"] = "L2";
@@ -853,14 +1092,7 @@ TEST(Sealed, SegmentInterfaceCalcDistByIDsPropagatesOpContext) {
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
 
-    auto create_index_info = milvus::index::CreateIndexInfo{};
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
+    const auto indexing_type = knowhere::IndexEnum::INDEX_HNSW;
     auto build_conf =
         knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
                        {knowhere::indexparam::HNSW_M, "16"},
@@ -868,12 +1100,20 @@ TEST(Sealed, SegmentInterfaceCalcDistByIDsPropagatesOpContext) {
                        {knowhere::indexparam::EF, "200"},
                        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
     auto database = knowhere::GenDataSet(N, dim, vec_col.data());
-    indexing->BuildWithDataset(database, build_conf);
+    auto indexing = BuildTestVectorIndex<float>(
+        database->GetRows(),
+        database->GetDim(),
+        static_cast<const float*>(database->GetTensor()),
+        indexing_type,
+        knowhere::metric::L2,
+        build_conf);
 
     milvus::OpContext* observed_ctx = nullptr;
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = fake_id.get();
     load_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
+    load_info.field_type = indexing->ValueType();
     load_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
     load_info.index_params["metric_type"] = "L2";
@@ -964,16 +1204,18 @@ TEST(Sealed, LoadFieldData) {
     segment->DropFieldData(fakevec_id);
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 
-    LoadIndexInfo vec_info;
+    LoadIndexInfo vec_info{};
     vec_info.field_id = fakevec_id.get();
     vec_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
+    vec_info.field_type = indexing->ValueType();
     vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->PinIndex(nullptr, double_id).size(), 0);
-    ASSERT_EQ(segment->PinIndex(nullptr, str_id).size(), 0);
+    ASSERT_EQ(segment->IndexCapability(double_id).entries().size(), 0);
+    ASSERT_EQ(segment->IndexCapability(str_id).entries().size(), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
     auto chunk_span3 =
@@ -1105,16 +1347,18 @@ TEST(Sealed, ClearData) {
     segment->DropFieldData(fakevec_id);
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 
-    LoadIndexInfo vec_info;
+    LoadIndexInfo vec_info{};
     vec_info.field_id = fakevec_id.get();
     vec_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
+    vec_info.field_type = indexing->ValueType();
     vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->PinIndex(nullptr, double_id).size(), 0);
-    ASSERT_EQ(segment->PinIndex(nullptr, str_id).size(), 0);
+    ASSERT_EQ(segment->IndexCapability(double_id).entries().size(), 0);
+    ASSERT_EQ(segment->IndexCapability(str_id).entries().size(), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
     auto chunk_span3 =
@@ -1191,16 +1435,18 @@ TEST(Sealed, LoadFieldDataMmap) {
     segment->DropFieldData(fakevec_id);
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 
-    LoadIndexInfo vec_info;
+    LoadIndexInfo vec_info{};
     vec_info.field_id = fakevec_id.get();
     vec_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
+    vec_info.field_type = indexing->ValueType();
     vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->PinIndex(nullptr, double_id).size(), 0);
-    ASSERT_EQ(segment->PinIndex(nullptr, str_id).size(), 0);
+    ASSERT_EQ(segment->IndexCapability(double_id).entries().size(), 0);
+    ASSERT_EQ(segment->IndexCapability(str_id).entries().size(), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
     auto chunk_span3 =
@@ -1230,13 +1476,14 @@ TEST(Sealed, LoadPkScalarIndex) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
-    LoadIndexInfo pk_index;
+    LoadIndexInfo pk_index{};
     pk_index.field_id = pk_id.get();
     pk_index.field_type = DataType::INT64;
     pk_index.index_params["index_type"] = "STL_SORT";
     auto pk_data = dataset.get_col<int64_t>(pk_id);
     auto index = GenScalarIndexing<int64_t>(N, pk_data.data());
     pk_index.index_params = GenIndexParams(index.get());
+    SetTestIndexMetadata(pk_index, *index, index::families::kSort);
     pk_index.cache_index = CreateTestCacheIndex("test", std::move(index));
     segment->LoadIndex(pk_index);
 }
@@ -1282,41 +1529,45 @@ TEST(Sealed, LoadScalarIndex) {
         false,
         GetExcludedFieldIds(schema, {{0, 1, counter_id.get()}}));
 
-    LoadIndexInfo vec_info;
+    LoadIndexInfo vec_info{};
     vec_info.field_id = fakevec_id.get();
     vec_info.field_type = DataType::VECTOR_FLOAT;
     vec_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
     vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    LoadIndexInfo counter_index;
+    LoadIndexInfo counter_index{};
     counter_index.field_id = counter_id.get();
     counter_index.field_type = DataType::INT64;
     counter_index.index_params["index_type"] = "STL_SORT";
     auto counter_data = dataset.get_col<int64_t>(counter_id);
     auto index = GenScalarIndexing<int64_t>(N, counter_data.data());
     counter_index.index_params = GenIndexParams(index.get());
+    SetTestIndexMetadata(counter_index, *index, index::families::kSort);
     counter_index.cache_index = CreateTestCacheIndex("test", std::move(index));
     segment->LoadIndex(counter_index);
 
-    LoadIndexInfo double_index;
+    LoadIndexInfo double_index{};
     double_index.field_id = double_id.get();
     double_index.field_type = DataType::DOUBLE;
     double_index.index_params["index_type"] = "STL_SORT";
     auto double_data = dataset.get_col<double>(double_id);
     auto temp1 = GenScalarIndexing<double>(N, double_data.data());
     double_index.index_params = GenIndexParams(temp1.get());
+    SetTestIndexMetadata(double_index, *temp1, index::families::kSort);
     double_index.cache_index = CreateTestCacheIndex("test", std::move(temp1));
     segment->LoadIndex(double_index);
 
-    LoadIndexInfo nothing_index;
+    LoadIndexInfo nothing_index{};
     nothing_index.field_id = nothing_id.get();
     nothing_index.field_type = DataType::INT32;
     nothing_index.index_params["index_type"] = "STL_SORT";
     auto nothing_data = dataset.get_col<int32_t>(nothing_id);
     auto temp2 = GenScalarIndexing<int32_t>(N, nothing_data.data());
     nothing_index.index_params = GenIndexParams(temp2.get());
+    SetTestIndexMetadata(nothing_index, *temp2, index::families::kSort);
     nothing_index.cache_index = CreateTestCacheIndex("test", std::move(temp2));
     segment->LoadIndex(nothing_index);
 
@@ -1345,14 +1596,17 @@ TEST(Sealed, BulkSubscriptSkipsPinIndexWhenIndexHasNoRawData) {
     // Load a scalar index whose metadata reports no raw data (as INVERTED
     // does). TestIndexTranslator records the OpContext when the index is
     // actually materialized, so we can assert bulk_subscript never pins it.
-    auto index = GenScalarIndexing<double>(N, double_col.data());
+    auto index = BuildTestScalarIndex<double>(
+        index::families::kInverted, N, double_col.data());
     milvus::OpContext* observed_ctx = nullptr;
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = double_id.get();
     load_info.field_type = DataType::DOUBLE;
-    load_info.index_params = GenIndexParams(index.get());
+    load_info.index_params =
+        GenIndexParams(index.get(), index::families::kInverted);
     load_info.load_resource_request.emplace();
     load_info.load_resource_request->has_raw_data = false;
+    SetTestIndexMetadata(load_info, *index, index::families::kInverted);
     load_info.cache_index =
         CreateTestCacheIndex("test", std::move(index), &observed_ctx);
     segment->LoadIndex(load_info);
@@ -1896,9 +2150,11 @@ TEST(Sealed, GetVector) {
 
     auto segment_sealed = CreateSealedSegment(schema);
 
-    LoadIndexInfo vec_info;
+    LoadIndexInfo vec_info{};
     vec_info.field_id = fakevec_id.get();
     vec_info.index_params = GenIndexParams(indexing.get());
+    SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
+    vec_info.field_type = indexing->ValueType();
     vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment_sealed->LoadIndex(vec_info);
@@ -1977,7 +2233,7 @@ TEST(Sealed, LoadArrayFieldDataWhenIndexHasRawData) {
     auto counter_data = dataset.get_col<int64_t>(counter_id);
     auto indexing = GenScalarIndexing<int64_t>(N, counter_data.data());
 
-    LoadIndexInfo array_index;
+    LoadIndexInfo array_index{};
     array_index.field_id = array_id.get();
     array_index.field_type = DataType::ARRAY;
     array_index.element_type = DataType::INT64;
@@ -1985,6 +2241,7 @@ TEST(Sealed, LoadArrayFieldDataWhenIndexHasRawData) {
     LoadResourceRequest request{};
     request.has_raw_data = true;
     array_index.load_resource_request = request;
+    SetTestIndexMetadata(array_index, *indexing, index::families::kSort);
     array_index.cache_index =
         CreateTestCacheIndex("array_raw_index", std::move(indexing));
     segment->LoadIndex(array_index);
@@ -2025,379 +2282,6 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
 
     segment = CreateSealedWithFieldDataLoaded(schema, dataset, true);
     segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
-}
-
-TEST(Sealed, SkipIndexSkipUnaryRange) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
-    auto i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
-    auto i8_fid = schema->AddDebugField("int8_field", DataType::INT8);
-    auto float_fid = schema->AddDebugField("float_field", DataType::FLOAT);
-    auto double_fid = schema->AddDebugField("double_field", DataType::DOUBLE);
-    size_t N = 10;
-    auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    std::cout << "pk_fid:" << pk_fid.get() << std::endl;
-
-    //test for int64
-    std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    auto pk_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1, 10);
-    pk_field_data->FillFieldData(pks.data(), N);
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    pk_fid.get(),
-                                                    {pk_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index = segment->GetSkipIndex();
-    bool equal_5_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
-    bool equal_12_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 12);
-    bool equal_10_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 10);
-    ASSERT_FALSE(equal_5_skip);
-    ASSERT_TRUE(equal_12_skip);
-    ASSERT_FALSE(equal_10_skip);
-    bool less_than_1_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 1);
-    bool less_than_5_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 5);
-    ASSERT_TRUE(less_than_1_skip);
-    ASSERT_FALSE(less_than_5_skip);
-    bool less_equal_than_1_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessEqual, 1);
-    bool less_equal_than_15_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 15);
-    ASSERT_FALSE(less_equal_than_1_skip);
-    ASSERT_FALSE(less_equal_than_15_skip);
-    bool greater_than_10_skip = skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterThan, 10);
-    bool greater_than_5_skip = skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterThan, 5);
-    ASSERT_TRUE(greater_than_10_skip);
-    ASSERT_FALSE(greater_than_5_skip);
-    bool greater_equal_than_10_skip = skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterEqual, 10);
-    bool greater_equal_than_5_skip = skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterEqual, 5);
-    ASSERT_FALSE(greater_equal_than_10_skip);
-    ASSERT_FALSE(greater_equal_than_5_skip);
-
-    //test for int32
-    std::vector<int32_t> int32s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
-    auto int32_field_data =
-        storage::CreateFieldData(DataType::INT32, DataType::NONE, false, 1, 10);
-    int32_field_data->FillFieldData(int32s.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               i32_fid.get(),
-                                               {int32_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    less_than_1_skip =
-        skip_index->CanSkipUnaryRange<int32_t>(i32_fid, 0, OpType::LessThan, 1);
-    ASSERT_TRUE(less_than_1_skip);
-
-    //test for int16
-    std::vector<int16_t> int16s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
-    auto int16_field_data =
-        storage::CreateFieldData(DataType::INT16, DataType::NONE, false, 1, 10);
-    int16_field_data->FillFieldData(int16s.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               i16_fid.get(),
-                                               {int16_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    bool less_than_12_skip = skip_index->CanSkipUnaryRange<int16_t>(
-        i16_fid, 0, OpType::LessThan, 12);
-    ASSERT_FALSE(less_than_12_skip);
-
-    //test for int8
-    std::vector<int8_t> int8s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
-    auto int8_field_data =
-        storage::CreateFieldData(DataType::INT8, DataType::NONE, false, 1, 10);
-    int8_field_data->FillFieldData(int8s.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               i8_fid.get(),
-                                               {int8_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    bool greater_than_12_skip = skip_index->CanSkipUnaryRange<int8_t>(
-        i8_fid, 0, OpType::GreaterThan, 12);
-    ASSERT_TRUE(greater_than_12_skip);
-
-    // test for float
-    std::vector<float> floats = {
-        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
-    auto float_field_data =
-        storage::CreateFieldData(DataType::FLOAT, DataType::NONE, false, 1, 10);
-    float_field_data->FillFieldData(floats.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               float_fid.get(),
-                                               {float_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    greater_than_10_skip = skip_index->CanSkipUnaryRange<float>(
-        float_fid, 0, OpType::GreaterThan, 10.0);
-    ASSERT_TRUE(greater_than_10_skip);
-
-    // test for double
-    std::vector<double> doubles = {
-        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
-    auto double_field_data = storage::CreateFieldData(
-        DataType::DOUBLE, DataType::NONE, false, 1, 10);
-    double_field_data->FillFieldData(doubles.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               double_fid.get(),
-                                               {double_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    greater_than_10_skip = skip_index->CanSkipUnaryRange<double>(
-        double_fid, 0, OpType::GreaterThan, 10.0);
-    ASSERT_TRUE(greater_than_10_skip);
-}
-
-TEST(Sealed, SkipIndexSkipBinaryRange) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    size_t N = 10;
-    auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    std::cout << "pk_fid:" << pk_fid.get() << std::endl;
-
-    //test for int64
-    std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    auto pk_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1, 10);
-    pk_field_data->FillFieldData(pks.data(), N);
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    pk_fid.get(),
-                                                    {pk_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index_owner = segment->GetSkipIndex();
-    const auto& skip_index = *skip_index_owner;
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, true));
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, false));
-
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 7, 9, true, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 8, 12, true, false));
-
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 10, 12, false, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 10, 12, true, true));
-}
-
-TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
-
-    auto dataset = DataGen(schema, 5);
-    auto segment = CreateSealedSegment(schema);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-
-    //test for int64
-    std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
-    std::array<uint8_t, 1> valid_data = {0x03};
-    auto int64s_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, true, 1, 5);
-
-    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    i64_fid.get(),
-                                                    {int64s_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index_owner = segment->GetSkipIndex();
-    const auto& skip_index = *skip_index_owner;
-    bool equal_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 5);
-    bool equal_4_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 4);
-    bool equal_2_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 2);
-    bool equal_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 1);
-    ASSERT_TRUE(equal_5_skip);
-    ASSERT_TRUE(equal_4_skip);
-    ASSERT_FALSE(equal_2_skip);
-    ASSERT_FALSE(equal_1_skip);
-    bool less_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 1);
-    bool less_than_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 5);
-    ASSERT_TRUE(less_than_1_skip);
-    ASSERT_FALSE(less_than_5_skip);
-    bool less_equal_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessEqual, 1);
-    bool less_equal_than_15_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 15);
-    ASSERT_FALSE(less_equal_than_1_skip);
-    ASSERT_FALSE(less_equal_than_15_skip);
-    bool greater_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 10);
-    bool greater_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 5);
-    bool greater_than_2_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 2);
-    bool greater_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 1);
-    ASSERT_TRUE(greater_than_10_skip);
-    ASSERT_TRUE(greater_than_5_skip);
-    ASSERT_TRUE(greater_than_2_skip);
-    ASSERT_FALSE(greater_than_1_skip);
-    bool greater_equal_than_3_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterEqual, 3);
-    bool greater_equal_than_2_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterEqual, 2);
-    ASSERT_TRUE(greater_equal_than_3_skip);
-    ASSERT_FALSE(greater_equal_than_2_skip);
-}
-
-TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
-    auto dataset = DataGen(schema, 5);
-    auto segment = CreateSealedSegment(schema);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-
-    //test for int64
-    std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
-    std::array<uint8_t, 1> valid_data = {0x03};
-    auto int64s_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, true, 1, 5);
-
-    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    i64_fid.get(),
-                                                    {int64s_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index_owner = segment->GetSkipIndex();
-    const auto& skip_index = *skip_index_owner;
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, true));
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, false));
-
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 1, 3, true, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 1, 2, true, false));
-
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 2, 3, false, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 2, 3, true, true));
-}
-
-TEST(Sealed, SkipIndexSkipStringRange) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("pk", DataType::INT64);
-    auto string_fid = schema->AddDebugField("string_field", DataType::VARCHAR);
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    size_t N = 5;
-    auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
-
-    //test for string
-    std::vector<std::string> strings = {"e", "f", "g", "g", "j"};
-    auto string_field_data = storage::CreateFieldData(
-        DataType::VARCHAR, DataType::NONE, false, 1, N);
-    string_field_data->FillFieldData(strings.data(), N);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    string_fid.get(),
-                                                    {string_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index_owner = segment->GetSkipIndex();
-    const auto& skip_index = *skip_index_owner;
-    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::Equal, "w"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::Equal, "e"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::Equal, "j"));
-
-    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::LessThan, "e"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::LessEqual, "e"));
-
-    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::GreaterThan, "j"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::GreaterEqual, "j"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<int64_t>(
-        string_fid, 0, OpType::GreaterEqual, 1));
-
-    ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "a", "c", true, true));
-    ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "c", "e", true, false));
-    ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "c", "e", true, true));
-    ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "e", "k", false, true));
-    ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "j", "k", true, true));
-    ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "j", "k", false, true));
-    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
-        string_fid, 0, 1, 2, false, true));
 }
 
 TEST(Sealed, QueryAllFields) {
@@ -2728,6 +2612,18 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
               dataset_size);
 
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        const auto offset = ids_ds->GetIds()[i];
+        if (int8_valid_values[offset]) {
+            EXPECT_EQ(int8_result->scalars().int_data().data(i),
+                      static_cast<int32_t>(int8_values[offset]));
+        }
+        if (int16_valid_values[offset]) {
+            EXPECT_EQ(int16_result->scalars().int_data().data(i),
+                      static_cast<int32_t>(int16_values[offset]));
+        }
+    }
+
     EXPECT_EQ(GetFieldDataRowValidData(*bool_result).size(), dataset_size);
     EXPECT_EQ(GetFieldDataRowValidData(*int8_result).size(), dataset_size);
     EXPECT_EQ(GetFieldDataRowValidData(*int16_result).size(), dataset_size);
@@ -2899,7 +2795,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -2943,32 +2839,25 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     std::vector<std::string> index_files;
 
     // create index
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = metric_type;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto emb_list_hnsw_index =
-        milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+    const auto index_metric = metric_type;
 
     // build index
     Config config;
     config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
     config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
-    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::meta::METRIC_TYPE] = index_metric;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
     config[DIM_KEY] = dim;
-    emb_list_hnsw_index->Build(config);
+    auto emb_list_hnsw_index = BuildSourceBackedVectorIndex(
+        config,
+        storage::FileManagerContext(field_meta, index_meta, cm, fs),
+        dataset_size);
 
     auto vec_index =
-        dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
-    EXPECT_EQ(vec_index->Count(), dataset_size * emb_list_len);
-    EXPECT_EQ(vec_index->GetDim(), dim);
+        dynamic_cast<const index::IVectorReader*>(emb_list_hnsw_index.get());
+    EXPECT_EQ(emb_list_hnsw_index->Count(), dataset_size * emb_list_len);
+    EXPECT_EQ(vec_index->Dim(), dim);
 
     // search
     auto vec_num = 10;
@@ -3000,14 +2889,16 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
                        const_cast<const size_t*>(query_vec_offsets.data()));
     query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
                        static_cast<int64_t>(query_vec_offsets.size() - 1));
+    query_dataset->Set(knowhere::meta::NQ,
+                       static_cast<int64_t>(query_vec_offsets.size() - 1));
 
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
-    milvus::SearchInfo searchInfo;
+    index::VectorSearchParams searchInfo;
     searchInfo.topk_ = 5;
     searchInfo.metric_type_ = metric_type;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Query(query_dataset, searchInfo, nullptr, nullptr, result);
+    vec_index->Search(query_dataset, searchInfo, nullptr, nullptr, result);
     auto ref_result = SearchResultToJson(result);
     std::cout << ref_result.dump(1) << std::endl;
     EXPECT_EQ(result.total_nq_, 2);
@@ -3078,11 +2969,13 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
 
     // search with index
     {
-        LoadIndexInfo load_info;
+        LoadIndexInfo load_info{};
         load_info.field_id = array_vec.get();
         load_info.field_type = DataType::VECTOR_ARRAY;
         load_info.element_type = element_type;
         load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
+        SetTestIndexMetadata(
+            load_info, *emb_list_hnsw_index, index::families::kVectorMem);
         load_info.cache_index =
             CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
         load_info.index_params["metric_type"] = metric_type;
@@ -3182,7 +3075,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromIndex) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3218,33 +3111,28 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromIndex) {
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
 
     // build HNSW index (FLAT base = has_raw_data = true)
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = metric_type;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto emb_list_hnsw_index =
-        milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+    const auto index_metric = metric_type;
 
     Config config;
     config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
     config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
-    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::meta::METRIC_TYPE] = index_metric;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
     config[DIM_KEY] = dim;
-    emb_list_hnsw_index->Build(config);
+    auto emb_list_hnsw_index = BuildSourceBackedVectorIndex(
+        config,
+        storage::FileManagerContext(field_meta, index_meta, cm, fs),
+        dataset_size);
 
     // drop field data and load index
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = array_vec.get();
     load_info.field_type = DataType::VECTOR_ARRAY;
     load_info.element_type = element_type;
     load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
+    SetTestIndexMetadata(
+        load_info, *emb_list_hnsw_index, index::families::kVectorMem);
     load_info.cache_index =
         CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
     load_info.index_params["metric_type"] = metric_type;
@@ -3294,8 +3182,8 @@ TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
     }
 
     std::vector<milvus::VectorArray> vector_arrays;
-    vector_arrays.emplace_back(empty_row);
-    vector_arrays.emplace_back(single_row);
+    vector_arrays.emplace_back(empty_row, false);
+    vector_arrays.emplace_back(single_row, false);
 
     constexpr int64_t row_count = 2;
     std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
@@ -3376,7 +3264,7 @@ TEST(SealedVectorArrayNullable,
     for (int64_t i = 0; i < dataset_size; ++i) {
         if (i % 3 != 0) {
             valid_bitmap[i >> 3] |= (1 << (i & 0x07));
-            vector_arrays.emplace_back(vec_array_col[i]);
+            vector_arrays.emplace_back(vec_array_col[i], false);
         }
     }
 
@@ -3416,38 +3304,33 @@ TEST(SealedVectorArrayNullable,
     auto cm_w = ChunkManagerWrapper(cm);
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
 
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = knowhere::metric::MAX_SIM;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto emb_list_hnsw_index =
-        milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+    const auto index_metric = knowhere::metric::MAX_SIM;
 
     Config config;
     config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
     config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
-    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::meta::METRIC_TYPE] = index_metric;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
     config[DIM_KEY] = dim;
-    emb_list_hnsw_index->Build(config);
+    auto emb_list_hnsw_index = BuildSourceBackedVectorIndex(
+        config,
+        storage::FileManagerContext(field_meta, index_meta, cm, fs),
+        dataset_size);
 
     auto vec_index =
-        dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
+        dynamic_cast<const index::IVectorReader*>(emb_list_hnsw_index.get());
     ASSERT_NE(vec_index, nullptr);
     EXPECT_TRUE(vec_index->HasValidData());
-    EXPECT_EQ(vec_index->GetValidCount(), vector_arrays.size());
+    EXPECT_EQ(vec_index->ValidCount(), vector_arrays.size());
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = array_vec.get();
     load_info.field_type = DataType::VECTOR_ARRAY;
     load_info.element_type = DataType::VECTOR_FLOAT;
     load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
+    SetTestIndexMetadata(
+        load_info, *emb_list_hnsw_index, index::families::kVectorMem);
     load_info.cache_index =
         CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
     load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
@@ -3547,39 +3430,34 @@ TEST(SealedVectorArrayNullable,
     auto cm_w = ChunkManagerWrapper(cm);
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
 
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = knowhere::metric::MAX_SIM;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto emb_list_hnsw_index =
-        milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+    const auto index_metric = knowhere::metric::MAX_SIM;
 
     Config config;
     config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
     config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
-    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::meta::METRIC_TYPE] = index_metric;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
     config[DIM_KEY] = dim;
-    emb_list_hnsw_index->Build(config);
+    auto emb_list_hnsw_index = BuildSourceBackedVectorIndex(
+        config,
+        storage::FileManagerContext(field_meta, index_meta, cm, fs),
+        dataset_size);
 
     auto vec_index =
-        dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
+        dynamic_cast<const index::IVectorReader*>(emb_list_hnsw_index.get());
     ASSERT_NE(vec_index, nullptr);
     EXPECT_TRUE(vec_index->HasValidData());
-    EXPECT_EQ(vec_index->GetValidCount(), 0);
+    EXPECT_EQ(vec_index->ValidCount(), 0);
     EXPECT_TRUE(vec_index->HasRawData());
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = array_vec.get();
     load_info.field_type = DataType::VECTOR_ARRAY;
     load_info.element_type = DataType::VECTOR_FLOAT;
     load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
+    SetTestIndexMetadata(
+        load_info, *emb_list_hnsw_index, index::families::kVectorMem);
     load_info.cache_index =
         CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
     load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
@@ -3641,7 +3519,7 @@ TEST(SealedVectorArrayFallback,
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3675,34 +3553,27 @@ TEST(SealedVectorArrayFallback,
     auto cm_w = ChunkManagerWrapper(cm);
     cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
 
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = metric_type;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW_SQ;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto emb_list_hnsw_sq_index =
-        milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+    const auto index_metric = metric_type;
 
     Config config;
     config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW_SQ;
     config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
-    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::meta::METRIC_TYPE] = index_metric;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
     config[knowhere::indexparam::SQ_TYPE] = "SQ8";
     config[DIM_KEY] = dim;
-    emb_list_hnsw_sq_index->Build(config);
+    auto emb_list_hnsw_sq_index = BuildSourceBackedVectorIndex(
+        config,
+        storage::FileManagerContext(field_meta, index_meta, cm, fs),
+        dataset_size);
 
     auto index_params = GenIndexParams(emb_list_hnsw_sq_index.get());
     index_params["metric_type"] = metric_type;
-    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+    auto request = milvus::index::IndexLoadResource(
         DataType::VECTOR_ARRAY,
         element_type,
-        create_index_info.index_engine_version,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
         0,
         index_params,
         false,
@@ -3710,11 +3581,13 @@ TEST(SealedVectorArrayFallback,
         dim);
     ASSERT_FALSE(request.has_raw_data);
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = array_vec.get();
     load_info.field_type = DataType::VECTOR_ARRAY;
     load_info.element_type = element_type;
     load_info.index_params = index_params;
+    SetTestIndexMetadata(
+        load_info, *emb_list_hnsw_sq_index, index::families::kVectorMem);
     load_info.cache_index =
         CreateTestCacheIndex("test", std::move(emb_list_hnsw_sq_index));
 
@@ -3778,7 +3651,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3815,52 +3688,34 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
 
     storage::FileManagerContext file_mgr_ctx(field_meta, index_meta, cm, fs);
 
-    // build DiskANN index
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = metric_type;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_DISKANN;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto disk_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, file_mgr_ctx);
-
     Config config;
-    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_DISKANN;
+    config[index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_DISKANN;
     config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
     config[knowhere::meta::METRIC_TYPE] = metric_type;
     config[DIM_KEY] = dim;
-    config[milvus::index::DISK_ANN_MAX_DEGREE] = std::to_string(24);
-    config[milvus::index::DISK_ANN_SEARCH_LIST_SIZE] = std::to_string(56);
-    config[milvus::index::DISK_ANN_PQ_CODE_BUDGET] = std::to_string(0.001);
-    config[milvus::index::DISK_ANN_BUILD_DRAM_BUDGET] = std::to_string(2);
-    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = std::to_string(2);
-    disk_index->Build(config);
-
-    // Upload to serialize, then reload
-    auto upload_result = disk_index->Upload();
-    auto index_files = upload_result->GetIndexFiles();
-    disk_index.reset();
-
-    auto loaded_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, file_mgr_ctx);
-    auto vec_index =
-        dynamic_cast<milvus::index::VectorIndex*>(loaded_index.get());
+    config[index::DISK_ANN_MAX_DEGREE] = std::to_string(24);
+    config[index::DISK_ANN_SEARCH_LIST_SIZE] = std::to_string(56);
+    config[index::DISK_ANN_PQ_CODE_BUDGET] = std::to_string(0.001);
+    config[index::DISK_ANN_BUILD_DRAM_BUDGET] = std::to_string(2);
+    config[index::DISK_ANN_BUILD_THREAD_NUM] = std::to_string(2);
     auto load_conf = generate_load_conf(knowhere::IndexEnum::INDEX_DISKANN,
                                         metric_type,
                                         dataset_size * emb_list_len);
-    load_conf["index_files"] = index_files;
-    load_conf[milvus::LOAD_PRIORITY] =
+    milvus::OpContext load_context;
+    load_context.runtime_load_priority =
         milvus::proto::common::LoadPriority::HIGH;
-    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
+    auto loaded_index = BuildSourceBackedVectorIndex(
+        config, file_mgr_ctx, dataset_size, load_conf, &load_context);
 
     // drop field data and load index into segment
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = array_vec.get();
     load_info.field_type = DataType::VECTOR_ARRAY;
     load_info.element_type = element_type;
-    load_info.index_params = GenIndexParams(vec_index);
+    load_info.index_params =
+        GenIndexParams(loaded_index.get(), index::families::kVectorDisk);
+    SetTestIndexMetadata(
+        load_info, *loaded_index, index::families::kVectorDisk);
     load_info.cache_index =
         CreateTestCacheIndex("test", std::move(loaded_index));
     load_info.index_params["metric_type"] = metric_type;
@@ -4437,7 +4292,6 @@ TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
 
     auto old_state = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(old_state->runtime, nullptr);
-    ASSERT_NE(old_state->runtime->skip_index, nullptr);
     EXPECT_EQ(old_state->runtime->row_count, row_count);
     EXPECT_EQ(old_state->runtime->mmap_field_ids.count(payload), 0);
     ASSERT_EQ(old_state->runtime->variable_fields_avg_size.count(payload), 1);
@@ -4445,11 +4299,9 @@ TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
         old_state->runtime->variable_fields_avg_size.at(payload).second;
 
     auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
-    ASSERT_NE(next_runtime->skip_index, old_state->runtime->skip_index);
     next_runtime->row_count = row_count + 1;
     next_runtime->mmap_field_ids.insert(payload);
     next_runtime->variable_fields_avg_size[payload] = {row_count + 1, 123};
-    next_runtime->skip_index->Erase(payload);
     sealed->TestPublishRuntimeResourceState(std::move(next_runtime));
 
     auto new_state = sealed->TestGetPublishedStateSnapshot();
@@ -4463,7 +4315,6 @@ TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
     EXPECT_EQ(old_state->runtime->mmap_field_ids.count(payload), 0);
     EXPECT_EQ(old_state->runtime->variable_fields_avg_size.at(payload).second,
               old_avg_size);
-    EXPECT_NE(old_state->runtime->skip_index, new_state->runtime->skip_index);
 }
 
 TEST(SealedSegmentCowState,
@@ -4530,15 +4381,26 @@ TEST(SealedSegmentCowState, StagedTextIndexIsInvisibleBeforePublish) {
     ASSERT_NE(sealed, nullptr);
 
     auto published_before = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_EQ(published_before->runtime->text_indexes.count(text), 0);
+    ASSERT_EQ(
+        TestIndexEntries(
+            published_before->runtime->indexes, text, index::families::kText)
+            .size(),
+        0);
 
     auto staged_runtime = sealed->TestCloneMutableRuntimeResourceState();
     sealed->TestCreateTextIndexWithSchema(
         text, schema, nullptr, false, staged_runtime.get());
 
-    EXPECT_EQ(staged_runtime->text_indexes.count(text), 1);
-    EXPECT_EQ(published_before->runtime->text_indexes.count(text), 0);
-    EXPECT_ANY_THROW(sealed->GetTextIndex(nullptr, text));
+    EXPECT_EQ(
+        TestIndexEntries(staged_runtime->indexes, text, index::families::kText)
+            .size(),
+        1);
+    EXPECT_EQ(
+        TestIndexEntries(
+            published_before->runtime->indexes, text, index::families::kText)
+            .size(),
+        0);
+    EXPECT_FALSE(PinTestTextIndex(*sealed, text));
     EXPECT_FALSE(sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text));
 }
 
@@ -4565,11 +4427,18 @@ TEST(SealedSegmentCowState, PublishedTextIndexFollowsSnapshotLifetime) {
     auto before_create = sealed->TestGetPublishedStateSnapshot();
     sealed->CreateTextIndex(text);
     auto published_with_index = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_EQ(before_create->runtime->text_indexes.count(text), 0);
-    ASSERT_EQ(published_with_index->runtime->text_indexes.count(text), 1);
+    ASSERT_EQ(TestIndexEntries(
+                  before_create->runtime->indexes, text, index::families::kText)
+                  .size(),
+              0);
+    ASSERT_EQ(TestIndexEntries(published_with_index->runtime->indexes,
+                               text,
+                               index::families::kText)
+                  .size(),
+              1);
     EXPECT_TRUE(published_with_index->load_info->HasTextIndexCreated(text));
 
-    auto old_pin = sealed->GetTextIndex(nullptr, text);
+    auto old_pin = PinTestTextIndex(*sealed, text);
     ASSERT_NE(old_pin.get(), nullptr);
 
     auto new_schema = std::make_shared<Schema>();
@@ -4579,10 +4448,18 @@ TEST(SealedSegmentCowState, PublishedTextIndexFollowsSnapshotLifetime) {
     sealed->Reopen(new_schema);
 
     auto published_after_drop = sealed->TestGetPublishedStateSnapshot();
-    EXPECT_EQ(published_after_drop->runtime->text_indexes.count(text), 0);
-    EXPECT_ANY_THROW(sealed->GetTextIndex(nullptr, text));
+    EXPECT_EQ(TestIndexEntries(published_after_drop->runtime->indexes,
+                               text,
+                               index::families::kText)
+                  .size(),
+              0);
+    EXPECT_FALSE(PinTestTextIndex(*sealed, text));
     EXPECT_NE(old_pin.get(), nullptr);
-    EXPECT_EQ(published_with_index->runtime->text_indexes.count(text), 1);
+    EXPECT_EQ(TestIndexEntries(published_with_index->runtime->indexes,
+                               text,
+                               index::families::kText)
+                  .size(),
+              1);
 }
 
 TEST(SealedSegmentCowState,
@@ -4628,7 +4505,7 @@ TEST(SealedSegmentCowState, ReopenNextStateMustNotInheritStaleFieldReadyBit) {
 
     auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
     next_runtime->fields.erase(payload);
-    next_runtime->array_offsets_map.erase(payload);
+    next_runtime->struct_element_offsets_map.erase(payload);
 
     ChunkedSegmentSealedImpl::StateDelta delta;
     delta.schema = current->schema;
@@ -4775,19 +4652,21 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
     ASSERT_EQ(staged->index_ready_bitset.size(), 2);
     ASSERT_FALSE(GetFieldBit(staged->index_ready_bitset, new_vec));
 
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
+    const std::array<float, 4> vector_values{0.0F, 0.0F, 0.0F, 0.0F};
+    auto indexing =
+        BuildTestVectorIndex<float>(1,
+                                    4,
+                                    vector_values.data(),
+                                    knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                                    knowhere::metric::L2,
+                                    Config{{knowhere::indexparam::NLIST, 1}});
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = new_vec.get();
     load_info.index_params = GenIndexParams(indexing.get());
     load_info.index_params["metric_type"] = knowhere::metric::L2;
+    SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
+    load_info.field_type = indexing->ValueType();
     load_info.cache_index =
         CreateTestCacheIndex("staged-vector", std::move(indexing));
     load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
@@ -4852,8 +4731,46 @@ TEST(SealedSegmentCowState,
     EXPECT_EQ(resolved, "disable");
 }
 
+TEST(SealedSegmentCowState, FieldTranslatorsRequireExplicitMmapWritebackMode) {
+    using storagev1translator::ChunkTranslator;
+    using storagev1translator::DefaultValueChunkTranslator;
+    using storagev2translator::GroupChunkTranslator;
+
+    EXPECT_FALSE(
+        (std::is_constructible_v<ChunkTranslator,
+                                 int64_t,
+                                 FieldMeta,
+                                 FieldDataInfo,
+                                 std::vector<ChunkTranslator::FileInfo>,
+                                 bool,
+                                 bool,
+                                 proto::common::LoadPriority,
+                                 std::string>));
+    EXPECT_FALSE((std::is_constructible_v<DefaultValueChunkTranslator,
+                                          int64_t,
+                                          FieldMeta,
+                                          FieldDataInfo,
+                                          bool,
+                                          bool,
+                                          std::string>));
+    EXPECT_FALSE((std::is_constructible_v<
+                  GroupChunkTranslator,
+                  int64_t,
+                  GroupChunkType,
+                  std::unordered_map<FieldId, FieldMeta>,
+                  FieldDataInfo,
+                  std::vector<std::string>,
+                  std::vector<milvus_storage::RowGroupMetadataVector>,
+                  bool,
+                  bool,
+                  int64_t,
+                  proto::common::LoadPriority,
+                  std::string>));
+}
+
 TEST(SealedSegmentCowState,
      StagedStorageV2ColumnGroupUsesVectorIndexWarmupForNoIndexVector) {
+    auto async_load_guard = SetStorageV2AsyncLoadForTest(false);
     auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
     const FieldId vec(kWarmupVectorFieldId);
 
@@ -4871,7 +4788,12 @@ TEST(SealedSegmentCowState,
               "disable");
 
     auto column_groups = MakeWarmupTestColumnGroups();
-    auto reader = std::make_shared<WarmupTestReader>(column_groups);
+    auto reader = std::make_shared<WarmupTestReader>(
+        column_groups,
+        /*allow_sync_open=*/true,
+        milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+            "async chunk reader open must not be used"));
     auto column = sealed->TestStageLoadColumnGroupWithReader(
         column_groups,
         std::make_shared<milvus_storage::api::Properties>(),
@@ -4886,6 +4808,464 @@ TEST(SealedSegmentCowState,
     ASSERT_NE(proxy_column, nullptr);
     EXPECT_EQ(proxy_column->TestCacheWarmupPolicy(),
               CacheWarmupPolicy::CacheWarmupPolicy_Disable);
+}
+
+TEST(SealedSegmentCowState,
+     StagedStorageV2ColumnGroupUsesAsyncReaderWhenAsyncEnabled) {
+    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1007);
+    load_proto.set_num_of_rows(1);
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    auto column_groups = MakeWarmupTestColumnGroups();
+    auto reader = std::make_shared<WarmupTestReader>(column_groups,
+                                                     /*allow_sync_open=*/false,
+                                                     arrow::Status::OK());
+    auto column = sealed->TestStageLoadColumnGroupWithReader(
+        column_groups,
+        std::make_shared<milvus_storage::api::Properties>(),
+        /*index=*/0,
+        {vec},
+        segment_load_info,
+        schema,
+        std::move(reader),
+        /*eager_load=*/true);
+
+    EXPECT_NE(std::dynamic_pointer_cast<ProxyChunkColumn>(column), nullptr);
+}
+
+TEST(SealedSegmentCowState,
+     StagedStorageV2ColumnGroupPreparesCacheSlotOnMiddlePool) {
+    auto async_load_guard = SetStorageV2AsyncLoadForTest(true);
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1008);
+    load_proto.set_num_of_rows(1);
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    const auto caller_thread = std::this_thread::get_id();
+    std::thread::id chunk_rows_thread = caller_thread;
+    std::string chunk_rows_thread_name;
+    auto column_groups = MakeWarmupTestColumnGroups();
+    auto reader = std::make_shared<WarmupTestReader>(column_groups,
+                                                     /*allow_sync_open=*/true,
+                                                     arrow::Status::OK(),
+                                                     &chunk_rows_thread,
+                                                     &chunk_rows_thread_name);
+    ASSERT_NO_THROW(sealed->TestStageLoadColumnGroupWithReader(
+        column_groups,
+        std::make_shared<milvus_storage::api::Properties>(),
+        /*index=*/0,
+        {vec},
+        segment_load_info,
+        schema,
+        std::move(reader),
+        /*eager_load=*/true));
+
+    EXPECT_NE(chunk_rows_thread, caller_thread);
+    EXPECT_TRUE(chunk_rows_thread_name.starts_with("MIDD_SEGC_POOL"))
+        << chunk_rows_thread_name;
+}
+
+TEST(SealedSegmentCowState,
+     StagedLazyManifestDefersChunkReaderAndSizeEstimate) {
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+    for (bool lazy_enabled : {false, true}) {
+        for (bool async_enabled : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << "lazy=" << lazy_enabled
+                                              << ", async=" << async_enabled);
+            LazyColumnGroupConfigGuard lazy_group_guard(lazy_enabled);
+            auto async_guard = SetStorageV2AsyncLoadForTest(async_enabled);
+            // The vector belongs to the staged schema, not the published one.
+            auto segment = CreateSealedSegment(
+                CreateWarmupPolicySchema(/*include_vector=*/false),
+                nullptr,
+                1007,
+                SegcoreConfig::default_config());
+            auto* sealed =
+                dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+            ASSERT_NE(sealed, nullptr);
+            proto::segcore::SegmentLoadInfo load_proto;
+            load_proto.set_segmentid(1007);
+            load_proto.set_num_of_rows(1);
+            load_proto.set_storageversion(STORAGE_V3);
+            load_proto.set_manifest_path("test-manifest");
+            SegmentLoadInfo segment_load_info(load_proto, schema);
+
+            auto open_calls = std::make_shared<std::atomic<int>>(0);
+            auto estimate_calls = std::make_shared<std::atomic<int>>(0);
+            auto column_groups = MakeWarmupTestColumnGroups();
+            auto async_status = async_enabled
+                                    ? arrow::Status::OK()
+                                    : milvus_storage::MakeExtendError(
+                                          milvus_storage::ExtendStatusCode::
+                                              StorageTransientTimeout,
+                                          "unexpected async reader open");
+            auto reader = std::make_shared<WarmupTestReader>(column_groups,
+                                                             !async_enabled,
+                                                             async_status,
+                                                             nullptr,
+                                                             nullptr,
+                                                             open_calls,
+                                                             estimate_calls);
+            auto columns = sealed->TestStageLoadColumnGroupsWithReader(
+                column_groups,
+                std::make_shared<milvus_storage::api::Properties>(),
+                {{0, {vec}}},
+                segment_load_info,
+                schema,
+                std::move(reader),
+                /*eager_load=*/true);
+            ASSERT_EQ(columns.size(), 1);
+            auto column =
+                std::dynamic_pointer_cast<ProxyChunkColumn>(columns.front());
+            ASSERT_NE(column, nullptr);
+            EXPECT_EQ(column->IsLazy(), lazy_enabled);
+            EXPECT_EQ(column->IsMaterialized(), !lazy_enabled);
+            EXPECT_EQ(open_calls->load(), lazy_enabled ? 0 : 1);
+            EXPECT_EQ(estimate_calls->load(), lazy_enabled ? 0 : 1);
+
+            // An installed factory must keep its mode across config changes.
+            storagev2translator::SetStorageV2AsyncLoadEnabled(!async_enabled);
+            SegcoreConfig::default_config().set_lazy_column_group_enabled(
+                !lazy_enabled);
+            EXPECT_EQ(column->num_chunks(), 1);
+            EXPECT_EQ(open_calls->load(), 1);
+            EXPECT_EQ(estimate_calls->load(), 1);
+        }
+    }
+}
+
+TEST(SealedSegmentCowState, MixedManifestTasksOnlyPreopenRegularReaders) {
+    LazyColumnGroupConfigGuard lazy_group_guard(true);
+    const auto previous =
+        cachinglayer::TieredStorageConfig::GetInstance().GetSnapshot();
+    auto restore_warmup = folly::makeGuard([&] {
+        cachinglayer::Manager::UpdateConfig(
+            previous.loading_timeout,
+            previous.warmup_loading_timeout,
+            previous.storage_usage_tracking_enabled,
+            previous.warmup_policies);
+    });
+    auto policies = previous.warmup_policies;
+    policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    policies.scalarIndexCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    cachinglayer::Manager::UpdateConfig(previous.loading_timeout,
+                                        previous.warmup_loading_timeout,
+                                        previous.storage_usage_tracking_enabled,
+                                        policies);
+
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+    const FieldId pk(kWarmupPkFieldId);
+    for (bool async_enabled : {false, true}) {
+        SCOPED_TRACE(async_enabled);
+        auto async_guard = SetStorageV2AsyncLoadForTest(async_enabled);
+        auto segment = CreateSealedSegment(schema, nullptr, 1009);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        proto::segcore::SegmentLoadInfo load_proto;
+        load_proto.set_segmentid(1009);
+        load_proto.set_num_of_rows(1);
+        load_proto.set_storageversion(STORAGE_V3);
+        load_proto.set_manifest_path("test-manifest");
+        SegmentLoadInfo load_info(load_proto, schema);
+        auto column_groups = MakeWarmupTestColumnGroups();
+        column_groups->at(0)->columns.push_back(std::to_string(pk.get()));
+        auto open_calls = std::make_shared<std::atomic<int>>(0);
+        auto estimate_calls = std::make_shared<std::atomic<int>>(0);
+        auto reader = std::make_shared<WarmupTestReader>(
+            column_groups,
+            !async_enabled,
+            async_enabled
+                ? arrow::Status::OK()
+                : milvus_storage::MakeExtendError(
+                      milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+                      "unexpected async reader open"),
+            nullptr,
+            nullptr,
+            open_calls,
+            estimate_calls);
+        // The leading lazy task must not shift the regular reader's assignment.
+        auto columns = sealed->TestStageLoadColumnGroupsWithReader(
+            column_groups,
+            std::make_shared<milvus_storage::api::Properties>(),
+            {{0, {vec}}, {0, {pk}}},
+            load_info,
+            schema,
+            std::move(reader),
+            /*eager_load=*/false);
+        ASSERT_EQ(columns.size(), 2);
+        auto lazy = std::dynamic_pointer_cast<ProxyChunkColumn>(columns[0]);
+        auto regular = std::dynamic_pointer_cast<ProxyChunkColumn>(columns[1]);
+        ASSERT_NE(lazy, nullptr);
+        ASSERT_NE(regular, nullptr);
+        EXPECT_TRUE(lazy->IsLazy());
+        EXPECT_FALSE(lazy->IsMaterialized());
+        EXPECT_FALSE(regular->IsLazy());
+        EXPECT_TRUE(regular->IsMaterialized());
+        EXPECT_EQ(open_calls->load(), 1);
+        EXPECT_EQ(estimate_calls->load(), 1);
+        EXPECT_EQ(lazy->DataByteSize(), 1);
+        EXPECT_EQ(open_calls->load(), 2);
+        EXPECT_EQ(estimate_calls->load(), 1);
+    }
+}
+
+TEST(SealedSegmentCowState, StagedManifestTasksShareColumnGroupSizeEstimate) {
+    LazyColumnGroupConfigGuard lazy_group_guard(false);
+    auto schema = std::make_shared<Schema>();
+    auto first = schema->AddDebugField("first", DataType::INT64);
+    auto second = schema->AddDebugField("second", DataType::INT64);
+
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 1008, SegcoreConfig::default_config());
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1008);
+    load_proto.set_num_of_rows(1);
+    load_proto.set_storageversion(STORAGE_V3);
+    load_proto.set_manifest_path("test-manifest");
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->columns = {std::to_string(first.get()),
+                             std::to_string(second.get())};
+    column_groups->push_back(std::move(column_group));
+
+    auto chunk_reader_calls = std::make_shared<std::atomic<int>>(0);
+    auto estimate_calls = std::make_shared<std::atomic<int>>(0);
+    auto reader = std::make_shared<WarmupTestReader>(column_groups,
+                                                     true,
+                                                     arrow::Status::OK(),
+                                                     nullptr,
+                                                     nullptr,
+                                                     chunk_reader_calls,
+                                                     estimate_calls);
+    std::vector<std::pair<int, std::vector<FieldId>>> tasks = {
+        {0, {first}},
+        {0, {second}},
+    };
+    auto columns = sealed->TestStageLoadColumnGroupsWithReader(
+        column_groups,
+        std::make_shared<milvus_storage::api::Properties>(),
+        std::move(tasks),
+        segment_load_info,
+        schema,
+        std::move(reader),
+        /*eager_load=*/false);
+
+    ASSERT_EQ(columns.size(), 2);
+    EXPECT_EQ(chunk_reader_calls->load(std::memory_order_relaxed), 2);
+    EXPECT_EQ(estimate_calls->load(std::memory_order_relaxed), 1);
+
+    SegcoreConfig::default_config().set_lazy_column_group_enabled(true);
+    for (bool concurrent : {false, true}) {
+        SCOPED_TRACE(concurrent);
+        chunk_reader_calls->store(0, std::memory_order_relaxed);
+        estimate_calls->store(0, std::memory_order_relaxed);
+        auto lazy_reader =
+            std::make_shared<WarmupTestReader>(column_groups,
+                                               true,
+                                               arrow::Status::OK(),
+                                               nullptr,
+                                               nullptr,
+                                               chunk_reader_calls,
+                                               estimate_calls);
+        std::weak_ptr<WarmupTestReader> captured_reader = lazy_reader;
+        columns = sealed->TestStageLoadColumnGroupsWithReader(
+            column_groups,
+            std::make_shared<milvus_storage::api::Properties>(),
+            {{0, {first}}, {0, {second}}},
+            segment_load_info,
+            schema,
+            std::move(lazy_reader),
+            /*eager_load=*/false);
+        ASSERT_EQ(columns.size(), 2);
+        EXPECT_EQ(chunk_reader_calls->load(), 0);
+        EXPECT_EQ(estimate_calls->load(), 0);
+
+        if (concurrent) {
+            std::promise<void> start;
+            auto ready = start.get_future().share();
+            auto first_read = std::async(std::launch::async, [&] {
+                ready.wait();
+                return columns[0]->DataByteSize();
+            });
+            auto second_read = std::async(std::launch::async, [&] {
+                ready.wait();
+                return columns[1]->DataByteSize();
+            });
+            start.set_value();
+            EXPECT_EQ(first_read.get(), 1);
+            EXPECT_EQ(second_read.get(), 2);
+        } else {
+            EXPECT_EQ(columns[0]->DataByteSize(), 1);
+            EXPECT_EQ(chunk_reader_calls->load(), 1);
+            EXPECT_EQ(estimate_calls->load(), 1);
+            // The unmaterialized sibling still owns the shared inputs.
+            EXPECT_FALSE(captured_reader.expired());
+            EXPECT_EQ(columns[1]->DataByteSize(), 2);
+        }
+        EXPECT_EQ(chunk_reader_calls->load(), 2);
+        EXPECT_EQ(estimate_calls->load(), 1);
+        EXPECT_TRUE(captured_reader.expired());
+    }
+}
+
+TEST(SealedSegmentCowState, ResolvesVortexColumnGroupLocalFormatFallback) {
+    const FieldId pk(100);
+    const FieldId raw(101);
+    const FieldId vortex(102);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta(FieldName("pk"),
+                               pk,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_RAW));
+    schema->AddField(FieldMeta(FieldName("raw"),
+                               raw,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_RAW));
+    schema->AddField(FieldMeta(FieldName("vortex"),
+                               vortex,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_VORTEX));
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->format = LOON_FORMAT_VORTEX;
+
+    column_group->columns = {schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Vortex);
+    column_group->columns = {schema->get_storage_column_name(raw),
+                             schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Default);
+    column_group->columns = {schema->get_storage_column_name(pk),
+                             schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Raw);
+
+    column_group->format = "parquet";
+    column_group->columns = {schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Default);
+    column_group->columns = {schema->get_storage_column_name(pk)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Raw);
+}
+
+TEST(SealedSegmentCowState, ResolvesCompleteVortexGroupsPerSchemaSnapshot) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_external_source("s3://bucket/path");
+    schema_proto.set_external_spec(R"({"format":"parquet"})");
+    auto add_field = [&](int64_t id,
+                         const std::string& column,
+                         const std::string& local_format) {
+        auto* field = schema_proto.add_fields();
+        field->set_fieldid(id);
+        field->set_name("field_" + std::to_string(id));
+        field->set_data_type(milvus::proto::schema::DataType::Int64);
+        field->set_external_field(column);
+        auto* param = field->add_type_params();
+        param->set_key("local_format");
+        param->set_value(local_format);
+        return field;
+    };
+    add_field(100, "id", LOCAL_FORMAT_RAW)->set_is_primary_key(true);
+    add_field(101, "shared", LOCAL_FORMAT_VORTEX);
+    add_field(102, "shared", LOCAL_FORMAT_VORTEX);
+    add_field(103, "direct", LOCAL_FORMAT_VORTEX);
+    add_field(104, "raw", LOCAL_FORMAT_RAW);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto add_group = [&](const std::string& format,
+                         std::vector<std::string> columns) {
+        auto group = std::make_shared<milvus_storage::api::ColumnGroup>();
+        group->format = format;
+        group->columns = std::move(columns);
+        groups->push_back(std::move(group));
+    };
+    add_group("parquet", {"direct"});
+    add_group(LOON_FORMAT_VORTEX, {});
+    add_group(LOON_FORMAT_VORTEX, {"shared"});
+    add_group(LOON_FORMAT_VORTEX, {"direct"});
+    add_group(LOON_FORMAT_VORTEX, {"direct", "raw"});
+    add_group(LOON_FORMAT_VORTEX, {"999"});
+    add_group(LOON_FORMAT_VORTEX, {"direct", "999"});
+    add_group(LOON_FORMAT_VORTEX, {"id", "direct"});
+    add_group("parquet", {"id"});
+    // Numeric field-id fallback does not establish a physical-name match.
+    add_group(LOON_FORMAT_VORTEX, {"103"});
+    using Format = VortexColumnGroupLocalFormat;
+    const std::vector<Format> expected = {Format::Default,
+                                          Format::Default,
+                                          Format::Vortex,
+                                          Format::Vortex,
+                                          Format::Default,
+                                          Format::Default,
+                                          Format::Default,
+                                          Format::Raw,
+                                          Format::Raw,
+                                          Format::Default};
+    EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, schema),
+              expected);
+
+    // A Raw alias excludes its entire group, including a Vortex-only projection.
+    schema_proto.mutable_fields(2)->mutable_type_params(0)->set_value(
+        LOCAL_FORMAT_RAW);
+    auto next_schema = Schema::ParseFrom(schema_proto);
+    auto next_expected = expected;
+    next_expected[2] = Format::Default;
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormats(groups, next_schema),
+        next_expected);
+    EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, schema),
+              expected);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
@@ -4946,19 +5326,21 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     initial_delta.commit_ts = current->commit_ts;
     auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
 
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
+    const auto vector_values = dataset.get_col<float>(vec);
+    auto indexing =
+        BuildTestVectorIndex<float>(row_count,
+                                    4,
+                                    vector_values.data(),
+                                    knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                                    knowhere::metric::L2,
+                                    Config{{knowhere::indexparam::NLIST, 16}});
 
-    LoadIndexInfo load_info;
+    LoadIndexInfo load_info{};
     load_info.field_id = vec.get();
     load_info.index_params = GenIndexParams(indexing.get());
     load_info.index_params["metric_type"] = knowhere::metric::L2;
+    SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
+    load_info.field_type = indexing->ValueType();
     load_info.cache_index =
         CreateTestCacheIndex("staged-real-vector", std::move(indexing));
     load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
@@ -5014,14 +5396,14 @@ TEST(SealedSegmentCowState,
     ASSERT_NE(sealed, nullptr);
 
     auto create_index = [] {
-        milvus::index::CreateIndexInfo create_index_info;
-        create_index_info.field_type = DataType::VECTOR_FLOAT;
-        create_index_info.metric_type = knowhere::metric::L2;
-        create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-        create_index_info.index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionNumber();
-        return milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, milvus::storage::FileManagerContext());
+        const std::array<float, 4> values{0.0F, 0.0F, 0.0F, 0.0F};
+        return BuildTestVectorIndex<float>(
+            1,
+            4,
+            values.data(),
+            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+            knowhere::metric::L2,
+            Config{{knowhere::indexparam::NLIST, 1}});
     };
 
     folly::CancellationToken published_warmup_token;
@@ -5029,6 +5411,10 @@ TEST(SealedSegmentCowState,
     auto warmup_started_future = warmup_started.get_future();
     auto published_index_impl = create_index();
     auto published_index_params = GenIndexParams(published_index_impl.get());
+    LoadIndexInfo published_index{};
+    SetTestIndexMetadata(
+        published_index, *published_index_impl, index::families::kVectorMem);
+    published_index.field_type = DataType::VECTOR_FLOAT;
     auto published_cache_index =
         CreateCancellationObservingCacheIndex("published-vector",
                                               std::move(published_index_impl),
@@ -5041,7 +5427,6 @@ TEST(SealedSegmentCowState,
               std::future_status::ready);
     ASSERT_FALSE(published_warmup_token.isCancellationRequested());
 
-    LoadIndexInfo published_index;
     published_index.field_id = vec.get();
     published_index.index_params = std::move(published_index_params);
     published_index.index_params["metric_type"] = knowhere::metric::L2;
@@ -5061,10 +5446,13 @@ TEST(SealedSegmentCowState,
              current->commit_ts});
 
         auto replacement_impl = create_index();
-        LoadIndexInfo replacement;
+        LoadIndexInfo replacement{};
         replacement.field_id = vec.get();
         replacement.index_params = GenIndexParams(replacement_impl.get());
         replacement.index_params["metric_type"] = knowhere::metric::L2;
+        SetTestIndexMetadata(
+            replacement, *replacement_impl, index::families::kVectorMem);
+        replacement.field_type = replacement_impl->ValueType();
         replacement.cache_index = CreateTestCacheIndex(
             fail_before_publish ? "rolled-back-vector" : "replacement-vector",
             std::move(replacement_impl));
@@ -5087,9 +5475,10 @@ TEST(SealedSegmentCowState,
                 final_delta,
                 [&] {
                     auto published = sealed->TestGetPublishedStateSnapshot();
-                    ASSERT_EQ(
-                        published->runtime->vector_indexings.at(vec)->indexing_,
-                        published_cache_index);
+                    ASSERT_EQ(TestIndexSlot(published->runtime->indexes,
+                                            vec,
+                                            index::families::kVectorMem),
+                              published_cache_index);
                     EXPECT_FALSE(
                         published_warmup_token.isCancellationRequested());
                     if (fail_before_publish) {
@@ -5108,14 +5497,18 @@ TEST(SealedSegmentCowState,
     stage_replacement(true);
     EXPECT_FALSE(published_warmup_token.isCancellationRequested());
     auto after_rollback = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_EQ(after_rollback->runtime->vector_indexings.at(vec)->indexing_,
-              published_cache_index);
+    ASSERT_EQ(
+        TestIndexSlot(
+            after_rollback->runtime->indexes, vec, index::families::kVectorMem),
+        published_cache_index);
 
     stage_replacement(false);
     EXPECT_TRUE(published_warmup_token.isCancellationRequested());
     auto after_publish = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_NE(after_publish->runtime->vector_indexings.at(vec)->indexing_,
-              published_cache_index);
+    ASSERT_NE(
+        TestIndexSlot(
+            after_publish->runtime->indexes, vec, index::families::kVectorMem),
+        published_cache_index);
 }
 
 TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
@@ -5129,7 +5522,7 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
-    LoadIndexInfo first_index;
+    LoadIndexInfo first_index{};
     first_index.field_id = payload.get();
     first_index.field_type = DataType::INT64;
     first_index.index_params["index_type"] = "STL_SORT";
@@ -5137,6 +5530,7 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     auto first_impl = GenScalarIndexing<int64_t>(dataset.raw_->num_rows(),
                                                  payload_data.data());
     first_index.index_params = GenIndexParams(first_impl.get());
+    SetTestIndexMetadata(first_index, *first_impl, index::families::kSort);
     first_index.cache_index =
         CreateTestCacheIndex("first", std::move(first_impl));
     auto first_cache_index = first_index.cache_index;
@@ -5145,41 +5539,48 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     auto before = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(before, nullptr);
     ASSERT_NE(before->runtime, nullptr);
-    ASSERT_TRUE(before->runtime->scalar_indexings.count(payload) > 0);
-    auto published_before_replace =
-        before->runtime->scalar_indexings.at(payload);
+    ASSERT_TRUE(TestIndexEntries(before->runtime->indexes, payload).size() > 0);
+    auto published_before_replace = TestIndexSlot(
+        before->runtime->indexes, payload, index::families::kSort);
     ASSERT_EQ(published_before_replace, first_cache_index);
 
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
-    ASSERT_TRUE(runtime->scalar_indexings.count(payload) > 0);
-    auto stale_runtime_index = runtime->scalar_indexings.at(payload);
+    ASSERT_TRUE(TestIndexEntries(runtime->indexes, payload).size() > 0);
+    auto stale_runtime_index =
+        TestIndexSlot(runtime->indexes, payload, index::families::kSort);
     ASSERT_EQ(stale_runtime_index, first_cache_index);
 
-    LoadIndexInfo replacement_index;
+    LoadIndexInfo replacement_index{};
     replacement_index.field_id = payload.get();
     replacement_index.field_type = DataType::INT64;
     replacement_index.index_params["index_type"] = "STL_SORT";
     auto replacement_impl = GenScalarIndexing<int64_t>(dataset.raw_->num_rows(),
                                                        payload_data.data());
     replacement_index.index_params = GenIndexParams(replacement_impl.get());
+    SetTestIndexMetadata(
+        replacement_index, *replacement_impl, index::families::kSort);
     replacement_index.cache_index =
         CreateTestCacheIndex("replacement", std::move(replacement_impl));
     auto replacement_cache_index = replacement_index.cache_index;
 
     sealed->TestLoadIndex(replacement_index, true, runtime.get());
 
-    ASSERT_TRUE(runtime->scalar_indexings.count(payload) > 0);
-    EXPECT_EQ(runtime->scalar_indexings.size(), 1);
-    auto updated_runtime_index = runtime->scalar_indexings.at(payload);
+    ASSERT_TRUE(TestIndexEntries(runtime->indexes, payload).size() > 0);
+    EXPECT_EQ(runtime->indexes.Entries().size(), 1);
+    auto updated_runtime_index =
+        TestIndexSlot(runtime->indexes, payload, index::families::kSort);
     EXPECT_EQ(updated_runtime_index, replacement_cache_index);
     EXPECT_NE(updated_runtime_index, stale_runtime_index);
 
     auto staged_only = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(staged_only, nullptr);
     ASSERT_NE(staged_only->runtime, nullptr);
-    ASSERT_TRUE(staged_only->runtime->scalar_indexings.count(payload) > 0);
-    EXPECT_EQ(staged_only->runtime->scalar_indexings.at(payload),
-              first_cache_index);
+    ASSERT_TRUE(
+        TestIndexEntries(staged_only->runtime->indexes, payload).size() > 0);
+    EXPECT_EQ(
+        TestIndexSlot(
+            staged_only->runtime->indexes, payload, index::families::kSort),
+        first_cache_index);
 
     ChunkedSegmentSealedImpl::StateDelta delta;
     delta.schema = staged_only->schema;
@@ -5190,12 +5591,16 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     auto next = sealed->TestBuildNextPublishedState(staged_only, delta);
     ASSERT_NE(next, nullptr);
     ASSERT_NE(next->runtime, nullptr);
-    EXPECT_EQ(next->runtime->scalar_indexings.size(), 1);
-    ASSERT_TRUE(next->runtime->scalar_indexings.count(payload) > 0);
-    auto published_runtime_index = next->runtime->scalar_indexings.at(payload);
+    EXPECT_EQ(next->runtime->indexes.Entries().size(), 1);
+    ASSERT_TRUE(TestIndexEntries(next->runtime->indexes, payload).size() > 0);
+    auto published_runtime_index =
+        TestIndexSlot(next->runtime->indexes, payload, index::families::kSort);
     EXPECT_EQ(published_runtime_index, replacement_cache_index);
     EXPECT_NE(published_runtime_index, stale_runtime_index);
-    EXPECT_EQ(next->runtime->ngram_fields.count(payload), 0);
+    EXPECT_EQ(TestIndexEntries(
+                  next->runtime->indexes, payload, index::families::kNgram)
+                  .size(),
+              0);
 }
 
 TEST(SealedSegmentCowState, ReplacePkStateIsInvisibleUntilFinalPublish) {
@@ -5315,6 +5720,77 @@ TEST(SealedSegmentCowState, ReplacePkStateIsInvisibleUntilFinalPublish) {
     EXPECT_EQ(current->runtime->pk_index_slot, old_pk_index_slot);
 }
 
+TEST(SealedSegmentCowState, ReplaceProxyColumnClearsStaleSkipMetrics) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto payload = schema->AddDebugField("payload", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto old_dataset = DataGen(schema, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, old_dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    InstallTestSkipMetrics(
+        sealed,
+        payload,
+        {std::make_shared<index::IntFieldChunkMetrics<int64_t>>(
+            0, 10, nullptr)});
+    auto old_view = sealed->GetFieldSkipMetrics(payload);
+    ASSERT_TRUE(old_view.CanSkipUnaryRange<int64_t>(
+        0, proto::plan::OpType::GreaterThan, 100));
+
+    auto replacement_dataset = DataGen(schema, 4, /*seed=*/271828);
+    auto replacement_segment =
+        CreateSealedWithFieldDataLoaded(schema, replacement_dataset);
+    auto* replacement_sealed =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(replacement_segment.get());
+    ASSERT_NE(replacement_sealed, nullptr);
+    auto replacement_state =
+        replacement_sealed->TestGetPublishedStateSnapshot();
+    auto replacement_column = replacement_state->runtime->fields.at(payload);
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    ChunkedSegmentSealedImpl::StateDelta initial_delta;
+    initial_delta.schema = current->schema;
+    initial_delta.load_info = current->load_info;
+    initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+    initial_delta.commit_ts = current->commit_ts;
+    auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
+
+    ChunkedSegmentSealedImpl::StateDelta final_delta;
+    final_delta.schema = current->schema;
+    final_delta.load_info = current->load_info;
+    final_delta.commit_ts = current->commit_ts;
+
+    sealed->TestStageLoadFieldDataThenPublish(
+        payload,
+        replacement_column,
+        replacement_dataset.raw_->num_rows(),
+        DataType::INT64,
+        schema,
+        runtime,
+        staged.get(),
+        current,
+        final_delta,
+        /*is_proxy_column=*/true,
+        [&] {
+            auto staged_view =
+                FieldSkipMetricsView::FromProvider(runtime->fields.at(payload));
+            EXPECT_FALSE(staged_view.CanSkipUnaryRange<int64_t>(
+                0, proto::plan::OpType::GreaterThan, 100));
+            EXPECT_TRUE(
+                sealed->GetFieldSkipMetrics(payload).CanSkipUnaryRange<int64_t>(
+                    0, proto::plan::OpType::GreaterThan, 100));
+        });
+
+    EXPECT_FALSE(
+        sealed->GetFieldSkipMetrics(payload).CanSkipUnaryRange<int64_t>(
+            0, proto::plan::OpType::GreaterThan, 100));
+    EXPECT_TRUE(old_view.CanSkipUnaryRange<int64_t>(
+        0, proto::plan::OpType::GreaterThan, 100));
+}
+
 TEST(SealedSegmentCowState, ClearPublishedStateDropsRuntimeSnapshot) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -5349,9 +5825,10 @@ TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
-    std::array<int64_t, 4> values = {1, 2, 3, 4};
-    auto indexing = GenScalarIndexing<int64_t>(values.size(), values.data());
-    LoadIndexInfo load_info;
+    std::array<double, 4> values = {1, 2, 3, 4};
+    auto indexing = BuildTestScalarIndex<double>(
+        index::families::kInverted, values.size(), values.data());
+    LoadIndexInfo load_info{};
     load_info.field_id = json.get();
     load_info.field_type = DataType::JSON;
     load_info.index_params = {
@@ -5359,12 +5836,15 @@ TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
         {JSON_PATH, "a"},
         {JSON_CAST_TYPE, "DOUBLE"},
     };
+    SetTestIndexMetadata(load_info, *indexing, index::families::kInverted);
     load_info.cache_index =
         CreateTestCacheIndex("json-runtime", std::move(indexing));
     auto loaded_index = load_info.cache_index;
 
     auto current = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_TRUE(current->runtime->json_indices.empty());
+    ASSERT_TRUE(TestIndexEntries(
+                    current->runtime->indexes, json, index::families::kInverted)
+                    .empty());
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
     initial_delta.schema = current->schema;
@@ -5386,14 +5866,26 @@ TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
         current,
         final_delta,
         [&] {
-            EXPECT_EQ(runtime->json_indices.size(), 1);
-            EXPECT_TRUE(current->runtime->json_indices.empty());
+            EXPECT_EQ(TestIndexEntries(
+                          runtime->indexes, json, index::families::kInverted)
+                          .size(),
+                      1);
+            EXPECT_TRUE(TestIndexEntries(current->runtime->indexes,
+                                         json,
+                                         index::families::kInverted)
+                            .empty());
             EXPECT_FALSE(sealed->HasJsonIndex(json));
         });
 
     auto published = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_EQ(published->runtime->json_indices.size(), 1);
-    EXPECT_EQ(published->runtime->json_indices.front().index, loaded_index);
+    ASSERT_EQ(TestIndexEntries(
+                  published->runtime->indexes, json, index::families::kInverted)
+                  .size(),
+              1);
+    EXPECT_EQ(
+        TestIndexSlot(
+            published->runtime->indexes, json, index::families::kInverted),
+        loaded_index);
     EXPECT_TRUE(sealed->HasJsonIndex(json));
 }
 
@@ -5407,11 +5899,11 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
-    std::array<int64_t, 4> values = {1, 2, 3, 4};
+    std::array<double, 4> values = {1, 2, 3, 4};
     auto make_load_info = [&](std::string key,
                               std::string path,
                               bool is_ngram) {
-        LoadIndexInfo info;
+        LoadIndexInfo info{};
         info.field_id = json.get();
         info.field_type = DataType::JSON;
         info.index_params = {
@@ -5419,11 +5911,26 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
              is_ngram ? index::NGRAM_INDEX_TYPE : index::INVERTED_INDEX_TYPE},
             {JSON_PATH, std::move(path)},
         };
-        if (!is_ngram) {
-            info.index_params[JSON_CAST_TYPE] = "DOUBLE";
-        }
+        info.index_id = info.index_params.at(JSON_PATH) == "a" ? 1001 : 1002;
+        info.index_params[JSON_CAST_TYPE] = is_ngram ? "VARCHAR" : "DOUBLE";
+        const std::array<std::string, 4> text_values = {
+            "alpha", "beta", "gamma", "delta"};
         auto indexing =
-            GenScalarIndexing<int64_t>(values.size(), values.data());
+            is_ngram
+                ? BuildTestScalarIndex<std::string>(
+                      index::families::kNgram,
+                      text_values.size(),
+                      text_values.data(),
+                      nullptr,
+                      Config{{index::FIELD_ID, json.get()},
+                             {index::MIN_GRAM, 2},
+                             {index::MAX_GRAM, 3}})
+                : BuildTestScalarIndex<double>(
+                      index::families::kInverted, values.size(), values.data());
+        SetTestIndexMetadata(
+            info,
+            *indexing,
+            is_ngram ? index::families::kNgram : index::families::kInverted);
         info.cache_index =
             CreateTestCacheIndex(std::move(key), std::move(indexing));
         return info;
@@ -5438,8 +5945,13 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
     sealed->LoadIndex(original);
 
     auto current = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_EQ(current->runtime->json_indices.size(), 2);
-    EXPECT_TRUE(current->runtime->ngram_indexings.empty());
+    ASSERT_EQ(TestIndexEntries(
+                  current->runtime->indexes, json, index::families::kInverted)
+                  .size(),
+              2);
+    EXPECT_TRUE(TestIndexEntries(
+                    current->runtime->indexes, json, index::families::kNgram)
+                    .empty());
     EXPECT_FALSE(GetFieldBit(current->index_ready_bitset, json));
 
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
@@ -5465,35 +5977,73 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
         current,
         final_delta,
         [&] {
-            ASSERT_EQ(runtime->json_indices.size(), 1);
-            EXPECT_EQ(runtime->json_indices.front().nested_path, "b");
-            EXPECT_EQ(runtime->json_indices.front().index, sibling_index);
-            ASSERT_EQ(runtime->ngram_indexings.count(json), 1);
-            ASSERT_EQ(runtime->ngram_indexings.at(json).count("a"), 1);
-            EXPECT_EQ(runtime->ngram_indexings.at(json).at("a"),
+            ASSERT_EQ(TestIndexEntries(
+                          runtime->indexes, json, index::families::kInverted)
+                          .size(),
+                      1);
+            EXPECT_EQ(TestIndexEntries(
+                          runtime->indexes, json, index::families::kInverted)
+                          .front()
+                          .json_path,
+                      "b");
+            EXPECT_EQ(TestIndexSlot(
+                          runtime->indexes, json, index::families::kInverted),
+                      sibling_index);
+            ASSERT_EQ(TestIndexEntries(
+                          runtime->indexes, json, index::families::kNgram)
+                          .size(),
+                      1);
+            ASSERT_NE(TestIndexSlot(
+                          runtime->indexes, json, index::families::kNgram, "a"),
+                      nullptr);
+            EXPECT_EQ(TestIndexSlot(
+                          runtime->indexes, json, index::families::kNgram, "a"),
                       replacement_index);
             EXPECT_TRUE(GetFieldBit(staged->index_ready_bitset, json));
 
-            ASSERT_EQ(current->runtime->json_indices.size(), 2);
-            EXPECT_TRUE(current->runtime->ngram_indexings.empty());
+            ASSERT_EQ(
+                TestIndexEntries(
+                    current->runtime->indexes, json, index::families::kInverted)
+                    .size(),
+                2);
+            EXPECT_TRUE(TestIndexEntries(current->runtime->indexes,
+                                         json,
+                                         index::families::kNgram)
+                            .empty());
         });
 
     auto published = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_EQ(published->runtime->json_indices.size(), 1);
-    EXPECT_EQ(published->runtime->json_indices.front().nested_path, "b");
-    EXPECT_EQ(published->runtime->json_indices.front().index, sibling_index);
-    ASSERT_EQ(published->runtime->ngram_indexings.count(json), 1);
-    EXPECT_EQ(published->runtime->ngram_indexings.at(json).at("a"),
-              replacement_index);
+    ASSERT_EQ(TestIndexEntries(
+                  published->runtime->indexes, json, index::families::kInverted)
+                  .size(),
+              1);
+    EXPECT_EQ(TestIndexEntries(
+                  published->runtime->indexes, json, index::families::kInverted)
+                  .front()
+                  .json_path,
+              "b");
+    EXPECT_EQ(
+        TestIndexSlot(
+            published->runtime->indexes, json, index::families::kInverted),
+        sibling_index);
+    ASSERT_EQ(TestIndexEntries(
+                  published->runtime->indexes, json, index::families::kNgram)
+                  .size(),
+              1);
+    EXPECT_EQ(
+        TestIndexSlot(
+            published->runtime->indexes, json, index::families::kNgram, "a"),
+        replacement_index);
     EXPECT_TRUE(GetFieldBit(published->index_ready_bitset, json));
 
-    ASSERT_EQ(current->runtime->json_indices.size(), 2);
-    auto old_path = std::find_if(
-        current->runtime->json_indices.begin(),
-        current->runtime->json_indices.end(),
-        [](const auto& index) { return index.nested_path == "a"; });
-    ASSERT_NE(old_path, current->runtime->json_indices.end());
-    EXPECT_EQ(old_path->index, original_index);
+    ASSERT_EQ(TestIndexEntries(
+                  current->runtime->indexes, json, index::families::kInverted)
+                  .size(),
+              2);
+    auto old_path = TestIndexSlot(
+        current->runtime->indexes, json, index::families::kInverted, "a");
+    ASSERT_NE(old_path, nullptr);
+    EXPECT_EQ(old_path, original_index);
 }
 
 TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
@@ -5506,11 +6056,11 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
-    std::array<int64_t, 4> values = {1, 2, 3, 4};
+    std::array<double, 4> values = {1, 2, 3, 4};
     auto make_load_info = [&](std::string key,
                               std::string path,
                               bool is_ngram) {
-        LoadIndexInfo info;
+        LoadIndexInfo info{};
         info.field_id = json.get();
         info.field_type = DataType::JSON;
         info.index_params = {
@@ -5518,11 +6068,26 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
              is_ngram ? index::NGRAM_INDEX_TYPE : index::INVERTED_INDEX_TYPE},
             {JSON_PATH, std::move(path)},
         };
-        if (!is_ngram) {
-            info.index_params[JSON_CAST_TYPE] = "DOUBLE";
-        }
+        info.index_id = info.index_params.at(JSON_PATH) == "a" ? 1001 : 1002;
+        info.index_params[JSON_CAST_TYPE] = is_ngram ? "VARCHAR" : "DOUBLE";
+        const std::array<std::string, 4> text_values = {
+            "alpha", "beta", "gamma", "delta"};
         auto indexing =
-            GenScalarIndexing<int64_t>(values.size(), values.data());
+            is_ngram
+                ? BuildTestScalarIndex<std::string>(
+                      index::families::kNgram,
+                      text_values.size(),
+                      text_values.data(),
+                      nullptr,
+                      Config{{index::FIELD_ID, json.get()},
+                             {index::MIN_GRAM, 2},
+                             {index::MAX_GRAM, 3}})
+                : BuildTestScalarIndex<double>(
+                      index::families::kInverted, values.size(), values.data());
+        SetTestIndexMetadata(
+            info,
+            *indexing,
+            is_ngram ? index::families::kNgram : index::families::kInverted);
         info.cache_index =
             CreateTestCacheIndex(std::move(key), std::move(indexing));
         return info;
@@ -5537,10 +6102,18 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
     sealed->LoadIndex(original);
 
     auto current = sealed->TestGetPublishedStateSnapshot();
-    ASSERT_EQ(current->runtime->json_indices.size(), 1);
-    ASSERT_EQ(current->runtime->ngram_indexings.count(json), 1);
-    EXPECT_EQ(current->runtime->ngram_indexings.at(json).at("a"),
-              original_index);
+    ASSERT_EQ(TestIndexEntries(
+                  current->runtime->indexes, json, index::families::kInverted)
+                  .size(),
+              1);
+    ASSERT_EQ(TestIndexEntries(
+                  current->runtime->indexes, json, index::families::kNgram)
+                  .size(),
+              1);
+    EXPECT_EQ(
+        TestIndexSlot(
+            current->runtime->indexes, json, index::families::kNgram, "a"),
+        original_index);
     EXPECT_TRUE(GetFieldBit(current->index_ready_bitset, json));
 
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
@@ -5566,41 +6139,57 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
         current,
         final_delta,
         [&] {
-            EXPECT_TRUE(runtime->ngram_indexings.empty());
-            ASSERT_EQ(runtime->json_indices.size(), 2);
-            auto replacement_path = std::find_if(
-                runtime->json_indices.begin(),
-                runtime->json_indices.end(),
-                [](const auto& index) { return index.nested_path == "a"; });
-            ASSERT_NE(replacement_path, runtime->json_indices.end());
-            EXPECT_EQ(replacement_path->index, replacement_index);
+            EXPECT_TRUE(TestIndexEntries(
+                            runtime->indexes, json, index::families::kNgram)
+                            .empty());
+            ASSERT_EQ(TestIndexEntries(
+                          runtime->indexes, json, index::families::kInverted)
+                          .size(),
+                      2);
+            auto replacement_path = TestIndexSlot(
+                runtime->indexes, json, index::families::kInverted, "a");
+            ASSERT_NE(replacement_path, nullptr);
+            EXPECT_EQ(replacement_path, replacement_index);
             EXPECT_FALSE(GetFieldBit(staged->index_ready_bitset, json));
 
-            ASSERT_EQ(current->runtime->ngram_indexings.count(json), 1);
-            EXPECT_EQ(current->runtime->ngram_indexings.at(json).at("a"),
+            ASSERT_EQ(
+                TestIndexEntries(
+                    current->runtime->indexes, json, index::families::kNgram)
+                    .size(),
+                1);
+            EXPECT_EQ(TestIndexSlot(current->runtime->indexes,
+                                    json,
+                                    index::families::kNgram,
+                                    "a"),
                       original_index);
         });
 
     auto published = sealed->TestGetPublishedStateSnapshot();
-    EXPECT_TRUE(published->runtime->ngram_indexings.empty());
-    ASSERT_EQ(published->runtime->json_indices.size(), 2);
-    auto sibling_path = std::find_if(
-        published->runtime->json_indices.begin(),
-        published->runtime->json_indices.end(),
-        [](const auto& index) { return index.nested_path == "b"; });
-    ASSERT_NE(sibling_path, published->runtime->json_indices.end());
-    EXPECT_EQ(sibling_path->index, sibling_index);
-    auto replacement_path = std::find_if(
-        published->runtime->json_indices.begin(),
-        published->runtime->json_indices.end(),
-        [](const auto& index) { return index.nested_path == "a"; });
-    ASSERT_NE(replacement_path, published->runtime->json_indices.end());
-    EXPECT_EQ(replacement_path->index, replacement_index);
+    EXPECT_TRUE(TestIndexEntries(
+                    published->runtime->indexes, json, index::families::kNgram)
+                    .empty());
+    ASSERT_EQ(TestIndexEntries(
+                  published->runtime->indexes, json, index::families::kInverted)
+                  .size(),
+              2);
+    auto sibling_path = TestIndexSlot(
+        published->runtime->indexes, json, index::families::kInverted, "b");
+    ASSERT_NE(sibling_path, nullptr);
+    EXPECT_EQ(sibling_path, sibling_index);
+    auto replacement_path = TestIndexSlot(
+        published->runtime->indexes, json, index::families::kInverted, "a");
+    ASSERT_NE(replacement_path, nullptr);
+    EXPECT_EQ(replacement_path, replacement_index);
     EXPECT_FALSE(GetFieldBit(published->index_ready_bitset, json));
 
-    ASSERT_EQ(current->runtime->ngram_indexings.count(json), 1);
-    EXPECT_EQ(current->runtime->ngram_indexings.at(json).at("a"),
-              original_index);
+    ASSERT_EQ(TestIndexEntries(
+                  current->runtime->indexes, json, index::families::kNgram)
+                  .size(),
+              1);
+    EXPECT_EQ(
+        TestIndexSlot(
+            current->runtime->indexes, json, index::families::kNgram, "a"),
+        original_index);
 }
 
 TEST(SealedSegmentCowState, JsonStatsLivesInRuntimeSnapshot) {

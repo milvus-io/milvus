@@ -26,7 +26,11 @@ KeyRetriever::GetKey(const std::string& key_metadata) {
     auto plugin = PluginLoader::GetInstance().getCipherPlugin();
     AssertInfo(plugin != nullptr, "cipher plugin not found");
     auto context = DecodeKeyMetadata(key_metadata);
-    AssertInfo(context != nullptr, "invalid key metadata: {}", key_metadata);
+    if (!(context != nullptr)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid key metadata: {}",
+                  key_metadata);
+    }
     auto decryptor = plugin->GetDecryptor(
         context->ez_id, context->collection_id, std::string(context->key));
     return decryptor->GetKey();
@@ -50,6 +54,22 @@ parquet::ArrowReaderProperties
 GetArrowReaderProperties() {
     std::lock_guard<std::mutex> lock(arrow_reader_properties_mutex);
     return arrow_reader_properties;
+}
+
+parquet::ArrowReaderProperties
+GetArrowReaderProperties(bool eager_prebuffer) {
+    auto properties = GetArrowReaderProperties();
+    if (!eager_prebuffer) {
+        return properties;
+    }
+    // Only when the ranges are fetched changes. The coalescing limits stay as
+    // configured, so an eager reader issues the same requests as a lazy one.
+    auto cache_options = properties.cache_options();
+    cache_options.lazy = false;
+    cache_options.prefetch_limit = 0;
+    properties.set_pre_buffer(true);
+    properties.set_cache_options(cache_options);
+    return properties;
 }
 
 void

@@ -474,13 +474,15 @@ framework, and the delete-safety guard are all encoding-agnostic and reused unch
   in [64 MiB, 128 MiB) admits the same Bloom filters, so the default is set to the smallest
   of them and states the real ceiling. The 128 MiB MBF1 num_blocks format cap remains the
   hard Bloom per-blob ceiling. The legacy `proxy.maxBloomFilterSize` key remains a fallback.
-- **`proxy.maxMembershipFilterPlanSize`** (default 128 MiB, refreshable): request-wide cap
-  on the serialized size of every membership-filter-bearing plan, enforced with
-  `proto.Size(plan)` before `proto.Marshal`. Reusing one template in multiple expressions
-  therefore consumes the budget for every embedded copy. Hybrid search accumulates all
-  membership-filter-bearing sub-plans against the same request budget, and scorer filters are
-  included: a membership expression is allowed in a scorer filter and its blob is charged to
-  the same budget.
+- **`proxy.maxMembershipFilterPlanSize`** (default 128 MiB, refreshable): request-wide
+  membership budget. It independently caps the serialized size of every
+  membership-filter-bearing plan and, for Roaring filters, the aggregate estimated decoded
+  size. The serialized total is enforced with `proto.Size(plan)` before `proto.Marshal`;
+  Roaring decoded estimates are charged before materialization. Every embedded copy consumes
+  the serialized total; only Roaring occurrences additionally consume the decoded total.
+  Hybrid search accumulates all membership-filter-bearing sub-plans against the same request
+  budget, and scorer filters are included: a membership expression is allowed in a scorer
+  filter and its applicable costs are charged to the same budget.
   Exceeding the cap returns
   `ErrParameterTooLarge` (1102, InputError, non-retriable) at the proxy, before QueryNode routing,
   so an over-budget Bloom request cannot turn into a gRPC `ResourceExhausted` or blacklist a

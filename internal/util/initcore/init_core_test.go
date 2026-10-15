@@ -17,17 +17,159 @@
 package initcore
 
 import (
+	"os"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
+	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)
+
+	for _, tc := range []struct {
+		name, coefficient, maxCapacity string
+		want                           int
+		wantErr                        bool
+	}{
+		{name: "default", coefficient: "", maxCapacity: "0", want: hardware.GetCPUNum()},
+		{name: "negative", coefficient: "-1", maxCapacity: "1", wantErr: true},
+		{name: "negative_fraction", coefficient: "-0.5", maxCapacity: "1", wantErr: true},
+		{name: "nan", coefficient: "NaN", maxCapacity: "0", wantErr: true},
+		{name: "infinite", coefficient: "+Inf", maxCapacity: "0", wantErr: true},
+		{name: "overflow", coefficient: "1e100", maxCapacity: "0", wantErr: true},
+		{name: "overflow_capped", coefficient: "1e100", maxCapacity: "3", want: 3},
+		{name: "zero_fixed_default", coefficient: "0", maxCapacity: "0", want: defaultArrowIOThreadPoolCapacity},
+		{name: "zero_ignores_cap", coefficient: "0", maxCapacity: "1", want: defaultArrowIOThreadPoolCapacity},
+		{name: "positive", coefficient: "2", maxCapacity: "0", want: 2 * hardware.GetCPUNum()},
+		{name: "positive_fraction", coefficient: "0.5", maxCapacity: "0", want: max(1, hardware.GetCPUNum()/2)},
+		{name: "positive_capped", coefficient: "2", maxCapacity: "1", want: 1},
+		{name: "positive_minimum", coefficient: "0.000001", maxCapacity: "0", want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.coefficient == "" {
+				pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
+			} else {
+				assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, tc.coefficient))
+			}
+			assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, tc.maxCapacity))
+			got, err := ResolveArrowIOThreadPoolCapacity()
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestResolveArrowCPUThreadPoolCapacity(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.ArrowCPUThreadPoolCoefficient.Key)
+	defer pt.Reset(pt.CommonCfg.ArrowCPUThreadPoolMaxCapacity.Key)
+	for _, tc := range []struct {
+		name, coefficient, maxCapacity string
+		want                           int
+		wantErr                        bool
+	}{
+		{name: "default", coefficient: "1", maxCapacity: "0", want: hardware.GetCPUNum()},
+		{name: "zero", coefficient: "0", maxCapacity: "1", want: hardware.GetCPUNum()},
+		{name: "scaled", coefficient: "2", maxCapacity: "0", want: 2 * hardware.GetCPUNum()},
+		{name: "fraction", coefficient: "0.5", maxCapacity: "0", want: max(1, hardware.GetCPUNum()/2)},
+		{name: "capped", coefficient: "2", maxCapacity: "1", want: 1},
+		{name: "minimum", coefficient: "0.000001", maxCapacity: "0", want: 1},
+		{name: "negative", coefficient: "-1", maxCapacity: "0", wantErr: true},
+		{name: "nan", coefficient: "NaN", maxCapacity: "0", wantErr: true},
+		{name: "infinite", coefficient: "+Inf", maxCapacity: "0", wantErr: true},
+		{name: "malformed", coefficient: "bad", maxCapacity: "0", wantErr: true},
+		{name: "overflow", coefficient: "1e100", maxCapacity: "0", wantErr: true},
+		{name: "overflow_capped", coefficient: "1e100", maxCapacity: "3", want: 3},
+		{name: "invalid_cap", coefficient: "1", maxCapacity: "bad", wantErr: true},
+		{name: "negative_cap", coefficient: "1", maxCapacity: "-1", wantErr: true},
+		{name: "cap_overflow", coefficient: "1", maxCapacity: "4294967296", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, pt.Save(pt.CommonCfg.ArrowCPUThreadPoolCoefficient.Key, tc.coefficient))
+			require.NoError(t, pt.Save(pt.CommonCfg.ArrowCPUThreadPoolMaxCapacity.Key, tc.maxCapacity))
+			got, err := ResolveArrowCPUThreadPoolCapacity()
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestInitStorageRuntime(t *testing.T) {
+	// Tokio cannot be reset, so each scenario needs its own process.
+	if os.Getenv("MILVUS_TEST_STORAGE_RUNTIME") == "" {
+		executable, err := os.Executable()
+		require.NoError(t, err)
+		for _, scenario := range []string{"success", "invalid_cpu", "invalid_io"} {
+			t.Run(scenario, func(t *testing.T) {
+				cmd := exec.Command(executable, "-test.run=^TestInitStorageRuntime$") // #nosec G204 -- Re-exec the current test binary with a fixed test filter.
+				cmd.Env = append(os.Environ(), "MILVUS_TEST_STORAGE_RUNTIME="+scenario)
+				output, err := cmd.CombinedOutput()
+				require.NoError(t, err, "%s", output)
+			})
+		}
+		return
+	}
+	paramtable.Init()
+	pt := paramtable.Get()
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowCPUThreadPoolCoefficient.Key, "2"))
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowCPUThreadPoolMaxCapacity.Key, "1"))
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "4"))
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "3"))
+	if scenario := os.Getenv("MILVUS_TEST_STORAGE_RUNTIME"); scenario != "success" {
+		key := pt.CommonCfg.ArrowCPUThreadPoolCoefficient.Key
+		if scenario == "invalid_io" {
+			key = pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key
+		}
+		require.NoError(t, pt.Save(key, "-1"))
+		err := InitStorageRuntime()
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		// A subsequent component must see the original failure, not success.
+		require.NoError(t, pt.Save(key, "1"))
+		assert.Same(t, err, InitStorageRuntime())
+		return
+	}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() { assert.NoError(t, InitStorageRuntime()) })
+	}
+	wg.Wait()
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "0"))
+	require.NoError(t, InitStorageRuntime())
+	families, err := metrics.NewCRegistry().Gather()
+	require.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() == "internal_arrow_io_pool_capacity" {
+			require.Len(t, mf.GetMetric(), 1)
+			assert.Equal(t, float64(3), mf.GetMetric()[0].GetGauge().GetValue())
+			return
+		}
+	}
+	t.Fatal("internal_arrow_io_pool_capacity gauge not found")
+}
 
 func TestTracer(t *testing.T) {
 	paramtable.Init()
@@ -70,47 +212,144 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
 
-	defer func() {
-		assert.NoError(t, pt.Reset(pt.QueryNodeCfg.TakeForOutputResultCountLimit.Key))
-		SyncTakeForOutputResultCountLimit(pt)
-	}()
-	assert.NoError(t, pt.Save(pt.QueryNodeCfg.TakeForOutputResultCountLimit.Key, "2048"))
-	assert.Equal(t, int64(2048), getTakeForOutputResultCountLimit())
+	previousReadWindow := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		pt.Reset(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key)
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previousReadWindow)
+	})
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "0"))
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "1048576"))
+	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
 }
 
-// TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers
-// a handler under each of the two watched keys. The sentinel handler we
-// register after the helper fires whenever the dispatcher receives an event
-// for the key, which proves that the dispatcher has an active handler list
-// for the key (and therefore that the helper's Watch calls landed correctly).
-//
-// Note on `HasUpdated`: paramtable's Save() unconditionally sets
-// HasUpdated=true on its synthetic runtime event, so the short-circuit branch
-// inside the helper is exercised only by file/etcd refresh events in
-// production, not by Save() in a unit test. We don't try to assert it here.
-func TestRegisterArrowIOThreadPoolWatchers(t *testing.T) {
+func TestRegisterConfigWatcherWithCatchUpSerializesInitialSyncAndUpdates(t *testing.T) {
+	var current atomic.Bool
+	var applied atomic.Bool
+	var syncCalls atomic.Int32
+	callbackRegistered := make(chan func(), 1)
+	firstRead := make(chan struct{})
+	secondSyncStarted := make(chan struct{})
+	secondSyncApplied := make(chan struct{})
+	releaseFirstSync := make(chan struct{})
+
+	done := make(chan struct{})
+	go func() {
+		registerConfigWatcherWithCatchUp(func(syncConfig func()) {
+			callbackRegistered <- syncConfig
+		}, func() {
+			value := current.Load()
+			call := syncCalls.Add(1)
+			switch call {
+			case 1:
+				close(firstRead)
+				<-releaseFirstSync
+			case 2:
+				close(secondSyncStarted)
+			}
+			applied.Store(value)
+			if call == 2 {
+				close(secondSyncApplied)
+			}
+		})
+		close(done)
+	}()
+
+	callback := <-callbackRegistered
+	<-firstRead
+	current.Store(true)
+	callbackInvoked := make(chan struct{})
+	callbackDone := make(chan struct{})
+	go func() {
+		close(callbackInvoked)
+		callback()
+		close(callbackDone)
+	}()
+	<-callbackInvoked
+
+	overlapped := false
+	select {
+	case <-secondSyncStarted:
+		overlapped = true
+		<-secondSyncApplied
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirstSync)
+	<-done
+	<-callbackDone
+	assert.False(t, overlapped, "config update ran concurrently with the initial catch-up")
+	assert.True(t, applied.Load(), "the concurrent update must be applied after the stale catch-up")
+}
+
+func TestRegisterStorageV2AsyncLoadReadWindowConfigCatchesUp(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	assert.NoError(t, pt.Save(item.Key, "1048576"))
+	updateStorageV2AsyncLoadReadWindowSizeBytes(32 * 1024 * 1024)
+	registerStorageV2AsyncLoadReadWindowConfig(pt)
+
+	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestRegisterStorageV2AsyncLoadReadWindowConfigHandlesDelete(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	assert.NoError(t, pt.Save(item.Key, "1048576"))
+	registerStorageV2AsyncLoadReadWindowConfig(pt)
+	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+
+	assert.NoError(t, pt.Remove(item.Key))
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2EnableAsyncLoad
+	assert.NoError(t, pt.Save(item.Key, "true"))
+
+	var applied atomic.Bool
+	registerQueryNodeLoadConfig(t.Context(), pt, func(enabled bool, budgetBytes, slots int64) error {
+		applied.Store(enabled)
+		if enabled {
+			assert.EqualValues(t, 2*1024*1024*1024, budgetBytes)
+			assert.Positive(t, slots)
+		} else {
+			assert.Zero(t, budgetBytes)
+			assert.Zero(t, slots)
+		}
+
+		return nil
+	})
+	assert.True(t, applied.Load())
+
+	assert.NoError(t, pt.Save(item.Key, "false"))
+	assert.False(t, applied.Load())
+}
+
+func TestLazyColumnGroupHotUpdate(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
-	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
-	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)
-
-	assert.NotPanics(t, func() { RegisterArrowIOThreadPoolWatchers(pt, "test") })
-
-	var coefFires, maxFires atomic.Int32
-	coefSentinel := config.NewHandler("sentinel-coef", func(*config.Event) { coefFires.Add(1) })
-	maxSentinel := config.NewHandler("sentinel-max", func(*config.Event) { maxFires.Add(1) })
-	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, coefSentinel)
-	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, maxSentinel)
-	defer pt.Unwatch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, coefSentinel)
-	defer pt.Unwatch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, maxSentinel)
-
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "2"))
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "64"))
-
-	assert.Positive(t, coefFires.Load(),
-		"helper must have registered a handler on ArrowIOThreadPoolCoefficient")
-	assert.Positive(t, maxFires.Load(),
-		"helper must have registered a handler on ArrowIOThreadPoolMaxCapacity")
+	SetupCoreConfigChangelCallback()
+	key := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.Key
+	previous := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetValue()
+	t.Cleanup(func() { assert.NoError(t, pt.Save(key, previous)) })
+	for _, value := range []string{"false", "true", "false"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.Equal(t, value == "true", getLazyColumnGroupEnabled())
+	}
 }
 
 // TestRegisterArrowReaderConfigWatchers verifies the lifted helper registers
@@ -325,6 +564,39 @@ func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
 	assert.NotPanics(t, func() {
 		UpdateLoadTransientBudgetBytes(0)
 		UpdateLoadTransientBudgetBytes(128 * 1024 * 1024)
+	})
+}
+
+func TestUpdateLoadAdmissionSlots(t *testing.T) {
+	defer UpdateLoadAdmissionSlots(0)
+	assert.NotPanics(t, func() {
+		UpdateLoadAdmissionSlots(0)
+		UpdateLoadAdmissionSlots(16)
+		UpdateLoadAdmissionSlots(-1)
+	})
+}
+
+func TestUpdateStorageV2AsyncLoadReadWindowSizeBytes(t *testing.T) {
+	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	updateStorageV2AsyncLoadReadWindowSizeBytes(0)
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+	updateStorageV2AsyncLoadReadWindowSizeBytes(16 * 1024 * 1024)
+	assert.EqualValues(t, 16*1024*1024, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestInitStorageV2FileSystemUsesProvidedLocalConfig(t *testing.T) {
+	params := &paramtable.ComponentParam{}
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	assert.NoError(t, params.Save(params.CommonCfg.StorageType.Key, "local"))
+	assert.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "3"))
+	// Invalid values supplied by the caller must be rejected, even when the
+	// global configuration has a valid default. This fails before entering C++.
+	assert.PanicsWithValue(t, `invalid common.storage.talon.mode: "3"`, func() {
+		_ = InitStorageV2FileSystem(params)
 	})
 }
 

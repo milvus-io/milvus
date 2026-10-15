@@ -283,6 +283,9 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us_);
 
+    // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
     query_context->set_op_context(&op_context);
@@ -333,11 +336,12 @@ ExecPlanNodeVisitor::setupRetrieveResult(
             tmp_retrieve_result.element_level_ = true;
             tracer::AutoSpan _(
                 "Element Level Find", tracer::GetRootSpan(), true);
-            auto array_offsets = query_context->get_array_offsets();
+            auto struct_element_offsets =
+                query_context->get_struct_element_offsets();
             auto [doc_offsets, element_indices, has_more] =
                 segment->find_first_n_element(node.limit_,
                                               view,
-                                              array_offsets.get(),
+                                              struct_element_offsets.get(),
                                               node.query_iterator_cursor_);
             tmp_retrieve_result.result_offsets_ = std::move(doc_offsets);
             tmp_retrieve_result.element_indices_ = std::move(element_indices);
@@ -433,6 +437,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                                    std::shared_ptr<milvus::exec::BaseConfig>>(),
                 entity_ttl_physical_time_us_);
 
+            // Pin the sealed published snapshot exactly once for this request.
+            query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
             if (enable_expr_cache_) {
                 query_context->set_enable_expr_cache(true);
                 query_context->set_enable_sub_expr_cache_write(false);
@@ -490,6 +497,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us_);
 
+    // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
     if (enable_expr_cache_) {
@@ -507,6 +517,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Store result
     search_result_opt_ = std::move(query_context->get_search_result());
+    search_result_opt_->read_snapshot_ = query_context->get_read_snapshot();
     search_result_opt_->search_storage_cost_.scanned_remote_bytes =
         op_context.storage_usage.scanned_cold_bytes.load();
     search_result_opt_->search_storage_cost_.scanned_total_bytes =

@@ -96,9 +96,7 @@ func (w *walAccesserImpl) ControlChannel() string {
 func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	assertValidMessage(msg)
 
-	msg = applyOpt(msg, opts...)
-
-	resp := w.AppendMessages(ctx, msg)
+	resp := w.AppendMessagesWithOptions(ctx, []message.MutableMessage{msg}, opts...)
 	return resp.Responses[0].AppendResult, resp.Responses[0].Error
 }
 
@@ -204,4 +202,8 @@ func (s errScanner) Error() error {
 }
 
 func (s errScanner) Close() {
+}
+
+func (w *walAccesserImpl) AnalyzerClient() AnalyzerClient {
+	return w.handlerClient
 }

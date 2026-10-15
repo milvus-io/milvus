@@ -41,6 +41,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
+#include "arrow/status.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/metadata.h"
@@ -54,6 +55,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadStream.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/ThreadPools.h"
 #include "storage/StorageV2FSCache.h"
 #include "storage/Types.h"
@@ -323,13 +325,47 @@ DrainFuture(std::future<T>& future) noexcept {
     }
 }
 
+// Normal control flow for bounded field-data visitors. Stop is not
+// cancellation and is never represented by an exception.
+enum class VisitControl {
+    Continue,
+    Stop,
+};
+
+enum class VisitOutcome {
+    Exhausted,
+    Stopped,
+    // The requested field is absent from the source inventory. This differs
+    // from a present field that legitimately contains zero rows.
+    FieldMissing,
+};
+
+using FieldDataVisitor = std::function<VisitControl(FieldDataPtr)>;
+
+// Visits storage-v2 data on the calling thread in numeric binlog-ID order,
+// preserving row-group order within each file. Stop takes effect after the
+// current row group: no later row group is read, but a row group is not a fixed
+// byte bound and may itself be large. Producer work for the current row group
+// is complete before the visitor is called.
+VisitOutcome
+VisitFieldDataFromStorageV2(
+    const std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const FieldDataVisitor& visitor);
+
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
                            DataType element_type,
                            int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs);
+                           milvus_storage::ArrowFileSystemPtr fs,
+                           size_t max_rows = 0,
+                           size_t offset = 0);
 
 // Streams the field's data out of a storage-v3 manifest batch by batch,
 // invoking `consumer` on the calling thread in batch order. Batch decoding
@@ -358,6 +394,37 @@ constexpr int64_t kStreamingInflightBytes = 512LL << 20;
 // are enough to keep fetch and decode overlapped.
 constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
 
+// Visits manifest data on the calling thread in source order. Stop prevents
+// further ReadNext calls, decode submissions, and callbacks. Decode work
+// already submitted within the bounded input-byte window is still joined via
+// future::get(); a real failure there takes precedence over a normal Stopped
+// outcome. The window does not bound decoded/external-normalization expansion.
+VisitOutcome
+VisitFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const FieldDataVisitor& visitor,
+    int64_t max_inflight_bytes = kStreamingInflightBytes);
+
+// Visits a Milvus-written TEXT column of a manifest as logical UTF-8 values.
+// Such a column stores LOB-encoded cells: a value below the inline threshold
+// (64 KiB by default) is kept inline behind a marker byte, and a larger value
+// is a reference into the partition's LOB files. Reading the column with the
+// plain manifest reader yields those encoded cells; this reader resolves both
+// forms. External TEXT columns are plain UTF-8 and use the plain reader. Stop
+// prevents further ReadNext calls and callbacks.
+VisitOutcome
+VisitTextFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    const FieldDataVisitor& visitor);
+
 void
 IterateFieldDataFromManifest(
     const std::string& manifest_path,
@@ -368,7 +435,9 @@ IterateFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const std::function<void(FieldDataPtr)>& consumer,
-    int64_t max_inflight_bytes = kStreamingInflightBytes);
+    int64_t max_inflight_bytes = kStreamingInflightBytes,
+    size_t max_rows = 0,
+    size_t offset = 0);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(
@@ -378,6 +447,8 @@ GetFieldDatasFromManifest(
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type,
+    size_t max_rows = 0,
+    size_t offset = 0,
     std::optional<StorageColumnMapping> storage_column_mapping = std::nullopt);
 
 std::vector<FieldDataPtr>
@@ -479,6 +550,11 @@ using DataTypeToOffsetMap =
 std::vector<FieldDataPtr>
 FetchFieldData(ChunkManager* cm, const std::vector<std::string>& batch_files);
 
+// Sort insert binlogs by their complete numeric basename. Malformed names,
+// including a one-file list, fail with DataFormatBroken.
+void
+SortBinlogPaths(std::vector<std::string>& paths);
+
 inline void
 SortByPath(std::vector<std::string>& paths) {
     std::sort(paths.begin(),
@@ -549,9 +625,11 @@ GetFieldIDList(FieldId column_group_id,
 // Convert a single row of an Arrow ListArray to a protobuf ScalarField.
 // The element type is inferred from the ListArray's value type.
 // Supported value types: BOOL, INT8, INT16, INT32, INT64, FLOAT, DOUBLE, STRING.
+// Element-nullable arrays retain one validity entry per logical child value.
 proto::schema::ScalarField
 ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
-                            int64_t row_index);
+                            int64_t row_index,
+                            bool element_nullable);
 
 // Convert a timestamp value to microseconds based on its Arrow TimeUnit.
 inline int64_t
@@ -608,9 +686,17 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays);
 //   Vectors: various -> FixedSizeBinary
 //   VectorArray: List<List<scalar>> -> List<FixedSizeBinary>
 //
+// preserve_array_element_validity is for consumers whose ARRAY result model
+// carries element validity; legacy Chunk materialization leaves it disabled.
 std::shared_ptr<arrow::Array>
 NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
-                       const FieldMeta& field_meta);
+                       const FieldMeta& field_meta,
+                       bool preserve_array_element_validity = false);
+
+bool
+IsCompatibleArrayElementArrowType(
+    const std::shared_ptr<arrow::DataType>& actual_type,
+    DataType expected_type);
 
 // Load path: batch wrapper around NormalizeExternalArrow.
 arrow::ArrayVector

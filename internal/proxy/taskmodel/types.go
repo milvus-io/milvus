@@ -34,12 +34,6 @@ type VChan = string
 // PChan shortcuts for physical channel.
 type PChan = string
 
-// PChanStatistics holds the min/max timestamp of a physical channel's DML.
-type PChanStatistics struct {
-	MinTs Timestamp
-	MaxTs Timestamp
-}
-
 // TsoAllocator allocates timestamps. It is the interface implemented by the
 // proxy's timestamp allocator and consumed by the task scheduler.
 type TsoAllocator interface {

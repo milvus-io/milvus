@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -152,6 +153,12 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
 	if err != nil || result == nil {
+		if errors.Is(err, merr.ErrCompactionResultNotFound) {
+			if dropErr := cluster.DropCompaction(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID()); dropErr != nil {
+				log.Warn(context.TODO(), "l0CompactionTask failed to drop task with unavailable result", mlog.Err(dropErr))
+				return
+			}
+		}
 		log.Warn(context.TODO(), "l0CompactionTask failed to get compaction result", mlog.Err(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
@@ -181,19 +188,21 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
 		return
 	case datapb.CompactionTaskState_timeout:
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout), setFailReason("DataNode reported compaction timeout"))
 		if err != nil {
 			log.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
 		}
 	case datapb.CompactionTaskState_failed:
-		if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed)); err != nil {
+		if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(compactionFailReason(result))); err != nil {
 			log.Warn(context.TODO(), "l0CompactionTask failed to set task failed state", mlog.Err(err))
 			return
 		}
 	default:
 		log.Error(context.TODO(), "not support compaction task state", mlog.String("state", result.GetState().String()))
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(fmt.Sprintf("DataNode returned unsupported compaction state: %s", result.GetState().String())))
 		if err != nil {
 			log.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
@@ -520,16 +529,35 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	)
 
 	if len(v3Deltalogs) > 0 {
-		return t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...)
+		if err := t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...); err != nil {
+			return err
+		}
+		// The L0 SegmentMeta mutation is committed (deltalogs + manifest recorded);
+		// the DataView snapshot is reconciled asynchronously from SegmentMeta.
+		if meta, ok := t.meta.(*meta); ok {
+			meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		}
+		return nil
 	}
-	return t.meta.UpdateSegmentsInfo(ctx, operators...)
+	if err := t.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		return err
+	}
+	// The L0 SegmentMeta mutation is committed (deltalogs + manifest recorded);
+	// the DataView snapshot is reconciled asynchronously from SegmentMeta. The
+	// recompute observes the new Manifest version, so the DataView advances
+	// compact_version even though membership is unchanged (L0 is a hard
+	// trigger: a Manifest-version change has no dedicated counter).
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	}
+	return nil
 }
 
 // commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
 // extraOperators — the L0 input-segment retirement — in ONE catalog transaction.
 // CommitSegmentManifests acquires all targets' manifest locks as a single atomic
 // operation, runs the loon transactions in parallel outside segMu (from the same
-// dataCoord.compaction.levelzero.manifestUpdatePoolSize pool), and lands every pointer
+// dataCoord.manifestCommitConcurrency executor), and lands every pointer
 // advance plus extraOperators in one catalog transaction (a single UpdateSegmentsInfo).
 // Folding the input drops in makes the whole L0 result atomic — the targets gain their
 // merged deltalogs and the inputs turn Dropped/Compacted together, or nothing does —

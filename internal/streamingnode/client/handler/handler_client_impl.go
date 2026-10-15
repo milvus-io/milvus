@@ -6,6 +6,8 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
@@ -301,7 +303,8 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 type handlerCreateFunc func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error)
 
 // createHandlerAfterStreamingNodeReady creates a handler until streaming node ready.
-// If streaming node is not ready, it will block until new assignment term is coming or context timeout.
+// If streaming node is not ready, it waits for assignment changes or backoff until the context ends.
+// An empty pchannel invokes create without an assignment, using the ready-node picker.
 func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Context, logger *mlog.Logger, pchannel string, create handlerCreateFunc) (any, error) {
 	// TODO: backoff should be configurable.
 	backoff := backoff.NewExponentialBackOff()
@@ -311,12 +314,16 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 	backoff.Reset()
 
 	for {
-		assign := hc.watcher.Get(ctx, pchannel)
-		if assign != nil {
-			// Find assignment, try to create producer on this assignment.
-			// pick the target streaming node to serve.
-			ctx = contextutil.WithPickServerID(ctx, assign.Node.ServerID)
-			createResult, err := create(ctx, assign)
+		var assign *types.PChannelInfoAssigned
+		callCtx := ctx
+		if pchannel != "" {
+			assign = hc.watcher.Get(ctx, pchannel)
+			if assign != nil {
+				callCtx = contextutil.WithPickServerID(ctx, assign.Node.ServerID)
+			}
+		}
+		if pchannel == "" || assign != nil {
+			createResult, err := create(callCtx, assign)
 			if err == nil {
 				logger.Info(ctx, "create handler success", mlog.Any("assignment", assign), mlog.Bool("isLocal", registry.IsLocal(createResult)))
 				return createResult, nil
@@ -326,14 +333,15 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 			// Unrecoverable errors (e.g. replicate violation when the WAL is no longer
 			// a secondary cluster) won't change by retrying the same WAL role. Surface
 			// them immediately so callers get a typed error within RTT instead of
-			// retrying until their context deadline.
-			if status.AsStreamingError(err).IsUnrecoverable() {
+			// retrying until their context deadline. Unsupported RPCs on older nodes
+			// must also return immediately.
+			if status.AsStreamingError(err).IsUnrecoverable() || grpcstatus.Code(err) == codes.Unimplemented {
 				logger.Warn(ctx, "create handler failed with unrecoverable error, stop retrying", mlog.Err(err))
 				return nil, err
 			}
 
 			// Check if the error is permanent failure until new assignment.
-			if isPermanentFailureUntilNewAssignment(err) {
+			if assign != nil && isPermanentFailureUntilNewAssignment(err) {
 				reportErr := hc.rebalanceTrigger.ReportAssignmentError(ctx, assign.Channel, err)
 				logger.Info(ctx, "report assignment error", mlog.NamedError("assignmentError", err), mlog.Err(reportErr))
 			}
@@ -358,8 +366,14 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 func (hc *handlerClientImpl) waitForNextBackoff(ctx context.Context, pchannel string, assign *types.PChannelInfoAssigned, nextBackoff time.Duration) (bool, error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, nextBackoff, errWaitNextBackoff)
 	defer cancel()
-	// Block until new assignment term is coming.
-	err := hc.watcher.Watch(ctx, pchannel, assign)
+	var err error
+	if pchannel == "" {
+		// Calls without a channel have no assignment to watch.
+		<-ctx.Done()
+		err = ctx.Err()
+	} else {
+		err = hc.watcher.Watch(ctx, pchannel, assign)
+	}
 	if err == nil || errors.Is(context.Cause(ctx), errWaitNextBackoff) {
 		return err == nil, nil
 	}

@@ -22,14 +22,14 @@
 #include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/protobuf_utils.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "mmap/ChunkedColumnInterface.h"
-#include "segcore/SealedIndexingRecord.h"
 
 namespace milvus::query {
 
 void
 SearchOnSealedIndex(const Schema& schema,
-                    const segcore::SealedIndexingEntry& entry,
+                    const index::IVectorReader& reader,
                     const SearchInfo& search_info,
                     const void* query_data,
                     const size_t* query_offsets,

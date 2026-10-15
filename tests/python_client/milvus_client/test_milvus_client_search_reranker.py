@@ -578,12 +578,14 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
             function_type=FunctionType.RERANK,
             params={"reranker": "decay", "function": "gauss", "origin": 0, "offset": 0, "decay": 0.5, "scale": 100},
         )
+        err_code = 65535
         if not_support_datatype == DataType.VARCHAR:
             err_msg = f"decay input field {default_string_field_name} must be numeric, got VarChar"
         if not_support_datatype == DataType.JSON:
-            err_msg = "unsupported field type: JSON"
+            err_code = 1100
+            err_msg = "unsupported field type JSON"
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535, ct.err_msg: err_msg}
+        error = {ct.err_code: err_code, ct.err_msg: err_msg}
         self.search(
             client,
             collection_name,
@@ -633,7 +635,7 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
             params={"reranker": "decay", "function": "gauss", "origin": 0, "offset": 0, "decay": 0.5, "scale": 100},
         )
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535, ct.err_msg: "unsupported field type: Array"}
+        error = {ct.err_code: 1100, ct.err_msg: "unsupported field type Array"}
         self.search(
             client,
             collection_name,
@@ -683,7 +685,7 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
             params={"reranker": "decay", "function": "gauss", "origin": 0, "offset": 0, "decay": 0.5, "scale": 100},
         )
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535, ct.err_msg: "unsupported field type: FloatVector"}
+        error = {ct.err_code: 1100, ct.err_msg: "unsupported field type FloatVector"}
         self.search(
             client,
             collection_name,

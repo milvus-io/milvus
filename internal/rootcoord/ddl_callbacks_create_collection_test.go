@@ -62,7 +62,6 @@ func TestBroadcastCreateCollectionV1RollbackFileResourcesWhenTaskNotCreated(t *t
 		}).Build()
 
 		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Once()
 		streaming.SetWALForTest(wal)
 		defer streaming.SetWALForTest(nil)
 

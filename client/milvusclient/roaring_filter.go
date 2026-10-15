@@ -27,39 +27,29 @@ import (
 // template value and contains an MRB1 envelope around portable Roaring64 data.
 type RoaringBitmapBlob []byte
 
-type signedInteger interface {
-	~int | ~int8 | ~int16 | ~int32 | ~int64
-}
-
-func widenSignedIntegers[T signedInteger](members []T) []int64 {
-	values := make([]int64, len(members))
-	for i, member := range members {
-		values[i] = int64(member)
-	}
-	return values
-}
-
 // NewRoaringBitmapBlob builds an exact membership bitmap from a slice of
 // signed integers. Supported input types are []int, []int8, []int16, []int32,
 // and []int64; values are sign-extended to int64 before serialization.
 func NewRoaringBitmapBlob(members any) (RoaringBitmapBlob, error) {
-	var values []int64
+	var (
+		blob []byte
+		err  error
+	)
 	switch typed := members.(type) {
 	case []int:
-		values = widenSignedIntegers(typed)
+		blob, err = roaringfilter.BuildSigned(typed)
 	case []int8:
-		values = widenSignedIntegers(typed)
+		blob, err = roaringfilter.BuildSigned(typed)
 	case []int16:
-		values = widenSignedIntegers(typed)
+		blob, err = roaringfilter.BuildSigned(typed)
 	case []int32:
-		values = widenSignedIntegers(typed)
+		blob, err = roaringfilter.BuildSigned(typed)
 	case []int64:
-		values = typed
+		blob, err = roaringfilter.Build(typed)
 	default:
 		return nil, errors.Errorf(
 			"roaring bitmap members must be []int, []int8, []int16, []int32, or []int64, got %T", members)
 	}
-	blob, err := roaringfilter.Build(values)
 	if err != nil {
 		return nil, err
 	}

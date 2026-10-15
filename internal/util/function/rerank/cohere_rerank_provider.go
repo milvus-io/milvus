@@ -90,13 +90,11 @@ func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 }
 
 func (provider *cohereProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.cohereClient.Rerank(provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
+	rerankResp, err := provider.cohereClient.Rerank(ctx, provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}
-	scores := make([]float32, len(docs))
-	for i, result := range rerankResp.Results {
-		scores[i] = result.RelevanceScore
-	}
-	return scores, nil
+	return rerankScoresByIndex(len(docs), len(rerankResp.Results), func(i int) (int, float32) {
+		return rerankResp.Results[i].Index, rerankResp.Results[i].RelevanceScore
+	})
 }

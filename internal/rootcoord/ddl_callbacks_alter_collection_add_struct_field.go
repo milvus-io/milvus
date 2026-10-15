@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -87,9 +86,6 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
-	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.VirtualChannelNames...)
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
 			DbId:         coll.DBID,
@@ -105,7 +101,7 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err

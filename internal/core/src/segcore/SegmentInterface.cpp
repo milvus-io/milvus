@@ -18,7 +18,6 @@
 #include <limits>
 #include <map>
 #include <ratio>
-#include <type_traits>
 #include <unordered_set>
 
 #include "ChunkedSegmentSealedImpl.h"
@@ -38,7 +37,7 @@
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
 #include "futures/Future.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "monitor/Monitor.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -238,8 +237,10 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     auto result_rows = GetResultRowCount(retrieve_results);
     int64_t output_data_size = 0;
-    for (auto field_id : plan->field_ids_) {
-        output_data_size += get_field_avg_size(field_id) * result_rows;
+    if (result_rows > 0) {
+        for (auto field_id : plan->field_ids_) {
+            output_data_size += get_field_avg_size(field_id) * result_rows;
+        }
     }
     if (output_data_size > limit_size) {
         ThrowInfo(
@@ -501,16 +502,28 @@ SegmentInternalInterface::FillTargetEntry(
     milvus::OpContext* op_ctx) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
+    // Capture the request-scoped read snapshot once per FillTargetEntry so
+    // the per-field reads (take + bulk_subscript) don't re-capture the
+    // published state. Growing segments return a null snapshot and fall back
+    // to the virtual bulk_subscript with identical semantics.
+    auto chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this);
+    auto snapshot = CaptureReadSnapshot();
+    auto pinned =
+        chunked ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
+                : std::shared_ptr<
+                      const ChunkedSegmentSealedImpl::PublishedSegmentState>();
+
     // Fast path: use take() API for eligible output fields.
     // Use dynamic_cast to avoid adding new virtual methods (vtable layout
     // change causes SIGSEGV in cgo boundary).
-    if (auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
+    if (chunked) {
         if (chunked->TryTakeForRetrieve(plan,
                                         results,
                                         offsets,
                                         size,
                                         ignore_non_pk,
                                         fill_ids,
+                                        pinned,
                                         op_ctx)) {
             return;
         }
@@ -558,21 +571,24 @@ SegmentInternalInterface::FillTargetEntry(
             continue;
         }
 
-        if (plan->schema_->get_dynamic_field_id().has_value() &&
-            plan->schema_->get_dynamic_field_id().value() == field_id &&
-            !plan->target_dynamic_fields_.empty()) {
-            auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            auto col = bulk_subscript(
-                &local_ctx, field_id, offsets, size, target_dynamic_fields);
+        auto& field_meta = plan->schema_->operator[](field_id);
+        const std::vector<std::string>* dynamic_field_names =
+            (plan->schema_->get_dynamic_field_id().has_value() &&
+             plan->schema_->get_dynamic_field_id().value() == field_id &&
+             !plan->target_dynamic_fields_.empty())
+                ? &plan->target_dynamic_fields_
+                : nullptr;
+        auto col = BulkSubscriptWithSnapshot(this,
+                                             snapshot,
+                                             &local_ctx,
+                                             field_id,
+                                             field_meta,
+                                             offsets,
+                                             size,
+                                             dynamic_field_names);
+        if (dynamic_field_names != nullptr) {
             fields_data->AddAllocated(col.release());
             continue;
-        }
-        std::unique_ptr<DataArray> col;
-        auto& field_meta = plan->schema_->operator[](field_id);
-        if (!is_field_exist(field_id)) {
-            col = bulk_subscript_not_exist_field(field_meta, size);
-        } else {
-            col = bulk_subscript(&local_ctx, field_id, offsets, size);
         }
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
@@ -737,7 +753,8 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
     auto& field_meta = (*schema)[field_id];
     auto data_type = field_meta.get_data_type();
 
-    std::shared_lock lck(mutex_);
+    // Retrieve already holds mutex_; acquiring it again may deadlock
+    // when a writer is waiting.
     if (IsVariableDataType(data_type)) {
         if (variable_fields_avg_size_.find(field_id) ==
             variable_fields_avg_size_.end()) {
@@ -786,53 +803,12 @@ SegmentInternalInterface::set_field_avg_size(const FieldMeta& field_meta,
     }
 }
 
-std::shared_ptr<const SkipIndex>
-SegmentInternalInterface::GetSkipIndex() const {
+FieldSkipMetricsView
+SegmentInternalInterface::GetFieldSkipMetrics(FieldId field_id) const {
     if (auto* sealed = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
-        return sealed->GetSkipIndexSnapshot();
+        return sealed->GetFieldSkipMetrics(field_id);
     }
-    return skip_index_;
-}
-
-PinWrapper<index::TextMatchIndex*>
-SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
-                                       FieldId field_id) const {
-    std::shared_lock lock(mutex_);
-    auto iter = text_indexes_.find(field_id);
-    if (iter == text_indexes_.end()) {
-        ThrowInfo(milvus::ErrorCode::TextIndexNotFound,
-                  "text index not found for field {}",
-                  field_id.get());
-    }
-
-    auto make_pin = [&](auto&& alt) -> PinWrapper<index::TextMatchIndex*> {
-        using Alt = std::decay_t<decltype(alt)>;
-
-        if constexpr (std::is_same_v<
-                          Alt,
-                          std::unique_ptr<milvus::index::TextMatchIndex>>) {
-            return PinWrapper<index::TextMatchIndex*>(alt.get());
-        } else if constexpr (std::is_same_v<
-                                 Alt,
-                                 std::shared_ptr<
-                                     milvus::index::TextMatchIndexHolder>>) {
-            return PinWrapper<index::TextMatchIndex*>(alt, alt->get());
-        } else if constexpr (std::is_same_v<
-                                 Alt,
-                                 std::shared_ptr<
-                                     milvus::cachinglayer::CacheSlot<
-                                         milvus::index::TextMatchIndex>>>) {
-            auto ca = SemiInlineGet(alt->PinCells(op_ctx, {0}));
-            auto index = ca->get_cell_of(0);
-            return PinWrapper<index::TextMatchIndex*>(std::move(ca), index);
-        } else {
-            ThrowInfo(milvus::ErrorCode::UnexpectedError,
-                      "text index of segment is not supported for field {}",
-                      field_id.get());
-        }
-    };
-
-    return std::visit(make_pin, iter->second);
+    return {};
 }
 
 std::unique_ptr<DataArray>
@@ -932,7 +908,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
-            case DataType::VARCHAR: {
+            case DataType::VARCHAR:
+            case DataType::TEXT: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_string_data()
                                     ->mutable_data();
@@ -977,21 +954,6 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                "Non-nullable scalar field without default value should not "
                "reach here");
     return result;
-}
-
-// Only sealed segment has ngram index
-PinWrapper<index::NgramInvertedIndex*>
-SegmentInternalInterface::GetNgramIndex(milvus::OpContext* op_ctx,
-                                        FieldId field_id) const {
-    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
-}
-
-PinWrapper<index::NgramInvertedIndex*>
-SegmentInternalInterface::GetNgramIndexForJson(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    const std::string& nested_path) const {
-    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
 
 std::shared_ptr<index::JsonKeyStats>
