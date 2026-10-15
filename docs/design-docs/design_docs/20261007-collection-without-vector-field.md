@@ -378,6 +378,33 @@ with its neighbours, compacted, and split back at `maxRows` by the output
 writer. Each compaction cycle rewrites the same rows (xiaofan-luan, review of
 this document).
 
+A simulation of both planners (legacy and two-tier, replicated from
+`knapsack.go`, `compaction_tier.go` and `compaction_trigger.go`; seal at
+`0.12 × cap` with jitter, outputs split at both caps, delete-ratio single
+compaction, 80 trigger intervals, constant row width) confirms the cycle and
+the fix. "Byte-only planner" is today's planner with the output-side caps of
+this design; "fullness" is Section 3.3. Write amplification is rows rewritten
+by compaction divided by rows ingested, over the last 20 intervals:
+
+| Row width | Planner | Byte-only planner: amplification / plans touching a row-full segment | Fullness planner: amplification / such plans | Plans identical in every interval |
+|-----------|---------|------:|------:|:---:|
+| 13 B, 50 B | legacy | 70.5 / 115–323 | 1.0 / 0 | no |
+| 13 B, 50 B, 200 B | two-tier | 70.0 / 181–1160 | 1.0 / 0 | no |
+| 200 B, 268 B | legacy | 1.5 / 0 | 1.0 / 0 | no (byte-only merges 2 M-row outputs once more) |
+| 268 B | two-tier | 1.0 / 0 | 1.0 / 0 | yes |
+| 300 B, 512 B, 3 KB | both | 1.0–1.5 / 0 | same | yes |
+| 50 B, 30 % deleted at interval 40 | both | 58 / 273–280 | 1.0 / 0 | no |
+
+The byte-only variant rewrites every narrow-row segment in every interval for
+widths below `0.5 × maxSize / maxRows` (legacy, 134 B) or
+`0.85 × maxSize / maxRows` (two-tier, 228 B). The fullness planner produces no
+such plan at any ingest rate tried (0.7 M to 9 M rows per interval), never
+emits a segment above either cap, and for widths above the boundary produces
+the same plans as today in every interval. One property of the legacy planner
+is unchanged in kind: outputs that land between the small threshold and the
+fill rate (today 512–870 MB, with the row cap also 2–3.4 M rows) are not merged
+again.
+
 #### 3.4 Enforcement points
 
 1. **StreamingNode seal (growing → sealed).**
