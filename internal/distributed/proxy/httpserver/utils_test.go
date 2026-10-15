@@ -22,6 +22,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -771,6 +772,49 @@ func TestPrimaryField(t *testing.T) {
 		values[primaryKeyTemplateVar].GetArrayVal().GetStringData().GetData())
 }
 
+func TestCheckAndSetDataDoesNotCopyWholeDataArray(t *testing.T) {
+	// One small row surrounded by a large amount of valid JSON whitespace
+	// isolates the cost of extracting data from row conversion allocations.
+	body := []byte(`{"data":[` + strings.Repeat(" ", 8<<20) + `{}]}`)
+	schema := &schemapb.CollectionSchema{}
+	_, _, err := checkAndSetData([]byte(`{"data":[{}]}`), schema, false)
+	require.NoError(t, err)
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	rows, _, err := checkAndSetData(body, schema, false)
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(body)
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+		"extracting one row should not copy the entire data array")
+}
+
+func TestSchemaForPathReplaceDoesNotCopyWholeDataArray(t *testing.T) {
+	body := []byte(`{"data":[` + strings.Repeat(" ", 8<<20) + `{}]}`)
+	schema := &schemapb.CollectionSchema{}
+	ops := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "metadata",
+		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		Path:      "$.name",
+	}}
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	got, err := schemaForPathReplaceOperands(body, schema, ops)
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(body)
+
+	require.NoError(t, err)
+	require.True(t, proto.Equal(schema, got))
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+		"validating path-replace rows should not copy the entire data array")
+}
+
 func TestAnyToColumns(t *testing.T) {
 	t.Run("insert with dynamic field", func(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
@@ -1215,6 +1259,39 @@ func TestAnyToColumns(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "does not has field fn_out")
 	})
+}
+
+func TestCheckAndSetDataRowTypes(t *testing.T) {
+	schema := &schemapb.CollectionSchema{}
+	for _, test := range []struct {
+		name     string
+		body     string
+		wantRows int
+		wantErr  bool
+		wantText string
+	}{
+		{name: "object rows", body: `{"data":[{},{}]}`, wantRows: 2},
+		{name: "singleton object for V1", body: `{"data":{}}`, wantRows: 1},
+		{name: "number row", body: `{"data":[0]}`, wantErr: true, wantText: "data[0] must be a JSON object"},
+		{name: "string row", body: `{"data":["row"]}`, wantErr: true, wantText: "data[0] must be a JSON object"},
+		{name: "null row", body: `{"data":[null]}`, wantErr: true, wantText: "data[0] must be a JSON object"},
+		{name: "nested array row", body: `{"data":[[]]}`, wantErr: true, wantText: "data[0] must be a JSON object"},
+		{name: "mixed rows", body: `{"data":[{},[]]}`, wantErr: true, wantText: "data[1] must be a JSON object"},
+		{name: "empty array", body: `{"data":[]}`, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rows, _, err := checkAndSetData([]byte(test.body), schema, false)
+			if test.wantErr {
+				require.Error(t, err)
+				if test.wantText != "" {
+					assert.Contains(t, err.Error(), test.wantText)
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, rows, test.wantRows)
+		})
+	}
 }
 
 func TestCheckAndSetData(t *testing.T) {
@@ -5357,6 +5434,49 @@ func TestSchemaForPathReplaceOperandsRejectsDifferentMasks(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not match request mask")
 }
 
+func TestSchemaForPathReplaceOperandsRejectsNonObjectRows(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+	}}
+	ops := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "scores", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[0]",
+	}}
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"null first", `{"data":[null,{}]}`, "data[0] must be a JSON object"},
+		{"number first", `{"data":[0,{}]}`, "data[0] must be a JSON object"},
+		{"number after object", `{"data":[{"scores":[1]},0]}`, "data[1] must be a JSON object"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := schemaForPathReplaceOperands([]byte(tc.body), schema, ops)
+			require.ErrorContains(t, err, tc.want)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
+	}
+}
+
+func TestSchemaForPathReplaceOperandsDoesNotMaterializeInvalidRows(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+	}}
+	ops := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "scores", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[0]",
+	}}
+	body := []byte(`{"data":[` + strings.Repeat("0,", 200000) + `0]}`)
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := schemaForPathReplaceOperands(body, schema, ops)
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(body)
+
+	require.ErrorContains(t, err, "data[0] must be a JSON object")
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(4<<20),
+		"rejecting the first invalid row must not allocate a result for every row")
+}
+
 func TestSchemaForPathReplaceOperandsRejectsInvalidStructRows(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, path, want string
@@ -9219,4 +9339,121 @@ func TestBase64NullIsAValidBinaryVector(t *testing.T) {
 		[]byte(fmt.Sprintf(`{"data": {"%s": 1, "fv": "null"}}`, FieldBookID)), floatSchema, false)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestCheckAndSetDataRowLookup(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				Name: "vec", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+			},
+			{Name: "note", DataType: schemapb.DataType_VarChar, Nullable: true},
+		},
+	}
+	for _, row := range []string{
+		`{"id":1,"vec":[0.25,-0.5],"tag":"a"}`,
+		`{"tag":"a","vec":[0.25,-0.5],"id":1,"note":null}`,
+		`{"\u0069d":1,"\u0076ec":[0.25,-0.5],"tag":"a"}`,
+		`{"id":1,"id":9,"vec":[0.25,-0.5],"tag":"a"}`,
+	} {
+		t.Run(row, func(t *testing.T) {
+			rows, valid, err := checkAndSetData([]byte(`{"data":[`+row+`]}`), schema, false)
+			require.NoError(t, err)
+			require.Equal(t, []map[string]interface{}{{
+				"id": int64(1), "vec": []float32{0.25, -0.5}, "tag": "a",
+			}}, rows)
+			require.Equal(t, []bool{false}, valid["note"])
+			_, err = anyToColumns(rows, valid, schema, true, false)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestConvertFloatVectorToArray(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		rows [][]float32
+		dim  int64
+		want []float32
+	}{
+		{name: "rows", rows: [][]float32{{1, 2}, {3, 4}}, dim: 2, want: []float32{1, 2, 3, 4}},
+		{name: "empty", dim: 2, want: []float32{}},
+		{name: "zero width", rows: [][]float32{{}, {}}, want: []float32{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := convertFloatVectorToArray(test.rows, test.dim)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+	for _, rows := range [][][]float32{{{1}}, {{1, 2}, {3}}} {
+		_, err := convertFloatVectorToArray(rows, 2)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	}
+	// Reject an invalid dimension before using it to allocate a buffer.
+	_, err := convertFloatVectorToArray([][]float32{{1}}, math.MaxInt64)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestConvertInt8VectorToArray(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		rows [][]int8
+		dim  int64
+		want []byte
+	}{
+		{name: "signed rows", rows: [][]int8{{-128, -1, 0}, {1, 126, 127}}, dim: 3, want: []byte{128, 255, 0, 1, 126, 127}},
+		{name: "empty", dim: 3, want: []byte{}},
+		{name: "zero width", rows: [][]int8{{}, {}}, want: []byte{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := convertInt8VectorToArray(test.rows, test.dim)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+			require.Equal(t, len(got), cap(got), "preallocate exactly the final column size")
+			if len(got) > 0 {
+				got[0] = 42
+				require.Equal(t, int8(-128), test.rows[0][0])
+			}
+		})
+	}
+	for _, rows := range [][][]int8{{{1}}, {{1, 2}, {3}}} {
+		got, err := convertInt8VectorToArray(rows, 2)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Nil(t, got)
+	}
+}
+
+func TestConvertBinaryVectorToArray(t *testing.T) {
+	for _, test := range []struct {
+		dataType schemapb.DataType
+		dim      int64
+	}{
+		{schemapb.DataType_BinaryVector, 16},
+		{schemapb.DataType_Float16Vector, 1},
+		{schemapb.DataType_BFloat16Vector, 1},
+	} {
+		t.Run(test.dataType.String(), func(t *testing.T) {
+			rows := [][]byte{{0, 255}, {128, 1}}
+			got, err := convertBinaryVectorToArray(rows, test.dim, test.dataType)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0, 255, 128, 1}, got)
+			got[0] = 42
+			require.Equal(t, byte(0), rows[0][0])
+			for _, invalid := range [][][]byte{{{1}}, {{1, 2}, {3}}} {
+				got, err := convertBinaryVectorToArray(invalid, test.dim, test.dataType)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Nil(t, got)
+			}
+			got, err = convertBinaryVectorToArray(nil, test.dim, test.dataType)
+			require.NoError(t, err)
+			require.Equal(t, []byte{}, got)
+			got, err = convertBinaryVectorToArray([][]byte{{}, {}}, 0, test.dataType)
+			require.NoError(t, err)
+			require.Equal(t, []byte{}, got)
+		})
+	}
 }
