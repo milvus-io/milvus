@@ -53,7 +53,6 @@ func TestPartialUpdateInterceptorBuildsIndependentPerWALState(t *testing.T) {
 	require.Same(t, first.state.rowLocks, second.state.rowLocks)
 	require.NotSame(t, first.state.pkVersions, second.state.pkVersions)
 	require.NotSame(t, first.state.fences, second.state.fences)
-	require.NotSame(t, first.state.incompleteTxnFences, second.state.incompleteTxnFences)
 	require.Same(t, first.state.pkVersions.budget, second.state.pkVersions.budget)
 	require.EqualValues(t, 1, first.state.channel.Term)
 	require.EqualValues(t, 2, second.state.channel.Term)
@@ -690,8 +689,6 @@ func TestPartialUpdateInterceptorCollectionFences(t *testing.T) {
 		interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
 		interceptor.state.pkVersions.UpdateAll("v1", []any{int64(10)}, 110)
 		interceptor.state.pkVersions.UpdateAll("v2", []any{int64(20)}, 110)
-		interceptor.state.incompleteTxnFences.Update("v1", 110)
-		interceptor.state.incompleteTxnFences.Update("v2", 110)
 		interceptor.state.fences.Update("v1", 10, 110)
 		interceptor.state.fences.Update("v2", 20, 110)
 		_, err := interceptor.DoAppend(context.Background(), newDropCollectionMessage(10).WithTimeTick(120), appendOK)
@@ -703,8 +700,6 @@ func TestPartialUpdateInterceptorCollectionFences(t *testing.T) {
 		require.True(t, loaded)
 		require.Equal(t, versionIndexBudgetForEntries(1), interceptor.state.pkVersions.budget.used.Load())
 		requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v2", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{20}}, 109, 121))
-		require.NoError(t, interceptor.state.incompleteTxnFences.Verify("v1", 109))
-		requirePartialUpdateRetryable(t, interceptor.state.incompleteTxnFences.Verify("v2", 109))
 		require.NoError(t, interceptor.state.fences.Verify("v1", 10, 109))
 		requirePartialUpdateRetryable(t, interceptor.state.fences.Verify("v2", 20, 109))
 	})
@@ -713,7 +708,6 @@ func TestPartialUpdateInterceptorCollectionFences(t *testing.T) {
 func TestPartialUpdateInterceptorKeepsStateWhenDropCollectionAppendFails(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
 	interceptor.state.pkVersions.UpdateAll("v1", []any{int64(10)}, 110)
-	interceptor.state.incompleteTxnFences.Update("v1", 110)
 	interceptor.state.fences.Update("v1", 10, 110)
 	expectedErr := errors.New("append failed")
 
@@ -726,7 +720,6 @@ func TestPartialUpdateInterceptorKeepsStateWhenDropCollectionAppendFails(t *test
 	require.True(t, loaded)
 	require.Equal(t, versionIndexBudgetForEntries(1), interceptor.state.pkVersions.budget.used.Load())
 	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 109, 121))
-	requirePartialUpdateRetryable(t, interceptor.state.incompleteTxnFences.Verify("v1", 109))
 	requirePartialUpdateRetryable(t, interceptor.state.fences.Verify("v1", 10, 109))
 }
 

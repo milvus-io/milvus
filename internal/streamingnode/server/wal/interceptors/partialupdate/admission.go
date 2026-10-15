@@ -17,13 +17,12 @@ import (
 type partialUpdateState struct {
 	channel types.PChannelInfo
 	// Immutable lower bound for proofs backed by this WAL lifecycle's state.
-	historyStartTs      uint64
-	pkVersions          *pkVersionIndex
-	fences              *collectionFenceIndex
-	incompleteTxnFences *vchannelFenceIndex
-	rowLocks            *rowLockManager
-	txnMu               sync.RWMutex
-	txns                map[message.TxnID]*pendingTxn
+	historyStartTs uint64
+	pkVersions     *pkVersionIndex
+	fences         *collectionFenceIndex
+	rowLocks       *rowLockManager
+	txnMu          sync.RWMutex
+	txns           map[message.TxnID]*pendingTxn
 }
 
 func newPartialUpdateState(versionIndexTTL time.Duration, maxVersionIndexBytes int64) *partialUpdateState {
@@ -38,11 +37,10 @@ func newPartialUpdateStateWithBudget(
 	versionIndexBudget *versionByteBudget,
 ) *partialUpdateState {
 	return &partialUpdateState{
-		pkVersions:          newPKVersionIndexWithBudget(versionIndexTTL, versionIndexBudget),
-		fences:              newCollectionFenceIndex(),
-		incompleteTxnFences: newVChannelFenceIndex(),
-		rowLocks:            globalRowLockManager,
-		txns:                make(map[message.TxnID]*pendingTxn),
+		pkVersions: newPKVersionIndexWithBudget(versionIndexTTL, versionIndexBudget),
+		fences:     newCollectionFenceIndex(),
+		rowLocks:   globalRowLockManager,
+		txns:       make(map[message.TxnID]*pendingTxn),
 	}
 }
 
@@ -50,7 +48,6 @@ func newPartialUpdateStateWithBudget(
 // durably appended under the vchannel exclusive lock.
 func (s *partialUpdateState) removeDroppedVChannel(vchannel string, collectionID int64) {
 	s.pkVersions.Remove(vchannel)
-	s.incompleteTxnFences.Remove(vchannel)
 	s.fences.Remove(vchannel, collectionID)
 }
 
@@ -171,9 +168,6 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 			txnState.meta.GetReadTs(), s.historyStartTs, msg.VChannel(),
 		)
 	}
-	if err := s.incompleteTxnFences.Verify(msg.VChannel(), txnState.meta.GetReadTs()); err != nil {
-		return nil, err
-	}
 	if err := s.pkVersions.VerifyTyped(msg.VChannel(), txnState.pks, txnState.meta.GetReadTs(), msg.TimeTick()); err != nil {
 		return nil, err
 	}
@@ -185,8 +179,8 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 
 func (s *partialUpdateState) publishCommit(msg message.MutableMessage, txnState *pendingTxn) {
 	if txnState == nil || !txnState.observedBegin {
-		s.pkVersions.Advance(msg.TimeTick())
-		s.incompleteTxnFences.Update(msg.VChannel(), msg.TimeTick())
+		// Commit validation rejects these states before append. Do not publish
+		// an incomplete write set if a future caller bypasses that validation.
 		return
 	}
 	if txnState.pks.Len() > 0 {

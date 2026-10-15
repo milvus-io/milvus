@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -114,7 +115,12 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 		// Allocate new timestamp acker for message.
 		if acker, err = allocateMessageAcker(ctx, ackManager, msg); err != nil {
 			if preparedCommit {
-				err = txn.MarkCommitAdmissionRejected(err)
+				// The prepared session is rolled back, so retrying this CommitTxn
+				// cannot succeed. Report a terminal transaction error so that the
+				// producer replays the whole transaction instead.
+				err = txn.MarkCommitAdmissionRejected(status.NewTransactionExpired(
+					"prepared commit of txn %d failed to allocate its final timestamp: %v",
+					txnSession.TxnContext().TxnID, err))
 			}
 			return nil, err
 		}

@@ -181,17 +181,6 @@ func TestValidateCommitRejectsTermAndReadConflicts(t *testing.T) {
 	})
 }
 
-func TestValidateCommitRejectsIncompleteTransactionFence(t *testing.T) {
-	state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
-	state.incompleteTxnFences.Update("v1", 150)
-	state.recordTxnBegin(1)
-	require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
-	state.recordTxnWrites(1, []any{int64(10)})
-
-	_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 160), 1)
-	requirePartialUpdateRetryable(t, err)
-}
-
 func TestValidateCommitReplicatedCASBypassesSourceProof(t *testing.T) {
 	state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
 	state.recordTxnBegin(1)

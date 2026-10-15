@@ -227,7 +227,7 @@ flowchart LR
 | Local transaction packaging and empty `_puc` commit marker | Producer | One vchannel message group | Standard WAL properties |
 | PChannel global lock and keyed vchannel RW locks | Lock interceptor | One WAL instance | None |
 | Shared ordinary-write and exclusive CAS locks on per-vchannel stripes | StreamingNode process-wide row-lock manager, acquired by TimeTick through `RowLock` | Entries live until their last acquiring or admitted operation releases them | None |
-| `pendingTxn`, PK versions, collection fences, and incomplete-txn fences | Partial-update interceptor | One PChannel WAL term | None |
+| `pendingTxn`, PK versions, and collection fences | Partial-update interceptor | One PChannel WAL term | None |
 | PK-version byte budget and aggregate used/limit/missed-write metrics | Partial-update interceptor builder | One StreamingNode process | None |
 | Live and recovered transaction sessions | TxnManager | Transaction and WAL recovery lifecycle | Existing TxnBuffer recovery |
 | Collection schema and immutable PK descriptor | ShardManager | Collection lifecycle in one WAL | Existing recovery snapshot |
@@ -609,7 +609,9 @@ acquisition. The final timestamp lease check rejects it before WAL append,
 even if row-lock acquisition has already copied its write set. Only the final timestamp
 is assigned to the persisted CommitTxn. An error in guard acquisition, final
 allocation, or the final lease check deterministically rejects a prepared
-commit. Ambiguous WAL append failures retain their existing transaction
+commit. Because the session is rolled back, a final allocation failure is
+reported as `TRANSACTION_EXPIRED` so the producer replays the transaction
+instead of retrying a commit that can no longer succeed. Ambiguous WAL append failures retain their existing transaction
 outcome handling.
 
 Acknowledging the provisional timestamp is a sync-only acknowledgement: it
@@ -792,7 +794,7 @@ Promotion creates a new term and a new empty per-term version index.
 
 | Origin | Internal classification | Proxy or client result |
 |---|---|---|
-| Term mismatch, PK conflict, collection fence, incomplete-txn fence, TTL expiry, or budget-incomplete history | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Rebuild `REPLACE`; project relative update to non-retriable conflict |
+| Term mismatch, PK conflict, collection fence, TTL expiry, or budget-incomplete history | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Rebuild `REPLACE`; project relative update to non-retriable conflict |
 | Recovered local CAS without complete proof | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
 | Local CAS transaction expires before commit | Producer converts to `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
 | Malformed marker, proof, Insert schema scope, PK write set, or internal invariant | `STREAMING_CODE_UNRECOVERABLE` | Fail without CAS retry |
