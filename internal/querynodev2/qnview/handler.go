@@ -1,6 +1,7 @@
 package qnview
 
 import (
+	"context"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -51,14 +52,16 @@ var _ handler.QueryViewHandler = (*QNQueryViewHandler)(nil)
 //   - Dropped, SM in Dropped: responds immediately with Dropped re-report.
 //     (In practice unreachable — entry is deleted upon reaching Dropped.)
 type QNQueryViewHandler struct {
+	ctx    context.Context
 	mu     sync.Mutex
 	shards map[qviews.ShardID]*qnShardView
 	segMgr SegmentManager
 }
 
 // NewQNQueryViewHandler creates a new QNQueryViewHandler.
-func NewQNQueryViewHandler(segMgr SegmentManager) *QNQueryViewHandler {
+func NewQNQueryViewHandler(ctx context.Context, segMgr SegmentManager) *QNQueryViewHandler {
 	return &QNQueryViewHandler{
+		ctx:    ctx,
 		shards: make(map[qviews.ShardID]*qnShardView),
 		segMgr: segMgr,
 	}
@@ -92,6 +95,7 @@ func (h *QNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *qnShardVi
 	shard, ok := h.shards[shardID]
 	if !ok {
 		shard = &qnShardView{
+			ctx:    h.ctx,
 			views:  make(map[qviews.QueryViewVersion]*qnViewEntry),
 			segMgr: h.segMgr,
 			onEmpty: func(emptyShard *qnShardView) {

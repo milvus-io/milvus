@@ -1091,6 +1091,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 
 	RegisterStreamingServiceClient(registry)
 	RegisterLoggingMetrics(registry)
+	RegisterQV(registry)
 }
 
 // CleanupQueryNodeCollectionMetrics drops every query node series belonging to
