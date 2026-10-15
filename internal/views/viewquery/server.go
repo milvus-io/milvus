@@ -224,8 +224,7 @@ func (s *Server) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStr
 	}
 	legacyRequest := request.GetLegacyReq()
 	if legacyRequest == nil || legacyRequest.GetLimit() <= 0 || legacyRequest.GetIsCount() ||
-		len(legacyRequest.GetGroupByFieldIds()) > 0 || len(legacyRequest.GetAggregates()) > 0 ||
-		len(legacyRequest.GetOrderByFields()) > 0 {
+		len(legacyRequest.GetGroupByFieldIds()) > 0 || len(legacyRequest.GetAggregates()) > 0 {
 		return status.Error(codes.InvalidArgument, "QueryOnViewStream supports bounded Plain Query only")
 	}
 
