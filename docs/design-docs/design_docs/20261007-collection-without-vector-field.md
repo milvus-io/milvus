@@ -768,14 +768,21 @@ Reported in Section 3.1 and Section 4.
 - Delete application inside a sealed segment: the profile in Section 3.1
   puts 81–85 % of the cost in `std::lower_bound`, one independent,
   cache-missing binary search per delete key over the sorted primary-key
-  column (`search_batch_pks`, sorted branch). The query-side `search_pks`
-  already has a single-pass two-pointer variant
-  (`search_pks_with_two_pointers_impl`, PR #45328): sort the delete keys once
-  and advance through the column sequentially, so that a batch of keys costs
-  one pass over the column instead of 25 random probes per key. The delete
-  record insert (skip list, bitmap) is under 2 % and can additionally be
-  split by offset range across threads. With either, `maxRows` can be raised
-  or removed.
+  column (`search_batch_pks`, sorted branch). The fix is a merge: sort the
+  delete keys once, then advance a cursor through the sorted column, locating
+  each next key by an exponential (galloping) search from the previous hit
+  instead of a fresh binary search from the start of the chunk. With keys
+  spread over the column the average gap is small (1.5 M keys over 44 M rows:
+  about 30 rows), so each key costs a few probes in already-cached lines
+  instead of 25 cache misses, and the whole batch is one sequential pass.
+  The query-side `search_pks_with_two_pointers_impl` (PR #45328) sorts the
+  keys and is monotone at chunk granularity, but inside a chunk it still runs
+  a full binary search from offset 0 for every key; with one Storage V2 file
+  per column group (Section 3.1) that gives no gain, so the in-chunk cursor
+  is the part to add, and both paths can then share it. The delete record
+  insert (skip list, bitmap) is under 2 % and can additionally be split by
+  offset range across threads. With the merge, `maxRows` can be raised or
+  removed.
 - Loader estimate: add a per-row constant for fixed-width columns (measured
   gap ~80 B per row on `int64 + int32`), not for variable-length columns
   (already covered by the 2× factor).
