@@ -29,6 +29,60 @@ type pendingSchemaTarget struct {
 	eligible        bool
 }
 
+// schemaTargetCollectionID is captured before publishing a task. MarkIgnore can
+// replace a task's message later, but only for AlterReplicateConfig messages.
+func schemaTargetCollectionID(msg message.BroadcastMutableMessage) int64 {
+	if msg.MessageTypeWithVersion() != message.MessageTypeAlterCollectionV2 {
+		return 0
+	}
+	alter, err := message.AsMutableAlterCollectionMessageV2(msg)
+	if err != nil || !messageutil.IsSchemaChange(alter.Header()) || alter.MustBody().GetUpdates().GetSchema() == nil {
+		return 0
+	}
+	return alter.Header().GetCollectionId()
+}
+
+// schemaTaskIndex narrows reads to one collection's ALTER tasks. Membership has
+// the same lifetime as the manager's tasks, including retained tombstones;
+// pendingSchemaTarget checks mutable state and callback eligibility under the
+// task lock. Recovery rebuilds the index before readers can access the manager.
+// All accesses are protected by broadcastTaskManager.mu.
+type schemaTaskIndex map[int64]map[uint64]*broadcastTask
+
+func (i schemaTaskIndex) add(id uint64, task *broadcastTask) {
+	if task.schemaCollectionID == 0 {
+		return
+	}
+	tasks := i[task.schemaCollectionID]
+	if tasks == nil {
+		tasks = make(map[uint64]*broadcastTask)
+		i[task.schemaCollectionID] = tasks
+	}
+	tasks[id] = task
+}
+
+func (i schemaTaskIndex) remove(id uint64, collectionID int64) {
+	tasks := i[collectionID]
+	delete(tasks, id)
+	if len(tasks) == 0 {
+		delete(i, collectionID)
+	}
+}
+
+func (bm *broadcastTaskManager) snapshotSchemaTasks(collectionID int64) []*broadcastTask {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	tasks := bm.schemaTasks[collectionID]
+	if len(tasks) == 0 {
+		return nil
+	}
+	snapshot := make([]*broadcastTask, 0, len(tasks))
+	for _, task := range tasks {
+		snapshot = append(snapshot, task)
+	}
+	return snapshot
+}
+
 func (b *broadcastTask) pendingSchemaTarget(collectionID int64) *pendingSchemaTarget {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -60,7 +114,7 @@ func (b *broadcastTask) pendingSchemaTarget(collectionID int64) *pendingSchemaTa
 
 func (bm *broadcastTaskManager) GetPendingSchemaTarget(collectionID int64) (*SchemaTarget, error) {
 	var pending []*pendingSchemaTarget
-	for _, task := range bm.snapshotBroadcastTasks() {
+	for _, task := range bm.snapshotSchemaTasks(collectionID) {
 		if snapshot := task.pendingSchemaTarget(collectionID); snapshot != nil {
 			pending = append(pending, snapshot)
 		}

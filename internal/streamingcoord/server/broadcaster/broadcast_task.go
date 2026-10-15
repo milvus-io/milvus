@@ -29,6 +29,7 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 		taskMetricsGuard:       m,
 		msg:                    msg,
 		messageTypeWithVersion: msg.MessageTypeWithVersion(),
+		schemaCollectionID:     schemaTargetCollectionID(msg),
 		task:                   proto,
 		dirty:                  false, // the task is recovered from the recovery info, so it's persisted.
 		ackCallbackScheduler:   ackCallbackScheduler,
@@ -73,6 +74,7 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 		mu:                     sync.Mutex{},
 		msg:                    msg,
 		messageTypeWithVersion: msg.MessageTypeWithVersion(),
+		schemaCollectionID:     schemaTargetCollectionID(msg),
 		task: &streamingpb.BroadcastTask{
 			Message:             msg.IntoMessageProto(),
 			State:               streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
@@ -106,6 +108,7 @@ type broadcastTask struct {
 	mu                     sync.Mutex
 	msg                    message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
 	messageTypeWithVersion message.MessageTypeWithVersion  // immutable after construction; safe to read without mu.
+	schemaCollectionID     int64                           // immutable; zero for tasks without schema preparation intent.
 	task                   *streamingpb.BroadcastTask
 	dirty                  bool // a flag to indicate that the task has been modified and needs to be saved into the recovery info.
 	done                   chan struct{}

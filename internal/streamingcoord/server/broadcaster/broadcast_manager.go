@@ -46,6 +46,7 @@ func newBroadcastTaskManager(ctx context.Context, protos []*streamingpb.Broadcas
 		recoveryTasks = append(recoveryTasks, t)
 	}
 	tasks := make(map[uint64]*broadcastTask, len(recoveryTasks))
+	schemaTasks := make(schemaTaskIndex)
 	pendingTasks := make([]*pendingBroadcastTask, 0, len(recoveryTasks))
 	pendingAckCallbackTasks := make([]*broadcastTask, 0, len(recoveryTasks))
 	tombstoneIDs := make([]uint64, 0, len(recoveryTasks))
@@ -77,6 +78,7 @@ func newBroadcastTaskManager(ctx context.Context, protos []*streamingpb.Broadcas
 			tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
 		}
 		tasks[task.Header().BroadcastID] = task
+		schemaTasks.add(task.Header().BroadcastID, task)
 		// Rebuild the idempotency index across EVERY state, tombstones included:
 		// a tombstoned task is exactly what a late retry must still hit.
 		idxOfKeys.Add(task.IdempotencyScope(), task.Header().BroadcastID)
@@ -89,6 +91,7 @@ func newBroadcastTaskManager(ctx context.Context, protos []*streamingpb.Broadcas
 		cancel:             cancel,
 		mu:                 &sync.Mutex{},
 		tasks:              tasks,
+		schemaTasks:        schemaTasks,
 		idempotencyIndex:   idxOfKeys,
 		resourceKeyLocker:  rkLocker,
 		metrics:            metrics,
@@ -112,10 +115,11 @@ type broadcastTaskManager struct {
 	lifetime *typeutil.Lifetime
 	ctx      context.Context
 	cancel   context.CancelFunc
-	// mu only protects tasks. Never call a broadcastTask method while holding mu.
+	// mu protects tasks and their indexes. Never acquire a task lock while holding mu.
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
-	idempotencyIndex   *idempotencyIndex         // map the idempotency key to the broadcastID that owns it
+	schemaTasks        schemaTaskIndex
+	idempotencyIndex   *idempotencyIndex // map the idempotency key to the broadcastID that owns it
 	resourceKeyLocker  *resourceKeyLocker
 	metrics            *broadcasterMetrics
 	broadcastScheduler *broadcasterScheduler // the scheduler of the broadcast task
@@ -418,6 +422,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
 	bm.tasks[broadcastID] = newIncomingTask
+	bm.schemaTasks.add(broadcastID, newIncomingTask)
 	bm.idempotencyIndex.Add(scope, broadcastID)
 	return newIncomingTask, true
 }
@@ -442,6 +447,7 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	newBroadcastTask := newBroadcastTaskFromImmutableMessage(msg, bm.metrics, bm.ackScheduler)
 	newBroadcastTask.SetLogger(bm.Logger())
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
+	bm.schemaTasks.add(bh.BroadcastID, newBroadcastTask)
 	bm.idempotencyIndex.Add(newBroadcastTask.IdempotencyScope(), bh.BroadcastID)
 	bm.mu.Unlock()
 	return newBroadcastTask, true
@@ -463,6 +469,7 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 
 	if t, ok := bm.tasks[broadcastID]; ok {
 		bm.idempotencyIndex.Remove(t.IdempotencyScope(), broadcastID)
+		bm.schemaTasks.remove(broadcastID, t.schemaCollectionID)
 	}
 	delete(bm.tasks, broadcastID)
 }
