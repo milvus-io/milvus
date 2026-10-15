@@ -42,9 +42,11 @@ type LoadInfoProvider interface {
 }
 
 type QueryViewLoadInfo struct {
-	PartitionIDs []int64
-	LoadFields   []*messagespb.LoadFieldConfig
-	IndexInfos   []*indexpb.IndexInfo
+	PartitionIDs         []int64
+	LoadFields           []*messagespb.LoadFieldConfig
+	RequiredFields       []*messagespb.LoadFieldConfig
+	SkipLoadDynamicField bool
+	IndexInfos           []*indexpb.IndexInfo
 }
 
 // QueryRuntimeReleaseModule completes resource transitions before a DataView may Drop.

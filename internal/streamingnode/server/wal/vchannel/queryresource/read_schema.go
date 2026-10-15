@@ -109,8 +109,8 @@ func (r *readSchemas) prepare(ctx context.Context, view walview.VChannelWALView)
 	if view.Schema == nil {
 		return merr.WrapErrServiceInternalMsg("query view read schema is absent")
 	}
-	fields := make([]int64, 0, len(view.LoadFields))
-	for _, field := range view.LoadFields {
+	fields := make([]int64, 0, len(view.RequiredFields))
+	for _, field := range qviews.ResolveRequiredFields(view.Schema, view.RequiredFields) {
 		fields = append(fields, field.GetFieldId())
 	}
 	req := &segcore.CreateCCollectionRequest{CollectionID: view.CollectionID, Schema: view.Schema}
@@ -171,6 +171,7 @@ func (r *readSchemas) PrepareSchema(ctx context.Context, meta *viewpb.QueryViewM
 			return err
 		}
 		view.LoadFields, view.IndexInfos = info.LoadFields, info.IndexInfos
+		view.RequiredFields = qviews.ResolveRequiredFields(view.Schema, info.RequiredFields)
 	}
 	return r.prepare(ctx, view)
 }

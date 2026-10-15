@@ -139,6 +139,11 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
         load_index_info.index_params[kv_pair.key()] = kv_pair.value();
     }
 
+    // Register every required index, but do not prewarm unhinted fields.
+    if (!fields_->ShouldPreload(field_id)) {
+        load_index_info.warmup_policy = "disable";
+    }
+
     // Inject scalar index version into index_params for scalar indexes
     auto scalar_version = field_index_info->current_scalar_index_version();
     if (scalar_version > 0) {

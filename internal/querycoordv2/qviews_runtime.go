@@ -250,6 +250,14 @@ func newDefaultQViewsRuntimeDependencies(
 				return source.QueryViewCollectionIndexInfos(id)
 			}
 			return nil
+		}, func(ctx context.Context, id int64) (*schemapb.CollectionSchema, error) {
+			return qvresource.PreparationSchema(ctx, id, func(ctx context.Context, id int64) (*schemapb.CollectionSchema, error) {
+				coll, err := broker.DescribeCollection(ctx, id)
+				if err != nil {
+					return nil, err
+				}
+				return coll.GetSchema(), nil
+			})
 		}),
 		dataViewReconciler: reconciler,
 		vchannels: func(ctx context.Context, id int64) ([]string, error) {

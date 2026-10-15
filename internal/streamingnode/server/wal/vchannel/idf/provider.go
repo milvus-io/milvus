@@ -139,7 +139,7 @@ func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) 
 	r.oracles = make(map[queryresource.ReadSchemaKey]*oracleRuntime)
 	r.mu.Unlock()
 
-	if !hasLoadedBM25Function(walView.Schema, loadFieldIDs(walView.LoadFields)) {
+	if !hasLoadedBM25Function(walView.Schema, loadFieldIDs(walView.RequiredFields)) {
 		r.mu.Lock()
 		closed := r.closed
 		if !closed {

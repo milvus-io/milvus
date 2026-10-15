@@ -114,9 +114,10 @@ func (r *Runtime) PrepareSchema(ctx context.Context, meta *viewpb.QueryViewMeta,
 		}
 		view.PartitionIDs = append([]int64{}, info.PartitionIDs...)
 		view.LoadFields = info.LoadFields
+		view.RequiredFields = qviews.ResolveRequiredFields(view.Schema, info.RequiredFields)
 	}
 	var next *oracleRuntime
-	if hasLoadedBM25Function(view.Schema, loadFieldIDs(view.LoadFields)) {
+	if hasLoadedBM25Function(view.Schema, loadFieldIDs(view.RequiredFields)) {
 		provider, err := r.resolveProvider(ctx)
 		if err != nil {
 			return err

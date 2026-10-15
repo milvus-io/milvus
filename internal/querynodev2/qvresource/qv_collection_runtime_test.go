@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -338,4 +339,15 @@ func TestQueryViewCollectionRuntimeFailedScopeUpdateReleasesReference(t *testing
 	require.NotNil(t, old.CCollection().Schema())
 	old.Release()
 	require.Empty(t, manager.collections, "the failed acquisition must not leak an owner pin")
+}
+
+func TestQueryViewRequiredFieldsAreIndependentOfHints(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102, IsDynamic: true}}}
+	info := qnview.QueryViewLoadInfo{RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}}, SkipLoadDynamicField: true}
+	require.Equal(t, []int64{100, 101, 102}, loadInfoFieldIDs(info, schema))
+	require.Equal(t, []int64{100}, loadInfoHintIDs(info, schema))
+	info.LoadFields = nil
+	require.Equal(t, []int64{100, 101}, loadInfoHintIDs(info, schema))
+	info.RequiredFields = nil // Retained legacy snapshot binds to this View's schema.
+	require.Equal(t, []int64{100, 101, 102}, loadInfoFieldIDs(info, schema))
 }

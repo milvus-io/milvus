@@ -17,6 +17,7 @@ import (
 
 func TestLoadInfoVersionCanonicalPersistedIdentity(t *testing.T) {
 	cfg := sampleConfig()
+	cfg.RequiredFields = []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 201}}
 	cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{FieldId: 201, IndexId: 301})
 	original := cfg.Clone()
 	version := loadInfoVersion(cfg)
@@ -24,6 +25,7 @@ func TestLoadInfoVersionCanonicalPersistedIdentity(t *testing.T) {
 	reordered := cfg.Clone()
 	slices.Reverse(reordered.PartitionIDs)
 	slices.Reverse(reordered.LoadFields)
+	slices.Reverse(reordered.RequiredFields)
 	slices.Reverse(reordered.Replicas)
 	require.Equal(t, version, loadInfoVersion(reordered))
 	reordered.Replicas[0].Priority = commonpb.LoadPriority_LOW
@@ -31,10 +33,12 @@ func TestLoadInfoVersionCanonicalPersistedIdentity(t *testing.T) {
 	reordered.LoadFields[0].IndexId++
 	require.Equal(t, version, loadInfoVersion(reordered), "index replacement does not change view loading scope")
 	for name, change := range map[string]func(*LoadConfig){
-		"field":          func(c *LoadConfig) { c.LoadFields[0].FieldId++ },
-		"partition":      func(c *LoadConfig) { c.PartitionIDs[0]++ },
-		"replica":        func(c *LoadConfig) { c.Replicas[0].ReplicaID++ },
-		"resource group": func(c *LoadConfig) { c.Replicas[0].ResourceGroup = "other" },
+		"required field":    func(c *LoadConfig) { c.RequiredFields[0].FieldId++ },
+		"skip dynamic hint": func(c *LoadConfig) { c.SkipLoadDynamicField = !c.SkipLoadDynamicField },
+		"field":             func(c *LoadConfig) { c.LoadFields[0].FieldId++ },
+		"partition":         func(c *LoadConfig) { c.PartitionIDs[0]++ },
+		"replica":           func(c *LoadConfig) { c.Replicas[0].ReplicaID++ },
+		"resource group":    func(c *LoadConfig) { c.Replicas[0].ResourceGroup = "other" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			next := cfg.Clone()

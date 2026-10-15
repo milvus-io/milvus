@@ -17,7 +17,8 @@ type LoadConfig struct {
 	DbID                     int64
 	CollectionID             int64
 	PartitionIDs             []int64
-	LoadFields               []*messagespb.LoadFieldConfig
+	LoadFields               []*messagespb.LoadFieldConfig // Preload hints, not query scope.
+	RequiredFields           []*messagespb.LoadFieldConfig // Explicit internal query scope.
 	LoadAllFields            *bool
 	SkipLoadDynamicField     bool
 	UserSpecifiedReplicaMode bool
@@ -42,6 +43,7 @@ func (c *LoadConfig) Clone() *LoadConfig {
 		CollectionID:             c.CollectionID,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
 		SkipLoadDynamicField:     c.SkipLoadDynamicField,
+		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
 	}
 	if c.LoadAllFields != nil {
 		out.LoadAllFields = proto.Bool(*c.LoadAllFields)
@@ -85,6 +87,7 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 		PartitionIDs:             append([]int64{}, msg.GetPartitionIds()...),
 		UserSpecifiedReplicaMode: msg.GetUserSpecifiedReplicaMode(),
 		SkipLoadDynamicField:     msg.GetSkipLoadDynamicField(),
+		RequiredFields:           cloneFieldConfigs(msg.GetRequiredFields()),
 	}
 	if msg.LoadAllFields != nil {
 		cfg.LoadAllFields = proto.Bool(msg.GetLoadAllFields())
@@ -119,6 +122,7 @@ func buildFromPersisted(
 		CollectionID:             info.GetCollectionID(),
 		UserSpecifiedReplicaMode: info.GetUserSpecifiedReplicaMode(),
 		SkipLoadDynamicField:     info.GetSkipLoadDynamicField(),
+		RequiredFields:           cloneFieldConfigs(info.GetRequiredFields()),
 	}
 
 	if info.LoadAllFields != nil {
@@ -167,6 +171,7 @@ func (c *LoadConfig) toCollectionLoadInfoProto() *querypb.CollectionLoadInfo {
 		Status:                   querypb.LoadStatus_Loaded,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
 		SkipLoadDynamicField:     c.SkipLoadDynamicField,
+		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
 	}
 	if c.LoadAllFields != nil {
 		info.LoadAllFields = proto.Bool(*c.LoadAllFields)
@@ -205,4 +210,15 @@ func (r *ReplicaAssignment) toReplicaProto(collectionID int64) *querypb.Replica 
 		ResourceGroup: r.ResourceGroup,
 		// TODO: persist Priority once a proto field is added.
 	}
+}
+
+func cloneFieldConfigs(fields []*messagespb.LoadFieldConfig) []*messagespb.LoadFieldConfig {
+	if fields == nil {
+		return nil
+	}
+	out := make([]*messagespb.LoadFieldConfig, len(fields))
+	for i, field := range fields {
+		out[i] = proto.Clone(field).(*messagespb.LoadFieldConfig)
+	}
+	return out
 }

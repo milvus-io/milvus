@@ -1,6 +1,7 @@
 package loadmgr
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,49 +19,51 @@ func TestSchemaDeltaPreservesLoadingIntent(t *testing.T) {
 		Functions:         []*schemapb.FunctionSchema{{InputFieldIds: []int64{100}, OutputFieldIds: []int64{105}}},
 	}
 	for _, tc := range []struct {
-		name     string
-		all      *bool
-		skip     bool
-		fields   []int64
-		expected []int64
+		name        string
+		all         *bool
+		skip        bool
+		hints, want []int64
 	}{
-		{"full", proto.Bool(true), false, []int64{100, 101, 102}, []int64{100, 101, 103, 104, 105, 107, 108}},
-		{"full skip dynamic", proto.Bool(true), true, []int64{100, 101, 102}, []int64{100, 101, 103, 105, 107, 108}},
-		{"explicit all old fields", proto.Bool(false), false, []int64{100, 101, 102}, []int64{100, 101, 105}},
-		{"partial missing input", proto.Bool(false), false, []int64{101, 102}, []int64{101}},
-		{"legacy full", nil, false, []int64{100, 101, 102}, []int64{100, 101, 103, 104, 105, 107, 108}},
-		{"legacy partial", nil, false, []int64{100, 102}, []int64{100, 105}},
+		{"empty follows schema", nil, false, nil, nil},
+		{"legacy full intent", proto.Bool(true), false, []int64{100, 101, 102}, nil},
+		{"explicit old schema", proto.Bool(false), false, []int64{100, 101, 102}, []int64{100, 101}},
+		{"unhinted function input", proto.Bool(false), false, []int64{101, 102}, []int64{101}},
+		{"skip dynamic is a hint", proto.Bool(true), true, []int64{100, 101, 102}, nil},
+		{"legacy partial", nil, false, []int64{100, 102}, []int64{100}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &LoadConfig{CollectionID: 1, LoadAllFields: tc.all, SkipLoadDynamicField: tc.skip}
-			for _, id := range tc.fields {
+			cfg := &LoadConfig{CollectionID: 1, LoadAllFields: tc.all, SkipLoadDynamicField: tc.skip, RequiredFields: RequiredFieldsForSchema(old)}
+			for _, id := range tc.hints {
 				cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{FieldId: id})
 			}
 			original := cfg.Clone()
 			next := reconcileSchemaFields(cfg, old, target, []*messagespb.LoadFieldConfig{{FieldId: 105, IndexId: 900}})
-			ids := make([]int64, 0, len(next.LoadFields))
-			for _, field := range next.LoadFields {
-				ids = append(ids, field.FieldId)
-				if field.FieldId == 105 {
-					require.EqualValues(t, 900, field.IndexId)
-				}
+			var hints []int64
+			for _, f := range next.LoadFields {
+				hints = append(hints, f.FieldId)
 			}
-			require.Equal(t, tc.expected, ids)
-			require.Equal(t, original, cfg, "published config is immutable")
-			require.True(t, equalSchemaLoadIntent(next, reconcileSchemaFields(next, old, target, []*messagespb.LoadFieldConfig{{FieldId: 105, IndexId: 900}})), "callback replay is idempotent")
+			require.Equal(t, tc.want, hints)
+			require.Equal(t, RequiredFieldsForSchema(target), next.RequiredFields)
+			require.Equal(t, original, cfg, "old views retain immutable requirements")
+			require.True(t, equalSchemaLoadIntent(next, reconcileSchemaFields(next, old, target, nil)), "replay is idempotent")
 			recovered := buildFromPersisted(next.toCollectionLoadInfoProto(), nil, nil)
-			require.Equal(t, next.LoadAllFields, recovered.LoadAllFields)
+			requireFieldConfigsEqual(t, next.RequiredFields, recovered.RequiredFields)
+			requireFieldConfigsEqual(t, next.LoadFields, recovered.LoadFields)
 			require.Equal(t, next.SkipLoadDynamicField, recovered.SkipLoadDynamicField)
 		})
 	}
 }
 
-func TestSchemaDeltaLegacySkipDynamic(t *testing.T) {
+func TestSchemaDeltaNormalizesLegacyRequiredFields(t *testing.T) {
 	old := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101, IsDynamic: true}}}
 	target := proto.Clone(old).(*schemapb.CollectionSchema)
 	target.Fields = append(target.Fields, &schemapb.FieldSchema{FieldID: 102})
-	next := reconcileSchemaFields(&LoadConfig{LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}}}, old, target, nil)
-	require.True(t, *next.LoadAllFields)
-	require.True(t, next.SkipLoadDynamicField)
-	require.Equal(t, []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 102}}, next.LoadFields)
+	next := reconcileSchemaFields(&LoadConfig{LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}}, SkipLoadDynamicField: true}, old, target, nil)
+	require.Equal(t, RequiredFieldsForSchema(target), next.RequiredFields)
+	require.Equal(t, []*messagespb.LoadFieldConfig{{FieldId: 100}}, next.LoadFields)
+}
+
+func requireFieldConfigsEqual(t *testing.T, expected, actual []*messagespb.LoadFieldConfig) {
+	t.Helper()
+	require.True(t, slices.EqualFunc(expected, actual, func(a, b *messagespb.LoadFieldConfig) bool { return proto.Equal(a, b) }), "expected %v, actual %v", expected, actual)
 }

@@ -6,8 +6,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -25,12 +27,17 @@ type loadInfoKey struct {
 type LoadInfoStore struct {
 	catalog queryview.LoadInfoCatalog
 	indexes func(int64) []*indexpb.IndexInfo
+	schema  func(context.Context, int64) (*schemapb.CollectionSchema, error)
 	locks   *lock.KeyLock[loadInfoKey]
 	cache   sync.Map
 }
 
-func NewLoadInfoStore(catalog queryview.LoadInfoCatalog, indexes func(int64) []*indexpb.IndexInfo) *LoadInfoStore {
-	return &LoadInfoStore{catalog: catalog, indexes: indexes, locks: lock.NewKeyLock[loadInfoKey]()}
+func NewLoadInfoStore(catalog queryview.LoadInfoCatalog, indexes func(int64) []*indexpb.IndexInfo, schema ...func(context.Context, int64) (*schemapb.CollectionSchema, error)) *LoadInfoStore {
+	s := &LoadInfoStore{catalog: catalog, indexes: indexes, locks: lock.NewKeyLock[loadInfoKey]()}
+	if len(schema) > 0 {
+		s.schema = schema[0]
+	}
+	return s
 }
 
 func (s *LoadInfoStore) Get(ctx context.Context, collectionID int64, version uint64) (*querypb.GetQueryViewLoadInfoResponse, error) {
@@ -67,9 +74,11 @@ func (s *LoadInfoStore) Ensure(ctx context.Context, cfg *LoadConfig) error {
 		return nil
 	}
 	owned := cfg.Clone()
-	info := &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: cfg.CollectionID, Version: key.version, PartitionIDs: owned.PartitionIDs, LoadFields: owned.LoadFields}
-	for _, field := range info.LoadFields {
-		field.IndexId = 0
+	info := &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: cfg.CollectionID, Version: key.version, PartitionIDs: owned.PartitionIDs, LoadFields: owned.LoadFields, RequiredFields: owned.RequiredFields, SkipLoadDynamicField: owned.SkipLoadDynamicField}
+	for _, fields := range [][]*messagespb.LoadFieldConfig{info.LoadFields, info.RequiredFields} {
+		for _, field := range fields {
+			field.IndexId = 0
+		}
 	}
 	if err := s.catalog.SaveLoadInfo(ctx, info); err != nil {
 		return err
@@ -82,8 +91,8 @@ func (s *LoadInfoStore) Ensure(ctx context.Context, cfg *LoadConfig) error {
 // the newest available index; no index metadata is persisted in this history.
 func (s *LoadInfoStore) withCurrentIndexes(stored *querypb.GetQueryViewLoadInfoResponse) *querypb.GetQueryViewLoadInfoResponse {
 	info := proto.Clone(stored).(*querypb.GetQueryViewLoadInfoResponse)
-	fields := make(map[int64]struct{}, len(info.LoadFields))
-	for _, field := range info.LoadFields {
+	fields := make(map[int64]struct{}, len(info.RequiredFields))
+	for _, field := range info.RequiredFields {
 		field.IndexId = 0
 		fields[field.FieldId] = struct{}{}
 	}
@@ -94,4 +103,24 @@ func (s *LoadInfoStore) withCurrentIndexes(stored *querypb.GetQueryViewLoadInfoR
 		}
 	}
 	return info
+}
+
+// normalize materializes legacy required scopes before desired state publication.
+// Historical snapshots are resolved against their View schema by the worker.
+func (s *LoadInfoStore) normalize(ctx context.Context, cfg *LoadConfig) (*LoadConfig, error) {
+	cfg = cfg.Clone()
+	if len(cfg.RequiredFields) == 0 && s.schema != nil {
+		schema, err := s.schema(ctx, cfg.CollectionID)
+		if err != nil {
+			return nil, err
+		}
+		cfg.RequiredFields = RequiredFieldsForSchema(schema)
+		if len(cfg.RequiredFields) == 0 {
+			return nil, merr.WrapErrServiceInternalMsg("collection %d has no required query fields", cfg.CollectionID)
+		}
+	}
+	if cfg.LoadAllFields != nil && *cfg.LoadAllFields {
+		cfg.LoadFields = nil
+	}
+	return cfg, nil
 }

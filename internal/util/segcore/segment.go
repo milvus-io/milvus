@@ -52,6 +52,7 @@ type CreateCSegmentRequest struct {
 	IsSorted          bool
 	LoadInfo          *querypb.SegmentLoadInfo
 	LoadFields        []int64 // independent sealed load scope; never mutates CCollection
+	FieldHints        []int64 // preload only; empty follows the bound scope
 	ExplicitLoadScope bool    // QN scope distinguishes empty from legacy all-fields
 }
 
@@ -77,6 +78,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		if err != nil {
 			return nil, merr.Wrap(err, "failed to convert segment load info")
 		}
+		segLoadInfo.FieldHints = req.FieldHints
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {
 			return nil, err
@@ -384,6 +386,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if err != nil {
 		return merr.Wrap(err, "failed to convert reopen load info")
 	}
+	segLoadInfo.FieldHints = req.FieldHints
 	loadInfoBlob, err := proto.Marshal(segLoadInfo)
 	if err != nil {
 		return err

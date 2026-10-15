@@ -335,6 +335,7 @@ type Collection struct {
 	schema     atomic.Pointer[collectionSchemaSnapshot]
 	isGpuIndex bool
 	loadFields typeutil.Set[int64]
+	fieldHints []int64
 
 	refCount *atomic.Uint32
 }
@@ -415,6 +416,7 @@ func (c *Collection) CreateCSegment(req *segcore.CreateCSegmentRequest) (segcore
 	}
 	req.Collection = c.ccollection
 	req.LoadFields = c.loadFields.Collect()
+	req.FieldHints = c.fieldHints
 	req.ExplicitLoadScope = c.schemaOwner != nil
 	return segcore.CreateCSegment(req)
 }
@@ -721,7 +723,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 // retain the owning collection for this wrapper's entire lifetime. It owns no
 // native resource and must not be passed to DeleteCollection or a manager.
 // Schema and index metadata stay shared; field and partition scope do not.
-func (c *Collection) WithLoadScope(partitions, fields []int64) *Collection {
+func (c *Collection) WithLoadScope(partitions, fields []int64, hints ...[]int64) *Collection {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	loadFields := typeutil.NewSet(fields...)
@@ -736,6 +738,9 @@ func (c *Collection) WithLoadScope(partitions, fields []int64) *Collection {
 		resourceGroup: c.resourceGroup,
 		isGpuIndex:    c.isGpuIndex,
 		loadFields:    loadFields,
+	}
+	if len(hints) > 0 {
+		view.fieldHints = append([]int64(nil), hints[0]...)
 	}
 	view.schema.Store(c.schema.Load())
 	view.AddPartition(partitions...)

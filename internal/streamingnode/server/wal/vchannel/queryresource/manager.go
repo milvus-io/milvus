@@ -365,6 +365,7 @@ func (m *Manager) resolveLoadInfo(ctx context.Context, view walview.VChannelWALV
 	// snapshot retains the legacy unrestricted scope.
 	view.PartitionIDs = append([]int64{}, loadInfo.PartitionIDs...)
 	view.LoadFields = loadInfo.LoadFields
+	view.RequiredFields = qviews.ResolveRequiredFields(view.Schema, loadInfo.RequiredFields)
 	view.IndexInfos = loadInfo.IndexInfos
 	return view, nil
 }

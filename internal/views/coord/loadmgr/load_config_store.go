@@ -90,6 +90,12 @@ func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCat
 	for _, info := range collections {
 		collID := info.GetCollectionID()
 		cfg := buildFromPersisted(info, partitions[collID], replicasByColl[collID])
+		if len(loadInfos) > 0 && loadInfos[0] != nil {
+			cfg, err = loadInfos[0].normalize(ctx, cfg)
+			if err != nil {
+				return nil, err
+			}
+		}
 		configs[collID] = cfg
 		versions[collID] = loadInfoVersion(cfg)
 	}
@@ -128,6 +134,11 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 
 func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error {
 	if s.loadInfos != nil {
+		var err error
+		cfg, err = s.loadInfos.normalize(ctx, cfg)
+		if err != nil {
+			return err
+		}
 		if err := s.loadInfos.Ensure(ctx, cfg); err != nil {
 			return err
 		}

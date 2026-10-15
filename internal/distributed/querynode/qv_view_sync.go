@@ -174,11 +174,13 @@ func (p *lazyQueryViewLoadMetadataProvider) GetQueryViewLoadInfo(ctx context.Con
 		return qnview.QueryViewLoadInfo{}, err
 	}
 	return qnview.QueryViewLoadInfo{
-		CollectionID: resp.GetCollectionID(),
-		Version:      qnview.QueryViewLoadInfoVersionFromProto(resp.GetVersion()),
-		PartitionIDs: append([]int64(nil), resp.GetPartitionIDs()...),
-		LoadFields:   resp.GetLoadFields(),
-		IndexInfos:   resp.GetIndexInfoList(),
+		CollectionID:         resp.GetCollectionID(),
+		Version:              qnview.QueryViewLoadInfoVersionFromProto(resp.GetVersion()),
+		PartitionIDs:         append([]int64(nil), resp.GetPartitionIDs()...),
+		LoadFields:           resp.GetLoadFields(),
+		RequiredFields:       resp.GetRequiredFields(),
+		SkipLoadDynamicField: resp.GetSkipLoadDynamicField(),
+		IndexInfos:           resp.GetIndexInfoList(),
 	}, nil
 }
 

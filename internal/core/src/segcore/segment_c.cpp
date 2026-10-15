@@ -252,17 +252,19 @@ NewSealedSegmentWithCollection(CCollection collection,
         if (field_count > 0) {
             fields.assign(load_fields, load_fields + field_count);
         }
+        milvus::proto::segcore::SegmentLoadInfo info;
+        AssertInfo(info.ParseFromArray(load_blob, load_length),
+                   "unmarshal load info failed");
+        std::vector<int64_t> hints(info.field_hints().begin(),
+                                   info.field_hints().end());
         auto segment =
             std::make_unique<milvus::segcore::ChunkedSegmentSealedImpl>(
                 std::make_shared<const milvus::segcore::SealedFieldLayout>(
-                    schema.get(), milvus::segcore::LoadScope(fields)),
+                    schema.get(), milvus::segcore::LoadScope(fields, hints)),
                 col->get_index_meta(),
                 milvus::segcore::SegcoreConfig::default_config(),
                 segment_id,
                 sorted);
-        milvus::proto::segcore::SegmentLoadInfo info;
-        AssertInfo(info.ParseFromArray(load_blob, load_length),
-                   "unmarshal load info failed");
         segment->SetLoadInfo(std::move(info));
         *output = segment.release();
         return milvus::SuccessCStatus();
@@ -341,8 +343,8 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
              schema = schema.get(),
              blob = std::string(reinterpret_cast<const char*>(load_blob),
                                 load_length),
-             scope = milvus::segcore::LoadScope(fields)](
-                folly::CancellationToken token) -> bool* {
+             fields =
+                 std::move(fields)](folly::CancellationToken token) -> bool* {
                 milvus::proto::segcore::SegmentLoadInfo info;
                 AssertInfo(info.ParseFromString(blob),
                            "unmarshal load info failed");
@@ -353,7 +355,14 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
                 AssertInfo(segment != nullptr,
                            "borrowed schema reopen requires a sealed segment");
                 milvus::OpContext ctx(token);
-                segment->Reopen(&ctx, info, schema, scope);
+                segment->Reopen(
+                    &ctx,
+                    info,
+                    schema,
+                    milvus::segcore::LoadScope(
+                        fields,
+                        std::vector<int64_t>(info.field_hints().begin(),
+                                             info.field_hints().end())));
                 return nullptr;
             },
             milvus::futures::PoolType::kLoad);

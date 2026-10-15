@@ -345,6 +345,8 @@ message GetQueryViewLoadInfoResponse {
     repeated int64 partitionIDs = 4;
     repeated messages.LoadFieldConfig load_fields = 5;
     repeated index.IndexInfo index_info_list = 6;
+    repeated messages.LoadFieldConfig required_fields = 7; // Internal explicit query field scope, independent of load_fields hints.
+    bool skip_load_dynamic_field = 8; // Preload hint only.
 }
 
 message QueryViewSegmentLoadInfoRevision {
@@ -852,6 +854,7 @@ message CollectionLoadInfo {
     int32 schema_version = 11 [deprecated = true]; // Ignored: QueryViews use the latest collection schema.
     optional bool load_all_fields = 12;
     bool skip_load_dynamic_field = 13;
+    repeated messages.LoadFieldConfig required_fields = 14; // Materialized internal scope; empty only in legacy persisted records.
 }
 
 message PartitionLoadInfo {

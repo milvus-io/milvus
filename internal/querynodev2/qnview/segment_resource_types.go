@@ -112,11 +112,13 @@ func QueryViewLoadInfoVersionFromProto(version uint64) QueryViewLoadInfoVersion 
 }
 
 type QueryViewLoadInfo struct {
-	CollectionID int64
-	Version      QueryViewLoadInfoVersion
-	PartitionIDs []int64
-	LoadFields   []*messagespb.LoadFieldConfig
-	IndexInfos   []*indexpb.IndexInfo
+	CollectionID         int64
+	Version              QueryViewLoadInfoVersion
+	PartitionIDs         []int64
+	LoadFields           []*messagespb.LoadFieldConfig
+	RequiredFields       []*messagespb.LoadFieldConfig
+	SkipLoadDynamicField bool
+	IndexInfos           []*indexpb.IndexInfo
 }
 
 type SegmentLoadInfoRevision struct {

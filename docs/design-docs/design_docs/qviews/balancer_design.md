@@ -336,7 +336,8 @@ type LoadConfig struct {
     DbID                     int64
     CollectionID             int64
     PartitionIDs             []int64
-    LoadFields               []*messagespb.LoadFieldConfig  // field_id + index_id
+    LoadFields               []*messagespb.LoadFieldConfig  // preload hints; empty follows target schema
+    RequiredFields           []*messagespb.LoadFieldConfig  // explicit nonempty internal query scope
     UserSpecifiedReplicaMode bool
     Replicas                 []*ReplicaAssignment
 }
@@ -363,7 +364,7 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 - `querycoord-partition-loadinfo/{collectionID}/{partitionID}` — PartitionLoadInfo proto
 - `querycoord-replica/{collectionID}/{replicaID}` — Replica proto
 
-Legacy proto fields are kept for wire compatibility but ignored by the new design: `ro_nodes`, `rw_sq_nodes`, `ro_sq_nodes`, `channel_node_infos`, `status`, `recover_times`, `load_percentage`, `replica_number`, `load_type`, `released_partitions`. New design uses only `resource_group`, `ID`, `collectionID` on Replica; physical node membership fields are ignored, and `collectionID`, `dbID`, `load_fields`, `field_indexID`, `user_specified_replica_mode` on CollectionLoadInfo. **TODO**: `Priority` is carried in memory but not yet persisted (needs a new Replica proto field).
+Legacy proto fields are kept for wire compatibility but ignored by the new design: `ro_nodes`, `rw_sq_nodes`, `ro_sq_nodes`, `channel_node_infos`, `status`, `recover_times`, `load_percentage`, `replica_number`, `load_type`, `released_partitions`. New design uses only `resource_group`, `ID`, `collectionID` on Replica; physical node membership fields are ignored, and `collectionID`, `dbID`, `required_fields`, `load_fields`, `load_all_fields`, `skip_load_dynamic_field`, `field_indexID`, `user_specified_replica_mode` on CollectionLoadInfo. **TODO**: `Priority` is carried in memory but not yet persisted (needs a new Replica proto field).
 
 **Copy-On-Write semantics**: Put clones caller-owned configuration and never
 mutates a published value. The target publication hook shares this immutable
@@ -1189,17 +1190,18 @@ the new configuration.
 
 **Recovery**: On startup: LoadConfigStore recovers from ETCD → ShardViewRegistry recovers persisted managers, stats, and indexes → Balancer triggers a full reconcile that hydrates the row-count ledger before planning.
 
-### Added function output fields during schema handoff
+### Required fields during schema handoff
 
-A schema revision itself remains outside LoadInfoVersion. An AlterCollection
-that adds indexed function outputs also carries a concrete load-field delta:
-RootCoord forwards the WAL-persisted bound field/index IDs after applying that
-index metadata. QueryCoord adds only these new outputs whose input fields are
-loaded, preserving other explicitly unloaded fields. It persists the resulting
-LoadConfig under the collection guard before triggering and waiting for schema
-handoff. This changes LoadInfoVersion because field/index membership changed,
-not because the schema revision changed. Replays are idempotent; absent load
-state is never recreated. Ordinary schema-only changes do not mutate LoadConfig.
+A schema revision itself remains outside LoadInfoVersion. AlterCollection
+reconciles the explicit internal `required_fields` against the acknowledged
+target schema, including ordinary columns, Function outputs and StructArray
+children. New fields enter required fields without extending an explicit preload
+hint; removed fields leave both sets. An empty hint follows the target schema.
+QueryCoord persists the resulting LoadConfig under the collection guard before
+triggering and waiting for schema handoff. Changes to these field sets change
+LoadInfoVersion; semantic-only schema changes can retain it. Index selection
+continues to follow current metadata and is not bound by QueryView. Replays are
+idempotent, and absent load state is never recreated.
 
 ### Partial partition release completion
 

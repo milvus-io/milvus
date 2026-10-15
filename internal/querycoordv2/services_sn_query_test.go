@@ -71,7 +71,8 @@ func TestQueryViewLoadInfoUsesExactSnapshots(t *testing.T) {
 func TestQueryViewLoadConfigFeedsAdmissionChecks(t *testing.T) {
 	cfg := &loadmgr.LoadConfig{
 		CollectionID: 1, DbID: 2, PartitionIDs: []int64{10, 11}, UserSpecifiedReplicaMode: true,
-		LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 200}},
+		LoadFields:     []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 200}},
+		RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
 		Replicas: []*loadmgr.ReplicaAssignment{
 			{ReplicaID: 3, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH},
 			{ReplicaID: 4, ResourceGroup: "rg2", Priority: commonpb.LoadPriority_LOW},
@@ -81,6 +82,8 @@ func TestQueryViewLoadConfigFeedsAdmissionChecks(t *testing.T) {
 	require.Equal(t, int64(1), current.Collection.GetCollectionID())
 	require.True(t, current.Collection.GetUserSpecifiedReplicaMode())
 	require.Equal(t, map[int64]int64{100: 200}, current.Collection.GetFieldIndexID())
+	require.Equal(t, cfg.RequiredFields, current.Collection.GetRequiredFields())
+	require.NotSame(t, cfg.RequiredFields[0], current.Collection.RequiredFields[0])
 	require.ElementsMatch(t, []int64{10, 11}, current.GetPartitionIDs())
 	require.Equal(t, map[string]int{"rg1": 1, "rg2": 1}, current.GetReplicaNumber())
 	require.Equal(t, commonpb.LoadPriority_LOW, current.Replicas[4].LoadPriority())

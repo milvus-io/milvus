@@ -28,7 +28,9 @@ namespace milvus::segcore {
 // constructing a scope; no collection Schema is changed by this value.
 class LoadScope {
  public:
-    explicit LoadScope(const std::vector<int64_t>& fields) {
+    explicit LoadScope(const std::vector<int64_t>& fields,
+                       const std::vector<int64_t>& hints = {}) {
+        hints_.insert(hints.begin(), hints.end());
         for (auto id : fields) {
             fields_.emplace(id);
         }
@@ -72,6 +74,13 @@ class LoadScope {
     }
 
     bool
+    ShouldPreload(FieldId id) const {
+        return Requires(id) && (id.get() < START_USER_FIELDID ||
+                                dependencies_.count(id.get()) != 0 ||
+                                hints_.empty() || hints_.count(id.get()) != 0);
+    }
+
+    bool
     IsExplicit() const {
         return explicit_;
     }
@@ -80,6 +89,7 @@ class LoadScope {
     bool explicit_ = true;
     std::unordered_set<int64_t> dependencies_;
     std::unordered_set<int64_t> fields_;
+    std::unordered_set<int64_t> hints_;
 };
 
 }  // namespace milvus::segcore

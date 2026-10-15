@@ -101,7 +101,7 @@ func (s *LocalSegment) PrepareReadState(ctx context.Context, reuse ReadState, in
 		read.ReleaseReadState()
 		return nil, err
 	}
-	if err := native.Reopen(ctx, &segcore.ReopenRequest{LoadInfo: info, Collection: collection.GetCCollection(), LoadFields: collection.loadFields.Collect()}); err != nil {
+	if err := native.Reopen(ctx, &segcore.ReopenRequest{LoadInfo: info, Collection: collection.GetCCollection(), LoadFields: collection.loadFields.Collect(), FieldHints: collection.fieldHints}); err != nil {
 		read.ReleaseReadState()
 		return nil, err
 	}

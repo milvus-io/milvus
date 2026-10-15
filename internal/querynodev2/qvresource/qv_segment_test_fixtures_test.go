@@ -123,8 +123,9 @@ func (p *fakeQVLoadMetadataProvider) GetQueryViewLoadInfo(context.Context, int64
 		fields = append(fields, &messagespb.LoadFieldConfig{FieldId: fieldID})
 	}
 	return qnview.QueryViewLoadInfo{
-		PartitionIDs: append([]int64(nil), p.partitionIDs...),
-		LoadFields:   fields,
+		PartitionIDs:   append([]int64(nil), p.partitionIDs...),
+		LoadFields:     fields,
+		RequiredFields: fields,
 	}, p.err
 }
 

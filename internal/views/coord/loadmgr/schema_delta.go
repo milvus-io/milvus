@@ -29,77 +29,33 @@ func (s *LoadConfigStore) ApplySchema(ctx context.Context, collectionID int64, o
 	return s.putLocked(ctx, next)
 }
 
+// RequiredFieldsForSchema materializes the internal query scope. User load_fields
+// are only preload hints and must never be used to construct this list.
+func RequiredFieldsForSchema(schema *schemapb.CollectionSchema) []*messagespb.LoadFieldConfig {
+	fields := make([]*messagespb.LoadFieldConfig, 0)
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetFieldID() >= common.StartOfUserFieldID {
+			fields = append(fields, &messagespb.LoadFieldConfig{FieldId: field.GetFieldID()})
+		}
+	}
+	return fields
+}
+
 func reconcileSchemaFields(current *LoadConfig, oldSchema, target *schemapb.CollectionSchema, bound []*messagespb.LoadFieldConfig) *LoadConfig {
 	next := current.Clone()
-	loaded := make(map[int64]*messagespb.LoadFieldConfig, len(next.LoadFields))
-	for _, field := range next.LoadFields {
-		loaded[field.GetFieldId()] = field
+	next.RequiredFields = RequiredFieldsForSchema(target)
+	desired := make(map[int64]bool, len(next.RequiredFields))
+	for _, field := range next.RequiredFields {
+		desired[field.GetFieldId()] = true
 	}
-	oldFields := make(map[int64]bool)
-	for _, field := range typeutil.GetAllFieldSchemas(oldSchema) {
-		oldFields[field.GetFieldID()] = true
-	}
-	if next.LoadAllFields == nil {
-		// Legacy messages did not record intent. Treat a complete old field set
-		// as full loading; otherwise preserve the existing explicit subset.
-		all := true
-		for _, field := range typeutil.GetAllFieldSchemas(oldSchema) {
-			if field.GetIsDynamic() && loaded[field.GetFieldID()] == nil {
-				next.SkipLoadDynamicField = true
-			}
-			if field.GetFieldID() >= common.StartOfUserFieldID && !field.GetIsDynamic() && loaded[field.GetFieldID()] == nil {
-				all = false
-			}
-		}
-		next.LoadAllFields = proto.Bool(all)
-	}
-	desired := make(map[int64]*schemapb.FieldSchema)
-	for _, field := range typeutil.GetAllFieldSchemas(target) {
-		if field.GetFieldID() >= common.StartOfUserFieldID {
-			desired[field.GetFieldID()] = field
-		}
-	}
-	// Preserve order and immutable index identities for retained fields.
-	next.LoadFields = slices.DeleteFunc(next.LoadFields, func(field *messagespb.LoadFieldConfig) bool {
-		_, exists := desired[field.GetFieldId()]
-		if !exists {
-			delete(loaded, field.GetFieldId())
-		}
-		return !exists
-	})
-	indexes := make(map[int64]int64, len(bound))
-	for _, field := range bound {
-		indexes[field.GetFieldId()] = field.GetIndexId()
-	}
-	appendField := func(field *schemapb.FieldSchema) {
-		id := field.GetFieldID()
-		if loaded[id] != nil || id < common.StartOfUserFieldID || (field.GetIsDynamic() && next.SkipLoadDynamicField) {
-			return
-		}
-		config := &messagespb.LoadFieldConfig{FieldId: id, IndexId: indexes[id]}
-		loaded[id] = config
-		next.LoadFields = append(next.LoadFields, config)
-	}
-	if *next.LoadAllFields {
-		for _, field := range typeutil.GetAllFieldSchemas(target) {
-			appendField(field)
-		}
+	// Full-load intent is represented by an empty hint. Explicit hints retain
+	// their surviving fields and never acquire additions from schema evolution.
+	if next.LoadAllFields != nil && *next.LoadAllFields {
+		next.LoadFields = nil
 	} else {
-		// A function output follows its loaded inputs. New unrelated ordinary
-		// fields do not expand an explicitly partial load.
-		for _, function := range target.GetFunctions() {
-			inputsLoaded := len(function.GetInputFieldIds()) > 0
-			for _, id := range function.GetInputFieldIds() {
-				inputsLoaded = inputsLoaded && loaded[id] != nil
-			}
-			if inputsLoaded {
-				for _, id := range function.GetOutputFieldIds() {
-					if field := desired[id]; field != nil && !oldFields[id] {
-						appendField(field)
-					}
-				}
-			}
-		}
+		next.LoadFields = slices.DeleteFunc(next.LoadFields, func(field *messagespb.LoadFieldConfig) bool {
+			return !desired[field.GetFieldId()]
+		})
 	}
 	return next
 }
@@ -108,5 +64,6 @@ func equalSchemaLoadIntent(a, b *LoadConfig) bool {
 	if (a.LoadAllFields == nil) != (b.LoadAllFields == nil) || (a.LoadAllFields != nil && *a.LoadAllFields != *b.LoadAllFields) || a.SkipLoadDynamicField != b.SkipLoadDynamicField {
 		return false
 	}
-	return slices.EqualFunc(a.LoadFields, b.LoadFields, func(a, b *messagespb.LoadFieldConfig) bool { return proto.Equal(a, b) })
+	equal := func(a, b *messagespb.LoadFieldConfig) bool { return proto.Equal(a, b) }
+	return slices.EqualFunc(a.LoadFields, b.LoadFields, equal) && slices.EqualFunc(a.RequiredFields, b.RequiredFields, equal)
 }

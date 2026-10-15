@@ -23,7 +23,7 @@ implement a missing-object/GC full-rebuild fallback.
 
 ## Retained state
 
-- One aggregate per loaded BM25 field: document frequencies, row and token counts.
+- One aggregate per required BM25 field: document frequencies, row and token counts.
 - One mutable BM25Stats per contributing growing segment, with flush/seal metadata.
 - Sealed resource descriptors (segment, partition, exact stats paths/manifest),
   without per-segment sealed statistics, memory cache or local disk cache.
@@ -53,7 +53,10 @@ Large column values remain borrowed read-only; existing outputs are preserved,
 and neither consumer modifies the cached Body. Missing outputs use the local
 function-runner fallback. This schema-dependent materialization remains outside
 the Body cache and is not deduplicated by it.
-Only loaded BM25 output fields contribute. Live events buffered during build are
+Only required BM25 output fields contribute. Required fields come from the
+internal `required_fields` scope, independently of user preload hints. An
+unhinted required BM25 field still needs IDF statistics for query correctness.
+Live events buffered during build are
 applied before readiness. Partial initialization is never published.
 
 The default eager mode materializes the aggregate during initialization. With
@@ -192,7 +195,7 @@ plan parameters, without another Oracle read.
 An empty latest aggregate cannot prove that an older view has no rows. It must
 not set SearchOptimization.Skip. For an empty corpus, document-frequency lookup
 uses zero counts and average document length uses the positive fallback 1. Missing
-loaded fields are errors, not empty corpora. This keeps scoring finite without
+required fields are errors, not empty corpora. This keeps scoring finite without
 incorrectly suppressing old-view candidates.
 
 ## Cost and validation
@@ -224,5 +227,5 @@ to retained resources, local-file references/cleanup, and additional preparation
 state. DataView lifetime already protects the source objects. This implementation
 keeps the established no-cache resource contract and adopts lazy loading, bounded
 parallel reads, immediate aggregation, retryable streaming reads, and chunked
-decoding independently. It also preserves loaded partition/field scope, StorageV3
+decoding independently. It also preserves loaded partition and required field scopes, StorageV3
 manifest recovery, batched hybrid-search scoring and atomic delta validation.

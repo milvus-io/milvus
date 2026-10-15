@@ -20,7 +20,7 @@ func TestAddFunctionFieldsPreservesPartialLoadsAndRelease(t *testing.T) {
 		save := mockey.Mock((*mocks.QueryCoordCatalog).SaveCollection).Return(nil).Build()
 		store := &LoadConfigStore{
 			catalog: catalog, collectionLocks: lock.NewKeyLock[int64](),
-			configs: map[int64]*LoadConfig{1: {CollectionID: 1, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 7}}}}, versions: map[int64]uint64{1: 1},
+			configs: map[int64]*LoadConfig{1: {CollectionID: 1, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 7}}}}, versions: map[int64]uint64{1: 1},
 		}
 		schema := &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{
 			{InputFieldIds: []int64{100}, OutputFieldIds: []int64{101}},
@@ -28,7 +28,7 @@ func TestAddFunctionFieldsPreservesPartialLoadsAndRelease(t *testing.T) {
 		}}
 		fields := []*messagespb.LoadFieldConfig{{FieldId: 101, IndexId: 8}, {FieldId: 201, IndexId: 9}, {FieldId: 300}}
 		require.NoError(t, store.AddFunctionFields(t.Context(), 1, schema, fields))
-		require.Equal(t, []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 7}, {FieldId: 101, IndexId: 8}}, store.GetConfig(1).LoadFields)
+		requireFieldConfigsEqual(t, []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 7}, {FieldId: 101, IndexId: 8}}, store.GetConfig(1).RequiredFields)
 		version := store.GetConfigVersion(1)
 		require.NotEqual(t, uint64(1), version)
 		require.NoError(t, store.AddFunctionFields(t.Context(), 1, schema, fields))
@@ -44,6 +44,6 @@ func TestAddFunctionFieldsPreservesPartialLoadsAndRelease(t *testing.T) {
 		require.Equal(t, version, store.GetConfigVersion(1))
 		persisted := store.GetConfig(1).toCollectionLoadInfoProto()
 		recovered := buildFromPersisted(persisted, []*querypb.PartitionLoadInfo{}, nil)
-		require.Equal(t, store.GetConfig(1).LoadFields, recovered.LoadFields)
+		requireFieldConfigsEqual(t, store.GetConfig(1).RequiredFields, recovered.RequiredFields)
 	})
 }

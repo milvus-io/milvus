@@ -141,7 +141,7 @@ func TestSchemaRefreshReconcilesLaterLoadFieldsAndPreservesCurrentOracle(t *test
 	defer runtime.Close()
 	base := view
 	base.LoadInfoVersion = 1
-	base.LoadFields = []*messagespb.LoadFieldConfig{{FieldId: 101}}
+	base.RequiredFields = []*messagespb.LoadFieldConfig{{FieldId: 101}}
 	base.CaptureQueryView = func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
 		view.LoadInfoVersion = meta.GetLoadInfoVersion()
 		view.SegmentSnapshot.DataVersion = qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
@@ -152,7 +152,7 @@ func TestSchemaRefreshReconcilesLaterLoadFieldsAndPreservesCurrentOracle(t *test
 	require.True(t, runtime.disabled)
 	var fetchErr error
 	loadPatch := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).To(func(_ *mocks.MockMixCoordClient, _ context.Context, req *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
-		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: 1, Version: req.GetVersion(), LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}}, fetchErr
+		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: 1, Version: req.GetVersion(), RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}}, fetchErr
 	}).Build()
 	defer loadPatch.UnPatch()
 	statsPatch := mockey.Mock((*Provider).getSealedBM25Resources).Return(nil, nil).Build()

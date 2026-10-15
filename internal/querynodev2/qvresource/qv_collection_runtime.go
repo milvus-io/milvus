@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type collectionRuntimeKey struct {
@@ -94,7 +95,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	localCollection := collections.Get(meta.GetCollectionId())
 	var ccollection *segcore.CCollection
 	if localCollection != nil {
-		localCollection = localCollection.WithLoadScope(loadInfoPartitionIDs(loadInfo, view.ViewOfQueryNode()), loadInfoFieldIDs(loadInfo))
+		localCollection = localCollection.WithLoadScope(loadInfoPartitionIDs(loadInfo, view.ViewOfQueryNode()), loadInfoFieldIDs(loadInfo, collection.GetSchema()), loadInfoHintIDs(loadInfo, collection.GetSchema()))
 		ccollection = localCollection.GetCCollection()
 		if shared {
 			if err := localCollection.UpdateIndexMeta(indexMeta); err != nil {
@@ -204,9 +205,9 @@ func loadInfoPartitionIDs(info qnview.QueryViewLoadInfo, fallback *viewpb.QueryV
 	return qvViewPartitionIDs(fallback)
 }
 
-func loadInfoFieldIDs(info qnview.QueryViewLoadInfo) []int64 {
-	fields := make([]int64, 0, len(info.LoadFields))
-	for _, field := range info.LoadFields {
+func loadInfoFieldIDs(info qnview.QueryViewLoadInfo, schema *schemapb.CollectionSchema) []int64 {
+	fields := make([]int64, 0, len(info.RequiredFields))
+	for _, field := range qviews.ResolveRequiredFields(schema, info.RequiredFields) {
 		fields = append(fields, field.GetFieldId())
 	}
 	return fields
@@ -218,4 +219,24 @@ func qvViewPartitionIDs(view *viewpb.QueryViewOfQueryNode) []int64 {
 		partitions = append(partitions, partition.GetPartitionId())
 	}
 	return partitions
+}
+
+func loadInfoHintIDs(info qnview.QueryViewLoadInfo, schema *schemapb.CollectionSchema) []int64 {
+	if len(info.LoadFields) == 0 && !info.SkipLoadDynamicField {
+		return nil
+	}
+	allowed := make(map[int64]bool)
+	for _, field := range info.LoadFields {
+		allowed[field.GetFieldId()] = true
+	}
+	fields := make([]int64, 0)
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetIsDynamic() && info.SkipLoadDynamicField {
+			continue
+		}
+		if len(info.LoadFields) == 0 || allowed[field.GetFieldID()] {
+			fields = append(fields, field.GetFieldID())
+		}
+	}
+	return fields
 }

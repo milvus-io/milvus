@@ -7819,6 +7819,9 @@ ChunkedSegmentSealedImpl::resolve_field_data_warmup_policy(
     if (SystemProperty::Instance().IsSystem(field_id)) {
         return explicit_warmup_policy;
     }
+    if (!schema_snapshot->ShouldPreload(field_id)) {
+        return "disable";
+    }
 
     // "Has index" here means an index is usable now:
     // - SegmentLoadInfo covers DataCoord-built index files loaded with segment

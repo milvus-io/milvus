@@ -37,10 +37,12 @@ type VChannelWALView struct {
 	LoadInfoVersion uint64
 	// PartitionIDs is nil for an unrestricted legacy snapshot. A non-nil empty
 	// list means load metadata was resolved and no partitions are loaded.
-	PartitionIDs []int64
-	LoadFields   []*messagespb.LoadFieldConfig
-	IndexInfos   []*indexpb.IndexInfo
-	Schema       *schemapb.CollectionSchema
+	PartitionIDs         []int64
+	LoadFields           []*messagespb.LoadFieldConfig
+	RequiredFields       []*messagespb.LoadFieldConfig
+	SkipLoadDynamicField bool
+	IndexInfos           []*indexpb.IndexInfo
+	Schema               *schemapb.CollectionSchema
 	// WriteSchema is the allocation/encoding frontier, independent of the read view.
 	WriteSchema *schemapb.CollectionSchema
 

@@ -9,8 +9,7 @@ import (
 )
 
 // AddFunctionFields applies the field/index delta of the acknowledged schema
-// DDL. It never infers missing fields from the whole schema, which would undo
-// explicit partial-field loads. Derived fields are included only when their
+// DDL. Preload hints are unchanged. Derived fields are included only when their
 // inputs are loaded. The collection guard prevents resurrecting released state.
 func (s *LoadConfigStore) AddFunctionFields(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, added []*messagespb.LoadFieldConfig) error {
 	if len(added) == 0 {
@@ -23,8 +22,8 @@ func (s *LoadConfigStore) AddFunctionFields(ctx context.Context, collectionID in
 		return nil
 	}
 	cfg = cfg.Clone()
-	loaded := make(map[int64]bool, len(cfg.LoadFields))
-	for _, field := range cfg.LoadFields {
+	loaded := make(map[int64]bool, len(cfg.RequiredFields))
+	for _, field := range cfg.RequiredFields {
 		loaded[field.GetFieldId()] = true
 	}
 	changed := false
@@ -41,7 +40,7 @@ func (s *LoadConfigStore) AddFunctionFields(ctx context.Context, collectionID in
 				inputsLoaded = inputsLoaded && loaded[id]
 			}
 			if inputsLoaded {
-				cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{FieldId: field.GetFieldId(), IndexId: field.GetIndexId()})
+				cfg.RequiredFields = append(cfg.RequiredFields, &messagespb.LoadFieldConfig{FieldId: field.GetFieldId(), IndexId: field.GetIndexId()})
 				loaded[field.GetFieldId()] = true
 				changed = true
 			}

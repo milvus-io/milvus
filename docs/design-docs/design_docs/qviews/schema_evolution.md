@@ -190,9 +190,21 @@ existing completion contract.
 
 LoadConfig expresses the desired partition/field/index/replica set. Schema
 identity remains separate; a semantic-only change can require handoff with an
-unchanged LoadInfoVersion. New fields follow the collection's loading intent:
-full-load and explicit partial-load behavior must be distinguished. Required
-Function input/output dependencies are resolved without adding unrelated fields.
+unchanged LoadInfoVersion. `required_fields` is an internal, explicit, nonempty
+list of the columns the View must be capable of querying. It is initialized from
+the target schema and is not exposed through the user Load API. ALTER adds new
+columns to this list and removes dropped columns, including Function outputs and
+StructArray children. Required physical dependencies are resolved separately.
+
+The existing `load_fields` wire field is a preload hint, not a query restriction.
+An empty hint follows the View's target schema; an explicit hint does not gain
+new columns on ALTER. Dropped fields are removed from explicit hints. Thus an
+added field enters `required_fields` without being appended to the hint, although
+an empty hint also covers it implicitly. `skip_load_dynamic_field` affects only
+preloading. Index metadata and query access follow required fields, never hints.
+Readiness establishes complete query capabilities and lazy-loading entry points;
+it does not require every allowed column to be resident. Warmup settings still
+control physical preloading. Both sets are retained in the exact LoadInfo snapshot.
 
 Each view pins the immutable LoadInfo field/partition scope it was created with.
 Its IndexID is always zero, meaning the latest available index; index descriptors

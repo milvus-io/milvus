@@ -260,14 +260,14 @@ func newOracleRuntime(
 		collectionID:    walView.CollectionID,
 		vchannel:        walView.VChannel,
 		partitionIDs:    slices.Clone(walView.PartitionIDs),
-		fieldIDs:        loadFieldIDs(walView.LoadFields),
+		fieldIDs:        loadFieldIDs(walView.RequiredFields),
 		barrier:         walView.ResourceEventBarrier,
 		ctx:             lifetime,
 		cancel:          cancel,
 		loadInfoVersion: walView.LoadInfoVersion,
 		schema:          proto.Clone(walView.Schema).(*schemapb.CollectionSchema),
 		currentVersion:  walView.SegmentSnapshot.DataVersion,
-		growingStore:    newGrowingStatsStore(walView.Schema, loadFieldIDs(walView.LoadFields)),
+		growingStore:    newGrowingStatsStore(walView.Schema, loadFieldIDs(walView.RequiredFields)),
 	}
 	r.writeSchema = walView.WriteSchema
 	if r.writeSchema == nil {

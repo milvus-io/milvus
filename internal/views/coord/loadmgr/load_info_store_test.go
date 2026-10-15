@@ -41,7 +41,7 @@ func TestLoadInfoHistorySurvivesConfigChangeAndRestart(t *testing.T) {
 		indexes := []*indexpb.IndexInfo{{FieldID: 100, IndexID: 200, IndexName: "old"}}
 		source := func(int64) []*indexpb.IndexInfo { return indexes }
 		store := NewLoadInfoStore(&loadInfoTestCatalog{}, source)
-		cfg := &LoadConfig{CollectionID: 1, PartitionIDs: []int64{10}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 200}}}
+		cfg := &LoadConfig{CollectionID: 1, PartitionIDs: []int64{10}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 200}}, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}}}
 		ctx := context.Background()
 		require.NoError(t, store.Ensure(ctx, cfg))
 		oldVersion := loadInfoVersion(cfg)
@@ -75,7 +75,7 @@ func TestLoadInfoSnapshotDoesNotBindIndex(t *testing.T) {
 		mockey.Mock((*loadInfoTestCatalog).GetLoadInfo).Return(nil, nil).Build()
 		saves := mockey.Mock((*loadInfoTestCatalog).SaveLoadInfo).Return(nil).Build()
 		store := NewLoadInfoStore(&loadInfoTestCatalog{}, func(int64) []*indexpb.IndexInfo { return []*indexpb.IndexInfo{{FieldID: 101, IndexID: 200}} })
-		cfg := &LoadConfig{CollectionID: 1, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 200}}}
+		cfg := &LoadConfig{CollectionID: 1, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 200}}, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}}}
 		require.NoError(t, store.Ensure(context.Background(), cfg))
 		info, err := store.Get(context.Background(), cfg.CollectionID, loadInfoVersion(cfg))
 		require.NoError(t, err)
@@ -103,4 +103,19 @@ func TestLoadInfoPersistenceFailureDoesNotPublishConfig(t *testing.T) {
 		require.ErrorIs(t, store.putLocked(t.Context(), cfg), merr.ErrServiceNotReady)
 		require.Equal(t, 2, writes, "failed persistence must not populate the immutable cache")
 	})
+}
+
+func TestLoadInfoIncludesRequiredIndexesOutsideHints(t *testing.T) {
+	store := NewLoadInfoStore(nil, func(int64) []*indexpb.IndexInfo {
+		return []*indexpb.IndexInfo{{FieldID: 100, IndexID: 1}, {FieldID: 101, IndexID: 2}, {FieldID: 102, IndexID: 3}}
+	})
+	snapshot := &querypb.GetQueryViewLoadInfoResponse{
+		CollectionID:   1,
+		LoadFields:     []*messagespb.LoadFieldConfig{{FieldId: 100}},
+		RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
+	}
+	got := store.withCurrentIndexes(snapshot)
+	require.Len(t, got.IndexInfoList, 2)
+	require.EqualValues(t, 101, got.IndexInfoList[1].FieldID)
+	require.Nil(t, snapshot.IndexInfoList, "lookup must not mutate retained metadata")
 }

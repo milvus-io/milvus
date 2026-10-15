@@ -110,8 +110,13 @@ class SealedFieldLayout {
     }
 
     bool
+    ShouldPreload(FieldId id) const {
+        return scope_.ShouldPreload(id);
+    }
+
+    bool
     ShouldLoadField(FieldId id) const {
-        return scope_.Requires(id) &&
+        return scope_.ShouldPreload(id) &&
                (id.get() < START_USER_FIELDID || eager_fields_.count(id) != 0);
     }
 
@@ -133,6 +138,9 @@ class SealedFieldLayout {
 
     std::pair<bool, std::string>
     WarmupPolicy(FieldId id, bool is_vector, bool is_index) const {
+        if (!scope_.ShouldPreload(id)) {
+            return {true, "disable"};
+        }
         auto it = warmup_.find(id);
         auto index = (is_vector ? 2 : 0) + (is_index ? 1 : 0);
         return (it == warmup_.end() ? warmup_default_ : it->second)[index];

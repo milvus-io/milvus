@@ -245,6 +245,7 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 		CollectionId:             coll.GetCollectionID(),
 		PartitionIds:             sortedInt64s(expected.PartitionIDs),
 		LoadFields:               generateQViewsLoadFields(expected.LoadFields, expected.FieldIndexID),
+		RequiredFields:           loadmgr.RequiredFieldsForSchema(coll.GetSchema()),
 		LoadAllFields:            expected.LoadAllFields,
 		SkipLoadDynamicField:     expected.SkipLoadDynamicField,
 		Replicas:                 replicas,
@@ -252,6 +253,9 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 	}
 	if header.LoadAllFields == nil && current != nil {
 		header.LoadAllFields, header.SkipLoadDynamicField = current.LoadAllFields, current.SkipLoadDynamicField
+	}
+	if header.GetLoadAllFields() {
+		header.LoadFields = nil
 	}
 	if proto.Equal(loadConfigIntoAlterLoadConfigHeader(current), header) {
 		return nil, nil
@@ -329,6 +333,7 @@ func loadConfigIntoAlterLoadConfigHeader(cfg *loadmgr.LoadConfig) *messagespb.Al
 		CollectionId:             cfg.CollectionID,
 		PartitionIds:             sortedInt64s(cfg.PartitionIDs),
 		LoadFields:               cloneAndSortLoadFields(cfg.LoadFields),
+		RequiredFields:           cloneAndSortLoadFields(cfg.RequiredFields),
 		LoadAllFields:            cfg.LoadAllFields,
 		SkipLoadDynamicField:     cfg.SkipLoadDynamicField,
 		Replicas:                 replicas,
@@ -438,6 +443,7 @@ func qviewsCurrentLoadConfig(cfg *loadmgr.LoadConfig) job.CurrentLoadConfig {
 		return current
 	}
 	info := &querypb.CollectionLoadInfo{CollectionID: cfg.CollectionID, DbID: cfg.DbID, ReplicaNumber: int32(len(cfg.Replicas)), Status: querypb.LoadStatus_Loaded, UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode, FieldIndexID: make(map[int64]int64), LoadAllFields: cfg.LoadAllFields, SkipLoadDynamicField: cfg.SkipLoadDynamicField}
+	info.RequiredFields = cloneAndSortLoadFields(cfg.RequiredFields)
 	for _, field := range cfg.LoadFields {
 		info.LoadFields = append(info.LoadFields, field.GetFieldId())
 		if field.GetIndexId() != 0 {

@@ -20,7 +20,7 @@ func loadInfoVersion(config *LoadConfig) uint64 {
 		return cfg.LoadFields[i].IndexId < cfg.LoadFields[j].IndexId
 	})
 	sort.Slice(cfg.Replicas, func(i, j int) bool { return cfg.Replicas[i].ReplicaID < cfg.Replicas[j].ReplicaID })
-	data := []byte("milvus-query-view-load-config-v1")
+	data := []byte("milvus-query-view-load-config-v2")
 	add := func(value int64) { data = binary.LittleEndian.AppendUint64(data, uint64(value)) }
 	add(cfg.DbID)
 	add(cfg.CollectionID)
@@ -37,6 +37,16 @@ func loadInfoVersion(config *LoadConfig) uint64 {
 	for _, field := range cfg.LoadFields {
 		add(field.FieldId)
 		add(0) // QueryView always follows current indexes; only loading scope is versioned.
+	}
+	sort.Slice(cfg.RequiredFields, func(i, j int) bool { return cfg.RequiredFields[i].FieldId < cfg.RequiredFields[j].FieldId })
+	add(int64(len(cfg.RequiredFields)))
+	for _, field := range cfg.RequiredFields {
+		add(field.GetFieldId())
+	}
+	if cfg.SkipLoadDynamicField {
+		add(1)
+	} else {
+		add(0)
 	}
 	add(int64(len(cfg.Replicas)))
 	for _, replica := range cfg.Replicas {
