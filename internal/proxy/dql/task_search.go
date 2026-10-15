@@ -450,9 +450,19 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
 	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	t.ConsistencyLevel = consistencyLevel
-	if t.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
-		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
-		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
+	if t.isIterator {
+		if t.request.GetGuaranteeTimestamp() > 0 {
+			t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
+		} else if t.viewQueryClient != nil {
+			// Choose one snapshot before any shard executes, including the
+			// first page. Every retry and subsequent page retains this value.
+			t.MvccTimestamp = t.BeginTs()
+		}
+		if t.MvccTimestamp != 0 {
+			t.GuaranteeTimestamp = t.MvccTimestamp
+			physicalTimeMs, _ = tsoutil.ParseHybridTs(t.MvccTimestamp)
+			t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
+		}
 	}
 	t.IsIterator = t.isIterator
 
@@ -466,11 +476,15 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 	}
 
 	if collectionInfo.CollectionTTL != 0 {
-		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
+		ttlTimestamp := t.GetBase().GetTimestamp()
+		if t.isIterator && t.MvccTimestamp != 0 {
+			ttlTimestamp = t.MvccTimestamp
+		}
+		physicalTime := tsoutil.PhysicalTime(ttlTimestamp)
 		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
-		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
+		if t.CollectionTtlTimestamps > ttlTimestamp {
 			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
 		}
 	}
@@ -1516,7 +1530,8 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 
 func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 	result, err := t.viewQueryClient.Legacy().Search(ctx, &queryclient.LegacySearchRequest{
-		Req: t.SearchRequest,
+		Req:         t.SearchRequest,
+		BarrierMVCC: t.MvccTimestamp,
 	})
 	if err != nil {
 		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
@@ -1700,7 +1715,11 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 
 	if t.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
-		t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())
+		if t.viewQueryClient != nil {
+			t.result.SessionTs = t.MvccTimestamp
+		} else {
+			t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())
+		}
 	}
 
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)

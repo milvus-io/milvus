@@ -130,7 +130,7 @@ func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (*
 	// TODO: set fieldPlan.SearchFields into req.Req.OutputFieldsId
 	// (requires field name → ID resolution from collection schema).
 	_ = fieldPlan
-	shardPlans, err := c.searchAllShards(ctx, vchannels, req.Req, req.MVCC, searchReducer)
+	shardPlans, err := c.searchAllShards(ctx, vchannels, req.Req, req.MVCC, req.BarrierMVCC, searchReducer)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +208,7 @@ func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (*Qu
 	// === Stage: Search/Query (per-shard pipelined) ===
 	// TODO: set fieldPlan.SearchFields into req.Req.OutputFieldsId
 	_ = fieldPlan
-	shardPlans, err := c.queryAllShards(ctx, vchannels, req.Req, req.MVCC, retrieveReducer)
+	shardPlans, err := c.queryAllShards(ctx, vchannels, req.Req, req.MVCC, req.BarrierMVCC, retrieveReducer)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +241,7 @@ func (c *viewQueryClientImpl) searchAllShards(
 	vchannels []string,
 	req *internalpb.SearchRequest,
 	mvcc *viewpb.QueryPlanMVCC,
+	barrierMVCC uint64,
 	searchReducer reducer.SearchResultReducer,
 ) ([]ShardPlan, error) {
 	shardPlans := make([]ShardPlan, len(vchannels))
@@ -249,10 +250,11 @@ func (c *viewQueryClientImpl) searchAllShards(
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				VChannel: vchannels[i],
-				Req:      req,
-				MVCC:     mvcc,
-				Reducer:  searchReducer,
+				VChannel:    vchannels[i],
+				Req:         req,
+				MVCC:        mvcc,
+				BarrierMVCC: barrierMVCC,
+				Reducer:     searchReducer,
 			})
 			if err != nil {
 				return err
@@ -273,6 +275,7 @@ func (c *viewQueryClientImpl) queryAllShards(
 	vchannels []string,
 	req *internalpb.RetrieveRequest,
 	mvcc *viewpb.QueryPlanMVCC,
+	barrierMVCC uint64,
 	retrieveReducer reducer.RetrieveResultReducer,
 ) ([]ShardPlan, error) {
 	shardPlans := make([]ShardPlan, len(vchannels))
@@ -281,10 +284,11 @@ func (c *viewQueryClientImpl) queryAllShards(
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
-				VChannel: vchannels[i],
-				Req:      req,
-				MVCC:     mvcc,
-				Reducer:  retrieveReducer,
+				VChannel:    vchannels[i],
+				Req:         req,
+				MVCC:        mvcc,
+				BarrierMVCC: barrierMVCC,
+				Reducer:     retrieveReducer,
 			})
 			if err != nil {
 				return err

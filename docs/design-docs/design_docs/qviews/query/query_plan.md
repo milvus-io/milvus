@@ -123,15 +123,22 @@ The frontiers mean:
 | `growing_timetick` | WAL TimeTick position that the corresponding StreamingNode shard's growing runtime must consume before serving growing queries. | StreamingNode. |
 | `transforming_timetick` | WAL TimeTick position that TransformLog-equivalent consumers must observe before serving queries. | QueryNode TransformBuffer, and StreamingNode growing runtime when growing-side execution depends on transform-equivalent effects such as deletes. |
 
-Both values must come from persisted WAL message TimeTicks. There is no
-system-clock, local-wall-clock, or synthetic non-WAL MVCC source.
+Ordinary query frontiers come from persisted WAL message TimeTicks. An explicit
+`barrier_mvcc=B` instead requests coverage through a fixed TSO timestamp. Primary
+SN bypasses Inspector if both confirmed frontiers already cover B; otherwise
+Inspector drives an `MVCCBarrier` confirmation through B and returns after WAL/WAB
+publication. RecoveryStorage consumes it passively. Query execution separately
+waits for the ordered prefix to be applied. The plan retains Growing=B and
+Transform=B. The confirmation is persisted with business messages and uses the
+non-persisted path when idle; it does not create a TransformLog payload record.
 
-`GetQueryPlan` supports two protocol modes:
+`GetQueryPlan` supports three protocol modes:
 
 | Request mode | First-version behavior |
 |---|---|
 | `consistency_level` | Primary RW WAL obtains the latest local `QueryPlanMVCC`. |
 | `query_plan_mvcc` | Use the caller-provided `QueryPlanMVCC` directly. |
+| `barrier_mvcc` | Primary WAL actively establishes scoped coverage, then returns both frontiers equal to the fixed timestamp. |
 
 For the first runnable implementation, only primary/RW WAL is required to produce
 new MVCC. RO/secondary behavior can return `NOT_PRIMARY` or another retriable

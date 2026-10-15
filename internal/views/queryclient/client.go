@@ -42,6 +42,9 @@ type SearchRequest struct {
 	Req *internalpb.SearchRequest
 	// MVCC optionally supplies fixed executor read frontiers across retries.
 	MVCC *viewpb.QueryPlanMVCC
+	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
+	// Mutually exclusive with MVCC. Zero preserves ordinary consistency sampling.
+	BarrierMVCC uint64
 
 	// OutputFieldNames are the user-requested output field names,
 	// resolved from Req.OutputFieldsId by the Proxy using the collection schema.
@@ -70,6 +73,9 @@ type QueryRequest struct {
 	Req *internalpb.RetrieveRequest
 	// MVCC optionally supplies fixed executor read frontiers across retries.
 	MVCC *viewpb.QueryPlanMVCC
+	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
+	// Mutually exclusive with MVCC. Zero preserves ordinary consistency sampling.
+	BarrierMVCC uint64
 
 	// OutputFieldNames are the user-requested output field names,
 	// resolved from Req.OutputFieldsId by the Proxy using the collection schema.

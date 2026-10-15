@@ -42,18 +42,20 @@ func newShardViewQueryClient(
 
 // ShardSearchRequest contains the parameters for a shard-level search execution.
 type ShardSearchRequest struct {
-	VChannel string
-	Req      *internalpb.SearchRequest
-	MVCC     *viewpb.QueryPlanMVCC
-	Reducer  reducer.SearchResultReducer
+	VChannel    string
+	Req         *internalpb.SearchRequest
+	MVCC        *viewpb.QueryPlanMVCC
+	BarrierMVCC uint64
+	Reducer     reducer.SearchResultReducer
 }
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
 type ShardQueryRequest struct {
-	VChannel string
-	Req      *internalpb.RetrieveRequest
-	MVCC     *viewpb.QueryPlanMVCC
-	Reducer  reducer.RetrieveResultReducer
+	VChannel    string
+	Req         *internalpb.RetrieveRequest
+	MVCC        *viewpb.QueryPlanMVCC
+	BarrierMVCC uint64
+	Reducer     reducer.RetrieveResultReducer
 }
 
 // Search executes Phase 1 + Phase 2 for a single shard's search.
@@ -63,6 +65,7 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
+		barrierMVCC:      req.BarrierMVCC,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -96,6 +99,7 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
+		barrierMVCC:      req.BarrierMVCC,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -134,6 +138,7 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 type shardExecParams struct {
 	consistencyLevel commonpb.ConsistencyLevel
 	mvcc             *viewpb.QueryPlanMVCC
+	barrierMVCC      uint64
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
 	// dispatchNode executes a Phase 2 RPC on a single work node.
@@ -213,7 +218,12 @@ func (s *shardViewQueryClient) executeGetQueryPlan(
 	planReq *viewpb.GetQueryPlanRequest,
 	params *shardExecParams,
 ) (*viewpb.QueryPlan, error) {
-	if params.mvcc != nil {
+	if params.mvcc != nil && params.barrierMVCC != 0 {
+		return nil, merr.WrapErrServiceInternalMsg("query specifies both executor MVCC and BarrierMVCC")
+	}
+	if params.barrierMVCC != 0 {
+		planReq.Mvcc = &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: params.barrierMVCC}
+	} else if params.mvcc != nil {
 		planReq.Mvcc = &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: proto.Clone(params.mvcc).(*viewpb.QueryPlanMVCC)}
 	} else {
 		switch params.consistencyLevel {

@@ -30,6 +30,8 @@ type timeTickSyncInspectorImpl struct {
 	operators    *typeutil.ConcurrentMap[string, TimeTickSyncOperator]
 	wg           sync.WaitGroup
 	working      typeutil.ConcurrentSet[string]
+	barrierMu    sync.Mutex
+	barriers     map[types.PChannelInfo]*barrierState
 	// lastPersistedSync records the last time a persisted time tick sync was
 	// triggered for each pchannel.
 	lastPersistedSync *typeutil.ConcurrentMap[string, time.Time]
@@ -54,19 +56,32 @@ func (s *timeTickSyncInspectorImpl) MustGetOperator(pChannelInfo types.PChannelI
 
 // RegisterSyncOperator registers a sync operator.
 func (s *timeTickSyncInspectorImpl) RegisterSyncOperator(operator TimeTickSyncOperator) {
+	s.barrierMu.Lock()
+	defer s.barrierMu.Unlock()
 	mlog.Info(context.TODO(), "RegisterSyncOperator", mlog.String("channel", operator.Channel().Name))
 	_, loaded := s.operators.GetOrInsert(operator.Channel().Name, operator)
 	if loaded {
 		panic("sync operator already exists, critical bug in code")
 	}
+	if s.barriers == nil {
+		s.barriers = make(map[types.PChannelInfo]*barrierState)
+	}
+	ctx, cancel := context.WithCancel(s.taskNotifier.Context()) //nolint:gosec // Ownership transfers to barrierState; Unregister cancels it, Close cancels the parent.
+	s.barriers[operator.Channel()] = &barrierState{ctx: ctx, cancel: cancel, sent: make(map[string]uint64), waiters: make(map[*barrierWaiter]struct{})}
 }
 
 // UnregisterSyncOperator unregisters a sync operator.
 func (s *timeTickSyncInspectorImpl) UnregisterSyncOperator(operator TimeTickSyncOperator) {
+	s.barrierMu.Lock()
+	defer s.barrierMu.Unlock()
 	mlog.Info(context.TODO(), "UnregisterSyncOperator", mlog.String("channel", operator.Channel().Name))
 	_, loaded := s.operators.GetAndRemove(operator.Channel().Name)
 	if !loaded {
 		panic("sync operator not found, critical bug in code")
+	}
+	if state := s.barriers[operator.Channel()]; state != nil {
+		state.cancel()
+		delete(s.barriers, operator.Channel())
 	}
 }
 
@@ -76,6 +91,7 @@ func (s *timeTickSyncInspectorImpl) background() {
 
 	interval := paramtable.Get().ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond)
 	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-s.taskNotifier.Context().Done():
@@ -85,7 +101,7 @@ func (s *timeTickSyncInspectorImpl) background() {
 			// on top of that, emit a persisted time tick at least every
 			// dataNode.segment.syncPeriod so an idle pchannel still refreshes
 			// the persisted recovery checkpoint on a bounded cadence (the
-			// recovery storage skips non-persisted heartbeats entirely).
+			// non-persisted heartbeats never advance durable recovery state).
 			// The persisted sync must be requested before the heartbeat: the
 			// working set allows only one in-flight sync per pchannel, and the
 			// heartbeat goroutine would otherwise win the slot on every tick.
@@ -130,16 +146,35 @@ func (s *timeTickSyncInspectorImpl) asyncSync(pchannelName string, persisted boo
 		// Check if the sync operation of pchannel is working, if so, skip it.
 		return false
 	}
+	s.barrierMu.Lock()
+	operator, ok := s.operators.Get(pchannelName)
+	if !ok {
+		s.barrierMu.Unlock()
+		s.working.Remove(pchannelName)
+		return false
+	}
+	state := s.barriers[operator.Channel()]
+	targets, revision := state.targets()
+	s.barrierMu.Unlock()
 
 	s.wg.Add(1)
 	go func() {
 		defer func() {
-			s.wg.Done()
 			s.working.Remove(pchannelName)
+			// A request arriving during Sync must survive the busy-slot skip.
+			s.barrierMu.Lock()
+			if state != nil && state.ctx.Err() == nil && state.revision != revision && len(state.waiters) != 0 {
+				s.syncNotifier.AddAndNotify(operator.Channel(), false)
+			}
+			s.barrierMu.Unlock()
+			s.wg.Done()
 		}()
-		if operator, ok := s.operators.Get(pchannelName); ok {
+		if len(targets) == 0 {
 			operator.Sync(s.taskNotifier.Context(), persisted)
+			return
 		}
+		tick, err := operator.SyncWithQueryBarriers(state.ctx, persisted, targets)
+		s.completeBarriers(state, tick, err)
 	}()
 	return true
 }

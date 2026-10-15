@@ -135,6 +135,11 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeAlterWAL: {
 		ExclusiveRequired: true,
 	},
+	MessageTypeMVCCBarrier: {
+		LogLevel:       mlog.DebugLevel,
+		IsSystem:       true,
+		SelfControlled: true,
+	},
 	MessageTypeRecoveryBarrier: {
 		LogLevel:       mlog.InfoLevel,
 		IsSystem:       true,

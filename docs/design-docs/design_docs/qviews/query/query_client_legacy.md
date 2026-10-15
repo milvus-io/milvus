@@ -42,9 +42,9 @@ legacy result messages currently produced by `QueryNodeClient.Search` and
 The `Legacy()` domain provides a minimal runnable QueryView backend for the
 existing Proxy query path:
 
-1. Keep the existing `queryclient.Search` and `queryclient.Query` code paths
-   untouched.
-2. Keep `SearchPipeline` and `QueryPipeline` untouched.
+1. Share routing, MVCC selection and retry with `queryclient.Search` and
+   `queryclient.Query`.
+2. Keep cross-shard processing in `SearchPipeline` and `QueryPipeline`.
 3. Replace only the raw execution currently driven by `t.lb.Execute`.
 4. Return `[]*internalpb.SearchResults` and `[]*internalpb.RetrieveResults`
    directly to Proxy.
@@ -102,6 +102,7 @@ Search request and result:
 type LegacySearchRequest struct {
     Req *internalpb.SearchRequest
     MVCC *viewpb.QueryPlanMVCC // optional fixed frontiers, retained across retry
+    BarrierMVCC uint64 // optional fixed scalar snapshot; mutually exclusive with MVCC
 }
 
 type LegacySearchResult struct {
@@ -117,6 +118,7 @@ type LegacyQueryRequest struct {
     Req *internalpb.RetrieveRequest
     Schema *schemapb.CollectionSchema // exact immutable request schema
     MVCC *viewpb.QueryPlanMVCC // optional fixed frontiers
+    BarrierMVCC uint64 // optional fixed scalar snapshot
     Plans []ShardPlan // non-nil reuses the original search plans
 }
 
@@ -126,8 +128,8 @@ type LegacyQueryResult struct {
 }
 ```
 
-`Plans` are returned for observability and future requery optimization. The
-first proxy integration only needs `Results`.
+`Results` feed the existing Proxy pipeline. `Plans` bind Search requery to
+the original View versions, nodes and MVCCs.
 
 ## 5. Construction
 
@@ -236,13 +238,19 @@ its transforming frontier. A per-attempt clone protects the caller's value.
 Nil preserves ordinary consistency-based sampling. `Plans` takes precedence
 for retained-plan requery and preserves its original MVCC.
 
-This temporary entry accepts valid executor frontiers, not an arbitrary scalar
-query timestamp. **TODO: Iterator snapshot adaptation.** The SDK stores a
-single snapshot and sends it as `guarantee_timestamp`. Copying that scalar into
-both frontiers can wait indefinitely when no TransformLog reaches that position.
-Decouple the fixed logical read timestamp from the executor catch-up proof before
-connecting this adapter. The entry does not pin physical Views across pages or
-extend historical-data retention guarantees.
+`BarrierMVCC` accepts a fixed scalar query timestamp, mutually exclusive with
+`MVCC`. SN actively establishes ordered WAL coverage through that timestamp,
+using Inspector-driven `MVCCBarrier` and scoped VChannel progress. Its common
+`_vc` remains empty; Header lists affected VChannels and the message TimeTick
+is the confirmed frontier. It uses the regular sync persistence policy. Both returned executor
+frontiers equal the requested timestamp; subsequent WAL progress never changes
+the query's snapshot. Query/Search Iterator chooses this timestamp before its
+first execution, returns it as SessionTs and reuses it on subsequent requests.
+Complex Delete uses its allocated query timestamp. TTL uses the same fixed time.
+`Plans` continues to take precedence for requery.
+
+These entries do not pin physical Views across pages or extend historical-data
+retention. Compaction/GC history guarantees remain a separate TODO.
 
 ## 8. Proxy Integration
 
@@ -265,9 +273,10 @@ Legacy().Query
   -> t.resultBuf.Insert(result)
 ```
 
-`queryTask.PostExecute` remains unchanged. It still gathers
+`queryTask.PostExecute` gathers
 `t.resultBuf`, updates task-level counters and storage cost, and invokes
-`QueryPipeline.Execute`.
+`QueryPipeline.Execute`. For the first Iterator page it returns the exact
+BarrierMVCC selected before execution as SessionTs.
 
 ### 8.2 Search Task
 
@@ -289,16 +298,16 @@ Legacy().Search
   -> t.resultBuf.Insert(result)
 ```
 
-`searchTask.PostExecute` remains unchanged. It still derives:
+`searchTask.PostExecute` returns the exact BarrierMVCC as the first Iterator
+page's SessionTs. It continues to derive:
 
 - `queryChannelsTs` from `SearchResults.channels_mvcc`;
 - storage cost from `SearchResults.scanned_*`;
 - related data size from `SearchResults.cost_aggregation`;
 - top-k and recall-evaluation flags from raw results.
 
-The first QueryView path does not fill `queryChannelsNode` with old QueryNode
-leader information. Search requery is handled by executing a normal QueryView
-query, not by preserving old leader-local requery affinity.
+The QueryView path does not fill `queryChannelsNode` with old QueryNode leader
+information. Search requery executes Query against the retained Search plans.
 
 ## 9. Requery Behavior
 

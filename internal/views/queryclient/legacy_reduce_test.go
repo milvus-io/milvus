@@ -154,3 +154,38 @@ func TestLegacyCostsPreserveZeroLatencyAndDoNotMutateInputs(t *testing.T) {
 	require.EqualValues(t, 30, result.TotalRelatedDataSize)
 	require.EqualValues(t, 10, first.TotalRelatedDataSize)
 }
+
+func TestLegacyBarrierMVCCSurvivesShardRetry(t *testing.T) {
+	mockey.PatchConvey("explicit read frontiers survive failed attempts on both worker types", t, func() {
+		id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
+		fixed := &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 100}
+		var attempts atomic.Int32
+		var fail atomic.Bool
+		fail.Store(true)
+		planClient := &fakeQueryPlanClient{}
+		service := &fakeViewQueryServiceClient{}
+		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+			attempts.Add(1)
+			require.EqualValues(t, 100, req.GetBarrierMvcc())
+			plan := legacyQueryPlan(id, qviews.NewQueryNode(1))
+			plan.Mvcc = proto.Clone(fixed).(*viewpb.QueryPlanMVCC)
+			plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{Pchannel: "p"}}})
+			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+		}).Build()
+		mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+			require.True(t, proto.Equal(fixed, req.Mvcc))
+			require.Equal(t, legacyMVCCForNode(fixed, node), req.LegacyReq.MvccTimestamp)
+			if node.NodeType() == qviews.NodeTypeQueryNode && fail.CompareAndSwap(true, false) {
+				return nil, viewerror.NewViewInvalidated("retry")
+			}
+			return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success()}}, nil
+		}).Build()
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 3}, planClient, service, &legacyResolver{vchannels: []string{id.VChannel}})
+		req := &LegacyQueryRequest{Req: &internalpb.RetrieveRequest{CollectionID: 1, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, BarrierMVCC: 100}
+		result, err := client.Legacy().Query(t.Context(), req)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, attempts.Load())
+		require.True(t, proto.Equal(fixed, result.Plans[0].Mvcc))
+		require.Zero(t, req.Req.MvccTimestamp)
+	})
+}

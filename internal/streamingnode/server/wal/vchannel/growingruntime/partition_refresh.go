@@ -19,6 +19,9 @@ type partitionRefresh struct {
 }
 
 func (s *partitionRefresh) includes(event walview.VChannelResourceEvent) bool {
+	if event.QueryBarrier != nil {
+		return event.QueryBarrier.TimeTick > s.timeTick
+	}
 	if event.Message != nil {
 		return event.Message.TimeTick() > s.timeTick
 	}

@@ -26,6 +26,11 @@ func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelReso
 }
 
 func (r *Runtime) applyEvent(ctx context.Context, event walview.VChannelResourceEvent) {
+	if event.QueryBarrier != nil {
+		r.markGrowingTimeTick(event.QueryBarrier.TimeTick)
+		r.markTransformTimeTick(event.QueryBarrier.TimeTick)
+		return
+	}
 	if event.Message != nil {
 		r.applyLiveMessage(ctx, event.Message)
 		return

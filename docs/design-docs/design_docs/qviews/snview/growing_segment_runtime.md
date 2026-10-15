@@ -397,3 +397,14 @@ last view's release. Newly prepared partitions borrow the pinned native
 collection, so the snapshot and existing segments share WAL-driven schema and
 index metadata. Ready is reported only after scope expansion and index metadata
 preparation both succeed.
+
+## Explicit Query Barrier Progress
+
+Ordered consumption of `MVCCBarrier` produces a VChannel `QueryBarrierEvent`,
+a memory-only complete-prefix notification,
+serialized behind ordinary resource events. GrowingRuntime applies preceding
+Insert/Delete/transaction events before advancing both applied frontiers. The
+event is retained during partition refresh when newer than its captured snapshot.
+VChannel query-view capture includes established barrier coverage, so a rebuilt
+runtime performs bounded Transform replay through the same base. This progress
+does not alter persisted recovery metadata, DataView versions or retention rules.

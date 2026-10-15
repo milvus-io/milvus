@@ -153,16 +153,27 @@ growing_timetick      = StreamingNode growing-runtime wait position
 transforming_timetick = QueryNode TransformBuffer wait position
 ```
 
-Both positions are WAL message TimeTicks. The query client treats them as opaque
+Ordinary positions are WAL message TimeTicks. BarrierMVCC establishes coverage
+for a fixed timestamp and uses it for both positions. The query client treats them as opaque
 executor-local MVCC values: StreamingNode targets consume `growing_timetick`, and
 QueryNode targets consume `transforming_timetick`.
 
 The client request may explicitly supply `MVCC` for fixed-snapshot callers.
 This takes precedence over consistency sampling: every Phase 1 attempt sends
 `query_plan_mvcc`, including retries after View retirement. Phase 2 uses that
-same plan MVCC. Nil retains the consistency routing below. These are executor
-frontiers; adapting an Iterator scalar snapshot requires a separate catch-up
-proof and is TODO. The explicit entry does not pin a physical View across pages.
+same plan MVCC. Alternatively, `BarrierMVCC=B` sends the `barrier_mvcc` mode:
+primary SN uses confirmed frontiers when available; otherwise Inspector drives
+a scoped `MVCCBarrier` confirmation through B. Publication completes independently
+of read-side consumption, which the existing execution waits enforce. The plan
+uses Growing=B and Transform=B, including every retry. MVCC and BarrierMVCC are
+mutually exclusive; leaving both unset retains the consistency routing below.
+
+Query/Search Iterator fixes B before its initial execution, returns that exact
+SessionTs, and forwards the SDK's subsequent guarantee_timestamp as BarrierMVCC.
+TTL evaluation uses B too. Complex Delete fixes B at its allocated query timestamp.
+Retained-plan requery preserves the parent's plan without choosing another B.
+These entries do not pin a physical View across pages or extend historical-data
+retention. See [scoped barriers](../../wal/transform_log.md#vchannel-query-barriers).
 
 **Proxy decision flow per shard:**
 

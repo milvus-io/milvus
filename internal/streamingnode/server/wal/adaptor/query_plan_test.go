@@ -3,11 +3,15 @@ package adaptor
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
@@ -15,12 +19,13 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestQueryMVCCShutdownPreservesViewError(t *testing.T) {
-	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}}
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}}
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	_, err := w.GetLatestQueryPlanMVCC(context.Background(), "p_1v0")
 	require.True(t, viewerror.AsViewError(err).IsOnShutdown())
@@ -51,7 +56,7 @@ func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {
 		renewed, released := false, false
 		lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { require.False(t, released); renewed = true }, Release: func() { released = true }}
 		patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
-		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 		req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
 		if valid {
 			req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: 1}}
@@ -73,7 +78,7 @@ func TestQueryPlanCannotUseOldSchemaView(t *testing.T) {
 	lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { t.Fatal("incompatible view must not renew a serving lease") }, Release: func() {}}
 	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
 	defer patch.UnPatch()
-	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 	req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
 	req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: 2}}
 	_, err := w.GetQueryPlan(t.Context(), req)
@@ -97,7 +102,7 @@ func TestQueryPlanRejectsUnloadedPartitionBeforePruning(t *testing.T) {
 			require.Equal(t, []int64{20}, partitions)
 			return nil, merr.WrapErrPartitionNotLoaded(20)
 		}).Build()
-		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 		req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
 		req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{PartitionIDs: []int64{20}}}
 		_, err := w.GetQueryPlan(t.Context(), req)
@@ -140,7 +145,7 @@ func TestQueryPlanWaitsForFixedMVCCBeforeSchemaValidation(t *testing.T) {
 	lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { t.Fatal("waiting for WAL coverage cannot issue a plan") }, Release: func() { released = true }}
 	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
 	defer patch.UnPatch()
-	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 	request := &viewpb.GetQueryPlanRequest{
 		ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(),
 		Mvcc:    &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 123, TransformingTimetick: 122}},
@@ -151,4 +156,71 @@ func TestQueryPlanWaitsForFixedMVCCBeforeSchemaValidation(t *testing.T) {
 	require.Nil(t, plan)
 	require.Equal(t, 1, calls)
 	require.True(t, released)
+}
+
+func TestQueryPlanBarrierPreservesRequestedSnapshot(t *testing.T) {
+	resource.InitForTest(t)
+	mockey.PatchConvey("barrier establishes coverage but never changes read time", t, func() {
+		manager := mvcc.NewMVCCManager(0)
+		mockey.Mock((*roWALAdaptorImpl).Channel).Return(types.PChannelInfo{AccessMode: types.AccessModeRW}).Build()
+		var barrierErr error
+		ensured := mockey.Mock(mockey.GetMethod(resource.Resource().TimeTickInspector(), "EnsureBarrier")).To(func(ctx context.Context, _ types.PChannelInfo, channel string, tt uint64) error {
+			require.Equal(t, "v", channel)
+			require.EqualValues(t, 100, tt)
+			return barrierErr
+		}).Build()
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
+		req := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 100}}
+		mvcc, err := w.resolveQueryPlanMVCC(t.Context(), req, "v")
+		require.NoError(t, err)
+		require.EqualValues(t, 100, mvcc.GrowingTimetick)
+		require.EqualValues(t, 100, mvcc.TransformingTimetick)
+		require.Equal(t, 1, ensured.Times())
+		barrierErr = context.DeadlineExceeded
+		mvcc, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Nil(t, mvcc)
+		// A confirmed pair of frontiers satisfies the snapshot without Inspector.
+		manager.ApplyRecoveryBarrier("v", 150)
+		mvcc, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
+		require.NoError(t, err)
+		require.EqualValues(t, 100, mvcc.GetGrowingTimetick())
+		require.Equal(t, 2, ensured.Times())
+	})
+}
+
+func TestQueryPlanBarrierDoesNotHoldWALShutdown(t *testing.T) {
+	mockey.PatchConvey("owner cancellation releases the pending plan and lease", t, func() {
+		owner, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v", ReplicaId: 1}
+		released := make(chan struct{})
+		lease := &snview.QueryViewLease{Meta: meta, Release: func() { close(released) }}
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+		entered := make(chan struct{})
+		mockey.Mock((*walAdaptorImpl).resolveQueryPlanMVCC).To(func(_ *walAdaptorImpl, ctx context.Context, _ *viewpb.GetQueryPlanRequest, _ string) (*viewpb.QueryPlanMVCC, error) {
+			close(entered)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}).Build()
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: owner, lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := w.GetQueryPlan(t.Context(), &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 100}})
+			done <- err
+		}()
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("plan did not start waiting")
+		}
+		cancel()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("plan kept waiting after WAL shutdown")
+		}
+		<-released
+	})
 }

@@ -47,9 +47,23 @@ func (cm *QueryMVCCManager) ApplyRecoveryBarrier(vchannel string, timetick uint6
 
 // UpdateMVCC updates the mvcc state by incoming message.
 func (cm *QueryMVCCManager) UpdateMVCC(msg message.MutableMessage) {
+	if msg.MessageType() == message.MessageTypeMVCCBarrier {
+		cm.mu.Lock()
+		defer cm.mu.Unlock()
+		tick := msg.TimeTick()
+		for _, channel := range message.MustAsMutableMVCCBarrierMessageV2(msg).Header().GetVchannels() {
+			mvcc := cm.vchannelMVCCs[channel]
+			mvcc.GrowingTimetick = max(mvcc.GrowingTimetick, tick)
+			mvcc.TransformingTimetick = max(mvcc.TransformingTimetick, tick)
+			mvcc.Confirmed = false
+			cm.vchannelMVCCs[channel] = mvcc
+			cm.unconfirmedVChannels[channel] = struct{}{}
+		}
+		cm.sync(msg.TimeTick())
+		return
+	}
 	if !msg.IsPersisted() {
-		// Compatibility guard for externally constructed non-persisted messages.
-		// The WAL no longer produces non-persisted TimeTick messages.
+		// Ordinary non-persisted heartbeats do not advance query frontiers.
 		return
 	}
 

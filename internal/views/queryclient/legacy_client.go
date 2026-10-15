@@ -30,6 +30,9 @@ type LegacySearchRequest struct {
 	Req *internalpb.SearchRequest
 	// MVCC, when supplied, overrides consistency-level sampling across retries.
 	MVCC *viewpb.QueryPlanMVCC
+	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
+	// Mutually exclusive with MVCC. Zero preserves ordinary consistency sampling.
+	BarrierMVCC uint64
 }
 
 type LegacySearchResult struct {
@@ -43,6 +46,9 @@ type LegacyQueryRequest struct {
 	Schema *schemapb.CollectionSchema
 	// MVCC fixes the read boundary across replanning; nil samples by consistency.
 	MVCC *viewpb.QueryPlanMVCC
+	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
+	// Mutually exclusive with MVCC. Zero preserves ordinary consistency sampling.
+	BarrierMVCC uint64
 	// Plans binds an internal requery to the original Search attempt. Non-nil
 	// (including empty) never resolves a new schema, view or MVCC.
 	Plans []ShardPlan
@@ -105,10 +111,11 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (*L
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				VChannel: vchannels[i],
-				Req:      req.Req,
-				MVCC:     req.MVCC,
-				Reducer:  collector,
+				VChannel:    vchannels[i],
+				Req:         req.Req,
+				MVCC:        req.MVCC,
+				BarrierMVCC: req.BarrierMVCC,
+				Reducer:     collector,
 			})
 			if err != nil {
 				return err
@@ -146,10 +153,11 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (*Leg
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
-				VChannel: vchannels[i],
-				Req:      req.Req,
-				MVCC:     req.MVCC,
-				Reducer:  collector,
+				VChannel:    vchannels[i],
+				Req:         req.Req,
+				MVCC:        req.MVCC,
+				BarrierMVCC: req.BarrierMVCC,
+				Reducer:     collector,
 			})
 			if err != nil {
 				return err

@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -14,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -47,6 +49,11 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
+
+	// A pending barrier must not hold WAL shutdown waiting for progress from
+	// the owner that is being fenced or replaced.
+	ctx, cancel := contextutil.MergeContext(ctx, w.availableCtx)
+	defer cancel()
 
 	if req == nil || req.GetShardId() == nil {
 		return nil, viewerror.NewUnknownError("query plan request misses shard id")
@@ -215,6 +222,23 @@ func (w *walAdaptorImpl) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMV
 
 func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.GetQueryPlanRequest, vchannel string) (*viewpb.QueryPlanMVCC, error) {
 	switch mvcc := req.GetMvcc().(type) {
+	case *viewpb.GetQueryPlanRequest_BarrierMvcc:
+		if w.Channel().AccessMode != types.AccessModeRW {
+			return nil, viewerror.NewNotPrimaryError("query barrier requires the primary WAL")
+		}
+		if mvcc.BarrierMvcc == 0 {
+			return nil, viewerror.NewUnknownError("query barrier timestamp is zero")
+		}
+		current := w.param.MVCCManager.GetQueryMVCCOfVChannel(vchannel)
+		if !current.Confirmed || current.GrowingTimetick < mvcc.BarrierMvcc || current.TransformingTimetick < mvcc.BarrierMvcc {
+			if err := resource.Resource().TimeTickInspector().EnsureBarrier(ctx, w.Channel(), vchannel, mvcc.BarrierMvcc); err != nil {
+				if se := status.AsStreamingError(err); se.IsOnShutdown() || se.IsFenced() {
+					return nil, viewerror.NewOnShutdownError("query barrier WAL is unavailable")
+				}
+				return nil, err
+			}
+		}
+		return &viewpb.QueryPlanMVCC{GrowingTimetick: mvcc.BarrierMvcc, TransformingTimetick: mvcc.BarrierMvcc}, nil
 	case *viewpb.GetQueryPlanRequest_QueryPlanMvcc:
 		return mvcc.QueryPlanMvcc, nil
 	case *viewpb.GetQueryPlanRequest_ConsistencyLevel:

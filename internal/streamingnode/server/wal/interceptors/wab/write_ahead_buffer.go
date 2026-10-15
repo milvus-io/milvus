@@ -59,7 +59,7 @@ func (w *WriteAheadBuffer) Append(msgs []message.ImmutableMessage, tsMsg message
 		return
 	}
 
-	if tsMsg.MessageType() != message.MessageTypeTimeTick {
+	if tsMsg.MessageType() != message.MessageTypeTimeTick && tsMsg.MessageType() != message.MessageTypeMVCCBarrier {
 		panic("the message is not a time tick message")
 	}
 	if tsMsg.TimeTick() <= w.lastTimeTickMessage.TimeTick() {
