@@ -1,6 +1,7 @@
 import json
 import os
 import queue
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -648,6 +649,7 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                 sequence_start = _continuous_lane_sequence(epoch, 2, 0)
                 sequence_end = _continuous_lane_sequence(epoch, 2, CONTINUOUS_IMPORT_ROWS_PER_EPOCH - 1)
                 with RemoteBulkWriter(
+                    local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
                     schema=schema,
                     remote_path=f"continuous_integrity/{collection_name}/epoch_{epoch + 1}",
                     connect_param=RemoteBulkWriter.ConnectParam(
