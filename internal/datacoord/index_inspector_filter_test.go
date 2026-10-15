@@ -99,11 +99,7 @@ func TestIndexInspectorGetUnIndexTaskSegmentsSkipsSegmentsCannotBuildIndexNow(t 
 		IsSorted:     true,
 	}})
 
-	segments := (&indexInspector{meta: m}).getUnIndexTaskSegments(context.TODO())
+	segmentIDs := (&indexInspector{meta: m}).getUnIndexTaskSegments(context.TODO())
 
-	segmentIDs := make([]UniqueID, 0, len(segments))
-	for _, segment := range segments {
-		segmentIDs = append(segmentIDs, segment.GetID())
-	}
 	assert.ElementsMatch(t, []UniqueID{sortedSegmentID}, segmentIDs)
 }

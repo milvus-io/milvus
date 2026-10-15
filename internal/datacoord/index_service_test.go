@@ -2841,9 +2841,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 	}
 
 	t.Run("normal", func(t *testing.T) {
-		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
-		assert.Equal(t, 1, len(segments))
-		assert.Equal(t, segID, segments[0].ID)
+		segIDs := indexInspector.getUnIndexTaskSegments(context.TODO())
+		assert.Equal(t, []UniqueID{segID}, segIDs)
 
 		m.indexMeta.segmentIndexes.Insert(segID, typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]())
 		m.indexMeta.updateSegmentIndex(&model.SegmentIndex{
@@ -2852,8 +2851,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexID:      indexID + 2,
 			IndexState:   commonpb.IndexState_Finished,
 		})
-		assert.Equal(t, 1, len(segments))
-		assert.Equal(t, segID, segments[0].ID)
+		segIDs = indexInspector.getUnIndexTaskSegments(context.TODO())
+		assert.Equal(t, []UniqueID{segID}, segIDs)
 	})
 
 	t.Run("segment partial field with index", func(t *testing.T) {
@@ -2864,9 +2863,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
-		assert.Equal(t, 1, len(segments))
-		assert.Equal(t, segID, segments[0].ID)
+		segIDs := indexInspector.getUnIndexTaskSegments(context.TODO())
+		assert.Equal(t, []UniqueID{segID}, segIDs)
 	})
 
 	t.Run("segment all vector field with index", func(t *testing.T) {
@@ -2877,8 +2875,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
-		assert.Equal(t, 0, len(segments))
+		segIDs := indexInspector.getUnIndexTaskSegments(context.TODO())
+		assert.Empty(t, segIDs)
 	})
 }
 

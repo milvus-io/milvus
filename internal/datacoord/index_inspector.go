@@ -131,7 +131,7 @@ func (i *indexInspector) Start() {
 	i.wg.Add(1)
 	go i.forwardBuildIndexCh(i.ctx)
 	i.reloadFromMeta()
-	i.requeueUnindexedTaskSegments(i.ctx)
+	i.requeuePendingIndexSegments(i.getUnIndexTaskSegments(i.ctx)...)
 	i.wg.Add(1)
 	go i.createIndexForSegmentLoop(i.ctx)
 }
@@ -203,24 +203,12 @@ func getIndexReconcileInterval() time.Duration {
 }
 
 func (i *indexInspector) enqueueUnindexedTaskSegments(ctx context.Context, filters ...SegmentFilter) {
-	segments := i.getUnIndexTaskSegments(ctx, filters...)
-	segIDs := make([]UniqueID, 0, len(segments))
-	for _, segment := range segments {
-		segIDs = append(segIDs, segment.GetID())
-	}
-	i.enqueuePendingIndexSegments(segIDs...)
+	i.enqueuePendingIndexSegments(i.getUnIndexTaskSegments(ctx, filters...)...)
 }
 
-func (i *indexInspector) requeueUnindexedTaskSegments(ctx context.Context, filters ...SegmentFilter) {
-	segments := i.getUnIndexTaskSegments(ctx, filters...)
-	segIDs := make([]UniqueID, 0, len(segments))
-	for _, segment := range segments {
-		segIDs = append(segIDs, segment.GetID())
-	}
-	i.requeuePendingIndexSegments(segIDs...)
-}
-
-func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+// getUnIndexTaskSegments returns the IDs of the segments that can build index
+// now but still miss an index task.
+func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context, filters ...SegmentFilter) []UniqueID {
 	sortCompactionEnabled := enableSortCompaction()
 	externalCollections := make(map[UniqueID]bool)
 	segmentFilters := append([]SegmentFilter{}, filters...)
@@ -241,29 +229,16 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context, filters ...
 		}
 		return true
 	}))
-	candidateSegments := i.meta.SelectSegments(ctx, segmentFilters...)
-
-	return i.filterUnindexedTaskSegments(candidateSegments)
-}
-
-func (i *indexInspector) filterUnindexedTaskSegments(candidateSegments []*SegmentInfo) []*SegmentInfo {
 	segmentIDsByCollection := make(map[UniqueID][]UniqueID)
-	for _, segment := range candidateSegments {
+	for _, segment := range i.meta.SelectSegments(ctx, segmentFilters...) {
 		segmentIDsByCollection[segment.CollectionID] = append(segmentIDsByCollection[segment.CollectionID], segment.GetID())
 	}
 
-	unindexedIDsByCollection := make(map[UniqueID]typeutil.UniqueSet)
+	var unindexedIDs []UniqueID
 	for collectionID, segIDs := range segmentIDsByCollection {
-		unindexedIDsByCollection[collectionID] = i.meta.indexMeta.GetUnIndexedSegmentIDsForIndexTask(collectionID, segIDs)
+		unindexedIDs = append(unindexedIDs, i.meta.indexMeta.GetUnIndexedSegmentIDsForIndexTask(collectionID, segIDs).Collect()...)
 	}
-
-	unindexedSegments := make([]*SegmentInfo, 0)
-	for _, segment := range candidateSegments {
-		if unindexedIDsByCollection[segment.CollectionID].Contain(segment.GetID()) {
-			unindexedSegments = append(unindexedSegments, segment)
-		}
-	}
-	return unindexedSegments
+	return unindexedIDs
 }
 
 func (i *indexInspector) processPendingIndexSegments(ctx context.Context) {
