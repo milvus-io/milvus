@@ -122,6 +122,12 @@ func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathR
 		VChannel:     info.meta.GetVchannel(),
 		CollectionID: collection.GetCollectionId(),
 		PartitionIDs: make([]int64, 0, len(collection.GetPartitions())),
+		// A fenced shard split source stays NORMAL and is therefore reported
+		// here like any live vchannel. The fence travels with it so the write
+		// path can rebuild its DoAppend gate: without it a restart would make
+		// the source writable again and accept DML for keys its targets own.
+		SplitFenceTimeTick: info.meta.GetSplitFenceTimeTick(),
+		SplitFenceTaskID:   info.meta.GetSplitFenceTaskId(),
 	}
 	for _, partition := range collection.GetPartitions() {
 		if isPartitionNormal(partition.GetState()) && !info.closingLocked(partition.GetPartitionId()) {
@@ -253,6 +259,15 @@ func (info *VChannelView) ObserveExistingCreateCollectionMessageV1(msg message.I
 		return existingCreateCollectionIgnored
 	}
 	return existingCreateCollectionInconsistent
+}
+
+// CanStartNewCollectionAt reports whether a genesis message at this tick may
+// start a new lifetime of the vchannel: the retained meta is a pure replay
+// filter and the genesis is beyond its checkpoint.
+func (info *VChannelView) CanStartNewCollectionAt(timetick uint64) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.canStartNewCollectionAtLocked(timetick)
 }
 
 func (info *VChannelView) canStartNewCollectionAtLocked(timetick uint64) bool {

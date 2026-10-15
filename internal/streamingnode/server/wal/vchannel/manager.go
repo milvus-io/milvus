@@ -315,7 +315,7 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 		return nil
 	}
 	module, _ := m.modules.Get(vchannel)
-	if module != nil || msg.MessageType() != message.MessageTypeCreateCollection {
+	if module != nil || !isVChannelGenesisMessage(msg) {
 		return module
 	}
 	module, err := m.newModule(vchannel)
@@ -324,6 +324,26 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 	}
 	module, _ = m.modules.GetOrInsert(vchannel, module)
 	return module
+}
+
+// isVChannelGenesisMessage reports whether a message creates the vchannel it
+// is addressed to, so a module must be built for it.
+//
+// CreateCollection is one. The TARGET replica of a SplitShard broadcast is the
+// other: a shard split's targets are brand-new vchannels, and that replica is
+// their genesis. The SOURCE replica of the same broadcast is not -- it fences
+// a vchannel this pchannel already holds -- and neither is the control channel
+// replica, which the dispatch drops before this point.
+func isVChannelGenesisMessage(msg message.ImmutableMessage) bool {
+	switch msg.MessageType() {
+	case message.MessageTypeCreateCollection:
+		return true
+	case message.MessageTypeSplitShard:
+		header := message.MustAsImmutableSplitShardMessageV2(msg).Header()
+		return message.SplitShardRoleOf(header, msg.VChannel()) == message.SplitShardRoleTarget
+	default:
+		return false
+	}
 }
 
 func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryModule, error) {
