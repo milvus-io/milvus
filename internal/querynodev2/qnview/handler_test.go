@@ -609,3 +609,39 @@ func TestQNHandler_FullLifecycle(t *testing.T) {
 	req.OnReady(map[int64][]int64{10: {1000}})
 	assert.Equal(t, 3, rc.count())
 }
+
+func TestFailedPrepareReplacementAcquiresBeforeRelease(t *testing.T) {
+	mockey.PatchConvey("replacement protects references before failed-view teardown", t, func() {
+		mgr := newMockSegmentManager()
+		requests := make(map[qviews.QueryViewKey]AcquireSegments)
+		var events []string
+		mockey.Mock((*mockSegmentManager).Acquire).To(func(_ *mockSegmentManager, req AcquireSegments) {
+			requests[req.Key] = req
+			events = append(events, "acquire")
+		}).Build()
+		mockey.Mock((*mockSegmentManager).Release).To(func(_ *mockSegmentManager, req ReleaseSegments) {
+			require.Len(t, requests, 2, "replacement references must already exist")
+			delete(requests, req.Key)
+			events = append(events, "release")
+		}).Build()
+		h := NewQNQueryViewHandler(mgr)
+		collector := &reportCollector{}
+		old := newPreparingQNView(1, 1)
+		h.ApplyViews([]handler.ApplyView{{View: old, OnReport: collector.onReport}})
+		req := requests[old.QueryViewKey()]
+		req.OnReady(map[int64][]int64{10: {1000, 1001}})
+		req.OnUnrecoverable()
+		require.Len(t, requests, 1, "failure alone must not release successful loads")
+		meta := buildHandlerTestMeta(1)
+		meta.Version.QueryVersion = 2 // Same materialization, different holder.
+		replacement := qviews.NewQueryViewAtQueryNode(meta, buildHandlerTestQNView(1))
+		// Deliberately send teardown first: the handler must reorder the batch.
+		h.ApplyViews([]handler.ApplyView{
+			{View: newDroppedQNView(1, 1), OnReport: collector.onReport},
+			{View: replacement, OnReport: collector.onReport},
+		})
+		require.Equal(t, []string{"acquire", "acquire", "release"}, events)
+		require.Contains(t, requests, replacement.QueryViewKey())
+		require.NotContains(t, requests, old.QueryViewKey())
+	})
+}

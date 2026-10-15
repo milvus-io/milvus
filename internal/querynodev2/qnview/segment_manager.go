@@ -64,6 +64,10 @@ type ReleaseSegments struct {
 type SegmentManager interface {
 	// Acquire creates a view-scoped segment reference, starts missing segment
 	// loads, and reports readiness for all assigned segments.
+	// References to compatible existing resources must be registered before
+	// returning: ApplyViews may next release an older failed view sharing them.
+	// Loading and callbacks remain asynchronous. A failure must preserve already
+	// acquired resources until Release, so a replacement can take over references.
 	Acquire(req AcquireSegments)
 
 	// Release decrements reference counts for all segments held by this view.
