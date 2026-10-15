@@ -393,6 +393,7 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | `checkpoint_time_tick` is 0 | Request check, `CommitFlush` | `ParameterInvalid` | No (caller bug) |
 | `ErrFenced` | Claim, flush | `ChannelNotAvailable` | No. Stop the writes on the pchannel |
 | Meta kv or object storage failure (`ErrUnavailable`) | Load, write, read-back, walk | `ServiceUnavailable` | Yes |
+| Object storage failure that a retry does not fix: permission denied, bucket not found, invalid credentials, entity too large | Load, write | Its own code (`IoPermissionDenied`, `IoBucketNotFound`, `IoInvalidCredentials`, `IoEntityTooLarge`) | No |
 | Pointer or claim write failed and the read-back does not show the new value | Commit step 5, claim | `ServiceUnavailable` | Yes |
 | Missing body object (`ErrCorrupted`) | Load | `DataIntegrity` | No |
 | Body, pointer or claim record does not decode, or has no body key, version 0 or term 0, or versions differ (`ErrCorrupted`) | Load | `DataIntegrity` | No |
@@ -401,8 +402,12 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 
 Notes:
 
-- A remote store failure is transient, so it is retryable. `pkerr.ErrIO` (code
-  `IoFailed`) is only for local disk, and the manifest service does not use it.
+- A remote store failure is transient, so it is retryable. The exceptions are
+  the failures of a wrong store configuration and of a too large object: a
+  retry does not fix them, so they keep their own code. `IoFailed` is not one
+  of them, because the object storage client also returns it for unknown and
+  transient failures. `pkerr.ErrIO` (code `IoFailed`) is only for local disk,
+  and the manifest service does not use it.
 - A missing object has both marks: `ErrCorrupted` from the object store adapter
   and `ErrUnavailable` from the caller. `ToMerr` checks `ErrCorrupted` first.
 - `GetRecoveryManifests` returns a load error of one target in the status of
