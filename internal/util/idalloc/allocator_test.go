@@ -104,3 +104,30 @@ func TestIDAllocator(t *testing.T) {
 	time.Sleep(time.Millisecond * 10)
 	allocator.SyncIfExpired(time.Millisecond * 10)
 }
+
+func TestAllocateFreshTakesANewBatch(t *testing.T) {
+	paramtable.Init()
+
+	client := NewMockRootCoordClient(t)
+	f := syncutil.NewFuture[types.MixCoordClient]()
+	f.Set(client)
+	allocator := NewTSOAllocator(f)
+
+	first, err := allocator.Allocate(context.Background())
+	assert.NoError(t, err)
+	// the batch is 1000 wide; a plain Allocate keeps drawing from it.
+	second, err := allocator.Allocate(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, first+1, second)
+
+	// AllocateFresh throws the rest of the batch away and draws from a new one,
+	// which the mock hands out strictly after every earlier batch.
+	fresh, err := allocator.AllocateFresh(context.Background())
+	assert.NoError(t, err)
+	assert.Greater(t, fresh, first+batchAllocateSize-1, "fresh tick must be past the end of the discarded batch")
+
+	// the allocator keeps going from the fresh batch afterwards.
+	next, err := allocator.Allocate(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, fresh+1, next)
+}
