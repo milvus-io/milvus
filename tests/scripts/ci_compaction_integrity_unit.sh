@@ -28,4 +28,6 @@ exec pytest "$@" \
   --tags CompactionIntegrityUnit \
   -- \
   milvus_client/compaction_integrity_helper_tests.py \
-  milvus_client/test_milvus_client_data_integrity.py
+  milvus_client/test_milvus_client_data_integrity.py \
+  milvus_client/test_milvus_client_continuous_data_integrity.py \
+  milvus_client/test_data_integrity_diagnostics_unit.py
