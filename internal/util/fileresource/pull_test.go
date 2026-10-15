@@ -6,6 +6,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -13,16 +14,18 @@ import (
 )
 
 func TestPrepareFileResourcesPublishesFetchedSnapshot(t *testing.T) {
-	t.Cleanup(func() { SetSnapshotFetcher(nil) })
+	manager := setupPullTestManager(t, 4)
 	var applied *internalpb.SyncFileResourceRequest
 	apply := mockey.Mock(Sync).To(func(ctx context.Context, version uint64, resources []*internalpb.FileResourceInfo) error {
 		require.NoError(t, ctx.Err())
 		applied = proto.Clone(&internalpb.SyncFileResourceRequest{Version: version, Resources: resources}).(*internalpb.SyncFileResourceRequest)
+		manager.version.Store(version)
 		return nil
 	}).Build()
 	defer apply.UnPatch()
 	resource := &internalpb.FileResourceInfo{Id: 3, Name: "model", Path: "models/rank.ubj", StorageName: "store"}
-	SetSnapshotFetcher(func(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
+	SetSnapshotFetcher(func(ctx context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64, error) {
+		require.EqualValues(t, 4, knownVersion)
 		_, bounded := ctx.Deadline()
 		require.True(t, bounded)
 		return []*internalpb.FileResourceInfo{resource}, 5, nil
@@ -30,7 +33,18 @@ func TestPrepareFileResourcesPublishesFetchedSnapshot(t *testing.T) {
 	require.NoError(t, Prepare(t.Context()))
 	require.EqualValues(t, 5, applied.GetVersion())
 	require.True(t, proto.Equal(resource, applied.GetResources()[0]))
-	SetSnapshotFetcher(func(context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
+	for _, version := range []uint64{5, 4} {
+		applied = nil
+		SetSnapshotFetcher(func(_ context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64, error) {
+			require.EqualValues(t, 5, knownVersion)
+			return nil, version, nil
+		})
+		require.NoError(t, Prepare(t.Context()))
+		require.Nil(t, applied, "unchanged and stale responses must not clear resources")
+		require.EqualValues(t, 5, manager.GetVersion())
+	}
+	SetSnapshotFetcher(func(_ context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64, error) {
+		require.EqualValues(t, 5, knownVersion)
 		return nil, 6, nil
 	})
 	require.NoError(t, Prepare(t.Context()))
@@ -39,23 +53,75 @@ func TestPrepareFileResourcesPublishesFetchedSnapshot(t *testing.T) {
 }
 
 func TestPrepareFileResourcesFailureDoesNotPublish(t *testing.T) {
-	t.Cleanup(func() { SetSnapshotFetcher(nil) })
+	manager := setupPullTestManager(t, 4)
 	apply := mockey.Mock(Sync).To(func(context.Context, uint64, []*internalpb.FileResourceInfo) error {
 		t.Fatal("failed fetch cannot replace the active resources")
 		return nil
 	}).Build()
 	defer apply.UnPatch()
-	SetSnapshotFetcher(func(context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
+	SetSnapshotFetcher(func(context.Context, uint64) ([]*internalpb.FileResourceInfo, uint64, error) {
 		return nil, 0, merr.ErrServiceUnavailable
 	})
 	require.ErrorIs(t, Prepare(t.Context()), merr.ErrServiceUnavailable)
-	SetSnapshotFetcher(func(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
+	SetSnapshotFetcher(func(ctx context.Context, _ uint64) ([]*internalpb.FileResourceInfo, uint64, error) {
 		<-ctx.Done()
 		return nil, 0, ctx.Err()
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	require.ErrorIs(t, Prepare(ctx), context.Canceled)
+	require.EqualValues(t, 4, manager.GetVersion())
 	SetSnapshotFetcher(nil)
 	require.NoError(t, Prepare(t.Context()), "workers using the existing push path need no fetcher")
+}
+
+func TestPrepareFileResourcesRetriesFromAppliedVersion(t *testing.T) {
+	manager := setupPullTestManager(t, 4)
+	resource := &internalpb.FileResourceInfo{Id: 3, Name: "dictionary", Path: "files/dictionary.txt"}
+	SetSnapshotFetcher(func(_ context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64, error) {
+		require.EqualValues(t, 4, knownVersion, "a failed application must not acknowledge the fetched version")
+		return []*internalpb.FileResourceInfo{resource}, 5, nil
+	})
+	fail := true
+	apply := mockey.Mock(Sync).To(func(_ context.Context, version uint64, resources []*internalpb.FileResourceInfo) error {
+		require.EqualValues(t, 5, version)
+		require.Len(t, resources, 1)
+		if fail {
+			return merr.ErrServiceUnavailable
+		}
+		manager.version.Store(version)
+		return nil
+	}).Build()
+	defer apply.UnPatch()
+	require.ErrorIs(t, Prepare(t.Context()), merr.ErrServiceUnavailable)
+	require.EqualValues(t, 4, manager.GetVersion())
+	fail = false
+	require.NoError(t, Prepare(t.Context()))
+	require.EqualValues(t, 5, manager.GetVersion())
+}
+
+func TestPrepareFileResourcesIgnoresSnapshotOvertakenDuringFetch(t *testing.T) {
+	manager := setupPullTestManager(t, 4)
+	SetSnapshotFetcher(func(_ context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64, error) {
+		require.EqualValues(t, 4, knownVersion)
+		// A concurrent pull or push publishes version 6 while this RPC is in flight.
+		manager.resourceMap = map[string]int64{"dictionary": 10}
+		manager.version.Store(6)
+		return nil, 5, nil
+	})
+	require.NoError(t, Prepare(t.Context()))
+	require.EqualValues(t, 6, manager.GetVersion())
+	require.Equal(t, map[string]int64{"dictionary": 10}, manager.resourceMap)
+}
+
+func setupPullTestManager(t *testing.T, version uint64) *SyncManager {
+	t.Helper()
+	previous := GlobalFileManager
+	manager := &SyncManager{version: atomic.NewUint64(version)}
+	GlobalFileManager = manager
+	t.Cleanup(func() {
+		SetSnapshotFetcher(nil)
+		GlobalFileManager = previous
+	})
+	return manager
 }

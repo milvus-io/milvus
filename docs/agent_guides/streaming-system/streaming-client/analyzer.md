@@ -101,9 +101,25 @@ uses its existing readiness/retry loop, returns Unimplemented immediately, and
 maps invalid arguments to the public DDL parameter-error contract. No independent
 retry loop, discovery mechanism, or shutdown lifecycle is introduced.
 
-The pull path adds the internal Coordinator `GetFileResourceSnapshot` RPC. New
-StreamingNodes require a Coordinator that supports it, and the new DDL validation
-path requires StreamingNodes that support `ValidateAnalyzer`. Existing RPC
+The internal Coordinator `GetFileResourceSnapshot` RPC uses a dedicated
+`GetFileResourceSnapshotRequest`. Its `known_version` is the last snapshot
+successfully applied locally, not the last version fetched. Zero denotes the
+initial empty inventory. Coordinator reads the inventory and version together
+under the metadata lock. On success:
+
+- An equal response version means unchanged; the resource list is omitted.
+- A different version carries the complete inventory, never a delta. A newer
+  version with an empty list means all resources were removed and must be applied.
+- Older responses are ignored. `Sync` rechecks the version under its lock, so
+  concurrent pulls and legacy pushes cannot roll back a newer local inventory.
+
+Downloads and native resource-table activation must succeed before the local
+version advances. A failed preparation therefore retries with the last applied
+version. Unchanged responses avoid transferring the list; they still perform an
+RPC, and Coordinator currently still reads the complete metadata snapshot.
+
+New StreamingNodes require a Coordinator that supports this RPC, and the new DDL
+validation path requires StreamingNodes that support `ValidateAnalyzer`. Existing RPC
 signatures remain available; missing new RPCs surface as Unimplemented.
 
 ## Key Packages
