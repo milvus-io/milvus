@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -90,12 +91,31 @@ func CheckAutoIndexHelper(key string, m map[string]string, dtype schemapb.DataTy
 	}
 }
 
+// GetSparseAutoIndexParams returns the metric-specific sparse autoindex build
+// params. BM25 function output fields select the BM25 config even when the
+// request omits metric_type. Each metric-specific ParamItem falls back to the
+// legacy autoIndex.params.sparse.build key when it is not configured.
+func GetSparseAutoIndexParams(metricType string, functionType schemapb.FunctionType) map[string]string {
+	autoIndexCfg := &paramtable.Get().AutoIndexConfig
+	var config map[string]string
+	if metricType == metric.BM25 || functionType == schemapb.FunctionType_BM25 {
+		config = autoIndexCfg.SparseBM25IndexParams.GetAsJSONMap()
+	} else {
+		config = autoIndexCfg.SparseIPIndexParams.GetAsJSONMap()
+	}
+	if len(config) == 0 {
+		return autoIndexCfg.SparseIndexParams.GetAsJSONMap()
+	}
+	return config
+}
+
 func CheckAutoIndexConfig() {
 	autoIndexCfg := &paramtable.Get().AutoIndexConfig
 	CheckAutoIndexHelper(autoIndexCfg.IndexParams.Key, autoIndexCfg.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
 	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.DeduplicateIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
-	CheckAutoIndexHelper(autoIndexCfg.SparseIndexParams.Key, autoIndexCfg.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector)
+	CheckAutoIndexHelper(autoIndexCfg.SparseIPIndexParams.Key, GetSparseAutoIndexParams("", schemapb.FunctionType_Unknown), schemapb.DataType_SparseFloatVector)
+	CheckAutoIndexHelper(autoIndexCfg.SparseBM25IndexParams.Key, GetSparseAutoIndexParams("", schemapb.FunctionType_BM25), schemapb.DataType_SparseFloatVector)
 	CheckAutoIndexHelper(autoIndexCfg.LargeTopKIndexParams.Key, autoIndexCfg.LargeTopKIndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 }
 
