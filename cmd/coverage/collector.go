@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -65,7 +64,7 @@ func start(ctx context.Context, root string, dump func()) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
 	}
-	ready, err := os.OpenFile(filepath.Join(root, "ready"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	ready, err := os.OpenFile(filepath.Join(root, "ready"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return merr.Wrap(err, "coverage output is already owned; use a fresh directory")
 	}
@@ -92,7 +91,7 @@ func start(ctx context.Context, root string, dump func()) error {
 		return merr.Wrap(err, "server was not built with Go coverage")
 	}
 	_, writeErr := ready.WriteString(strconv.Itoa(os.Getpid()))
-	if err := errors.Join(writeErr, ready.Close()); err != nil {
+	if err := merr.Combine(writeErr, ready.Close()); err != nil {
 		return err
 	}
 	go c.serve(ctx)
@@ -105,12 +104,13 @@ func validID(id string) bool {
 }
 
 func (c *collector) serve(ctx context.Context) {
-	ticks := time.Tick(500 * time.Millisecond)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticks:
+		case <-ticker.C:
 			entries, err := os.ReadDir(filepath.Join(c.root, "requests"))
 			if err != nil {
 				mlog.RatedWarn(ctx, 0.1, "read coverage requests", mlog.Err(err))
@@ -134,7 +134,7 @@ func (c *collector) handle(ctx context.Context, id string) {
 		mlog.Warn(ctx, "claim coverage snapshot", mlog.Err(err))
 	} else if err := c.snapshot(run); err != nil {
 		mlog.Warn(ctx, "export coverage snapshot", mlog.Err(err))
-		if writeErr := os.WriteFile(filepath.Join(run, "error"), []byte(err.Error()), 0o644); writeErr != nil {
+		if writeErr := os.WriteFile(filepath.Join(run, "error"), []byte(err.Error()), 0o600); writeErr != nil {
 			mlog.Warn(ctx, "write coverage failure marker", mlog.Err(writeErr))
 		}
 	}
@@ -158,7 +158,7 @@ func (c *collector) snapshot(run string) error {
 		return c.nativeError
 	}
 	errorFile := filepath.Join(c.root, "gcov-errors.log")
-	if err := os.WriteFile(errorFile, nil, 0o644); err != nil {
+	if err := os.WriteFile(errorFile, nil, 0o600); err != nil {
 		return err
 	}
 	c.dump()
@@ -206,7 +206,7 @@ func (c *collector) snapshot(run string) error {
 		return err
 	}
 	temp := filepath.Join(run, "done.json.tmp")
-	if err := os.WriteFile(temp, manifest, 0o644); err != nil {
+	if err := os.WriteFile(temp, manifest, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(temp, filepath.Join(run, "done.json"))
@@ -221,10 +221,10 @@ func copyFile(source, destination string) error {
 		return err
 	}
 	defer src.Close()
-	dst, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	dst, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
 	_, copyErr := io.Copy(dst, src)
-	return errors.Join(copyErr, dst.Close())
+	return merr.Combine(copyErr, dst.Close())
 }
