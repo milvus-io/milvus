@@ -104,6 +104,30 @@ func TestGrepSegmentAdapter(t *testing.T) {
 				require.Nil(t, result)
 				require.ErrorIs(t, err, context.DeadlineExceeded)
 			})
+			t.Run("invalid offsets", func(t *testing.T) {
+				for _, null := range []bool{false, true} {
+					builder := array.NewInt64Builder(pool)
+					if null {
+						builder.AppendNull()
+					} else {
+						builder.Append(-1)
+					}
+					invalidOffsets := builder.NewInt64Array()
+					builder.Release()
+					result, err := adapter.ScanGrep(context.Background(), invalidOffsets, req)
+					invalidOffsets.Release()
+					require.Nil(t, result)
+					require.Error(t, err)
+					require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+					if null {
+						require.ErrorIs(t, err, merr.ErrServiceInternal)
+						require.Contains(t, err.Error(), "non-null Int64")
+					} else {
+						require.Equal(t, int32(merr.CodeUnexpectedError), merr.Code(err))
+						require.Contains(t, err.Error(), "grep offset out of range")
+					}
+				}
+			})
 			t.Run("request deadline during scan", func(t *testing.T) {
 				builder := array.NewInt64Builder(pool)
 				builder.AppendValues(make([]int64, 1000000), nil) // Repeated nonmatching row.

@@ -127,45 +127,19 @@ func NewGrepOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBui
 	}, nil
 }
 
+// Execute relies on factory/chain validation and ExecuteOperator's frame checks.
+// ScanGrep validates native results before returning them.
 func (o *GrepOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error) {
-	if ctx == nil || o == nil {
-		return nil, merr.WrapErrServiceInternalMsg("grep execution requires context and operator")
-	}
-	if o.segment == nil {
-		return nil, merr.WrapErrServiceInternalMsg("grep execution requires a segment binding")
-	}
-	if !o.IsRunnable(ctx.Stage()) {
-		return nil, merr.WrapErrServiceInternalMsg("grep executed outside QueryScan")
-	}
-	if err := ctx.Context().Err(); err != nil {
-		return nil, merr.Wrap(err, "execute grep")
-	}
-	if err := validateFrameLayout(input); err != nil {
-		return nil, err
-	}
 	if input.NumChunks() != 1 {
 		return nil, merr.WrapErrServiceInternalMsg("grep requires one segment and one logical query chunk")
-	}
-	if input.HasColumn(o.outputs[0]) {
-		return nil, merr.WrapErrServiceInternalMsg("grep output conflicts with an existing runtime column")
 	}
 	columns, err := o.ReadInputColumns("grep", input)
 	if err != nil {
 		return nil, err
 	}
 	offsets, ok := columns[0].Chunk(0).(*array.Int64)
-	if !ok || offsets.NullN() != 0 {
-		return nil, merr.WrapErrServiceInternalMsg("grep offsets must be non-null Int64")
-	}
-	for i, offset := range offsets.Int64Values() {
-		if i%1024 == 0 {
-			if err := ctx.Context().Err(); err != nil {
-				return nil, merr.Wrap(err, "validate grep offsets")
-			}
-		}
-		if offset < 0 {
-			return nil, merr.WrapErrServiceInternalMsg("grep offset must be non-negative")
-		}
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("grep offsets must be Int64")
 	}
 	// A private slice prevents adapters from changing another execution's
 	// configuration. Strings and scalar options are immutable/value data.
@@ -176,31 +150,9 @@ func (o *GrepOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorRes
 	if err != nil {
 		return nil, merr.Wrap(err, "execute grep runner")
 	}
-	if err := ctx.Context().Err(); err != nil {
-		return nil, merr.Wrap(err, "execute grep runner")
-	}
-	if result == nil || result.Details == nil || !arrow.TypeEqual(result.Details.DataType(), native.GrepDetailsType()) {
-		return nil, merr.WrapErrServiceInternalMsg("grep runner returned an invalid detail column")
-	}
-	if int64(len(result.Positions)) > o.request.Limit || result.Details.Len() != len(result.Positions) || result.Details.NullN() != 0 {
-		return nil, merr.WrapErrServiceInternalMsg("grep runner returned inconsistent rows or exceeded the matching limit")
-	}
-	details, ok := result.Details.(*array.List)
-	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("grep runner returned an invalid Arrow list implementation")
-	}
 	indices := make([]int, len(result.Positions))
-	previous := int64(-1)
 	for i, position := range result.Positions {
-		if position <= previous || position >= int64(offsets.Len()) {
-			return nil, merr.WrapErrServiceInternalMsg("grep runner positions must be increasing input positions")
-		}
-		start, end := details.ValueOffsets(i)
-		if start == end {
-			return nil, merr.WrapErrServiceInternalMsg("grep runner selected a row without matching lines")
-		}
 		indices[i] = int(position)
-		previous = position
 	}
 	return &OperatorResult{
 		Selection: &RowSelection{Chunks: []ChunkSelection{RowIndices(indices)}},

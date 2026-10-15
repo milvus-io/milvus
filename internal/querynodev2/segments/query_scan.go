@@ -171,9 +171,6 @@ func runQueryScanSegment(ctx context.Context, fieldID int64, repr *chain.ChainRe
 	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	builder := array.NewInt64Builder(memory.DefaultAllocator)
 	builder.AppendValues(input.Result.GetOffset(), nil)
 	offsets := builder.NewInt64Array()

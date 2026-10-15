@@ -52,8 +52,11 @@ func (s *grepSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req na
 	}
 	c, e := req.CompileLimits, req.ExecutionLimits
 	if req.Limit <= 0 || c.MaxRegexBytes == 0 || c.MaxDFACacheBytes == 0 ||
-		e.BatchSize <= 0 || e.MaxResultBytes == 0 || offsets.NullN() != 0 {
+		e.BatchSize <= 0 || e.MaxResultBytes == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("invalid prepared grep budgets, limit or offsets")
+	}
+	if offsets.NullN() != 0 {
+		return nil, merr.WrapErrServiceInternalMsg("grep offsets must be non-null Int64")
 	}
 	if len(req.Spec.Patterns) == 0 || uint64(len(req.Spec.Patterns)) > math.MaxUint32 {
 		return nil, merr.WrapErrServiceInternalMsg("invalid prepared grep pattern count")
@@ -101,9 +104,6 @@ func (s *grepSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req na
 	runtime.KeepAlive(blob)
 	runtime.KeepAlive(lengths)
 	err := ConsumeCStatusIntoError(&status)
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
 	if err != nil {
 		return nil, merr.Wrap(err, "scan grep segment")
 	}
@@ -116,12 +116,40 @@ func (s *grepSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req na
 		return nil, merr.WrapErrServiceInternalErr(err, "import grep result")
 	}
 	defer record.Release()
-	if record.NumCols() != 2 || record.NumRows() > req.Limit || !arrow.TypeEqual(record.Column(0).DataType(), arrow.PrimitiveTypes.Int64) ||
-		!arrow.TypeEqual(record.Column(1).DataType(), native.GrepDetailsType()) || record.Column(0).NullN() != 0 {
-		return nil, merr.WrapErrServiceInternalMsg("invalid native grep result schema")
+	result, err := newGrepScanResult(record, offsets.Len(), req.Limit)
+	if err != nil {
+		return nil, err
 	}
-	selected := append([]int64(nil), record.Column(0).(*array.Int64).Int64Values()...)
-	details := record.Column(1)
+	return result, nil
+}
+
+// newGrepScanResult validates the native boundary once. Callers may release
+// record after return: positions are copied and details retain their own reference.
+func newGrepScanResult(record arrow.Record, inputRows int, limit int64) (*native.ScanResult, error) {
+	if record.NumCols() != 2 || record.NumRows() > limit {
+		return nil, merr.WrapErrServiceInternalMsg("invalid native grep result schema or row count")
+	}
+	positions, positionsOK := record.Column(0).(*array.Int64)
+	details, detailsOK := record.Column(1).(*array.List)
+	if !positionsOK || !detailsOK || !arrow.TypeEqual(details.DataType(), native.GrepDetailsType()) {
+		return nil, merr.WrapErrServiceInternalMsg("invalid native grep result column types")
+	}
+	if positions.NullN() != 0 || details.NullN() != 0 ||
+		int64(positions.Len()) != record.NumRows() || details.Len() != positions.Len() {
+		return nil, merr.WrapErrServiceInternalMsg("native grep result columns have inconsistent rows or nulls")
+	}
+	previous := int64(-1)
+	for i, position := range positions.Int64Values() {
+		if position <= previous || position >= int64(inputRows) {
+			return nil, merr.WrapErrServiceInternalMsg("grep runner positions must be increasing input positions")
+		}
+		start, end := details.ValueOffsets(i)
+		if start == end {
+			return nil, merr.WrapErrServiceInternalMsg("grep runner selected a row without matching lines")
+		}
+		previous = position
+	}
+	selected := append([]int64(nil), positions.Int64Values()...)
 	details.Retain()
 	return &native.ScanResult{Positions: selected, Details: details}, nil
 }

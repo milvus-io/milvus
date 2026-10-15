@@ -53,6 +53,9 @@ type ScanRequest struct {
 // released on success, error or cancellation before it returns. They are never
 // shared between segments or retained by the Go operator. Returned details own
 // their buffers independently of native temporary results. No partial success.
+// Successful results are non-nil, contain at most Limit rows, and have strictly
+// increasing in-range Positions aligned with non-null, non-empty Details rows
+// of GrepDetailsType. Implementations validate this at the native boundary.
 // The segcore adapter delegates to the independent C++ Grep runner; Segment
 // itself has no Grep-specific method.
 type Segment interface {

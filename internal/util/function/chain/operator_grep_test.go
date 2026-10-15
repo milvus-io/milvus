@@ -190,51 +190,6 @@ func TestGrepMaximumValidation(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
-func TestGrepRejectsInvalidRunnerResults(t *testing.T) {
-	for name, tc := range map[string]struct {
-		positions            []int64
-		details              string
-		nilResult, wrongType bool
-	}{
-		"negative":        {positions: []int64{-1}, details: "[" + grepHit + "]"},
-		"physical offset": {positions: []int64{90}, details: "[" + grepHit + "]"},
-		"duplicate":       {positions: []int64{1, 1}, details: "[" + grepHit + "," + grepHit + "]"},
-		"unordered":       {positions: []int64{1, 0}, details: "[" + grepHit + "," + grepHit + "]"},
-		"too many":        {positions: []int64{0, 1, 2}, details: "[" + grepHit + "," + grepHit + "," + grepHit + "]"},
-		"length":          {positions: []int64{1}, details: "[]"},
-		"empty hit":       {positions: []int64{1}, details: "[[]]"},
-		"null hit":        {positions: []int64{1}, details: "[null]"},
-		"nil":             {nilResult: true},
-		"wrong type":      {wrongType: true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
-			defer pool.AssertSize(t, 0)
-			input := grepTestFrame(t, pool, "[7,2,90,41]")
-			defer input.Release()
-			binding := grepTestBinding(func(context.Context, *array.Int64, int64) (*native.ScanResult, error) {
-				if tc.nilResult {
-					return nil, nil
-				}
-				var details arrow.Array
-				if tc.wrongType {
-					b := array.NewInt64Builder(pool)
-					details = b.NewArray()
-					b.Release()
-				} else {
-					details = grepTestDetails(t, pool, tc.details)
-				}
-				return &native.ScanResult{Positions: tc.positions, Details: details}, nil
-			})
-			op, err := NewGrepOpFromReprWithContext(grepTestRepr(t, 2), binding.Build)
-			require.NoError(t, err)
-			result, err := ExecuteOperator(binding.execution(context.Background(), pool), input, op)
-			require.Nil(t, result)
-			require.ErrorIs(t, err, merr.ErrServiceInternal)
-		})
-	}
-}
-
 func TestGrepEmptyAndRunnerFailureOwnership(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
@@ -265,21 +220,7 @@ func TestGrepEmptyAndRunnerFailureOwnership(t *testing.T) {
 	}
 }
 
-func TestGrepRejectsBadOffsetsAndCancellation(t *testing.T) {
-	for _, values := range []string{"[-1]", "[null]"} {
-		pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
-		input := grepTestFrame(t, pool, values)
-		called := false
-		binding := grepTestBinding(func(context.Context, *array.Int64, int64) (*native.ScanResult, error) { called = true; return nil, nil })
-		op, err := NewGrepOpFromReprWithContext(grepTestRepr(t, 1), binding.Build)
-		require.NoError(t, err)
-		result, err := ExecuteOperator(binding.execution(context.Background(), pool), input, op)
-		require.Nil(t, result)
-		require.ErrorIs(t, err, merr.ErrServiceInternal)
-		require.False(t, called)
-		input.Release()
-		pool.AssertSize(t, 0)
-	}
+func TestGrepCancellationAfterRunner(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
 	input := grepTestFrame(t, pool, "[1]")
