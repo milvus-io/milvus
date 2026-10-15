@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -257,10 +258,11 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.Equal(t, int64(10), provider.queryRequest.GetCollectionID())
 }
 
-func TestQueryOnViewStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
+func TestQueryOnViewStreamAcceptsOrderByQuery(t *testing.T) {
 	tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
+	provider := &streamTestProvider{queryTasks: tasks}
 	server := NewServer(
-		&streamTestProvider{queryTasks: tasks},
+		provider,
 		&streamTestScheduler{queryResult: &internalpb.RetrieveResults{
 			Status: merr.Success(),
 			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
@@ -272,8 +274,14 @@ func TestQueryOnViewStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
 	defer cleanup()
 
 	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
-		LegacyReq: &internalpb.RetrieveRequest{CollectionID: 10, Limit: 1},
-		ShardId:   &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+		LegacyReq: &internalpb.RetrieveRequest{
+			CollectionID: 10,
+			Limit:        1,
+			OrderByFields: []*planpb.OrderByField{
+				{FieldId: 101, Ascending: true},
+			},
+		},
+		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
 		Version: &viewpb.QueryViewVersion{
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
 			QueryVersion: 3,
@@ -288,6 +296,7 @@ func TestQueryOnViewStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
 	require.Equal(t, []int64{1}, chunk.GetIds().GetIntId().GetData())
 	require.NoError(t, stream.Close())
 	require.Equal(t, 1, tasks.releaseCount)
+	require.Equal(t, int64(101), provider.queryRequest.GetOrderByFields()[0].GetFieldId())
 }
 
 func startSearchStreamTestServer(t *testing.T, service viewpb.ViewQueryServiceServer) (viewpb.ViewQueryServiceClient, func()) {
