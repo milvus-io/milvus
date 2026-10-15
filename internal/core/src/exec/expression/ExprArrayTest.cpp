@@ -2192,7 +2192,7 @@ TEST(Expr, TestArrayLengthExprServedFromChunks) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
     ASSERT_NE(growing_segment, nullptr);
 
@@ -4502,7 +4502,7 @@ TEST(Expr, TestArrayLengthExprCanExecuteAllAtOnce) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
 
     auto expr = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
         expr::ColumnInfo(long_array_fid, DataType::ARRAY, DataType::INT64),
