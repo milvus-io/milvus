@@ -106,6 +106,13 @@ its YAML entries: disk-PQ ratio `0.25`, `inline_pq=-1`, `num_entry_points=100`,
 `pq_read_page_cache_size=0`. DiskANN retains its distinct defaults. Verify these
 along with the existing graph/PQ defaults in Knowhere tests.
 
+Both algorithms validate `max_degree` against the backend graph limit, currently
+`[1, 512]`. DiskANN previously accepted requests up to 2048 even though its loader
+already rejected artifact degrees above 512; partitioned builds can write the
+requested degree into that artifact metadata. Reject these requests before
+building. External e2e fixtures that expect a successful Build at 2048 must adopt
+the supported boundary; existing native tests cover accepting 512 and rejecting 513.
+
 Deployment load/search overrides are merged at their execution stages, not
 persisted as explicit index choices during CreateIndex. In particular, changing
 a load-stage cache override must not be defeated by an earlier merge of shipped
