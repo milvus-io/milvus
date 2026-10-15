@@ -644,7 +644,7 @@ func manifestIndexEntryForCommitTest(t *testing.T, m *meta, segmentID, buildID i
 	}
 	segIdx, ok := m.indexMeta.GetIndexJob(buildID)
 	require.True(t, ok)
-	finished, _, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, taskInfo)
+	finished, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, taskInfo)
 	require.NoError(t, err)
 	entry, err := buildManifestIndexInfo(m, m.GetSegment(context.Background(), segmentID), finished)
 	require.NoError(t, err)
@@ -1236,21 +1236,14 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 
 // Regression test for a stall between the manifest commit and every index DDL.
 //
-// The staged index install updates the stored-index-size gauge, which must
-// serialize against MarkIndexAsDeleted via indexMeta.fieldIndexLock — and every
-// index DDL (CreateIndex, AlterIndex, MarkIndexAsDeleted, RemoveIndex) holds
-// that lock's WRITE side across an etcd round trip. The install used to run the
-// gauge update inside the commit's segMu critical section, so one concurrent
-// DDL made the commit hold segMu for up to the etcd request timeout, stalling
-// every GetSegment/SelectSegments/SaveBinlogPaths. The fix defers the
-// fieldIndexLock-guarded gauge until after segMu is released (still under the
-// buildID key lock).
-//
-// In the style of TestCommitSegmentManifestTakesKeyLockBeforeSegMu, this
-// asserts the invariant rather than racing a window: hold fieldIndexLock's
-// write side, let the commit park on the deferred gauge, and check that segMu
-// is free and publication already completed.
-func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
+// Index DDL takes indexMeta.fieldIndexLock's write side to install field index
+// definitions. The commit installs its staged SegmentIndex mutations inside its
+// segMu critical section, so it must never wait for that lock: sync.RWMutex is
+// writer-preferring, and a commit parked on it with segMu held stalls every
+// GetSegment/SelectSegments/SaveBinlogPaths. The install updates the
+// stored-index-size gauge through indexMeta's memory-only task counters, so the
+// whole commit, publication included, completes while the lock is held.
+func TestCommitSegmentManifestDoesNotWaitForIndexDDL(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 	newFakeManifestStore(t)
 	ctx := context.TODO()
@@ -1261,7 +1254,7 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 
 	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
 	require.True(t, ok)
-	finished, _, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, &workerpb.IndexTaskInfo{
+	finished, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, &workerpb.IndexTaskInfo{
 		BuildID:       restartBuildID,
 		State:         commonpb.IndexState_Finished,
 		IndexFileKeys: []string{"0", "1"},
@@ -1271,9 +1264,7 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 	require.NoError(t, err)
 	baseManifest := m.GetSegment(ctx, restartSegID).GetManifestPath()
 
-	// Stand in for any index DDL mid-etcd-round-trip: CreateIndex, AlterIndex,
-	// MarkIndexAsDeleted and RemoveIndex all hold fieldIndexLock's write side
-	// across their catalog write.
+	// Stand in for an index DDL installing definitions.
 	m.indexMeta.fieldIndexLock.Lock()
 
 	committed := make(chan error, 1)
@@ -1299,41 +1290,15 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 		})
 	}()
 
-	// Let the commit run until it parks on the deferred gauge. Manifest I/O and
-	// the catalog write are in-memory here, so it reaches its blocking point
-	// well within this window.
 	select {
-	case err := <-committed:
+	case err = <-committed:
 		m.indexMeta.fieldIndexLock.Unlock()
-		t.Fatalf("commit finished without waiting on the held field index lock: %v", err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
+		m.indexMeta.fieldIndexLock.Unlock()
+		<-committed
+		t.Fatal("commit waited on the field index lock")
 	}
-
-	// The load-bearing assertion. Parked on fieldIndexLock, the commit must
-	// hold no segMu; otherwise every segment reader queues behind the DDL's
-	// etcd round trip for its whole duration.
-	acquired := m.segMu.TryLock()
-	if acquired {
-		m.segMu.Unlock()
-	}
-	var publishedManifest string
-	if acquired {
-		// segMu is provably free, so reading through it cannot hang; the
-		// pointer must already have advanced, proving the commit finished its
-		// entire publication section before waiting on fieldIndexLock.
-		publishedManifest = m.GetSegment(ctx, restartSegID).GetManifestPath()
-	}
-	m.indexMeta.fieldIndexLock.Unlock()
-
-	select {
-	case err := <-committed:
-		require.NoError(t, err)
-	case <-time.After(30 * time.Second):
-		t.Fatal("commit did not complete after the field index lock was released")
-	}
-
-	require.True(t, acquired,
-		"commit is holding segMu while blocked on fieldIndexLock: a concurrent index DDL would stall every segment reader")
-	assert.NotEqual(t, baseManifest, publishedManifest,
-		"publication must complete before the commit waits on fieldIndexLock")
+	require.NoError(t, err)
+	assert.NotEqual(t, baseManifest, m.GetSegment(ctx, restartSegID).GetManifestPath(),
+		"publication must complete while index DDL holds the field index lock")
 }
