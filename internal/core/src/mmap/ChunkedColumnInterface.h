@@ -32,8 +32,8 @@ class ChunkedColumnInterface {
  public:
     virtual ~ChunkedColumnInterface() = default;
 
-    // Layout metadata is already available for columns on this branch.
-    // Keep the caller's context attached to layout reads and future preparation.
+    // Materialize lazy column-directory metadata with the caller's context
+    // before using context-free layout accessors. This does not pin raw data.
     virtual void
     Prepare(milvus::OpContext* op_ctx) const {
     }
