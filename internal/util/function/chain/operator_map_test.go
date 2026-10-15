@@ -319,7 +319,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteBasic() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -352,7 +352,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteMultiChunk() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -382,7 +382,7 @@ func (s *MapOpTestSuite) TestMapOpExecutePreservesDuplicateInputPositions() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -401,7 +401,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteColumnNotFound() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err = op.Execute(ctx, df)
+	_, err = ExecuteOperator(ctx, df, op)
 	s.Error(err)
 	s.Contains(err.Error(), "not found")
 }
@@ -415,7 +415,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteFunctionError() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err = op.Execute(ctx, df)
+	_, err = ExecuteOperator(ctx, df, op)
 	s.Error(err)
 	s.Contains(err.Error(), "intentional error")
 }
@@ -429,7 +429,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteOutputCountMismatchAtRuntime() {
 	s.Require().NoError(err) // passes creation (dynamic types)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err = op.Execute(ctx, df)
+	_, err = ExecuteOperator(ctx, df, op)
 	s.Error(err)
 	s.ErrorIs(err, merr.ErrFunctionFailed)
 	s.Equal(merr.Code(merr.ErrFunctionFailed), merr.Code(err))
@@ -454,7 +454,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteConvertsNumericScoreOutputsToFloat32() 
 			s.Require().NoError(err)
 
 			ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-			result, err := op.Execute(ctx, df)
+			result, err := ExecuteOperator(ctx, df, op)
 			s.Require().NoError(err)
 			defer result.Release()
 
@@ -473,7 +473,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteRejectsNonNumericScoreOutput() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err = op.Execute(ctx, df)
+	_, err = ExecuteOperator(ctx, df, op)
 	s.ErrorIs(err, merr.ErrFunctionFailed)
 	s.Equal(merr.Code(merr.ErrFunctionFailed), merr.Code(err))
 	s.Contains(err.Error(), `output 0 mapped to "$score" must be numeric, got utf8`)
@@ -493,16 +493,16 @@ func (s *MapOpTestSuite) TestMapOpAllowsNullUntilScoreExport() {
 			s.Require().NoError(err)
 
 			ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-			result, err := op.Execute(ctx, df)
+			result, err := ExecuteOperator(ctx, df, op)
 			s.Require().NoError(err)
 			defer result.Release()
 			_, err = ToSearchResultData(result)
 			s.ErrorIs(err, merr.ErrFunctionFailed)
 			s.Contains(err.Error(), "$score contains null")
-			sorted, err := newSortOp(types.ScoreFieldName, true, types.IDFieldName).Execute(ctx, result)
+			sorted, err := ExecuteOperator(ctx, result, newSortOp(types.ScoreFieldName, true, types.IDFieldName))
 			s.Require().NoError(err)
 			defer sorted.Release()
-			limited, err := NewLimitOp(1, 0).Execute(ctx, sorted)
+			limited, err := ExecuteOperator(ctx, sorted, NewLimitOp(1, 0))
 			s.Require().NoError(err)
 			defer limited.Release()
 			exported, err := ToSearchResultData(limited)
@@ -524,7 +524,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteAllowsNullRegularOutput() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 	s.Equal(1, result.Column("nullable_output").Chunk(0).NullN())
@@ -553,7 +553,7 @@ func (s *MapOpTestSuite) TestMapOpFiniteScoreConstraint() {
 						[]string{types.ScoreFieldName}, []string{destination})
 					s.Require().NoError(err)
 					ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-					result, err := op.Execute(ctx, df)
+					result, err := ExecuteOperator(ctx, df, op)
 					s.Require().NoError(err)
 					defer result.Release()
 					if destination != types.ScoreFieldName {
@@ -572,10 +572,10 @@ func (s *MapOpTestSuite) TestMapOpFiniteScoreConstraint() {
 						s.Require().NoError(exportErr)
 					}
 					if destination == types.ScoreFieldName && math.IsNaN(tc.value) {
-						sorted, err := newSortOp(types.ScoreFieldName, true, types.IDFieldName).Execute(ctx, result)
+						sorted, err := ExecuteOperator(ctx, result, newSortOp(types.ScoreFieldName, true, types.IDFieldName))
 						s.Require().NoError(err)
 						defer sorted.Release()
-						limited, err := NewLimitOp(1, 0).Execute(ctx, sorted)
+						limited, err := ExecuteOperator(ctx, sorted, NewLimitOp(1, 0))
 						s.Require().NoError(err)
 						defer limited.Release()
 						clean, err := ToSearchResultData(limited)
@@ -616,7 +616,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteAllowsFloat64ForRegularOutput() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 	s.Equal(arrow.FLOAT64, result.Column("float64_output").DataType().ID())
@@ -649,7 +649,7 @@ func (s *MapOpTestSuite) TestMapOpExecuteNilFunction() {
 	df := s.createTestDF([]int64{1}, []float32{1.0}, []int64{1})
 	defer df.Release()
 
-	_, err := op.Execute(ctx, df)
+	_, err := ExecuteOperator(ctx, df, op)
 	s.Error(err)
 	s.Contains(err.Error(), "function is nil")
 }
@@ -687,7 +687,7 @@ func (s *MapOpTestSuite) TestNewMapOpFromReprNoOutputs() {
 	s.Contains(err.Error(), "requires outputs")
 }
 
-func (s *MapOpTestSuite) TestBuildOutputDataFrameReleasesOutputsOnCopyError() {
+func (s *MapOpTestSuite) TestExecuteOperatorRejectsInvalidInputSchema() {
 	builder := NewDataFrameBuilder()
 	builder.SetChunkSizes([]int64{1})
 	idBuilder := array.NewInt64Builder(s.pool)
@@ -698,34 +698,46 @@ func (s *MapOpTestSuite) TestBuildOutputDataFrameReleasesOutputsOnCopyError() {
 	df := builder.Build()
 	defer df.Release()
 
-	// Corrupt schema-only metadata to exercise the defensive AddColumnFrom error path.
+	// Reject an invalid schema at the execution entry, before evaluating the expression.
 	df.schema = arrow.NewSchema([]arrow.Field{
 		{Name: types.IDFieldName, Type: arrow.PrimitiveTypes.Int64},
 		{Name: "missing", Type: arrow.PrimitiveTypes.Int64},
 	}, nil)
 
-	outBuilder := array.NewFloat32Builder(s.pool)
-	outBuilder.Append(2.0)
-	outArray := outBuilder.NewArray()
-	outBuilder.Release()
-	out := arrow.NewChunked(arrow.PrimitiveTypes.Float32, []arrow.Array{outArray})
-	outArray.Release()
-
 	op, err := NewMapOp(&doubleScoreExpr{}, []string{types.ScoreFieldName}, []string{types.ScoreFieldName})
 	s.Require().NoError(err)
-	_, err = op.buildOutputDataFrame(df, []*arrow.Chunked{out})
+	output, err := ExecuteOperator(types.NewFuncContext(s.pool), df, op)
+	s.Nil(output)
 	s.Error(err)
-	s.Contains(err.Error(), "missing")
+	s.Contains(err.Error(), "schema")
 }
 
-func (s *MapOpTestSuite) TestBuildOutputDataFrameWrapsAddColumnsError() {
+func (s *MapOpTestSuite) TestAssemblyRejectsNilOutput() {
 	df := s.createTestDF([]int64{1}, []float32{1.0}, []int64{1})
 	defer df.Release()
 
 	op, err := NewMapOp(&doubleScoreExpr{}, []string{types.ScoreFieldName}, []string{types.ScoreFieldName})
 	s.Require().NoError(err)
-	_, err = op.buildOutputDataFrame(df, []*arrow.Chunked{nil})
+	_, err = assembleOperatorResult(types.NewFuncContext(s.pool), df, op.Outputs(), &OperatorResult{
+		Columns: []NamedColumn{{Field: arrow.Field{Name: types.ScoreFieldName, Type: arrow.PrimitiveTypes.Float32}}},
+	})
 	s.Error(err)
-	s.Contains(err.Error(), "map_op")
-	s.Contains(err.Error(), "is nil")
+	s.Contains(err.Error(), "column is nil")
+}
+
+func (s *MapOpTestSuite) TestMapOpReleasesPartialOutputsOnFunctionError() {
+	df := s.createTestDF([]int64{1}, []float32{1}, []int64{1})
+	defer df.Release()
+	fn := &selectionMaskExpr{
+		dt:     arrow.PrimitiveTypes.Int64,
+		chunks: []string{"[7]"},
+		err:    merr.ErrServiceUnavailable,
+	}
+	// Even when the partial output count differs, preserve the execution error.
+	op, err := NewMapOp(fn, []string{types.ScoreFieldName}, []string{"a", "b"})
+	s.Require().NoError(err)
+	result, err := ExecuteOperator(types.NewFuncContext(s.pool), df, op)
+	s.Nil(result)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	// TearDownTest checks that the partial output has been released.
 }

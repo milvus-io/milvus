@@ -352,6 +352,10 @@ A function used by an operator must also declare that it is runnable at that sta
 
 ### Operators
 
+Internal row selection and result assembly are specified in
+[Function Chain Row Selection](20261010-function-chain-row-selection.md). This
+framework refactor does not change public operators or stage permissions.
+
 #### `map`
 
 `map(output, expr)` evaluates an expression and writes the result to `output`.

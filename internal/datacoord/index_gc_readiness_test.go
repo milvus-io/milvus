@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -124,7 +125,7 @@ func patchIndexGCReadinessExternalIO(t *testing.T, s *Server, catalog *indexGCRe
 	t.Helper()
 	// Keep the real collector and real index metadata methods. Only storage
 	// discovery/removal is substituted so failures are deterministic.
-	discovery := mockey.Mock((*garbageCollector).getDroppedSegmentIndexFiles).To(func(_ *garbageCollector, _ context.Context, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, gcBlockReason) {
+	discovery := mockey.Mock((*garbageCollector).getDroppedSegmentIndexFiles).To(func(_ *garbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, gcBlockReason) {
 		indexes := s.meta.indexMeta.GetAllSegmentIndexes(segmentID)
 		sort.Slice(indexes, func(i, j int) bool { return indexes[i].IndexID < indexes[j].IndexID })
 		return indexes, map[string]struct{}{"index-artifact": {}}, gcNotBlocked
@@ -162,7 +163,7 @@ func TestIndexGCReadinessMarkerFailurePreventsFiles(t *testing.T) {
 	catalog.alterFailure = 20
 	patchIndexGCReadinessExternalIO(t, s, catalog, false)
 	gc := &garbageCollector{meta: s.meta}
-	gc.recycleDroppedSegment(context.Background(), 1, s.meta.segments.GetSegment(1))
+	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1, s.meta.segments.GetSegment(1))
 	require.Equal(t, []string{"mark:10", "mark:20"}, catalog.events, "every marker must persist before any file deletion")
 	require.True(t, catalog.stored[110].IsDeleted)
 	require.False(t, catalog.stored[120].IsDeleted, "failed persistence must not mutate the live task")
@@ -174,7 +175,7 @@ func TestIndexGCReadinessFileFailureLeavesMarkedRecord(t *testing.T) {
 	s, index, catalog := newIndexGCReadinessServer(t, false)
 	patchIndexGCReadinessExternalIO(t, s, catalog, true)
 	gc := &garbageCollector{meta: s.meta}
-	gc.recycleDroppedSegment(context.Background(), 1, s.meta.segments.GetSegment(1))
+	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1, s.meta.segments.GetSegment(1))
 	require.Equal(t, []string{"mark:10", "files"}, catalog.events)
 	require.True(t, catalog.stored[110].IsDeleted)
 	assertIndexGCReadinessInvalidated(t, s, index)
@@ -185,7 +186,7 @@ func TestIndexGCReadinessMetaFailureSurvivesRestart(t *testing.T) {
 	catalog.dropFailure = true
 	patchIndexGCReadinessExternalIO(t, s, catalog, false)
 	gc := &garbageCollector{meta: s.meta}
-	gc.recycleDroppedSegment(context.Background(), 1, s.meta.segments.GetSegment(1))
+	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1, s.meta.segments.GetSegment(1))
 	require.Equal(t, []string{"mark:10", "files", "drop:110"}, catalog.events)
 	require.True(t, catalog.stored[110].IsDeleted)
 	assertIndexGCReadinessInvalidated(t, s, index)
@@ -196,7 +197,7 @@ func TestIndexGCReadinessMetaFailureSurvivesRestart(t *testing.T) {
 	s.meta.indexMeta, err = newIndexMeta(context.Background(), catalog, []int64{1})
 	require.NoError(t, err)
 	assertIndexGCReadinessInvalidated(t, s, index)
-	gc.recycleDroppedSegment(context.Background(), 1, s.meta.segments.GetSegment(1))
+	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1, s.meta.segments.GetSegment(1))
 	require.Equal(t, []string{"mark:10", "files", "drop:110", "files", "drop:110"}, catalog.events, "retry uses the persisted marker without rewriting it")
 
 	// An independently finished current task still reports Finished.

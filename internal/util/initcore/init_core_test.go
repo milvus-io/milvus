@@ -17,6 +17,8 @@
 package initcore
 
 import (
+	"os"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -43,8 +45,13 @@ func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
 		want                           int
 		wantErr                        bool
 	}{
+		{name: "default", coefficient: "", maxCapacity: "0", want: hardware.GetCPUNum()},
 		{name: "negative", coefficient: "-1", maxCapacity: "1", wantErr: true},
 		{name: "negative_fraction", coefficient: "-0.5", maxCapacity: "1", wantErr: true},
+		{name: "nan", coefficient: "NaN", maxCapacity: "0", wantErr: true},
+		{name: "infinite", coefficient: "+Inf", maxCapacity: "0", wantErr: true},
+		{name: "overflow", coefficient: "1e100", maxCapacity: "0", wantErr: true},
+		{name: "overflow_capped", coefficient: "1e100", maxCapacity: "3", want: 3},
 		{name: "zero_fixed_default", coefficient: "0", maxCapacity: "0", want: defaultArrowIOThreadPoolCapacity},
 		{name: "zero_ignores_cap", coefficient: "0", maxCapacity: "1", want: defaultArrowIOThreadPoolCapacity},
 		{name: "positive", coefficient: "2", maxCapacity: "0", want: 2 * hardware.GetCPUNum()},
@@ -53,7 +60,11 @@ func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
 		{name: "positive_minimum", coefficient: "0.000001", maxCapacity: "0", want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, tc.coefficient))
+			if tc.coefficient == "" {
+				pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
+			} else {
+				assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, tc.coefficient))
+			}
 			assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, tc.maxCapacity))
 			got, err := ResolveArrowIOThreadPoolCapacity()
 			if tc.wantErr {
@@ -66,46 +77,98 @@ func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
 	}
 }
 
-// TestApplyArrowIOThreadPoolCapacityHotReload drives paramtable Save ->
-// watcher -> ApplyArrowIOThreadPoolCapacity -> arrow and reads the capacity
-// back through the core prometheus gauge.
-func TestApplyArrowIOThreadPoolCapacityHotReload(t *testing.T) {
+func TestResolveArrowCPUThreadPoolCapacity(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
-	defer func() {
-		pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
-		pt.Reset(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)
-		ApplyArrowIOThreadPoolCapacity("test", "cleanup")
-	}()
-	RegisterArrowIOThreadPoolWatchers(pt, "test")
-
-	registry := metrics.NewCRegistry()
-	capacity := func() int {
-		families, err := registry.Gather()
-		require.NoError(t, err)
-		for _, mf := range families {
-			if mf.GetName() == "internal_arrow_io_pool_capacity" {
-				require.Len(t, mf.GetMetric(), 1)
-				return int(mf.GetMetric()[0].GetGauge().GetValue())
+	defer pt.Reset(pt.CommonCfg.ArrowCPUThreadPoolCoefficient.Key)
+	defer pt.Reset(pt.CommonCfg.ArrowCPUThreadPoolMaxCapacity.Key)
+	for _, tc := range []struct {
+		name, coefficient, maxCapacity string
+		want                           int
+		wantErr                        bool
+	}{
+		{name: "default", coefficient: "1", maxCapacity: "0", want: hardware.GetCPUNum()},
+		{name: "zero", coefficient: "0", maxCapacity: "1", want: hardware.GetCPUNum()},
+		{name: "scaled", coefficient: "2", maxCapacity: "0", want: 2 * hardware.GetCPUNum()},
+		{name: "fraction", coefficient: "0.5", maxCapacity: "0", want: max(1, hardware.GetCPUNum()/2)},
+		{name: "capped", coefficient: "2", maxCapacity: "1", want: 1},
+		{name: "minimum", coefficient: "0.000001", maxCapacity: "0", want: 1},
+		{name: "negative", coefficient: "-1", maxCapacity: "0", wantErr: true},
+		{name: "nan", coefficient: "NaN", maxCapacity: "0", wantErr: true},
+		{name: "infinite", coefficient: "+Inf", maxCapacity: "0", wantErr: true},
+		{name: "malformed", coefficient: "bad", maxCapacity: "0", wantErr: true},
+		{name: "overflow", coefficient: "1e100", maxCapacity: "0", wantErr: true},
+		{name: "overflow_capped", coefficient: "1e100", maxCapacity: "3", want: 3},
+		{name: "invalid_cap", coefficient: "1", maxCapacity: "bad", wantErr: true},
+		{name: "negative_cap", coefficient: "1", maxCapacity: "-1", wantErr: true},
+		{name: "cap_overflow", coefficient: "1", maxCapacity: "4294967296", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, pt.Save(pt.CommonCfg.ArrowCPUThreadPoolCoefficient.Key, tc.coefficient))
+			require.NoError(t, pt.Save(pt.CommonCfg.ArrowCPUThreadPoolMaxCapacity.Key, tc.maxCapacity))
+			got, err := ResolveArrowCPUThreadPoolCapacity()
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				return
 			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestInitStorageRuntime(t *testing.T) {
+	// Tokio cannot be reset, so each scenario needs its own process.
+	if os.Getenv("MILVUS_TEST_STORAGE_RUNTIME") == "" {
+		executable, err := os.Executable()
+		require.NoError(t, err)
+		for _, scenario := range []string{"success", "invalid_cpu", "invalid_io"} {
+			t.Run(scenario, func(t *testing.T) {
+				cmd := exec.Command(executable, "-test.run=^TestInitStorageRuntime$") // #nosec G204 -- Re-exec the current test binary with a fixed test filter.
+				cmd.Env = append(os.Environ(), "MILVUS_TEST_STORAGE_RUNTIME="+scenario)
+				output, err := cmd.CombinedOutput()
+				require.NoError(t, err, "%s", output)
+			})
 		}
-		require.FailNow(t, "internal_arrow_io_pool_capacity gauge not found")
-		return -1
+		return
+	}
+	paramtable.Init()
+	pt := paramtable.Get()
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowCPUThreadPoolCoefficient.Key, "2"))
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowCPUThreadPoolMaxCapacity.Key, "1"))
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "4"))
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "3"))
+	if scenario := os.Getenv("MILVUS_TEST_STORAGE_RUNTIME"); scenario != "success" {
+		key := pt.CommonCfg.ArrowCPUThreadPoolCoefficient.Key
+		if scenario == "invalid_io" {
+			key = pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key
+		}
+		require.NoError(t, pt.Save(key, "-1"))
+		err := InitStorageRuntime()
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		// A subsequent component must see the original failure, not success.
+		require.NoError(t, pt.Save(key, "1"))
+		assert.Same(t, err, InitStorageRuntime())
+		return
 	}
 
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "0"))
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "2"))
-	assert.Equal(t, 2*hardware.GetCPUNum(), capacity())
-
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "0"))
-	assert.Equal(t, defaultArrowIOThreadPoolCapacity, capacity())
-
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "-1"))
-	assert.Equal(t, defaultArrowIOThreadPoolCapacity, capacity())
-
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "2"))
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "3"))
-	assert.Equal(t, 3, capacity())
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() { assert.NoError(t, InitStorageRuntime()) })
+	}
+	wg.Wait()
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "0"))
+	require.NoError(t, InitStorageRuntime())
+	families, err := metrics.NewCRegistry().Gather()
+	require.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() == "internal_arrow_io_pool_capacity" {
+			require.Len(t, mf.GetMetric(), 1)
+			assert.Equal(t, float64(3), mf.GetMetric()[0].GetGauge().GetValue())
+			return
+		}
+	}
+	t.Fatal("internal_arrow_io_pool_capacity gauge not found")
 }
 
 func TestTracer(t *testing.T) {
@@ -287,41 +350,6 @@ func TestLazyColumnGroupHotUpdate(t *testing.T) {
 		assert.NoError(t, pt.Save(key, value))
 		assert.Equal(t, value == "true", getLazyColumnGroupEnabled())
 	}
-}
-
-// TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers
-// a handler under each of the two watched keys. The sentinel handler we
-// register after the helper fires whenever the dispatcher receives an event
-// for the key, which proves that the dispatcher has an active handler list
-// for the key (and therefore that the helper's Watch calls landed correctly).
-//
-// Note on `HasUpdated`: paramtable's Save() unconditionally sets
-// HasUpdated=true on its synthetic runtime event, so the short-circuit branch
-// inside the helper is exercised only by file/etcd refresh events in
-// production, not by Save() in a unit test. We don't try to assert it here.
-func TestRegisterArrowIOThreadPoolWatchers(t *testing.T) {
-	paramtable.Init()
-	pt := paramtable.Get()
-	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
-	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)
-
-	assert.NotPanics(t, func() { RegisterArrowIOThreadPoolWatchers(pt, "test") })
-
-	var coefFires, maxFires atomic.Int32
-	coefSentinel := config.NewHandler("sentinel-coef", func(*config.Event) { coefFires.Add(1) })
-	maxSentinel := config.NewHandler("sentinel-max", func(*config.Event) { maxFires.Add(1) })
-	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, coefSentinel)
-	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, maxSentinel)
-	defer pt.Unwatch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, coefSentinel)
-	defer pt.Unwatch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, maxSentinel)
-
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "2"))
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "64"))
-
-	assert.Positive(t, coefFires.Load(),
-		"helper must have registered a handler on ArrowIOThreadPoolCoefficient")
-	assert.Positive(t, maxFires.Load(),
-		"helper must have registered a handler on ArrowIOThreadPoolMaxCapacity")
 }
 
 // TestRegisterArrowReaderConfigWatchers verifies the lifted helper registers

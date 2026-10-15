@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -126,6 +128,12 @@ func (t *QueryTask) Execute() error {
 
 	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
 	defer t.segmentManager.Segment.Unpin(pinnedSegments)
+	// The Arrow transport hands back records that MaterializeArrowSelection
+	// reads below -- the reduce only records which rows won. They are
+	// owned here, not by the pipeline, and must be released on every path --
+	// including the error returns below, hence a defer rather than an explicit
+	// release after the reduce.
+	defer segments.ReleaseRecords(results)
 	if err != nil {
 		return err
 	}
@@ -134,13 +142,26 @@ func (t *QueryTask) Execute() error {
 
 	reduceResults := make([]*segcorepb.RetrieveResults, 0, len(results))
 	querySegments := make([]segments.Segment, 0, len(results))
+	// arrowRecords stays positionally aligned with reduceResults; the reduce
+	// addresses rows by index into it.
+	arrowRecords := make([]arrow.Record, 0, len(results))
+	hasArrow := false
 	for _, result := range results {
 		reduceResults = append(reduceResults, result.Result)
 		querySegments = append(querySegments, result.Segment)
+		arrowRecords = append(arrowRecords, result.Record)
+		if result.Record != nil {
+			hasArrow = true
+		}
 	}
-	reducedResult, err := segments.RunQNQueryPipeline(
+	if !hasArrow {
+		// All-nil would make the reduce think Arrow is in play and produce an
+		// empty gather; nil means "protobuf path" unambiguously.
+		arrowRecords = nil
+	}
+	reducedResult, arrowSelection, err := segments.RunQNQueryPipeline(
 		t.ctx, t.req, t.collection.Schema(), t.plan,
-		reduceResults, querySegments, t.segmentManager, retrievePlan,
+		reduceResults, arrowRecords, querySegments, t.segmentManager, retrievePlan,
 	)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
@@ -150,6 +171,14 @@ func (t *QueryTask) Execute() error {
 		metrics.BatchReduce,
 	).Observe(float64(time.Since(beforeReduce).Microseconds()) / 1000.0)
 	if err != nil {
+		return err
+	}
+
+	// Materialize the Arrow path's chosen rows into FieldsData. This is the
+	// response's own format, so it ends the Arrow representation here, at the
+	// RPC boundary, exactly where the records are still alive -- the deferred
+	// ReleaseRecords above has not run yet. No-op on the protobuf path.
+	if err := queryutil.MaterializeArrowSelection(reducedResult, arrowSelection, t.collection.Schema()); err != nil {
 		return err
 	}
 

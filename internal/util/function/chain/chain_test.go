@@ -1139,7 +1139,7 @@ func (s *ChainTestSuite) TestExecuteWithContext_Cancellation() {
 		ExecuteWithContext(goCtx, df)
 
 	s.Error(err)
-	s.Equal(context.Canceled, err)
+	s.ErrorIs(err, context.Canceled)
 }
 
 func (s *ChainTestSuite) TestExecuteWithContext_Success() {
@@ -2168,16 +2168,16 @@ func (s *MergeOpTestSuite) TestSortDescending() {
 }
 
 // =============================================================================
-// Additional MergeOp Tests: strategies, edge cases, Execute delegation
+// Additional MergeOp Tests: strategies, edge cases, single-input merging
 // =============================================================================
 
-func (s *MergeOpTestSuite) TestMergeOpExecuteDelegatesToExecuteMulti() {
+func (s *MergeOpTestSuite) TestMergeOpExecuteMultiSingleInput() {
 	df := s.createDataFrame([]int64{1, 2}, []float32{0.9, 0.8}, []int64{2})
 	defer df.Release()
 
 	op := NewMergeOp(MergeStrategyMax, WithNormalize(false))
 	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
-	result, err := op.Execute(ctx, df)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Require().NoError(err)
 	defer result.Release()
 
