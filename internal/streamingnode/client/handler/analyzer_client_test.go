@@ -253,7 +253,7 @@ func (*analyzerRPC) ValidateAnalyzer(context.Context, *streamingpb.StreamingNode
 }
 
 func TestValidateAnalyzerDiscovery(t *testing.T) {
-	for _, scenario := range []string{"retry", "invalid", "unimplemented", "cancel"} {
+	for _, scenario := range []string{"retry", "invalid", "terminal system error", "unimplemented", "cancel"} {
 		mockey.PatchConvey(scenario, t, func() {
 			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -270,6 +270,8 @@ func TestValidateAnalyzerDiscovery(t *testing.T) {
 					}
 				case "invalid":
 					return nil, status.NewInvalidArgument("invalid tokenizer")
+				case "terminal system error":
+					return nil, status.NewUnrecoverableError("native internal failure")
 				case "unimplemented":
 					return nil, grpcstatus.Error(codes.Unimplemented, "older SN")
 				case "cancel":
@@ -287,6 +289,10 @@ func TestValidateAnalyzerDiscovery(t *testing.T) {
 				require.Equal(t, 2, calls)
 			case "invalid":
 				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Equal(t, 1, calls)
+			case "terminal system error":
+				require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+				require.False(t, status.AsStreamingError(err).IsInvalidArgument())
 				require.Equal(t, 1, calls)
 			case "unimplemented":
 				require.Equal(t, codes.Unimplemented, grpcstatus.Code(err))

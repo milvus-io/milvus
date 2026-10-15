@@ -37,7 +37,7 @@ impl<'a> AnalyzerBuilder<'a> {
         params: &json::Value,
     ) -> Result<TextAnalyzerBuilder> {
         if !params.is_array() {
-            return Err(TantivyBindingError::InternalError(
+            return Err(TantivyBindingError::InvalidArgument(
                 "filter params should be array".to_string(),
             ));
         }
@@ -57,7 +57,7 @@ impl<'a> AnalyzerBuilder<'a> {
                 let system = SystemFilter::from(filter_name);
                 match system {
                     SystemFilter::Invalid => {
-                        return Err(TantivyBindingError::InternalError(format!(
+                        return Err(TantivyBindingError::InvalidArgument(format!(
                             "build analyzer failed, filter not found :{}",
                             filter_name
                         )))
@@ -85,7 +85,7 @@ impl<'a> AnalyzerBuilder<'a> {
                     builder = self.build_filter(builder, value)?;
                 }
                 other => {
-                    return Err(TantivyBindingError::InternalError(format!(
+                    return Err(TantivyBindingError::InvalidArgument(format!(
                         "unknown analyzer option key: {}",
                         other
                     )))
@@ -116,7 +116,7 @@ impl<'a> AnalyzerBuilder<'a> {
             "english" => Ok(english_analyzer(self.get_stop_words_option()?)),
             "arabic" => Ok(arabic_analyzer(self.get_stop_words_option()?)),
             "thai" => Ok(thai_analyzer(self.get_stop_words_option()?)),
-            other_ => Err(TantivyBindingError::InternalError(format!(
+            other_ => Err(TantivyBindingError::InvalidArgument(format!(
                 "unknown build-in analyzer type: {}",
                 other_
             ))),
@@ -136,7 +136,7 @@ impl<'a> AnalyzerBuilder<'a> {
                     ));
                 }
                 if !type_.is_string() {
-                    return Err(TantivyBindingError::InternalError(format!(
+                    return Err(TantivyBindingError::InvalidArgument(format!(
                         "analyzer type should be string"
                     )));
                 }
@@ -148,14 +148,14 @@ impl<'a> AnalyzerBuilder<'a> {
         //build custom analyzer
         let tokenizer_params = self.params.get("tokenizer");
         if tokenizer_params.is_none() {
-            return Err(TantivyBindingError::InternalError(format!(
+            return Err(TantivyBindingError::InvalidArgument(format!(
                 "tokenizer name or type must be set"
             )));
         }
 
         let value = tokenizer_params.unwrap();
         if !value.is_object() && !value.is_string() {
-            return Err(TantivyBindingError::InternalError(format!(
+            return Err(TantivyBindingError::InvalidArgument(format!(
                 "tokenizer name should be string or dict"
             )));
         }
@@ -244,6 +244,24 @@ pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
 mod tests {
     use crate::analyzer::analyzer::create_analyzer;
     use tantivy::tokenizer::TokenStream;
+
+    #[test]
+    fn test_invalid_analyzer_configuration_is_input_error() {
+        for params in [
+            r#"{"type":"klingon"}"#,
+            r#"{"type":1}"#,
+            r#"{"tokenizer":"standard","filter":"lowercase"}"#,
+            r#"{"tokenizer":"standard","filter":["unknown_filter"]}"#,
+            r#"{"tokenizer":"standard","unknown_option":true}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"stemmer","language":"xx"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"stemmer","language":1}]}"#,
+        ] {
+            assert!(matches!(
+                create_analyzer(params, ""),
+                Err(crate::error::TantivyBindingError::InvalidArgument(_))
+            ), "{}", params);
+        }
+    }
 
     #[test]
     fn test_standard_analyzer() {
