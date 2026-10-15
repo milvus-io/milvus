@@ -392,50 +392,42 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     return res_vec;
 }
 
-// Helper function to calculate bounding box for range_within query optimization
-// Creates a rectangular bounding box around a query point with given distance in meters
+// Coarse pre-filter geometry for ST_DWithin on the indexed path: the R-Tree
+// returns every row whose stored MBR intersects this polygon's envelope, and
+// exact refinement (Geometry::dwithin) decides from there. The envelope itself
+// is derived by Geometry::DWithinSearchEnvelope from the same metrics the
+// exact predicate uses, so that every row dwithin() can accept is a candidate
+// -- the previous fixed 111320 m/deg box was not a superset of either metric
+// and silently dropped boundary rows (issue #54138).
+//
+// Coordinates are printed with fmt's shortest round-trip representation, not
+// a fixed decimal count, so the WKT round trip cannot shrink the box.
 static Geometry
 create_bounding_box_for_dwithin(GEOSContextHandle_t ctx,
                                 const Geometry& query_point,
                                 double distance_meters) {
-    double query_lon, query_lat;
+    Geometry::Envelope env{};
+    if (!Geometry::DWithinSearchEnvelope(
+            ctx, query_point.GetGeometry(), distance_meters, env)) {
+        // An empty query point is within no distance of anything (dwithin
+        // returns false for every row), so hand the index an empty geometry:
+        // it has no envelope and yields zero candidates.
+        return Geometry(ctx, "POLYGON EMPTY");
+    }
 
-    AssertInfo(GEOSGeomGetX_r(ctx, query_point.GetGeometry(), &query_lon) == 1,
-               "Failed to get X coordinate from query point");
-    AssertInfo(GEOSGeomGetY_r(ctx, query_point.GetGeometry(), &query_lat) == 1,
-               "Failed to get Y coordinate from query point");
-
-    const double metersPerDegreeLat = 111320.0;
-
-    // Calculate latitude offset (relatively constant)
-    double latOffset = distance_meters / metersPerDegreeLat;
-
-    // Calculate longitude offset (varies with latitude)
-    double latRad = query_lat * M_PI / 180.0;
-    double lonOffset =
-        distance_meters / (metersPerDegreeLat * std::cos(latRad));
-
-    // Calculate bounding box coordinates
-    double minLon = query_lon - lonOffset;
-    double maxLon = query_lon + lonOffset;
-    double minLat = query_lat - latOffset;
-    double maxLat = query_lat + latOffset;
-
-    // Create WKT POLYGON for bounding box
-    std::string bboxWKT = fmt::format(
-        "POLYGON(({:.6f} {:.6f}, {:.6f} {:.6f}, {:.6f} {:.6f}, {:.6f} {:.6f}, "
-        "{:.6f} {:.6f}))",
-        minLon,
-        minLat,  // Bottom-left
-        maxLon,
-        minLat,  // Bottom-right
-        maxLon,
-        maxLat,  // Top-right
-        minLon,
-        maxLat,  // Top-left
-        minLon,
-        minLat  // Close the ring
-    );
+    std::string bboxWKT =
+        fmt::format("POLYGON(({} {}, {} {}, {} {}, {} {}, {} {}))",
+                    env.min_x,
+                    env.min_y,  // Bottom-left
+                    env.max_x,
+                    env.min_y,  // Bottom-right
+                    env.max_x,
+                    env.max_y,  // Top-right
+                    env.min_x,
+                    env.max_y,  // Top-left
+                    env.min_x,
+                    env.min_y  // Close the ring
+        );
 
     return Geometry(ctx, bboxWKT.c_str());
 }
