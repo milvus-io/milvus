@@ -160,6 +160,7 @@ type Server struct {
 	statsInspector                   *statsInspector
 	indexInspector                   *indexInspector
 	analyzeInspector                 *analyzeInspector
+	talonPrewarmInspector            *TalonPrewarmInspector
 	externalCollectionRefreshManager ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
 
@@ -405,6 +406,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	mlog.Info(s.ctx, "init snapshot manager done")
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	if err := s.initTalonPrewarm(); err != nil {
+		return err
+	}
 
 	mlog.Info(s.ctx, "init datacoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 
@@ -430,6 +434,11 @@ func (s *Server) startDataCoord() {
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	// The first prewarm round reads the recovered metadata through a healthy
+	// DataCoord; starting it earlier could skip that round as not ready.
+	if s.talonPrewarmInspector != nil {
+		s.talonPrewarmInspector.Start()
+	}
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
 }
 
@@ -1098,6 +1107,11 @@ func (s *Server) initMixCoord() error {
 //
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
+	// Init can create the client without reaching Start. Release it even when
+	// the state guard below skips the rest of component shutdown.
+	if s.talonPrewarmInspector != nil {
+		s.talonPrewarmInspector.Stop()
+	}
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}
