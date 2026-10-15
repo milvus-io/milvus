@@ -1,0 +1,86 @@
+package partialupdate
+
+import (
+	"context"
+	"time"
+
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+)
+
+const recoveryPKDecodeTimeout = 5 * time.Second
+
+// recoverTransactions reconstructs the write set of the durable body prefix.
+// Runtime body appends extend that prefix before CommitTxn freezes and drains
+// the session. No row lock, lease, committed version, or WAL record is restored.
+func (i *appendInterceptor) recoverTransactions(param *interceptors.InterceptorBuildParam) {
+	if param.InitialRecoverSnapshot == nil || param.InitialRecoverSnapshot.TxnBuffer == nil || param.TxnManager == nil {
+		return
+	}
+	ctx := param.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// KMS may retry an invalid key indefinitely. Bound this optional write-set
+	// reconstruction and respect WAL-open cancellation; a failed transaction can
+	// use the existing full replay without dropping any durable body.
+	ctx, cancel := context.WithTimeout(ctx, recoveryPKDecodeTimeout)
+	defer cancel()
+	for txnID, builder := range param.InitialRecoverSnapshot.TxnBuffer.GetUncommittedMessageBuilder() {
+		begin, bodies := builder.Messages()
+		i.state.txnMu.Lock()
+		i.state.txnLocked(txnID).recovered = true
+		i.state.txnMu.Unlock()
+
+		lastBodyTS := begin.TimeTick()
+		for _, body := range bodies {
+			if body.TimeTick() > lastBodyTS {
+				lastBodyTS = body.TimeTick()
+			}
+		}
+		complete := true
+		for _, body := range bodies {
+			if err := i.recoverTxnBody(ctx, txnID, body); err != nil {
+				// A single unsupported or malformed recovered write set must not
+				// prevent the WAL from opening. Its CommitTxn requests a full retry.
+				complete = false
+				break
+			}
+		}
+		if complete {
+			i.state.recordTxnBegin(txnID)
+		}
+		if session, err := param.TxnManager.GetSessionOfTxn(txnID); err == nil {
+			// The manager already restored the original keepalive. Registering
+			// cleanup at its last durable body TS never extends that lease.
+			i.state.registerTxnCleanup(session, lastBodyTS)
+		} else {
+			i.state.deleteTxn(txnID)
+		}
+	}
+}
+
+func (i *appendInterceptor) recoverTxnBody(ctx context.Context, txnID message.TxnID, body message.ImmutableMessage) error {
+	if message.HasPartialUpdateCAS(body) {
+		pks, scope, encoded, err := extractPKsFromCASInsertWithContext(ctx, body, i.pkDescriptorGetter)
+		if err != nil {
+			return err
+		}
+		meta, err := message.DecodePartialUpdateCASMetadata(encoded)
+		if err != nil {
+			return err
+		}
+		if err := i.state.recordTxnCAS(txnID, meta, scope); err != nil {
+			return err
+		}
+		i.state.recordTxnWritesTyped(txnID, pks)
+		return nil
+	}
+	set, err := i.extractOrdinaryWriteSet(ctx, body)
+	if err != nil {
+		return err
+	}
+	i.state.recordTxnWritesTyped(txnID, set.pks)
+	i.state.recordTxnFence(txnID, set.fenceCollectionID)
+	return nil
+}
