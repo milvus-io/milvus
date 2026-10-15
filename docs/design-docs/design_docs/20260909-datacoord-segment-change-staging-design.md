@@ -473,15 +473,21 @@ Per-term definition and edge cases:
   temporarily vanishes from the view). Staging uses the `true` semantics, which
   is a **behavior fix**; lock it with unit tests (for a no-index collection, a
   child may be published as soon as its data is complete).
-- **segmentIndexed**: `indexMeta.GetIndexedSegments(collection, {id},
-  targetFieldIds)` contains the segment, with `targetFieldIds` = all vector
-  fields + (when `DVForceAllIndexReady`) all scalar-indexed fields. **Edge
-  case**: a collection with no vector field (and `DVForceAllIndexReady` off)
-  leaves `targetFieldIds` empty; the term is then **true** for every segment,
-  so that scalar indexes do not gate publication, matching how a vector
-  collection treats its scalar indexes today. See
-  `20261007-collection-without-vector-field.md` (touchpoint C1) for the
-  `FilterInIndexedSegments` change that implements this.
+- **segmentIndexed**: every non-deleted index defined on the collection
+  (`indexMeta.GetIndexesForCollection(collection, "")`, scalar and vector) has a
+  `segmentIndex` record for the segment in state `Finished`. This is the
+  `handoffReady` predicate of
+  `20261007-collection-without-vector-field.md` (Section 2.6) and replaces the
+  earlier "vector fields + (when `DVForceAllIndexReady`) scalar-indexed fields"
+  target set; `dataCoord.dataview.forceAllIndexReady` is removed. **Edge
+  cases**: a collection with no index defined satisfies the term (same as the
+  "no index requirement" exemption above); a collection with no vector field
+  needs no special case because the target set is built from `indexMeta`, not
+  from the schema; a terminally failed index build keeps the term false and the
+  group goes to FAILED (transition 4) with the parents still published. The
+  compaction trigger keeps its own, narrower predicate (`compactionInputReady`:
+  vector indexes only), so publication readiness and compaction-input readiness
+  are distinct terms.
 - **smallExempt**: `(IsSorted || IsSortedByNamespace) && NumOfRows <
   Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex`. Same as today.
 - **sort term**: exempt when `enableSortCompaction()` (both

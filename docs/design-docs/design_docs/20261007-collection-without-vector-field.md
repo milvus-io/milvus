@@ -37,9 +37,15 @@ The change set is:
    guards only the `CreateCollection` entry;
 3. eleven call sites fixed (five hard rejections, two always-true rejections,
    three silent misbehaviours, one row-count hazard);
-4. a new per-segment row cap, `dataCoord.segment.maxRows` (default 4,000,000),
-   enforced at the three places that already enforce the byte cap. It applies
-   to every collection; today only collections with very narrow rows reach it.
+4. two index-readiness predicates in DataCoord: handoff (data view publication)
+   waits for every index defined on the collection, compaction input waits only
+   for vector indexes; a collection with no index defined, or no vector field,
+   satisfies them without a special case;
+5. a new per-segment row cap, `dataCoord.segment.maxRows` (default 4,000,000),
+   introduced as a second dimension of segment fullness next to
+   `dataCoord.segment.maxSize`. It enters every place that classifies, packs,
+   splits or seals segments by size. It applies to every collection; today only
+   collections with very narrow rows reach it.
 
 The row cap is the only part of the design that is not a pure removal of an
 assumption. It is justified by measurement: delete application inside one
@@ -188,9 +194,9 @@ already only fires when the dropped field is a vector.
 
 | # | Site | Today | Change |
 |---|------|-------|--------|
-| C1 | `internal/datacoord/util.go:77` `FilterInIndexedSegments` with `index_meta.go:750` `GetIndexedSegments` | `targetFieldIds` = vector fields (+ scalar-indexed fields when `DVForceAllIndexReady`). With `indexBasedCompaction=true` (default) and `skipNoIndexCollection=false` (periodic trigger, single-segment policy), a collection with no entry in `indexMeta.indexes` makes `GetIndexedSegments` return `nil` and every segment is filtered out: no L1 mix compaction and no delete-ratio compaction ever run. With only scalar indexes, `fieldIDSet` is empty so `checkSegmentState` is vacuously true for any segment that has a `segmentIndex` record (even one still building) and false for segments without a record. | In `FilterInIndexedSegments`, after computing `targetFieldIds`: if it is empty, return every flushed / dropped-state segment of that collection without consulting `GetIndexedSegments`. Rationale: `indexBasedCompaction` exists to avoid rebuilding a vector index after compaction; with no vector index to wait for there is nothing to gate on. This equals today's behaviour for a vector collection with `DVForceAllIndexReady=false`, where scalar indexes do not block compaction. The staging design's `segmentIndexed` term is updated accordingly (its text currently says "must explicitly degrade to all scalar indexes Finished"; the agreed semantics is "empty target set → term is true"). |
+| C1 | `internal/datacoord/util.go:77` `FilterInIndexedSegments` with `index_meta.go:750` `GetIndexedSegments` | `targetFieldIds` = all vector fields (+ all indexed fields when `dataCoord.dataview.forceAllIndexReady`). `GetIndexedSegments` returns `nil` when any target field has no index, so with `indexBasedCompaction=true` (default) and `skipNoIndexCollection=false` (periodic trigger, single-segment policy, `GetQueryVChanPositions`) every segment is filtered out until an index exists on every vector field. For a vector collection that is a wait; for a collection with no vector field it is permanent: no L1 mix compaction and no delete-ratio compaction ever run, and compaction children never become visible. | Split the one filter into the two predicates of Section 2.6. Compaction input: when the vector target set is empty, every flushed / dropped-state segment passes. Handoff: wait for all indexes defined on the collection. |
 | C2 | `internal/datacoord/index_meta.go:1497` `AllDenseWithDiskIndex` | `len(dense) == len(denseWithDiskIndex)`; `0 == 0` is true, so `getExpectedSegmentSize` (`compaction_trigger_v2.go:872`) returns `diskSegmentMaxSize` (2048 MB) for a collection with no dense vector. Mix / force-merge / import outputs become twice the streaming seal size. Sparse-only collections already show this. | `len(dense) > 0 && len(dense) == len(denseWithDiskIndex)`. |
-| C3 | `internal/datanode/importv2/util.go:713` `GetInsertDataRowCount` | Comment states "each collection must contain at least one vector field, there must be one field whose row number is not 0". The function returns the first non-zero row count; with `auto_id` primary key and every remaining field eligible for zero-row fill (nullable / default / dynamic / function output) it returns 0 and the batch is skipped as "0 row was imported". | Remove the assumption from the comment. Keep the current algorithm (any non-zero field decides the row count) and, when all present fields have zero rows, return the row count the reader reported for the batch instead of 0. Add a unit test with a schema of `auto_id` pk + nullable fields only. The reader-side question (whether JSON / Parquet / CSV readers materialise rows for columns absent from the file) is part of Verification. |
+| C3 | `internal/datanode/importv2/util.go:713` `GetInsertDataRowCount` and the four file readers | The comment states "each collection must contain at least one vector field, there must be one field whose row number is not 0". With `auto_id` primary key and every remaining field eligible for zero-row fill (nullable / default / dynamic / function output), a file that contains none of the schema's columns is accepted by schema validation (`parquet/util.go:isSchemaEqual` skips nullable / default / dynamic fields; `numpy/util.go:CreateReaders` ignores paths that name no field). The reader then has an empty column-reader set: Parquet `Read()` never executes its inner loop and never reaches `io.EOF`, NumPy `Read()` returns a zero-row batch on every call, and `importFile` logs "0 row was imported" and calls `Read()` again. The task spins until cancelled. | Reject at reader construction, before any row is produced: Parquet and NumPy fail with `ErrImportFailed("no importable field found in <file>")` when the matched column set is empty; CSV applies the same rule to its header; JSON rejects a row object that supplies no schema field and no dynamic key. Files that supply a matching column whose values are all null remain importable. `GetInsertDataRowCount` keeps its algorithm (any populated field decides the row count); the comment is corrected, and the zero result is treated as an internal error (`importFile` returns it instead of continuing) because the readers now guarantee at least one populated column per batch. |
 
 #### 2.4 Search entry (behaviour kept, message unified)
 
@@ -224,6 +230,61 @@ checks stay as defensive guards.
   sub-fields of struct arrays today). `MilvusClient.create_collection(schema=)`
   has no such check. Go SDK has none.
 - Quick-setup paths are not changed (Non-goals).
+
+#### 2.6 Index readiness: handoff versus compaction input
+
+`FilterInIndexedSegments` serves two different questions with one target set:
+
+- **Handoff** (`handler.go:168` `GetQueryVChanPositions`, and the
+  `segmentIndexed` term of the staging design): may this segment replace its
+  compaction parents in the data view?
+- **Compaction input** (`compaction_trigger.go:365`,
+  `compaction_policy_single.go:290`): may this segment be consumed by another
+  compaction?
+
+The design separates them. Both are evaluated against the indexes defined in
+`indexMeta` for the collection, not against the schema, so neither needs a
+vector-field special case:
+
+| Predicate | Target set | Empty target set | Used by |
+|-----------|-----------|------------------|---------|
+| `handoffReady(segment)` | every non-deleted index of the collection, scalar and vector (`GetIndexesForCollection`) | true (no index defined) | `GetQueryVChanPositions`, staging `segmentIndexed` |
+| `compactionInputReady(segment)` | indexes on vector fields only | true (no vector field, or no vector index defined) | periodic trigger, single-segment policy |
+
+`handoffReady` is the current behaviour of `dataCoord.dataview.forceAllIndexReady=true`
+made unconditional; the parameter is removed. The `smallExempt` term of the
+staging design (`NumOfRows < indexCoord.segment.minSegmentNumRowsToEnableIndex`,
+default 1024, sorted segments only) stays in front of it.
+
+`compactionInputReady` keeps today's semantics for vector collections (a vector
+field whose index is still building is not compacted again) and drops the gate
+when there is nothing to wait for. Scalar indexes are not part of it because
+they are rebuilt per output segment after every compaction, so waiting for them
+on the input side delays the compaction without saving work. This matches what
+a vector collection does with its scalar indexes today.
+
+Consequences of waiting for scalar indexes at handoff, for every collection:
+
+- **Publication latency.** A compaction output becomes visible after its scalar
+  indexes finish instead of after its vector index. Measured on the test build:
+  `INVERTED` on one `int32` field builds in 8.5 s for 5.5 M rows and 28.6 s for
+  44 M rows; at the 4 M-row cap this adds about 6 s per segment, and scalar
+  index tasks for sibling segments run in parallel. Until publication the
+  parents keep serving, so the cost is index freshness of the children, not
+  availability.
+- **Small segments.** Segments below `minSegmentNumRowsToEnableIndex` are not
+  indexed and are exempt, as today.
+- **Index failure.** A segment whose scalar index build fails terminally never
+  satisfies `handoffReady`. Under the staging design the group moves to
+  `FAILED` (transition 4) and the parents stay published; without staging the
+  parents are already retired and the children stay invisible, which is the
+  existing behaviour for a failed vector index. The failure mode is therefore
+  unchanged in kind and now has a visible terminal state.
+- **Vector collection without any index.** Today such a collection's compaction
+  children are invisible until an index is created on every vector field (data
+  "temporarily vanishes", as the staging design notes). With `handoffReady`
+  they publish as soon as data is complete. The staging design already
+  specifies this as a behaviour fix.
 
 ### 3. Per-segment row cap
 
@@ -290,42 +351,87 @@ is equally defensible; the difference is at the margin.
 The cap applies to every collection. Vector collections with dim ≥ 32 float32
 do not reach it before the byte cap (Compatibility lists the ones that do).
 
-#### 3.3 Enforcement points
+#### 3.3 Segment fullness
 
-All three places already carry a row field; the change is to populate it.
+Every place that today compares a byte count against `maxSize` compares a
+*fullness* instead:
+
+```
+residualRows(s)  = NumOfRows(s) − DeleteNumRows(s)
+residualSize(s)  = getSegmentSize(s) × residualRows(s) / NumOfRows(s)      // existing GetResidualSegmentSize
+
+fullness(s)      = max( residualSize(s) / expectedSize,
+                        residualRows(s) / maxRows )                        // maxRows = 0 → second term is 0
+fullness(set)    = max( Σ residualSize / expectedSize, Σ residualRows / maxRows )
+```
+
+A segment is *full* when `fullness ≥ compactionFillRate` (0.85), a *fragment*
+when `fullness < compactionFillRate / 4`, *small* (legacy planner) when
+`fullness < segmentSmallProportion`. A set of segments fits one output when
+both `Σ residualSize ≤ expectedSize` and `Σ residualRows ≤ maxRows`. For a
+collection whose rows are wider than `maxSize / maxRows` (268 B at defaults)
+the byte term dominates and every result is identical to today's.
+
+Without this, a narrow-row segment that reached `maxRows` has
+`size / expectedSize ≈ 0.3` and is classified as small or fragment, packed
+with its neighbours, compacted, and split back at `maxRows` by the output
+writer. Each compaction cycle rewrites the same rows (xiaofan-luan, review of
+this document).
+
+#### 3.4 Enforcement points
 
 1. **StreamingNode seal (growing → sealed).**
    `jitterSegmentLimitationPolicy.generateL1Limitation` sets
    `SegmentRows: math.MaxUint64`. Set it to
-   `jitterRatio × maxRows × sealProportion` when `maxRows > 0` (same jitter and
-   proportion as the byte limit, so the two caps scatter seals the same way).
-   The value already travels in `CreateSegmentMessageHeader.MaxRows` into
-   `SegmentStats.MaxRows`, where the allocation path compares assigned rows
-   against it; L0 segments use this path today with `FlushL0MaxRowNum`.
-2. **Compaction outputs.** `CompactionPlan.max_size` bounds mix / sort /
-   force-merge outputs on the DataNode; `MultiSegmentWriter` already receives a
-   `maxRows` argument but uses it only to size the bloom filter. Add
-   `CompactionPlan.max_rows` (populated from the parameter by DataCoord next to
-   `max_size`) and make the writer roll to a new output segment when either
-   bound is reached. Clustering compaction already carries
-   `MaxSegmentRows` / `PreferSegmentRows`; cap both with `maxRows`. The
-   DataCoord trigger's bucket packing (`squeezeSmallSegmentsToBuckets`,
-   `compaction_trigger.go:704`) sums `getSegmentSize`; add the same check on
-   `NumOfRows` so that a plan does not merge more rows than one output may
-   hold.
-3. **Import.** `AssignSegments` (`import_util.go:165`) allocates
-   `ceil(size / segmentMaxSize)` segments per vchannel/partition from the
-   preimport hashed sizes. Preimport also reports row counts
-   (`ImportFileStats.TotalRows`, hashed per vchannel/partition); allocate
-   `max(ceil(size / maxSize), ceil(rows / maxRows))` segments. The DataNode
-   side picks a segment per batch (`PickSegment`) by vchannel/partition; it
-   needs no change because the number of segments already bounds the average,
-   and the sort compaction that follows import re-splits by the compaction
-   rule above.
-
-Import V3 (PR #53334, open) changes the import pipeline but keeps the
-preimport-measured rows and sizes and the sorted-fragment writer; the same rule
-applies to its fragment target.
+   `jitterRatio × maxRows × sealProportion` when `maxRows > 0`, the same
+   jitter and proportion as the byte limit so that both caps scatter seals the
+   same way. The value already travels in `CreateSegmentMessageHeader.MaxRows`
+   into `SegmentStats.MaxRows`; `SegmentStats.AllocRows` and `IsFull`
+   (`utils/stats.go:116,128`) already test rows against it. L0 segments keep
+   `FlushL0MaxRowNum`.
+2. **Compaction trigger: classification.** `isFullSegment`,
+   `isFragmentSegment` (`compaction_tier.go`), `isSmallSegment`,
+   `isExpandableSmallSegment` (`compaction_trigger.go:689-694`) take the
+   segment's fullness. A segment that is row-full is not a candidate for
+   merging. `ShouldDoSingleCompaction` (delete ratio, expired rows, deltalog
+   count) is unchanged, so deletes and TTL still compact a row-full segment;
+   its output is split by the writer below.
+3. **Compaction trigger: packing.** `Knapsack.tryPack` (`knapsack.go:48`)
+   accumulates one capacity. It gets a second: a candidate is added only if
+   both `Σ residualSize ≤ expectedSize` and `Σ residualRows ≤ maxRows`; the
+   "left" value that `pack`, `packSliding` and `packWith` compare against
+   `maxLeftSize` becomes `(1 − fullness(pack)) × expectedSize`, so the
+   fill-rate gate and `minSegs` logic are unchanged. The `less` ordering in
+   `newSegmentPacker` sorts by residual fullness instead of residual size.
+   `squeezeSmallSegmentsToBuckets` applies the same two-dimensional fit.
+   `compactionBucket` carries `maxRows` next to `maxSize`.
+4. **Compaction output.** `CompactionPlan.max_size` bounds mix / sort /
+   force-merge outputs on the DataNode; `MultiSegmentWriter` already receives
+   a `maxRows` argument but uses it only to size the bloom filter. Add
+   `CompactionPlan.max_rows`, populated by DataCoord next to `max_size`, and
+   make the writer roll to a new output when either bound is reached. Sort
+   compaction (`merge_sort.go:49`), mix compaction, force-merge, bump-schema
+   and namespace compaction all write through this writer and inherit the
+   rule; import outputs are therefore re-split by the sort compaction that
+   follows import even if the import assignment under-estimated.
+5. **Clustering compaction.** `calculateClusteringCompactionConfig` derives
+   `MaxSegmentRows` / `PreferSegmentRows` from the observed bytes per row. Cap
+   both: `MaxSegmentRows = min(MaxSegmentRows, maxRows)`,
+   `PreferSegmentRows = min(PreferSegmentRows, maxRows × preferRatio)`.
+6. **Import.** `AssignSegments` (`import_util.go:165`) allocates
+   `ceil(size / segmentMaxSize)` segments per vchannel / partition from
+   `PartitionImportStats.partition_data_size`; `partition_rows` is in the same
+   message. Allocate `max(ceil(size / maxSize), ceil(rows / maxRows))`. The
+   DataNode side (`PickSegment`) needs no change: the number of segments bounds
+   the average, and sort compaction re-splits outliers (point 4).
+7. **Other writers.** Backfill, copy-segment and the Import V3 reshard fragment
+   writer (PR #53334) target `max_size` through the same plan / writer types
+   and receive `max_rows` with it.
+8. **L0 segments** are excluded: their rows are delete records applied per
+   target segment, and they already have `FlushL0MaxRowNum`.
+9. **Observability.** The seal and compaction logs that today print the byte
+   reason print which dimension fired (`size` or `rows`), so that operators can
+   see when `maxRows` is the binding limit for a collection.
 
 ### 4. Resource estimation
 
@@ -359,6 +465,13 @@ in place, the absolute error per segment is bounded (4 M rows × ~80 B =
   for the new field; the nullable / backfill rules of online schema evolution
   apply unchanged.
 - **Dropping the last vector field / function** stays rejected (Non-goals).
+- **QueryCoord** already tolerates a collection with no index: the load
+  executor turns `ErrIndexNotFound` into an empty index list
+  (`querycoordv2/task/executor.go:764`), and the autoscale precheck skips it
+  (`autoscale_precheck.go:378`). RootCoord has no vector check at create time;
+  its only one is the drop-function rule at
+  `ddl_callbacks_alter_collection_schema.go:621`, already guarded by
+  `removedVectors > 0`. Both verified on master, no change.
 - **`GetQueryVChanPositions` (`handler.go:168`)** uses the same
   `FilterInIndexedSegments`; with C1 it regains the compaction-parent fallback
   for zero-vector collections.
@@ -403,8 +516,18 @@ in place, the absolute error per segment is bounded (4 M rows × ~80 B =
   `dataCoord.segment.maxRows=0`.
 - **Sparse-only collections** get a 1024 MB compaction / import target instead
   of 2048 MB (C2).
-- **Staging design.** `segmentIndexed` for an empty target set is defined as
-  true. The staging document is amended in the same PR series.
+- **Handoff waits for scalar indexes** on every collection (Section 2.6).
+  Compaction children become visible after their scalar indexes finish; the
+  parents serve until then. `dataCoord.dataview.forceAllIndexReady` is
+  removed; a configuration that sets it is ignored with a deprecation log.
+- **Compaction planner** results are unchanged for any collection whose rows
+  are wider than `maxSize / maxRows` (Section 3.3); narrower collections stop
+  re-merging row-full segments.
+- **Bulk import** rejects a file that contains none of the schema's importable
+  columns (C3). Today such a file makes the import task loop without progress;
+  no completed import changes outcome.
+- **Staging design.** `segmentIndexed` is defined as `handoffReady` of
+  Section 2.6. The staging document is amended in the same PR.
 
 ## Verification
 
@@ -418,14 +541,26 @@ in place, the absolute error per segment is bounded (4 M rows × ~80 B =
   scalar index only; A5 REST insert / upsert without vector.
 - B1 / B2: drop struct field and drop function on a zero-vector collection
   succeed; dropping the last vector still fails.
-- C1: `FilterInIndexedSegments` with no index meta entry and with scalar
-  indexes only returns all flushed segments; with a vector index behaves as
-  today. C2: `AllDenseWithDiskIndex` false for zero dense fields. C3:
-  `GetInsertDataRowCount` with `auto_id` pk and nullable-only fields.
+- C1 / Section 2.6: `compactionInputReady` with no index meta entry, with
+  scalar indexes only, with a vector index building, with a vector index
+  finished; `handoffReady` with a scalar index building / finished / failed,
+  with no index defined, below `minSegmentNumRowsToEnableIndex`. C2:
+  `AllDenseWithDiskIndex` false for zero dense fields. C3: Parquet, NumPy and
+  CSV readers reject a file with no importable column at construction; JSON
+  rejects a row with no schema key and no dynamic key; a Parquet column of
+  all nulls on a nullable field imports; `importFile` returns an error on a
+  zero-row batch instead of continuing.
+- Section 3.3: `fullness` on byte-dominated and row-dominated segments, with
+  and without deletes, with `maxRows=0`; `isFullSegment` / `isFragmentSegment`
+  / `isSmallSegment` on a row-full narrow segment return full / not fragment /
+  not small; `Knapsack.tryPack` refuses a candidate that fits by bytes but not
+  by rows; `generatePlansTwoTier` on a channel of row-full narrow segments
+  produces no merge plan and still produces a single-segment plan for a
+  segment over the delete-ratio threshold; clustering caps.
 - Search entry: one error text across `Search`, `HybridSearch`,
   `SearchIterator`, search-by-pk, REST.
 - Row cap: StreamingNode limitation with `maxRows` set / 0; `MultiSegmentWriter`
-  rolls at `max_rows`; `AssignSegments` allocates by rows; clustering caps.
+  rolls at `max_rows`; `AssignSegments` allocates by rows.
 
 ### End-to-end (`tests/python_client/milvus_client/`)
 
@@ -442,7 +577,11 @@ in place, the absolute error per segment is bounded (4 M rows × ~80 B =
 6. Gate off → create rejected with the legacy error.
 7. REST v2 create / insert / upsert / query / delete.
 8. Row cap: import 12 M narrow rows → ≥ 3 segments; streaming insert past
-   `maxRows × sealProportion` → seal observed.
+   `maxRows × sealProportion` → seal observed; after the periodic trigger has
+   run, the row-full segments are not re-compacted (segment IDs stable across
+   two trigger intervals).
+9. Import of a Parquet file with none of the schema's columns → job fails with
+   the C3 error within the preimport / import timeout, not a hung task.
 
 ### Measurements already done (2026-10-07, master `036bef9e9f`, single node)
 
@@ -465,6 +604,16 @@ aarch64).
   constant) instead of a separate row cap. Rejected: it changes the meaning of
   `maxSize` for every collection (a dim-768 segment shrinks by ~3 %), while a
   separate cap is a no-op below the threshold.
+- **Row cap on outputs only (seal, writer, import assignment), planner
+  unchanged.** Rejected: the planner would classify every row-full narrow
+  segment as small, merge it and have the writer split it again on each
+  trigger interval (Section 3.3).
+- **One readiness predicate for handoff and compaction input.** Rejected:
+  handoff wants every defined index so that the published segment is
+  queryable without a brute-force fallback; compaction input only needs to
+  avoid consuming a segment whose vector index is still building. Using the
+  handoff rule for compaction input would delay compaction by a scalar index
+  build that is discarded with the input segment.
 - **No row cap, rely on delete parallelisation.** Rejected for now: the
   parallelisation is a segcore change with its own review; the cap is a
   configuration-level guard that can be relaxed when the former lands.
@@ -490,6 +639,8 @@ aarch64).
 ## References
 
 - Issue #52065, #33853, #51185
+- Review comments on PR #53983 (xiaofan-luan, 2026-10-10): handoff readiness,
+  row-aware compaction planning, import reader validation
 - PR #53334 `feat: implement Import V3 reshard` (open)
 - Druid segment optimization: https://druid.apache.org/docs/latest/operations/segment-optimization
 - TiKV coprocessor configuration: https://tikv.org/docs/4.0/tasks/configure/coprocessor/
