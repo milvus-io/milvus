@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -20,7 +20,7 @@ func TestFileResourceSnapshotIncludesInventoryVersion(t *testing.T) {
 		10: {Id: 10, Name: "dictionary", Path: "files/dictionary.txt", StorageName: "store"},
 	}}
 	core := &Core{meta: meta}
-	response, err := core.GetFileResourceSnapshot(t.Context(), &milvuspb.ListFileResourcesRequest{})
+	response, err := core.GetFileResourceSnapshot(t.Context(), &rootcoordpb.GetFileResourceSnapshotRequest{})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(response.GetStatus()))
 	require.EqualValues(t, 7, response.GetVersion())
@@ -28,12 +28,12 @@ func TestFileResourceSnapshotIncludesInventoryVersion(t *testing.T) {
 	require.Equal(t, "store", response.GetResources()[0].GetStorageName())
 	meta.fileResourceVersion++
 	delete(meta.fileResourceID2Meta, 10)
-	response, err = core.GetFileResourceSnapshot(t.Context(), &milvuspb.ListFileResourcesRequest{})
+	response, err = core.GetFileResourceSnapshot(t.Context(), &rootcoordpb.GetFileResourceSnapshotRequest{})
 	require.NoError(t, err)
 	require.EqualValues(t, 8, response.GetVersion())
 	require.Empty(t, response.GetResources())
 	state = commonpb.StateCode_Abnormal
-	response, err = core.GetFileResourceSnapshot(t.Context(), &milvuspb.ListFileResourcesRequest{})
+	response, err = core.GetFileResourceSnapshot(t.Context(), &rootcoordpb.GetFileResourceSnapshotRequest{})
 	require.NoError(t, err)
 	require.Error(t, merr.Error(response.GetStatus()))
 	require.Empty(t, response.GetResources())

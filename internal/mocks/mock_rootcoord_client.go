@@ -4439,7 +4439,7 @@ func (_c *MockRootCoordClient_ListDatabases_Call) RunAndReturn(run func(context.
 }
 
 // GetFileResourceSnapshot provides a mock function with given fields: ctx, in, opts
-func (_m *MockRootCoordClient) GetFileResourceSnapshot(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error) {
+func (_m *MockRootCoordClient) GetFileResourceSnapshot(ctx context.Context, in *rootcoordpb.GetFileResourceSnapshotRequest, opts ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -4455,10 +4455,10 @@ func (_m *MockRootCoordClient) GetFileResourceSnapshot(ctx context.Context, in *
 
 	var r0 *rootcoordpb.FileResourceSnapshot
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest, ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListFileResourcesRequest, ...grpc.CallOption) *rootcoordpb.FileResourceSnapshot); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest, ...grpc.CallOption) *rootcoordpb.FileResourceSnapshot); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
@@ -4466,7 +4466,7 @@ func (_m *MockRootCoordClient) GetFileResourceSnapshot(ctx context.Context, in *
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListFileResourcesRequest, ...grpc.CallOption) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest, ...grpc.CallOption) error); ok {
 		r1 = rf(ctx, in, opts...)
 	} else {
 		r1 = ret.Error(1)
@@ -4482,14 +4482,14 @@ type MockRootCoordClient_GetFileResourceSnapshot_Call struct {
 
 // GetFileResourceSnapshot is a helper method to define mock.On call
 //   - ctx context.Context
-//   - in *milvuspb.ListFileResourcesRequest
+//   - in *rootcoordpb.GetFileResourceSnapshotRequest
 //   - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) GetFileResourceSnapshot(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetFileResourceSnapshot_Call {
 	return &MockRootCoordClient_GetFileResourceSnapshot_Call{Call: _e.mock.On("GetFileResourceSnapshot",
 		append([]interface{}{ctx, in}, opts...)...)}
 }
 
-func (_c *MockRootCoordClient_GetFileResourceSnapshot_Call) Run(run func(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption)) *MockRootCoordClient_GetFileResourceSnapshot_Call {
+func (_c *MockRootCoordClient_GetFileResourceSnapshot_Call) Run(run func(ctx context.Context, in *rootcoordpb.GetFileResourceSnapshotRequest, opts ...grpc.CallOption)) *MockRootCoordClient_GetFileResourceSnapshot_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]grpc.CallOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -4497,7 +4497,7 @@ func (_c *MockRootCoordClient_GetFileResourceSnapshot_Call) Run(run func(ctx con
 				variadicArgs[i] = a.(grpc.CallOption)
 			}
 		}
-		run(args[0].(context.Context), args[1].(*milvuspb.ListFileResourcesRequest), variadicArgs...)
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetFileResourceSnapshotRequest), variadicArgs...)
 	})
 	return _c
 }
@@ -4507,7 +4507,7 @@ func (_c *MockRootCoordClient_GetFileResourceSnapshot_Call) Return(_a0 *rootcoor
 	return _c
 }
 
-func (_c *MockRootCoordClient_GetFileResourceSnapshot_Call) RunAndReturn(run func(context.Context, *milvuspb.ListFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error)) *MockRootCoordClient_GetFileResourceSnapshot_Call {
+func (_c *MockRootCoordClient_GetFileResourceSnapshot_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest, ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error)) *MockRootCoordClient_GetFileResourceSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

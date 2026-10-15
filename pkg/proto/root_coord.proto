@@ -10,7 +10,7 @@ import "proxy.proto";
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb";
 
 service RootCoord {
-  rpc GetFileResourceSnapshot(milvus.ListFileResourcesRequest) returns (FileResourceSnapshot) {}
+  rpc GetFileResourceSnapshot(GetFileResourceSnapshotRequest) returns (FileResourceSnapshot) {}
   rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns (milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns (milvus.StringResponse) {}
@@ -406,6 +406,8 @@ message GetRLSMetadataResponse {
   repeated RLSPolicyInfo policies = 5;
   repeated RLSPrincipalInfo principals = 6;
 }
+
+message GetFileResourceSnapshotRequest {}
 
 message FileResourceSnapshot {
   common.Status status = 1;

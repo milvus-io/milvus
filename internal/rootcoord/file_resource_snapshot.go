@@ -3,12 +3,11 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (c *Core) GetFileResourceSnapshot(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*rootcoordpb.FileResourceSnapshot, error) {
+func (c *Core) GetFileResourceSnapshot(ctx context.Context, req *rootcoordpb.GetFileResourceSnapshotRequest) (*rootcoordpb.FileResourceSnapshot, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return &rootcoordpb.FileResourceSnapshot{Status: merr.Status(err)}, nil
 	}

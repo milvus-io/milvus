@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -14,7 +14,7 @@ func fetchFileResourceSnapshot(ctx context.Context) ([]*internalpb.FileResourceI
 	if err != nil {
 		return nil, 0, err
 	}
-	resp, err := coord.GetFileResourceSnapshot(ctx, &milvuspb.ListFileResourcesRequest{})
+	resp, err := coord.GetFileResourceSnapshot(ctx, &rootcoordpb.GetFileResourceSnapshotRequest{})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, 0, err
 	}
