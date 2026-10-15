@@ -20,6 +20,11 @@ type RootCoordCatalog interface {
 	GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error)
 	GetCollectionByName(ctx context.Context, dbID int64, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error)
 	ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error)
+	// ListCollectionsForRecovery returns, for every database ID in dbIDs, the
+	// collections ListCollections returns for it, read in one pass over the
+	// metadata store. util.NonDBID selects the collections stored without a
+	// database.
+	ListCollectionsForRecovery(ctx context.Context, dbIDs []int64, ts typeutil.Timestamp) (map[int64][]*model.Collection, error)
 	CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool
 	DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType AlterType, ts typeutil.Timestamp, fieldModify bool) error
