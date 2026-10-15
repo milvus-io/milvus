@@ -24,26 +24,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func drainBuildIndexChForTest() {
+func drainBuildIndexChForTest() []UniqueID {
 	ch := getBuildIndexChSingleton()
+	var segIDs []UniqueID
 	for {
 		select {
-		case <-ch:
+		case segID := <-ch:
+			segIDs = append(segIDs, segID)
 		default:
-			return
+			return segIDs
 		}
 	}
 }
 
-func drainBuildIndexOverflowChForTest() {
-	ch := getBuildIndexOverflowChSingleton()
-	for {
-		select {
-		case <-ch:
-		default:
-			return
-		}
+func fillBuildIndexChForTest(t *testing.T) {
+	ch := getBuildIndexChSingleton()
+	for len(ch) < cap(ch) {
+		ch <- 0
 	}
+	t.Cleanup(func() { drainBuildIndexChForTest() })
+}
+
+func setBuildIndexConsumerForTest(t *testing.T, done <-chan struct{}) {
+	prev, _ := buildIndexConsumerDone.Load().(<-chan struct{})
+	setBuildIndexConsumer(done)
+	t.Cleanup(func() { setBuildIndexConsumer(prev) })
 }
 
 func drainStatsTaskChForTest() {
@@ -92,8 +97,6 @@ func assertNoStatsTaskEvent(t *testing.T) {
 func TestNotifySegmentIndexBuild(t *testing.T) {
 	drainBuildIndexChForTest()
 	defer drainBuildIndexChForTest()
-	drainBuildIndexOverflowChForTest()
-	defer drainBuildIndexOverflowChForTest()
 
 	notifySegmentIndexBuild(10, 20, 10)
 
@@ -101,22 +104,27 @@ func TestNotifySegmentIndexBuild(t *testing.T) {
 	assertNoBuildIndexEvent(t)
 }
 
-func TestNotifySegmentIndexBuildOverflow(t *testing.T) {
-	drainBuildIndexChForTest()
-	defer drainBuildIndexChForTest()
-	drainBuildIndexOverflowChForTest()
-	defer drainBuildIndexOverflowChForTest()
-
+func TestNotifySegmentIndexBuildWaitsForConsumer(t *testing.T) {
+	setBuildIndexConsumerForTest(t, make(chan struct{}))
+	fillBuildIndexChForTest(t)
 	ch := getBuildIndexChSingleton()
-	for idx := 0; idx < cap(ch); idx++ {
-		ch <- UniqueID(idx)
-	}
+	time.AfterFunc(20*time.Millisecond, func() { <-ch })
 
 	notifySegmentIndexBuild(100)
 
-	select {
-	case <-getBuildIndexOverflowChSingleton():
-	case <-time.After(100 * time.Millisecond):
-		require.Fail(t, "missing build index overflow event")
+	segIDs := drainBuildIndexChForTest()
+	assert.Equal(t, UniqueID(100), segIDs[len(segIDs)-1], "the segment must wait for room, not be dropped")
+}
+
+func TestNotifySegmentIndexBuildDropsWithoutConsumer(t *testing.T) {
+	stopped := make(chan struct{})
+	close(stopped)
+	for _, done := range []<-chan struct{}{nil, stopped} {
+		setBuildIndexConsumerForTest(t, done)
+		fillBuildIndexChForTest(t)
+
+		notifySegmentIndexBuild(100)
+
+		assert.NotContains(t, drainBuildIndexChForTest(), UniqueID(100))
 	}
 }

@@ -821,8 +821,6 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_CompletedSyncsTask() {
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment() {
 	drainBuildIndexChForTest()
 	defer drainBuildIndexChForTest()
-	drainBuildIndexOverflowChForTest()
-	defer drainBuildIndexOverflowChForTest()
 
 	ctx := context.Background()
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)

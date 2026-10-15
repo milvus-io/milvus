@@ -126,6 +126,10 @@ func (i *indexInspector) notifyPendingIndexSegments() {
 }
 
 func (i *indexInspector) Start() {
+	// Become the buildIndexCh consumer before any producer starts.
+	setBuildIndexConsumer(i.ctx.Done())
+	i.wg.Add(1)
+	go i.forwardBuildIndexCh(i.ctx)
 	i.reloadFromMeta()
 	i.requeueUnindexedTaskSegments(i.ctx)
 	i.wg.Add(1)
@@ -160,12 +164,35 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 		case collectionID := <-i.notifyIndexChan:
 			mlog.Info(ctx, "receive create index notify", mlog.FieldCollectionID(collectionID))
 			i.enqueueUnindexedTaskSegments(ctx, WithCollection(collectionID))
-		case <-getBuildIndexOverflowChSingleton():
-			mlog.Warn(ctx, "build index notify channel overflow, reconcile all unindexed segments")
-			i.enqueueUnindexedTaskSegments(ctx)
-		case segID := <-getBuildIndexChSingleton():
-			mlog.Info(ctx, "receive new flushed segment", mlog.FieldSegmentID(segID))
-			i.enqueuePendingIndexSegments(segID)
+		}
+	}
+}
+
+// forwardBuildIndexCh moves segments from buildIndexCh into the pending set.
+// It runs apart from createIndexForSegmentLoop so that a sender waiting on a
+// full channel never waits for a create-index round to finish.
+func (i *indexInspector) forwardBuildIndexCh(ctx context.Context) {
+	defer i.wg.Done()
+	ch := getBuildIndexChSingleton()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case segID := <-ch:
+			// Take what is already buffered too, so a burst costs one log line
+			// and one wake-up of the create-index loop.
+			segIDs := []UniqueID{segID}
+		drain:
+			for len(segIDs) < cap(ch) {
+				select {
+				case segID = <-ch:
+					segIDs = append(segIDs, segID)
+				default:
+					break drain
+				}
+			}
+			mlog.Info(ctx, "receive segments to build index", mlog.Int64s("segmentIDs", segIDs))
+			i.enqueuePendingIndexSegments(segIDs...)
 		}
 	}
 }

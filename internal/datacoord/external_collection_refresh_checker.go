@@ -346,8 +346,8 @@ func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCol
 }
 
 // nudgeIndexBuilds pushes unindexed segments into the build-acceleration
-// channel, exactly as importChecker.checkIndexBuildingJob does - but only once
-// DataCoord's collection meta already carries THIS refresh's source/spec.
+// channel through notifySegmentIndexBuild - but only once DataCoord's
+// collection meta already carries THIS refresh's source/spec.
 //
 // An index build resolves the external source/spec at DISPATCH time, not at
 // enqueue time: prepareJobRequest calls handler.GetCollection and copies
@@ -380,12 +380,7 @@ func (c *externalCollectionRefreshChecker) nudgeIndexBuilds(job *datapb.External
 			mlog.FieldCollectionID(job.GetCollectionId()))
 		return
 	}
-	for _, segmentID := range unindexed {
-		select {
-		case getBuildIndexChSingleton() <- segmentID: // accelerate index building
-		default:
-		}
-	}
+	notifySegmentIndexBuild(unindexed...)
 }
 
 // externalSourceChanged reports whether a schema update makes a new external

@@ -16,15 +16,20 @@
 
 package datacoord
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 var (
-	buildIndexCh           chan UniqueID
-	buildIndexOverflowCh   chan struct{}
-	statsTaskCh            chan UniqueID
-	buildIndexChOnce       sync.Once
-	buildIndexOverflowOnce sync.Once
-	statsTaskChOnce        sync.Once
+	buildIndexCh     chan UniqueID
+	statsTaskCh      chan UniqueID
+	buildIndexChOnce sync.Once
+	statsTaskChOnce  sync.Once
+
+	// buildIndexConsumerDone holds the done channel (<-chan struct{}) of the
+	// index inspector that drains buildIndexCh.
+	buildIndexConsumerDone atomic.Value
 )
 
 func getBuildIndexChSingleton() chan UniqueID {
@@ -35,11 +40,9 @@ func getBuildIndexChSingleton() chan UniqueID {
 	return buildIndexCh
 }
 
-func getBuildIndexOverflowChSingleton() chan struct{} {
-	buildIndexOverflowOnce.Do(func() {
-		buildIndexOverflowCh = make(chan struct{}, 1)
-	})
-	return buildIndexOverflowCh
+// setBuildIndexConsumer records that buildIndexCh is drained until done is closed.
+func setBuildIndexConsumer(done <-chan struct{}) {
+	buildIndexConsumerDone.Store(done)
 }
 
 // notifyCollectionIndexBuild asks the index inspector to enqueue every segment
@@ -52,15 +55,27 @@ func notifyCollectionIndexBuild(notifyIndexChan chan<- UniqueID, collectionID Un
 	}
 }
 
+// notifySegmentIndexBuild asks the index inspector to build the segments'
+// missing indexes. While an inspector drains buildIndexCh, a full channel makes
+// it wait for room instead of dropping the segment; the inspector drains on a
+// dedicated goroutine, so the wait is short. Without a running inspector it
+// drops, since the next inspector start scans every unindexed segment anyway.
 func notifySegmentIndexBuild(segIDs ...UniqueID) {
+	ch := getBuildIndexChSingleton()
+	done, _ := buildIndexConsumerDone.Load().(<-chan struct{})
 	for _, segID := range segIDs {
 		select {
-		case getBuildIndexChSingleton() <- segID:
+		case ch <- segID:
+			continue
 		default:
-			select {
-			case getBuildIndexOverflowChSingleton() <- struct{}{}:
-			default:
-			}
+		}
+		if done == nil {
+			return
+		}
+		select {
+		case ch <- segID:
+		case <-done:
+			return
 		}
 	}
 }

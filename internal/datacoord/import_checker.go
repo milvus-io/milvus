@@ -741,7 +741,8 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	if len(unindexed) > 0 && !isL0Import {
-		notifySegmentIndexBuild(unindexed...)
+		// Segments that already have index tasks only need time to finish.
+		notifySegmentIndexBuild(c.meta.indexMeta.GetUnIndexedSegmentIDsForIndexTask(job.GetCollectionID(), unindexed).Collect()...)
 	}
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !isL0Import {
 		log.Debug(c.ctx, "waiting for import segments building index...", mlog.Int64s("unindexed", unindexed))

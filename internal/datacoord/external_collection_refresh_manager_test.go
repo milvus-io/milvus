@@ -1088,8 +1088,6 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaselin
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsDoesNotNotifyIndexBuild(t *testing.T) {
 	drainBuildIndexChForTest()
 	defer drainBuildIndexChForTest()
-	drainBuildIndexOverflowChForTest()
-	defer drainBuildIndexOverflowChForTest()
 
 	ctx := context.Background()
 	catalog := &stubCatalog{}

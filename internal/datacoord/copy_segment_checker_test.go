@@ -782,8 +782,6 @@ func (s *CopySegmentCheckerSuite) TestClose() {
 func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	drainBuildIndexChForTest()
 	defer drainBuildIndexChForTest()
-	drainBuildIndexOverflowChForTest()
-	defer drainBuildIndexOverflowChForTest()
 
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
