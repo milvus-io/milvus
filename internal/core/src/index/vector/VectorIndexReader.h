@@ -37,7 +37,10 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     // reader only exposes logical-row helpers.
     explicit VectorIndexReader(KnowhereEngine engine);
 
-    VectorIndexReader(uint32_t disk_ann_beamwidth, KnowhereEngine engine);
+    VectorIndexReader(
+        uint32_t disk_ann_beamwidth,
+        KnowhereEngine engine,
+        std::optional<uint32_t> disk_ann_vectors_beamwidth = std::nullopt);
 
     // A growing generation shares one live Add/Search engine -- including its
     // append-only IdMap -- but freezes the logical row prefix, the physical
@@ -203,6 +206,9 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     KnowhereEngine engine_;
     Backend backend_{Backend::Memory};
     uint32_t disk_ann_beamwidth_{8};
+    // AISAQ only: PQ-vectors beamwidth (DISK_ANN_QUERY_PQ_BEAMWIDTH). Unset for
+    // DiskANN, which has no separate on-disk PQ-vectors beamwidth.
+    std::optional<uint32_t> disk_ann_vectors_beamwidth_;
     int64_t physical_count_;
     // Growing only: the frozen public row count this generation may answer
     // for. Sealed readers read their row domain from the immutable IdMap.
