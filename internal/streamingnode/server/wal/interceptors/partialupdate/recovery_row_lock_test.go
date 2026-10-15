@@ -254,8 +254,8 @@ func TestPartialUpdateRecoveryPayloadDecodeRespectsWALOpenCancellation(t *testin
 	getter := &staticPrimaryKeyDescriptorGetter{
 		descriptor: shards.PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64},
 	}
-	env := newPartialUpdateChainTestEnvWithBuildersGetterAndContext(t,
-		recoveredRowLockBuilders(t, newGuardTestDelete(10)), getter, ctx)
+	env := newPartialUpdateChainTestEnvWithBuildersGetterAndContext(ctx, t,
+		recoveredRowLockBuilders(t, newGuardTestDelete(10)), getter)
 	require.True(t, decoded)
 	state := env.partial.state.getTxn(1)
 	require.NotNil(t, state)

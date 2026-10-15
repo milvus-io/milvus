@@ -297,9 +297,9 @@ func TestRowLockManagerCASWaitsForReadersAndBlocksLaterReaders(t *testing.T) {
 	pks := primaryKeys{int64Values: []int64{10, 20}}
 	first := acquireTestRowLock(t, g, "v1", pks, false)
 	second := acquireTestRowLock(t, g, "v1", pks, false)
-	casResult := startTestRowLock(g, context.Background(), "v1", primaryKeys{int64Values: []int64{10, 10}}, true)
+	casResult := startTestRowLock(context.Background(), g, "v1", primaryKeys{int64Values: []int64{10, 10}}, true)
 	waitForTestPKWriter(t, g, "v1", 10)
-	laterResult := startTestRowLock(g, context.Background(), "v1", primaryKeys{int64Values: []int64{5, 10}}, false)
+	laterResult := startTestRowLock(context.Background(), g, "v1", primaryKeys{int64Values: []int64{5, 10}}, false)
 	waitForTestPKHeld(t, g, "v1", 5)
 	first()
 	select {
@@ -345,7 +345,7 @@ func TestRowLockManagerCancellationReleasesPartiallyAcquiredPKs(t *testing.T) {
 			blocker := acquireTestRowLock(t, g, "v1", primaryKeys{int64Values: []int64{10}}, true)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			result := startTestRowLock(g, ctx, "v1", primaryKeys{int64Values: []int64{10, 20, 10}}, exclusive)
+			result := startTestRowLock(ctx, g, "v1", primaryKeys{int64Values: []int64{10, 20, 10}}, exclusive)
 			// Stripe(20) precedes stripe(10); cancellation must release the
 			// already acquired stripe even though the input starts at PK 10.
 			waitForTestPKHeld(t, g, "v1", 20)
@@ -371,13 +371,13 @@ func TestRowLockManagerDuplicateSharedPKDoesNotDeadlockQueuedCAS(t *testing.T) {
 	var resumeOnce sync.Once
 	resume := func() { resumeOnce.Do(func() { close(ctx.resume) }) }
 	t.Cleanup(resume)
-	ordinaryResult := startTestRowLock(g, ctx, "v1", primaryKeys{int64Values: []int64{20, 10, 10}}, false)
+	ordinaryResult := startTestRowLock(ctx, g, "v1", primaryKeys{int64Values: []int64{20, 10, 10}}, false)
 	select {
 	case <-ctx.locked:
 	case <-time.After(time.Second):
 		t.Fatal("ordinary write did not acquire its first PK")
 	}
-	casResult := startTestRowLock(g, context.Background(), "v1", primaryKeys{int64Values: []int64{10}}, true)
+	casResult := startTestRowLock(context.Background(), g, "v1", primaryKeys{int64Values: []int64{10}}, true)
 	waitForTestPKWriter(t, g, "v1", 10)
 	resume()
 	// A second RLock(10) would wait behind CAS while still holding the first
@@ -431,7 +431,7 @@ type testRowLockResult struct {
 	err     error
 }
 
-func startTestRowLock(g *rowLockManager, ctx context.Context, vchannel string, pks primaryKeys, exclusive bool) <-chan testRowLockResult {
+func startTestRowLock(ctx context.Context, g *rowLockManager, vchannel string, pks primaryKeys, exclusive bool) <-chan testRowLockResult {
 	result := make(chan testRowLockResult, 1)
 	go func() {
 		release, err := g.acquire(ctx, vchannel, pks, exclusive)
