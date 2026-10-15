@@ -145,9 +145,9 @@ list(REMOVE_ITEM MILVUS_TEST_FILES ${INDEX_TEST_FILES})
 # compiled and run independently.
 list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "index_runtime_acceptance_test\\.cpp$")
 
-if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
-    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "KmeansClusteringTest\\.cpp$")
-endif()
+# KmeansClusteringTest (MajorCompaction suite) was historically gated to the
+# cardinal index engine. The loon-FFI / storage-v3 infra it exercises is now
+# engine-independent, so compile it in all configurations.
 
 # need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757.
 # now we always remove this file from MILVUS_TEST_FILES thus it is never compiled.

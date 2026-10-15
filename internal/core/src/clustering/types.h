@@ -19,7 +19,8 @@
 #include <string>
 #include <vector>
 #include "common/Types.h"
-#include "index/Index.h"
+#include "common/Consts.h"
+#include "nlohmann/json.hpp"
 #include "storage/Types.h"
 
 struct AnalyzeInfo {
