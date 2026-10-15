@@ -75,7 +75,10 @@ const manifestV3TestSchema = `{"type":"record","name":"Manifest","fields":[
  {"name":"path","type":"string"},{"name":"start_index","type":"long"},{"name":"end_index","type":"long"},
  {"name":"properties","type":{"type":"map","values":"string"}}]}}}]}}},
  {"name":"stats","type":{"type":"map","values":{"type":"record","name":"Statistics","fields":[
- {"name":"paths","type":{"type":"array","items":"string"}},{"name":"metadata","type":{"type":"map","values":"string"}}]}}}
+ {"name":"paths","type":{"type":"array","items":"string"}},{"name":"metadata","type":{"type":"map","values":"string"}}]}}},
+ {"name":"lob_files","type":{"type":"array","items":{"type":"record","name":"LobFileInfo","fields":[
+ {"name":"path","type":"string"},{"name":"field_id","type":"long"},
+ {"name":"total_rows","type":"long"},{"name":"valid_rows","type":"long"},{"name":"file_size_bytes","type":"long"}]}}}
  ]}`
 
 func manifestV3Fixture() map[string]any {
@@ -90,7 +93,8 @@ func manifestV3Fixture() map[string]any {
 				map[string]any{"path": "d.parquet", "start_index": int64(2), "end_index": int64(4), "properties": map[string]string{}},
 			}},
 		},
-		"stats": map[string]any{"bloom_filter.100": map[string]any{"paths": []string{"_stats/bloom_filter.100/7"}, "metadata": map[string]string{}}},
+		"stats":     map[string]any{"bloom_filter.100": map[string]any{"paths": []string{"_stats/bloom_filter.100/7"}, "metadata": map[string]string{}}},
+		"lob_files": []any{},
 	}
 }
 
@@ -155,6 +159,30 @@ func TestManifestV3IgnoresUnrelatedMetadata(t *testing.T) {
 	objects, err := ParseParquetObjectsV3(output.Bytes(), "root/11")
 	require.NoError(t, err)
 	require.Equal(t, expected, objects)
+}
+
+func TestManifestV3RejectsNonParquetColumnGroups(t *testing.T) {
+	for _, format := range []string{"", "vortex", "future-format"} {
+		t.Run(format, func(t *testing.T) {
+			record := manifestV3Fixture()
+			// A later group must not be silently omitted from the Parquet inventory.
+			record["column_groups"].([]any)[1].(map[string]any)["format"] = format
+			objects, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, record), "root/11")
+			require.ErrorContains(t, err, "expected parquet column group")
+			require.Nil(t, objects, "format mismatch must not yield a partial inventory")
+		})
+	}
+}
+
+func TestManifestV3RejectsLOBObjects(t *testing.T) {
+	record := manifestV3Fixture()
+	record["lob_files"] = []any{map[string]any{
+		"path": "_lob/7", "field_id": int64(101), "total_rows": int64(4),
+		"valid_rows": int64(4), "file_size_bytes": int64(1024),
+	}}
+	objects, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, record), "root/11")
+	require.ErrorContains(t, err, "unexpected LOB objects in non-TEXT manifest")
+	require.Nil(t, objects, "LOB data must not be silently omitted from the inventory")
 }
 
 func TestManifestV3RejectsIncompleteAndMalformedObjects(t *testing.T) {

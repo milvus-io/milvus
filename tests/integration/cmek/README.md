@@ -40,7 +40,7 @@ The V3 scalar scenario uses one nonempty Parquet object for the format's key bas
 | File | Responsibility |
 | --- | --- |
 | `inspector/storage_v2_binlogs.go` | `LocateRawDataV2` finds every raw-data object through `FieldBinlog/Binlog`. |
-| `inspector/storage_v3_manifest.go` | `LocateManifestsV3` selects each segment's exact manifest revision; `ParseParquetObjectsV3` reads the fields needed to enumerate every referenced data object, ignoring unrelated metadata extensions. |
+| `inspector/storage_v3_manifest.go` | `LocateManifestsV3` selects each segment's exact manifest revision; `ParseParquetObjectsV3` requires Parquet groups and no LOB objects for the non-TEXT campaigns, then enumerates every referenced data object. Unrelated metadata extensions remain ignored. |
 | `inspector/parquet_encryption.go` | `InspectEncryptedParquet` checks encrypted footer metadata, algorithm, EZ and collection identity. `ReadEncryptedParquet` independently reads all row groups. These are physical-format tools shared by V2/V3 where applicable. |
 | `inspector/locator.go` | `LocateScalarIndex` resolves scalar-index paths from segment/index metadata; `LocateTextLog` resolves TextMatch objects from `TextStatsLogs`. |
 | `inspector/scalar_v2.go` | `InspectV2` checks the legacy scalar IndexData envelope's EDEK and EZ identity. |

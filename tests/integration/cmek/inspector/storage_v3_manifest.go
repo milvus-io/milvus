@@ -82,14 +82,16 @@ func LocateManifestsV3(segments []*datapb.SegmentInfo, collectionID int64) ([]Ma
 	return references, nil
 }
 
-// Only fields needed to locate the current raw-data objects are decoded.
+// Decode the object inventory and the non-TEXT Parquet campaign boundaries.
 type manifestV3 struct {
 	ColumnGroups []manifestV3ColumnGroup `json:"column_groups"`
+	LOBFiles     []json.RawMessage       `json:"lob_files"`
 }
 
 type manifestV3ColumnGroup struct {
 	Columns []string         `json:"columns"`
 	Files   []manifestV3File `json:"files"`
+	Format  string           `json:"format"`
 }
 
 type manifestV3File struct {
@@ -142,6 +144,9 @@ func ParseParquetObjectsV3(raw []byte, basePath string) ([]ParquetObjectV3, erro
 }
 
 func (manifest *manifestV3) parquetObjects(basePath string) ([]ParquetObjectV3, error) {
+	if len(manifest.LOBFiles) != 0 {
+		return nil, errors.New("unexpected LOB objects in non-TEXT manifest")
+	}
 	if len(manifest.ColumnGroups) == 0 {
 		return nil, errors.New("manifest has no column groups")
 	}
@@ -149,6 +154,9 @@ func (manifest *manifestV3) parquetObjects(basePath string) ([]ParquetObjectV3, 
 	seen := make(map[string]bool)
 	columns := make(map[string]bool)
 	for _, group := range manifest.ColumnGroups {
+		if group.Format != "parquet" {
+			return nil, errors.New("expected parquet column group")
+		}
 		if len(group.Columns) == 0 || len(group.Files) == 0 {
 			return nil, errors.New("manifest has empty column group")
 		}
