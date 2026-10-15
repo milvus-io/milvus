@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // MetaStore is the metadata store of the manifest pointers and the pchannel
@@ -346,11 +347,29 @@ func decodePointer(key, value string) (*pkindexpb.ManifestPointer, error) {
 	return &p, nil
 }
 
+// permanentStoreErrors are the remote store failures that a retry does not
+// fix: the configuration of the store is wrong, or the object is too large.
+// ErrIoFailed is not one of them, because it is also the code of an unknown
+// or transient failure.
+var permanentStoreErrors = []error{
+	merr.ErrIoPermissionDenied,
+	merr.ErrIoBucketNotFound,
+	merr.ErrIoInvalidCredentials,
+	merr.ErrIoEntityTooLarge,
+}
+
 // markUnavailable adds context to a failure of a remote store and marks it as
-// pkerr.ErrUnavailable. A mark that err already has, such as pkerr.ErrCorrupted
-// for a missing object, stays.
+// pkerr.ErrUnavailable. A permanent failure (see permanentStoreErrors) is not
+// marked and keeps its merr code. A mark that err already has, such as
+// pkerr.ErrCorrupted for a missing object, stays.
 func markUnavailable(err error, format string, args ...any) error {
-	return errors.Mark(errors.Wrapf(err, format, args...), pkerr.ErrUnavailable)
+	err = errors.Wrapf(err, format, args...)
+	for _, target := range permanentStoreErrors {
+		if errors.Is(err, target) {
+			return err
+		}
+	}
+	return errors.Mark(err, pkerr.ErrUnavailable)
 }
 
 func (m *Manager) remember(key string, v *vchannelManifest) {
