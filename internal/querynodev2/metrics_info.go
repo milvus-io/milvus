@@ -80,11 +80,6 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	nodeID := fmt.Sprint(node.GetNodeID())
 	collectionIDs := node.manager.Collection.List()
 	aggregateCollectionMetrics := metrics.IsCollectionLevelMetricsAggregateMode()
-	if aggregateCollectionMetrics {
-		node.collectionMetricsMu.Lock()
-		defer node.collectionMetricsMu.Unlock()
-		metrics.CleanupQueryNodeAggregateEntityMetrics(node.GetNodeID())
-	}
 
 	growingStatsByCollection := make(map[int64]segmentMetricStats, len(collectionIDs))
 	node.manager.Segment.RangeBy(func(seg segments.Segment) bool {
@@ -118,19 +113,6 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 				fmt.Sprint(collection),
 				segments.SegmentTypeGrowing.String(),
 			).Set(float64(stats.rows))
-		}
-	}
-	if aggregateCollectionMetrics {
-		metrics.QueryNodeEntitiesSize.WithLabelValues(
-			nodeID, metrics.AllLabel, segments.SegmentTypeGrowing.String()).Set(float64(totalGrowingSize))
-		for dbName, rows := range growingRowsByDB {
-			metrics.QueryNodeNumEntities.WithLabelValues(
-				dbName,
-				metrics.AllLabel,
-				nodeID,
-				metrics.AllLabel,
-				segments.SegmentTypeGrowing.String(),
-			).Set(float64(rows))
 		}
 	}
 
@@ -168,17 +150,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		}
 	}
 	if aggregateCollectionMetrics {
-		metrics.QueryNodeEntitiesSize.WithLabelValues(
-			nodeID, metrics.AllLabel, segments.SegmentTypeSealed.String()).Set(float64(totalSealedSize))
-		for dbName, rows := range sealedRowsByDB {
-			metrics.QueryNodeNumEntities.WithLabelValues(
-				dbName,
-				metrics.AllLabel,
-				nodeID,
-				metrics.AllLabel,
-				segments.SegmentTypeSealed.String(),
-			).Set(float64(rows))
-		}
+		publishAggregateEntityMetrics(node, nodeID, totalGrowingSize, growingRowsByDB, totalSealedSize, sealedRowsByDB)
 	}
 
 	deleteBufferNum := make(map[int64]int64)
@@ -217,6 +189,35 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 type segmentMetricStats struct {
 	size int64
 	rows int64
+}
+
+// publishAggregateEntityMetrics replaces this node's aggregate entity gauges
+// with the growing and sealed values of one refresh. Callers finish both
+// segment scans first, so scrapes keep the previous values until this short
+// cleanup-and-set phase; collectionMetricsMu keeps concurrent refreshes from
+// interleaving their cleanups and writes.
+func publishAggregateEntityMetrics(
+	node *QueryNode,
+	nodeID string,
+	growingSize int64,
+	growingRowsByDB map[string]int64,
+	sealedSize int64,
+	sealedRowsByDB map[string]int64,
+) {
+	node.collectionMetricsMu.Lock()
+	defer node.collectionMetricsMu.Unlock()
+
+	metrics.CleanupQueryNodeAggregateEntityMetrics(node.GetNodeID())
+	publish := func(segmentType segments.SegmentType, size int64, rowsByDB map[string]int64) {
+		state := segmentType.String()
+		metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, metrics.AllLabel, state).Set(float64(size))
+		for dbName, rows := range rowsByDB {
+			metrics.QueryNodeNumEntities.WithLabelValues(
+				dbName, metrics.AllLabel, nodeID, metrics.AllLabel, state).Set(float64(rows))
+		}
+	}
+	publish(segments.SegmentTypeGrowing, growingSize, growingRowsByDB)
+	publish(segments.SegmentTypeSealed, sealedSize, sealedRowsByDB)
 }
 
 // getStreamingQuotaMetrics returns the streaming quota metrics of the QueryNode.
