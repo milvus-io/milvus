@@ -215,7 +215,26 @@ func TestValidateAnalyzerNativeTransport(t *testing.T) {
 		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		for _, params := range []string{`{"tokenizer":"standard"}`, `{"tokenizer":"not_a_tokenizer"}`, `{"type":"klingon"}`, `{"tokenizer":"standard","filter":[{"type":"stemmer","language":"xx"}]}`, `{"tokenizer":"standard","filter":["unknown_filter"]}`, `{"tokenizer":"standard","unknown_option":true}`, `{"tokenizer":`, `[]`, `null`} {
+		for _, params := range []string{
+			`{"tokenizer":"standard","filter":[{}]}`,
+			`{"tokenizer":"standard","filter":[{"type":1}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"unknown_filter"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"length"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"length","max":"10"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"pinyin","keep_original":"yes"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"pinyin","keep_full_pinyin":"yes"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"pinyin","keep_joined_full_pinyin":"yes"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"pinyin","keep_separate_first_letter":"yes"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"regex"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"regex","expr":1}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"decompounder","word_list":"word"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"decompounder","word_list":[1]}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"decompounder","word_list":[]}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"stop","stop_words":"word"}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"stop","stop_words":[1]}]}`,
+			`{"tokenizer":"standard","filter":[{"type":"synonym","synonyms":[1]}]}`,
+			`{"tokenizer":{"type":"lang_ident","identifier":{"type":"whatlang","confidence":"high"}}}`,
+			`{"tokenizer":"standard"}`, `{"tokenizer":"not_a_tokenizer"}`, `{"type":"klingon"}`, `{"tokenizer":"standard","filter":[{"type":"stemmer","language":"xx"}]}`, `{"tokenizer":"standard","filter":["unknown_filter"]}`, `{"tokenizer":"standard","unknown_option":true}`, `{"tokenizer":`, `[]`, `null`} {
 			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: params, Field: "body"}}})
 			if params == `{"tokenizer":"standard"}` {
 				require.NoError(t, err)

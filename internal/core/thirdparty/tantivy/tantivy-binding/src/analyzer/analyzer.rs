@@ -246,9 +246,36 @@ mod tests {
     use tantivy::tokenizer::TokenStream;
 
     #[test]
+    fn test_jieba_custom_word_is_not_a_system_dictionary_name() {
+        assert!(create_analyzer(
+            r#"{"tokenizer":{"type":"jieba","dict":["custom_word"]}}"#,
+            "",
+        )
+        .is_ok());
+    }
+
+    #[test]
     fn test_invalid_analyzer_configuration_is_input_error() {
         for params in [
             r#"{"type":"klingon"}"#,
+            r#"{"tokenizer":"standard","filter":[{}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":1}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"unknown_filter"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"length"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"length","max":"10"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"pinyin","keep_original":"yes"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"pinyin","keep_full_pinyin":"yes"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"pinyin","keep_joined_full_pinyin":"yes"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"pinyin","keep_separate_first_letter":"yes"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"regex"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"regex","expr":1}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"decompounder","word_list":"word"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"decompounder","word_list":[1]}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"decompounder","word_list":[]}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"stop","stop_words":"word"}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"stop","stop_words":[1]}]}"#,
+            r#"{"tokenizer":"standard","filter":[{"type":"synonym","synonyms":[1]}]}"#,
+            r#"{"tokenizer":{"type":"lang_ident","identifier":{"type":"whatlang","confidence":"high"}}}"#,
             r#"{"type":1}"#,
             r#"{"tokenizer":"standard","filter":"lowercase"}"#,
             r#"{"tokenizer":"standard","filter":["unknown_filter"]}"#,
