@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -166,5 +167,68 @@ func TestAnalyzerGracefulStopWaitsForInline(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
+	})
+}
+
+func TestValidateAnalyzerPreparesResources(t *testing.T) {
+	mockey.PatchConvey("prepare before validating, deduplicate references", t, func() {
+		prepared := false
+		var prepareErr error
+		prepare := mockey.Mock(fileresource.Prepare).To(func(context.Context) error {
+			prepared = true
+			return prepareErr
+		}).Build()
+		native := mockey.Mock(analyzer.ValidateAnalyzer).To(func(string, string) ([]int64, error) {
+			require.True(t, prepared)
+			return []int64{10, 20, 10}, nil
+		}).Build()
+		handler := NewHandlerService(nil)
+		req := &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: "{}"}, {Params: "{}"}}}
+		resp, err := handler.ValidateAnalyzer(context.Background(), req)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []int64{10, 20}, resp.ResourceIds)
+		require.Equal(t, 2, native.Times())
+		prepareErr = merr.ErrServiceUnavailable
+		resp, err = handler.ValidateAnalyzer(context.Background(), req)
+		require.ErrorIs(t, err, prepareErr)
+		require.Nil(t, resp)
+		require.Equal(t, 2, native.Times())
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err = handler.ValidateAnalyzer(ctx, req)
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, 2, prepare.Times())
+	})
+}
+
+func TestValidateAnalyzerNativeTransport(t *testing.T) {
+	mockey.PatchConvey("native streaming errors, no response error payload", t, func() {
+		mockey.Mock(fileresource.Prepare).Return(nil).Build()
+		listener := bufconn.Listen(1024 * 1024)
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
+		go server.Serve(listener)
+		defer server.Stop()
+		conn, err := grpc.NewClient("passthrough:///validate-analyzer", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		require.NoError(t, err)
+		defer conn.Close()
+		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, params := range []string{`{"tokenizer":"standard"}`, `{"tokenizer":"not_a_tokenizer"}`, `{"tokenizer":`, `[]`, `null`} {
+			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: params, Field: "body"}}})
+			if params == `{"tokenizer":"standard"}` {
+				require.NoError(t, err)
+				require.Empty(t, resp.ResourceIds)
+			} else {
+				require.Error(t, err)
+				require.Nil(t, resp)
+				require.True(t, status.AsStreamingError(err).IsInvalidArgument(), "%s: %v", params, err)
+			}
+		}
+		mockey.Mock(analyzer.ValidateAnalyzer).Return(nil, merr.ErrServiceUnavailable).Build()
+		_, err = client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: "{}"}}})
+		require.Error(t, err)
+		require.False(t, status.AsStreamingError(err).IsUnrecoverable(), "system failures must remain retriable")
 	})
 }

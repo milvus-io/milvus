@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -46,4 +47,27 @@ func (hc *handlerClientImpl) RunAnalyzer(ctx context.Context, req *streamingpb.S
 		return nil, err
 	}
 	return response.(*streamingpb.StreamingNodeRunAnalyzerResponse), nil
+}
+
+func (hc *handlerClientImpl) ValidateAnalyzer(ctx context.Context, req *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("handler client is closing")
+	}
+	defer hc.lifetime.Done()
+	logger := mlog.With(mlog.String("handler", "validate-analyzer"))
+	response, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, "", func(ctx context.Context, _ *types.PChannelInfoAssigned) (any, error) {
+		client, err := hc.service.GetService(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return client.ValidateAnalyzer(ctx, req)
+	})
+	if err != nil {
+		// Preserve the existing DDL parameter-error contract at the streaming boundary.
+		if status.AsStreamingError(err).IsInvalidArgument() {
+			return nil, merr.WrapErrParameterInvalidErr(err, "analyzer validation failed")
+		}
+		return nil, err
+	}
+	return response.(*streamingpb.StreamingNodeValidateAnalyzerResponse), nil
 }

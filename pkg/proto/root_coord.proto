@@ -1,223 +1,222 @@
 syntax = "proto3";
 package milvus.proto.rootcoord;
 
-option go_package="github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb";
-
 import "common.proto";
-import "milvus.proto";
-import "internal.proto";
-import "proxy.proto";
 import "etcd_meta.proto";
+import "internal.proto";
+import "milvus.proto";
+import "proxy.proto";
+
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb";
 
 service RootCoord {
+  rpc GetFileResourceSnapshot(milvus.ListFileResourcesRequest) returns (FileResourceSnapshot) {}
   rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
-  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
-  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-    /**
-     * @brief This method is used to create collection
-     *
-     * @param CreateCollectionRequest, use to provide collection information to be created.
-     *
-     * @return Status
-     */
-    rpc CreateCollection(milvus.CreateCollectionRequest) returns (common.Status){}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns (milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns (milvus.StringResponse) {}
+  /**
+   * @brief This method is used to create collection
+   *
+   * @param CreateCollectionRequest, use to provide collection information to be created.
+   *
+   * @return Status
+   */
+  rpc CreateCollection(milvus.CreateCollectionRequest) returns (common.Status) {}
 
-    /**
-     * @brief This method is used to delete collection.
-     *
-     * @param DropCollectionRequest, collection name is going to be deleted.
-     *
-     * @return Status
-     */
-    rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
+  /**
+   * @brief This method is used to delete collection.
+   *
+   * @param DropCollectionRequest, collection name is going to be deleted.
+   *
+   * @return Status
+   */
+  rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
 
-    /**
-     * @brief This method is used to clear a collection.
-     *
-     * @param TruncateCollectionRequest, collection name is going to be cleared.
-     *
-     * @return Status
-     */
-    rpc TruncateCollection(milvus.TruncateCollectionRequest) returns (milvus.TruncateCollectionResponse) {}
+  /**
+   * @brief This method is used to clear a collection.
+   *
+   * @param TruncateCollectionRequest, collection name is going to be cleared.
+   *
+   * @return Status
+   */
+  rpc TruncateCollection(milvus.TruncateCollectionRequest) returns (milvus.TruncateCollectionResponse) {}
 
-    /**
-     * @brief This method is used to add collection field.
-     *
-     * @param AddCollectionFieldRequest, field schema is going to be added.
-     *
-     * @return Status
-     */
-    rpc AddCollectionField(milvus.AddCollectionFieldRequest) returns (common.Status) {}
+  /**
+   * @brief This method is used to add collection field.
+   *
+   * @param AddCollectionFieldRequest, field schema is going to be added.
+   *
+   * @return Status
+   */
+  rpc AddCollectionField(milvus.AddCollectionFieldRequest) returns (common.Status) {}
 
-    /**
-     * @brief This method is used to add collection struct field.
-     *
-     * @param AddCollectionStructFieldRequest, struct field schema is going to be added.
-     *
-     * @return Status
-     */
-    rpc AddCollectionStructField(milvus.AddCollectionStructFieldRequest) returns (common.Status) {}
+  /**
+   * @brief This method is used to add collection struct field.
+   *
+   * @param AddCollectionStructFieldRequest, struct field schema is going to be added.
+   *
+   * @return Status
+   */
+  rpc AddCollectionStructField(milvus.AddCollectionStructFieldRequest) returns (common.Status) {}
 
+  /**
+   * @brief This method is used to add/drop collection field/function.
+   *
+   * @param AlterCollectionSchemaRequest, field schema is going to be added.
+   *
+   * @return AlterCollectionSchemaResponse
+   */
+  rpc AlterCollectionSchema(milvus.AlterCollectionSchemaRequest) returns (milvus.AlterCollectionSchemaResponse) {}
 
-     /**
-     * @brief This method is used to add/drop collection field/function.
-     *
-     * @param AlterCollectionSchemaRequest, field schema is going to be added.
-     *
-     * @return AlterCollectionSchemaResponse
-     */
-    rpc AlterCollectionSchema(milvus.AlterCollectionSchemaRequest) returns (milvus.AlterCollectionSchemaResponse){}
+  /**
+   * @brief This method is used to test collection existence.
+   *
+   * @param HasCollectionRequest, collection name is going to be tested.
+   *
+   * @return BoolResponse
+   */
+  rpc HasCollection(milvus.HasCollectionRequest) returns (milvus.BoolResponse) {}
 
+  /**
+   * @brief This method is used to get collection schema.
+   *
+   * @param DescribeCollectionRequest, target collection name.
+   *
+   * @return CollectionSchema
+   */
+  rpc DescribeCollection(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
+  rpc DescribeCollectionInternal(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
 
-    /**
-     * @brief This method is used to test collection existence.
-     *
-     * @param HasCollectionRequest, collection name is going to be tested.
-     *
-     * @return BoolResponse
-     */
-    rpc HasCollection(milvus.HasCollectionRequest) returns (milvus.BoolResponse) {}
+  rpc CreateAlias(milvus.CreateAliasRequest) returns (common.Status) {}
+  rpc DropAlias(milvus.DropAliasRequest) returns (common.Status) {}
+  rpc AlterAlias(milvus.AlterAliasRequest) returns (common.Status) {}
+  rpc DescribeAlias(milvus.DescribeAliasRequest) returns (milvus.DescribeAliasResponse) {}
+  rpc ListAliases(milvus.ListAliasesRequest) returns (milvus.ListAliasesResponse) {}
 
-    /**
-     * @brief This method is used to get collection schema.
-     *
-     * @param DescribeCollectionRequest, target collection name.
-     *
-     * @return CollectionSchema
-     */
-    rpc DescribeCollection(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
-    rpc DescribeCollectionInternal(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
+  /**
+   * @brief This method is used to list all collections.
+   *
+   * @return StringListResponse, collection name list
+   */
+  rpc ShowCollections(milvus.ShowCollectionsRequest) returns (milvus.ShowCollectionsResponse) {}
 
-    rpc CreateAlias(milvus.CreateAliasRequest) returns (common.Status) {}
-    rpc DropAlias(milvus.DropAliasRequest) returns (common.Status) {}
-    rpc AlterAlias(milvus.AlterAliasRequest) returns (common.Status) {}
-    rpc DescribeAlias(milvus.DescribeAliasRequest) returns (milvus.DescribeAliasResponse) {}
-    rpc ListAliases(milvus.ListAliasesRequest) returns (milvus.ListAliasesResponse) {}
+  rpc ShowCollectionIDs(ShowCollectionIDsRequest) returns (ShowCollectionIDsResponse) {}
 
-    /**
-     * @brief This method is used to list all collections.
-     *
-     * @return StringListResponse, collection name list
-     */
-    rpc ShowCollections(milvus.ShowCollectionsRequest) returns (milvus.ShowCollectionsResponse) {}
+  rpc AlterCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
 
-    rpc ShowCollectionIDs(ShowCollectionIDsRequest) returns (ShowCollectionIDsResponse) {}
+  rpc AlterCollectionField(milvus.AlterCollectionFieldRequest) returns (common.Status) {}
 
-    rpc AlterCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
-    
-    rpc AlterCollectionField(milvus.AlterCollectionFieldRequest) returns (common.Status) {}
+  rpc AddCollectionFunction(milvus.AddCollectionFunctionRequest) returns (common.Status) {}
 
-    rpc AddCollectionFunction(milvus.AddCollectionFunctionRequest) returns (common.Status) {}
+  rpc AlterCollectionFunction(milvus.AlterCollectionFunctionRequest) returns (common.Status) {}
 
-    rpc AlterCollectionFunction(milvus.AlterCollectionFunctionRequest) returns (common.Status) {}    
-    
-    rpc DropCollectionFunction(milvus.DropCollectionFunctionRequest) returns (common.Status) {}    
+  rpc DropCollectionFunction(milvus.DropCollectionFunctionRequest) returns (common.Status) {}
   /**
    * @brief This method is used to create partition
    *
    * @return Status
    */
-    rpc CreatePartition(milvus.CreatePartitionRequest) returns (common.Status) {}
-    rpc CreatePartitionV2(milvus.CreatePartitionRequest) returns (CreatePartitionResponse) {}
+  rpc CreatePartition(milvus.CreatePartitionRequest) returns (common.Status) {}
+  rpc CreatePartitionV2(milvus.CreatePartitionRequest) returns (CreatePartitionResponse) {}
 
-    /**
-     * @brief This method is used to drop partition
-     *
-     * @return Status
-     */
-    rpc DropPartition(milvus.DropPartitionRequest) returns (common.Status) {}
+  /**
+   * @brief This method is used to drop partition
+   *
+   * @return Status
+   */
+  rpc DropPartition(milvus.DropPartitionRequest) returns (common.Status) {}
 
-    /**
-     * @brief This method is used to test partition existence.
-     *
-     * @return BoolResponse
-     */
-    rpc HasPartition(milvus.HasPartitionRequest) returns (milvus.BoolResponse) {}
+  /**
+   * @brief This method is used to test partition existence.
+   *
+   * @return BoolResponse
+   */
+  rpc HasPartition(milvus.HasPartitionRequest) returns (milvus.BoolResponse) {}
 
-    /**
-     * @brief This method is used to show partition information
-     *
-     * @param ShowPartitionRequest, target collection name.
-     *
-     * @return StringListResponse
-     */
-    rpc ShowPartitions(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
-    rpc ShowPartitionsInternal(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
-    rpc ShowSegments(milvus.ShowSegmentsRequest) returns (milvus.ShowSegmentsResponse) {}
-    rpc GetPChannelInfo(GetPChannelInfoRequest) returns (GetPChannelInfoResponse) {}
+  /**
+   * @brief This method is used to show partition information
+   *
+   * @param ShowPartitionRequest, target collection name.
+   *
+   * @return StringListResponse
+   */
+  rpc ShowPartitions(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
+  rpc ShowPartitionsInternal(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
+  rpc ShowSegments(milvus.ShowSegmentsRequest) returns (milvus.ShowSegmentsResponse) {}
+  rpc GetPChannelInfo(GetPChannelInfoRequest) returns (GetPChannelInfoResponse) {}
 
-    rpc AllocTimestamp(AllocTimestampRequest) returns (AllocTimestampResponse) {}
-    rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
-    rpc UpdateChannelTimeTick(internal.ChannelTimeTickMsg) returns (common.Status) {}
-    rpc InvalidateCollectionMetaCache(proxy.InvalidateCollMetaCacheRequest) returns (common.Status) {}
+  rpc AllocTimestamp(AllocTimestampRequest) returns (AllocTimestampResponse) {}
+  rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
+  rpc UpdateChannelTimeTick(internal.ChannelTimeTickMsg) returns (common.Status) {}
+  rpc InvalidateCollectionMetaCache(proxy.InvalidateCollMetaCacheRequest) returns (common.Status) {}
 
-    rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
-    // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
-    rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+  rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse) {}
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 
-    // https://wiki.lfaidata.foundation/display/MIL/MEP+27+--+Support+Basic+Authentication
-    rpc CreateCredential(internal.CredentialInfo) returns (common.Status) {}
-    rpc UpdateCredential(internal.CredentialInfo) returns (common.Status) {}
-    rpc DeleteCredential(milvus.DeleteCredentialRequest) returns (common.Status) {}
-    rpc ListCredUsers(milvus.ListCredUsersRequest) returns (milvus.ListCredUsersResponse) {}
-    // userd by proxy, not exposed to sdk
-    rpc GetCredential(GetCredentialRequest) returns (GetCredentialResponse) {}
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+27+--+Support+Basic+Authentication
+  rpc CreateCredential(internal.CredentialInfo) returns (common.Status) {}
+  rpc UpdateCredential(internal.CredentialInfo) returns (common.Status) {}
+  rpc DeleteCredential(milvus.DeleteCredentialRequest) returns (common.Status) {}
+  rpc ListCredUsers(milvus.ListCredUsersRequest) returns (milvus.ListCredUsersResponse) {}
+  // userd by proxy, not exposed to sdk
+  rpc GetCredential(GetCredentialRequest) returns (GetCredentialResponse) {}
 
-    // https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
-    rpc CreateRole(milvus.CreateRoleRequest) returns (common.Status) {}
-    rpc AlterRole(milvus.AlterRoleRequest) returns (common.Status) {}
-    rpc DropRole(milvus.DropRoleRequest) returns (common.Status) {}
-    rpc OperateUserRole(milvus.OperateUserRoleRequest) returns (common.Status) {}
-    rpc SelectRole(milvus.SelectRoleRequest) returns (milvus.SelectRoleResponse) {}
-    rpc SelectUser(milvus.SelectUserRequest) returns (milvus.SelectUserResponse) {}
-    rpc OperatePrivilege(milvus.OperatePrivilegeRequest) returns (common.Status) {}
-    rpc SelectGrant(milvus.SelectGrantRequest) returns (milvus.SelectGrantResponse) {}
-    rpc ListPolicy(internal.ListPolicyRequest) returns (internal.ListPolicyResponse) {}
-    rpc BackupRBAC(milvus.BackupRBACMetaRequest) returns (milvus.BackupRBACMetaResponse){}
-    rpc RestoreRBAC(milvus.RestoreRBACMetaRequest) returns (common.Status){}
-    rpc CreatePrivilegeGroup(milvus.CreatePrivilegeGroupRequest) returns (common.Status) {}
-    rpc DropPrivilegeGroup(milvus.DropPrivilegeGroupRequest) returns (common.Status) {}
-    rpc ListPrivilegeGroups(milvus.ListPrivilegeGroupsRequest) returns (milvus.ListPrivilegeGroupsResponse) {}
-    rpc OperatePrivilegeGroup(milvus.OperatePrivilegeGroupRequest) returns (common.Status) {}
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
+  rpc CreateRole(milvus.CreateRoleRequest) returns (common.Status) {}
+  rpc AlterRole(milvus.AlterRoleRequest) returns (common.Status) {}
+  rpc DropRole(milvus.DropRoleRequest) returns (common.Status) {}
+  rpc OperateUserRole(milvus.OperateUserRoleRequest) returns (common.Status) {}
+  rpc SelectRole(milvus.SelectRoleRequest) returns (milvus.SelectRoleResponse) {}
+  rpc SelectUser(milvus.SelectUserRequest) returns (milvus.SelectUserResponse) {}
+  rpc OperatePrivilege(milvus.OperatePrivilegeRequest) returns (common.Status) {}
+  rpc SelectGrant(milvus.SelectGrantRequest) returns (milvus.SelectGrantResponse) {}
+  rpc ListPolicy(internal.ListPolicyRequest) returns (internal.ListPolicyResponse) {}
+  rpc BackupRBAC(milvus.BackupRBACMetaRequest) returns (milvus.BackupRBACMetaResponse) {}
+  rpc RestoreRBAC(milvus.RestoreRBACMetaRequest) returns (common.Status) {}
+  rpc CreatePrivilegeGroup(milvus.CreatePrivilegeGroupRequest) returns (common.Status) {}
+  rpc DropPrivilegeGroup(milvus.DropPrivilegeGroupRequest) returns (common.Status) {}
+  rpc ListPrivilegeGroups(milvus.ListPrivilegeGroupsRequest) returns (milvus.ListPrivilegeGroupsResponse) {}
+  rpc OperatePrivilegeGroup(milvus.OperatePrivilegeGroupRequest) returns (common.Status) {}
 
-    // Row-Level Security (RLS) management APIs.
-    rpc CreateRowPolicy(milvus.CreateRowPolicyRequest) returns (common.Status) {}
-    rpc DropRowPolicy(milvus.DropRowPolicyRequest) returns (common.Status) {}
-    rpc ListRowPolicies(milvus.ListRowPoliciesRequest) returns (milvus.ListRowPoliciesResponse) {}
-    rpc UpdateRowPolicy(milvus.UpdateRowPolicyRequest) returns (common.Status) {}
-    rpc SetRLSPrincipalTags(milvus.SetRLSPrincipalTagsRequest) returns (common.Status) {}
-    rpc GetRLSPrincipalTags(milvus.GetRLSPrincipalTagsRequest) returns (milvus.GetRLSPrincipalTagsResponse) {}
-    rpc ListRLSPrincipals(milvus.ListRLSPrincipalsRequest) returns (milvus.ListRLSPrincipalsResponse) {}
-    rpc DeleteRLSPrincipalTags(milvus.DeleteRLSPrincipalTagsRequest) returns (common.Status) {}
+  // Row-Level Security (RLS) management APIs.
+  rpc CreateRowPolicy(milvus.CreateRowPolicyRequest) returns (common.Status) {}
+  rpc DropRowPolicy(milvus.DropRowPolicyRequest) returns (common.Status) {}
+  rpc ListRowPolicies(milvus.ListRowPoliciesRequest) returns (milvus.ListRowPoliciesResponse) {}
+  rpc UpdateRowPolicy(milvus.UpdateRowPolicyRequest) returns (common.Status) {}
+  rpc SetRLSPrincipalTags(milvus.SetRLSPrincipalTagsRequest) returns (common.Status) {}
+  rpc GetRLSPrincipalTags(milvus.GetRLSPrincipalTagsRequest) returns (milvus.GetRLSPrincipalTagsResponse) {}
+  rpc ListRLSPrincipals(milvus.ListRLSPrincipalsRequest) returns (milvus.ListRLSPrincipalsResponse) {}
+  rpc DeleteRLSPrincipalTags(milvus.DeleteRLSPrincipalTagsRequest) returns (common.Status) {}
 
-    // Internal collection-scoped snapshot API used by Proxy RLS caches.
-    rpc GetRLSMetadata(GetRLSMetadataRequest) returns (GetRLSMetadataResponse) {}
+  // Internal collection-scoped snapshot API used by Proxy RLS caches.
+  rpc GetRLSMetadata(GetRLSMetadataRequest) returns (GetRLSMetadataResponse) {}
 
-    rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
+  rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
 
-    rpc RenameCollection(milvus.RenameCollectionRequest) returns (common.Status) {}
+  rpc RenameCollection(milvus.RenameCollectionRequest) returns (common.Status) {}
 
-    rpc CreateDatabase(milvus.CreateDatabaseRequest) returns (common.Status) {}
-    rpc DropDatabase(milvus.DropDatabaseRequest) returns (common.Status) {}
-    rpc ListDatabases(milvus.ListDatabasesRequest) returns (milvus.ListDatabasesResponse) {}
-    rpc DescribeDatabase(DescribeDatabaseRequest) returns(DescribeDatabaseResponse){}
-    rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
+  rpc CreateDatabase(milvus.CreateDatabaseRequest) returns (common.Status) {}
+  rpc DropDatabase(milvus.DropDatabaseRequest) returns (common.Status) {}
+  rpc ListDatabases(milvus.ListDatabasesRequest) returns (milvus.ListDatabasesResponse) {}
+  rpc DescribeDatabase(DescribeDatabaseRequest) returns (DescribeDatabaseResponse) {}
+  rpc AlterDatabase(AlterDatabaseRequest) returns (common.Status) {}
 
-    rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
-    rpc GetFeatureUsage(internal.GetFeatureUsageRequest) returns (internal.FeatureUsageReport) {}
-    rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
-    rpc BackupEzk(internal.BackupEzkRequest) returns (internal.BackupEzkResponse) {}
-    // File Resource Management
-    rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
-    rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
-    rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
+  rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
+  rpc GetFeatureUsage(internal.GetFeatureUsageRequest) returns (internal.FeatureUsageReport) {}
+  rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
+  rpc BackupEzk(internal.BackupEzkRequest) returns (internal.BackupEzkResponse) {}
+  // File Resource Management
+  rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
+  rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
+  rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
 
-    // Client Telemetry RPCs (forwarded to rootcoord implementation)
-    rpc ClientHeartbeat(milvus.ClientHeartbeatRequest) returns (milvus.ClientHeartbeatResponse) {}
-    rpc GetClientTelemetry(milvus.GetClientTelemetryRequest) returns (milvus.GetClientTelemetryResponse) {}
-    rpc PushClientCommand(milvus.PushClientCommandRequest) returns (milvus.PushClientCommandResponse) {}
-    rpc DeleteClientCommand(milvus.DeleteClientCommandRequest) returns (milvus.DeleteClientCommandResponse) {}
-    rpc ListClientCommands(ListClientCommandsRequest) returns (ListClientCommandsResponse) {}
+  // Client Telemetry RPCs (forwarded to rootcoord implementation)
+  rpc ClientHeartbeat(milvus.ClientHeartbeatRequest) returns (milvus.ClientHeartbeatResponse) {}
+  rpc GetClientTelemetry(milvus.GetClientTelemetryRequest) returns (milvus.GetClientTelemetryResponse) {}
+  rpc PushClientCommand(milvus.PushClientCommandRequest) returns (milvus.PushClientCommandResponse) {}
+  rpc DeleteClientCommand(milvus.DeleteClientCommandRequest) returns (milvus.DeleteClientCommandResponse) {}
+  rpc ListClientCommands(ListClientCommandsRequest) returns (ListClientCommandsResponse) {}
 }
 
 // ListClientCommandsRequest asks for the commands the coordinator is currently holding for
@@ -241,9 +240,9 @@ message AllocTimestampRequest {
 }
 
 message AllocTimestampResponse {
-    common.Status status = 1;
-    uint64 timestamp = 2;
-    uint32 count = 3;
+  common.Status status = 1;
+  uint64 timestamp = 2;
+  uint32 count = 3;
 }
 
 message AllocIDRequest {
@@ -267,13 +266,13 @@ message DescribeSegmentsRequest {
 
 message SegmentBaseInfo {
   int64 collectionID = 1; // in which collection.
-  int64 partitionID = 2;  // in which partition.
+  int64 partitionID = 2; // in which partition.
   int64 segmentID = 3;
 }
 
 message SegmentInfos {
-  SegmentBaseInfo base_info = 1;                    // base information.
-  repeated etcd.SegmentIndexInfo index_infos = 2;   // multiple index infos.
+  SegmentBaseInfo base_info = 1; // base information.
+  repeated etcd.SegmentIndexInfo index_infos = 2; // multiple index infos.
   map<int64, etcd.IndexInfo> extra_index_infos = 3; // index_id -> IndexInfo{index_name, index_id, index_params}
 }
 
@@ -370,8 +369,8 @@ message ShowCollectionIDsRequest {
 }
 
 message DBCollections {
- string db_name = 1;
- repeated int64 collectionIDs = 2;
+  string db_name = 1;
+  repeated int64 collectionIDs = 2;
 }
 
 message ShowCollectionIDsResponse {
@@ -407,4 +406,10 @@ message GetRLSMetadataResponse {
   int64 collection_id = 4;
   repeated RLSPolicyInfo policies = 5;
   repeated RLSPrincipalInfo principals = 6;
+}
+
+message FileResourceSnapshot {
+  common.Status status = 1;
+  uint64 version = 2;
+  repeated internal.FileResourceInfo resources = 3;
 }

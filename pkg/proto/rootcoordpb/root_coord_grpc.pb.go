@@ -23,6 +23,7 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
+	RootCoord_GetFileResourceSnapshot_FullMethodName       = "/milvus.proto.rootcoord.RootCoord/GetFileResourceSnapshot"
 	RootCoord_GetComponentStates_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/GetComponentStates"
 	RootCoord_GetTimeTickChannel_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/GetTimeTickChannel"
 	RootCoord_GetStatisticsChannel_FullMethodName          = "/milvus.proto.rootcoord.RootCoord/GetStatisticsChannel"
@@ -115,6 +116,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RootCoordClient interface {
+	GetFileResourceSnapshot(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*FileResourceSnapshot, error)
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 	GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
@@ -287,6 +289,15 @@ type rootCoordClient struct {
 
 func NewRootCoordClient(cc grpc.ClientConnInterface) RootCoordClient {
 	return &rootCoordClient{cc}
+}
+
+func (c *rootCoordClient) GetFileResourceSnapshot(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*FileResourceSnapshot, error) {
+	out := new(FileResourceSnapshot)
+	err := c.cc.Invoke(ctx, RootCoord_GetFileResourceSnapshot_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *rootCoordClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
@@ -1067,6 +1078,7 @@ func (c *rootCoordClient) ListClientCommands(ctx context.Context, in *ListClient
 // All implementations should embed UnimplementedRootCoordServer
 // for forward compatibility
 type RootCoordServer interface {
+	GetFileResourceSnapshot(context.Context, *milvuspb.ListFileResourcesRequest) (*FileResourceSnapshot, error)
 	GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)
 	GetTimeTickChannel(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
@@ -1237,6 +1249,9 @@ type RootCoordServer interface {
 type UnimplementedRootCoordServer struct {
 }
 
+func (UnimplementedRootCoordServer) GetFileResourceSnapshot(context.Context, *milvuspb.ListFileResourcesRequest) (*FileResourceSnapshot, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetFileResourceSnapshot not implemented")
+}
 func (UnimplementedRootCoordServer) GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetComponentStates not implemented")
 }
@@ -1505,6 +1520,24 @@ type UnsafeRootCoordServer interface {
 
 func RegisterRootCoordServer(s grpc.ServiceRegistrar, srv RootCoordServer) {
 	s.RegisterService(&RootCoord_ServiceDesc, srv)
+}
+
+func _RootCoord_GetFileResourceSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ListFileResourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).GetFileResourceSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_GetFileResourceSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).GetFileResourceSnapshot(ctx, req.(*milvuspb.ListFileResourcesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _RootCoord_GetComponentStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -3062,6 +3095,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.rootcoord.RootCoord",
 	HandlerType: (*RootCoordServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetFileResourceSnapshot",
+			Handler:    _RootCoord_GetFileResourceSnapshot_Handler,
+		},
 		{
 			MethodName: "GetComponentStates",
 			Handler:    _RootCoord_GetComponentStates_Handler,

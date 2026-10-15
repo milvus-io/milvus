@@ -75,6 +75,37 @@ fallback, so upgrade SNs before enabling these callers. Token ordering,
 details/hash and analyzer-name normalization retain existing behavior. Field
 requests additionally work before load and after release.
 
+## Configuration validation and file resources
+
+RootCoord validates analyzer configuration through
+`streaming.WAL().AnalyzerClient().ValidateAnalyzer`, implemented by HandlerClient
+and `StreamingNodeHandlerService.ValidateAnalyzer`. The ready-connection picker
+selects any StreamingNode; validation requires no collection, WAL assignment,
+QueryView, replica, or loaded QueryNode. The legacy Coordinator `ValidateAnalyzer`
+RPC remains as a forwarding entry for existing callers. There is no
+`StreamingNodeManagerService.ValidateRuntime` RPC or ManagerClient validation API.
+
+Before native validation, the selected StreamingNode calls `fileresource.Prepare`
+to pull Coordinator's current resource snapshot and synchronize its local files
+and native resource table. Validation returns the deduplicated resource IDs.
+RootCoord reserves these references under its existing metadata lock before DDL
+publication; a concurrent resource removal must fail reservation rather than
+publish a schema with missing resources. RootCoord does not wait for all QNs to
+synchronize their inventories. Existing StreamingCoord assignment admission and
+legacy file-resource push distribution remain unchanged.
+
+The validation response contains only resource IDs. Errors use streaming gRPC
+interceptors: invalid analyzer configuration is an unrecoverable invalid argument;
+resource preparation and native system failures remain retriable. HandlerClient
+uses its existing readiness/retry loop, returns Unimplemented immediately, and
+maps invalid arguments to the public DDL parameter-error contract. No independent
+retry loop, discovery mechanism, or shutdown lifecycle is introduced.
+
+The pull path adds the internal Coordinator `GetFileResourceSnapshot` RPC. New
+StreamingNodes require a Coordinator that supports it, and the new DDL validation
+path requires StreamingNodes that support `ValidateAnalyzer`. Existing RPC
+signatures remain available; missing new RPCs surface as Unimplemented.
+
 ## Key Packages
 
 - `internal/distributed/streaming/{streaming.go,wal.go}` — public streaming entry.

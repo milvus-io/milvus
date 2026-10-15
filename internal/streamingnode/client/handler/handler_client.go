@@ -81,6 +81,9 @@ type HandlerClient interface {
 	// GetCollectionSchema resolves a schema on the current primary WAL owner.
 	GetCollectionSchema(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error)
 
+	// ValidateAnalyzer prepares file resources and validates configs without a collection.
+	ValidateAnalyzer(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)
+
 	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
 	// If the wal is located at remote, it will return 0, error.
 	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)

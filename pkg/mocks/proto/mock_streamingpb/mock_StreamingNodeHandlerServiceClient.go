@@ -465,6 +465,80 @@ func (_c *MockStreamingNodeHandlerServiceClient_RunAnalyzer_Call) RunAndReturn(r
 	return _c
 }
 
+// ValidateAnalyzer provides a mock function with given fields: ctx, in, opts
+func (_m *MockStreamingNodeHandlerServiceClient) ValidateAnalyzer(ctx context.Context, in *streamingpb.StreamingNodeValidateAnalyzerRequest, opts ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateAnalyzer")
+	}
+
+	var r0 *streamingpb.StreamingNodeValidateAnalyzerResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest, ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest, ...grpc.CallOption) *streamingpb.StreamingNodeValidateAnalyzerResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.StreamingNodeValidateAnalyzerResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateAnalyzer'
+type MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call struct {
+	*mock.Call
+}
+
+// ValidateAnalyzer is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *streamingpb.StreamingNodeValidateAnalyzerRequest
+//   - opts ...grpc.CallOption
+func (_e *MockStreamingNodeHandlerServiceClient_Expecter) ValidateAnalyzer(ctx interface{}, in interface{}, opts ...interface{}) *MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call {
+	return &MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call{Call: _e.mock.On("ValidateAnalyzer",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call) Run(run func(ctx context.Context, in *streamingpb.StreamingNodeValidateAnalyzerRequest, opts ...grpc.CallOption)) *MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*streamingpb.StreamingNodeValidateAnalyzerRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call) Return(_a0 *streamingpb.StreamingNodeValidateAnalyzerResponse, _a1 error) *MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest, ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)) *MockStreamingNodeHandlerServiceClient_ValidateAnalyzer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockStreamingNodeHandlerServiceClient creates a new instance of MockStreamingNodeHandlerServiceClient. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockStreamingNodeHandlerServiceClient(t interface {

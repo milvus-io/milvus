@@ -49,6 +49,11 @@ func TestMain(m *testing.M) {
 }
 
 func Test_NewClient(t *testing.T) {
+	resourceSnapshot := mockey.Mock((*mock.GrpcRootCoordClient).GetFileResourceSnapshot).To(
+		func(c *mock.GrpcRootCoordClient, _ context.Context, _ *milvuspb.ListFileResourcesRequest, _ ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error) {
+			return &rootcoordpb.FileResourceSnapshot{}, c.Err
+		}).Build()
+	defer resourceSnapshot.UnPatch()
 	ctx := context.Background()
 
 	client, err := NewClient(ctx)
@@ -391,6 +396,9 @@ func Test_NewClient(t *testing.T) {
 
 		r42, err := client.ValidateAnalyzer(ctx, nil)
 		retCheck(retNotNil, r42, err)
+
+		snapshot, err := client.GetFileResourceSnapshot(ctx, &milvuspb.ListFileResourcesRequest{})
+		retCheck(retNotNil, snapshot, err)
 	}
 
 	client.(*Client).grpcClient = &mock.GRPCClientBase[MixCoordClient]{
