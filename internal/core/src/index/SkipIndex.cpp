@@ -11,48 +11,41 @@
 
 #include "SkipIndex.h"
 
-#include <any>
-
-#include "cachinglayer/CacheSlot.h"
-#include "cachinglayer/Utils.h"
-
 namespace milvus {
 
 static const index::NoneFieldChunkMetrics defaultFieldChunkMetrics{};
 
-const cachinglayer::PinWrapper<const index::FieldChunkMetrics*>
-SkipIndex::GetFieldChunkMetrics(milvus::OpContext* op_ctx,
-                                milvus::FieldId field_id,
-                                int chunk_id) const {
-    // skip index structure must be setup before using, thus we do not lock here.
-    auto field_metrics = fieldChunkMetrics_.find(field_id);
-    if (field_metrics != fieldChunkMetrics_.end()) {
-        auto& field_chunk_metrics = field_metrics->second;
-        auto ca = cachinglayer::SemiInlineGet(
-            field_chunk_metrics->PinCells(op_ctx, {chunk_id}));
-        auto metrics = ca->get_cell_of(chunk_id);
-        return cachinglayer::PinWrapper<const index::FieldChunkMetrics*>(
-            std::move(ca), metrics);
+const index::FieldChunkMetrics*
+FieldSkipMetricsView::MetricsAt(int64_t chunk_id) const {
+    if (list_ != nullptr) {
+        if (chunk_id >= 0 && static_cast<size_t>(chunk_id) < list_->size()) {
+            if (const auto* metrics = (*list_)[chunk_id].get();
+                metrics != nullptr) {
+                return metrics;
+            }
+        }
+        return &defaultFieldChunkMetrics;
     }
-    return cachinglayer::PinWrapper<const index::FieldChunkMetrics*>(
-        &defaultFieldChunkMetrics);
+    if (per_chunk_fallback_ && owner_ != nullptr) {
+        if (const auto* metrics = owner_->GetSkipMetrics(chunk_id);
+            metrics != nullptr) {
+            return metrics;
+        }
+    }
+    return &defaultFieldChunkMetrics;
 }
 
-std::vector<std::pair<milvus::cachinglayer::cid_t,
-                      std::unique_ptr<index::FieldChunkMetrics>>>
-FieldChunkMetricsTranslator::get_cells(
-    milvus::OpContext* ctx,
-    const std::vector<milvus::cachinglayer::cid_t>& cids) {
-    std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<index::FieldChunkMetrics>>>
-        cells;
-    cells.reserve(cids.size());
-    for (auto chunk_id : cids) {
-        auto pw = column_->GetChunk(ctx, chunk_id);
-        auto chunk_metrics = builder_.Build(data_type_, pw.get());
-        cells.emplace_back(chunk_id, std::move(chunk_metrics));
+FieldSkipMetricsView
+SkipIndex::ResolveField(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    // Copy the provider while holding the binding map's read lock.
+    // Sealed segment expressions resolve directly from their field columns
+    // through GetFieldSkipMetrics and do not use this map.
+    auto source = fieldMetricSources_.find(field_id);
+    if (source == fieldMetricSources_.end() || source->second == nullptr) {
+        return {};
     }
-    return cells;
+    return FieldSkipMetricsView::FromProvider(source->second);
 }
 
 }  // namespace milvus

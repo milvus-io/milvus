@@ -55,8 +55,9 @@ const (
 
 const (
 	// Numeric combine parameter keys
-	NumCombineParamMode    = "mode"
-	NumCombineParamWeights = "weights"
+	NumCombineParamMode       = "mode"
+	NumCombineParamWeights    = "weights"
+	NumCombineParamNullPolicy = "null_policy"
 
 	// Numeric combine mode values
 	NumCombineModeMultiply = "multiply"
@@ -78,6 +79,11 @@ const (
 	GroupByFieldName   = "$group_by"
 	// ElementIndicesFieldName stores one Int32 element index per result row.
 	ElementIndicesFieldName = "$element_indices"
+)
+
+// Function Chain framework parameter keys.
+const (
+	InputDataTypesParam = "$input_data_types"
 )
 
 // =============================================================================

@@ -17,6 +17,7 @@
 package voyageai
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"sort"
@@ -45,14 +46,14 @@ func (c *VoyageAIClient) headers() map[string]string {
 	}
 }
 
-func (c *VoyageAIClient) Embedding(url string, modelName string, texts []string, dim int, textType string, outputType string, truncation bool, timeoutMs int64) (any, error) {
+func (c *VoyageAIClient) Embedding(ctx context.Context, url string, modelName string, texts []string, dim int, textType string, outputType string, truncation bool, timeoutMs int64) (any, error) {
 	embClient := newVoyageAIEmbedding(c.apiKey, url)
-	return embClient.embedding(modelName, texts, dim, textType, outputType, truncation, c.headers(), timeoutMs)
+	return embClient.embedding(ctx, modelName, texts, dim, textType, outputType, truncation, c.headers(), timeoutMs)
 }
 
-func (c *VoyageAIClient) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
+func (c *VoyageAIClient) Rerank(ctx context.Context, url string, modelName string, query string, texts []string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	rerankClient := newVoyageAIRerank(c.apiKey, url)
-	return rerankClient.rerank(modelName, query, texts, c.headers(), params, timeoutMs)
+	return rerankClient.rerank(ctx, modelName, query, texts, c.headers(), params, timeoutMs)
 }
 
 type EmbeddingRequest struct {
@@ -64,7 +65,9 @@ type EmbeddingRequest struct {
 
 	InputType string `json:"input_type,omitempty"`
 
-	Truncation bool `json:"truncation,omitempty"`
+	// Always sent: the service defaults an absent truncation to true, so
+	// omitting false would silently turn an explicit false into true.
+	Truncation bool `json:"truncation"`
 
 	OutputDimension int64 `json:"output_dimension,omitempty"`
 
@@ -122,7 +125,7 @@ func (c *voyageAIEmbedding) Check() error {
 	return nil
 }
 
-func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int, textType string, outputType string, truncation bool, headers map[string]string, timeoutMs int64) (any, error) {
+func (c *voyageAIEmbedding) embedding(ctx context.Context, modelName string, texts []string, dim int, textType string, outputType string, truncation bool, headers map[string]string, timeoutMs int64) (any, error) {
 	if outputType != "float" && outputType != "int8" {
 		return nil, merr.WrapErrParameterInvalidMsg("Voyageai: unsupported output type: [%s], only support float and int8", outputType) //nolint:staticcheck // starts with proper noun
 	}
@@ -138,7 +141,7 @@ func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int,
 	}
 
 	if outputType == "float" {
-		res, err := models.PostRequest[EmbeddingResponse[float32]](r, c.url, headers, timeoutMs)
+		res, err := models.PostRequest[EmbeddingResponse[float32]](ctx, r, c.url, headers, timeoutMs)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +150,7 @@ func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int,
 		})
 		return res, nil
 	} else {
-		res, err := models.PostRequest[EmbeddingResponse[int8]](r, c.url, headers, timeoutMs)
+		res, err := models.PostRequest[EmbeddingResponse[int8]](ctx, r, c.url, headers, timeoutMs)
 		if err != nil {
 			return nil, err
 		}
@@ -202,7 +205,7 @@ func newVoyageAIRerank(apiKey string, url string) *voyageAIRerank {
 	}
 }
 
-func (c *voyageAIRerank) rerank(modelName string, query string, texts []string, headers map[string]string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
+func (c *voyageAIRerank) rerank(ctx context.Context, modelName string, query string, texts []string, headers map[string]string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	r := map[string]any{
 		"model":     modelName,
 		"query":     query,
@@ -211,7 +214,7 @@ func (c *voyageAIRerank) rerank(modelName string, query string, texts []string, 
 	if params != nil {
 		maps.Copy(r, params)
 	}
-	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutMs)
+	res, err := models.PostRequest[RerankResponse](ctx, r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

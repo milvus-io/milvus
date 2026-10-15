@@ -140,14 +140,19 @@ GenIdsDataset(const int64_t count, const int64_t* ids) {
 inline DatasetPtr
 GenResultDataset(const int64_t nq,
                  const int64_t topk,
-                 const int64_t* ids,
-                 const float* distance) {
+                 std::unique_ptr<int64_t[]> ids,
+                 std::unique_ptr<float[]> distance) {
     auto ret_ds = std::make_shared<Dataset>();
+    // Dataset setters can allocate. Keep the arrays owned by the guards until
+    // every setter succeeds, including when only one pointer was installed.
+    ret_ds->SetIsOwner(false);
     ret_ds->SetRows(nq);
     ret_ds->SetDim(topk);
-    ret_ds->SetIds(ids);
-    ret_ds->SetDistance(distance);
+    ret_ds->SetIds(ids.get());
+    ret_ds->SetDistance(distance.get());
     ret_ds->SetIsOwner(true);
+    ids.release();
+    distance.release();
     return ret_ds;
 }
 
@@ -268,6 +273,8 @@ KnowhereStatusToErrorCode(knowhere::Status status) {
             return ErrorCode::MemAllocateFailed;
         case knowhere::Status::disk_file_error:
             return ErrorCode::FileReadFailed;
+        case knowhere::Status::cancelled:
+            return ErrorCode::FollyCancel;
         // Server-side inner errors -> generic KnowhereError. timeout is
         // Cardinal-only (BuildAsync cancel-or-build-timeout, not a search
         // timeout) and conflates cancel with timeout, so it stays here rather
@@ -372,17 +379,18 @@ inline knowhere::sparse::SparseRow<SparseValueType>
 CopyAndWrapSparseRow(const void* data,
                      size_t size,
                      const bool validate = false) {
+    // Length is a memory-safety requirement even when value validation is off.
+    // Check before allocating a whole number of cells and copying all bytes.
+    if (size % knowhere::sparse::SparseRow<SparseValueType>::element_size() !=
+        0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Invalid size for sparse row data");
+    }
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
     milvus::fastmem::FastMemcpy(row.data(), data, size);
     if (validate) {
-        if (!(size % knowhere::sparse::SparseRow<
-                         SparseValueType>::element_size() ==
-              0)) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "Invalid size for sparse row data");
-        }
         for (size_t i = 0; i < num_elements; ++i) {
             auto element = row[i];
             if (!(std::isfinite(element.val))) {
@@ -495,18 +503,23 @@ lowerString(const std::string& str) {
     return ret;
 }
 
-// Adds unsigned integers and clamps overflow to the type's maximum value.
-template <std::unsigned_integral T>
-[[nodiscard]] constexpr T
-SaturatingAdd(T lhs, T rhs) noexcept {
+// Adds unsigned integers and clamps overflow to the result type's maximum
+// value. Operands may differ in type; the result uses their common type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingAdd(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
     constexpr auto max = std::numeric_limits<T>::max();
     return rhs > max - lhs ? max : lhs + rhs;
 }
 
-// Multiplies unsigned integers and clamps overflow to the type's maximum value.
-template <std::unsigned_integral T>
-[[nodiscard]] constexpr T
-SaturatingMultiply(T lhs, T rhs) noexcept {
+// Multiplies unsigned integers and clamps overflow to the result type's
+// maximum value. Operands may differ in type; the result uses their common
+// type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingMultiply(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
     constexpr auto max = std::numeric_limits<T>::max();
     return lhs != 0 && rhs > max / lhs ? max : lhs * rhs;
 }

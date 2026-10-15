@@ -15,19 +15,19 @@
 // limitations under the License.
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
-#include <vector>
+#include <string_view>
 
-#include <boost/core/span.hpp>
 #include "boost/variant/variant.hpp"
-#include "cachinglayer/CacheSlot.h"
+#include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
-#include "index/Index.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::segcore {
@@ -45,7 +45,25 @@ using data_access_type = std::optional<boost::variant<bool,
 
 using ChunkDataAccessor = std::function<const data_access_type(int)>;
 using MultipleChunkDataAccessor = std::function<const data_access_type()>;
-using PinnedIndexView = boost::span<const PinWrapper<const index::IndexBase*>>;
+
+// One sealed Column consumer owns this handle across complete execution
+// windows of one field and request snapshot. Two consumers of the same field
+// must use separate handles. A default handle does not allocate Scan state.
+class ColumnScanState {
+ public:
+    ColumnScanState() = default;
+    ColumnScanState(const ColumnScanState&) = delete;
+    ColumnScanState&
+    operator=(const ColumnScanState&) = delete;
+    ColumnScanState(ColumnScanState&&) noexcept = default;
+    ColumnScanState&
+    operator=(ColumnScanState&&) noexcept = default;
+
+ private:
+    friend class SegmentChunkReader;
+    struct State;
+    std::shared_ptr<State> state_;
+};
 
 // Helper to extract a value of type T from data_access_type.
 // For std::string, handles both std::string and std::string_view in the variant.
@@ -108,18 +126,29 @@ class SegmentChunkReader {
           op_ctx_(op_ctx) {
     }
 
+    // A sequential sealed accessor materializes at most scan_batch_size rows
+    // per window. It may serve multiple windows; consume borrowed values before
+    // advancing it into the next window or Cell.
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(DataType data_type,
                                  FieldId field_id,
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos,
-                                 PinnedIndexView pinned_index) const;
+                                 int64_t scan_batch_size = 1024,
+                                 ColumnScanState* scan_state = nullptr) const;
+
+    // Sealed access over one expression's finite offset input. Vortex uses one
+    // Take result; Raw fixed-width data keeps the existing Chunk path. Offsets
+    // must outlive the accessor.
+    ChunkDataAccessor
+    GetDataAccessorByOffsets(DataType data_type,
+                             FieldId field_id,
+                             OffsetView offsets) const;
 
     ChunkDataAccessor
     GetChunkDataAccessor(DataType data_type,
                          FieldId field_id,
-                         int chunk_id,
-                         PinnedIndexView pinned_index) const;
+                         int chunk_id) const;
 
     void
     MoveCursorForMultipleChunk(int64_t& current_chunk_id,
@@ -151,6 +180,44 @@ class SegmentChunkReader {
         snapshot_ = snapshot;
     }
 
+    // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
+    // read the column from the frozen published state (same generation as the
+    // chunk boundaries above); otherwise fall back to the segment.
+    template <typename T>
+    PinWrapper<Span<T>>
+    ChunkData(FieldId field_id, int64_t chunk_id) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting chunk data",
+                       field_id.get());
+            return column->Span(op_ctx_, chunk_id)
+                .template transform<Span<T>>([](SpanBase&& span_base) {
+                    return static_cast<Span<T>>(span_base);
+                });
+        }
+        return segment_->chunk_data<T>(op_ctx_, field_id, chunk_id);
+    }
+
+    // Pinned sealed string chunk view. Pinned path reads the column from the
+    // frozen snapshot so the string views come from the same generation as
+    // every other read above.
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
+    ChunkStringView(FieldId field_id,
+                    int64_t chunk_id,
+                    std::optional<std::pair<int64_t, int64_t>> offset_len =
+                        std::nullopt) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting string chunk view",
+                       field_id.get());
+            return column->StringViews(op_ctx_, chunk_id, offset_len);
+        }
+        return segment_->chunk_view<std::string_view>(
+            op_ctx_, field_id, chunk_id, offset_len);
+    }
+
     int64_t
     ChunkSize(FieldId field_id, int64_t chunk_id) const {
         return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id)
@@ -179,6 +246,66 @@ class SegmentChunkReader {
     RowCount() const {
         return snapshot_ ? snapshot_->get_row_count()
                          : segment_->get_row_count();
+    }
+
+    // Apply field nullability to an already-initialized valid_result bitmap.
+    // Pinned path reads the column from the frozen snapshot so the validity
+    // data comes from the same generation as the chunk boundaries above.
+    void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const {
+        if (size == 0) {
+            return;
+        }
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} column must exist when validity is requested",
+                       field_id.get());
+            column->ApplyValidDataInChunk(
+                op_ctx, chunk_id, offset, size, valid_result);
+        } else {
+            segment_->ApplyFieldValidData(
+                op_ctx, field_id, chunk_id, offset, size, valid_result);
+        }
+    }
+
+    // Apply field nullability for segment-level row offsets. Pinned path reads
+    // the column from the frozen snapshot, same generation as all reads above.
+    void
+    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
+                                 const int64_t* offsets,
+                                 int64_t count,
+                                 TargetBitmapView valid_result) const {
+        if (count == 0) {
+            return;
+        }
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} column must exist when validity is requested",
+                       field_id.get());
+            if (!column->IsNullable()) {
+                return;
+            }
+            column->BulkIsValid(
+                op_ctx,
+                [&valid_result](bool is_valid, size_t i) {
+                    if (!is_valid) {
+                        valid_result[i] = false;
+                    }
+                },
+                offsets,
+                count);
+        } else {
+            segment_->ApplyFieldValidDataByOffsets(
+                op_ctx, field_id, offsets, count, valid_result);
+        }
     }
 
     void
@@ -216,18 +343,49 @@ class SegmentChunkReader {
     mutable const segcore::SegmentReadSnapshot* snapshot_{nullptr};
 
  private:
+    // Sealed reads prefer the bound request snapshot's published column;
+    // growing / non-pinned paths fall back to the live segment.
+    std::shared_ptr<ChunkedColumnInterface>
+    GetColumn(FieldId field_id) const {
+        return snapshot_ ? snapshot_->GetDataScanResources(field_id).first
+                         : segment_->GetChunkedColumn(field_id);
+    }
+
     template <typename T>
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(FieldId field_id,
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos,
-                                 PinnedIndexView pinned_index) const;
+                                 int64_t scan_batch_size,
+                                 ColumnScanState* scan_state) const;
+
+    template <typename T>
+    MultipleChunkDataAccessor
+    GetMultipleChunkScanDataAccessor(
+        FieldId field_id,
+        int64_t& current_chunk_id,
+        int64_t& current_chunk_pos,
+        int64_t scan_batch_size,
+        ColumnScanState* scan_state,
+        std::shared_ptr<ChunkedColumnInterface> column) const;
+
+    MultipleChunkDataAccessor
+    GetMultipleChunkStringDataAccessor(FieldId field_id,
+                                       int64_t& current_chunk_id,
+                                       int64_t& current_chunk_pos,
+                                       int64_t scan_batch_size,
+                                       ColumnScanState* scan_state) const;
 
     template <typename T>
     ChunkDataAccessor
-    GetChunkDataAccessor(FieldId field_id,
-                         int chunk_id,
-                         PinnedIndexView pinned_index) const;
+    GetChunkDataAccessor(FieldId field_id, int chunk_id) const;
+
+    template <typename T>
+    ChunkDataAccessor
+    GetVortexDataAccessorByOffsets(FieldId field_id, OffsetView offsets) const;
+
+    ChunkDataAccessor
+    GetStringDataAccessorByOffsets(FieldId field_id, OffsetView offsets) const;
 
     const int64_t size_per_chunk_;
     milvus::OpContext* op_ctx_;

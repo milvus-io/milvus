@@ -141,15 +141,7 @@ GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     ApplyChecksumConfigOverrides(config);
-    if (storage_config.useIAM) {
-        // Using S3 client instead of google client because of compatible protocol
-        client_ = std::make_shared<Aws::S3::S3Client>(
-            config,
-            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-            storage_config.useVirtualHost);
-    } else {
-        BuildAccessKeyClient(storage_config, config);
-    }
+    BuildGoogleCloudClient(storage_config, config);
 
     PreCheck(storage_config);
 

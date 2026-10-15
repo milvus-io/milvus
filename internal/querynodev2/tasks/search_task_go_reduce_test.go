@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	mock_segcore "github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -45,10 +46,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -110,55 +113,88 @@ const (
 )
 
 func TestExportSearchResultsAsArrowReleasesCompletedDataFramesOnMultiSegmentError(t *testing.T) {
-	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
-	defer pool.AssertSize(t, 0)
-
-	successResult := new(segments.SearchResult)
-	failResult := new(segments.SearchResult)
-	results := []*segments.SearchResult{successResult, failResult}
-	injectedErr := errors.New("injected export failure")
-
-	makeRecord := func() arrow.Record {
-		idBuilder := array.NewInt64Builder(pool)
-		idBuilder.AppendValues([]int64{1, 2}, nil)
-		ids := idBuilder.NewArray()
-		idBuilder.Release()
-
-		scoreBuilder := array.NewFloat32Builder(pool)
-		scoreBuilder.AppendValues([]float32{0.9, 0.8}, nil)
-		scores := scoreBuilder.NewArray()
-		scoreBuilder.Release()
-
-		offsetBuilder := array.NewInt64Builder(pool)
-		offsetBuilder.AppendValues([]int64{10, 20}, nil)
-		offsets := offsetBuilder.NewArray()
-		offsetBuilder.Release()
-
-		schema := arrow.NewSchema([]arrow.Field{
-			{Name: "$id", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "$score", Type: arrow.PrimitiveTypes.Float32},
-			{Name: "$seg_offset", Type: arrow.PrimitiveTypes.Int64},
-		}, nil)
-		record := array.NewRecord(schema, []arrow.Array{ids, scores, offsets}, int64(ids.Len()))
-		ids.Release()
-		scores.Release()
-		offsets.Release()
-		return record
+	testCases := []struct {
+		name      string
+		inputPlan *chain.DataFrameInputPlan
+	}{
+		{name: "system columns only"},
+		{
+			name: "function chain projection exporter",
+			inputPlan: &chain.DataFrameInputPlan{Inputs: []chain.ResolvedChainInput{
+				{LogicalName: `metadata["rank"]`, SourceFieldID: 101, DataType: schemapb.DataType_JSON, DataTypeHint: schemapb.DataType_Int64, NestedPath: []string{"rank"}},
+			}},
+		},
 	}
 
-	mocker := mockey.Mock(segcore.ExportSearchResultAsArrowRecordBatch).To(
-		func(ctx context.Context, result *segcore.SearchResult, plan *segcore.SearchPlan, extraFieldIDs []int64) (arrow.Record, []int64, error) {
-			if result == failResult {
-				return nil, nil, injectedErr
-			}
-			return makeRecord(), []int64{2}, nil
-		},
-	).Build()
-	defer mocker.UnPatch()
+	for _, test := range testCases {
+		t.Run(test.name, func(t *testing.T) {
+			pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer pool.AssertSize(t, 0)
 
-	task := &SearchTask{ctx: context.Background()}
-	_, err := task.exportSearchResultsAsArrow(results, nil, nil)
-	require.ErrorIs(t, err, injectedErr)
+			successResult := new(segments.SearchResult)
+			failResult := new(segments.SearchResult)
+			results := []*segments.SearchResult{successResult, failResult}
+			injectedErr := errors.New("injected export failure")
+
+			makeRecord := func() arrow.Record {
+				idBuilder := array.NewInt64Builder(pool)
+				idBuilder.AppendValues([]int64{1, 2}, nil)
+				ids := idBuilder.NewArray()
+				idBuilder.Release()
+
+				scoreBuilder := array.NewFloat32Builder(pool)
+				scoreBuilder.AppendValues([]float32{0.9, 0.8}, nil)
+				scores := scoreBuilder.NewArray()
+				scoreBuilder.Release()
+
+				offsetBuilder := array.NewInt64Builder(pool)
+				offsetBuilder.AppendValues([]int64{10, 20}, nil)
+				offsets := offsetBuilder.NewArray()
+				offsetBuilder.Release()
+
+				schema := arrow.NewSchema([]arrow.Field{
+					{Name: "$id", Type: arrow.PrimitiveTypes.Int64},
+					{Name: "$score", Type: arrow.PrimitiveTypes.Float32},
+					{Name: "$seg_offset", Type: arrow.PrimitiveTypes.Int64},
+				}, nil)
+				record := array.NewRecord(schema, []arrow.Array{ids, scores, offsets}, int64(ids.Len()))
+				ids.Release()
+				scores.Release()
+				offsets.Release()
+				return record
+			}
+
+			blob, err := segcore.MarshalFunctionChainInputPlan(test.inputPlan)
+			require.NoError(t, err)
+			marshalCalls := 0
+			encoder := mockey.Mock(segcore.MarshalFunctionChainInputPlan).To(
+				func(plan *chain.DataFrameInputPlan) ([]byte, error) {
+					marshalCalls++
+					assert.Same(t, test.inputPlan, plan)
+					return blob, nil
+				},
+			).Build()
+			defer encoder.UnPatch()
+			defer func() { assert.Equal(t, 1, marshalCalls) }()
+			mocker := mockey.Mock(segcore.ExportSearchResultAsArrowRecordBatchWithInputPlan).To(
+				func(ctx context.Context, result *segcore.SearchResult, plan *segcore.SearchPlan, inputPlanBlob []byte) (arrow.Record, []int64, error) {
+					assert.Equal(t, blob, inputPlanBlob)
+					if len(blob) > 0 {
+						assert.Same(t, &blob[0], &inputPlanBlob[0])
+					}
+					if result == failResult {
+						return nil, nil, injectedErr
+					}
+					return makeRecord(), []int64{2}, nil
+				},
+			).Build()
+			defer mocker.UnPatch()
+
+			task := &SearchTask{ctx: context.Background()}
+			_, err = task.exportSearchResultsAsArrow(results, nil, test.inputPlan)
+			require.ErrorIs(t, err, injectedErr)
+		})
+	}
 }
 
 // setupOpts varies the search request shape across test cases.
@@ -347,7 +383,7 @@ func runGoReducePipeline(t *testing.T, ts *testSegments) (*mergeResult, []*chain
 
 	segDFs := make([]*chain.DataFrame, 0, len(ts.searchResults))
 	for _, res := range ts.searchResults {
-		record, chunkSizes, err := segcore.ExportSearchResultAsArrowRecordBatch(context.Background(), res, plan, nil)
+		record, chunkSizes, err := segcore.ExportSearchResultAsArrowRecordBatchWithInputPlan(context.Background(), res, plan, nil)
 		require.NoError(t, err)
 		defer record.Release()
 
@@ -568,12 +604,15 @@ func TestL1RerankLateMaterializationKeepsOutputFieldsAligned(t *testing.T) {
 		ctx context.Context,
 		results []*segcore.SearchResult,
 		plan *segcore.SearchPlan,
-		fieldIDs []int64,
+		inputPlanBlob []byte,
 		segIndices []int32,
 		segOffsets []int64,
 	) (arrow.Record, error) {
 		require.NoError(t, ctx.Err())
-		require.Equal(t, []int64{int32FieldID}, fieldIDs)
+		var inputPlan cgopb.FunctionChainInputPlan
+		require.NoError(t, proto.Unmarshal(inputPlanBlob, &inputPlan))
+		require.Len(t, inputPlan.Inputs, 1)
+		require.Equal(t, int32FieldID, inputPlan.Inputs[0].GetSourceFieldId())
 		require.Len(t, segIndices, len(originalSources))
 		require.Len(t, segOffsets, len(originalSources))
 		builder := array.NewInt32Builder(defaultAllocator)
@@ -598,8 +637,8 @@ func TestL1RerankLateMaterializationKeepsOutputFieldsAligned(t *testing.T) {
 
 	task := &SearchTask{ctx: t.Context()}
 	reranked, err := task.applyL1RerankResult(reduced, ts.searchResults, ts.searchReq.Plan(), &preparedL1FunctionChain{
-		chain:         repr,
-		inputFieldIDs: []int64{int32FieldID},
+		chain:     repr,
+		inputPlan: inputPlanForScalarFieldForTest(int32FieldID, "int32Field", schemapb.DataType_Int32),
 	})
 	require.NoError(t, err)
 	defer reranked.DF.Release()
@@ -1185,7 +1224,7 @@ func TestFillOutputFieldsOrdered_NoCMemoryLeak(t *testing.T) {
 	assertNoCHeapLeak(t, retained, func() { call() })
 }
 
-func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
+func TestExportSearchResultAsArrowRecordBatchWithInputPlan_NoCMemoryLeak(t *testing.T) {
 	extraFieldIDs := []int64{103} // Int32
 
 	// Same sizing reason as TestFillOutputFieldsOrdered_NoCMemoryLeak: the
@@ -1203,6 +1242,19 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	var field *schemapb.FieldSchema
+	for _, candidate := range ts.collection.Schema().GetFields() {
+		if candidate.GetFieldID() == extraFieldIDs[0] {
+			field = candidate
+			break
+		}
+	}
+	require.NotNil(t, field)
+	inputPlanBlob, err := segcore.MarshalFunctionChainInputPlan(&chain.DataFrameInputPlan{Inputs: []chain.ResolvedChainInput{{
+		LogicalName: field.GetName(), SourceFieldID: field.GetFieldID(), DataType: field.GetDataType(),
+	}}})
+	require.NoError(t, err)
+
 	before := segcore.GetJemallocStats()
 	if !before.Success {
 		t.Skip("jemalloc stats not available on this platform")
@@ -1210,7 +1262,7 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 
 	exportOnce := func() {
 		for _, res := range ts.searchResults {
-			record, _, err := segcore.ExportSearchResultAsArrowRecordBatch(context.Background(), res, ts.searchReq.Plan(), extraFieldIDs)
+			record, _, err := segcore.ExportSearchResultAsArrowRecordBatchWithInputPlan(context.Background(), res, ts.searchReq.Plan(), inputPlanBlob)
 			require.NoError(t, err)
 			record.Release()
 		}
@@ -1218,7 +1270,7 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 
 	var retained int64
 	for _, res := range ts.searchResults {
-		record, _, err := segcore.ExportSearchResultAsArrowRecordBatch(context.Background(), res, ts.searchReq.Plan(), extraFieldIDs)
+		record, _, err := segcore.ExportSearchResultAsArrowRecordBatchWithInputPlan(context.Background(), res, ts.searchReq.Plan(), inputPlanBlob)
 		require.NoError(t, err)
 		retained += arrowRecordCBytes(record)
 		record.Release()
@@ -1248,9 +1300,13 @@ func TestExecuteFilterOnly(t *testing.T) {
 	require.NoError(t, err)
 	defer searchReqFilterOnly.Delete()
 
+	prepare := mockey.Mock(prepareQueryNodeFunctionChains).Return((*preparedQueryNodeFunctionChains)(nil), merr.ErrServiceInternal).Build()
+	defer prepare.UnPatch()
+
 	task := NewSearchTask(ctx, ts.collection, ts.manager, queryReq, 1)
 	require.NoError(t, task.PreExecute())
 	require.NoError(t, task.Execute())
+	assert.Zero(t, prepare.Times())
 
 	result := task.SearchResult()
 	require.NotNil(t, result)
@@ -1271,53 +1327,133 @@ func TestExecuteFilterOnly(t *testing.T) {
 	assert.NotNil(t, result.CostAggregation)
 }
 
-func TestExecuteEmptySearchReturnsNQEmptyResult(t *testing.T) {
-	const (
-		nq   int64 = 1
-		topK int64 = 10
-	)
-
+// Validate the request before either ANN implementation can observe local data.
+func TestExecuteValidatesFunctionChainsBeforeANN(t *testing.T) {
 	paramtable.Init()
-	schema := mock_segcore.GenTestCollectionSchema("test-empty-search", schemapb.DataType_Int64, true)
-	indexMeta := mock_segcore.GenTestIndexMeta(testCollectionID, schema)
+	schema := mock_segcore.GenTestCollectionSchema("test-chain-validation", schemapb.DataType_Int64, true)
+	var vectorField string
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_FloatVector {
+			vectorField = field.GetName()
+		}
+	}
+	require.NotEmpty(t, vectorField)
 	manager := segments.NewManager()
-	manager.Collection.PutOrRef(testCollectionID, schema, indexMeta, &querypb.LoadMetaInfo{
-		LoadType:     querypb.LoadType_LoadCollection,
-		CollectionID: testCollectionID,
+	manager.Collection.PutOrRef(testCollectionID, schema, mock_segcore.GenTestIndexMeta(testCollectionID, schema), &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection, CollectionID: testCollectionID,
 		PartitionIDs: []int64{testPartitionID},
 	})
 	collection := manager.Collection.Get(testCollectionID)
 	defer manager.Collection.Unref(collection.ID(), 1)
 
-	ctx := context.Background()
-	queryReq, err := mock_segcore.GenQueryRequest(
-		collection.GetCCollection(), nil, nq, topK, testCollectionID)
-	require.NoError(t, err)
-
-	task := NewSearchTask(ctx, collection, manager, queryReq, 1)
-	require.NoError(t, task.PreExecute())
-	require.NoError(t, task.Execute())
-
-	result := task.SearchResult()
-	require.NotNil(t, result)
-	assert.Equal(t, nq, result.NumQueries)
-	assert.Equal(t, topK, result.TopK)
-
-	var resultData *schemapb.SearchResultData
-	if result.ResultData != nil {
-		resultData = result.ResultData
-	} else {
-		require.NotEmpty(t, result.SlicedBlob)
-		resultData = &schemapb.SearchResultData{}
-		require.NoError(t, proto.Unmarshal(result.SlicedBlob, resultData))
+	cases := []struct {
+		name    string
+		op      *schemapb.FunctionChainOp
+		message string
+	}{
+		{"unknown function", mapOpForTest(chaintypes.ScoreFieldName, "unknown_function", columnArgForTest(chaintypes.ScoreFieldName)), "unknown function"},
+		{"invalid parameter", mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName,
+			map[string]*schemapb.FunctionParamValue{"mode": stringParamForTest("invalid")}, columnArgForTest(chaintypes.ScoreFieldName)), "invalid mode"},
+		{"missing field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("missing_field")), "field missing_field not exist"},
+		{"unsupported field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(vectorField)), "unsupported field type"},
+		{"invalid arguments", mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.XGBoostFuncName,
+			map[string]*schemapb.FunctionParamValue{"model_resource": stringParamForTest("model.json")}), "expected at least one feature column"},
+		{"missing inputs", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName), "requires inputs"},
+		{"missing outputs", &schemapb.FunctionChainOp{Op: chaintypes.OpTypeMap, Expr: &schemapb.FunctionChainExpr{
+			Name: chainexpr.NumCombineFuncName, Args: []*schemapb.FunctionChainExprArg{columnArgForTest(chaintypes.ScoreFieldName)},
+		}}, "requires outputs"},
+		{"output count", &schemapb.FunctionChainOp{Op: chaintypes.OpTypeMap, Outputs: []string{chaintypes.ScoreFieldName, "extra"}, Expr: &schemapb.FunctionChainExpr{
+			Name: chainexpr.NumCombineFuncName, Args: []*schemapb.FunctionChainExprArg{columnArgForTest(chaintypes.ScoreFieldName)},
+		}}, "does not match function output count"},
 	}
+	for _, scope := range []querypb.DataScope{querypb.DataScope_Historical, querypb.DataScope_Streaming} {
+		for _, stage := range []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, schemapb.FunctionChainStage_FunctionChainStageL1Rerank} {
+			for _, tc := range cases {
+				t.Run(scope.String()+"/"+stage.String()+"/"+tc.name, func(t *testing.T) {
+					queryReq, err := mock_segcore.GenQueryRequest(collection.GetCCollection(), nil, 1, 10, testCollectionID)
+					require.NoError(t, err)
+					queryReq.Scope = scope
+					plan := &planpb.PlanNode{}
+					require.NoError(t, proto.Unmarshal(queryReq.GetReq().GetSerializedExprPlan(), plan))
+					plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Stage: stage, Ops: []*schemapb.FunctionChainOp{tc.op}}}
+					queryReq.Req.SerializedExprPlan, err = proto.Marshal(plan)
+					require.NoError(t, err)
 
-	assert.Equal(t, nq, resultData.NumQueries)
-	assert.Equal(t, topK, resultData.TopK)
-	assert.Equal(t, []int64{0}, resultData.Topks)
-	assert.Empty(t, resultData.Scores)
-	assert.Zero(t, typeutil.GetSizeOfIDs(resultData.GetIds()))
-	assert.Empty(t, resultData.FieldsData)
+					historical := mockey.Mock(segments.SearchHistorical).Return([]*segments.SearchResult(nil), []segments.Segment(nil), nil).Build()
+					defer historical.UnPatch()
+					streaming := mockey.Mock(segments.SearchStreaming).Return([]*segments.SearchResult(nil), []segments.Segment(nil), nil).Build()
+					defer streaming.UnPatch()
+					task := NewSearchTask(context.Background(), collection, manager, queryReq, 1)
+					require.NoError(t, task.PreExecute())
+					err = task.Execute()
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					assert.Contains(t, err.Error(), tc.message)
+					assert.Zero(t, historical.Times())
+					assert.Zero(t, streaming.Times())
+					assert.Nil(t, task.SearchResult())
+				})
+			}
+		}
+	}
+}
+
+func TestExecuteEmptySearchReturnsNQEmptyResultAfterFunctionChainValidation(t *testing.T) {
+	const (
+		nq   int64 = 2
+		topK int64 = 10
+	)
+	paramtable.Init()
+	schema := mock_segcore.GenTestCollectionSchema("test-empty-search", schemapb.DataType_Int64, true)
+	manager := segments.NewManager()
+	manager.Collection.PutOrRef(testCollectionID, schema, mock_segcore.GenTestIndexMeta(testCollectionID, schema), &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection, CollectionID: testCollectionID,
+		PartitionIDs: []int64{testPartitionID},
+	})
+	collection := manager.Collection.Get(testCollectionID)
+	defer manager.Collection.Unref(collection.ID(), 1)
+
+	for _, scope := range []querypb.DataScope{querypb.DataScope_Historical, querypb.DataScope_Streaming} {
+		for _, withChain := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/chain=%t", scope.String(), withChain), func(t *testing.T) {
+				queryReq, err := mock_segcore.GenQueryRequest(collection.GetCCollection(), nil, nq, topK, testCollectionID)
+				require.NoError(t, err)
+				queryReq.Scope = scope
+				if withChain {
+					plan := &planpb.PlanNode{}
+					require.NoError(t, proto.Unmarshal(queryReq.GetReq().GetSerializedExprPlan(), plan))
+					// A valid XGBoost configuration needs no model on the empty path:
+					// preparation validates the request but never executes the model.
+					newOp := func() *schemapb.FunctionChainOp {
+						return mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.XGBoostFuncName,
+							map[string]*schemapb.FunctionParamValue{"model_resource": stringParamForTest("not-loaded-empty-search-model.json")},
+							columnArgForTest(chaintypes.ScoreFieldName))
+					}
+					plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{l0FunctionChainForTest(newOp()), l1FunctionChainForTest(newOp())}
+					queryReq.Req.SerializedExprPlan, err = proto.Marshal(plan)
+					require.NoError(t, err)
+				}
+				task := NewSearchTask(context.Background(), collection, manager, queryReq, 1)
+				require.NoError(t, task.PreExecute())
+				require.NoError(t, task.Execute())
+				result := task.SearchResult()
+				require.NotNil(t, result)
+				assert.Equal(t, nq, result.NumQueries)
+				assert.Equal(t, topK, result.TopK)
+				resultData := result.ResultData
+				if resultData == nil {
+					require.NotEmpty(t, result.SlicedBlob)
+					resultData = &schemapb.SearchResultData{}
+					require.NoError(t, proto.Unmarshal(result.SlicedBlob, resultData))
+				}
+				assert.Equal(t, nq, resultData.NumQueries)
+				assert.Equal(t, topK, resultData.TopK)
+				assert.Equal(t, []int64{0, 0}, resultData.Topks)
+				assert.Empty(t, resultData.Scores)
+				assert.Zero(t, typeutil.GetSizeOfIDs(resultData.GetIds()))
+				assert.Empty(t, resultData.FieldsData)
+			})
+		}
+	}
 }
 
 // TestExecuteMergedSubTasks exercises the multi-sub-task slicing path: after
@@ -1468,16 +1604,51 @@ func TestExecuteSearchGroupTakeForOutputDecision(t *testing.T) {
 	}
 }
 
+// mergeTasksForReduceTest preserves coverage of the reduce pipeline's merged
+// layouts. Production rejects chain-bearing merges; construct that layout here
+// explicitly after checking the guard, so these tests still exercise L1 slicing.
+func mergeTasksForReduceTest(t *testing.T, receiver, other *SearchTask) {
+	t.Helper()
+	plan := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(receiver.req.GetReq().GetSerializedExprPlan(), plan))
+	if len(plan.GetQuerynodeFunctionChains()) == 0 {
+		require.True(t, receiver.Merge(other))
+		return
+	}
+	require.False(t, receiver.Merge(other))
+	receiver.groupSize += other.groupSize
+	receiver.topk = max(receiver.topk, other.topk)
+	receiver.nq += other.nq
+	receiver.originTopks = append(receiver.originTopks, other.originTopks...)
+	receiver.originNqs = append(receiver.originNqs, other.originNqs...)
+	receiver.others = append(receiver.others, other)
+	other.merged = true
+}
+
 func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 	const (
-		numSegments = 2
-		msgLength   = 200
-		maxTopK     = int64(8)
+		numSegments     = 2
+		msgLength       = 200
+		maxTopK         = int64(8)
+		floatVecFieldID = 107
 	)
 	originNqs := []int64{1, 2}
 	originTopks := []int64{3, maxTopK}
 
-	ts := setupTestSegments(t, numSegments, msgLength, setupOpts{SkipSearchReq: true})
+	// With zero query vectors, these rows have exact L2 distances
+	// (row + 0.5)^2, all with a .25 fractional part. The default mock
+	// queries produce large distances whose float32 precision can lose
+	// fractional parts and make the rounding assertion flaky.
+	ts := setupTestSegments(t, numSegments, msgLength, setupOpts{
+		SkipSearchReq: true,
+		MutateInsertData: func(segmentIdx int, data *storage.InsertData) {
+			vectors := data.Data[floatVecFieldID].(*storage.FloatVectorFieldData)
+			clear(vectors.Data)
+			for row := 0; row < msgLength; row++ {
+				vectors.Data[row*vectors.Dim] = float32(segmentIdx*msgLength+row) + 0.5
+			}
+		},
+	})
 	defer ts.cleanup()
 	ctx := context.Background()
 
@@ -1494,6 +1665,15 @@ func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 	for i := range originNqs {
 		req, err := mock_segcore.GenQueryRequest(
 			ts.collection.GetCCollection(), ts.segIDs, originNqs[i], originTopks[i], testCollectionID)
+		require.NoError(t, err)
+		placeholder := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(req.Req.PlaceholderGroup, placeholder))
+		for _, value := range placeholder.GetPlaceholders() {
+			for _, vector := range value.GetValues() {
+				clear(vector)
+			}
+		}
+		req.Req.PlaceholderGroup, err = proto.Marshal(placeholder)
 		require.NoError(t, err)
 		rawRequests[i] = req
 	}
@@ -1519,7 +1699,7 @@ func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 		t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key) })
 		hook := fixedTopKQueryHook{topK: maxTopK, searchParam: `{}`}
 		for i, req := range requests {
-			optimized, err := optimizers.OptimizeSearchParams(ctx, req, hook, numSegments, false, func(int64) int64 { return 128 })
+			optimized, err := optimizers.OptimizeSearchParams(ctx, req, hook, numSegments, false, func(int64) int64 { return 128 }, "")
 			require.NoError(t, err)
 			requests[i] = optimized
 		}
@@ -1543,7 +1723,7 @@ func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 		t.Helper()
 		receiver := NewSearchTask(ctx, ts.collection, ts.manager, requests[0], 1)
 		other := NewSearchTask(ctx, ts.collection, ts.manager, requests[1], 1)
-		require.True(t, receiver.Merge(other))
+		mergeTasksForReduceTest(t, receiver, other)
 		require.Equal(t, int64(3), receiver.nq)
 		require.Equal(t, maxTopK, receiver.topk)
 		require.Equal(t, originNqs, receiver.originNqs)
@@ -1582,17 +1762,12 @@ func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 	for i := range baseline {
 		require.Equal(t, baseline[i].GetTopks(), reranked[i].GetTopks())
 		require.Len(t, reranked[i].GetScores(), len(baseline[i].GetScores()))
-		for _, score := range reranked[i].GetScores() {
-			assert.Equal(t, float32(math.Trunc(float64(score))), score)
+		require.Len(t, baseline[i].GetScores(), int(originNqs[i]*originTopks[i]))
+		for j, score := range baseline[i].GetScores() {
+			require.Equal(t, 0.25, math.Abs(float64(score)-math.Trunc(float64(score))),
+				"baseline scores must be fractional to prove L1 rounding executed")
+			assert.Equal(t, float32(math.Round(float64(score))), reranked[i].GetScores()[j])
 		}
-		var changed bool
-		for _, score := range baseline[i].GetScores() {
-			if score != float32(math.Trunc(float64(score))) {
-				changed = true
-				break
-			}
-		}
-		require.True(t, changed, "baseline scores must contain a fractional value to prove L1 rounding executed")
 	}
 }
 
@@ -1792,7 +1967,7 @@ func TestExecuteMergedSubTasks_MixedTopKWithL1RerankMatchesIndependentRequests(t
 		receiver := NewSearchTask(ctx, ts.collection, ts.manager, requests[0], 1)
 		for _, req := range requests[1:] {
 			other := NewSearchTask(ctx, ts.collection, ts.manager, req, 1)
-			require.True(t, receiver.Merge(other))
+			mergeTasksForReduceTest(t, receiver, other)
 		}
 		require.NoError(t, receiver.PreExecute())
 		require.NoError(t, receiver.Execute())
@@ -1886,8 +2061,8 @@ func TestExecuteMergedSubTasks_MixedGroupByTopKWithL1Rerank(t *testing.T) {
 	// receiver's three-query search while preserving request-level TopKs below.
 	receiverReq := buildRequest(originNqs[0], originTopks[0])
 	otherReq := buildRequest(originNqs[1], originTopks[1])
-	// Make the plan bytes identical so the normal Merge guard accepts the
-	// requests, while retaining their request-level TopKs in internalpb.
+	// Use identical plan bytes while retaining request-level TopKs to exercise
+	// the reduce layout with a synthetic merged task.
 	var receiverPlan planpb.PlanNode
 	require.NoError(t, proto.Unmarshal(receiverReq.GetReq().GetSerializedExprPlan(), &receiverPlan))
 	receiverPlan.GetVectorAnns().QueryInfo.Topk = maxTopK
@@ -1897,7 +2072,7 @@ func TestExecuteMergedSubTasks_MixedGroupByTopKWithL1Rerank(t *testing.T) {
 	otherReq.Req.SerializedExprPlan = append([]byte(nil), serializedPlan...)
 	receiver := NewSearchTask(ctx, ts.collection, ts.manager, receiverReq, 1)
 	other := NewSearchTask(ctx, ts.collection, ts.manager, otherReq, 1)
-	require.True(t, receiver.Merge(other))
+	mergeTasksForReduceTest(t, receiver, other)
 	require.Equal(t, originNqs, receiver.originNqs)
 	require.Equal(t, originTopks, receiver.originTopks)
 	require.Equal(t, maxTopK, receiver.topk)

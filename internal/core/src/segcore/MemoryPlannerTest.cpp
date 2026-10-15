@@ -115,25 +115,27 @@ TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
 
 TEST(LoadMemoryOverheadControllerTest, KeepsHandleAcrossPolicySwitches) {
     auto& owner = milvus::storage::LoadMemoryOverheadController::GetInstance();
-    auto workers = milvus::ThreadPools::GetLoadExecutorWorkers();
+    auto& admission = milvus::storage::LoadAdmissionController::GetInstance();
+    const auto slots = admission.CapacitySlots();
     auto budget_bytes =
         milvus::storage::LoadAdmissionController::GetInstance().CapacityBytes();
-    auto cleanup = folly::makeGuard([&owner, workers, budget_bytes]() {
-        EXPECT_TRUE(owner.UpdateBudgetBytes(budget_bytes));
-        EXPECT_TRUE(owner.UpdateExecutorWorkers(workers));
-    });
+    auto cleanup =
+        folly::makeGuard([&owner, &admission, slots, budget_bytes]() {
+            EXPECT_TRUE(owner.UpdateBudgetBytes(budget_bytes));
+            admission.SetCapacitySlots(slots);
+        });
 
-    EXPECT_TRUE(owner.UpdateExecutorWorkers(workers));
+    admission.SetCapacitySlots(slots);
     EXPECT_TRUE(owner.UpdateBudgetBytes(/*bytes=*/512));
-    auto group = owner.GetOrCreate(workers);
+    auto group = owner.GetOrCreate();
     ASSERT_NE(group, nullptr);
 
     EXPECT_TRUE(owner.UpdateBudgetBytes(/*bytes=*/0));
-    EXPECT_TRUE(owner.UpdateExecutorWorkers(/*workers=*/8));
-    EXPECT_EQ(group, owner.GetOrCreate(/*executor_workers=*/8));
+    admission.SetCapacitySlots(8);
+    EXPECT_EQ(group, owner.GetOrCreate());
 
     EXPECT_TRUE(owner.UpdateBudgetBytes(/*bytes=*/1024));
-    EXPECT_EQ(group, owner.GetOrCreate(/*executor_workers=*/8));
+    EXPECT_EQ(group, owner.GetOrCreate());
 }
 
 // ---- LoadCellBatchAsync tests ----

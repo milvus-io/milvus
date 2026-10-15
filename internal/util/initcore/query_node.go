@@ -58,6 +58,10 @@ func InitQueryNode(ctx context.Context) error {
 
 // doInitQueryNodeOnce initializes query node once.
 func doInitQueryNodeOnce(ctx context.Context) error {
+	if err := InitStorageRuntime(); err != nil {
+		return err
+	}
+
 	nodeID := paramtable.GetNodeID()
 
 	// Deprecated compatibility shim for common.visibilityFilterEnabled. The
@@ -171,14 +175,14 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		UpdateExprResCacheConfig()
 	}
 
-	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
-
 	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
 	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)
 	if err := registerQueryNodeAsyncLoadThreadPoolConfig(ctx, paramtable.Get(), updateStorageV2AsyncLoadThreadPoolSize); err != nil {
 		return err
 	}
-	registerQueryNodeLoadConfig(ctx, paramtable.Get(), applyQueryNodeLoadConfig)
+	if err := registerQueryNodeLoadConfig(ctx, paramtable.Get(), applyQueryNodeLoadConfig); err != nil {
+		return err
+	}
 	cStorageV2AsyncLoadReadWindowSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.GetAsInt64())
 	C.SetStorageV2AsyncLoadReadWindowSizeBytes(cStorageV2AsyncLoadReadWindowSizeBytes)
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()

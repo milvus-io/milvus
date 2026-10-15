@@ -28,6 +28,10 @@ type Broadcaster interface {
 	// Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
 	WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
 
+	// WithUnreplicableResourceKeys acquires the resource keys for a broadcast that stays in this cluster.
+	// It is accepted on any replicate role, and the message passed to Broadcast must be unreplicable.
+	WithUnreplicableResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
+
 	// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
 	// and verifies the cluster is secondary. Returns error if the cluster is primary.
 	// This is used for force promote operations that should only be executed on secondary clusters.

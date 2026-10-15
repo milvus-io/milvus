@@ -16,8 +16,9 @@
 
 #pragma once
 
-#include <any>
 #include <functional>
+#include <mutex>
+#include <typeinfo>
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -26,7 +27,7 @@
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
 #include "segcore/SegmentInterface.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
 
 namespace milvus {
@@ -34,20 +35,18 @@ namespace exec {
 
 template <typename T>
 struct TermIndexFunc {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, size_t n, const IndexInnerType* val) {
-        return index->In(n, val);
+    operator()(const index::IScalarPredicateReader<T>* reader,
+               size_t n,
+               const T* val) {
+        return reader->In(n, val);
     }
 };
 
 class PhyTermFilterExpr : public SegmentExpr {
  public:
     PhyTermFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::TermFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -83,6 +82,11 @@ class PhyTermFilterExpr : public SegmentExpr {
     DetermineExecPath() override;
 
     bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
+
+    bool
     IsSource() const override {
         return true;
     }
@@ -110,6 +114,10 @@ class PhyTermFilterExpr : public SegmentExpr {
     PrefetchRawData();
 
  private:
+    template <typename T>
+    const index::PreparedInQuery&
+    GetSkipIndexQuery();
+
     void
     InitPkCacheOffset();
 
@@ -179,8 +187,13 @@ class PhyTermFilterExpr : public SegmentExpr {
     // variant construction. Set once during init; nullptr when arg_set_ is not
     // SetElement<string> (e.g. FlatVectorElement for small IN).
     SetElement<std::string>* cached_str_set_elem_{nullptr};
-    // Cached element values for skip_index (avoids per-chunk vector copy).
-    std::any cached_skip_elements_;
+    std::once_flag skip_values_once_;
+    index::PreparedInQuery cached_skip_query_;
+    // The cache above is built for one ValueType and reused by every later
+    // call, while PrefetchRawData and Eval reach it through two independent
+    // dispatch switches. Record the type so a future divergence between those
+    // switches fails open instead of reinterpreting the cached variants.
+    const std::type_info* skip_values_type_{nullptr};
 };
 }  //namespace exec
 }  // namespace milvus

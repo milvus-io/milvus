@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -67,12 +68,13 @@ func (s *MixCompactionTaskStorageV2Suite) SetupTest() {
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TearDownTest() {
+	localStoragePath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	os.RemoveAll(filepath.Join(localStoragePath, "insert_log"))
+	os.RemoveAll(filepath.Join(localStoragePath, "delta_log"))
+	os.RemoveAll(filepath.Join(localStoragePath, "stats_log"))
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
-	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
-	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
-	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "stats_log")
 	initcore.CleanArrowFileSystem()
 }
 
@@ -152,7 +154,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactMetrics() {
 	storageConfig := s.task.GetStorageConfig()
 	beforeMetrics, err := storagev2.GetFilesystemMetricsWithConfig(storageConfig)
 	s.NoError(err)
-	s.NotNil(beforeMetrics)
+	s.Contains(beforeMetrics, "origin")
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -160,9 +162,9 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactMetrics() {
 
 	afterMetrics, err := storagev2.GetFilesystemMetricsWithConfig(storageConfig)
 	s.NoError(err)
-	s.NotNil(afterMetrics)
+	s.Contains(afterMetrics, "origin")
 
-	s.Greater(afterMetrics.WriteBytes, beforeMetrics.WriteBytes,
+	s.Greater(afterMetrics["origin"].WriteBytes, beforeMetrics["origin"].WriteBytes,
 		"write bytes should increase after compaction")
 }
 

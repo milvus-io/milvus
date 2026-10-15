@@ -23,6 +23,7 @@
 
 #include "PluginInterface.h"
 #include "common/EasyAssert.h"
+#include "common/init_c.h"
 #include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalFileIOPool.h"
@@ -104,6 +105,18 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
         }
         storage_config.use_crc32c_checksum =
             c_storage_config.use_crc32c_checksum;
+        storage_config.talon_mode = c_storage_config.talon_mode;
+        storage_config.talon_small_read_threshold =
+            c_storage_config.talon_small_read_threshold;
+        storage_config.talon_coordinator =
+            c_storage_config.talon_coordinator != nullptr
+                ? c_storage_config.talon_coordinator
+                : "";
+        storage_config.talon_block_size = c_storage_config.talon_block_size;
+        storage_config.talon_max_idle_per_addr =
+            c_storage_config.talon_max_idle_per_addr;
+        storage_config.talon_enable_for_external_table =
+            c_storage_config.talon_enable_for_external_table;
         milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
             storage_config);
 
@@ -180,6 +193,29 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
             c_disk_write_config.rate_limiter_config.high_priority_ratio,
             c_disk_write_config.rate_limiter_config.middle_priority_ratio,
             c_disk_write_config.rate_limiter_config.low_priority_ratio);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+InitStorageRuntime(const int cpu_threads, const int io_threads) {
+    try {
+        if (cpu_threads <= 0 || io_threads <= 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "storage runtime thread counts must be positive");
+        }
+        const auto status = milvus_storage::ConfigureStorageRuntime(
+            static_cast<uint32_t>(cpu_threads),
+            static_cast<uint32_t>(io_threads));
+        if (!status.ok()) {
+            // Storage reports late/duplicate Tokio initialization as Invalid.
+            // With validated counts this is a runtime setup failure, not bad input.
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          status.ToString());
+        }
+        UpdateArrowIOThreadPoolMetrics();
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
@@ -322,7 +358,25 @@ InitPluginLoader(const char* plugin_path) {
         milvus::storage::PluginLoader::GetInstance().load(plugin_path);
         return milvus::SuccessCStatus();
     }
-    CGO_CATCH_AND_RETURN_CSTATUS
+    // Plugin callbacks can throw opaque messages containing configuration.
+    // Sanitize before FailureCStatus: its untyped-exception observer also logs
+    // the message. Keep the same code/OOM/fallback rules as the shared macro.
+    catch (const std::bad_alloc&) {
+        return milvus::FailureCStatus(
+            milvus::MemAllocateFailed,
+            "Plugin initialization ran out of memory");
+    } catch (const milvus::SegcoreError& error) {
+        return milvus::FailureCStatus(error.get_error_code(),
+                                      "Native plugin initialization failed");
+    } catch (const std::exception&) {
+        const std::runtime_error safe_error(
+            "Native plugin initialization failed");
+        return milvus::FailureCStatus(&safe_error);
+    } catch (...) {
+        return milvus::FailureCStatus(
+            milvus::UnexpectedError,
+            "Unknown exception during native plugin initialization");
+    }
 }
 
 CStatus

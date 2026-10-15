@@ -31,7 +31,7 @@ namespace exec {
 class PhyLogicalUnaryExpr : public Expr {
  public:
     PhyLogicalUnaryExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::LogicalUnaryExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx)

@@ -132,6 +132,17 @@ type segcoreClass struct {
 	// construction and never set this; permanent system failures (corruption,
 	// config, internal bug, missing object) leave it false.
 	retriable bool
+	// permanent marks system failures that are known to reproduce identically on
+	// every attempt and every node: corrupted data, a misconfigured bucket, a
+	// missing object. A code only qualifies when every one of its C++
+	// construction sites is deterministic — a code that a broad "operation
+	// failed" branch also produces (IndexBuildError 2004, StorageError 2044)
+	// does not, because the same code then carries transient storage and
+	// per-node disk failures that a re-dispatch would clear. It is distinct
+	// from simply leaving every flag unset, which also covers the unclassified
+	// fallback (2000/2001/2002) that callers must keep retrying because the
+	// underlying condition is unknown.
+	permanent bool
 }
 
 // segcoreErrorCode preserves the exact C++ ErrorCode without changing the
@@ -244,13 +255,33 @@ func classForCode(c SegcoreCode) (segcoreClass, bool) {
 	// scheduler must retry them rather than fail permanently. ConfigInvalid(2006) is
 	// a server-side yaml/config error (not the API caller's fault). StorageError(2044)
 	// is the permanent storage fallback.
+	//
+	// IndexBuildError(2004) and StorageError(2044) are deliberately NOT marked
+	// permanent below: VectorDiskIndex maps every non-success knowhere status to
+	// 2004 (knowhere's disk_file_error also covers an upload that failed against
+	// object storage and a node whose local disk filled up), and 2044 is where a
+	// bare IOError with no ExtendStatusDetail lands (S3 UNKNOWN, a connection
+	// error after the SDK retry budget, an InvalidAccessKeyId during a credential
+	// rotation). Both succeed when the task is re-dispatched elsewhere; their
+	// non-retriable marking exists to stop querynode retry storms, not to say
+	// another worker cannot succeed.
 	case CodeUnexpectedError, CodeNotImplemented, CodeIndexBuildError, CodeIndexAlreadyBuild,
 		CodeConfigInvalid, CodePathInvalid, CodePathAlreadyExist, CodePathNotExist,
 		// RetrieveError likewise has no segcore producer; permanent is the
 		// conservative default rather than an audited verdict.
-		CodeBucketInvalid, CodeObjectNotExist, CodeRetrieveError, CodeDataFormatBroken,
-		CodeUnistdError, CodeMemAllocateSizeNotMatch, CodeTextIndexNotFound, CodeStorageError:
+		CodeRetrieveError, CodeUnistdError, CodeMemAllocateSizeNotMatch,
+		CodeTextIndexNotFound, CodeStorageError:
 		return segcoreClass{sentinel: ErrSegcore}, true
+
+	// Permanent system errors whose every producer is deterministic -> the
+	// index/stats scheduler gives up instead of re-dispatching (see
+	// IsPermanentSegcoreErr): a misconfigured bucket is the same on every
+	// replica, an object missing from shared storage is missing for every
+	// worker, and malformed persisted data (a wrong binlog magic number, a JSON
+	// document that does not parse, a bson without terminator) does not change
+	// between attempts.
+	case CodeBucketInvalid, CodeObjectNotExist, CodeDataFormatBroken:
+		return segcoreClass{sentinel: ErrSegcore, permanent: true}, true
 	}
 	// kCollectionSchemaVersionNotReady(2046) is minted by
 	// ChunkedSegmentSealedImpl.cpp OUTSIDE milvus-common's ErrorCode enum
@@ -338,6 +369,21 @@ func classifySegcoreError(code int32, msg string) error {
 func IsSegcoreDataFormatBroken(err error) bool {
 	var segcoreErr *segcoreErrorCode
 	return errors.As(err, &segcoreErr) && segcoreErr.code == 2024
+}
+
+// IsPermanentSegcoreErr reports whether err carries a C++ segcore code that is
+// known to fail identically on every attempt and every node. Callers that would
+// otherwise retry — the index/stats/analyze scheduler in particular — must treat
+// it as terminal: re-dispatching burns a worker slot to reproduce the same
+// failure. Unregistered codes and the generic 2000/2001/2002 fallbacks are not
+// permanent: their cause is unknown, so they keep the retrying default.
+func IsPermanentSegcoreErr(err error) bool {
+	var segcoreErr *segcoreErrorCode
+	if !errors.As(err, &segcoreErr) {
+		return false
+	}
+	cls, ok := classForCode(SegcoreCode(segcoreErr.code))
+	return ok && cls.permanent
 }
 
 // IsSegcoreSignal reports whether a segcore error code is a control-flow signal

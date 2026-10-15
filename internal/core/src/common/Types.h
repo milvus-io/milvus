@@ -368,6 +368,10 @@ GetArrowDataType(DataType data_type, int dim = 1) {
             return arrow::utf8();
         case DataType::UUID:
             return arrow::fixed_size_binary(16);
+        // TODO(local-format): Milvus currently writes each scalar ARRAY row as
+        // serialized ScalarFieldProto in Arrow Binary. Unify the writer and
+        // Vortex local-format reader on native Arrow/Vortex List after the
+        // ARRAY representation stabilizes; the reader accepts both meanwhile.
         case DataType::ARRAY:
         case DataType::JSON:
             return arrow::binary();
@@ -731,6 +735,11 @@ IsVectorDataType(DataType data_type) {
     return IsBinaryVectorDataType(data_type) ||
            IsFloatVectorDataType(data_type) || IsIntVectorDataType(data_type) ||
            IsVectorArrayDataType(data_type);
+}
+
+inline bool
+IsOrdinaryVectorDataType(DataType data_type) {
+    return IsVectorDataType(data_type) && !IsVectorArrayDataType(data_type);
 }
 
 inline bool

@@ -48,10 +48,10 @@ class PluginLoader {
         void* handle = dlopen(path.c_str(), RTLD_LAZY);
         // void *handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_DEEPBIND);
         if (!handle) {
-            const char* error = dlerror();
-            ThrowInfo(
-                UnexpectedError,
-                fmt::format("Failed to load plugin: {}, err={}", path, error));
+            // ThrowInfo prints before throwing. Both the configured path and
+            // dlerror can contain protected configuration, so name only the
+            // failed stage, including at these pre-CStatus output boundaries.
+            ThrowInfo(UnexpectedError, "Failed to open plugin library");
         }
 
         // Rest error flags
@@ -64,22 +64,18 @@ class PluginLoader {
         const char* error = dlerror();
         if (error) {
             dlclose(handle);
-            ThrowInfo(UnexpectedError,
-                      fmt::format("Failed to load plugin: {}", error));
+            ThrowInfo(UnexpectedError, "Failed to find plugin factory");
         }
 
-        error = dlerror();
         auto pluginPtr = createPluginFunc();
         if (!pluginPtr) {
             dlclose(handle);
-            ThrowInfo(
-                UnexpectedError,
-                fmt::format("Failed to init plugin: {}, {}", path, error));
+            ThrowInfo(UnexpectedError, "Plugin factory returned no instance");
         }
 
         std::string pluginName = pluginPtr->getPluginName();
         if (plugins_.find(pluginName) != plugins_.end()) {
-            LOG_DEBUG("Plugin with name {} is already loaded.", pluginName);
+            LOG_DEBUG("Plugin is already loaded.");
             dlclose(handle);
             return;
         }
@@ -88,7 +84,7 @@ class PluginLoader {
         plugins_[pluginName] =
             std::shared_ptr<milvus::storage::plugin::IPlugin>(pluginPtr);
         handles_[pluginName] = handle;
-        LOG_INFO("Loaded plugin: {}", pluginName);
+        LOG_INFO("Loaded plugin");
     }
 
     // Visible for testing: install a plugin instance directly, bypassing

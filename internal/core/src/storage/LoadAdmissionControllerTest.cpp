@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <future>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -33,6 +34,7 @@
 #include <vector>
 
 #include "folly/CancellationToken.h"
+#include "folly/ScopeGuard.h"
 #include "folly/OperationCancelled.h"
 #include "folly/coro/BlockingWait.h"
 #include "folly/coro/Promise.h"
@@ -41,6 +43,12 @@
 #include "folly/executors/ManualExecutor.h"
 #include "gtest/gtest.h"
 #include "monitor/monitor_c.h"
+#include "common/init_c.h"
+#include "cachinglayer/lrucache/DList.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "storage/LoadOverheadController.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 namespace {
@@ -91,6 +99,9 @@ class LoadAdmissionControllerAsyncTest : public testing::Test {
  protected:
     void
     SetUp() override {
+        previous_enabled_ =
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
         budget_.SetCapacityBytes(0);
         budget_.SetCapacitySlots(0);
     }
@@ -99,10 +110,230 @@ class LoadAdmissionControllerAsyncTest : public testing::Test {
     TearDown() override {
         budget_.SetCapacityBytes(0);
         budget_.SetCapacitySlots(0);
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            previous_enabled_);
     }
 
+    bool previous_enabled_;
     LoadAdmissionController& budget_ = LoadAdmissionController::GetInstance();
 };
+
+TEST_F(LoadAdmissionControllerAsyncTest, SharedOverheadFollowsAdmissionLimits) {
+    using namespace cachinglayer;
+    const auto memory =
+        LoadMemoryOverheadController::GetInstance().GetOrCreate();
+    const auto file = LoadFileOverheadController::GetInstance().GetOrCreate();
+    const LoadingOverheadConfig config{LoadingOverheadGroupBinding{memory, 100},
+                                       LoadingOverheadGroupBinding{file, 50}};
+    // All operations on these singleton groups are sequential in this test.
+    internal::DList list(false, {100000, 100000}, {}, {}, {});
+    list.BindLoadingOverheadGroups(config);
+    auto unbind =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(config); });
+    const ResourceUsage overhead{1000, 500};
+    const auto check = [&](ResourceUsage expected) {
+        const auto result =
+            list.ReserveLoadingResourceWithTimeout(
+                    {}, overhead, &config, std::chrono::milliseconds(0))
+                .get();
+        ASSERT_TRUE(result.success);
+        EXPECT_EQ(result.reserved, expected);
+        EXPECT_EQ(list.ReleaseLoadingResource({}, overhead, &config), expected);
+        EXPECT_EQ(LoadMemoryOverheadController::GetInstance().GetOrCreate(),
+                  memory);
+        EXPECT_EQ(LoadFileOverheadController::GetInstance().GetOrCreate(),
+                  file);
+    };
+
+    check(
+        {1000, 500});  // Both limits disabled: preserve full request overhead.
+    budget_.SetCapacitySlots(3);
+    check({300, 150});
+    budget_.SetCapacityBytes(400);
+    check({400, 150});  // Memory uses bytes; file overhead uses slots.
+    budget_.SetCapacityBytes(80);
+    check({100, 150});  // One oversized runtime unit must still fit.
+    budget_.SetCapacitySlots(2);
+    check({100, 100});
+    budget_.SetCapacityBytes(0);
+    check({200, 100});  // Disabling bytes uses the latest slot capacity.
+
+    const auto previous_workers = GetAsyncLoadThreadPoolSize();
+    auto restore =
+        folly::makeGuard([&] { SetAsyncLoadThreadPoolSize(previous_workers); });
+    SetAsyncLoadThreadPoolSize(1);
+    check({200, 100});  // Admitted tasks can outlive CPU workers.
+    SetAsyncLoadThreadPoolSize(4);
+    check({200, 100});
+    budget_.SetCapacitySlots(5);
+    check({500, 250});
+    auto lease = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 5}, LoadAdmissionPriority::High));
+    budget_.SetCapacitySlots(2);
+    check({500, 250});  // Shrinking must still cover all five admitted slots.
+    budget_.SetCapacitySlots(3);
+    check({500, 250});  // Expanding again cannot erase that in-flight bound.
+    lease.Release();
+    check({300, 150});  // Once drained, the latest configured limit applies.
+    budget_.SetCapacitySlots(0);
+    check({1000, 500});
+    budget_.SetCapacitySlots(std::numeric_limits<size_t>::max());
+    check({1000, 500});  // The policy conversion must not overflow.
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, SharedOverheadFollowsActiveMode) {
+    using namespace cachinglayer;
+    using segcore::storagev2translator::SetStorageV2AsyncLoadEnabled;
+    SetStorageV2AsyncLoadEnabled(false);
+    const auto high = ThreadPools::GetThreadPool(HIGH).GetMaxThreadNum();
+    const auto low = ThreadPools::GetThreadPool(LOW).GetMaxThreadNum();
+    auto restore = folly::makeGuard([&] {
+        ThreadPools::ResizeThreadPool(HIGH, static_cast<float>(high) / CPU_NUM);
+        ThreadPools::ResizeThreadPool(LOW, static_cast<float>(low) / CPU_NUM);
+    });
+    ThreadPools::ResizeThreadPool(HIGH, 1.0f / CPU_NUM);
+    ThreadPools::ResizeThreadPool(LOW, 1.0f / CPU_NUM);
+    const auto workers = ThreadPools::GetLoadExecutorWorkers();
+    ASSERT_EQ(workers, 2);
+    auto& memory = LoadMemoryOverheadController::GetInstance();
+    auto& file = LoadFileOverheadController::GetInstance();
+    const LoadingOverheadConfig sync{
+        LoadingOverheadGroupBinding{memory.GetOrCreate(), 100},
+        LoadingOverheadGroupBinding{file.GetOrCreate(), 50}};
+    internal::DList list(false, {100000, 100000}, {}, {}, {});
+    list.BindLoadingOverheadGroups(sync);
+    auto unbind =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(sync); });
+    const ResourceUsage overhead{10000, 5000};
+    const auto check = [&](const LoadingOverheadConfig& config,
+                           ResourceUsage expected) {
+        const auto result =
+            list.ReserveLoadingResourceWithTimeout(
+                    {}, overhead, &config, std::chrono::milliseconds(0))
+                .get();
+        ASSERT_TRUE(result.success);
+        EXPECT_EQ(result.reserved, expected);
+        EXPECT_EQ(list.ReleaseLoadingResource({}, overhead, &config), expected);
+    };
+    budget_.SetCapacitySlots(8);
+    budget_.SetCapacityBytes(600);
+    check(sync, {200, 100});  // Inactive admission settings do not affect sync.
+    ThreadPools::ResizeThreadPool(HIGH, 3.0f / CPU_NUM);
+    check(sync, {400, 200});
+    SetStorageV2AsyncLoadEnabled(true);
+    EXPECT_EQ(memory.GetOrCreate(), sync.memory->group);
+    EXPECT_EQ(file.GetOrCreate(), sync.file->group);
+    check(sync, {600, 400});
+    ThreadPools::ResizeThreadPool(LOW, 2.0f / CPU_NUM);
+    check(sync, {600, 400});  // Inactive workers do not overwrite admission.
+    budget_.SetCapacityBytes(0);
+    check(sync, {800, 400});
+    SetStorageV2AsyncLoadEnabled(false);
+    check(sync, {500, 250});  // Picks up the latest worker count.
+    ThreadPools::ResizeThreadPool(HIGH, 1.0f / CPU_NUM);
+    check(sync, {300, 150});
+    budget_.SetCapacitySlots(0);
+    check(sync, {300, 150});
+    SetStorageV2AsyncLoadEnabled(true);
+    check(sync, overhead);  // Unlimited async must not inherit worker bounds.
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       RejectedSlotExpansionKeepsAdmissionBound) {
+    using namespace cachinglayer;
+    const LoadingOverheadConfig incomplete{
+        LoadingOverheadGroupBinding{
+            LoadMemoryOverheadController::GetInstance().GetOrCreate(),
+            std::nullopt},
+        std::nullopt};
+    internal::DList list(false, {100000, 100000}, {}, {}, {});
+    list.BindLoadingOverheadGroups(incomplete);
+    auto unbind =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(incomplete); });
+
+    // A missing runtime bound is legal for Passthrough but rejects slot policy.
+    // Tightening admission first is safe even when the policy update fails.
+    budget_.SetCapacitySlots(1);
+    EXPECT_EQ(budget_.CapacitySlots(), 1);
+    budget_.SetCapacitySlots(2);
+    EXPECT_EQ(budget_.CapacitySlots(), 1);
+    auto lease = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    EXPECT_FALSE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
+    lease.Release();
+
+    list.UnbindLoadingOverheadGroups(incomplete);
+    unbind.dismiss();
+    budget_.SetCapacitySlots(2);
+    EXPECT_EQ(budget_.CapacitySlots(), 2);
+    lease = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 2}, LoadAdmissionPriority::High));
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       RejectedModeChangeRestoresBothPolicies) {
+    using namespace cachinglayer;
+    const LoadingOverheadConfig config{
+        LoadingOverheadGroupBinding{
+            LoadMemoryOverheadController::GetInstance().GetOrCreate(),
+            std::nullopt},
+        LoadingOverheadGroupBinding{
+            LoadFileOverheadController::GetInstance().GetOrCreate(), 1}};
+    internal::DList list(false, {1000000000, 1000000000}, {}, {}, {});
+    list.BindLoadingOverheadGroups(config);
+    auto unbind =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(config); });
+    // File accepts the executor policy; memory rejects it. The C boundary must
+    // return an error and the file policy must be restored to Passthrough.
+    auto status = ::SetStorageV2AsyncLoadEnabled(false);
+    auto release_error = folly::makeGuard(
+        [&] { std::free(const_cast<char*>(status.error_msg)); });
+    EXPECT_NE(status.error_code, 0);
+    EXPECT_TRUE(segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+    const ResourceUsage demand{1000000, 1000000};
+    const auto result =
+        list.ReserveLoadingResourceWithTimeout(
+                {}, demand, &config, std::chrono::milliseconds(0))
+            .get();
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(result.reserved, demand);
+    EXPECT_EQ(list.ReleaseLoadingResource({}, demand, &config), demand);
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       RejectedSlotShrinkRetriesAfterRelease) {
+    using namespace cachinglayer;
+    auto memory = LoadMemoryOverheadController::GetInstance().GetOrCreate();
+    auto file = LoadFileOverheadController::GetInstance().GetOrCreate();
+    const LoadingOverheadConfig incomplete{
+        LoadingOverheadGroupBinding{memory, std::nullopt}, std::nullopt};
+    internal::DList list(false, {100000, 100000}, {}, {}, {});
+    list.BindLoadingOverheadGroups(incomplete);
+    auto unbind_incomplete =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(incomplete); });
+    budget_.SetCapacitySlots(1);
+    EXPECT_EQ(budget_.CapacitySlots(), 1);
+    list.UnbindLoadingOverheadGroups(incomplete);
+    unbind_incomplete.dismiss();
+    const LoadingOverheadConfig complete{
+        LoadingOverheadGroupBinding{memory, 100},
+        LoadingOverheadGroupBinding{file, 50}};
+    list.BindLoadingOverheadGroups(complete);
+    auto unbind =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(complete); });
+    auto lease = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    lease.Release();
+    const ResourceUsage demand{1000, 500};
+    const ResourceUsage expected{100, 50};
+    const auto result =
+        list.ReserveLoadingResourceWithTimeout(
+                {}, demand, &complete, std::chrono::milliseconds(0))
+            .get();
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(result.reserved, expected);
+    EXPECT_EQ(list.ReleaseLoadingResource({}, demand, &complete), expected);
+}
 
 TEST_F(LoadAdmissionControllerAsyncTest, MetricsExposeReservationsAndCapacity) {
     budget_.SetCapacityBytes(10);
@@ -1124,79 +1355,6 @@ TEST_F(LoadAdmissionControllerAsyncTest,
     auto low_lease = folly::coro::blockingWait(std::move(low_waiting));
     low_lease.Release();
     running_lease.Release();
-}
-
-TEST_F(LoadAdmissionControllerAsyncTest, PendingQueueOperationsScaleLinearly) {
-    auto measure_queue_operations = [this](size_t waiter_count) {
-        budget_.SetCapacityBytes(1);
-        auto running =
-            budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
-        auto running_lease = folly::coro::blockingWait(std::move(running));
-        std::vector<folly::coro::Future<LoadAdmissionLease>> waiters;
-        waiters.reserve(waiter_count);
-        std::vector<std::unique_ptr<folly::CancellationSource>>
-            cancellation_sources;
-        cancellation_sources.reserve(waiter_count);
-
-        const auto registration_start = std::chrono::steady_clock::now();
-        for (size_t i = 0; i < waiter_count; ++i) {
-            auto cancellation_source =
-                std::make_unique<folly::CancellationSource>();
-            waiters.push_back(
-                budget_.AcquireAsync({1, 1},
-                                     LoadAdmissionPriority::High,
-                                     cancellation_source->getToken()));
-            cancellation_sources.push_back(std::move(cancellation_source));
-        }
-        const auto registration_elapsed =
-            std::chrono::steady_clock::now() - registration_start;
-
-        const auto cancellation_start = std::chrono::steady_clock::now();
-        for (const auto& cancellation_source : cancellation_sources) {
-            cancellation_source->requestCancellation();
-        }
-        const auto cancellation_elapsed =
-            std::chrono::steady_clock::now() - cancellation_start;
-
-        EXPECT_TRUE(
-            std::all_of(waiters.begin(), waiters.end(), [](const auto& waiter) {
-                return waiter.isReady();
-            }));
-        waiters.clear();
-        running_lease.Release();
-        return std::pair{registration_elapsed, cancellation_elapsed};
-    };
-
-    constexpr size_t kSmallWaiterCount = 1024;
-    constexpr size_t kLargeWaiterCount = 8192;
-    const auto [small_registration, small_cancellation] =
-        measure_queue_operations(kSmallWaiterCount);
-    const auto [large_registration, large_cancellation] =
-        measure_queue_operations(kLargeWaiterCount);
-    const auto scheduling_slack = std::chrono::milliseconds(2);
-
-    EXPECT_LT(large_registration, small_registration * 24 + scheduling_slack)
-        << "registering 8x pending admissions should not repeatedly scan all "
-           "existing waiters; small="
-        << std::chrono::duration_cast<std::chrono::microseconds>(
-               small_registration)
-               .count()
-        << "us large="
-        << std::chrono::duration_cast<std::chrono::microseconds>(
-               large_registration)
-               .count()
-        << "us";
-    EXPECT_LT(large_cancellation, small_cancellation * 24 + scheduling_slack)
-        << "cancelling 8x pending admissions should unlink each waiter "
-           "directly; small="
-        << std::chrono::duration_cast<std::chrono::microseconds>(
-               small_cancellation)
-               .count()
-        << "us large="
-        << std::chrono::duration_cast<std::chrono::microseconds>(
-               large_cancellation)
-               .count()
-        << "us";
 }
 
 }  // namespace

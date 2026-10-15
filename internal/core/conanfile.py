@@ -26,9 +26,8 @@ class MilvusConan(ConanFile):
         "xsimd/9.0.1#51df19a2d512f70597105ee2a2d21916",
         "xz_utils/5.4.5#fc4e36861e0a47ecd4a40a00e6d29ac8",
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
-        "re2/20230301#f8efaf45f98d0193cd0b2ea08b6b4060",
         "folly/2026.04.20.00@milvus/dev#06852bea5b6449f0c4eb0df002b5779c",
-        "milvus-common/1.0.0-7d67e14@milvus/dev#dc4c1c257103c92e01c0c1bd83541623",
+        "milvus-common/1.0.0-45fca32@milvus/dev#ac7e38699c9dcc9a83d5be95e8227900",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
         "librdkafka/2.6.1@milvus/dev#a15d9fefad917290d59fa3fcbc144888",
@@ -111,6 +110,11 @@ class MilvusConan(ConanFile):
         self.options["arrow"].with_azure = True
 
     def requirements(self):
+        # Public necessary-literal API; Arrow and gRPC must use the same RE2.
+        self.requires(
+            "re2/20230301-milvus-regex1@milvus/dev#836c4df4da0690eb2122225b136b04b2",
+            force=True,
+        )
         # force=True: override transitive dependency versions (same behavior as Conan 1)
         # In Conan 1.x, the consumer's requires implicitly override transitive versions.
         # In Conan 2.x, force=True must be explicit.

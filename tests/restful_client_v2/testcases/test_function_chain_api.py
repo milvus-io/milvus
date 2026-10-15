@@ -77,6 +77,64 @@ class TestFunctionChainAPI(TestBase):
             }
         ]
 
+    def _hybrid_score_plus_ts_function_chain(self, limit=2):
+        return [
+            {
+                "name": "hybrid_score_plus_ts",
+                "stage": "FunctionChainStageL2Rerank",
+                "ops": [
+                    {
+                        "op": "merge",
+                        "params": {"strategy": "rrf"},
+                    },
+                    {
+                        "op": "map",
+                        "outputs": ["$score"],
+                        "expr": {
+                            "name": "num_combine",
+                            "args": [
+                                {"column": "$score"},
+                                {"column": "ts"},
+                            ],
+                            "params": {"mode": "sum"},
+                        },
+                    },
+                    {
+                        "op": "sort",
+                        "inputs": ["$score"],
+                        "params": {"column": "$score", "desc": True},
+                    },
+                    {
+                        "op": "limit",
+                        "params": {"limit": limit},
+                    },
+                ],
+            }
+        ]
+
+    def _hybrid_merge_function_chain(self, strategy, **params):
+        return [
+            {
+                "name": f"hybrid_{strategy}_merge",
+                "stage": "FunctionChainStageL2Rerank",
+                "ops": [
+                    {
+                        "op": "merge",
+                        "params": {"strategy": strategy, **params},
+                    },
+                    {
+                        "op": "sort",
+                        "inputs": ["$score"],
+                        "params": {"column": "$score", "desc": True},
+                    },
+                    {
+                        "op": "limit",
+                        "params": {"limit": 2},
+                    },
+                ],
+            }
+        ]
+
     def _l0_boost_equivalent_function_chain(self):
         return [
             {
@@ -544,11 +602,11 @@ class TestFunctionChainAPI(TestBase):
         assert rsp["code"] != 0
         assert "exactly one of column or literal is required" in rsp["message"]
 
-    def test_hybrid_search_rejects_function_chains(self):
+    def test_hybrid_search_function_chain_owns_final_output(self):
         """
-        target: test REST v2 hybrid search rejects functionChains in first version
-        method: send top-level functionChains to hybrid_search
-        expected: request fails with unsupported error
+        target: test REST v2 hybrid search executes a top-level Function Chain
+        method: merge two ANN results, rerank with a hidden scalar field, sort, and limit in chain
+        expected: chain owns final ordering/count despite request limit/offset, and hidden input is not returned
         """
         name = self._create_function_chain_collection()
 
@@ -558,13 +616,67 @@ class TestFunctionChainAPI(TestBase):
                 {
                     "data": [[0.0, 0.0]],
                     "annsField": "vector",
+                    "metricType": "L2",
                     "limit": 3,
-                }
+                },
+                {
+                    "data": [[0.0, 0.0]],
+                    "annsField": "vector",
+                    "metricType": "L2",
+                    "limit": 3,
+                },
             ],
-            "rerank": {"strategy": "rrf", "params": {}},
-            "limit": 3,
-            "functionChains": self._score_plus_ts_function_chain(),
+            "limit": 1,
+            "offset": 1,
+            "outputFields": ["id"],
+            "functionChains": self._hybrid_score_plus_ts_function_chain(limit=2),
         }
         rsp = self.vector_client.vector_hybrid_search(payload)
-        assert rsp["code"] != 0
-        assert "functionChains is not supported for hybrid search yet" in rsp["message"]
+        assert rsp["code"] == 0, f"hybrid search with functionChains failed: {rsp}"
+        assert [item["id"] for item in rsp["data"]] == [3, 2]
+        assert len(rsp["data"]) == 2
+        assert all("ts" not in item for item in rsp["data"])
+        assert [item["distance"] for item in rsp["data"]] == sorted(
+            [item["distance"] for item in rsp["data"]], reverse=True
+        )
+
+    def test_hybrid_search_function_chain_merge_strategies(self):
+        """
+        target: test all declarative Merge strategies through the REST v2 hybrid endpoint
+        method: execute the same two ANN requests with rrf, weighted, max, sum, and avg
+        expected: every strategy succeeds and its chain-level limit determines the result count
+        """
+        name = self._create_function_chain_collection()
+        searches = [
+            {
+                "data": [[0.0, 0.0]],
+                "annsField": "vector",
+                "metricType": "L2",
+                "limit": 3,
+            },
+            {
+                "data": [[0.0, 0.0]],
+                "annsField": "vector",
+                "metricType": "L2",
+                "limit": 3,
+            },
+        ]
+        strategies = [
+            ("rrf", {}),
+            ("weighted", {"weights": [0.4, 0.6], "norm_score": True}),
+            ("max", {"norm_score": True}),
+            ("sum", {"norm_score": True}),
+            ("avg", {"norm_score": True}),
+        ]
+
+        for strategy, params in strategies:
+            payload = {
+                "collectionName": name,
+                "search": searches,
+                "limit": 1,
+                "functionChains": self._hybrid_merge_function_chain(strategy, **params),
+            }
+            rsp = self.vector_client.vector_hybrid_search(payload)
+            assert rsp["code"] == 0, f"hybrid {strategy} merge failed: {rsp}"
+            assert [item["id"] for item in rsp["data"]] == [1, 2]
+            assert len(rsp["data"]) == 2

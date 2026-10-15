@@ -12,6 +12,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -1014,3 +1015,106 @@ func (p *staticChannelProvider) NewIncomingChannels() <-chan []string {
 }
 
 func (p *staticChannelProvider) Close() {}
+
+// reassignFromLostNode recovers a balancer with test-channel-1 assigned to node 3, which is absent from
+// the streaming node status, using the given grace period, and returns the time from the Remove of the
+// node 3 assignment to the Assign.
+func reassignFromLostNode(t *testing.T, removeErr error, grace string) time.Duration {
+	paramtable.Init()
+	paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue(grace)
+	defer paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue("")
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+
+	var mu sync.Mutex
+	var removedAt, assignedAt time.Time
+	assigned := make(chan struct{})
+	var assignOnce sync.Once
+
+	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, assignment types.PChannelInfoAssigned) error {
+			mu.Lock()
+			defer mu.Unlock()
+			removedAt = time.Now()
+			return removeErr
+		})
+	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, assignment types.PChannelInfoAssigned) error {
+			assert.Equal(t, int64(1), assignment.Node.ServerID)
+			mu.Lock()
+			defer mu.Unlock()
+			assignedAt = time.Now()
+			assignOnce.Do(func() { close(assigned) })
+			return nil
+		})
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+	}, nil).Maybe()
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+	}, nil).Maybe()
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1)).Maybe()
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListPChannel(mock.Anything).RunAndReturn(func(ctx context.Context) ([]*streamingpb.PChannelMeta, error) {
+		return []*streamingpb.PChannelMeta{
+			{
+				Channel: &streamingpb.PChannelInfo{
+					Name:       "test-channel-1",
+					Term:       1,
+					AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE,
+				},
+				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+				Node:  &streamingpb.StreamingNodeInfo{ServerId: 3},
+			},
+		}, nil
+	})
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
+
+	ctx := context.Background()
+	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("test-channel-1"))
+	require.NoError(t, err)
+	defer b.Close()
+
+	assert.NoError(t, b.Trigger(ctx))
+	select {
+	case <-assigned:
+	case <-time.After(10 * time.Second):
+		t.Fatal("test-channel-1 is not assigned to node 1")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	return assignedAt.Sub(removedAt)
+}
+
+func TestBalancer_WaitGracePeriodWhenNodeNotAlive(t *testing.T) {
+	gap := reassignFromLostNode(t, types.ErrNotAlive, "500ms")
+	assert.GreaterOrEqual(t, gap, 500*time.Millisecond)
+}
+
+func TestBalancer_NoGracePeriodWhenRemoveSucceeds(t *testing.T) {
+	// The helper fails at its 10s assign timeout if the balancer waits the 30s grace period.
+	gap := reassignFromLostNode(t, nil, "30s")
+	assert.Less(t, gap, 30*time.Second)
+}
+
+func TestBalancer_NoGracePeriodWhenDisabled(t *testing.T) {
+	// Grace 0 disables the wait, the helper fails at its 10s assign timeout if the balancer keeps waiting.
+	reassignFromLostNode(t, types.ErrNotAlive, "0")
+}

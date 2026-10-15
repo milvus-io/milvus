@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -48,6 +49,7 @@ func TestL0CompactionTaskSuite(t *testing.T) {
 }
 
 func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	newManifest := packed.MarshalManifestPath(basePath, 8)
@@ -64,12 +66,12 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 	deltalogs := []*datapb.FieldBinlog{{
 		Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: deltaPath, EntriesNum: 3, MemorySize: 128}},
 	}}
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			require.Equal(t, basePath, base)
 			require.EqualValues(t, 7, version)
 			require.Equal(t, []packed.DeltaLogEntry{{Path: deltaPath, NumEntries: 3}}, updates.DeltaLogs)
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, updates), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -84,6 +86,7 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 }
 
 func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	basePath := "/tmp/milvus/insert_log/1/10/201"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	newManifest := packed.MarshalManifestPath(basePath, 8)
@@ -105,10 +108,10 @@ func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
 	}
 
 	var commitCount int
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(_ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			commitCount++
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, nil), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -279,9 +282,10 @@ func TestL0CompactionSaveSegmentMetaFailsOnManifestCommitError(t *testing.T) {
 // via the timeout error instead of hanging. This drives the real primitive end to
 // end — atomic multi-lock acquisition, then the parallel per-target manifest I/O.
 func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	const targets = 3
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "16")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key, "16")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key)
 
 	mt, err := newMemoryMeta(t)
 	require.NoError(t, err)
@@ -305,16 +309,16 @@ func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
 
 	release := make(chan struct{})
 	var entered atomic.Int32
-	mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			if entered.Add(1) == targets {
 				close(release)
 			}
 			select {
 			case <-release:
-				return packed.MarshalManifestPath(base, version+1), nil
+				return mockManifestUpdateResult(packed.MarshalManifestPath(base, version+1), nil), nil
 			case <-time.After(30 * time.Second):
-				return "", errors.New("v3 manifest commits did not overlap; batch fan-out is serial")
+				return mockManifestUpdateResult("", nil), errors.New("v3 manifest commits did not overlap; batch fan-out is serial")
 			}
 		}).Build()
 	defer mockCommit.UnPatch()
@@ -372,6 +376,105 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUsesAtomicDeltalogOperator() 
 	).Once()
 
 	s.NoError(task.saveSegmentMeta(output))
+}
+
+func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUpdatesLatestDataViewWithoutVersionAdvance() {
+	ctx := context.Background()
+	meta, err := newMemoryMeta(s.T())
+	s.Require().NoError(err)
+	manifestBasePath := "/tmp/milvus/insert_log/1/10/200"
+	for _, segment := range []*datapb.SegmentInfo{
+		{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+		},
+		{
+			ID:            101,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+		},
+		{
+			ID:            200,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			ManifestPath:  packed.MarshalManifestPath(manifestBasePath, 3),
+		},
+	} {
+		s.Require().NoError(meta.AddSegment(ctx, NewSegmentInfo(segment)))
+	}
+	dataViewCatalog, ok := meta.catalog.(dataview.Catalog)
+	s.Require().True(ok)
+	meta.dataViewManager = dataview.NewManager(dataViewCatalog, nil)
+	_, err = meta.dataViewManager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{
+		CollectionID: 1,
+		VChannels:    []string{"ch-1"},
+	})
+	s.Require().NoError(err)
+	_, commit, abort, err := meta.dataViewManager.PrepareFlush(ctx, FlushDataViewEvent{
+		CollectionID: 1,
+		Segments: []dataview.LoadableSegment{{
+			SegmentID:       200,
+			VChannel:        "ch-1",
+			PartitionID:     10,
+			ManifestVersion: 0,
+		}},
+	})
+	s.Require().NoError(err)
+	s.Require().NotNil(commit)
+	s.Require().NotNil(abort)
+	commit()
+
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		TriggerID:     19530,
+		CollectionID:  1,
+		PartitionID:   10,
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
+		NodeID:        NullNodeID,
+		State:         datapb.CompactionTaskState_executing,
+		Channel:       "ch-1",
+		InputSegments: []int64{100, 101},
+		Pos:           &msgpb.MsgPosition{Timestamp: 800},
+	}, nil, meta)
+	task.committedV3Manifests[200] = packed.MarshalManifestPath(manifestBasePath, 4)
+	output := []*datapb.CompactionSegment{{
+		SegmentID: 200,
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: "/tmp/milvus/delta/9001", EntriesNum: 3}},
+		}},
+	}}
+
+	s.Require().NoError(task.saveSegmentMeta(output))
+
+	// saveSegmentMeta enqueues an async recompute; drive the queue worker's
+	// projection. The L0 manifest bump (3 -> 4) hard-triggers compact_version
+	// +1 even though the membership is unchanged (a Manifest-version change
+	// has no dedicated counter).
+	segments, err := meta.loadableProjection(ctx, 1)
+	s.Require().NoError(err)
+	_, err = meta.dataViewManager.RecomputeNow(ctx, 1, func(_ context.Context, _ int64) ([]dataview.LoadableSegment, error) {
+		return segments, nil
+	})
+	s.Require().NoError(err)
+
+	ref, err := meta.dataViewManager.Latest(ctx, 1)
+	s.Require().NoError(err)
+	s.Require().NotNil(ref)
+	defer ref.Deref()
+	view := ref.DataView()
+	s.Equal(int64(2), view.GetDataVersion().GetStreamingVersion())
+	s.Equal(int64(1), view.GetDataVersion().GetCompactVersion())
+	s.Equal([]int64{4}, view.GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions())
 }
 
 func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_NormalL0() {
@@ -758,6 +861,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 
 		t.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
+		s.Equal("compaction failed in datanode", t.GetTaskProto().GetFailReason())
 	})
 	s.Run("test executing with result failed save compaction meta failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()

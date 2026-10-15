@@ -594,6 +594,73 @@ func TestDeltaDistributionPatchNotifiesNewServiceableChannel(t *testing.T) {
 	assert.Equal(t, []int64{collectionID}, notified)
 }
 
+func TestDeltaDistributionPatchNotifiesRemovedChannel(t *testing.T) {
+	ctx := context.Background()
+	nodeID := time.Now().UnixNano() % 1000000
+	collectionID := int64(10)
+	releasedCollectionID := int64(11)
+	channel := "test-channel-delta-removed"
+	releasedChannel := "test-channel-delta-removed-released"
+	nodeManager := session.NewNodeManager()
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost:19530",
+		Hostname: "localhost",
+	}))
+	target := meta.NewMockTargetManager(t)
+	target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	dist := meta.NewDistributionManager(nodeManager)
+	handler := &distHandler{
+		nodeID:      nodeID,
+		nodeManager: nodeManager,
+		dist:        dist,
+		target:      target,
+	}
+	defer metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(nodeID))
+
+	fullResp := &querypb.GetDataDistributionResponse{
+		Status:       merr.Success(),
+		NodeID:       nodeID,
+		LastModifyTs: 1,
+		Channels: []*querypb.ChannelVersionInfo{
+			{Channel: channel, Collection: collectionID, Version: 1},
+			{Channel: releasedChannel, Collection: releasedCollectionID, Version: 1},
+		},
+		LeaderViews: []*querypb.LeaderView{
+			{
+				Collection: collectionID,
+				Channel:    channel,
+				Status:     &querypb.LeaderViewStatus{Serviceable: true},
+			},
+			{
+				Collection: releasedCollectionID,
+				Channel:    releasedChannel,
+				Status:     &querypb.LeaderViewStatus{Serviceable: true},
+			},
+		},
+	}
+	handler.handleDistResp(ctx, fullResp)
+
+	var notified []int64
+	handler.SetNotifyFunc(func(collectionID ...int64) {
+		notified = append(notified, collectionID...)
+	})
+	removeResp := &querypb.GetDataDistributionResponse{
+		Status:              merr.Success(),
+		NodeID:              nodeID,
+		LastModifyTs:        2,
+		IsDelta:             true,
+		TotalChannelCount:   1,
+		RemovedChannelNames: []string{releasedChannel},
+	}
+	handler.handleDistResp(ctx, removeResp)
+
+	assert.ElementsMatch(t, []int64{releasedCollectionID}, notified)
+	channels := dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
+	assert.Len(t, channels, 1)
+	assert.Equal(t, channel, channels[0].GetChannelName())
+}
+
 // Helper function to get the current metric value for a specific nodeID
 func getMetricValueForNode(nodeID string) float64 {
 	// Create a temporary registry to capture the current state

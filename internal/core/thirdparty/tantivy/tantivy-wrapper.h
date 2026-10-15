@@ -1,3 +1,5 @@
+#pragma once
+
 #include <assert.h>
 #include <cmath>
 #include <sstream>
@@ -6,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <vector>
 #include <type_traits>
 
@@ -100,7 +103,8 @@ struct TantivyIndexWrapper {
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
-                        bool enable_background_merge = false) {
+                        bool enable_background_merge = false)
+        : path_(path) {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
             AssertInfo(tantivy_index_version == 5,
@@ -121,20 +125,18 @@ struct TantivyIndexWrapper {
         }
         AssertTantivyOk(res, "failed to create index: {}", res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // load index. create index reader.
     explicit TantivyIndexWrapper(const char* path,
                                  bool load_in_mmap,
                                  SetBitsetFn set_bitset)
-        : load_in_mmap_(load_in_mmap) {
+        : path_(path), load_in_mmap_(load_in_mmap) {
         assert(tantivy_index_exist(path));
         auto res = RustResultWrapper(
             tantivy_load_index(path, load_in_mmap_, set_bitset));
         AssertTantivyOk(res, "failed to load index: {}", res.result_->error);
         reader_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create index writer for text type with tokenizer.
@@ -152,7 +154,8 @@ struct TantivyIndexWrapper {
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
-                        bool enable_background_merge = false) {
+                        bool enable_background_merge = false)
+        : path_(path) {
         auto res = RustResultWrapper(
             tantivy_create_text_writer(field_name,
                                        path,
@@ -167,7 +170,6 @@ struct TantivyIndexWrapper {
         AssertTantivyOk(
             res, "failed to create text writer: {}", res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create index writer for json key stats
@@ -177,7 +179,8 @@ struct TantivyIndexWrapper {
                         bool in_ram = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES)
+        : path_(path) {
         auto res = RustResultWrapper(
             tantivy_create_json_key_stats_writer(field_name,
                                                  path,
@@ -188,7 +191,6 @@ struct TantivyIndexWrapper {
         AssertTantivyOk(
             res, "failed to create text writer: {}", res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create index writer for ngram
@@ -198,7 +200,8 @@ struct TantivyIndexWrapper {
                         uintptr_t max_gram,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES)
+        : path_(path) {
         auto res = RustResultWrapper(
             tantivy_create_ngram_writer(field_name,
                                         path,
@@ -210,7 +213,6 @@ struct TantivyIndexWrapper {
         AssertTantivyOk(
             res, "failed to create ngram writer: {}", res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create reader.
@@ -231,6 +233,30 @@ struct TantivyIndexWrapper {
                 res, "failed to load index: {}", res.result_->error);
             reader_ = res.result_->value.ptr._0;
         }
+    }
+
+    // Capture the writer's currently committed generation in an independent
+    // manual-reload reader. This does not commit the writer, and published
+    // snapshots must never call reload().
+    std::shared_ptr<TantivyIndexWrapper>
+    create_snapshot_reader(SetBitsetFn set_bitset) const {
+        AssertInfo(writer_ != nullptr,
+                   "snapshot reader requires a live Tantivy writer");
+        AssertInfo(reader_ == nullptr,
+                   "snapshot reader requires a writer-only wrapper");
+
+        // Allocate before exporting the Rust reader so a C++ allocation
+        // failure cannot leak the returned binding.
+        auto snapshot = std::make_shared<TantivyIndexWrapper>();
+        auto res = RustResultWrapper(
+            tantivy_create_snapshot_reader_from_writer(writer_, set_bitset));
+        AssertInfo(res.result_->success,
+                   "failed to create snapshot reader from writer: {}",
+                   res.result_->error);
+        snapshot->reader_ = res.result_->value.ptr._0;
+        AssertInfo(snapshot->reader_ != nullptr,
+                   "snapshot reader creation returned a null reader");
+        return snapshot;
     }
 
     ~TantivyIndexWrapper() {
@@ -680,6 +706,16 @@ struct TantivyIndexWrapper {
     }
 
     inline void
+    rollback() {
+        AssertInfo(writer_ != nullptr,
+                   "cannot rollback an index without a writer");
+        auto res = RustResultWrapper(tantivy_rollback_index(writer_));
+        AssertInfo(res.result_->success,
+                   "failed to rollback index: {}",
+                   res.result_->error);
+    }
+
+    inline void
     reload() {
         if (reader_ != nullptr) {
             auto res = RustResultWrapper(tantivy_reload_index(reader_));
@@ -750,13 +786,14 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                std::vector<const char*> views;
-                views.reserve(len);
+                std::vector<const char*> views(len);
+                std::vector<size_t> lengths(len);
                 for (uintptr_t i = 0; i < len; i++) {
-                    views.push_back(terms[i].c_str());
+                    views[i] = terms[i].data();
+                    lengths[i] = terms[i].size();
                 }
-                return tantivy_terms_query_keyword(
-                    reader_, views.data(), len, bitset);
+                return tantivy_terms_query_keyword_with_len(
+                    reader_, views.data(), lengths.data(), len, bitset);
             }
 
             if constexpr (std::is_same_v<T, milvus::UUID>) {
@@ -787,7 +824,8 @@ struct TantivyIndexWrapper {
     RustArrayI64Wrapper
     term_query_i64(std::string term) {
         auto array = [&]() {
-            return tantivy_term_query_keyword_i64(reader_, term.c_str());
+            return tantivy_term_query_keyword_i64_with_len(
+                reader_, term.data(), term.size());
         }();
 
         auto res = RustResultWrapper(array);
@@ -825,9 +863,10 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_lower_bound_range_query_keyword(
+                return tantivy_lower_bound_range_query_keyword_with_len(
                     reader_,
-                    static_cast<std::string>(lower_bound).c_str(),
+                    lower_bound.data(),
+                    lower_bound.size(),
                     inclusive,
                     bitset);
             }
@@ -880,9 +919,10 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_upper_bound_range_query_keyword(
+                return tantivy_upper_bound_range_query_keyword_with_len(
                     reader_,
-                    static_cast<std::string>(upper_bound).c_str(),
+                    upper_bound.data(),
+                    upper_bound.size(),
                     inclusive,
                     bitset);
             }
@@ -946,13 +986,14 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_range_query_keyword(
-                    reader_,
-                    static_cast<std::string>(lower_bound).c_str(),
-                    static_cast<std::string>(upper_bound).c_str(),
-                    lb_inclusive,
-                    ub_inclusive,
-                    bitset);
+                return tantivy_range_query_keyword_with_len(reader_,
+                                                            lower_bound.data(),
+                                                            lower_bound.size(),
+                                                            upper_bound.data(),
+                                                            upper_bound.size(),
+                                                            lb_inclusive,
+                                                            ub_inclusive,
+                                                            bitset);
             }
 
             if constexpr (std::is_same_v<T, milvus::UUID>) {
@@ -1066,8 +1107,12 @@ struct TantivyIndexWrapper {
                       uintptr_t min_gram,
                       uintptr_t max_gram,
                       void* bitset) {
-        auto array = tantivy_ngram_match_query(
-            reader_, literal.c_str(), min_gram, max_gram, bitset);
+        auto array = tantivy_ngram_match_query(reader_,
+                                               literal.data(),
+                                               literal.size(),
+                                               min_gram,
+                                               max_gram,
+                                               bitset);
         auto res = RustResultWrapper(array);
         AssertTantivyOk(res,
                         "TantivyIndexWrapper.ngram_match_query: {}",
@@ -1085,25 +1130,33 @@ struct TantivyIndexWrapper {
                    uintptr_t min_gram,
                    uintptr_t max_gram) {
         std::vector<const char*> c_literals;
+        std::vector<uintptr_t> c_literal_lens;
         c_literals.reserve(literals.size());
+        c_literal_lens.reserve(literals.size());
         for (const auto& lit : literals) {
-            c_literals.push_back(lit.c_str());
+            c_literals.push_back(lit.data());
+            c_literal_lens.push_back(lit.size());
         }
 
-        auto array = tantivy_ngram_tokenize(
-            reader_, c_literals.data(), c_literals.size(), min_gram, max_gram);
+        auto array = tantivy_ngram_tokenize(reader_,
+                                            c_literals.data(),
+                                            c_literal_lens.data(),
+                                            c_literals.size(),
+                                            min_gram,
+                                            max_gram);
         auto res = RustResultWrapper(array);
         AssertTantivyOk(
             res, "TantivyIndexWrapper.ngram_tokenize: {}", res.result_->error);
         AssertInfo(res.result_->value.tag == Value::Tag::RustStringArray,
                    "TantivyIndexWrapper.ngram_tokenize: invalid result type");
 
-        // Convert RustStringArray to std::vector<std::string>
+        // Convert RustStringArray (byte strings with explicit lengths, not
+        // NUL-terminated) to std::vector<std::string>
         auto& rust_array = res.result_->value.rust_string_array._0;
         std::vector<std::string> result;
         result.reserve(rust_array.len);
         for (size_t i = 0; i < rust_array.len; i++) {
-            result.emplace_back(rust_array.array[i]);
+            result.emplace_back(rust_array.array[i], rust_array.lens[i]);
         }
         return result;
     }
@@ -1111,8 +1164,8 @@ struct TantivyIndexWrapper {
     // Get the posting list for a single ngram term.
     void
     ngram_term_posting_list(const std::string& term, void* bitset) {
-        auto array =
-            tantivy_ngram_term_posting_list(reader_, term.c_str(), bitset);
+        auto array = tantivy_ngram_term_posting_list(
+            reader_, term.data(), term.size(), bitset);
         auto res = RustResultWrapper(array);
         AssertTantivyOk(res,
                         "TantivyIndexWrapper.ngram_term_posting_list: {}",
@@ -1230,8 +1283,12 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_json_term_query_keyword(
-                    reader_, json_path.c_str(), term.c_str(), bitset);
+                return tantivy_json_term_query_keyword_with_len(
+                    reader_,
+                    json_path.c_str(),
+                    term.data(),
+                    term.size(),
+                    bitset);
             }
 
             // fmt::format returns a std::string; throwing it means catch
@@ -1390,10 +1447,19 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                std::vector<const char*> c_strs(n);
-                for (size_t i = 0; i < n; ++i) c_strs[i] = values[i].c_str();
-                return tantivy_json_terms_query_keyword(
-                    reader_, json_path.c_str(), c_strs.data(), n, bitset);
+                std::vector<const char*> views(n);
+                std::vector<size_t> lengths(n);
+                for (size_t i = 0; i < n; ++i) {
+                    views[i] = values[i].data();
+                    lengths[i] = values[i].size();
+                }
+                return tantivy_json_terms_query_keyword_with_len(
+                    reader_,
+                    json_path.c_str(),
+                    views.data(),
+                    lengths.data(),
+                    n,
+                    bitset);
             }
 
             // fmt::format returns a std::string; throwing it means catch
@@ -1488,15 +1554,18 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_json_range_query_keyword(reader_,
-                                                        json_path.c_str(),
-                                                        lower_bound.c_str(),
-                                                        upper_bound.c_str(),
-                                                        lb_unbounded,
-                                                        ub_unbounded,
-                                                        lb_inclusive,
-                                                        ub_inclusive,
-                                                        bitset);
+                return tantivy_json_range_query_keyword_with_len(
+                    reader_,
+                    json_path.c_str(),
+                    lower_bound.data(),
+                    lower_bound.size(),
+                    upper_bound.data(),
+                    upper_bound.size(),
+                    lb_unbounded,
+                    ub_unbounded,
+                    lb_inclusive,
+                    ub_inclusive,
+                    bitset);
             }
 
             // fmt::format returns a std::string; throwing it means catch

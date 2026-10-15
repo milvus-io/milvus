@@ -33,7 +33,7 @@
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/Utils.h"
 #include "segcore/storagev2translator/AsyncLoadException.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
 #include "storage/LoadAdmissionController.h"
@@ -235,8 +235,8 @@ LoadWindowAsync(const int64_t segment_id,
         }
 
         result_slot = co_await folly::coro::co_withExecutor(
-            ResolveAsyncLoadExecutor(std::move(finalization_executor),
-                                     load_priority),
+            storage::ResolveAsyncLoadExecutor(std::move(finalization_executor),
+                                              load_priority),
             FinalizeWindowAsync(segment_id,
                                 cancellation_token,
                                 std::move(window),
@@ -495,7 +495,7 @@ LoadCellsAsync(const milvus::OpContext* ctx,
                CellFinalizeFunc finalize_cell,
                AsyncLoadPipelineOptions options) {
     try {
-        auto executor_keep_alive = ResolveAsyncLoadExecutor(
+        auto executor_keep_alive = storage::ResolveAsyncLoadExecutor(
             std::move(options.executor), options.load_priority);
         auto finalization_executor_provider =
             std::move(options.finalization_executor_provider);

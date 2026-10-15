@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -33,6 +35,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -54,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -63,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -87,6 +92,12 @@ const (
 	attempts      = 1000000
 	sleepDuration = time.Millisecond * 200
 )
+
+type fileResourceSyncListenerFunc func(fileresource.SyncEvent) error
+
+func (f fileResourceSyncListenerFunc) OnFileResourceSync(event fileresource.SyncEvent) error {
+	return f(event)
+}
 
 const (
 	// Collection and partition naming
@@ -2450,6 +2461,27 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("load default partition for AutoID upsert", func(t *testing.T) {
+		collectionID, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
+		assert.NoError(t, err)
+		defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
+		resp, err := proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionNames: []string{defaultPartitionName},
+			ReplicaNumber:  1,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+		for attempt := 0; !checkPartitionInMemory(t, ctx, proxy, dbName, collectionName, defaultPartitionName, collectionID); attempt++ {
+			if attempt >= 100 {
+				t.Fatal("default partition was not loaded for AutoID upsert")
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+
 	t.Run("upsert when autoID == true", func(t *testing.T) {
 		// autoID==true but not pass pk in upsert, failed
 		req := constructCollectionUpsertRequestNoPK(dbName, collectionName, floatVecField, binaryVecField, structField, schema, rowNum, dim)
@@ -2545,6 +2577,16 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, mixedUpsertResp.GetStatus().GetErrorCode(),
 			"reason: %s", mixedUpsertResp.GetStatus().GetReason())
 		assert.Equal(t, int64(halfRows), mixedUpsertResp.UpsertCnt)
+	})
+
+	t.Run("release default partition after AutoID upsert", func(t *testing.T) {
+		resp, err := proxy.ReleasePartitions(ctx, &milvuspb.ReleasePartitionsRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionNames: []string{Params.CommonCfg.DefaultPartitionName.GetValue()},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
 	t.Run("release partition", func(t *testing.T) {
@@ -2689,6 +2731,10 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("truncate collection", func(t *testing.T) {
+		// Completion must not wait for Summary's 600-second backlog flush.
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
 		_, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
@@ -3694,6 +3740,7 @@ func TestProxy(t *testing.T) {
 	testProxyPrivilegeTimeout(shortCtx, t, proxy)
 
 	schema = constructTestCollectionSchema(collectionName, int64Field, floatVecField, binaryVecField, structField, dim)
+	schema.Fields[0].AutoID = false
 	createCollectionReq = constructTestCreateCollectionRequest(dbName, collectionName, schema, shardsNum)
 
 	t.Run("create collection upsert valid", func(t *testing.T) {
@@ -4408,6 +4455,38 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
+	t.Run("test get all compaction tasks by collection", func(t *testing.T) {
+		metaCache := NewMockCache(t)
+		metaCache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(100), nil)
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error) {
+			assert.Equal(t, int64(100), request.GetCollectionId())
+			assert.Equal(t, "collection", request.GetCollectionName())
+			return &milvuspb.GetCompactionPlansResponse{Status: merr.Success()}, nil
+		})
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: metaCache}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			DbName:         "db",
+			CollectionName: "collection",
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
+	t.Run("test ignore client supplied collection id", func(t *testing.T) {
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error) {
+			assert.Equal(t, int64(10), request.GetCompactionID())
+			assert.Zero(t, request.GetCollectionId())
+			return &milvuspb.GetCompactionPlansResponse{Status: merr.Success()}, nil
+		})
+		proxy := &Proxy{mixCoord: mixCoord}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			CompactionID: 10,
+			CollectionId: 999,
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
 	t.Run("test get compaction state with plans with unhealthy proxy", func(t *testing.T) {
 		mixCoord := &MixCoordMock{}
 		proxy := &Proxy{mixCoord: mixCoord}
@@ -4466,6 +4545,73 @@ func TestProxy_SyncFileResource(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, merr.Error(status))
 	})
+
+	t.Run("sync mode downloads and notifies", func(t *testing.T) {
+		paramtable.Init()
+		params := paramtable.Get()
+		localStoragePath := t.TempDir()
+		require.NoError(t, params.Save(params.LocalStorageCfg.Path.Key, localStoragePath))
+		t.Cleanup(func() {
+			require.NoError(t, params.Reset(params.LocalStorageCfg.Path.Key))
+		})
+
+		sourcePath := t.TempDir()
+		remotePath := filepath.Join(sourcePath, "remote", "test.whl")
+		wheelContent := []byte("trusted wheel content")
+		downloader := storage.NewLocalChunkManager(objectstorage.RootPath(sourcePath))
+		require.NoError(t, downloader.Write(context.Background(), remotePath, wheelContent))
+
+		manager := fileresource.NewManager(downloader, fileresource.SyncMode)
+		fileresource.GlobalFileManager = manager
+		t.Cleanup(manager.Close)
+
+		events := make(chan fileresource.SyncEvent, 1)
+		listenerName := "proxy-sync-file-resource-test"
+		fileresource.RegisterListener(listenerName, fileResourceSyncListenerFunc(func(event fileresource.SyncEvent) error {
+			events <- event
+			return nil
+		}))
+		t.Cleanup(func() {
+			fileresource.UnregisterListener(listenerName)
+		})
+		t.Cleanup(func() {
+			require.NoError(t, manager.Sync(context.Background(), 2, nil))
+		})
+
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{
+			Version: 1,
+			Resources: []*internalpb.FileResourceInfo{
+				{
+					Id:   10,
+					Name: "test.whl",
+					Path: remotePath,
+				},
+			},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+		require.Equal(t, fileresource.SyncMode, manager.Mode())
+		require.Equal(t, uint64(1), manager.GetVersion())
+
+		select {
+		case event := <-events:
+			require.Equal(t, uint64(1), event.Version)
+			require.Len(t, event.Resources, 1)
+			resource := event.Resources[0]
+			require.Equal(t, int64(10), resource.ID)
+			require.Equal(t, "test.whl", resource.Name)
+			require.Equal(t, remotePath, resource.Path)
+			require.NotEmpty(t, resource.LocalPath)
+			require.Contains(t, resource.LocalPath, localStoragePath)
+			content, err := os.ReadFile(resource.LocalPath)
+			require.NoError(t, err)
+			require.Equal(t, wheelContent, content)
+		default:
+			t.Fatal("file resource listener was not notified")
+		}
+	})
 }
 
 func TestProxy_GetComponentStates(t *testing.T) {
@@ -4502,7 +4648,12 @@ func TestProxy_Import(t *testing.T) {
 		mc := NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+			CollectionSchema: &schemapb.CollectionSchema{Name: "dummy", Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		}, nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "dummy", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
@@ -4905,4 +5056,10 @@ func TestProxy_IsDQLQueueFull(t *testing.T) {
 		name:          "query",
 	}))
 	assert.True(t, node.IsDQLQueueFull())
+}
+
+func getMixCoordClient() *mocks.MockMixCoordClient {
+	mixc := &mocks.MockMixCoordClient{}
+	mixc.EXPECT().Close().Return(nil)
+	return mixc
 }

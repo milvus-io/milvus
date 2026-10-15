@@ -138,7 +138,8 @@ DiskFileManagerImpl::LocalDirWriteLease::Release() noexcept {
 DiskFileManagerImpl::DiskFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta),
+                      fileManagerContext.indexMeta,
+                      fileManagerContext.use_async_load),
       file_path_generation_(
           g_file_path_generation.fetch_add(1, std::memory_order_relaxed)) {
     rcm_ = fileManagerContext.chunkManagerPtr;
@@ -659,7 +660,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         config, INSERT_FILES_KEY);
     AssertInfo(insert_files.has_value(),
                "insert file paths is empty when build index");
-    auto remote_files = insert_files.value();
+    auto& remote_files = insert_files.value();
     SortByPath(remote_files);
 
     auto local_chunk_manager =
@@ -880,7 +881,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
             if (offsets != nullptr) {
                 // Add cumulative offset (number of vectors processed so far)
                 size_t last_offset = offsets->back();
-                offsets->push_back(last_offset + vec_array->length());
+                offsets->push_back(last_offset + vec_array->physical_length());
             }
 
             if (size > 0) {
@@ -941,10 +942,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
             config, SEGMENT_INSERT_FILES_KEY);
     AssertInfo(segment_insert_files.has_value(),
                "segment insert files is empty when build index");
-    auto all_remote_files = segment_insert_files.value();
-    for (auto& remote_files : all_remote_files) {
-        SortByPath(remote_files);
-    }
+    auto& all_remote_files = segment_insert_files.value();
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -1066,6 +1064,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         }
     } else {
         for (auto& remote_files_group : all_remote_files) {
+            // Dense-vector pagination splits the group into single-file
+            // reads. Order the complete group before that split; the shared
+            // reader can only validate each single-file page afterwards.
+            if (manifest_path_str.empty()) {
+                SortBinlogPaths(remote_files_group);
+            }
             if (dim >
                 0) {  // for vector indices try to use limited RAM when loading
                 cached_already = true;
@@ -1371,7 +1375,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
     }
 
     // legacy path
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();
     if (num_of_fields > 1) {
         ThrowInfo(
@@ -1440,12 +1444,9 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v2(const Config& config) {
     AssertInfo(segment_insert_files.has_value(),
                "segment insert files is empty when build index while "
                "caching opt fields");
-    auto remote_files_storage_v2 = segment_insert_files.value();
-    for (auto& remote_files : remote_files_storage_v2) {
-        SortByPath(remote_files);
-    }
+    auto& remote_files_storage_v2 = segment_insert_files.value();
 
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return "";
@@ -1507,7 +1508,7 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
     if (!opt_fields.has_value()) {
         return "";
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return "";

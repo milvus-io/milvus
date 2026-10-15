@@ -2107,7 +2107,10 @@ func (data *TimestamptzFieldData) GetDataType() schemapb.DataType {
 func (data *StringFieldData) GetDataType() schemapb.DataType { return data.DataType }
 func (data *UUIDFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_UUID }
 func (data *ArrayFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Array }
-func (data *JSONFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_JSON }
+func (data *ArrayFieldData) GetElementType() schemapb.DataType {
+	return data.ElementType
+}
+func (data *JSONFieldData) GetDataType() schemapb.DataType { return schemapb.DataType_JSON }
 func (data *GeometryFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Geometry
 }

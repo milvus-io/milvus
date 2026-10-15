@@ -152,7 +152,7 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		if err := t.saveSegmentMeta(result); err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to save segment meta", mlog.Err(err))
 			if errors.Is(err, merr.ErrIllegalCompactionPlan) {
-				err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+				err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 				if err != nil {
 					mlog.Warn(context.TODO(), "mixCompactionTask failed to setState failed", mlog.Err(err))
 				}
@@ -164,7 +164,7 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
 		return
 	case datapb.CompactionTaskState_timeout:
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout), setFailReason("DataNode reported compaction timeout"))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
@@ -179,7 +179,8 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		}
 	default:
 		mlog.Error(context.TODO(), "not support compaction task state", mlog.String("state", result.GetState().String()))
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(fmt.Sprintf("DataNode returned unsupported compaction state: %s", result.GetState().String())))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
@@ -250,6 +251,15 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 		case getBuildIndexChSingleton() <- newSegID:
 		default:
 		}
+	}
+
+	// The SegmentMeta mutation is committed (inputs dropped, outputs visible,
+	// manifest versions advanced); schedule an asynchronous DataView snapshot
+	// reconciliation. The recompute runs on the latest SegmentMeta, so it
+	// observes both the output publish and the input retirement in one
+	// projection.
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))

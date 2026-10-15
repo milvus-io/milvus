@@ -25,6 +25,7 @@
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "common/Exception.h"
+#include "common/Json.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -215,7 +216,7 @@ struct ColumnInfo {
             std::to_string(field_id_.get()),
             data_type_,
             element_type_,
-            milvus::Join<std::string>(nested_path_, ","),
+            milvus::Json::pointer(nested_path_),
             element_level_);
     }
 };
@@ -419,13 +420,13 @@ class UnaryRangeFilterExpr : public ITypeFilterExpr {
         const ColumnInfo& column,
         proto::plan::OpType op_type,
         const proto::plan::GenericValue& val,
-        const std::vector<proto::plan::GenericValue>& extra_values =
+        std::vector<proto::plan::GenericValue> extra_values =
             std::vector<proto::plan::GenericValue>{})
         : ITypeFilterExpr(),
           column_(column),
           op_type_(op_type),
           val_(val),
-          extra_values_(extra_values) {
+          extra_values_(std::move(extra_values)) {
     }
 
     std::string
@@ -550,11 +551,11 @@ class LogicalUnaryExpr : public ITypeFilterExpr {
 class TermFilterExpr : public ITypeFilterExpr {
  public:
     explicit TermFilterExpr(const ColumnInfo& column,
-                            const std::vector<proto::plan::GenericValue>& vals,
+                            std::vector<proto::plan::GenericValue> vals,
                             bool is_in_field = false)
         : ITypeFilterExpr(),
           column_(column),
-          vals_(vals),
+          vals_(std::move(vals)),
           is_in_field_(is_in_field) {
     }
 
@@ -772,7 +773,7 @@ class NullExpr : public ITypeFilterExpr {
 
 class CallExpr : public ITypeFilterExpr {
  public:
-    CallExpr(const std::string fun_name,
+    CallExpr(std::string fun_name,
              const std::vector<TypedExprPtr>& parameters,
              const exec::expression::FilterFunctionPtr function_ptr)
         : fun_name_(std::move(fun_name)), function_ptr_(function_ptr) {

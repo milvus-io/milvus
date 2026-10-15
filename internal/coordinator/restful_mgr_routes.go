@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	pkgconfig "github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -65,6 +66,7 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			management.Register(&management.Handler{
 				Path:        route.path,
 				HandlerFunc: route.handler,
+				AdminAuth:   true,
 			})
 		}
 	})
@@ -1147,7 +1149,8 @@ func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) 
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&requestBody); err != nil {
-		logger.Info(req.Context(), "HandleAlterWAL failed to decode request body", mlog.Err(err))
+		// Decoder errors may quote request keys and credential values.
+		logger.Info(req.Context(), "HandleAlterWAL failed to decode request body")
 		http.Error(w, `{"msg": "Invalid request body"}`, http.StatusBadRequest)
 		return
 	}
@@ -1182,9 +1185,11 @@ func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) 
 		}
 	}
 
+	// Both keys and values are request payload. A caller can put secret material
+	// in either, so logs retain only the number of supplied options.
 	logger.Info(req.Context(), "HandleAlterWAL start",
 		mlog.String("targetWAL", requestBody.TargetWALName),
-		mlog.Any("config", requestBody.Config))
+		mlog.Int("configCount", len(requestBody.Config)))
 
 	if err := s.broadcastAlterWALMessage(req.Context(), commonpb.WALName(targetWAL), requestBody.Config); err != nil {
 		logger.Info(req.Context(), "HandleAlterWAL failed to broadcast AlterWALMessage",
@@ -1232,7 +1237,7 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 
 	logger.Info(ctx, "broadcastAlterWALMessage success",
 		mlog.Int("pChannelCount", len(result.AppendResults)),
-		mlog.Uint64("broadcastID", result.BroadcastID))
+		mlog.FieldBroadcastID(result.BroadcastID))
 
 	return nil
 }
@@ -1298,7 +1303,8 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	}
 
 	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
-		logger.Info(request.Context(), "HandleAlterConfig failed to decode request body", mlog.Err(err))
+		// Decoder errors may quote request keys and credential values.
+		logger.Info(request.Context(), "HandleAlterConfig failed to decode request body")
 		writeJSONError(writer, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -1326,27 +1332,44 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		// Check for duplicate keys
+		// Preserve the existing write contract independently of read visibility:
+		// validate and deduplicate the caller's spelling, then let etcd storage
+		// apply its usual key formatting. Sensitivity only controls projections
+		// and logging; it does not add a write restriction.
 		if _, exists := seen[config.Key]; exists {
-			logger.Info(request.Context(), "HandleAlterConfig duplicate key found", mlog.String("key", config.Key))
+			logger.Info(request.Context(), "HandleAlterConfig duplicate key found")
 			writeJSONError(writer, fmt.Sprintf("duplicate key found: %s", config.Key), http.StatusBadRequest)
 			return
 		}
 		seen[config.Key] = struct{}{}
 
-		// Check if it's mqtype configuration
-		normalizedKey := strings.ToLower(strings.ReplaceAll(config.Key, "/", "."))
-		if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype",
-				mlog.String("key", config.Key))
+		// The identity the key is stored under, shared with pkg/config rather
+		// than recomputed here: separators are stripped, not translated, so a
+		// hand-rolled normalization would let common_security_adminAuthEnabled
+		// -- or the separator-free spelling -- land on the same etcd key while
+		// missing every guard below.
+		normalizedKey := pkgconfig.FormatKey(config.Key)
+		if strings.Contains(normalizedKey, "mqtype") {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype")
 			writeJSONError(writer, fmt.Sprintf("mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+
+		// The management-plane auth gate is not settable here. This endpoint is
+		// itself behind that gate, so allowing it would mean: while the gate is
+		// off, anyone who can reach port 9091 -- the exposure the gate exists to
+		// close -- writes false into etcd, and because the etcd source outranks
+		// file and env, the operator's later adminAuthEnabled: true in yaml
+		// never takes effect and nothing says so.
+		if normalizedKey == pkgconfig.FormatKey(paramtable.Get().CommonCfg.AdminAuthEnabled.Key) {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify the management auth gate")
+			writeJSONError(writer, fmt.Sprintf("%s cannot be modified through this endpoint; set it in the configuration file. Invalid key: %s", paramtable.Get().CommonCfg.AdminAuthEnabled.Key, config.Key), http.StatusBadRequest)
 			return
 		}
 
 		// Check if the configuration is immutable - immutable keys cannot be modified
 		if paramMgr.IsImmutable(config.Key) {
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify immutable config",
-				mlog.String("key", config.Key))
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify immutable config")
 			writeJSONError(writer, fmt.Sprintf("immutable configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
 			return
 		}
@@ -1370,19 +1393,17 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	// AlterConfigsInEtcd also proactively refreshes the local EtcdSource so that the write
 	// is immediately visible in this process before we return.
 	if err := paramMgr.AlterConfigsInEtcd(etcdSource, configsToUpdate, keysToDelete); err != nil {
-		logger.Info(request.Context(), "HandleAlterConfig failed to atomically alter configs in etcd",
-			mlog.Any("updates", configsToUpdate),
-			mlog.Strings("deletes", keysToDelete),
+		logger.Error(request.Context(), "HandleAlterConfig failed to atomically alter configs in etcd",
+			mlog.Int("updateCount", len(configsToUpdate)),
+			mlog.Int("deleteCount", len(keysToDelete)),
 			mlog.Err(err))
 		writeJSONError(writer, fmt.Sprintf("failed to atomically alter configurations in etcd: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	logger.Info(request.Context(), "HandleAlterConfig success",
-		mlog.Int("updates", len(configsToUpdate)),
-		mlog.Int("deletes", len(keysToDelete)),
-		mlog.Any("updated", configsToUpdate),
-		mlog.Strings("deleted", keysToDelete))
+		mlog.Int("updateCount", len(configsToUpdate)),
+		mlog.Int("deleteCount", len(keysToDelete)))
 
 	writeJSONResponse(writer, http.StatusOK, map[string]string{"msg": "OK"})
 }
@@ -1423,17 +1444,15 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 		if key == "" {
 			continue
 		}
-		// Redact sensitive config keys (passwords, secrets, tokens).
-		normalizedKey := strings.ToLower(key)
-		if strings.Contains(normalizedKey, "password") || strings.Contains(normalizedKey, "secret") ||
-			strings.Contains(normalizedKey, "token") || strings.Contains(normalizedKey, "credential") {
-			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
-			continue
-		}
-		source, value, err := paramMgr.GetConfig(key)
-		if err != nil {
+		source, value, err := paramMgr.GetRegisteredConfig(key)
+		switch {
+		case errors.Is(err, pkgconfig.ErrKeyUnregistered):
+			results = append(results, configResult{Key: key, Error: "access to unregistered config key is denied"})
+		case errors.Is(err, pkgconfig.ErrKeySensitive):
+			results = append(results, configResult{Key: key, Value: pkgconfig.RedactedValue})
+		case err != nil:
 			results = append(results, configResult{Key: key, Error: err.Error()})
-		} else {
+		default:
 			results = append(results, configResult{Key: key, Value: value, Source: source})
 		}
 	}

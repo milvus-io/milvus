@@ -11,10 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/mock_wab"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/timetick/mock_inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/config"
@@ -63,7 +65,7 @@ func TestScannerAdaptorReadError(t *testing.T) {
 			MessageFilter: nil,
 		},
 		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
-		func() {}, false)
+		func() {}, scannerConfig{})
 	// wait for timetick inspector first round
 	<-sig1.CloseCh()
 	// wait for scanner backoff 2 rounds
@@ -92,12 +94,14 @@ func TestScannerAdaptorStopsOnCorruptedChunk(t *testing.T) {
 	innerScanner.EXPECT().Close().Return(nil).Once()
 
 	l := mock_walimpls.NewMockWALImpls(t)
-	l.EXPECT().Channel().Return(types.PChannelInfo{})
+	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRO})
 	l.EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
 
-	s := newScannerAdaptor("corrupted-chunk", l, wal.ReadOption{
-		DeliverPolicy: options.DeliverPolicyAll(),
-	}, metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(), func() {}, true)
+	s := newScannerAdaptor("scanner", l,
+		wal.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(0)), IgnorePauseConsumption: true},
+		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(), func() {}, scannerConfig{})
+
+	t.Cleanup(func() { _ = s.Close() })
 
 	select {
 	case <-s.Done():
@@ -129,6 +133,47 @@ func TestCatchupScannerDeliversOnlyReassembledLogicalMessages(t *testing.T) {
 	require.Len(t, captured, 1)
 	assert.Equal(t, payload, captured[0].IntoImmutableMessageProto().GetPayload())
 	assert.False(t, message.IsChunkedPayload(captured[0]))
+}
+
+func TestScannerAdaptorWaitsForTimeTickOperator(t *testing.T) {
+	resource.InitForTest(t)
+
+	pchannel := types.PChannelInfo{Name: "test-pchannel", AccessMode: types.AccessModeRW}
+	l := mock_walimpls.NewMockWALImpls(t)
+	l.EXPECT().Channel().Return(pchannel)
+	scanner := &scannerAdaptorImpl{
+		logger:        mlog.With(),
+		innerWAL:      l,
+		ScannerHelper: helper.NewScannerHelper("test"),
+	}
+
+	done := make(chan wab.ROWriteAheadBuffer, 1)
+	go func() {
+		wb, err := scanner.waitWriteAheadBuffer()
+		assert.NoError(t, err)
+		done <- wb
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("write ahead buffer should wait until timetick operator is registered")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	wb := mock_wab.NewMockROWriteAheadBuffer(t)
+	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
+	operator.EXPECT().Channel().Return(pchannel)
+	operator.EXPECT().WriteAheadBuffer().Return(wb)
+	operator.EXPECT().Sync(mock.Anything, mock.Anything).Maybe()
+	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
+	defer resource.Resource().TimeTickInspector().UnregisterSyncOperator(operator)
+
+	select {
+	case got := <-done:
+		assert.Equal(t, wb, got)
+	case <-time.After(time.Second):
+		t.Fatal("wait write ahead buffer timeout")
+	}
 }
 
 func TestPauseConsumption(t *testing.T) {
@@ -173,4 +218,100 @@ func TestPauseConsumption(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("wait until start consumption timeout")
 	}
+}
+
+func TestRecoveryBarrierConfirmsBufferedMessages(t *testing.T) {
+	scanner := &scannerAdaptorImpl{
+		logger: mlog.With(),
+		readOption: wal.ReadOption{
+			IgnorePauseConsumption: true,
+		},
+		filterFunc:      func(message.ImmutableMessage) bool { return true },
+		reorderBuffer:   utility.NewReOrderBuffer(),
+		pendingQueue:    utility.NewPendingQueue(),
+		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		cleanup:         func() {},
+		ScannerHelper:   helper.NewScannerHelper("test"),
+		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
+		readRateCounter: utility.NewAverageRateCounter(time.Second),
+	}
+	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, true)
+	barrier := newScannerTestMessage(t, 20, "", message.MessageTypeRecoveryBarrier, true)
+
+	scanner.handleUpstream(msg)
+	assert.Equal(t, 1, scanner.reorderBuffer.Len())
+	assert.Equal(t, 0, scanner.pendingQueue.Len())
+
+	scanner.handleUpstream(barrier)
+
+	assert.Equal(t, 0, scanner.reorderBuffer.Len())
+	assert.Equal(t, 2, scanner.pendingQueue.Len())
+	assert.Equal(t, msg, scanner.pendingQueue.Next())
+	scanner.pendingQueue.UnsafeAdvance()
+	assert.Equal(t, barrier, scanner.pendingQueue.Next())
+}
+
+func TestTimeTickPreservesLegacyDeliverySemantics(t *testing.T) {
+	scanner := &scannerAdaptorImpl{
+		logger: mlog.With(),
+		readOption: wal.ReadOption{
+			IgnorePauseConsumption: true,
+		},
+		filterFunc:      func(message.ImmutableMessage) bool { return true },
+		reorderBuffer:   utility.NewReOrderBuffer(),
+		pendingQueue:    utility.NewPendingQueue(),
+		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		cleanup:         func() {},
+		ScannerHelper:   helper.NewScannerHelper("test"),
+		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
+		readRateCounter: utility.NewAverageRateCounter(time.Second),
+	}
+	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, true)
+	timeTick := newScannerTestMessage(t, 20, "", message.MessageTypeTimeTick, true)
+
+	scanner.handleUpstream(msg)
+	scanner.handleUpstream(timeTick)
+
+	assert.Equal(t, 0, scanner.reorderBuffer.Len())
+	assert.Equal(t, 2, scanner.pendingQueue.Len())
+	assert.Equal(t, msg, scanner.pendingQueue.Next())
+	scanner.pendingQueue.UnsafeAdvance()
+	assert.Equal(t, timeTick, scanner.pendingQueue.Next())
+
+	scanner.pendingQueue.UnsafeAdvance()
+	nonPersistedTimeTick := newScannerTestMessage(t, 30, "", message.MessageTypeTimeTick, false)
+	scanner.handleUpstream(nonPersistedTimeTick)
+	assert.Equal(t, 1, scanner.pendingQueue.Len())
+	assert.Equal(t, nonPersistedTimeTick, scanner.pendingQueue.Next())
+}
+
+func newScannerTestMessage(
+	t *testing.T,
+	timetick uint64,
+	vchannel string,
+	msgType message.MessageType,
+	persisted bool,
+) message.ImmutableMessage {
+	t.Helper()
+	var msg message.MutableMessage
+	switch msgType {
+	case message.MessageTypeInsert:
+		msg = message.NewInsertMessageBuilderV1().WithVChannel(vchannel).
+			WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable()
+	case message.MessageTypeRecoveryBarrier:
+		msg = message.NewRecoveryBarrierMessageBuilderV2().WithAllVChannel().
+			WithHeader(&message.RecoveryBarrierMessageHeader{}).
+			WithBody(&message.RecoveryBarrierMessageBody{}).MustBuildMutable()
+	case message.MessageTypeTimeTick:
+		builder := message.NewTimeTickMessageBuilderV1().WithAllVChannel().
+			WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{})
+		if !persisted {
+			builder.WithNotPersisted()
+		}
+		msg = builder.MustBuildMutable()
+	default:
+		t.Fatalf("unsupported test message type: %s", msgType)
+	}
+	return msg.WithTimeTick(timetick).WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick)))
 }

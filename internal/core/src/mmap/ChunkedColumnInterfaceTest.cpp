@@ -389,6 +389,7 @@ CreateNullableEmptyArrayColumn() {
                          DataType::ARRAY,
                          DataType::INT64,
                          /*nullable=*/true,
+                         /*element_nullable=*/false,
                          std::nullopt);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
         std::move(translator), nullptr);
@@ -501,10 +502,11 @@ struct ChunkedVectorArrayColumnFactory {
         FieldMeta fm(FieldName("va"),
                      FieldId(kVectorArrayFieldId),
                      DataType::VECTOR_ARRAY,
+                     DataType::VECTOR_FLOAT,
                      kVectorArrayDim,
                      knowhere::metric::L2,
                      /*nullable=*/true,
-                     std::nullopt);
+                     /*element_nullable=*/false);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
             std::move(translator), nullptr);
         auto column =
@@ -534,10 +536,11 @@ struct ProxyVectorArrayColumnFactory {
         FieldMeta fm(FieldName("va"),
                      FieldId(kVectorArrayFieldId),
                      DataType::VECTOR_ARRAY,
+                     DataType::VECTOR_FLOAT,
                      kVectorArrayDim,
                      knowhere::metric::L2,
                      /*nullable=*/true,
-                     std::nullopt);
+                     /*element_nullable=*/false);
         auto column = std::make_shared<ProxyChunkColumn>(
             group, FieldId(kVectorArrayFieldId), fm);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),
@@ -638,6 +641,32 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsNonNullableIsNoop) {
     EXPECT_FALSE(fx.column->GetOffsetMapping().IsEnabled());
     EXPECT_EQ(fx.column->GetValidCountInChunk(0), 5);
     EXPECT_TRUE(fx.fetched->empty());
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BulkIsValidWithoutOffsetsTraversesNullableColumn) {
+    ColumnSpec spec{{3, 2},
+                    {{true, false, true}, {false, true}},
+                    /*nullable=*/true};
+    auto fx = TypeParam::Create(spec);
+
+    std::vector<std::pair<size_t, bool>> validity;
+    fx.column->BulkIsValid(
+        nullptr,
+        [&](bool valid, size_t offset) {
+            validity.emplace_back(offset, valid);
+        },
+        nullptr,
+        0);
+
+    EXPECT_EQ(validity,
+              (std::vector<std::pair<size_t, bool>>{
+                  {0, true},
+                  {1, false},
+                  {2, true},
+                  {3, false},
+                  {4, true},
+              }));
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
@@ -812,6 +841,37 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
                         ChunkedColumnInterface::ScanOptions::ForData(
                             0, ChunkedColumnInterface::TargetType::Int32)),
         std::exception);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, RawFormatScanDoesNotSupportUnaryRowIds) {
+    ColumnSpec spec{{5}, {{true, false, true, true, false}}, true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(3);
+    auto options = ChunkedColumnInterface::ScanOptions::ForUnary(
+        0, proto::plan::OpType::Equal, value);
+
+    EXPECT_FALSE(fx.column->SupportsScanPushdown(options));
+    EXPECT_EQ(fx.column->Scan(nullptr, options), nullptr);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           RawFormatScanDoesNotSupportBinaryRangeRowIds) {
+    ColumnSpec spec{{5}, {{true, false, true, true, false}}, true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    proto::plan::GenericValue lower;
+    proto::plan::GenericValue upper;
+    lower.set_int64_val(1);
+    upper.set_int64_val(10);
+    auto options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(
+        0, lower, true, upper, true);
+
+    EXPECT_FALSE(fx.column->SupportsScanPushdown(options));
+    EXPECT_EQ(fx.column->Scan(nullptr, options), nullptr);
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
@@ -1403,6 +1463,63 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
+           NullableSkipMayOmitValidityOnlyForNullRejectingConsumer) {
+    for (const bool needs_validity : {false, true}) {
+        for (const bool prefetch : {false, true}) {
+            ColumnSpec spec{{2, 2}, {{false, true}, {true, true}}, true};
+            spec.data_type = DataType::INT32;
+            auto fx = TypeParam::Create(spec);
+            auto filter = std::make_shared<const detail::ColumnFilter>(
+                detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+                [](int64_t) { return true; },
+                needs_validity);
+            auto options = ChunkedColumnInterface::ScanOptions::ForData(
+                0,
+                ChunkedColumnInterface::TargetType::Int32,
+                ChunkedColumnInterface::ScanPinPolicy::CursorOwned,
+                prefetch);
+            options.filter = filter;
+            auto cursor = fx.column->Scan(nullptr, options);
+            ASSERT_NE(cursor, nullptr);
+            ChunkedColumnInterface::ScanBatch batch;
+            ASSERT_TRUE(cursor->Next(
+                4,
+                ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                &batch));
+            EXPECT_TRUE(batch.data_skipped);
+            EXPECT_TRUE(batch.values.empty());
+            if (needs_validity) {
+                ASSERT_TRUE(batch.validity);
+                EXPECT_FALSE(batch.validity[0]);
+                EXPECT_TRUE(batch.validity[1]);
+                EXPECT_FALSE(fx.pin_requests->empty());
+            } else {
+                EXPECT_FALSE(batch.validity);
+                EXPECT_TRUE(fx.pin_requests->empty());
+            }
+
+            const int32_t offsets[] = {0, 1, 0};
+            auto take = fx.column->Take(
+                nullptr,
+                ChunkedColumnInterface::TakeOptions{
+                    ChunkedColumnInterface::OffsetView::From(offsets, 3),
+                    ChunkedColumnInterface::TargetType::Int32,
+                    filter});
+            ASSERT_NE(take, nullptr);
+            for (int64_t i = 0; i < 3; ++i) {
+                const auto item = take->template Get<int32_t>(i);
+                EXPECT_TRUE(item.data_skipped);
+                EXPECT_FALSE(item.value.has_value());
+                EXPECT_EQ(item.is_valid, !needs_validity || offsets[i] == 1);
+            }
+            if (!needs_validity) {
+                EXPECT_TRUE(fx.pin_requests->empty());
+            }
+        }
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
            TakeSkippedNullableRowsStillReadRealValidity) {
     ColumnSpec spec{{2, 2}, {{false, true}, {true, true}}, /*nullable=*/true};
     spec.data_type = DataType::INT32;
@@ -1515,6 +1632,11 @@ TEST(ColumnPlannerTest, LocatesSegmentOffsets) {
     const auto boundary = planner.Locate(3);
     EXPECT_EQ(boundary.cell_id, 1);
     EXPECT_EQ(boundary.cell_offset, 0);
+
+    ColumnPlanner single_cell(std::vector<int64_t>{0, 5});
+    const auto single_cell_last = single_cell.Locate(4);
+    EXPECT_EQ(single_cell_last.cell_id, 0);
+    EXPECT_EQ(single_cell_last.cell_offset, 4);
 }
 
 TEST(ColumnPlannerTest, BorrowsStableBoundariesAndOwnsTemporaryBoundaries) {
@@ -1547,6 +1669,26 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_TRUE(take->IsValid(1));
     EXPECT_FALSE(take->IsValid(2));
     EXPECT_TRUE(take->IsValid(3));
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           NonNullableTakeIsValidRejectsInvalidOffsetWithoutPinning) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{5};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(offsets.data(), 1),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(take, nullptr);
+
+    EXPECT_THROW(take->IsValid(0), std::exception);
+    EXPECT_TRUE(fx.pin_requests->empty());
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
@@ -1694,9 +1836,10 @@ TEST(ChunkedColumnInterfaceTest,
     ASSERT_TRUE(owned.validity);
     const auto* arrays = owned.values.data_as<ArrayView>();
     EXPECT_EQ(arrays[0].length(), 0);
-    EXPECT_EQ(arrays[0].get_element_type(), DataType::INT64);
+    EXPECT_EQ(arrays[0].output_data().data_case(), ScalarFieldProto::kLongData);
     EXPECT_NE(arrays[0].data(), nullptr);
-    EXPECT_EQ(arrays[1].get_element_type(), DataType::NONE);
+    EXPECT_EQ(arrays[1].output_data().data_case(),
+              ScalarFieldProto::DATA_NOT_SET);
     EXPECT_EQ(arrays[1].data(), nullptr);
 }
 

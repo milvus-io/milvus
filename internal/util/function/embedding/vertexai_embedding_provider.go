@@ -269,21 +269,24 @@ func (provider *VertexAIEmbeddingProvider) getGeminiTaskType(mode models.TextEmb
 
 func (provider *VertexAIEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, mode models.TextEmbeddingMode) (any, error) {
 	if provider.isGemini {
-		return provider.callGeminiEmbedding(texts, mode)
+		return provider.callGeminiEmbedding(ctx, texts, mode)
 	}
-	return provider.callVertexAIEmbedding(texts, mode)
+	return provider.callVertexAIEmbedding(ctx, texts, mode)
 }
 
-func (provider *VertexAIEmbeddingProvider) callVertexAIEmbedding(texts []string, mode models.TextEmbeddingMode) (any, error) {
+func (provider *VertexAIEmbeddingProvider) callVertexAIEmbedding(ctx context.Context, texts []string, mode models.TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	taskType := provider.getTaskType(mode)
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += provider.maxBatch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], provider.embedDimParam, taskType, provider.timeoutMs)
+		resp, err := provider.client.Embedding(ctx, provider.modelName, texts[i:end], provider.embedDimParam, taskType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
@@ -303,11 +306,14 @@ func (provider *VertexAIEmbeddingProvider) callVertexAIEmbedding(texts []string,
 
 // callGeminiEmbedding sends one request per text because the VertexAI Gemini embedding
 // endpoint only exposes :embedContent (single text), not batchEmbedContents.
-func (provider *VertexAIEmbeddingProvider) callGeminiEmbedding(texts []string, mode models.TextEmbeddingMode) (any, error) {
+func (provider *VertexAIEmbeddingProvider) callGeminiEmbedding(ctx context.Context, texts []string, mode models.TextEmbeddingMode) (any, error) {
 	taskType := provider.getTaskType(mode)
 	data := make([][]float32, 0, len(texts))
 	for _, text := range texts {
-		resp, err := provider.client.GeminiEmbedding(provider.geminiURL, text, provider.embedDimParam, taskType, provider.timeoutMs)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		resp, err := provider.client.GeminiEmbedding(ctx, provider.geminiURL, text, provider.embedDimParam, taskType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

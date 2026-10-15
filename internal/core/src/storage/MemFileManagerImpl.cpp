@@ -51,7 +51,8 @@ namespace milvus::storage {
 MemFileManagerImpl::MemFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta) {
+                      fileManagerContext.indexMeta,
+                      fileManagerContext.use_async_load) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
@@ -187,7 +188,7 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
         config, INSERT_FILES_KEY);
     AssertInfo(insert_files.has_value(),
                "insert file paths is empty when build index");
-    auto remote_files = insert_files.value();
+    auto& remote_files = insert_files.value();
     SortByPath(remote_files);
 
     auto parallel_degree =
@@ -309,10 +310,7 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          storage_column_mapping);
     }
 
-    auto remote_files = segment_insert_files.value();
-    for (auto& files : remote_files) {
-        SortByPath(files);
-    }
+    auto& remote_files = segment_insert_files.value();
     auto field_datas = GetFieldDatasFromStorageV2(remote_files,
                                                   field_meta_.field_id,
                                                   data_type.value(),
@@ -407,7 +405,7 @@ MemFileManagerImpl::cache_opt_field_memory(const Config& config) {
     if (!opt_fields.has_value()) {
         return res;
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};
@@ -440,7 +438,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
     if (!opt_fields.has_value()) {
         return {};
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};
@@ -455,10 +453,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
             config, SEGMENT_INSERT_FILES_KEY);
     AssertInfo(segment_insert_files.has_value(),
                "insert file paths for storage v2 is empty when build index");
-    auto remote_files = segment_insert_files.value();
-    for (auto& files : remote_files) {
-        SortByPath(files);
-    }
+    auto& remote_files = segment_insert_files.value();
 
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
     for (auto& [field_id, tup] : fields_map) {
@@ -480,7 +475,7 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
     if (!opt_fields.has_value()) {
         return {};
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};

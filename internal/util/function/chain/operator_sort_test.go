@@ -20,6 +20,8 @@ package chain
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -29,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type SortOpTestSuite struct {
@@ -46,6 +49,81 @@ func (s *SortOpTestSuite) TearDownTest() {
 
 func TestSortOpTestSuite(t *testing.T) {
 	suite.Run(t, new(SortOpTestSuite))
+}
+
+func (s *SortOpTestSuite) TestSpecialFloatOrdering() {
+	for _, dataType := range []arrow.DataType{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64} {
+		for _, withNull := range []bool{false, true} {
+			for _, desc := range []bool{false, true} {
+				for _, tieBreak := range []string{"", types.IDFieldName} {
+					s.Run(fmt.Sprintf("%s/null=%t/desc=%t/tie=%s", dataType.Name(), withNull, desc, tieBreak), func() {
+						ids := []int64{9, 3, 1, 4, 5, 6}
+						values := []float64{math.NaN(), 3, math.NaN(), 1, math.Inf(1), math.Inf(-1)}
+						valid := []bool{true, true, true, true, true, true}
+						if withNull {
+							ids = append(ids, 7, 2)
+							values = append(values, 0, 0)
+							valid = append(valid, false, false)
+						}
+						ib := array.NewInt64Builder(s.pool)
+						ib.AppendValues(ids, nil)
+						idArray := ib.NewArray()
+						ib.Release()
+						sb := array.NewBuilder(s.pool, dataType)
+						switch b := sb.(type) {
+						case *array.Float32Builder:
+							for i, v := range values {
+								if valid[i] {
+									b.Append(float32(v))
+								} else {
+									b.AppendNull()
+								}
+							}
+						case *array.Float64Builder:
+							b.AppendValues(values, valid)
+						}
+						scoreArray := sb.NewArray()
+						sb.Release()
+						builder := NewDataFrameBuilder().SetChunkSizes([]int64{int64(len(ids))})
+						s.Require().NoError(builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{idArray}))
+						s.Require().NoError(builder.AddColumnFromChunks(types.ScoreFieldName, []arrow.Array{scoreArray}))
+						df := builder.Build()
+						defer df.Release()
+						ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+						result, err := ExecuteOperator(ctx, df, newSortOp(types.ScoreFieldName, desc, tieBreak))
+						s.Require().NoError(err)
+						defer result.Release()
+						want := []int64{6, 4, 3, 5}
+						if desc {
+							want = []int64{5, 3, 4, 6}
+						}
+						if tieBreak != "" {
+							want = append(want, 1, 9)
+						} else {
+							want = append(want, 9, 1)
+						}
+						if withNull {
+							if tieBreak != "" {
+								want = append(want, 2, 7)
+							} else {
+								want = append(want, 7, 2)
+							}
+						}
+						s.Equal(want, result.Column(types.IDFieldName).Chunk(0).(*array.Int64).Int64Values())
+						if dataType.ID() == arrow.FLOAT32 {
+							// Remove the leading infinity and retain only finite rows.
+							limited, err := ExecuteOperator(ctx, result, NewLimitOp(2, 1))
+							s.Require().NoError(err)
+							defer limited.Release()
+							exported, err := ToSearchResultData(limited)
+							s.Require().NoError(err)
+							s.Equal(want[1:3], exported.Ids.GetIntId().Data)
+						}
+					})
+				}
+			}
+		}
+	}
 }
 
 // createSortTestDF creates a simple DataFrame with $id, $score columns and the given chunk sizes.
@@ -89,7 +167,7 @@ func (s *SortOpTestSuite) TestSortDescending() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -113,7 +191,7 @@ func (s *SortOpTestSuite) TestSortAscending() {
 
 	op := newSortOp(types.ScoreFieldName, false, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -152,7 +230,7 @@ func (s *SortOpTestSuite) TestSortWithAllNullScores() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -196,7 +274,7 @@ func (s *SortOpTestSuite) TestSortNullsLastDescending() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -239,7 +317,7 @@ func (s *SortOpTestSuite) TestSortNullsLastAscending() {
 
 	op := newSortOp(types.ScoreFieldName, false, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -262,7 +340,7 @@ func (s *SortOpTestSuite) TestSortMultiChunkIndependent() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -285,7 +363,7 @@ func (s *SortOpTestSuite) TestSortColumnNotFound() {
 
 	op := newSortOp("nonexistent", true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err := op.Execute(ctx, df)
+	_, err := ExecuteOperator(ctx, df, op)
 	s.Error(err)
 	s.Contains(err.Error(), "not found")
 }
@@ -312,7 +390,7 @@ func (s *SortOpTestSuite) TestSortEmptyChunk() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -367,7 +445,7 @@ func (s *SortOpTestSuite) TestSortTieBreakByID() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -392,7 +470,7 @@ func (s *SortOpTestSuite) TestSortTieBreakPartialTies() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -426,7 +504,7 @@ func (s *SortOpTestSuite) TestSortFastPathFloat32DescWithInt64TieBreak() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -465,7 +543,7 @@ func (s *SortOpTestSuite) TestSortIgnoresNonComparableTieBreakAndStringHelpers()
 	op := newSortOp(types.ScoreFieldName, true, "bool_tie")
 	s.Equal("Sort($score DESC, bool_tie ASC)", op.String())
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -476,4 +554,14 @@ func (s *SortOpTestSuite) TestSortIgnoresNonComparableTieBreakAndStringHelpers()
 
 	emptyOp := &SortOp{}
 	s.Empty(emptyOp.Column())
+
+	// A user can select a Bool column (including a projected JSON path), but
+	// sorting it must fail as an input error, including after a wire round trip.
+	_, err = NewFuncChainWithAllocator(s.pool).
+		SetStage(types.StageL1Rerank).
+		Sort("bool_tie", false, types.IDFieldName).
+		Execute(df)
+	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
+	s.Equal(merr.InputError, merr.GetErrorType(merr.Error(merr.Status(err))))
+	s.False(merr.Status(err).GetRetriable())
 }

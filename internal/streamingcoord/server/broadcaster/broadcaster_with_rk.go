@@ -7,15 +7,23 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type broadcasterWithRK struct {
-	broadcaster *broadcastTaskManager
-	broadcastID uint64
-	guards      *lockGuards
+	broadcaster    *broadcastTaskManager
+	broadcastID    uint64
+	controlChannel string
+	unreplicable   bool // the message must be unreplicable, see WithUnreplicableResourceKeys.
+	guards         *lockGuards
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	if b.unreplicable && !msg.IsUnreplicable() {
+		// The guards are still the caller's here, so its Close() releases them.
+		return nil, merr.WrapErrServiceInternalMsg("a broadcast started without the primary check must carry an unreplicable message, got %s", msg.MessageType())
+	}
+
 	// The idempotency decision lives in the manager, under the same lock that
 	// registers the task: see getOrAddBroadcastTask. It used to live here, as a
 	// lookup separate from the registration, with the resource keys this object
@@ -30,9 +38,12 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 
 	// Stamping the header, opening the span and injecting the trace context all
 	// operate on this call's own values, so they stay outside the manager lock.
+	// Every broadcast goes to the control channel: its ack joins the task into the
+	// ack callback scheduler, and its time tick orders the ack callbacks.
 	// Keep a trace context in the broadcast message so that the DDL ack callback
 	// can still extract it after the original caller span is long gone.
 	msg = msg.OverwriteBroadcastHeader(b.broadcastID, guards.ResourceKeys()...)
+	msg = message.WithBroadcastControlChannel(msg, b.controlChannel)
 	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALBroadcast)
 	defer span.End()
 	message.InjectTraceContext(ctx, msg)

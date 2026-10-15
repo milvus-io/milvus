@@ -26,9 +26,11 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
+#include "filemanager/InputStream.h"
 #include "folly/CancellationToken.h"
-#include "storage/ThreadPools.h"
+#include "folly/coro/Task.h"
 #include "storage/LoadAdmissionController.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -49,6 +51,12 @@ IsStreamSliceSizeAligned(size_t slice_size) noexcept {
 // Returns the configured default size of one entry-stream slice.
 [[nodiscard]] inline size_t
 DefaultStreamSliceSize() {
+    // Non-tail slices must remain valid DIRECT I/O write ranges.
+    static_assert(
+        DEFAULT_INDEX_FILE_SLICE_SIZE >=
+                static_cast<int64_t>(kMinStreamSliceSize) &&
+            IsStreamSliceSizeAligned(DEFAULT_INDEX_FILE_SLICE_SIZE),
+        "Default index slice size must be at least 64 KiB and 4 KiB-aligned");
     return DEFAULT_INDEX_FILE_SLICE_SIZE;
 }
 
@@ -60,6 +68,15 @@ ThrowIfCancelled(const folly::CancellationToken& cancellation_token,
         ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
     }
 }
+
+// Drain issued I/O before checking cancellation so the stream and the
+// caller-owned destination remain alive through completion and retries.
+folly::coro::Task<void>
+ReadInputStreamExactlyAsync(milvus::InputStream& input,
+                            uint64_t offset,
+                            uint8_t* destination,
+                            size_t bytes,
+                            folly::CancellationToken token);
 
 // A slice read from a V3 entry. `error` carries an exception captured in the
 // producer task so the consumer can rethrow instead of hanging.

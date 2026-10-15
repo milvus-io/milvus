@@ -1,6 +1,7 @@
 package rewriter
 
 import (
+	"cmp"
 	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -184,6 +185,12 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	}
 	for _, g := range groups {
 		if g.term == nil || len(g.eqIdxs) == 0 {
+			continue
+		}
+		// An empty intersection on a nullable field or missing path leaves
+		// multiple IN predicates intact. Checking only g.term (the last IN)
+		// must not consume the other sets and lose their constraints.
+		if len(g.termIdxs) != 1 {
 			continue
 		}
 		// Build set of eq values and check presence in term set.
@@ -559,27 +566,9 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 		if len(g.idxs) <= 1 {
 			continue
 		}
-		// compute intersection; start from first set
-		inter := make([]*planpb.GenericValue, 0, len(g.values[0]))
-	outer:
-		for _, v := range g.values[0] {
-			// check in every other set
-			ok := true
-			for i := 1; i < len(g.values); i++ {
-				found := false
-				for _, w := range g.values[i] {
-					if equalsGeneric(v, w) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					continue outer
-				}
-			}
-			if ok {
-				inter = append(inter, v)
-			}
+		inter, ok := intersectSortedTermValues(g.values)
+		if !ok {
+			continue
 		}
 		if len(inter) == 0 && !canFoldPredicateToBoolConstant(g.col) {
 			continue
@@ -601,179 +590,72 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 	return out
 }
 
-// AND: (a IN S) AND (a != d) -> remove d from S; empty -> false
-func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
-	type group struct {
-		col     *planpb.ColumnInfo
-		termIdx int
-		term    *planpb.TermExpr
-		neqIdxs []int
-		neqVals []*planpb.GenericValue
+// intersectSortedTermValues intersects normalized TermExpr value lists without
+// mutating them. Unsupported values fall back to the original conjunction.
+func intersectSortedTermValues(valueSets [][]*planpb.GenericValue) ([]*planpb.GenericValue, bool) {
+	if len(valueSets) == 0 || len(valueSets[0]) == 0 {
+		return nil, false
 	}
-	groups := map[string]*group{}
-	others := []int{}
-	for idx, e := range parts {
-		if te := e.GetTermExpr(); te != nil {
-			k, ok := termGroupKey(te)
-			if !ok {
-				others = append(others, idx)
-				continue
-			}
-			g := groups[k]
-			if g == nil {
-				g = &group{col: te.GetColumnInfo()}
-				groups[k] = g
-			}
-			g.term = te
-			g.termIdx = idx
-			continue
-		}
-		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_NotEqual && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
-			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
-			if !ok {
-				others = append(others, idx)
-				continue
-			}
-			g := groups[k]
-			if g == nil {
-				g = &group{col: ue.GetColumnInfo()}
-				groups[k] = g
-			}
-			g.neqIdxs = append(g.neqIdxs, idx)
-			g.neqVals = append(g.neqVals, ue.GetValue())
-			continue
-		}
-		others = append(others, idx)
-	}
-	used := make([]bool, len(parts))
-	out := make([]*planpb.Expr, 0, len(parts))
-	for _, i := range others {
-		out = append(out, parts[i])
-		used[i] = true
-	}
-	for _, g := range groups {
-		if g.term == nil || len(g.neqIdxs) == 0 {
-			continue
-		}
-		filtered := []*planpb.GenericValue{}
-		for _, tv := range g.term.GetValues() {
-			excluded := false
-			for _, dv := range g.neqVals {
-				if equalsGeneric(tv, dv) {
-					excluded = true
-					break
+	kind := valueCaseWithNil(valueSets[0][0])
+	switch kind {
+	case "bool", "int64", "string":
+	case "float":
+		for _, values := range valueSets {
+			for _, value := range values {
+				if math.IsNaN(value.GetFloatVal()) {
+					return nil, false
 				}
 			}
-			if !excluded {
-				filtered = append(filtered, tv)
+		}
+	default:
+		return nil, false
+	}
+	for _, values := range valueSets {
+		if len(values) == 0 || !canBuildTermExpr(values...) || valueCaseWithNil(values[0]) != kind {
+			return nil, false
+		}
+	}
+
+	intersection := valueSets[0]
+	for _, values := range valueSets[1:] {
+		result := make([]*planpb.GenericValue, 0, min(len(intersection), len(values)))
+		for i, j := 0, 0; i < len(intersection) && j < len(values); {
+			switch compareSortedTermValue(kind, intersection[i], values[j]) {
+			case -1:
+				i++
+			case 1:
+				j++
+			default:
+				result = append(result, intersection[i])
+				i++
+				j++
 			}
 		}
-		if len(filtered) == 0 && !canFoldPredicateToBoolConstant(g.col) {
-			continue
-		}
-		used[g.termIdx] = true
-		for _, ni := range g.neqIdxs {
-			used[ni] = true
-		}
-		if len(filtered) == 0 {
-			out = append(out, newAlwaysFalseExpr())
-		} else {
-			out = append(out, newTermExpr(g.col, filtered))
+		intersection = result
+		if len(intersection) == 0 {
+			break
 		}
 	}
-	for i := range parts {
-		if !used[i] {
-			out = append(out, parts[i])
-		}
-	}
-	return out
+	return intersection, true
 }
 
-// OR: (a IN S) OR (a != d) -> if d ∈ S then true else (a != d)
-func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
-	type group struct {
-		col     *planpb.ColumnInfo
-		termIdx int
-		term    *planpb.TermExpr
-		neqIdxs []int
-		neqVals []*planpb.GenericValue
+func compareSortedTermValue(kind string, left, right *planpb.GenericValue) int {
+	switch kind {
+	case "bool":
+		if left.GetBoolVal() == right.GetBoolVal() {
+			return 0
+		}
+		if !left.GetBoolVal() {
+			return -1
+		}
+		return 1
+	case "int64":
+		return cmp.Compare(left.GetInt64Val(), right.GetInt64Val())
+	case "float":
+		return cmp.Compare(left.GetFloatVal(), right.GetFloatVal())
+	case "string":
+		return cmp.Compare(left.GetStringVal(), right.GetStringVal())
+	default:
+		return 0
 	}
-	groups := map[string]*group{}
-	others := []int{}
-	for idx, e := range parts {
-		if te := e.GetTermExpr(); te != nil {
-			k, ok := termGroupKey(te)
-			if !ok {
-				others = append(others, idx)
-				continue
-			}
-			g := groups[k]
-			if g == nil {
-				g = &group{col: te.GetColumnInfo()}
-				groups[k] = g
-			}
-			g.term = te
-			g.termIdx = idx
-			continue
-		}
-		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_NotEqual && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
-			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
-			if !ok {
-				others = append(others, idx)
-				continue
-			}
-			g := groups[k]
-			if g == nil {
-				g = &group{col: ue.GetColumnInfo()}
-				groups[k] = g
-			}
-			g.neqIdxs = append(g.neqIdxs, idx)
-			g.neqVals = append(g.neqVals, ue.GetValue())
-			continue
-		}
-		others = append(others, idx)
-	}
-	used := make([]bool, len(parts))
-	out := make([]*planpb.Expr, 0, len(parts))
-	for _, i := range others {
-		out = append(out, parts[i])
-		used[i] = true
-	}
-	for _, g := range groups {
-		if g.term == nil || len(g.neqIdxs) == 0 {
-			continue
-		}
-		// if any neq value is inside IN set -> true
-		containsAny := false
-		for _, dv := range g.neqVals {
-			for _, tv := range g.term.GetValues() {
-				if equalsGeneric(tv, dv) {
-					containsAny = true
-					break
-				}
-			}
-			if containsAny {
-				break
-			}
-		}
-		if containsAny {
-			if !canFoldPredicateToBoolConstant(g.col) {
-				continue
-			}
-			used[g.termIdx] = true
-			for _, ni := range g.neqIdxs {
-				used[ni] = true
-			}
-			out = append(out, newAlwaysTrueExpr())
-		} else {
-			// drop the IN; keep != as-is
-			used[g.termIdx] = true
-		}
-	}
-	for i := range parts {
-		if !used[i] {
-			out = append(out, parts[i])
-		}
-	}
-	return out
 }

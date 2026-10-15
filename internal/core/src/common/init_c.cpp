@@ -34,7 +34,7 @@
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "segcore/memory_planner.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
@@ -144,8 +144,10 @@ SetExprResCacheEnable(bool val) {
 void
 SetExprResCacheConfig(const char* mode,
                       const char* disk_base_path,
+                      int64_t materialization_max_bytes,
                       int64_t mem_max_bytes,
                       bool compression_enabled,
+                      bool mem_enable_growing,
                       int32_t admission_threshold,
                       int64_t mem_min_eval_duration_us,
                       int64_t disk_max_bytes,
@@ -164,7 +166,8 @@ SetExprResCacheConfig(const char* mode,
         return;
     }
 
-    if ((config.mode == milvus::exec::CacheMode::Memory &&
+    if (materialization_max_bytes <= 0 ||
+        (config.mode == milvus::exec::CacheMode::Memory &&
          mem_max_bytes <= 0) ||
         (config.mode == milvus::exec::CacheMode::Disk &&
          (disk_max_bytes <= 0 || disk_max_file_size <= 0))) {
@@ -175,8 +178,11 @@ SetExprResCacheConfig(const char* mode,
 
     config.disk_base_path =
         disk_base_path == nullptr ? std::string() : std::string(disk_base_path);
+    config.materialization_max_bytes =
+        static_cast<size_t>(materialization_max_bytes);
     config.mem_max_bytes = static_cast<size_t>(mem_max_bytes);
     config.compression_enabled = compression_enabled;
+    config.mem_enable_growing = mem_enable_growing;
     if (admission_threshold < 1) {
         admission_threshold = 1;
     } else if (admission_threshold > 255) {
@@ -207,22 +213,6 @@ SetExprResCacheConfig(const char* mode,
 }
 
 void
-SetArrowIOThreadPoolCapacity(int threads) {
-    if (threads <= 0) {
-        return;
-    }
-    auto status = arrow::io::SetIOThreadPoolCapacity(threads);
-    if (!status.ok()) {
-        LOG_WARN("failed to set arrow io thread pool capacity to {}: {}",
-                 threads,
-                 status.ToString());
-        return;
-    }
-    LOG_INFO("arrow io thread pool capacity set to {}", threads);
-    UpdateArrowIOThreadPoolMetrics();
-}
-
-void
 UpdateArrowIOThreadPoolMetrics() {
     auto capacity = arrow::io::GetIOThreadPoolCapacity();
     milvus::monitor::internal_arrow_io_pool_capacity_all.Set(capacity);
@@ -243,16 +233,24 @@ SetStorageV2CellTargetSizeBytes(int64_t bytes) {
     milvus::segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
 }
 
-void
+CStatus
 SetStorageV2AsyncLoadEnabled(const bool enabled) {
-    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+    try {
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            enabled);
+        return milvus::SuccessCStatus();
+    } catch (const std::exception& error) {
+        return milvus::FailureCStatus(&error);
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "Failed to configure async load mode");
+    }
 }
 
 CStatus
 SetStorageV2AsyncLoadThreadPoolSize(const int threads) {
     try {
-        milvus::segcore::storagev2translator::SetAsyncLoadThreadPoolSize(
-            threads);
+        milvus::storage::SetAsyncLoadThreadPoolSize(threads);
         return milvus::SuccessCStatus();
     } catch (const std::exception& error) {
         return milvus::FailureCStatus(&error);
@@ -264,7 +262,7 @@ SetStorageV2AsyncLoadThreadPoolSize(const int threads) {
 
 int
 GetStorageV2AsyncLoadThreadPoolSize() {
-    return milvus::segcore::storagev2translator::GetAsyncLoadThreadPoolSize();
+    return milvus::storage::GetAsyncLoadThreadPoolSize();
 }
 
 void

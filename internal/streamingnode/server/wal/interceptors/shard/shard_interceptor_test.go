@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -31,7 +32,7 @@ import (
 
 func allocWALSchemaForTest(t *testing.T, collectionID int64, vchannel string, schemaVersion int32) {
 	t.Helper()
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	assert.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{Version: schemaVersion}))
 	t.Cleanup(func() {
 		function.GetManager().Release(collectionID, key)
@@ -160,10 +161,10 @@ func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(
 			},
 		},
 	}
-	assert.NoError(t, function.GetManager().Alloc(collectionID, walFunctionRunnerKey(vchannel), schema))
-	defer function.GetManager().Release(collectionID, walFunctionRunnerKey(vchannel))
+	assert.NoError(t, function.GetManager().Alloc(collectionID, WALFunctionRunnerKey(vchannel), schema))
+	defer function.GetManager().Release(collectionID, WALFunctionRunnerKey(vchannel))
 
-	ok, err := function.GetManager().RunWithAnalyzer(context.Background(), collectionID, walFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
+	ok, err := function.GetManager().RunWithAnalyzer(context.Background(), collectionID, WALFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
 		return nil
 	})
 	assert.NoError(t, err)
@@ -178,7 +179,7 @@ func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(
 	noFunctionSchema.Functions = nil
 	impl.updateFunctionRunners(collectionID, vchannel, noFunctionSchema)
 
-	ok, err = function.GetManager().RunWithAnalyzer(context.Background(), collectionID, walFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
+	ok, err = function.GetManager().RunWithAnalyzer(context.Background(), collectionID, WALFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
 		return nil
 	})
 	assert.NoError(t, err)
@@ -198,7 +199,7 @@ func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(
 func TestShardInterceptorCreateCollectionAllocatesFunctionRunnersFromLegacySchema(t *testing.T) {
 	collectionID := int64(99003)
 	vchannel := "by-dev-rootcoord-dml_0_99003v0"
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	schema := &schemapb.CollectionSchema{
 		Version: 1,
 		Fields: []*schemapb.FieldSchema{
@@ -292,7 +293,7 @@ func TestShardInterceptorRejectsInvalidLegacySchemaBeforeAppend(t *testing.T) {
 func TestShardInterceptorAlterCollectionSkipsPartialSchemaForFunctionManager(t *testing.T) {
 	collectionID := int64(99002)
 	vchannel := "by-dev-rootcoord-dml_0_99002v0"
-	key := walFunctionRunnerKey(vchannel)
+	key := WALFunctionRunnerKey(vchannel)
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -604,7 +605,7 @@ func TestShardInterceptor(t *testing.T) {
 			PartitionId:  1,
 		}).
 		WithBody(&msgpb.DropPartitionRequest{}).
-		MustBuildMutable()
+		MustBuildMutable().WithTimeTick(1)
 	shardManager.EXPECT().CheckIfPartitionExists(mock.Anything).Return(nil)
 	shardManager.EXPECT().DropPartition(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
@@ -802,4 +803,72 @@ func TestShardInterceptor(t *testing.T) {
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
+}
+
+func TestCreateSnapshotSealsSegmentsBeforeAppend(t *testing.T) {
+	manager := &mock_shards.MockShardManager{}
+	sealed := false
+	patch := mockey.Mock(mockey.GetMethod(manager, "FlushAndFenceSegmentAllocUntil")).To(func(collectionID int64, tt uint64) ([]int64, error) {
+		assert.Equal(t, int64(100), collectionID)
+		assert.Equal(t, uint64(200), tt)
+		sealed = true
+		return []int64{1, 2}, nil
+	}).Build()
+	defer patch.UnPatch()
+	impl := &shardInterceptor{shardManager: manager}
+	impl.initOpTable()
+	msg := message.NewCreateSnapshotMessageBuilderV2().WithVChannel("p1_100v0").
+		WithHeader(&message.CreateSnapshotMessageHeader{CollectionId: 100}).
+		WithBody(&message.CreateSnapshotMessageBody{}).MustBuildMutable().WithTimeTick(200)
+	assert.True(t, msg.MessageType().IsExclusiveRequired())
+	_, err := impl.DoAppend(context.Background(), msg, func(_ context.Context, _ message.MutableMessage) (message.MessageID, error) {
+		assert.True(t, sealed)
+		return rmq.NewRmqID(1), nil
+	})
+	assert.NoError(t, err)
+}
+
+func TestDropPartitionUpdatesManagerAfterAppend(t *testing.T) {
+	for _, failAt := range []string{"none", "append"} {
+		t.Run(failAt, func(t *testing.T) {
+			manager := &mock_shards.MockShardManager{}
+			check := mockey.Mock(mockey.GetMethod(manager, "CheckIfPartitionExists")).Return(nil).Build()
+			defer check.UnPatch()
+			var events []string
+			drop := mockey.Mock(mockey.GetMethod(manager, "DropPartition")).To(func(msg message.ImmutableDropPartitionMessageV1) {
+				require.Equal(t, int64(10), msg.Header().GetPartitionId())
+				events = append(events, "drop")
+			}).Build()
+			defer drop.UnPatch()
+			impl := &shardInterceptor{shardManager: manager}
+			impl.initOpTable()
+			newMessage := func() message.MutableMessage {
+				return message.NewDropPartitionMessageBuilderV1().WithVChannel("p1_100v0").
+					WithHeader(&messagespb.DropPartitionMessageHeader{CollectionId: 100, PartitionId: 10}).
+					WithBody(&msgpb.DropPartitionRequest{}).MustBuildMutable().WithTimeTick(200)
+			}
+			require.True(t, newMessage().MessageType().IsExclusiveRequired())
+			appendMessage := func(_ context.Context, _ message.MutableMessage) (message.MessageID, error) {
+				events = append(events, "append")
+				if failAt == "append" {
+					return nil, context.DeadlineExceeded
+				}
+				return rmq.NewRmqID(1), nil
+			}
+			_, err := impl.DoAppend(context.Background(), newMessage(), appendMessage)
+			if failAt == "none" {
+				require.NoError(t, err)
+				require.Equal(t, []string{"append", "drop"}, events)
+				return
+			}
+			require.Error(t, err)
+			require.NotContains(t, events, "drop", "a failed append must not remove the partition")
+			// Retry updates the manager only after a successful append.
+			failAt = "none"
+			events = nil
+			_, err = impl.DoAppend(context.Background(), newMessage(), appendMessage)
+			require.NoError(t, err)
+			require.Equal(t, []string{"append", "drop"}, events)
+		})
+	}
 }

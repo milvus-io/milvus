@@ -16,12 +16,14 @@
 
 #pragma once
 
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <string>
 
 #include "crc32c/crc32c.h"
+#include "common/EasyAssert.h"
 
 namespace milvus::storage {
 
@@ -129,7 +131,15 @@ Crc32cToHex(uint32_t crc) {
 
 inline uint32_t
 Crc32cFromHex(const std::string& hex) {
-    return static_cast<uint32_t>(std::stoul(hex, nullptr, 16));
+    uint32_t crc;
+    const auto result =
+        std::from_chars(hex.data(), hex.data() + hex.size(), crc, 16);
+    if (hex.size() != 8 || result.ec != std::errc{} ||
+        result.ptr != hex.data() + hex.size()) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken, "Invalid packed entry CRC: {}", hex);
+    }
+    return crc;
 }
 
 }  // namespace milvus::storage

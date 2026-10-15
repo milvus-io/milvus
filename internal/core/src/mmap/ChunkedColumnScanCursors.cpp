@@ -204,7 +204,8 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
             filter_->Source() ==
                 ColumnFilter::MetricsSource::PreloadedStatistics;
         auto data_skipped = preloaded_skip && ShouldSkipCell(chunk_id);
-        if (data_skipped && !column_->IsNullable()) {
+        if (data_skipped &&
+            (!column_->IsNullable() || !filter_->SkippedValidityRequired())) {
             // Next() invalidates the previous batch. A CursorOwned pin from
             // that batch must not survive merely because this Cell needs no
             // data pin of its own.
@@ -245,6 +246,7 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
     ResetOutput(ChunkedColumnInterface::ScanBatch* out) {
         out->values = ChunkedColumnInterface::ValueView{};
         out->validity = {};
+        out->row_ids.clear();
         out->owner.reset();
         out->row_id_start = 0;
         out->size = 0;
@@ -321,7 +323,8 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
                     ColumnFilter::MetricsSource::PreloadedStatistics &&
                 ShouldSkipCell(cell_id);
             // A nullable skipped Cell is still needed for its real validity.
-            if (data_skipped && !column_->IsNullable()) {
+            if (data_skipped && (!column_->IsNullable() ||
+                                 !filter_->SkippedValidityRequired())) {
                 continue;
             }
             remaining.push_back(cell_id);
@@ -542,6 +545,10 @@ OpenDataScan(const ChunkedColumnInterface* column,
 ChunkedColumnInterface::ScanResult
 ChunkedColumnInterface::Scan(milvus::OpContext* op_ctx,
                              const ScanOptions& options) const {
+    if (options.output != ScanOutput::Data ||
+        options.predicate != ScanPredicate::None) {
+        return nullptr;
+    }
     auto data_type = GetDefaultScanDataType();
     if (!data_type.has_value()) {
         return nullptr;

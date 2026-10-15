@@ -66,6 +66,8 @@ SimdjsonParseErrorToErrorCode(simdjson::error_code err) {
         case simdjson::UNINITIALIZED:
         case simdjson::INSUFFICIENT_PADDING:
         case simdjson::UNEXPECTED_ERROR:
+        case simdjson::PARSER_IN_USE:
+        case simdjson::OUT_OF_ORDER_ITERATION:
             return ErrorCode::UnexpectedError;  // milvus-side misuse / bug
         default:
             return ErrorCode::DataFormatBroken;  // 2024, malformed stored JSON
@@ -212,6 +214,21 @@ class Json {
             data_ = own_data_.value();
         } else {
             data_ = json.data_;
+        }
+        return *this;
+    }
+
+    Json&
+    operator=(Json&& json) noexcept {
+        if (this != &json) {
+            if (json.own_data_.has_value()) {
+                own_data_ = std::move(json.own_data_);
+                data_ = own_data_.value();
+            } else {
+                // A borrowed view may alias our current owned buffer. Keep
+                // that buffer alive, just as copy assignment does.
+                data_ = json.data_;
+            }
         }
         return *this;
     }

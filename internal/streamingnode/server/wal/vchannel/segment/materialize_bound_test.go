@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 func TestL1MaterializationBlockerTimeTick(t *testing.T) {
@@ -17,8 +18,8 @@ func TestL1MaterializationBlockerTimeTick(t *testing.T) {
 	assert.Equal(t, uint64(100), timetick)
 
 	committed := newSegmentViewFromMeta(&streamingpb.SegmentAssignmentMeta{
-		L1CommitDone: true,
-		Stat:         &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 200},
+		SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 1},
+		Stat:                &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 200},
 	}, nil)
 	timetick, blocks = committed.L1MaterializationBlockerTimeTick()
 	assert.False(t, blocks)

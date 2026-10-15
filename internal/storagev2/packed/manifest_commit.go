@@ -41,6 +41,9 @@ type WriterOutput interface {
 	// applyTo stages the output onto a loon transaction handle. Called by
 	// applyManifestUpdates as part of CommitManifestUpdates.
 	applyTo(handle C.LoonTransactionHandle) error
+	// Appending files invalidates indexes on columns with new files. Adding new
+	// column groups and registering LOBs do not invalidate existing indexes.
+	invalidatedIndexColumns() []string
 }
 
 // ManifestUpdates bundles every data-file-level change a single caller
@@ -50,8 +53,8 @@ type WriterOutput interface {
 // one shot, and commits.
 //
 // NewFiles holds C memory produced by an FFI writer and MUST be released
-// by the caller via Destroy after CommitManifestUpdates returns (success
-// or failure).
+// by the caller via Destroy after the blocking commit returns (success or
+// failure), or after the terminal callback when using SubmitManifestUpdates.
 type ManifestUpdates struct {
 	// NewFiles is the column-groups / LOB payload returned by an FFI
 	// writer's Close. nil if no insert files were written.
@@ -69,6 +72,14 @@ type ManifestUpdates struct {
 	// register. Each entry's Files / Metadata replace any existing entry
 	// with the same Key (loon overwrite semantics).
 	Stats []StatEntry
+	// Indexes registers completed index artifacts. milvus-storage replaces
+	// any existing entry carrying the same index_id, so republishing a
+	// rebuilt index supersedes its predecessor instead of duplicating it.
+	Indexes []ManifestIndexInfo
+	// DropIndexes removes index metadata without deleting artifact files.
+	// The lifecycle caller owns deletion ordering; DataCoord GC deletes unused
+	// bytes first, then retracts their metadata so failures remain retryable.
+	DropIndexes []DropIndexEntry
 }
 
 // isEmpty short-circuits CommitManifestUpdates when the caller assembled
@@ -83,7 +94,8 @@ func (u *ManifestUpdates) isEmpty() bool {
 	if u.NewFiles != nil {
 		return false
 	}
-	return len(u.ColumnGroups) == 0 && len(u.DeltaLogs) == 0 && len(u.Stats) == 0
+	return len(u.ColumnGroups) == 0 && len(u.DeltaLogs) == 0 && len(u.Stats) == 0 &&
+		len(u.Indexes) == 0 && len(u.DropIndexes) == 0
 }
 
 // CommitManifestUpdates opens a loon transaction at (basePath, baseVersion),
@@ -98,6 +110,18 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates,
 ) (string, error) {
 	if updates.isEmpty() {
+		return MarshalManifestPath(basePath, baseVersion), nil
+	}
+
+	// Resolve drops against the exact revision the transaction will open at,
+	// before opening it: a drop that no longer applies must not turn into an
+	// empty commit, which loon rejects with "no updates recorded".
+	dropIndexIDs, err := resolveDropIndexes(basePath, baseVersion, storageConfig, updates.DropIndexes)
+	if err != nil {
+		return "", err
+	}
+	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
+		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(dropIndexIDs) == 0 {
 		return MarshalManifestPath(basePath, baseVersion), nil
 	}
 
@@ -117,7 +141,7 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	// resolve mode keeps the API simple and matches the prior
 	// AddStatsToManifest behavior.
 	var handle C.LoonTransactionHandle
-	res := C.loon_transaction_begin(cBasePath, cProperties,
+	res := C.loon_transaction_open(cBasePath, cProperties,
 		C.int64_t(baseVersion),
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)
@@ -128,7 +152,7 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	}
 	defer C.loon_transaction_destroy(handle)
 
-	if err := applyManifestUpdates(handle, updates); err != nil {
+	if err := applyManifestUpdates(handle, updates, dropIndexIDs); err != nil {
 		return "", err
 	}
 
@@ -141,8 +165,9 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 }
 
 // applyManifestUpdates stages every operation in updates onto the loon
-// transaction handle.
-func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdates) error {
+// transaction handle. dropIndexIDs is the drop set already resolved against
+// the transaction's base revision by resolveDropIndexes.
+func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdates, dropIndexIDs []int64) error {
 	if updates.NewFiles != nil {
 		if err := updates.NewFiles.applyTo(handle); err != nil {
 			return err
@@ -167,5 +192,63 @@ func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdat
 			return merr.WrapErrStorage(err, "commit manifest update_stat")
 		}
 	}
+
+	// Drops are staged before adds so a rebuild that republishes an index this
+	// bundle also drops keeps the added entry: loon resolves the drop set first
+	// and then applies the additions.
+	for _, indexID := range dropIndexIDs {
+		if err := stageDropIndex(handle, indexID); err != nil {
+			return err
+		}
+	}
+
+	for _, index := range updates.Indexes {
+		if err := stageIndexInfo(handle, index); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// resolveDropIndexes reads the manifest revision the transaction will be
+// opened at and returns the index IDs that are actually present there.
+//
+// An index that is already absent is a completed earlier attempt, so the drop
+// is silently dropped from the bundle rather than committing an empty
+// revision. An index that is present under a different build was republished
+// by a rebuild after the caller collected its metadata; dropping it by ID
+// would delete the live artifact, so the whole commit is refused.
+func resolveDropIndexes(basePath string, baseVersion int64,
+	storageConfig *indexpb.StorageConfig, drops []DropIndexEntry,
+) ([]int64, error) {
+	if len(drops) == 0 {
+		return nil, nil
+	}
+	manifestPath := MarshalManifestPath(basePath, baseVersion)
+	current, err := GetManifestIndexInfos(manifestPath, storageConfig)
+	if err != nil {
+		return nil, merr.Wrap(err, "resolve manifest index drops")
+	}
+	return resolveManifestIndexDrops(manifestPath, current, drops)
+}
+
+func resolveManifestIndexDrops(manifestPath string, current []ManifestIndexInfo, drops []DropIndexEntry) ([]int64, error) {
+	buildIDs := make(map[int64]int64, len(current))
+	for _, index := range current {
+		buildIDs[index.IndexID] = index.BuildID
+	}
+	indexIDs := make([]int64, 0, len(drops))
+	for _, drop := range drops {
+		buildID, ok := buildIDs[drop.IndexID]
+		if !ok {
+			continue
+		}
+		if drop.ExpectedBuildID != 0 && buildID != drop.ExpectedBuildID {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"manifest %s holds build %d for index %d, refusing to drop build %d",
+				manifestPath, buildID, drop.IndexID, drop.ExpectedBuildID)
+		}
+		indexIDs = append(indexIDs, drop.IndexID)
+	}
+	return indexIDs, nil
 }

@@ -66,6 +66,11 @@ type basicSegmentMethodSet interface {
 	// Retrieve retrieves entities from the segment.
 	Retrieve(ctx context.Context, plan *RetrievePlan) (*RetrieveResult, error)
 
+	// RetrieveAsArrow retrieves entities from the segment, returning the
+	// protobuf header and the user output columns as an Arrow record
+	// separately. See CRetrieveArrowResult in segment_c.h.
+	RetrieveAsArrow(ctx context.Context, plan *RetrievePlan) (*RetrieveArrowResult, error)
+
 	// RetrieveByOffsets retrieves entities from the segment by offsets.
 	RetrieveByOffsets(ctx context.Context, plan *RetrievePlanWithOffsets) (*RetrieveResult, error)
 

@@ -471,7 +471,7 @@ Predefined field constructors providing type-safe field creation:
 | `FieldIndexID(val)` | int64 | Index ID |
 | `FieldFieldID(val)` | int64 | Field ID |
 | `FieldTaskID(val)` | int64 | Task ID |
-| `FieldBroadcastID(val)` | int64 | Broadcast ID |
+| `FieldBroadcastID(val)` | uint64 | Broadcast ID |
 | `FieldJobID(val)` | int64 | Job ID |
 | `FieldBuildID(val)` | int64 | Build ID |
 | `FieldVChannel(val)` | string | Virtual channel name |

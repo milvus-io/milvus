@@ -112,13 +112,11 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 
 // startRestoreSnapshotLock acquires the Phase 0 restore lock set for RestoreSnapshot.
 //
-// It holds three locks that together serialize the full restore flow against
-// concurrent DropSnapshot / CreateCollection on both the source snapshot and
-// the target collection name:
+// These locks protect target validation and source snapshot pinning against
+// concurrent DropSnapshot / CreateCollection during Phase 0:
 //
 //   - Shared lock on target database
-//   - Exclusive lock on target collection name (reserves the name before the
-//     collection is created in Phase 2)
+//   - Exclusive lock on target collection name during validation
 //   - Exclusive lock on (sourceCollectionID, snapshotName) — namespaced by
 //     collection so cross-collection same-name snapshots do not contend,
 //     and serializes against DropSnapshot of the same source snapshot
@@ -126,7 +124,9 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 // The returned broadcaster holds the locks only; Close() releases them
 // without broadcasting any message. Callers are expected to increment
 // the restore reference count while the lock is held, then Close() — the
-// refcount becomes the persistent guard after the lock is released.
+// pin becomes the persistent source guard after the lock is released. The
+// separate restore target lock serializes restore requests through job submission
+// and synchronous cleanup without holding the DDL lock across nested DDL calls.
 func (s *Server) startRestoreSnapshotLock(
 	ctx context.Context,
 	sourceCollectionID int64,

@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -116,6 +117,21 @@ type broadcastTaskManager struct {
 
 // WithResourceKeys acquires the resource keys for the broadcast task.
 func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	return bm.withResourceKeys(ctx, bm.checkClusterRole, false, resourceKeys...)
+}
+
+// WithUnreplicableResourceKeys acquires the resource keys for a broadcast that stays in this cluster.
+// The message never leaves this cluster, so the replicate role is not checked.
+func (bm *broadcastTaskManager) WithUnreplicableResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	return bm.withResourceKeys(ctx, func(ctx context.Context) error { return ctx.Err() }, true, resourceKeys...)
+}
+
+// withResourceKeys acquires the resource keys, then checks the cluster with checkCluster.
+func (bm *broadcastTaskManager) withResourceKeys(ctx context.Context, checkCluster func(context.Context) error, unreplicable bool, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	// Resolved before any lock is taken: it blocks until the first assignment
+	// arrives, and it panics when the streaming client is closing.
+	controlChannel := streaming.WAL().ControlChannel()
+
 	startLockInstant := time.Now()
 	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
 	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
@@ -126,17 +142,19 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 		return nil, merr.Wrapf(err, "allocate new id failed")
 	}
 
-	if err := bm.checkClusterRole(ctx); err != nil {
-		// unlock the guards if the cluster role is not primary.
+	if err := checkCluster(ctx); err != nil {
+		// unlock the guards if the cluster check fails.
 		guards.Unlock()
 		return nil, err
 	}
 	bm.metrics.ObserveAcquireLockDuration(startLockInstant, guards.ResourceKeys())
 
 	return &broadcasterWithRK{
-		broadcaster: bm,
-		broadcastID: id,
-		guards:      guards,
+		broadcaster:    bm,
+		broadcastID:    id,
+		controlChannel: controlChannel,
+		unreplicable:   unreplicable,
+		guards:         guards,
 	}, nil
 }
 
@@ -144,6 +162,9 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 // and verifies the cluster is secondary. Returns error if the cluster is primary.
 // This is used for force promote operations that should only be executed on secondary clusters.
 func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error) {
+	// Resolved before any lock is taken, see WithResourceKeys.
+	controlChannel := streaming.WAL().ControlChannel()
+
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, merr.Wrapf(err, "allocate new id failed")
@@ -163,9 +184,10 @@ func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Cont
 	bm.metrics.ObserveAcquireLockDuration(startLockInstant, guards.ResourceKeys())
 
 	return &broadcasterWithRK{
-		broadcaster: bm,
-		broadcastID: id,
-		guards:      guards,
+		broadcaster:    bm,
+		broadcastID:    id,
+		controlChannel: controlChannel,
+		guards:         guards,
 	}, nil
 }
 
@@ -276,7 +298,7 @@ func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint6
 	task, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
 		bm.Logger().Warn(ctx,
-			"broadcast task not found, it may already acked, ignore the request", mlog.Uint64("broadcastID", broadcastID), mlog.String("vchannel", vchannel))
+			"broadcast task not found, it may already acked, ignore the request", mlog.FieldBroadcastID(broadcastID), mlog.String("vchannel", vchannel))
 		return nil
 	}
 	msg := task.GetImmutableMessageFromVChannel(vchannel)
@@ -298,7 +320,7 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	if !ok {
 		bm.Logger().Debug(ctx,
 			"task is tombstone, ignored the ack request",
-			mlog.Uint64("broadcastID", msg.BroadcastHeader().BroadcastID),
+			mlog.FieldBroadcastID(msg.BroadcastHeader().BroadcastID),
 			mlog.String("vchannel", msg.VChannel()))
 		return nil
 	}
@@ -314,7 +336,7 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 
 	t, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
-		bm.Logger().Debug(ctx, "task is not found, ignored the drop tombstone request", mlog.Uint64("broadcastID", broadcastID))
+		bm.Logger().Debug(ctx, "task is not found, ignored the drop tombstone request", mlog.FieldBroadcastID(broadcastID))
 		return nil
 	}
 	if err := t.DropTombstone(ctx); err != nil {

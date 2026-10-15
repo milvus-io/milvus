@@ -69,7 +69,9 @@ VectorBase::set_data_raw(ssize_t element_offset,
                 if (vector_array.size() == element_count) {
                     for (ssize_t i = 0; i < element_count; ++i) {
                         if (valid_data[i]) {
-                            data_raw.emplace_back(VectorArray(vector_array[i]));
+                            data_raw.emplace_back(
+                                VectorArray(vector_array[i],
+                                            field_meta.is_element_nullable()));
                         }
                     }
                 } else {
@@ -80,7 +82,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
                         vector_array.size(),
                         valid_count);
                     for (auto& e : vector_array) {
-                        data_raw.emplace_back(VectorArray(e));
+                        data_raw.emplace_back(
+                            VectorArray(e, field_meta.is_element_nullable()));
                     }
                 }
             } else {
@@ -91,7 +94,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
                            element_count);
                 data_raw.reserve(vector_array.size());
                 for (auto& e : vector_array) {
-                    data_raw.emplace_back(VectorArray(e));
+                    data_raw.emplace_back(
+                        VectorArray(e, field_meta.is_element_nullable()));
                 }
             }
             return set_data_raw(element_offset, data_raw.data(), element_count);

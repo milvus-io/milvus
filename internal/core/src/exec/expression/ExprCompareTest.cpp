@@ -30,7 +30,8 @@
 #include <utility>
 #include <vector>
 
-#include "ExprTestBase.h"
+#include "ExprBatchTestUtils.h"
+#include "ConsumerExprTestBase.h"
 #include "NamedType/named_type_impl.hpp"
 #include "bitset/bitset.h"
 #include "common/Consts.h"
@@ -44,8 +45,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/ScalarIndexSort.h"
+#include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
@@ -60,6 +60,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -90,7 +91,7 @@ TEST_P(ExprTest, TestCall) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -190,7 +191,7 @@ TEST_P(ExprTest, TestCompare) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -321,7 +322,7 @@ TEST_P(ExprTest, TestCompareNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -452,7 +453,7 @@ TEST_P(ExprTest, TestCompareNullable2) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -524,31 +525,32 @@ TEST_P(ExprTest, TestCompareWithScalarIndex) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-    segcore::LoadIndexInfo load_index_info;
 
     // load index for int32 field
     auto age32_col = raw_data.get_col<int32_t>(i32_fid);
     age32_col[0] = 1000;
-    auto age32_index = milvus::index::CreateScalarIndexSort<int32_t>();
-    age32_index->Build(N, age32_col.data());
-    load_index_info.field_id = i32_fid.get();
-    load_index_info.field_type = DataType::INT32;
-    load_index_info.index_params = GenIndexParams(age32_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age32_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i32_fid,
+        DataType::INT32,
+        test::consumer::BuildScalarReader<int32_t>(i32_fid,
+                                                   DataType::INT32,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age32_col.data()));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
     age64_col[0] = 2000;
-    auto age64_index = milvus::index::CreateScalarIndexSort<int64_t>();
-    age64_index->Build(N, age64_col.data());
-    load_index_info.field_id = i64_fid.get();
-    load_index_info.field_type = DataType::INT64;
-    load_index_info.index_params = GenIndexParams(age64_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age64_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i64_fid,
+        DataType::INT64,
+        test::consumer::BuildScalarReader<int64_t>(i64_fid,
+                                                   DataType::INT64,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age64_col.data()));
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
     SetSchema(schema);
@@ -655,32 +657,34 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-    segcore::LoadIndexInfo load_index_info;
 
     // load index for int32 field
     auto nullable_col = raw_data.get_col<int32_t>(nullable_fid);
     nullable_col[0] = 1000;
     auto valid_data_col = raw_data.get_col_valid(nullable_fid);
-    auto nullable_index = milvus::index::CreateScalarIndexSort<int32_t>();
-    nullable_index->Build(N, nullable_col.data(), valid_data_col.data());
-    load_index_info.field_id = nullable_fid.get();
-    load_index_info.field_type = DataType::INT32;
-    load_index_info.index_params = GenIndexParams(nullable_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(nullable_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        nullable_fid,
+        DataType::INT32,
+        test::consumer::BuildScalarReader<int32_t>(nullable_fid,
+                                                   DataType::INT32,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   nullable_col.data(),
+                                                   valid_data_col.data()));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
     age64_col[0] = 2000;
-    auto age64_index = milvus::index::CreateScalarIndexSort<int64_t>();
-    age64_index->Build(N, age64_col.data());
-    load_index_info.field_id = i64_fid.get();
-    load_index_info.field_type = DataType::INT64;
-    load_index_info.index_params = GenIndexParams(age64_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age64_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i64_fid,
+        DataType::INT64,
+        test::consumer::BuildScalarReader<int64_t>(i64_fid,
+                                                   DataType::INT64,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age64_col.data()));
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
     SetSchema(schema);
@@ -787,32 +791,34 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable2) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-    segcore::LoadIndexInfo load_index_info;
 
     // load index for int32 field
     auto nullable_col = raw_data.get_col<int32_t>(nullable_fid);
     nullable_col[0] = 1000;
     auto valid_data_col = raw_data.get_col_valid(nullable_fid);
-    auto nullable_index = milvus::index::CreateScalarIndexSort<int32_t>();
-    nullable_index->Build(N, nullable_col.data(), valid_data_col.data());
-    load_index_info.field_id = nullable_fid.get();
-    load_index_info.field_type = DataType::INT32;
-    load_index_info.index_params = GenIndexParams(nullable_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(nullable_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        nullable_fid,
+        DataType::INT32,
+        test::consumer::BuildScalarReader<int32_t>(nullable_fid,
+                                                   DataType::INT32,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   nullable_col.data(),
+                                                   valid_data_col.data()));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
     age64_col[0] = 2000;
-    auto age64_index = milvus::index::CreateScalarIndexSort<int64_t>();
-    age64_index->Build(N, age64_col.data());
-    load_index_info.field_id = i64_fid.get();
-    load_index_info.field_type = DataType::INT64;
-    load_index_info.index_params = GenIndexParams(age64_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age64_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i64_fid,
+        DataType::INT64,
+        test::consumer::BuildScalarReader<int64_t>(i64_fid,
+                                                   DataType::INT64,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age64_col.data()));
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
     SetSchema(schema);
@@ -933,6 +939,7 @@ TEST_P(ExprTest, test_term_pk_with_sorted) {
 }
 
 TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
+    milvus::test::ExprBatchSizeGuard batch_size_guard(7);
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
@@ -952,6 +959,9 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     auto str3_fid = schema->AddDebugField("string3", DataType::VARCHAR);
+    auto string_fid = schema->AddDebugField("string", DataType::STRING);
+    auto string_1_fid =
+        schema->AddDebugField("string1_internal", DataType::STRING);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -1034,6 +1044,15 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
                                                         OpType::LessThan);
                 return compare_expr;
             }
+            case DataType::STRING: {
+                auto compare_expr =
+                    std::make_shared<expr::CompareExpr>(string_fid,
+                                                        string_1_fid,
+                                                        DataType::STRING,
+                                                        DataType::STRING,
+                                                        OpType::LessThan);
+                return compare_expr;
+            }
             default:
                 return std::make_shared<expr::CompareExpr>(int8_fid,
                                                            int8_1_fid,
@@ -1042,29 +1061,67 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
                                                            OpType::LessThan);
         }
     };
-    auto expr = build_expr(DataType::BOOL);
-    BitsetType final;
-    auto plan =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::INT8);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::INT16);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::INT32);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::INT64);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::FLOAT);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::DOUBLE);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    auto execute = [&](DataType type) {
+        auto expr = build_expr(type);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        return ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    };
+
+    auto check = [&]<typename T>(DataType type, FieldId left, FieldId right) {
+        auto result = execute(type);
+        auto left_values = raw_data.get_col<T>(left);
+        auto right_values = raw_data.get_col<T>(right);
+        ASSERT_EQ(result.size(), N);
+        for (size_t i = 0; i < N; ++i) {
+            ASSERT_EQ(result[i], left_values[i] < right_values[i])
+                << "type " << static_cast<int>(type) << " row " << i;
+        }
+    };
+
+    check.operator()<bool>(DataType::BOOL, bool_fid, bool_1_fid);
+    check.operator()<int8_t>(DataType::INT8, int8_fid, int8_1_fid);
+    check.operator()<int16_t>(DataType::INT16, int16_fid, int16_1_fid);
+    check.operator()<int32_t>(DataType::INT32, int32_fid, int32_1_fid);
+    check.operator()<int64_t>(DataType::INT64, int64_fid, int64_1_fid);
+    check.operator()<float>(DataType::FLOAT, float_fid, float_1_fid);
+    check.operator()<double>(DataType::DOUBLE, double_fid, double_1_fid);
+    check.operator()<std::string>(DataType::VARCHAR, str2_fid, str3_fid);
+    check.operator()<std::string>(DataType::STRING, string_fid, string_1_fid);
+
+    auto int64_expr = build_expr(DataType::INT64);
+    auto int64_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, int64_expr);
+    milvus::exec::OffsetVector offsets{9, 2, 9, 511, 3, 999};
+    auto offset_result = milvus::test::gen_filter_res(
+        int64_plan.get(), seg.get(), N, MAX_TIMESTAMP, &offsets);
+    BitsetTypeView offset_view(offset_result->GetRawData(),
+                               offset_result->size());
+    auto left_values = raw_data.get_col<int64_t>(int64_fid);
+    auto right_values = raw_data.get_col<int64_t>(int64_1_fid);
+    ASSERT_EQ(offset_view.size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto offset = offsets[i];
+        ASSERT_EQ(offset_view[i], left_values[offset] < right_values[offset])
+            << "offset input position " << i << " row " << offset;
+    }
+
+    auto varchar_expr = build_expr(DataType::VARCHAR);
+    auto varchar_plan = std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, varchar_expr);
+    auto varchar_offset_result = milvus::test::gen_filter_res(
+        varchar_plan.get(), seg.get(), N, MAX_TIMESTAMP, &offsets);
+    BitsetTypeView varchar_offset_view(varchar_offset_result->GetRawData(),
+                                       varchar_offset_result->size());
+    auto left_strings = raw_data.get_col<std::string>(str2_fid);
+    auto right_strings = raw_data.get_col<std::string>(str3_fid);
+    ASSERT_EQ(varchar_offset_view.size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto offset = offsets[i];
+        ASSERT_EQ(varchar_offset_view[i],
+                  left_strings[offset] < right_strings[offset])
+            << "varchar offset input position " << i << " row " << offset;
+    }
 }
 
 TEST_P(ExprTest, TestReorder) {

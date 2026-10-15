@@ -20,9 +20,10 @@ FILE_COVERAGE_INFO="$PWD/go_coverage.txt"
 FILE_COVERAGE_HTML="$PWD/go_coverage.html"
 
 
+set -e
+
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
-
 set -e
 
 echo "mode: atomic" > ${FILE_COVERAGE_INFO}
@@ -40,7 +41,7 @@ export MILVUS_UT_WITHOUT_KAFKA=1 # kafka is not available in the CI environment,
 beginTime=$(date +%s)
 echo -e "=== Running go unittest (parallel=$PARALLEL) ===\n\n"
 
-for d in cmd/tools internal pkg client; do
+for d in cmd/tools cmd/milvus internal pkg client; do
     pushd "$d"
     PROFILE="profile_${d//\//_}.out"
     echo -e "-----------------------------------\nRunning test cases under $d with -p $PARALLEL ..."

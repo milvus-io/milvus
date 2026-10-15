@@ -74,6 +74,7 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  int64_t num_paths,
                                  struct ArrowSchema* schema,
                                  const int64_t buffer_size,
+                                 const bool eager_prebuffer,
                                  CStorageConfig c_storage_config,
                                  CPackedReader* c_packed_reader,
                                  CPluginContext* c_plugin_context) {
@@ -106,6 +107,13 @@ NewPackedReaderWithStorageConfig(char** paths,
                 ? std::string(c_storage_config.tls_min_version)
                 : "",
             c_storage_config.use_crc32c_checksum,
+            c_storage_config.talon_mode,
+            c_storage_config.talon_small_read_threshold,
+            c_storage_config.talon_coordinator != nullptr
+                ? c_storage_config.talon_coordinator
+                : "",
+            c_storage_config.talon_block_size,
+            c_storage_config.talon_max_idle_per_addr,
         });
         if (!trueFs) {
             return milvus::FailureCStatus(
@@ -130,7 +138,7 @@ NewPackedReaderWithStorageConfig(char** paths,
             trueSchema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     }
@@ -142,6 +150,7 @@ NewPackedReaderWithProperties(char** paths,
                               int64_t num_paths,
                               struct ArrowSchema* schema,
                               const int64_t buffer_size,
+                              const bool eager_prebuffer,
                               const LoonProperties* c_properties,
                               const char* filesystem_path,
                               CPackedReader* c_packed_reader,
@@ -182,7 +191,7 @@ NewPackedReaderWithProperties(char** paths,
             trueSchema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     }
@@ -194,6 +203,7 @@ NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
+                const bool eager_prebuffer,
                 CPackedReader* c_packed_reader,
                 CPluginContext* c_plugin_context) {
     SCOPE_CGO_CALL_METRIC();
@@ -225,7 +235,7 @@ NewPackedReader(char** paths,
             trueSchema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     }
@@ -234,9 +244,12 @@ NewPackedReader(char** paths,
 
 CStatus
 ReadNext(CPackedReader c_packed_reader,
-         CArrowArray* out_array,
-         CArrowSchema* out_schema) {
+         struct ArrowArray* out_array,
+         struct ArrowSchema* out_schema) {
     SCOPE_CGO_CALL_METRIC();
+
+    *out_array = {};
+    *out_schema = {};
 
     try {
         auto packed_reader =
@@ -251,19 +264,12 @@ ReadNext(CPackedReader c_packed_reader,
         if (record_batch == nullptr) {
             // end of file
             return milvus::SuccessCStatus();
-        } else {
-            std::unique_ptr<ArrowArray> arr = std::make_unique<ArrowArray>();
-            std::unique_ptr<ArrowSchema> schema =
-                std::make_unique<ArrowSchema>();
-            auto status = arrow::ExportRecordBatch(
-                *record_batch, arr.get(), schema.get());
-            if (!status.ok()) {
-                return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                              status.ToString());
-            }
-            *out_array = arr.release();
-            *out_schema = schema.release();
-            return milvus::SuccessCStatus();
+        }
+        auto export_status =
+            arrow::ExportRecordBatch(*record_batch, out_array, out_schema);
+        if (!export_status.ok()) {
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
+                                          export_status.ToString());
         }
         return milvus::SuccessCStatus();
     }

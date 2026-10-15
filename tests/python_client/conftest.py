@@ -44,6 +44,12 @@ def pytest_addoption(parser):
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
     parser.addoption("--dry_run", action="store_true", default=False, help="")
+    parser.addoption(
+        "--run-compaction-integrity-serial",
+        action="store_true",
+        default=False,
+        help="run cluster-global compaction data-integrity workloads in a non-xdist stage",
+    )
     parser.addoption("--database_name", action="store", default="default", help="name of database")
     parser.addoption("--partition_name", action="store", default="partition_name", help="name of partition")
     parser.addoption("--connect_name", action="store", default="connect_name", help="name of connect")
@@ -61,6 +67,11 @@ def pytest_addoption(parser):
     parser.addoption("--replica_num", action="store", default=ct.default_replica_num, help="memory replica number")
     parser.addoption("--minio_host", action="store", default="localhost", help="minio service's ip")
     parser.addoption("--minio_bucket", action="store", default="milvus-bucket", help="minio bucket name")
+    parser.addoption("--etcd_host", action="store", default="localhost", help="etcd service host")
+    parser.addoption("--etcd_port", action="store", type=int, default=2379, help="etcd service port")
+    parser.addoption("--etcd_root_path", action="store", default="by-dev", help="Milvus root path in etcd")
+    parser.addoption("--etcd_user", action="store", default="", help="etcd authentication user")
+    parser.addoption("--etcd_password", action="store", default="", help="etcd authentication password")
     parser.addoption("--uri", action="store", default="", help="uri for milvus client")
     parser.addoption("--token", action="store", default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
@@ -90,6 +101,71 @@ def pytest_addoption(parser):
     parser.addoption(
         "--tei_endpoint_2", action="store", default="", help="second tei embedding endpoint for alter tests"
     )
+
+    spark_backfill = parser.getgroup("spark-backfill")
+    spark_backfill.addoption(
+        "--run-spark-backfill",
+        action="store_true",
+        default=False,
+        help="collect and run the Spark-Milvus Backfill suite",
+    )
+    spark_backfill.addoption(
+        "--spark-runner-mode",
+        action="store",
+        choices=("job", "toolbox"),
+        default="job",
+        help="run Spark in one-shot Kubernetes Jobs or an existing Toolbox Pod",
+    )
+    spark_backfill.addoption("--management-endpoint", action="store", default="")
+    spark_backfill.addoption("--spark-k8s-context", action="store", default="")
+    spark_backfill.addoption("--spark-k8s-namespace", action="store", default="")
+    spark_backfill.addoption(
+        "--spark-image",
+        action="store",
+        default=(
+            "apache/spark:4.0.1-scala2.13-java21-python3-ubuntu"
+            "@sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e"
+        ),
+    )
+    spark_backfill.addoption("--spark-connector-url", action="store", default="")
+    spark_backfill.addoption("--spark-connector-sha256", action="store", default="")
+    spark_backfill.addoption("--spark-toolbox-pod", action="store", default="")
+    spark_backfill.addoption(
+        "--spark-toolbox-label",
+        action="store",
+        default="app=spark-milvus-toolbox",
+    )
+    spark_backfill.addoption("--spark-toolbox-container", action="store", default="spark-toolbox")
+    spark_backfill.addoption(
+        "--spark-toolbox-wrapper",
+        action="store",
+        default="/usr/local/bin/spark-submit-milvus",
+    )
+    spark_backfill.addoption(
+        "--spark-toolbox-workspace",
+        action="store",
+        default="/workspace/spark-backfill-pytest",
+    )
+    spark_backfill.addoption("--spark-milvus-uri", action="store", default="")
+    spark_backfill.addoption("--spark-minio-endpoint", action="store", default="")
+    spark_backfill.addoption("--spark-storage-secret-name", action="store", default="")
+    spark_backfill.addoption("--spark-service-account-name", action="store", default="")
+    spark_backfill.addoption("--spark-job-timeout", action="store", type=int, default=1800)
+    spark_backfill.addoption("--spark-keep-failed-job", action="store_true", default=False)
+    spark_backfill.addoption(
+        "--spark-evidence-root",
+        action="store",
+        default=os.path.join(os.getenv("CI_LOG_PATH", "/tmp/ci_logs"), "spark_backfill"),
+    )
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Keep Spark Backfill tests completely out of regular PR/E2E collection."""
+    from spark_backfill.config import is_spark_backfill_path
+
+    if is_spark_backfill_path(collection_path) and not config.getoption("--run-spark-backfill"):
+        return True
+    return None
 
 
 @pytest.fixture
@@ -235,6 +311,31 @@ def minio_bucket(request):
 
 
 @pytest.fixture
+def etcd_host(request):
+    return request.config.getoption("--etcd_host")
+
+
+@pytest.fixture
+def etcd_port(request):
+    return request.config.getoption("--etcd_port")
+
+
+@pytest.fixture
+def etcd_root_path(request):
+    return request.config.getoption("--etcd_root_path")
+
+
+@pytest.fixture
+def etcd_user(request):
+    return request.config.getoption("--etcd_user")
+
+
+@pytest.fixture
+def etcd_password(request):
+    return request.config.getoption("--etcd_password")
+
+
+@pytest.fixture
 def uri(request):
     return request.config.getoption("--uri")
 
@@ -331,9 +432,18 @@ def get_invalid_vector_dict(request):
 def pytest_configure(config):
     # register an additional marker
     config.addinivalue_line("markers", "tag(name): mark test to run only matching the tag")
+    if config.getoption("--run-spark-backfill"):
+        from spark_backfill.config import ensure_serial_execution
+
+        ensure_serial_execution(getattr(config.option, "numprocesses", None))
 
 
 def pytest_runtest_setup(item):
+    if item.get_closest_marker("compaction_data_integrity_serial") is not None:
+        if not item.config.getoption("--run-compaction-integrity-serial"):
+            pytest.skip("compaction data-integrity workloads require the dedicated serial E2E stage")
+        if hasattr(item.config, "workerinput"):
+            pytest.fail("compaction data-integrity workloads must run with pytest -n 0")
     tags = list()
     for marker in item.iter_markers(name="tag"):
         for tag in marker.args:

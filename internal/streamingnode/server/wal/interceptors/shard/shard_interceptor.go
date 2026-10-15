@@ -41,6 +41,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeInsert:             impl.handleInsertMessage,
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
+		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshotMessage,
 		message.MessageTypeSchemaChange:       impl.handleSchemaChange,
 		message.MessageTypeAlterCollection:    impl.handleAlterCollection,
 		message.MessageTypeCreateSegment:      impl.handleCreateSegment,
@@ -110,7 +111,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
+	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), WALFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
 
@@ -286,6 +287,16 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 	return appendOp(ctx, msg)
 }
 
+// handleCreateSnapshotMessage seals the old segments so later inserts cannot
+// change the snapshot's L1 data. The consuming-side Ack waits for their output.
+func (impl *shardInterceptor) handleCreateSnapshotMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	header := message.MustAsMutableCreateSnapshotMessageV2(msg).Header()
+	if _, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick()); err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+	return appendOp(ctx, msg)
+}
+
 // handleSchemaChange handles the schema change message.
 func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	schemaChangeMsg := message.MustAsMutableSchemaChangeMessageV2(msg)
@@ -398,7 +409,7 @@ func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Contex
 func (impl *shardInterceptor) Close() {
 	if schemaProvider, ok := impl.shardManager.(collectionSchemaProvider); ok {
 		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {
-			function.GetManager().Release(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
+			function.GetManager().Release(collectionID, WALFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
 }
