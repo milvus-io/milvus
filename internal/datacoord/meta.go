@@ -2188,7 +2188,7 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	if err != nil {
 		return err
 	}
-	m.notifyQueryViewSegmentUpdates(manifestUpdates)
+	m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates)
 	return nil
 }
 
@@ -2236,7 +2236,7 @@ func (m *meta) updateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 // Catalog retries overwrite the same actions until success or cancellation.
 func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
 	var manifestUpdates []*SegmentInfo
-	defer func() { m.notifyQueryViewSegmentUpdates(manifestUpdates) }()
+	defer func() { m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 
@@ -3175,7 +3175,7 @@ func (m *meta) appliedCompactionResultLocked(
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) (newSegments []*SegmentInfo, metricMutation *segMetricMutation, retErr error) {
 	defer func() {
 		if retErr == nil && t.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction {
-			m.notifyQueryViewSegmentUpdates(newSegments)
+			m.notifyQueryViewSegmentUpdates(ctx, newSegments)
 		}
 	}()
 	m.segMu.Lock()

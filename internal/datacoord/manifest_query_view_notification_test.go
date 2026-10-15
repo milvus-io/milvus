@@ -74,6 +74,16 @@ func TestManifestPublicationNotifiesQueryViews(t *testing.T) {
 			m.segments.SetSegment(10, segment)
 			m.queryViewLoadInfoNotifier = noopQueryViewLoadInfoNotifier{}
 			notifications := 0
+			recomputes := 0
+			recompute := mockey.Mock((*meta).recomputeDataView).To(func(got *meta, ctx context.Context, collectionID int64) {
+				require.Same(t, m, got)
+				require.EqualValues(t, 1, collectionID)
+				require.True(t, m.segMu.TryLock(), "recompute must run after publication outside segMu")
+				m.segMu.Unlock()
+				require.Equal(t, newManifest, m.GetSegment(ctx, 10).GetManifestPath())
+				recomputes++
+			}).Build()
+			defer recompute.UnPatch()
 			notifier := mockey.Mock(noopQueryViewLoadInfoNotifier.NotifySegments).To(func(_ noopQueryViewLoadInfoNotifier, collectionID int64, ids ...int64) {
 				notifications++
 				require.EqualValues(t, 1, collectionID)
@@ -96,12 +106,14 @@ func TestManifestPublicationNotifiesQueryViews(t *testing.T) {
 			cancel()
 			require.Error(t, tc.apply(ctx, m))
 			require.Zero(t, notifications)
+			require.Zero(t, recomputes)
 			require.Equal(t, oldManifest, m.GetSegment(context.Background(), 10).GetManifestPath())
 			update.UnPatch()
 			alter.UnPatch()
 
 			require.NoError(t, tc.apply(context.Background(), m))
 			require.Equal(t, 1, notifications)
+			require.Positive(t, recomputes, "committed Manifest must also update DataView requirements")
 			// Retrying a committed result may notify again, but cannot lose the update
 			// or move the Manifest backwards.
 			require.NoError(t, tc.apply(context.Background(), m))

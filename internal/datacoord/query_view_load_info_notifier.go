@@ -16,6 +16,8 @@
 
 package datacoord
 
+import "context"
+
 // QueryViewLoadInfoNotifier invalidates QueryNode segment load-info snapshots
 // after the corresponding DataCoord metadata has been durably committed.
 // Notifications are best-effort wakeups: QueryNode recovery always rebuilds
@@ -46,12 +48,16 @@ func (m *meta) notifyQueryViewSegments(collectionID int64, segmentIDs ...int64) 
 
 // notifyQueryViewSegmentUpdates runs after catalog and in-memory publication,
 // outside segMu, so subscribers can read the complete committed snapshot.
-func (m *meta) notifyQueryViewSegmentUpdates(segments []*SegmentInfo) {
+func (m *meta) notifyQueryViewSegmentUpdates(ctx context.Context, segments []*SegmentInfo) {
 	byCollection := make(map[int64][]int64)
 	for _, segment := range segments {
 		byCollection[segment.GetCollectionID()] = append(byCollection[segment.GetCollectionID()], segment.GetID())
 	}
 	for collectionID, segmentIDs := range byCollection {
 		m.notifyQueryViewSegments(collectionID, segmentIDs...)
+		// Manifest publication changes the base required by future QueryViews.
+		// Updating only the metadata stream can strand an external View on an
+		// older exact Manifest while every subscriber already sees its successor.
+		m.recomputeDataView(ctx, collectionID)
 	}
 }

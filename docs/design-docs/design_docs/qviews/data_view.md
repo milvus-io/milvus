@@ -220,10 +220,14 @@ projection-based reconciliation can be retired.
 Compaction (mix/clustering/L0/sort/bump-schema-version), copy completion and
 background SegmentMeta updates request asynchronous reconciliation after their
 metadata mutation commits by calling
-`Manager.Recompute(ctx, collectionID)`. Two additional SegmentMeta mutations
-advance a segment's Manifest version without changing membership and also
-request a recompute: a stats task (e.g. sort) that records a new manifest, and
-a `BatchUpdateManifest` V3 item that bumps a stored Manifest version.
+`Manager.Recompute(ctx, collectionID)`. Every committed Manifest-pointer change
+also requests reconciliation through
+the shared post-publication notification path, including single/batched Manifest
+transactions, text/JSON stats, index publication, schema bump and backfill.
+This path runs outside metadata/Manifest locks after catalog and memory commit,
+and both refreshes QN metadata subscribers and requests DataView recomputation.
+Updating only subscribers would leave external Views requiring an old exact
+Manifest while the available metadata already describes its successor.
 The queue and its worker live inside the Manager: a non-blocking, per-Collection
 deduplicated request (a Collection with a pending request is not queued again),
 drained by a single worker that rebuilds the snapshot against the injected

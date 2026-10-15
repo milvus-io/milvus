@@ -157,7 +157,7 @@ type SegmentManifestCommit struct {
 // released (still under keyLock).
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	var manifestUpdates []*SegmentInfo
-	defer func() { m.notifyQueryViewSegmentUpdates(manifestUpdates) }()
+	defer func() { m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
 	}
@@ -812,7 +812,7 @@ var segmentManifestLockEscalationThreshold = 30 * time.Second
 // manifest pointer (which would require its own per-segment manifest lock).
 func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentManifestCommit, extraOperators ...UpdateOperator) error {
 	var manifestUpdates []*SegmentInfo
-	defer func() { m.notifyQueryViewSegmentUpdates(manifestUpdates) }()
+	defer func() { m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	idSet := make(map[int64]struct{}, len(commits))
 	for _, commit := range commits {
 		if commit.SegmentID == 0 {
