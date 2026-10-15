@@ -29,7 +29,8 @@ const (
 	DataWalkLabel   = "walk"
 	DataStatLabel   = "stat"
 
-	persistentDataOpType = "persistent_data_op_type"
+	persistentDataOpType          = "persistent_data_op_type"
+	filesystemMetricsOriginSource = "origin"
 )
 
 var (
@@ -66,7 +67,7 @@ var (
 			Subsystem: "storage",
 			Name:      "filesystem_read_count",
 			Help:      "number of filesystem read operations",
-		}, []string{filesystemKeyLabelName})
+		}, []string{filesystemKeyLabelName, filesystemSourceLabelName})
 
 	// Deprecated: filesystem metrics are collected from the filesystem cache at scrape time. Remove in v4.
 	FilesystemWriteCount = prometheus.NewGaugeVec(
@@ -75,7 +76,7 @@ var (
 			Subsystem: "storage",
 			Name:      "filesystem_write_count",
 			Help:      "number of filesystem write operations",
-		}, []string{filesystemKeyLabelName})
+		}, []string{filesystemKeyLabelName, filesystemSourceLabelName})
 
 	// Deprecated: filesystem metrics are collected from the filesystem cache at scrape time. Remove in v4.
 	FilesystemReadBytes = prometheus.NewGaugeVec(
@@ -84,7 +85,7 @@ var (
 			Subsystem: "storage",
 			Name:      "filesystem_read_bytes",
 			Help:      "total bytes read from filesystem",
-		}, []string{filesystemKeyLabelName})
+		}, []string{filesystemKeyLabelName, filesystemSourceLabelName})
 
 	// Deprecated: filesystem metrics are collected from the filesystem cache at scrape time. Remove in v4.
 	FilesystemWriteBytes = prometheus.NewGaugeVec(
@@ -93,7 +94,7 @@ var (
 			Subsystem: "storage",
 			Name:      "filesystem_write_bytes",
 			Help:      "total bytes written to filesystem",
-		}, []string{filesystemKeyLabelName})
+		}, []string{filesystemKeyLabelName, filesystemSourceLabelName})
 
 	// Deprecated: filesystem metrics are collected from the filesystem cache at scrape time. Remove in v4.
 	FilesystemGetFileInfoCount = prometheus.NewGaugeVec(
@@ -102,7 +103,7 @@ var (
 			Subsystem: "storage",
 			Name:      "filesystem_get_file_info_count",
 			Help:      "number of get file info operations",
-		}, []string{filesystemKeyLabelName})
+		}, []string{filesystemKeyLabelName, filesystemSourceLabelName})
 
 	// Deprecated: filesystem metrics are collected from the filesystem cache at scrape time. Remove in v4.
 	FilesystemFailedCount = prometheus.NewGaugeVec(
@@ -111,7 +112,7 @@ var (
 			Subsystem: "storage",
 			Name:      "filesystem_failed_count",
 			Help:      "number of failed filesystem operations",
-		}, []string{filesystemKeyLabelName})
+		}, []string{filesystemKeyLabelName, filesystemSourceLabelName})
 
 	// Deprecated: filesystem metrics are collected from the filesystem cache at scrape time. Remove in v4.
 	FilesystemMultiPartUploadCreated = prometheus.NewGaugeVec(
@@ -120,7 +121,7 @@ var (
 			Subsystem: "storage",
 			Name:      "filesystem_multi_part_upload_created",
 			Help:      "number of multi-part uploads created",
-		}, []string{filesystemKeyLabelName})
+		}, []string{filesystemKeyLabelName, filesystemSourceLabelName})
 
 	// Deprecated: filesystem metrics are collected from the filesystem cache at scrape time. Remove in v4.
 	FilesystemMultiPartUploadFinished = prometheus.NewGaugeVec(
@@ -129,7 +130,7 @@ var (
 			Subsystem: "storage",
 			Name:      "filesystem_multi_part_upload_finished",
 			Help:      "number of multi-part uploads finished",
-		}, []string{filesystemKeyLabelName})
+		}, []string{filesystemKeyLabelName, filesystemSourceLabelName})
 
 	filesystemMetricVecs = []*prometheus.GaugeVec{
 		FilesystemReadCount,
@@ -143,9 +144,10 @@ var (
 	}
 )
 
-// FilesystemMetrics holds the metrics for one cached filesystem.
+// FilesystemMetrics holds one source's metrics for a cached filesystem.
 type FilesystemMetrics struct {
 	DisplayKey              string
+	Source                  string
 	ReadCount               int64
 	WriteCount              int64
 	ReadBytes               int64
@@ -156,14 +158,19 @@ type FilesystemMetrics struct {
 	MultiPartUploadFinished int64
 }
 
+type filesystemMetricsKey struct {
+	fs     string
+	source string
+}
+
 var (
 	filesystemMetricsCollectFn func() []FilesystemMetrics
 	filesystemMetricsMu        sync.Mutex
 
 	filesystemMetricsScrapeMu   sync.Mutex
 	filesystemMetricsStateMu    sync.Mutex
-	filesystemMetricsCacheKeys  = make(map[string]struct{})
-	filesystemMetricsLegacyKeys = make(map[string]struct{})
+	filesystemMetricsCacheKeys  = make(map[filesystemMetricsKey]struct{})
+	filesystemMetricsLegacyKeys = make(map[filesystemMetricsKey]struct{})
 )
 
 // SetFilesystemMetricsCollectFn sets the callback used to list current filesystem metrics.
@@ -202,18 +209,19 @@ func (c *filesystemMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 			continue
 		}
 		for _, metric := range filesystemMetricVecs {
-			metric.DeleteLabelValues(key)
+			metric.DeleteLabelValues(key.fs, key.source)
 		}
 	}
 	clear(filesystemMetricsCacheKeys)
 
 	for _, metric := range cacheMetrics {
-		if _, legacy := filesystemMetricsLegacyKeys[metric.DisplayKey]; legacy {
+		key := filesystemMetricsKey{fs: metric.DisplayKey, source: metric.Source}
+		if _, legacy := filesystemMetricsLegacyKeys[key]; legacy {
 			continue
 		}
-		setFilesystemMetrics(metric.DisplayKey, metric.ReadCount, metric.WriteCount, metric.ReadBytes, metric.WriteBytes,
+		setFilesystemMetrics(metric.DisplayKey, metric.Source, metric.ReadCount, metric.WriteCount, metric.ReadBytes, metric.WriteBytes,
 			metric.GetFileInfoCount, metric.FailedCount, metric.MultiPartUploadCreated, metric.MultiPartUploadFinished)
-		filesystemMetricsCacheKeys[metric.DisplayKey] = struct{}{}
+		filesystemMetricsCacheKeys[key] = struct{}{}
 	}
 
 	for _, metric := range filesystemMetricVecs {
@@ -221,26 +229,26 @@ func (c *filesystemMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 }
 
-func setFilesystemMetrics(fs string, readCount, writeCount, readBytes, writeBytes, getFileInfoCount, failedCount, multiPartUploadCreated, multiPartUploadFinished int64) {
-	FilesystemReadCount.WithLabelValues(fs).Set(float64(readCount))
-	FilesystemWriteCount.WithLabelValues(fs).Set(float64(writeCount))
-	FilesystemReadBytes.WithLabelValues(fs).Set(float64(readBytes))
-	FilesystemWriteBytes.WithLabelValues(fs).Set(float64(writeBytes))
-	FilesystemGetFileInfoCount.WithLabelValues(fs).Set(float64(getFileInfoCount))
-	FilesystemFailedCount.WithLabelValues(fs).Set(float64(failedCount))
-	FilesystemMultiPartUploadCreated.WithLabelValues(fs).Set(float64(multiPartUploadCreated))
-	FilesystemMultiPartUploadFinished.WithLabelValues(fs).Set(float64(multiPartUploadFinished))
+func setFilesystemMetrics(fs, source string, readCount, writeCount, readBytes, writeBytes, getFileInfoCount, failedCount, multiPartUploadCreated, multiPartUploadFinished int64) {
+	FilesystemReadCount.WithLabelValues(fs, source).Set(float64(readCount))
+	FilesystemWriteCount.WithLabelValues(fs, source).Set(float64(writeCount))
+	FilesystemReadBytes.WithLabelValues(fs, source).Set(float64(readBytes))
+	FilesystemWriteBytes.WithLabelValues(fs, source).Set(float64(writeBytes))
+	FilesystemGetFileInfoCount.WithLabelValues(fs, source).Set(float64(getFileInfoCount))
+	FilesystemFailedCount.WithLabelValues(fs, source).Set(float64(failedCount))
+	FilesystemMultiPartUploadCreated.WithLabelValues(fs, source).Set(float64(multiPartUploadCreated))
+	FilesystemMultiPartUploadFinished.WithLabelValues(fs, source).Set(float64(multiPartUploadFinished))
 }
 
-// PublishFilesystemMetrics publishes filesystem metrics.
+// PublishFilesystemMetrics publishes origin metrics for legacy callers.
 //
 // Deprecated: filesystem metrics are collected from the filesystem cache at scrape time. Remove in v4.
 func PublishFilesystemMetrics(fs string, readCount, writeCount, readBytes, writeBytes, getFileInfoCount, failedCount, multiPartUploadCreated, multiPartUploadFinished int64) {
 	filesystemMetricsStateMu.Lock()
 	defer filesystemMetricsStateMu.Unlock()
 
-	setFilesystemMetrics(fs, readCount, writeCount, readBytes, writeBytes, getFileInfoCount, failedCount, multiPartUploadCreated, multiPartUploadFinished)
-	filesystemMetricsLegacyKeys[fs] = struct{}{}
+	setFilesystemMetrics(fs, filesystemMetricsOriginSource, readCount, writeCount, readBytes, writeBytes, getFileInfoCount, failedCount, multiPartUploadCreated, multiPartUploadFinished)
+	filesystemMetricsLegacyKeys[filesystemMetricsKey{fs: fs, source: filesystemMetricsOriginSource}] = struct{}{}
 }
 
 // RegisterStorageMetrics registers storage metrics
