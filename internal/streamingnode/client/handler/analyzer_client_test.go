@@ -326,13 +326,26 @@ func TestAnalyzerRequestsBoundPersistentPreparationFailures(t *testing.T) {
 			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
 			// The caller itself has no deadline. Repeated errors must not keep the
 			// request (and a RootCoord DDL lock) alive indefinitely.
-			var err error
-			if validate {
-				_, err = client.ValidateAnalyzer(context.Background(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
-			} else {
-				_, err = client.RunAnalyzer(context.Background(), &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				var err error
+				if validate {
+					_, err = client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+				} else {
+					_, err = client.RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}})
+				}
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			case <-time.After(5 * time.Second):
+				cancel()
+				<-done
+				t.Fatal("analyzer request did not enforce its configured timeout")
 			}
-			require.ErrorIs(t, err, context.DeadlineExceeded)
 			require.Positive(t, calls)
 			client.lifetime.SetState(typeutil.LifetimeStateStopped)
 			client.lifetime.Wait()

@@ -256,10 +256,14 @@ mod tests {
             r#"{"tokenizer":"standard","filter":[{"type":"stemmer","language":"xx"}]}"#,
             r#"{"tokenizer":"standard","filter":[{"type":"stemmer","language":1}]}"#,
         ] {
-            assert!(matches!(
-                create_analyzer(params, ""),
-                Err(crate::error::TantivyBindingError::InvalidArgument(_))
-            ), "{}", params);
+            assert!(
+                matches!(
+                    create_analyzer(params, ""),
+                    Err(crate::error::TantivyBindingError::InvalidArgument(_))
+                ),
+                "{}",
+                params
+            );
         }
     }
 
