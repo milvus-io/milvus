@@ -75,13 +75,29 @@ func HTTPReturn(c *gin.Context, code int, result gin.H) {
 }
 
 // HTTPReturnStream uses custom jsonRender that encodes JSON data directly into the response writer.
-// Timeout-wrapped REST routes still buffer encoded bytes before committing them to the client.
+// Legacy timeout routes buffer output; selected V2 DQL routes write directly.
 func HTTPReturnStream(c *gin.Context, code int, result gin.H) {
 	c.Set(HTTPReturnCode, result[HTTPReturnCode])
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
 	setTraceIDHeader(c)
+	if writer, streaming := c.Writer.(*streamingResponseWriter); streaming {
+		c.Writer.WriteHeader(code)
+		if err := (jsonRender{Data: result}).Render(c.Writer); err != nil {
+			if c.Writer.Written() {
+				c.Set(HTTPReturnCode, merr.Code(merr.ErrInvalidSearchResult))
+				c.Set(HTTPReturnMessage, resultErrMessage(err))
+				writer.failure = err
+				c.Abort()
+				return
+			}
+			if c.Request.Context().Err() == nil {
+				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrInvalidSearchResult), HTTPReturnMessage: resultErrMessage(err)})
+			}
+		}
+		return
+	}
 	c.Render(code, jsonRender{Data: result})
 }
 

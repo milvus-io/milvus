@@ -1,0 +1,555 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package httpserver
+
+import (
+	"context"
+	"crypto/tls"
+	"io"
+	"math"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httptrace"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+// Only recorder-based value tests use this deadline capability. Real transport
+// tests deliberately bypass it so unsupported or missing deadlines fail tests.
+type streamingRecorderWriter struct{ gin.ResponseWriter }
+
+func (w streamingRecorderWriter) SetWriteDeadline(time.Time) error { return nil }
+
+func streamingRecorderMiddleware(c *gin.Context) {
+	c.Writer = streamingRecorderWriter{c.Writer}
+	c.Next()
+}
+
+func streamingTestServer(t *testing.T, protocol string, handler http.Handler) (*httptest.Server, *http.Client) {
+	t.Helper()
+	if protocol == "h2c" {
+		server := httptest.NewServer(h2c.NewHandler(handler, &http2.Server{}))
+		transport := &http2.Transport{AllowHTTP: true, DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		}}
+		client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
+		t.Cleanup(transport.CloseIdleConnections)
+		t.Cleanup(server.Close)
+		return server, client
+	}
+	server := httptest.NewUnstartedServer(handler)
+	if protocol == "h2" {
+		server.EnableHTTP2 = true
+		server.StartTLS()
+	} else {
+		server.Start()
+	}
+	client := server.Client()
+	client.Timeout = 3 * time.Second
+	t.Cleanup(server.Close)
+	return server, client
+}
+
+func streamingTestTimeout(t *testing.T, timeout string) {
+	t.Helper()
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.RequestTimeoutMs.Key
+	require.NoError(t, paramtable.Get().Save(key, timeout))
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+}
+
+func requireStreamingAbort(t *testing.T, response *http.Response) []byte {
+	t.Helper()
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	require.Error(t, err, "the transport must report an interrupted response")
+	require.False(t, json.Valid(body), string(body))
+	require.NotContains(t, string(body), `"message"`)
+	require.NotContains(t, string(body), "]}\n")
+	return body
+}
+
+func streamingProjectionRows(t *testing.T, count, badIndex int) *queryResponseRows {
+	t.Helper()
+	values := make([]string, count)
+	for i := range values {
+		values[i] = `{"value":1}`
+	}
+	values[badIndex] = `{broken`
+	field := jsonRespFieldData(values...)
+	field.IsDynamic, field.FieldName = true, "$meta"
+	rows, err := newQueryResponseRows(0, []string{"value"}, []*schemapb.FieldData{field}, nil, nil, true, nil)
+	require.NoError(t, err)
+	return rows
+}
+
+func TestStreamingResponseDeliveredBeforeHandlerReturns(t *testing.T) {
+	paramtable.Init()
+	release := make(chan struct{})
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
+		_, _ = c.Writer.Write([]byte(strings.Repeat("x", 8192)))
+		c.Writer.Flush()
+		<-release
+	}))
+	server := httptest.NewServer(StreamingHTTPHandler(engine))
+	defer server.Close()
+	defer close(release)
+	client := server.Client()
+	client.Timeout = time.Second
+	resp, err := client.Get(server.URL)
+	require.NoError(t, err, "the first batch must be visible while the handler is still running")
+	defer resp.Body.Close()
+	first := make([]byte, 8192)
+	_, err = io.ReadFull(resp.Body, first)
+	require.NoError(t, err)
+	require.Equal(t, strings.Repeat("x", 8192), string(first))
+}
+
+func TestStreamingTransportFailures(t *testing.T) {
+	streamingTestTimeout(t, "80")
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			for _, mode := range []string{"timeout", "panic", "late projection", "late encoding"} {
+				t.Run(mode, func(t *testing.T) {
+					engine := gin.New()
+					engine.Use(gin.Recovery())
+					unwound := make(chan struct{})
+					engine.Use(func(c *gin.Context) { c.Next(); close(unwound) })
+					engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
+						if mode == "late projection" || mode == "late encoding" {
+							values := make([]float64, 130)
+							if mode == "late encoding" {
+								values[129] = math.NaN()
+							}
+							rows := streamTestRows(t, values...)
+							if mode == "late projection" {
+								rows = streamingProjectionRows(t, 130, 129)
+							}
+							returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: rows})
+							return
+						}
+						_, _ = c.Writer.Write([]byte(`{"data":[1`))
+						c.Writer.Flush()
+						if mode == "panic" {
+							panic("committed failure")
+						}
+						<-c.Request.Context().Done()
+					}))
+					server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
+					resp, err := client.Get(server.URL)
+					require.NoError(t, err)
+					requireStreamingAbort(t, resp)
+					select {
+					case <-unwound:
+					case <-time.After(time.Second):
+						t.Fatal("Gin middleware did not unwind before transport abort")
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestStreamingCommittedPanicDiagnostics(t *testing.T) {
+	streamingTestTimeout(t, "1000")
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			for _, ordinaryPanic := range []bool{true, false} {
+				t.Run(strconv.FormatBool(ordinaryPanic), func(t *testing.T) {
+					logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug", Format: "json", DisableTimestamp: true, DisableCaller: true, DisableStacktrace: true})
+					type accounting struct {
+						code    any
+						message any
+						errors  string
+					}
+					observed := make(chan accounting, 1)
+					engine := gin.New()
+					engine.Use(gin.Recovery())
+					engine.Use(func(c *gin.Context) {
+						c.Set("traceID", "panic-diagnostics-trace")
+						c.Next()
+						code, _ := c.Get(HTTPReturnCode)
+						message, _ := c.Get(HTTPReturnMessage)
+						observed <- accounting{code, message, c.Errors.ByType(gin.ErrorTypePrivate).String()}
+					})
+					engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
+						c.Set(ContextRequest, "REQUEST_PAYLOAD_SENTINEL")
+						c.Set(HTTPReturnCode, merr.Code(nil))
+						_, _ = c.Writer.Write([]byte(`{"data":[1`))
+						c.Writer.Flush()
+						if ordinaryPanic {
+							panic("original committed panic")
+						}
+						panic(http.ErrAbortHandler)
+					}))
+					server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
+					resp, err := client.Get(server.URL)
+					require.NoError(t, err)
+					requireStreamingAbort(t, resp)
+					var got accounting
+					select {
+					case got = <-observed:
+					case <-time.After(time.Second):
+						t.Fatal("request accounting did not unwind after panic")
+					}
+					if ordinaryPanic {
+						require.Equal(t, merr.Code(merr.ErrServiceInternal), got.code)
+						require.Contains(t, got.message, "panicked")
+						require.Contains(t, got.errors, "panicked")
+						require.Contains(t, logs.String(), "original committed panic")
+						require.Contains(t, logs.String(), "TestStreamingCommittedPanicDiagnostics.func")
+						require.Contains(t, logs.String(), `"panic_stack"`)
+						require.Contains(t, logs.String(), `"error"`)
+						require.Contains(t, strings.ToLower(logs.String()), `"level":"error"`)
+					} else {
+						require.Empty(t, got.errors, "transport abort signal is not an ordinary handler panic")
+						require.NotContains(t, logs.String(), "panicked")
+					}
+					require.NotContains(t, logs.String(), "REQUEST_PAYLOAD_SENTINEL")
+				})
+			}
+		})
+	}
+}
+
+func TestStreamingPrecommitErrorsAndKeepalive(t *testing.T) {
+	streamingTestTimeout(t, "80")
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			engine := gin.New()
+			engine.Use(gin.Recovery())
+			engine.GET("/:mode", streamingTimeoutMiddleware(func(c *gin.Context) {
+				switch c.Param("mode") {
+				case "timeout":
+					<-c.Request.Context().Done()
+				case "panic":
+					panic("uncommitted panic")
+				case "encoding":
+					returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnCost: func() {}, HTTPReturnData: streamTestRows(t, 1)})
+				case "first encoding":
+					returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: streamTestRows(t, math.NaN())})
+				case "first projection":
+					rows := streamingProjectionRows(t, 1, 0)
+					returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: rows})
+				case "nested encoding":
+					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: []gin.H{{"value": math.NaN()}}})
+				default:
+					HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: "healthy"})
+				}
+			}))
+			server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
+			for index, mode := range []string{"timeout", "panic", "encoding", "first encoding", "first projection", "nested encoding", "healthy"} {
+				reused := false
+				req, err := http.NewRequest(http.MethodGet, server.URL+"/"+mode, nil)
+				require.NoError(t, err)
+				req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused }}))
+				resp, err := client.Do(req)
+				require.NoError(t, err)
+				if index > 0 {
+					require.True(t, reused, "uncommitted errors must preserve a healthy connection")
+				}
+				body, err := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				require.NoError(t, err)
+				switch mode {
+				case "timeout":
+					require.Equal(t, http.StatusRequestTimeout, resp.StatusCode)
+					require.Contains(t, string(body), "request timeout")
+					require.True(t, json.Valid(body))
+				case "panic":
+					require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+					require.JSONEq(t, `{"code":500}`, string(body))
+				case "encoding", "first encoding", "first projection", "nested encoding":
+					require.Equal(t, int64(merr.Code(merr.ErrInvalidSearchResult)), gjson.GetBytes(body, HTTPReturnCode).Int())
+					require.True(t, json.Valid(body))
+				default:
+					require.Contains(t, string(body), "healthy")
+				}
+			}
+		})
+	}
+}
+
+func TestStreamingClientDisconnect(t *testing.T) {
+	streamingTestTimeout(t, "1000")
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			finished := make(chan struct{})
+			rejectedWrite := make(chan error, 1)
+			engine := gin.New()
+			engine.Use(gin.Recovery())
+			engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
+				defer close(finished)
+				_, _ = c.Writer.Write([]byte(`{"data":[1`))
+				c.Writer.Flush()
+				<-c.Request.Context().Done()
+				_, err := c.Writer.Write([]byte("]}\n"))
+				rejectedWrite <- err
+			}))
+			server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
+			resp, err := client.Get(server.URL)
+			require.NoError(t, err)
+			resp.Body.Close()
+			select {
+			case <-finished:
+			case <-time.After(500 * time.Millisecond):
+				t.Fatal("handler failed to stop after client disconnect")
+			}
+			require.Error(t, <-rejectedWrite)
+		})
+	}
+}
+
+func TestStreamingUnsupportedDeadlinesFailClosed(t *testing.T) {
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) { HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: 0}) }))
+	w := httptest.NewRecorder()
+	require.PanicsWithValue(t, http.ErrAbortHandler, func() {
+		StreamingHTTPHandler(engine).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	})
+	require.Empty(t, w.Body.String(), "unsupported deadlines must not permit unbounded real writes")
+}
+
+func TestStreamingCommittedFailureReturnsToHandler(t *testing.T) {
+	streamingTestTimeout(t, "1000")
+	for _, nested := range []bool{false, true} {
+		t.Run(strconv.FormatBool(nested), func(t *testing.T) {
+			continued := make(chan error, 1)
+			engine := gin.New()
+			engine.Use(gin.Recovery())
+			engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
+				if nested {
+					_, _ = c.Writer.Write([]byte(`{"data":[1`))
+					c.Writer.Flush()
+					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: math.NaN()})
+				} else {
+					values := make([]float64, 130)
+					values[129] = math.NaN()
+					returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: streamTestRows(t, values...)})
+				}
+				// Real route wrappers must regain control to record their normal
+				// accounting, but cannot write more bytes after renderer failure.
+				_, err := c.Writer.Write([]byte("]}\n"))
+				continued <- err
+			}))
+			server, client := streamingTestServer(t, "http1", StreamingHTTPHandler(engine))
+			resp, err := client.Get(server.URL)
+			require.NoError(t, err)
+			requireStreamingAbort(t, resp)
+			select {
+			case err := <-continued:
+				require.Error(t, err)
+			default:
+				t.Fatal("ordinary renderer failure skipped its caller's accounting")
+			}
+		})
+	}
+}
+
+func TestStreamingImmediateTimeoutHeader(t *testing.T) {
+	streamingTestTimeout(t, "80")
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			engine := gin.New()
+			engine.Use(gin.Recovery())
+			engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
+				returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: streamTestRows(t, 1)})
+			}))
+			server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
+			req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+			require.NoError(t, err)
+			req.Header.Set("Request-Timeout", "0")
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			require.NoError(t, err)
+			require.Equal(t, http.StatusRequestTimeout, resp.StatusCode)
+			require.True(t, json.Valid(body))
+			require.Contains(t, string(body), "request timeout")
+		})
+	}
+}
+
+func TestStreamingNestedAggregationRoute(t *testing.T) {
+	streamingTestTimeout(t, "80")
+	key := paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key
+	require.NoError(t, paramtable.Get().Save(key, "false"))
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			for _, mode := range []string{"success", "encoding", "timeout"} {
+				t.Run(mode, func(t *testing.T) {
+					mp := mocks.NewMockProxy(t)
+					mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+						CollectionName: DefaultCollectionName, Schema: generateCollectionSchema(schemapb.DataType_Int64, false, true), Status: &StatusSuccess,
+					}, nil).Once()
+					metric := 12.5
+					if mode == "encoding" {
+						metric = math.NaN()
+					}
+					result := &milvuspb.SearchResults{Status: &StatusSuccess, Results: &schemapb.SearchResultData{
+						NumQueries: 1, AggTopks: []int64{1}, AggBuckets: []*schemapb.AggBucket{{
+							Key:   []*schemapb.BucketKeyEntry{{FieldName: "brand", Value: &schemapb.BucketKeyEntry_StringVal{StringVal: "<tag>&"}}},
+							Count: 3, Metrics: map[string]*schemapb.MetricValue{"avg_price": {Value: &schemapb.MetricValue_DoubleVal{DoubleVal: metric}}},
+						}},
+					}}
+					mp.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+						if mode == "timeout" {
+							<-ctx.Done()
+						}
+						return result, nil
+					}).Once()
+					engine := gin.New()
+					engine.Use(gin.Recovery())
+					NewHandlersV2(mp).RegisterRoutesToV2(engine.Group("/v2/vectordb", genAuthMiddleWare(false)))
+					server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
+					resp, err := client.Post(server.URL+versionalV2(EntityCategory, SearchAction), "application/json", strings.NewReader(`{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":10,"searchAggregation":{"fields":["brand"],"size":2,"metrics":{"avg_price":{"op":"avg","fieldName":"price"}}}}`))
+					require.NoError(t, err)
+					body, err := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					require.NoError(t, err)
+					require.True(t, json.Valid(body), string(body))
+					switch mode {
+					case "timeout":
+						require.Equal(t, http.StatusRequestTimeout, resp.StatusCode)
+						require.Equal(t, int64(merr.TimeoutCode), gjson.GetBytes(body, HTTPReturnCode).Int())
+					case "encoding":
+						require.Equal(t, int64(merr.Code(merr.ErrInvalidSearchResult)), gjson.GetBytes(body, HTTPReturnCode).Int())
+					default:
+						require.Equal(t, int64(0), gjson.GetBytes(body, HTTPReturnCode).Int())
+						require.Contains(t, string(body), `\u003ctag\u003e\u0026`)
+						require.Equal(t, 12.5, gjson.GetBytes(body, "data.0.buckets.0.metrics.avg_price").Float())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestStreamingBlockedOutputAndHealthyStream(t *testing.T) {
+	streamingTestTimeout(t, "100")
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			finished := make(chan struct{})
+			engine := gin.New()
+			engine.Use(gin.Recovery())
+			engine.GET("/blocked", streamingTimeoutMiddleware(func(c *gin.Context) {
+				defer close(finished)
+				_, _ = c.Writer.Write([]byte(`{"data":["`))
+				c.Writer.Flush()
+				batch := []byte(strings.Repeat("x", 1<<20))
+				for i := 0; i < 128; i++ {
+					if _, err := c.Writer.Write(batch); err != nil {
+						return
+					}
+				}
+				t.Error("client did not exert output backpressure")
+			}))
+			engine.GET("/healthy", streamingTimeoutMiddleware(func(c *gin.Context) {
+				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: "healthy"})
+			}))
+			server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
+			resp, err := client.Get(server.URL + "/blocked")
+			require.NoError(t, err)
+			if protocol != "http1" {
+				reused := false
+				req, err := http.NewRequest(http.MethodGet, server.URL+"/healthy", nil)
+				require.NoError(t, err)
+				req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused }}))
+				healthy, err := client.Do(req)
+				require.NoError(t, err)
+				body, err := io.ReadAll(healthy.Body)
+				healthy.Body.Close()
+				require.NoError(t, err)
+				require.Equal(t, 2, healthy.ProtoMajor)
+				require.True(t, reused, "the healthy stream must share the blocked stream's connection")
+				require.Contains(t, string(body), "healthy")
+			}
+			select {
+			case <-finished:
+			case <-time.After(2 * time.Second):
+				t.Fatal("blocked socket write outlived the request deadline")
+			}
+			requireStreamingAbort(t, resp)
+			// A new request must not inherit a stopped callback or expired deadline.
+			healthy, err := client.Get(server.URL + "/healthy")
+			require.NoError(t, err)
+			body, err := io.ReadAll(healthy.Body)
+			healthy.Body.Close()
+			require.NoError(t, err)
+			require.Contains(t, string(body), "healthy")
+		})
+	}
+}
+
+func TestStreamingTimeoutWaitsForWorkerExit(t *testing.T) {
+	paramtable.Init()
+	cfg := paramtable.Get().HTTPCfg.RequestTimeoutMs
+	require.NoError(t, paramtable.Get().Save(cfg.Key, "20"))
+	defer paramtable.Get().Reset(cfg.Key)
+	release := make(chan struct{})
+	expired := make(chan struct{})
+	finished := make(chan struct{})
+	engine := gin.New()
+	engine.Use(streamingRecorderMiddleware)
+	engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
+		<-c.Request.Context().Done()
+		close(expired)
+		<-release
+	}))
+	w := httptest.NewRecorder()
+	go func() {
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+		close(finished)
+	}()
+	<-expired
+	select {
+	case <-finished:
+		close(release)
+		t.Fatal("request returned while its worker was still running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("request did not return after worker exit")
+	}
+	require.Equal(t, http.StatusRequestTimeout, w.Code)
+}

@@ -28,8 +28,8 @@ import (
 )
 
 // writeQueryResponse writes one response while owning only one encoded batch.
-// The caller must discard any partial output on error before writing an error
-// envelope. In Phase 1, w is the existing response recorder, never the socket.
+// The caller must discard buffered output or abort a committed transport on
+// error. An error envelope can replace output only before commitment.
 // Metadata must exclude data; this function owns the data array's framing.
 func writeQueryResponse(ctx context.Context, w io.Writer, metadata gin.H, rows *queryResponseRows, batchRows int) error {
 	if err := ctx.Err(); err != nil {
@@ -68,6 +68,9 @@ func writeQueryResponse(ctx context.Context, w io.Writer, metadata gin.H, rows *
 			return err
 		}
 	}
+	if err := flushQueryResponse(w); err != nil {
+		return err
+	}
 	for err == nil {
 		// Do not retain the preceding encoded batch while producing another.
 		batch = nil
@@ -84,8 +87,18 @@ func writeQueryResponse(ctx context.Context, w io.Writer, metadata gin.H, rows *
 		if err := writeQueryResponseBytes(ctx, w, batch); err != nil {
 			return err
 		}
+		if err := flushQueryResponse(w); err != nil {
+			return err
+		}
 	}
 	return writeQueryResponseBytes(ctx, w, []byte("]}\n"))
+}
+
+func flushQueryResponse(w io.Writer) error {
+	if flusher, ok := w.(interface{ FlushError() error }); ok {
+		return flusher.FlushError()
+	}
+	return nil
 }
 
 func marshalQueryResponseBatch(ctx context.Context, rows *queryResponseRows, batchRows int) ([]byte, error) {

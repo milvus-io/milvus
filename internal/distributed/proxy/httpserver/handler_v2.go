@@ -291,14 +291,14 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	router.POST(DataBaseCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
-	router.POST(EntityCategory+QueryAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+QueryAction, h.dqlAdmission(restfulSizeMiddleware(streamingTimeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
 			Limit:        100,
 			OutputFields: []string{DefaultOutputFields},
 		}
 	}, wrapperTraceLog(h.query))), true)))
 	// Get
-	router.POST(EntityCategory+GetAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+GetAction, h.dqlAdmission(restfulSizeMiddleware(streamingTimeoutMiddleware(wrapperPost(func() any {
 		return &CollectionIDReq{
 			OutputFields: []string{DefaultOutputFields},
 		}
@@ -316,19 +316,19 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.upsert))), false))
 	// Search
-	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(streamingTimeoutMiddleware(wrapperPost(func() any {
 		return &SearchReqV2{
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.search))), true)))
 	// advanced_search, backward compatible uri
-	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(streamingTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.advancedSearch))), true)))
 	// HybridSearch
-	router.POST(EntityCategory+HybridSearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+HybridSearchAction, h.dqlAdmission(restfulSizeMiddleware(streamingTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
@@ -1638,15 +1638,15 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	return resp, err
 }
 
-// queryResponseBatchRows is internal: response bytes remain buffered by the
-// existing timeout recorder while projection and encoding own one batch.
+// queryResponseBatchRows bounds the projection and encoding working set.
 const queryResponseBatchRows = 64
 
 func returnQueryResponse(ctx context.Context, c *gin.Context, code int, result gin.H) {
 	rows := result[HTTPReturnData].(*queryResponseRows)
 	delete(result, HTTPReturnData)
 	recorder, buffered := c.Writer.(*timeoutResponseRecorder)
-	if !buffered {
+	streamWriter, streaming := c.Writer.(*streamingResponseWriter)
+	if !buffered && !streaming {
 		// Callers without the timeout recorder must finish projection before
 		// rendering, since a socket cannot replace a partially written envelope.
 		data := make([]map[string]interface{}, 0, rows.rowsNum)
@@ -1669,9 +1669,16 @@ func returnQueryResponse(ctx context.Context, c *gin.Context, code int, result g
 	setTraceIDHeader(c)
 	jsonRender{}.WriteContentType(c.Writer)
 	c.Writer.WriteHeader(code)
-	if err := writeQueryResponse(ctx, recorder, result, rows, queryResponseBatchRows); err != nil {
+	if err := writeQueryResponse(ctx, c.Writer, result, rows, queryResponseBatchRows); err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to render query result", mlog.Err(err))
-		if !recorder.Discard() {
+		if streaming && c.Writer.Written() {
+			c.Set(HTTPReturnCode, merr.Code(merr.ErrInvalidSearchResult))
+			c.Set(HTTPReturnMessage, resultErrMessage(err))
+			streamWriter.failure = err
+			c.Abort()
+			return
+		}
+		if buffered && !recorder.Discard() {
 			return
 		}
 		// Batch cancellation can finish before the middleware's timer fires.

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -1296,8 +1297,8 @@ func TestTextFieldQueryV2(t *testing.T) {
 	assert.Equal(t, "rest query text", data[0].(map[string]interface{})[FieldText])
 }
 
-// A late encoder failure must replace every previously buffered batch. The
-// success cases also protect the public envelope across all five DQL routes.
+// Late encoder/projection failures interrupt committed output. The success
+// cases also protect the public envelope across all five DQL routes.
 func TestV2BatchedDQLRoutes(t *testing.T) {
 	paramtable.Init()
 	for _, setting := range []struct{ key, value string }{
@@ -1369,23 +1370,31 @@ func TestV2BatchedDQLRoutes(t *testing.T) {
 				if mode == "numeric" {
 					req.Header.Set(HTTPHeaderAllowInt64, "true")
 				}
-				w := httptest.NewRecorder()
-				engine.ServeHTTP(w, req)
-				require.Equal(t, http.StatusOK, w.Code)
-				require.Equal(t, "batch-trace", w.Header().Get(HTTPHeaderMilvusTraceID))
-				require.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
-				require.Empty(t, w.Header().Get("Content-Length"))
+				server := httptest.NewServer(StreamingHTTPHandler(engine))
+				defer server.Close()
+				req.URL.Scheme = "http"
+				req.URL.Host = strings.TrimPrefix(server.URL, "http://")
+				req.RequestURI = ""
+				responseHTTP, err := server.Client().Do(req)
+				require.NoError(t, err)
+				defer responseHTTP.Body.Close()
+				responseBytes, readErr := io.ReadAll(responseHTTP.Body)
+				require.Equal(t, http.StatusOK, responseHTTP.StatusCode)
+				require.Equal(t, "batch-trace", responseHTTP.Header.Get(HTTPHeaderMilvusTraceID))
+				require.Equal(t, "application/json; charset=utf-8", responseHTTP.Header.Get("Content-Type"))
+				require.Empty(t, responseHTTP.Header.Get("Content-Length"))
 				body := map[string]interface{}{}
-				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
 				if strings.HasPrefix(mode, "late") {
-					require.Equal(t, float64(merr.Code(merr.ErrInvalidSearchResult)), body[HTTPReturnCode])
-					require.NotEmpty(t, body[HTTPReturnMessage])
-					require.NotContains(t, body, HTTPReturnData)
+					require.Error(t, readErr)
+					require.False(t, json.Valid(responseBytes))
+					require.NotContains(t, string(responseBytes), `"message"`)
 					code, _ := original.Get(HTTPReturnCode)
 					require.Equal(t, merr.Code(merr.ErrInvalidSearchResult), code)
 					message, _ := original.Get(HTTPReturnMessage)
-					require.Equal(t, body[HTTPReturnMessage], message)
+					require.NotEmpty(t, message)
 				} else {
+					require.NoError(t, readErr)
+					require.NoError(t, json.Unmarshal(responseBytes, &body), string(responseBytes))
 					require.Equal(t, float64(0), body[HTTPReturnCode])
 					require.Equal(t, float64(17), body[HTTPReturnCost])
 					data := body[HTTPReturnData].([]interface{})
@@ -1395,11 +1404,11 @@ func TestV2BatchedDQLRoutes(t *testing.T) {
 						require.Equal(t, float64(100), body[HTTPReturnScannedTotalBytes])
 						require.Equal(t, 0.75, body[HTTPReturnCacheHitRatio])
 						require.Equal(t, "<tag>&", data[129].(map[string]interface{})["text_field"])
-						require.Contains(t, w.Body.String(), `\u003ctag\u003e\u0026`)
+						require.Contains(t, string(responseBytes), `\u003ctag\u003e\u0026`)
 						require.Equal(t, 129.5, data[129].(map[string]interface{})["value"])
 						if mode == "numeric" {
 							require.IsType(t, float64(0), data[129].(map[string]interface{})["book_id"])
-							require.Contains(t, w.Body.String(), `"book_id":9007199254741122`)
+							require.Contains(t, string(responseBytes), `"book_id":9007199254741122`)
 						} else {
 							require.Equal(t, "9007199254741122", data[129].(map[string]interface{})["book_id"])
 						}
@@ -3303,6 +3312,9 @@ func versionalV2(category string, action string) string {
 func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	h := NewHandlersV2(proxy)
 	ginHandler := gin.Default()
+	// ResponseRecorder has no socket deadlines. The shim is only for existing
+	// value assertions; transport lifecycle tests use real HTTP/1 and HTTP/2.
+	ginHandler.Use(streamingRecorderMiddleware)
 	// Mirror the middleware the real server installs, so tests exercise the same
 	// chain rather than a handler-only subset of it.
 	ginHandler.Use(IdempotencyKeyHandlerFunc)
@@ -4945,6 +4957,7 @@ func newRESTV2ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) *gin.Eng
 	t.Helper()
 	h := NewHandlersV2(pxy)
 	ginHandler := gin.Default()
+	ginHandler.Use(streamingRecorderMiddleware)
 	appV2 := ginHandler.Group("/v2/vectordb", func(c *gin.Context) {
 		username, _, ok := ParseUsernamePassword(c)
 		if !ok || username == "" {
