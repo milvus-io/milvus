@@ -557,7 +557,13 @@ func TestReplicatedCommitRetryKeepsSegmentReferences(t *testing.T) {
 func TestExclusiveWritePreservesRecoveredReplicatedTxn(t *testing.T) {
 	resource.InitForTest(t)
 	makeBuilder := func(id message.TxnID, replicated bool) *message.ImmutableTxnMessageBuilder {
-		msg := newBeginTxnMessage(1, time.Second).WithTxnContext(message.TxnContext{TxnID: id, Keepalive: message.TxnKeepaliveInfinite})
+		msg := message.NewBeginTxnMessageBuilderV2().
+			WithVChannel("v1").
+			WithHeader(&message.BeginTxnMessageHeader{}).
+			WithBody(&message.BeginTxnMessageBody{}).
+			MustBuildMutable().
+			WithTimeTick(1).
+			WithTxnContext(message.TxnContext{TxnID: id, Keepalive: message.TxnKeepaliveInfinite})
 		if replicated {
 			msg = msg.WithReplicateHeader(&message.ReplicateHeader{
 				ClusterID: "source", TimeTick: 10,
