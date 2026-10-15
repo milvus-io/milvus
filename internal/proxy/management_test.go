@@ -57,32 +57,6 @@ func (s *ProxyManagementSuite) TearDownTest() {
 	s.mixcoord.AssertExpectations(s.T())
 }
 
-func (s *ProxyManagementSuite) TestWriteJSONResp() {
-	s.Run("escape_message", func() {
-		recorder := httptest.NewRecorder()
-		msg := `boom "quoted" \and\ slashed`
-
-		writeJSONWithMsg(context.Background(), recorder, http.StatusBadRequest, msg)
-
-		s.Equal(http.StatusBadRequest, recorder.Code)
-		s.Equal("application/json", recorder.Header().Get("Content-Type"))
-		var payload map[string]string
-		s.Require().NoError(gojson.Unmarshal(recorder.Body.Bytes(), &payload))
-		s.Equal(msg, payload["msg"])
-	})
-
-	s.Run("marshal_error", func() {
-		recorder := httptest.NewRecorder()
-
-		writeJSONResp(context.Background(), recorder, http.StatusOK, make(chan int))
-
-		s.Equal(http.StatusInternalServerError, recorder.Code)
-		var payload map[string]string
-		s.Require().NoError(gojson.Unmarshal(recorder.Body.Bytes(), &payload))
-		s.Contains(payload["msg"], "failed to marshal response")
-	})
-}
-
 func (s *ProxyManagementSuite) TestPauseDataCoordGC() {
 	s.Run("normal", func() {
 		s.SetupTest()

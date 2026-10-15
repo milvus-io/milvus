@@ -19,7 +19,6 @@ package http
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	netpprof "net/http/pprof"
@@ -136,12 +135,6 @@ func mustBeGated(pattern string) bool {
 	return false
 }
 
-func writeJSONWithMsg(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"msg": msg})
-}
-
 func registerDefaults() {
 	Register(&Handler{
 		Path: LogLevelRouterPath,
@@ -231,12 +224,12 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 			mlog.Info(ctx, "start to trigger component stop", mlog.String("role", truncateForLog(role)))
 			if err := triggerComponentStop(role); err != nil {
 				mlog.Warn(ctx, "failed to trigger component stop", mlog.Err(err))
-				writeJSONWithMsg(w, http.StatusInternalServerError,
+				WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
 					fmt.Sprintf("failed to trigger component stop, %s", err.Error()))
 				return
 			}
 			mlog.Info(ctx, "finish to trigger component stop", mlog.String("role", truncateForLog(role)))
-			writeJSONWithMsg(w, http.StatusOK, "OK")
+			WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 		},
 		// /management/stop can DoS a running component. /management/check/ready
 		// below stays open because k8s probes cannot present credentials.
@@ -258,13 +251,13 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 				mlog.String("role", truncateForLog(role)))
 			if err := checkActive(role); err != nil {
 				mlog.RatedWarn(ctx, 1.0, "failed to check component ready", mlog.Err(err))
-				writeJSONWithMsg(w, http.StatusInternalServerError,
+				WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
 					fmt.Sprintf("failed to check component ready, %s", err.Error()))
 				return
 			}
 			mlog.RatedDebug(ctx, 1.0, "finish to check component ready",
 				mlog.String("role", truncateForLog(role)))
-			writeJSONWithMsg(w, http.StatusOK, "OK")
+			WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 		},
 	})
 }
