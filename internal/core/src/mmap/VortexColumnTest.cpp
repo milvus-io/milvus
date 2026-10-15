@@ -937,7 +937,7 @@ CheckDataScan(VortexColumn& column, DataType type) {
 }
 
 void
-CheckOrderedTake(VortexColumn& column, DataType type) {
+CheckOrderedTake(VortexColumn& column, DataType type, TakePinPolicy policy) {
     std::vector<int64_t> offsets{15, 1, 8, 1, 0};
     // Exercise packed validity and skip masks across multiple bitmap words.
     while (offsets.size() < 129) {
@@ -947,7 +947,9 @@ CheckOrderedTake(VortexColumn& column, DataType type) {
                             ChunkedColumnInterface::TakeOptions{
                                 ChunkedColumnInterface::OffsetView::From(
                                     offsets.data(), offsets.size()),
-                                TargetTypeForDataType(type)});
+                                TargetTypeForDataType(type),
+                                nullptr,
+                                policy});
     ASSERT_NE(take, nullptr);
     ASSERT_EQ(take->Size(), static_cast<int64_t>(offsets.size()));
     EXPECT_TRUE(take->IsOwned());
@@ -1053,35 +1055,44 @@ CheckOrderedTake(VortexColumn& column, DataType type) {
 
     if (type == DataType::JSON) {
         size_t visited_rows = 0;
-        column.BulkRawJsonAt(
-            nullptr,
-            [&](Json value, size_t row, bool valid) {
+        auto json_scan =
+            column.Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::Json));
+        ASSERT_NE(json_scan, nullptr);
+        ChunkedColumnInterface::ScanBatch batch;
+        while (json_scan->Next(
+            3, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch)) {
+            const auto* values = batch.values.data_as<Json>();
+            for (int64_t i = 0; i < batch.size; ++i) {
+                const auto row = batch.row_id_start + i;
                 EXPECT_EQ(row, visited_rows++);
+                const auto valid = !batch.validity || batch.validity[i];
                 EXPECT_EQ(valid, ExpectedValid(row));
                 if (valid) {
-                    EXPECT_EQ(std::string_view(value),
+                    EXPECT_EQ(std::string_view(values[i]),
                               ExpectedString(type, row));
-                    EXPECT_NO_THROW((void)value.doc());
+                    EXPECT_NO_THROW((void)values[i].doc());
                 }
-            },
-            nullptr,
-            kNullableRows);
+            }
+        }
         EXPECT_EQ(visited_rows, kNullableRows);
-        std::vector<Json> bulk_values(offsets.size());
-        std::vector<bool> bulk_valid(offsets.size());
-        column.BulkRawJsonAt(
-            nullptr,
-            [&](Json value, size_t index, bool valid) {
-                bulk_valid[index] = valid;
-                if (valid) {
-                    bulk_values[index] = std::move(value);
-                }
-            },
-            offsets.data(),
-            offsets.size());
+        auto json_take =
+            column.Take(nullptr,
+                        ChunkedColumnInterface::TakeOptions{
+                            ChunkedColumnInterface::OffsetView::From(
+                                offsets.data(), offsets.size()),
+                            ChunkedColumnInterface::TargetType::Json,
+                            nullptr,
+                            policy});
+        ASSERT_NE(json_take, nullptr);
+        const auto owned_json = json_take->GetOwn();
+        json_take.reset();
+        const auto* bulk_values = owned_json.values.data_as<Json>();
         for (size_t i = 0; i < offsets.size(); ++i) {
-            EXPECT_EQ(bulk_valid[i], ExpectedValid(offsets[i]));
-            if (bulk_valid[i]) {
+            const auto valid = !owned_json.validity || owned_json.validity[i];
+            EXPECT_EQ(valid, ExpectedValid(offsets[i]));
+            if (valid) {
                 EXPECT_NO_THROW((void)bulk_values[i].doc());
                 EXPECT_EQ(std::string_view(bulk_values[i]),
                           ExpectedString(type, offsets[i]));
@@ -1112,7 +1123,8 @@ CheckOrderedTake(VortexColumn& column, DataType type) {
                             ChunkedColumnInterface::OffsetView::From(
                                 offsets.data(), offsets.size()),
                             TargetTypeForDataType(type),
-                            std::move(skip_file)});
+                            std::move(skip_file),
+                            policy});
         ASSERT_NE(filtered, nullptr);
         const auto filtered_owned = filtered->GetOwn();
         ASSERT_TRUE(filtered_owned.data_skipped);
@@ -1347,20 +1359,27 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
     auto skip_second_file = std::make_shared<const detail::ColumnFilter>(
         detail::ColumnFilter::MetricsSource::PreloadedStatistics,
         [](int64_t cell_id) { return cell_id == 1; });
-    auto filtered_take =
-        int_column.Take(nullptr,
-                        ChunkedColumnInterface::TakeOptions{
-                            ChunkedColumnInterface::OffsetView::From(
-                                offsets.data(), offsets.size()),
-                            ChunkedColumnInterface::TargetType::Int32,
-                            skip_second_file});
-    ASSERT_NE(filtered_take, nullptr);
-    for (int64_t i = 0; i < filtered_take->Size(); ++i) {
-        const auto item = filtered_take->Get<int32_t>(i);
-        EXPECT_TRUE(item.is_valid);
-        const auto expected_skip = offsets[i] >= 16;
-        EXPECT_EQ(item.data_skipped, expected_skip);
-        EXPECT_EQ(item.value.has_value(), !expected_skip);
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        int_column.ManualEvictCache();
+        auto filtered_take =
+            int_column.Take(nullptr,
+                            ChunkedColumnInterface::TakeOptions{
+                                ChunkedColumnInterface::OffsetView::From(
+                                    offsets.data(), offsets.size()),
+                                ChunkedColumnInterface::TargetType::Int32,
+                                skip_second_file,
+                                policy});
+        ASSERT_NE(filtered_take, nullptr);
+        for (int64_t i = 0; i < filtered_take->Size(); ++i) {
+            const auto item = filtered_take->Get<int32_t>(i);
+            EXPECT_TRUE(item.is_valid);
+            const auto expected_skip = offsets[i] >= 16;
+            EXPECT_EQ(item.data_skipped, expected_skip);
+            EXPECT_EQ(item.value.has_value(), !expected_skip);
+        }
+        EXPECT_TRUE(int_column.CellsLoaded(first_file_offset, 1));
+        EXPECT_FALSE(int_column.CellsLoaded(second_file_offset, 1));
     }
 
     auto scan_values = CollectIntScanValues(int_column, 18, 4);
@@ -1453,6 +1472,120 @@ TEST(VortexColumnTest, RejectsNonContiguousFileRanges) {
         MakeColumnGroup(
             std::move(files), properties, {std::to_string(kIntFieldId)}),
         std::exception);
+}
+
+TEST(VortexColumnTest, TakePinPoliciesControlSourceLifetime) {
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_vortex_take_pin_policy_" + std::to_string(::getpid()) + "_" +
+         std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    std::filesystem::create_directories(dir);
+    const auto field_name = std::to_string(kStringFieldId);
+    auto schema =
+        arrow::schema({arrow::field(field_name, arrow::utf8(), true)});
+    std::vector<VortexColumn::FileInfo> files;
+    for (int64_t file_id = 0; file_id < 3; ++file_id) {
+        arrow::StringBuilder builder;
+        ASSERT_TRUE(
+            builder.Append(file_id == 0 ? "invalid WKT" : "POINT(1 2)").ok());
+        ASSERT_TRUE(builder.AppendNull().ok());
+        std::shared_ptr<arrow::Array> array;
+        ASSERT_TRUE(builder.Finish(&array).ok());
+        auto file = WriteVortexBatches(
+            (dir / ("cg" + std::to_string(file_id) + ".vx")).string(),
+            schema,
+            *properties,
+            {arrow::RecordBatch::Make(schema, 2, {std::move(array)})});
+        file.start_index += 2 * file_id;
+        file.end_index += 2 * file_id;
+        files.push_back(std::move(file));
+    }
+    auto group = MakeColumnGroup(files, properties, {field_name});
+    FieldMeta meta(FieldName("geometry"),
+                   FieldId(kStringFieldId),
+                   DataType::GEOMETRY,
+                   true,
+                   std::nullopt);
+    VortexColumn column(
+        FieldId(kStringFieldId), meta, field_name, properties, group);
+    const int64_t first[]{0};
+    const int64_t second[]{2};
+    const int64_t unrelated[]{4};
+    const int64_t offsets[]{2, 0, 3, 2, 1};
+    ScopedGeosResources geos("Take pin policy test");
+    const auto expected = Geometry(geos.ctx, "POINT(1 2)").to_wkb_string();
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        SCOPED_TRACE(static_cast<int>(policy));
+        group->ManualEvictCache();
+        // Failure after the first file is decoded reveals whether the second
+        // file was pre-pinned, without adding a test hook to the reader.
+        EXPECT_THROW(column.Take(nullptr,
+                                 {OffsetView::From(offsets, std::size(offsets)),
+                                  TargetType::StringView,
+                                  nullptr,
+                                  policy}),
+                     SegcoreError);
+        EXPECT_TRUE(column.CellsLoaded(first, 1));
+        EXPECT_EQ(column.CellsLoaded(second, 1),
+                  policy == TakePinPolicy::Batch);
+        EXPECT_FALSE(column.CellsLoaded(unrelated, 1));
+        group->ManualEvictCache();
+        EXPECT_FALSE(column.CellsLoaded(first, 1));
+        EXPECT_FALSE(column.CellsLoaded(second, 1));
+
+        auto skip_first = std::make_shared<const detail::ColumnFilter>(
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [](int64_t cell_id) { return cell_id == 0; });
+        auto take = column.Take(nullptr,
+                                {OffsetView::From(offsets, std::size(offsets)),
+                                 TargetType::StringView,
+                                 skip_first,
+                                 policy});
+        ASSERT_NE(take, nullptr);
+        EXPECT_TRUE(take->IsOwned());
+        EXPECT_TRUE(column.CellsLoaded(first, 1));
+        EXPECT_TRUE(column.CellsLoaded(second, 1));
+        EXPECT_FALSE(column.CellsLoaded(unrelated, 1));
+        group->ManualEvictCache();
+        EXPECT_FALSE(column.CellsLoaded(first, 1));
+        EXPECT_FALSE(column.CellsLoaded(second, 1));
+        EXPECT_TRUE(take->Get<std::string_view>(1).is_valid);
+        EXPECT_TRUE(take->Get<std::string_view>(1).data_skipped);
+        EXPECT_FALSE(take->IsValid(4));
+        EXPECT_TRUE(take->Get<std::string_view>(4).data_skipped);
+        EXPECT_FALSE(take->IsValid(2));
+        EXPECT_EQ(*take->Get<std::string_view>(0).value,
+                  *take->Get<std::string_view>(3).value);
+        auto owned = take->GetOwn();
+        take.reset();
+        EXPECT_FALSE(owned.validity[2]);
+        EXPECT_FALSE(owned.validity[4]);
+        EXPECT_EQ(owned.values.data_as<std::string_view>()[0], expected);
+        EXPECT_FALSE(column.CellsLoaded(second, 1));
+
+        const int64_t masked_offsets[]{2, -1, 3, 2};
+        TargetBitmap mask(std::size(masked_offsets), true);
+        mask.set(1, false);
+        auto selected = column.Take(
+            nullptr,
+            {OffsetView::From(masked_offsets, std::size(masked_offsets)),
+             TargetType::StringView,
+             nullptr,
+             policy,
+             &mask});
+        ASSERT_NE(selected, nullptr);
+        EXPECT_FALSE(column.CellsLoaded(first, 1));
+        EXPECT_TRUE(column.CellsLoaded(second, 1));
+        EXPECT_FALSE(column.CellsLoaded(unrelated, 1));
+        group->ManualEvictCache();
+        EXPECT_EQ(*selected->Get<std::string_view>(0).value, expected);
+        EXPECT_FALSE(selected->IsValid(2));
+        EXPECT_FALSE(column.CellsLoaded(second, 1));
+    }
+    std::filesystem::remove_all(dir);
 }
 
 TEST(VortexColumnTest, CursorOwnedScanReleasesOldFileBeforePinningNextFile) {
@@ -2689,7 +2822,10 @@ TEST(VortexColumnTest, NullableAllScalarTypesScanCorrectness) {
         CheckNoDataScan(column);
         CheckApplyValidDataInChunk(column);
         CheckDataScan(column, type);
-        CheckOrderedTake(column, type);
+        for (const auto policy :
+             {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+            CheckOrderedTake(column, type, policy);
+        }
         if (type == DataType::JSON) {
             auto pinned = column.StringViews(nullptr, 0);
             const auto& [views, validity] = pinned.get();

@@ -44,6 +44,7 @@
 #include "common/OpContext.h"
 #include "common/Span.h"
 #include "mmap/ChunkedColumnInterface.h"
+#include "mmap/ColumnOffsetLookup.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
 namespace milvus {
@@ -208,25 +209,8 @@ class ChunkedColumnGroup {
 
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) {
-        const auto& num_rows_until_chunk = GetNumRowsUntilChunk();
-        std::vector<milvus::cachinglayer::cid_t> cids(count, 1);
-        std::vector<int64_t> offsets_in_chunk(count);
-        int64_t len = num_rows_until_chunk.size() - 1;
-        while (len > 1) {
-            const int64_t half = len / 2;
-            len -= half;
-            for (size_t i = 0; i < count; ++i) {
-                const bool cmp =
-                    num_rows_until_chunk[cids[i] + half - 1] < offsets[i] + 1;
-                cids[i] += static_cast<int64_t>(cmp) * half;
-            }
-        }
-
-        for (size_t i = 0; i < count; ++i) {
-            offsets_in_chunk[i] = offsets[i] - num_rows_until_chunk[--cids[i]];
-        }
-
-        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+        return detail::LocateOffsetsByBinary(
+            offsets, count, GetNumRowsUntilChunk());
     }
 
     size_t
@@ -735,19 +719,37 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         return PinWrapper<Chunk*>(std::move(group_chunk), chunk.get());
     }
 
-    TakeCellPin
-    MakeTakeCellPin(milvus::OpContext* op_ctx) const override {
+    TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
         auto group = group_;
         const auto field_id = field_id_;
-        return [group = std::move(group), field_id, op_ctx](int64_t chunk_id) {
-            auto group_chunk = group->GetGroupChunk(op_ctx, chunk_id);
-            auto* chunk = group_chunk.get()->GetChunkRaw(field_id);
-            AssertInfo(chunk != nullptr,
-                       "field {} is missing from group chunk {}",
-                       field_id.get(),
-                       chunk_id);
-            return PinWrapper<Chunk*>(std::move(group_chunk), chunk);
-        };
+        if (batch_cell_ids != nullptr) {
+            auto ca = batch_cell_ids->empty()
+                          ? nullptr
+                          : group->GetGroupChunks(op_ctx, *batch_cell_ids);
+            return TakeCellRead([group = std::move(group),
+                                 ca = std::move(ca),
+                                 field_id](int64_t id) {
+                auto* chunk = ca->get_cell_of(id)->GetChunkRaw(field_id);
+                AssertInfo(chunk != nullptr,
+                           "field {} is missing from group chunk {}",
+                           field_id.get(),
+                           id);
+                return chunk;
+            });
+        }
+        return TakeCellPin(
+            [group = std::move(group), field_id, op_ctx](int64_t chunk_id) {
+                auto group_chunk = group->GetGroupChunk(op_ctx, chunk_id);
+                auto* chunk = group_chunk.get()->GetChunkRaw(field_id);
+                AssertInfo(chunk != nullptr,
+                           "field {} is missing from group chunk {}",
+                           field_id.get(),
+                           chunk_id);
+                return PinWrapper<Chunk*>(std::move(group_chunk), chunk);
+            });
     }
 
     std::vector<PinWrapper<Chunk*>>
@@ -941,32 +943,6 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
     }
 
-    // TODO(tiered storage 2): replace with Bulk version
-    void
-    BulkRawJsonAt(milvus::OpContext* op_ctx,
-                  std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets,
-                  int64_t count) const override {
-        if (data_type_ != DataType::JSON) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "[StorageV2] RawJsonAt only supported for "
-                      "ProxyChunkColumn of Json type");
-        }
-        if (count == 0) {
-            return;
-        }
-        ForEachResolvedRow(
-            op_ctx,
-            offsets,
-            count,
-            [&fn](Chunk* chunk, int64_t offset_in_chunk, int64_t i) {
-                auto valid = chunk->isValid(offset_in_chunk);
-                auto str_view = static_cast<StringChunk*>(chunk)->operator[](
-                    offset_in_chunk);
-                fn(Json(str_view.data(), str_view.size()), i, valid);
-            });
-    }
-
     void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
@@ -1068,6 +1044,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
  protected:
+    std::unique_ptr<ColumnPlanner>
+    BuildPlanner() const override {
+        return std::make_unique<ColumnPlanner>(
+            GetNumRowsUntilChunk(),
+            OffsetLookupOptions{OffsetLookupStrategy::BatchBinary});
+    }
+
     void
     BuildValidArrayOffsetsInChunks(
         const std::vector<PinWrapper<Chunk*>>& chunk_pws) override {
