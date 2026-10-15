@@ -42,15 +42,18 @@ func schemaTargetCollectionID(msg message.BroadcastMutableMessage) int64 {
 	return alter.Header().GetCollectionId()
 }
 
-// schemaTaskIndex narrows reads to one collection's ALTER tasks. Membership has
-// the same lifetime as the manager's tasks, including retained tombstones;
-// pendingSchemaTarget checks mutable state and callback eligibility under the
-// task lock. Recovery rebuilds the index before readers can access the manager.
+// schemaTaskIndex narrows reads to one collection's unfinished ALTER tasks.
+// Tombstoning removes membership; recovery excludes completed tasks. Readers
+// holding an earlier snapshot still check task state and callback eligibility
+// under the task lock.
 // All accesses are protected by broadcastTaskManager.mu.
 type schemaTaskIndex map[int64]map[uint64]*broadcastTask
 
+// add is called only before the task is published to concurrent readers.
 func (i schemaTaskIndex) add(id uint64, task *broadcastTask) {
-	if task.schemaCollectionID == 0 {
+	if task.schemaCollectionID == 0 ||
+		task.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
+		task.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
 		return
 	}
 	tasks := i[task.schemaCollectionID]
@@ -67,6 +70,12 @@ func (i schemaTaskIndex) remove(id uint64, collectionID int64) {
 	if len(tasks) == 0 {
 		delete(i, collectionID)
 	}
+}
+
+func (bm *broadcastTaskManager) removeSchemaTask(broadcastID uint64, collectionID int64) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	bm.schemaTasks.remove(broadcastID, collectionID)
 }
 
 func (bm *broadcastTaskManager) snapshotSchemaTasks(collectionID int64) []*broadcastTask {

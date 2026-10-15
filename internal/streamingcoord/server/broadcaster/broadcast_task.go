@@ -610,7 +610,15 @@ func ackedCount(task *streamingpb.BroadcastTask) int {
 // MarkAckCallbackDone marks the ack callback is done.
 func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	defer func() {
+		b.mu.Unlock()
+		if b.schemaCollectionID != 0 {
+			// Published metadata now owns schema lookup. Keep the task and its
+			// idempotency entry until GC. Release the task lock before taking the
+			// manager lock, since task removal takes them in the opposite order.
+			b.ackCallbackScheduler.bm.removeSchemaTask(b.Header().BroadcastID, b.schemaCollectionID)
+		}
+	}()
 	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
 		close(b.done)

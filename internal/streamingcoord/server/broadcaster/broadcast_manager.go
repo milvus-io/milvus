@@ -115,7 +115,7 @@ type broadcastTaskManager struct {
 	lifetime *typeutil.Lifetime
 	ctx      context.Context
 	cancel   context.CancelFunc
-	// mu protects tasks and their indexes. Never acquire a task lock while holding mu.
+	// mu protects tasks and their indexes. Never acquire mu while holding a task lock.
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
 	schemaTasks        schemaTaskIndex

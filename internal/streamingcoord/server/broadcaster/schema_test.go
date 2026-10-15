@@ -80,6 +80,7 @@ func schemaTestMessage(collection int64, id uint64) message.BroadcastMutableMess
 	return message.NewAlterCollectionMessageBuilderV2().WithHeader(&message.AlterCollectionMessageHeader{
 		CollectionId: collection, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}},
 	}).WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{Schema: &schemapb.CollectionSchema{Version: 2}}}).
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collection, fmt.Sprint(id))).
 		WithBroadcast([]string{"p" + funcutil.ControlChannelSuffix, "v1"}).MustBuildBroadcast().WithBroadcastID(id)
 }
 
@@ -106,6 +107,8 @@ func TestSchemaTargetIndexLifecycle(t *testing.T) {
 		target, err := bm.GetPendingSchemaTarget(101)
 		require.NoError(t, err)
 		require.Nil(t, target)
+		require.Empty(t, bm.snapshotSchemaTasks(101), "recovery must not index tombstones")
+		require.Contains(t, bm.tasks, uint64(2), "recovered tombstones remain until GC")
 
 		guards := bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey())
 		local, created := bm.getOrAddBroadcastTask(t.Context(), schemaTestMessage(102, 3), 3, guards)
@@ -132,7 +135,18 @@ func TestSchemaTargetIndexLifecycle(t *testing.T) {
 			target, err := bm.GetPendingSchemaTarget(task.schemaCollectionID)
 			require.NoError(t, err)
 			require.Equal(t, task.Header().BroadcastID, target.BroadcastID)
+			snapshot := bm.snapshotSchemaTasks(task.schemaCollectionID)
+			require.Len(t, snapshot, 1)
 			require.NoError(t, task.MarkAckCallbackDone(t.Context()))
+			require.Empty(t, bm.snapshotSchemaTasks(task.schemaCollectionID), "completion must reclaim the collection bucket before GC")
+			require.Contains(t, bm.tasks, task.Header().BroadcastID, "completion must retain the tombstone")
+			require.Nil(t, snapshot[0].pendingSchemaTarget(task.schemaCollectionID), "an earlier reader snapshot must reject the completed target")
+			require.NoError(t, task.MarkAckCallbackDone(t.Context()), "completion replay must be idempotent")
+			if task == local {
+				ownerID, found := bm.idempotencyIndex.Get(local.IdempotencyScope())
+				require.True(t, found, "completion must retain deduplication")
+				require.EqualValues(t, 3, ownerID)
+			}
 			target, err = bm.GetPendingSchemaTarget(task.schemaCollectionID)
 			require.NoError(t, err)
 			require.Nil(t, target, "completed target must fall back even before tombstone GC")
@@ -140,7 +154,7 @@ func TestSchemaTargetIndexLifecycle(t *testing.T) {
 			require.Empty(t, bm.snapshotSchemaTasks(task.schemaCollectionID))
 		}
 		bm.removeBroadcastTask(2)
-		require.Empty(t, bm.schemaTasks, "GC must reclaim empty collection buckets")
+		require.Empty(t, bm.schemaTasks)
 	})
 }
 
@@ -165,6 +179,36 @@ func TestSchemaTargetLookupDoesNotInspectOtherCollections(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("lookup inspected an unrelated schema task")
 	}
+}
+
+func TestSchemaTargetCompletionKeepsNextTask(t *testing.T) {
+	mockey.PatchConvey("completion removes only its own schema target", t, func() {
+		paramtable.Init()
+		mockey.Mock((*schemaTestCatalog).SaveBroadcastTask).Return(nil).Build()
+		resource.InitForTest(resource.OptStreamingCatalog(&schemaTestCatalog{}))
+		first := createNewWaitAckBroadcastTaskFromMessage(schemaTestMessage(100, 1), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{0, 0})
+		second := createNewWaitAckBroadcastTaskFromMessage(schemaTestMessage(100, 2), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{0, 0})
+		bm := newBroadcastTaskManager(t.Context(), []*streamingpb.BroadcastTask{first, second})
+		defer bm.Close()
+
+		require.NoError(t, bm.tasks[1].MarkAckCallbackDone(t.Context()))
+		require.Len(t, bm.snapshotSchemaTasks(100), 1)
+		_, err := bm.GetPendingSchemaTarget(100)
+		require.ErrorIs(t, err, merr.ErrServiceNotReady, "the next task still requires callback admission")
+		bm.tasks[2].mu.Lock()
+		bm.tasks[2].schemaTargetEligible = true
+		bm.tasks[2].mu.Unlock()
+		target, err := bm.GetPendingSchemaTarget(100)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, target.BroadcastID)
+
+		// GC of the earlier tombstone must not remove the later task's bucket.
+		bm.removeBroadcastTask(1)
+		require.Len(t, bm.snapshotSchemaTasks(100), 1)
+		require.NoError(t, bm.tasks[2].MarkAckCallbackDone(t.Context()))
+		require.Empty(t, bm.schemaTasks)
+		require.Contains(t, bm.tasks, uint64(2))
+	})
 }
 
 func TestSchemaTargetIndexExcludesNonSchemaAlter(t *testing.T) {
