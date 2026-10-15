@@ -96,7 +96,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactMetrics() {
 	storageConfig := s.task.GetStorageConfig()
 	beforeMetrics, err := storagev2.GetFilesystemMetricsWithConfig(storageConfig)
 	s.NoError(err)
-	s.NotNil(beforeMetrics)
+	s.Contains(beforeMetrics, "origin")
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -104,9 +104,9 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactMetrics() {
 
 	afterMetrics, err := storagev2.GetFilesystemMetricsWithConfig(storageConfig)
 	s.NoError(err)
-	s.NotNil(afterMetrics)
+	s.Contains(afterMetrics, "origin")
 
-	s.Greater(afterMetrics.WriteBytes, beforeMetrics.WriteBytes,
+	s.Greater(afterMetrics["origin"].WriteBytes, beforeMetrics["origin"].WriteBytes,
 		"write bytes should increase after compaction")
 }
 

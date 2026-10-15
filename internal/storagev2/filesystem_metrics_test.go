@@ -32,9 +32,11 @@ func TestGetFilesystemMetricsWithConfig(t *testing.T) {
 		StorageType: "local",
 		RootPath:    dir,
 	}
-	metrics, err := GetFilesystemMetricsWithConfig(localConfig)
+	sources, err := GetFilesystemMetricsWithConfig(localConfig)
 	require.NoError(t, err)
-	require.NotNil(t, metrics)
+	require.Len(t, sources, 1)
+	require.Contains(t, sources, "origin")
+	metrics := sources["origin"]
 	assert.GreaterOrEqual(t, metrics.ReadCount, int64(0))
 	assert.GreaterOrEqual(t, metrics.WriteCount, int64(0))
 	assert.GreaterOrEqual(t, metrics.ReadBytes, int64(0))
@@ -56,7 +58,7 @@ func TestGetFilesystemMetricsWithConfig(t *testing.T) {
 		}
 		m, err := GetFilesystemMetricsWithConfig(cfg)
 		require.NoError(t, err, "MaxConnections=%d must build valid properties", maxConns)
-		require.NotNil(t, m)
+		require.Contains(t, m, "origin")
 	}
 }
 
@@ -83,6 +85,7 @@ func TestListFilesystemMetrics(t *testing.T) {
 			continue
 		}
 		localEntries++
+		assert.Equal(t, "origin", fsMetrics.Source)
 		assert.GreaterOrEqual(t, fsMetrics.ReadCount, int64(0))
 		assert.GreaterOrEqual(t, fsMetrics.WriteCount, int64(0))
 		assert.GreaterOrEqual(t, fsMetrics.ReadBytes, int64(0))
