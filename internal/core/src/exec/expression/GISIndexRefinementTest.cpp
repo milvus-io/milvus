@@ -13,8 +13,10 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <numeric>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -735,6 +737,137 @@ TEST_F(GISIndexRefinementTest, GeometryCachePublishesAndRetiresWithRawColumn) {
     // the runtime snapshot together with the raw column.
     sealed->DropFieldData(geo_id);
     EXPECT_EQ(sealed->GetGeometryCache(geo_id), nullptr);
+}
+
+// Regression for issue #54138: ST_DWITHIN through the R-Tree must return the
+// same rows as the un-indexed raw path. Two defects made them disagree:
+//  1. Geometry::dwithin accepted EMPTY rows (GEOS distance 0), but the index
+//     stores a placeholder MBR for them that no query envelope away from the
+//     origin reaches, so the raw path returned them and the indexed path did
+//     not. Now neither does (PostGIS semantics).
+//  2. The coarse envelope was sized with a fixed 111320 m/deg box that was not
+//     a superset of the exact metrics (haversine for points, scaled planar
+//     GEOS distance for other shapes), so rows near the distance boundary were
+//     pruned before refinement. The reporter's three missed points are rows
+//     here, plus a polygon and a line in the 4.49..4.91 deg band that the old
+//     box cut off at latitude 35.
+// Both segments load the SAME geometry column; only one gets the index.
+TEST_F(GISIndexRefinementTest, DWithinIndexPathMatchesRawPath) {
+    constexpr int N = 100;
+    // Interior offsets, mirroring the reporter's layout (empties are never
+    // first or last so a row-count mismatch cannot mask them).
+    const std::map<int, std::string> special = {
+        {3, "POINT EMPTY"},
+        {17, "LINESTRING EMPTY"},
+        {41, "POLYGON EMPTY"},
+        {58, "MULTIPOINT EMPTY"},
+        {77, "GEOMETRYCOLLECTION EMPTY"},
+        // Boundary rows for ST_DWITHIN(geo, 'POINT (115 35)', 500000).
+        {5, "POINT (109.513509 35.327246)"},   // haversine 500000 m
+        {23, "POINT (120.490847 35.204498)"},  // haversine 499965 m
+        {61, "POINT (115.028171 30.507155)"},  // haversine 499589 m
+        {30,
+         "POLYGON ((114.9 39.8, 115.1 39.8, 115.1 39.9, 114.9 39.9, 114.9 "
+         "39.8))"},                                   // planar 4.8 deg north
+        {45, "LINESTRING (114.5 30.2, 115.5 30.2)"},  // planar 4.8 deg south
+        // Clearly outside every query below (pruning sanity).
+        {70, "POINT (125 35)"},
+        {88, "POLYGON ((-10 -10, -9 -10, -9 -9, -10 -9, -10 -10))"},
+    };
+    const std::set<int> empties = {3, 17, 41, 58, 77};
+    const std::set<int> boundary_rows = {5, 23, 61, 30, 45};
+    const std::set<int> far_rows = {70, 88};
+
+    std::vector<std::string> wkbs;
+    wkbs.reserve(N);
+    for (int i = 0; i < N; ++i) {
+        std::string wkt;
+        auto it = special.find(i);
+        if (it != special.end()) {
+            wkt = it->second;
+        } else if (i % 2 == 0) {
+            wkt = "POINT (" + std::to_string(10.0 + (i % 7) * 0.01) + " " +
+                  std::to_string(10.0 + (i % 5) * 0.01) + ")";
+        } else {
+            wkt = "POINT (" + std::to_string(120.0 + (i % 7) * 0.01) + " " +
+                  std::to_string(30.0 + (i % 5) * 0.01) + ")";
+        }
+        wkbs.emplace_back(CreateWkbFromWkt(wkt));
+        ASSERT_FALSE(wkbs.back().empty()) << wkt;
+    }
+
+    auto raw = MakeGeometrySegment(wkbs);
+    auto indexed = MakeGeometrySegment(wkbs);
+    InstallGeometryIndex(indexed, wkbs);
+    ASSERT_TRUE(indexed.sealed->HasIndex(indexed.geo_id));
+    ASSERT_FALSE(raw.sealed->HasIndex(raw.geo_id));
+
+    auto run = [&](const GeometrySegment& seg,
+                   const std::string& wkt,
+                   double distance) {
+        auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            milvus::expr::ColumnInfo(seg.geo_id, DataType::GEOMETRY),
+            proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+            wkt,
+            distance);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           gis_expr);
+        return ExecuteQueryExpr(plan, seg.sealed.get(), N, MAX_TIMESTAMP);
+    };
+
+    struct Query {
+        std::string wkt;
+        double distance;
+    };
+    const std::vector<Query> queries = {
+        {"POINT (115 35)", 500000},
+        {"POINT (10 10)", 50000},
+        {"POINT (120 30)", 50000},
+        {"POINT (-60 -40)", 1},
+        {"POINT EMPTY", 1e12},
+    };
+    for (const auto& q : queries) {
+        SCOPED_TRACE("ST_DWITHIN(geo, '" + q.wkt + "', " +
+                     std::to_string(q.distance) + ")");
+        BitsetType raw_bits = run(raw, q.wkt, q.distance);
+        BitsetType idx_bits = run(indexed, q.wkt, q.distance);
+        ASSERT_EQ(raw_bits.size(), static_cast<size_t>(N));
+        ASSERT_EQ(idx_bits.size(), static_cast<size_t>(N));
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(bool(raw_bits[i]), bool(idx_bits[i]))
+                << "row " << i << " raw=" << bool(raw_bits[i])
+                << " indexed=" << bool(idx_bits[i]);
+        }
+        // Empty rows match nothing, on either path, at any distance.
+        for (int i : empties) {
+            EXPECT_FALSE(raw_bits[i]) << "empty row " << i << " (raw)";
+            EXPECT_FALSE(idx_bits[i]) << "empty row " << i << " (indexed)";
+        }
+        for (int i : far_rows) {
+            EXPECT_FALSE(idx_bits[i]) << "far row " << i;
+        }
+    }
+
+    // The boundary rows are inside 500 km of (115 35) on the exact metric and
+    // must survive the coarse pass.
+    {
+        BitsetType idx_bits = run(indexed, "POINT (115 35)", 500000);
+        for (int i : boundary_rows) {
+            EXPECT_TRUE(idx_bits[i])
+                << "boundary row " << i << " pruned by the coarse envelope";
+        }
+        // Cluster rows around (120 30) are ~700 km away: still pruned.
+        for (int i = 1; i < N; i += 2) {
+            if (special.count(i) == 0) {
+                EXPECT_FALSE(idx_bits[i]) << "cluster row " << i;
+            }
+        }
+    }
+    // An empty query point matches nothing (and must not throw).
+    {
+        BitsetType idx_bits = run(indexed, "POINT EMPTY", 1e12);
+        EXPECT_EQ(idx_bits.count(), 0u);
+    }
 }
 
 }  // namespace

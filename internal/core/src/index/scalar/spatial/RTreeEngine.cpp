@@ -100,6 +100,15 @@ BoundingBox(const GEOSGeometry* geometry, GEOSContextHandle_t context) {
 // which then trips the coarse-bitmap bounds guard in EvalForIndexSegment on
 // EVERY subsequent geometry query against this segment.
 //
+// "Exact refinement tolerates the placeholder" is a contract the predicates
+// must uphold, not a property of the placeholder itself: the placeholder is
+// only reachable by a query envelope covering the origin, so any predicate
+// that accepted an empty row would match it on the raw path but not here.
+// Geometry::dwithin therefore rejects empty operands (GEOS reports distance 0
+// to them, issue #54138), the GEOS spatial predicates are false for empty
+// operands, and an empty query geometry has no envelope at all, which
+// RTreeIndexReader::Candidates answers with every non-null row.
+//
 // Nullness is decided by the caller's validity bitmap alone, never by the
 // payload: the builder and the growing appender both classify a row as NULL
 // before reaching here, so a valid row with an empty/corrupt payload lands on
