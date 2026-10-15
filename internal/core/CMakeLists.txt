@@ -450,6 +450,12 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         FILES_MATCHING PATTERN "*_c.h"
 )
 
+# Install the independent Grep runner C ABI for Go consumers.
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/grep/
+        DESTINATION include/grep
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
 # Install rescores
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/rescores/
         DESTINATION include/rescores

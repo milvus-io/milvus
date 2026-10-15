@@ -199,6 +199,7 @@ type RetrievePlan struct {
 	msgID                 int64 // only used to debug.
 	maxLimitSize          int64
 	ignoreNonPk           bool
+	candidateMode         bool
 	consistencyLevel      commonpb.ConsistencyLevel
 	collectionTTL         typeutil.Timestamp
 	entityTTLPhysicalTime typeutil.Timestamp
@@ -232,12 +233,26 @@ func NewRetrievePlan(col *CCollection,
 	}, nil
 }
 
+// EnableCandidateMode prepares a candidate read before segment fan-out.
+// maxRows is a non-negative candidate row cap; zero disables the cap.
+// The caller supplies the execution budget. The Query limit and projection
+// remain unchanged, including for subsequent explicit reads by offsets.
+func (plan *RetrievePlan) EnableCandidateMode(maxRows int64) error {
+	status := C.SetRetrievePlanMode(plan.cRetrievePlan, C.RetrieveModeCandidates, C.int64_t(maxRows))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return merr.Wrap(err, "enable candidate retrieve mode")
+	}
+	plan.ignoreNonPk = true
+	plan.candidateMode = true
+	return nil
+}
+
 func (plan *RetrievePlan) ShouldIgnoreNonPk() bool {
 	return bool(C.ShouldIgnoreNonPk(plan.cRetrievePlan))
 }
 
 func (plan *RetrievePlan) SetIgnoreNonPk(ignore bool) {
-	plan.ignoreNonPk = ignore
+	plan.ignoreNonPk = ignore || plan.candidateMode
 }
 
 func (plan *RetrievePlan) SetTakeForOutputAllowed(allowed bool) {

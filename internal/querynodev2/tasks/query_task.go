@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -53,6 +54,7 @@ type QueryTask struct {
 	segmentManager *segments.Manager
 	req            *querypb.QueryRequest
 	plan           *planpb.PlanNode // used by RunQNQueryPipeline for reduce
+	queryChain     *chain.QueryChainPlan
 	result         *internalpb.RetrieveResults
 	notifier       chan error
 	tr             *timerecord.TimeRecorder
@@ -103,7 +105,9 @@ func (t *QueryTask) PreExecute() error {
 		return err
 	}
 
-	return nil
+	var err error
+	t.queryChain, err = chain.PrepareQueryPlanChainExecution(t.plan, t.collection.Schema(), t.req.GetReq().GetIsIterator())
+	return err
 }
 
 func (t *QueryTask) SearchResult() *internalpb.SearchResults {
@@ -122,6 +126,12 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 	defer retrievePlan.Delete()
+	if t.queryChain != nil {
+		maxRows := paramtable.Get().FunctionCfg.GrepMaxScanRows.GetAsInt64()
+		if err = retrievePlan.EnableCandidateMode(maxRows); err != nil {
+			return err
+		}
+	}
 	resultCount := retrieveTakeForOutputResultCount(t.req.GetReq(), t.plan)
 	takeAllowed := requestAllowsTakeForOutput(resultCount)
 	retrievePlan.SetTakeForOutputAllowed(takeAllowed)
@@ -159,10 +169,17 @@ func (t *QueryTask) Execute() error {
 		// empty gather; nil means "protobuf path" unambiguously.
 		arrowRecords = nil
 	}
-	reducedResult, arrowSelection, err := segments.RunQNQueryPipeline(
-		t.ctx, t.req, t.collection.Schema(), t.plan,
-		reduceResults, arrowRecords, querySegments, t.segmentManager, retrievePlan,
-	)
+	var reducedResult *segcorepb.RetrieveResults
+	var extraResults *commonpb.ResultData
+	var arrowSelection *queryutil.ArrowSelection
+	if t.queryChain != nil {
+		reducedResult, extraResults, err = segments.RunQueryScanPipeline(t.ctx, t.req, t.collection.Schema(), t.queryChain, results, t.segmentManager, retrievePlan)
+	} else {
+		reducedResult, arrowSelection, err = segments.RunQNQueryPipeline(
+			t.ctx, t.req, t.collection.Schema(), t.plan,
+			reduceResults, arrowRecords, querySegments, t.segmentManager, retrievePlan,
+		)
+	}
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		paramtable.GetStringNodeID(),
@@ -190,9 +207,10 @@ func (t *QueryTask) Execute() error {
 		Base: &commonpb.MsgBase{
 			SourceID: paramtable.GetNodeID(),
 		},
-		Status:     merr.Success(),
-		Ids:        reducedResult.Ids,
-		FieldsData: reducedResult.FieldsData,
+		Status:       merr.Success(),
+		ExtraResults: extraResults,
+		Ids:          reducedResult.Ids,
+		FieldsData:   reducedResult.FieldsData,
 		CostAggregation: &internalpb.CostAggregation{
 			ServiceTime:          tr.ElapseSpan().Milliseconds(),
 			TotalRelatedDataSize: relatedDataSize,

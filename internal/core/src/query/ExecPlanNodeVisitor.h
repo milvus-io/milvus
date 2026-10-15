@@ -154,6 +154,12 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return filter_only_;
     }
 
+    void
+    SetRetrieveCandidateBudget(int64_t max_bytes, int64_t max_rows) {
+        retrieve_candidate_budget_ = max_bytes;
+        retrieve_candidate_max_rows_ = max_rows;
+    }
+
     ExecPlanNodeVisitor&
     SetEnableExprCache(bool enable) {
         enable_expr_cache_ = enable;
@@ -192,6 +198,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
     bool expr_use_pk_index_ = false;
     bool filter_only_ = false;
+    std::optional<int64_t> retrieve_candidate_budget_;
+    int64_t retrieve_candidate_max_rows_{0};
     bool enable_expr_cache_ = false;
     milvus::tracer::SpanPtr trace_span_ = nullptr;
 };

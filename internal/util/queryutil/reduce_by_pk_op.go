@@ -66,6 +66,10 @@ func (op *ReduceByPKOperator) Run(ctx context.Context, span trace.Span, inputs .
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
+	emptyExtra, extraErr := selectExtraResults(results, nil)
+	if extraErr != nil {
+		return nil, extraErr
+	}
 
 	// Filter out empty results and collect valid ones
 	validResults := make([]*internalpb.RetrieveResults, 0, len(results))
@@ -79,7 +83,7 @@ func (op *ReduceByPKOperator) Run(ctx context.Context, span trace.Span, inputs .
 	}
 
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{}}, nil
+		return []any{&internalpb.RetrieveResults{ExtraResults: emptyExtra}}, nil
 	}
 
 	// If only one result, return as-is
@@ -213,6 +217,10 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
+	emptyExtra, extraErr := selectExtraResults(results, nil)
+	if extraErr != nil {
+		return nil, extraErr
+	}
 
 	// Positional agreement is a precondition, not something to tolerate. A
 	// short arrowRecords slice would leave later results with a nil record
@@ -248,7 +256,7 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 	}
 
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{}}, nil
+		return []any{&internalpb.RetrieveResults{ExtraResults: emptyExtra}}, nil
 	}
 
 	// No single-result shortcut: even a single result may contain duplicate PKs

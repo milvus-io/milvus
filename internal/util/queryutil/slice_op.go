@@ -87,7 +87,7 @@ func (op *SliceOperator) applySlice(result *internalpb.RetrieveResults) (*intern
 
 	start := int(op.offset)
 	if start >= size {
-		return &internalpb.RetrieveResults{}, nil
+		return rangeSliceRetrieveResults(result, size, size)
 	}
 
 	end := size

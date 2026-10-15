@@ -2,10 +2,10 @@ set(TANTIVY_FEATURES_LIST "" CACHE STRING "List of Cargo features to enable")
 string(REPLACE ";" "," TANTIVY_FEATURES "${TANTIVY_FEATURES_LIST}")
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CARGO_CMD cargo +1.89 build --verbose)
+    set(CARGO_CMD cargo +1.89 build --locked --verbose)
     set(TARGET_DIR "debug")
 else ()
-    set(CARGO_CMD cargo +1.89 build --release --verbose)
+    set(CARGO_CMD cargo +1.89 build --release --locked --verbose)
     set(TARGET_DIR "release")
 endif ()
 
@@ -28,6 +28,7 @@ elseif (NOT TANTIVY_CARGO_TARGET_DIR)
 endif ()
 set(LIB_FILE "${TANTIVY_CARGO_TARGET_DIR}/${TARGET_DIR}/${TANTIVY_NAME}")
 set(LIB_HEADER_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/include")
+set(GREP_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/../grep/include/milvus_grep.h")
 
 # In fact, cargo was already installed on our builder environment.
 # Below settings are used to suit for first local development.
@@ -47,7 +48,7 @@ add_custom_target(tantivy_build
                 "CARGO_TARGET_DIR=${TANTIVY_CARGO_TARGET_DIR}"
                 ${CARGO_CMD}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding
-        BYPRODUCTS ${LIB_FILE}
+        BYPRODUCTS ${LIB_FILE} ${GREP_HEADER}
         VERBATIM
 )
 
@@ -62,6 +63,7 @@ add_custom_target(install_tantivy_target
         COMMAND ${CMAKE_COMMAND} -E make_directory ${TANTIVY_INCLUDE_DIR}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LIB_FILE} ${TANTIVY_LIB_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LIB_HEADER_FOLDER}/tantivy-binding.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${GREP_HEADER} ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-wrapper.h ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/rust-binding.h ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/rust-array.h ${TANTIVY_INCLUDE_DIR}/
@@ -71,7 +73,7 @@ add_custom_target(install_tantivy_target
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/phrase_match.h ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/time_recorder.h ${TANTIVY_INCLUDE_DIR}/
         DEPENDS tantivy_build
-        BYPRODUCTS ${INSTALLED_LIB_FILE}
+        BYPRODUCTS ${INSTALLED_LIB_FILE} ${TANTIVY_INCLUDE_DIR}/milvus_grep.h
         VERBATIM
 )
 
