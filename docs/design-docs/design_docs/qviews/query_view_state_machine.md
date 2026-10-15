@@ -347,7 +347,10 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 **Automatic Behavior:**
 1. Replay WAL from the checkpoint position to recover growing segments.
-2. Do NOT serve queries (data is incomplete).
+2. Do NOT serve queries (data is incomplete). SN query acquisition waits on
+   local state notifications when a matching UpRecovering view is the only
+   eligible candidate, then acquires an Up lease after recovery. Cancellation,
+   recovery failure, teardown and shutdown terminate or wake the wait.
 3. Multiple UpRecovering versions may coexist. After recovery, query planning
    selects the highest available Up version.
 4. Resource preparation uses the same final-commit and applied-sealed-event

@@ -96,8 +96,13 @@ Rules:
 - `UpRecovering` views do not serve queries.
 - `Preparing`, `Ready`, `Down`, `Dropping`, `Dropped`, and `Unrecoverable` do not
   serve plans.
-- If no Up view exists, `GetQueryPlan` returns a retriable view-not-ready or
-  view-not-found error.
+- If no matching Up view exists but a matching `UpRecovering` view exists,
+  `GetQueryPlan` waits on SN-local state notifications within the request context
+  and reselects after waking. An already available matching Up view takes
+  precedence, including across replicas. Only the requested exact schema counts.
+- Recovery failure, teardown and handler shutdown wake waiters. If no matching
+  Up or UpRecovering view remains, return the existing retriable view error.
+  Missing, Preparing or schema-mismatched views alone do not cause waiting.
 
 The handler returns a read lease of the selected view, not a mutable state
 machine entry. The lease must protect the selected version from being released
