@@ -26,8 +26,7 @@ clustering keys, bulk import, compaction, load/release, field-level load lists,
 and schema evolution (add field, add function). `search`, `hybrid_search` and
 `search_iterator` return one uniform error. No new schema-level proto field,
 collection property or "table type" is introduced: "has no vector field" is
-derived from the schema. The only proto addition is `CompactionPlan.max_rows`,
-internal to DataCoord / DataNode.
+derived from the schema. There is no proto change.
 
 The change set is:
 
@@ -41,14 +40,16 @@ The change set is:
    waits for every index defined on the collection, compaction input waits only
    for vector indexes; a collection with no index defined, or no vector field,
    satisfies them without a special case;
-5. a new per-segment row cap, `dataCoord.segment.maxRows` (default 4,000,000),
-   introduced as a second dimension of segment fullness next to
-   `dataCoord.segment.maxSize`. It enters every place that classifies, packs,
-   splits or seals segments by size. It applies to every collection; today only
-   collections with very narrow rows reach it.
+5. a per-collection segment size target derived from a new row target,
+   `dataCoord.segment.maxRows` (default 4,000,000):
+   `expectedSize = min(maxSize, maxRows × estimated bytes per row)`, computed
+   in the existing `getExpectedSegmentSize` that every DataCoord size
+   consumer already reads, and in the StreamingNode seal limitation. The
+   planner, the output writer and import stay byte-only. Collections whose
+   rows are wider than `maxSize / maxRows` (268 B at defaults) are unaffected.
 
-The row cap is the only part of the design that is not a pure removal of an
-assumption. It is justified by measurement: delete application inside one
+The size target is the only part of the design that is not a pure removal of
+an assumption. It is justified by measurement: delete application inside one
 sealed segment is serial at roughly 8 µs per primary key, so a 1 GB segment of
 13-byte rows (44 M rows) stalls the channel's tsafe for 28 s on a 10 % delete,
 while eight segments of 5.5 M rows stall 5.8 s under the same delete.
@@ -268,7 +269,7 @@ Consequences of waiting for scalar indexes at handoff, for every collection:
 - **Publication latency.** A compaction output becomes visible after its scalar
   indexes finish instead of after its vector index. Measured on the test build:
   `INVERTED` on one `int32` field builds in 8.5 s for 5.5 M rows and 28.6 s for
-  44 M rows; at the 4 M-row cap this adds about 6 s per segment, and scalar
+  44 M rows; at the 4 M-row target this adds about 6 s per segment, and scalar
   index tasks for sibling segments run in parallel. Until publication the
   parents keep serving, so the cost is index freshness of the children, not
   availability.
@@ -286,7 +287,7 @@ Consequences of waiting for scalar indexes at handoff, for every collection:
   they publish as soon as data is complete. The staging design already
   specifies this as a behaviour fix.
 
-### 3. Per-segment row cap
+### 3. Per-collection segment size target
 
 #### 3.1 Why bytes alone are not enough
 
@@ -336,9 +337,10 @@ p.SegmentMaxRows = ParamItem{
     Key:          "dataCoord.segment.maxRows",
     Version:      "2.7.0",
     DefaultValue: "4000000",
-    Doc:          "The maximum number of rows in a sealed segment. A segment is sealed, a compaction output " +
-                  "is split, and an import segment is assigned when either this or dataCoord.segment.maxSize " +
-                  "is reached. 0 disables the row cap.",
+    Doc:          "Target number of rows per sealed segment. The per-collection segment size target is " +
+                  "min(dataCoord.segment.maxSize, maxRows * estimated bytes per row of the schema); seal, " +
+                  "compaction and import all use that target. Collections whose rows are wider than " +
+                  "maxSize / maxRows are unaffected. 0 disables the row target.",
     Export:       true,
 }
 ```
@@ -348,117 +350,124 @@ recommends, and the point where a 10 % single-request delete on one segment
 (400 k keys × 8 µs = 3.2 s) sits at the tsafe lag limit. 5,000,000 (Druid)
 is equally defensible; the difference is at the margin.
 
-The cap applies to every collection. Vector collections with dim ≥ 32 float32
-do not reach it before the byte cap (Compatibility lists the ones that do).
+The target applies to every collection. Vector collections with dim > 64
+float32 have an estimated row width above 268 B and keep `maxSize`
+(Compatibility lists the ones that do not).
 
-#### 3.3 Segment fullness
+#### 3.3 Row-derived segment size target
 
-Every place that today compares a byte count against `maxSize` compares a
-*fullness* instead:
+DataCoord already computes the segment size target per collection:
+`getExpectedSegmentSize(meta, collectionID, schema)`
+(`compaction_trigger_v2.go:872`) returns `diskSegmentMaxSize` when every
+dense vector field has a DiskANN index and `maxSize` otherwise. Every size
+consumer in DataCoord reads it: the legacy and two-tier planners, force-merge,
+clustering (`calculateClusteringCompactionConfig` takes it as an argument),
+import (`GetSegmentMaxSize`, `import_util.go:143`) and `CompactionPlan.max_size`.
+The row target enters through this one function:
 
 ```
-residualRows(s)  = NumOfRows(s) − DeleteNumRows(s)
-residualSize(s)  = getSegmentSize(s) × residualRows(s) / NumOfRows(s)      // existing GetResidualSegmentSize
-
-fullness(s)      = max( residualSize(s) / expectedSize,
-                        residualRows(s) / maxRows )                        // maxRows = 0 → second term is 0
-fullness(set)    = max( Σ residualSize / expectedSize, Σ residualRows / maxRows )
+rowWidth(c)      = EstimateSizePerRecord(schema(c))        // pkg/util/typeutil/schema.go:134
+expectedSize(c)  = min( baseSize(c), maxRows × rowWidth(c) )   // baseSize = maxSize or diskSegmentMaxSize
+                                                                // maxRows = 0 → baseSize
 ```
 
-A segment is *full* when `fullness ≥ compactionFillRate` (0.85), a *fragment*
-when `fullness < compactionFillRate / 4`, *small* (legacy planner) when
-`fullness < segmentSmallProportion`. A set of segments fits one output when
-both `Σ residualSize ≤ expectedSize` and `Σ residualRows ≤ maxRows`. For a
-collection whose rows are wider than `maxSize / maxRows` (268 B at defaults)
-the byte term dominates and every result is identical to today's.
+At defaults: `int64 + int32` (12 B) → 48 MB; `int64 + 4 × int64` (40 B) →
+160 MB; `int64 + varchar(max 256) + JSON` → the estimate exceeds 268 B and the
+target stays 1 GiB; `FLOAT_VECTOR` dim 128 (520 B) → 1 GiB.
 
-Without this, a narrow-row segment that reached `maxRows` has
-`size / expectedSize ≈ 0.3` and is classified as small or fragment, packed
-with its neighbours, compacted, and split back at `maxRows` by the output
-writer. Each compaction cycle rewrites the same rows (xiaofan-luan, review of
-this document).
+Properties:
+
+- **One number per collection.** Classification (`isFullSegment`,
+  `isFragmentSegment`, `isSmallSegment`), `Knapsack` capacity, the output
+  writer's `max_size`, import assignment and the seal limitation all compare
+  bytes against `expectedSize(c)`. There is no second dimension, no change to
+  `knapsack.go`, `MultiSegmentWriter` or the proto. A compaction output of
+  about `expectedSize(c)` bytes is full by the same measure that selected its
+  inputs, so it is never re-selected: the merge-then-split cycle that a row cap
+  on outputs alone would cause (Alternatives) cannot occur.
+- **Wide rows are unchanged.** `maxRows × rowWidth ≥ maxSize` whenever
+  `rowWidth ≥ 268 B`, so every existing collection with a dense vector of
+  dim > 64 float32 keeps today's target and today's plans.
+- **Estimation error is one-sided.** `EstimateSizePerRecord` is exact for
+  fixed-width fields and counts nullable fields at full width; variable-length
+  fields use the `custom` length policy, measured at 3.68× the stored size on
+  the `varchar + JSON` schema of Section 4; sparse vectors are counted at 150
+  non-zeros. Every error raises `rowWidth`, raises `expectedSize` towards
+  `maxSize`, and so weakens the target; none makes it smaller than intended.
+  The collections where the estimate is loose (variable-length) are the ones
+  that hold at most about 5 M rows per GiB (Section 4) and do not need it.
+- **Schema change.** Adding a field raises `rowWidth` and `expectedSize`;
+  segments that were full under the old target are classified small under the
+  new one and merged once, as happens today when `maxSize` is raised. Rows
+  ingested before the change can then share an output with a byte target
+  derived from the new width, so such an output holds up to
+  `newWidth / oldWidth × maxRows` of the old rows. The bound is by bytes, not a
+  hard row count; the conservative variant that avoids this is listed under
+  Alternatives.
+- **Configuration change** of `maxRows` behaves like a change of `maxSize`
+  today: one re-merge, then steady state.
 
 A simulation of both planners (legacy and two-tier, replicated from
 `knapsack.go`, `compaction_tier.go` and `compaction_trigger.go`; seal at
-`0.12 × cap` with jitter, outputs split at both caps, delete-ratio single
-compaction, 80 trigger intervals, constant row width) confirms the cycle and
-the fix. "Byte-only planner" is today's planner with the output-side caps of
-this design; "fullness" is Section 3.3. Write amplification is rows rewritten
-by compaction divided by rows ingested, over the last 20 intervals:
+`0.12 × target` with jitter, outputs split by the writer, delete-ratio single
+compaction, 80 trigger intervals) compares three variants: "byte-only +
+output row cap" (today's planner with the row cap applied only at seal and in
+the writer), "two-dimensional fullness" (the previous revision of this
+document: `max(size / maxSize, rows / maxRows)` inside the planner) and this
+section. Write amplification is rows rewritten by compaction divided by rows
+ingested, over the last 20 intervals; a churn plan is one that re-merges a
+compaction output that is already full.
 
-| Row width | Planner | Byte-only planner: amplification / plans touching a row-full segment | Fullness planner: amplification / such plans | Plans identical in every interval |
-|-----------|---------|------:|------:|:---:|
-| 13 B, 50 B | legacy | 70.5 / 115–323 | 1.0 / 0 | no |
-| 13 B, 50 B, 200 B | two-tier | 70.0 / 181–1160 | 1.0 / 0 | no |
-| 200 B, 268 B | legacy | 1.5 / 0 | 1.0 / 0 | no (byte-only merges 2 M-row outputs once more) |
-| 268 B | two-tier | 1.0 / 0 | 1.0 / 0 | yes |
-| 300 B, 512 B, 3 KB | both | 1.0–1.5 / 0 | same | yes |
-| 50 B, 30 % deleted at interval 40 | both | 58 / 273–280 | 1.0 / 0 | no |
+| Scenario | Byte-only + output row cap | Two-dimensional fullness | This section |
+|----------|---------------------------:|-------------------------:|-------------:|
+| 13, 50, 134, 200 B rows, 2 M rows / interval, both planners | amplification 70, 115–1160 churn plans | 1.0, 0 | 1.0, 0; plans identical to two-dimensional fullness in every interval |
+| 268 B (two-tier), ≥ 300 B (both) | identical to today | identical to today | identical to today |
+| 50 B, ingest 0.7 M – 9 M rows / interval | 64 – 70 | 1.0 – 1.6 | 0.9 – 1.6, 0 churn, no segment above `maxRows` |
+| 50 B, estimate k× actual (k = 2, 4, 10, 30) | — | — | 0 churn; rows per segment rise linearly to `k × maxRows`, capped at `maxSize / width` |
+| 13 B → 50 B schema change at interval 40 | — | — | all 80 M pre-change rows merged exactly once, 0 churn after; old rows per output up to 14 M |
+| 50 B, 30 % deleted at interval 40 | 58, 273–280 churn plans | 1.35 (legacy) / 1.69 (two-tier), 0 | same as two-dimensional fullness |
 
-The byte-only variant rewrites every narrow-row segment in every interval for
-widths below `0.5 × maxSize / maxRows` (legacy, 134 B) or
-`0.85 × maxSize / maxRows` (two-tier, 228 B). The fullness planner produces no
-such plan at any ingest rate tried (0.7 M to 9 M rows per interval), never
-emits a segment above either cap, and for widths above the boundary produces
-the same plans as today in every interval. One property of the legacy planner
-is unchanged in kind: outputs that land between the small threshold and the
-fill rate (today 512–870 MB, with the row cap also 2–3.4 M rows) are not merged
-again.
+With an exact estimate the byte target and two-dimensional fullness produce
+the same plan in every interval, for every width and both planners: for a
+narrow row `rows / maxRows` equals `size / (maxRows × rowWidth)` =
+`size / expectedSize`. The byte target reaches the result without a second
+dimension. One property of the legacy planner is unchanged in kind: outputs
+that land between `segmentSmallProportion` and `compactionFillRate` of the
+target are not merged again.
 
 #### 3.4 Enforcement points
 
-1. **StreamingNode seal (growing → sealed).**
-   `jitterSegmentLimitationPolicy.generateL1Limitation` sets
-   `SegmentRows: math.MaxUint64`. Set it to
-   `jitterRatio × maxRows × sealProportion` when `maxRows > 0`, the same
-   jitter and proportion as the byte limit so that both caps scatter seals the
-   same way. The value already travels in `CreateSegmentMessageHeader.MaxRows`
-   into `SegmentStats.MaxRows`; `SegmentStats.AllocRows` and `IsFull`
-   (`utils/stats.go:116,128`) already test rows against it. L0 segments keep
-   `FlushL0MaxRowNum`.
-2. **Compaction trigger: classification.** `isFullSegment`,
-   `isFragmentSegment` (`compaction_tier.go`), `isSmallSegment`,
-   `isExpandableSmallSegment` (`compaction_trigger.go:689-694`) take the
-   segment's fullness. A segment that is row-full is not a candidate for
-   merging. `ShouldDoSingleCompaction` (delete ratio, expired rows, deltalog
-   count) is unchanged, so deletes and TTL still compact a row-full segment;
-   its output is split by the writer below.
-3. **Compaction trigger: packing.** `Knapsack.tryPack` (`knapsack.go:48`)
-   accumulates one capacity. It gets a second: a candidate is added only if
-   both `Σ residualSize ≤ expectedSize` and `Σ residualRows ≤ maxRows`; the
-   "left" value that `pack`, `packSliding` and `packWith` compare against
-   `maxLeftSize` becomes `(1 − fullness(pack)) × expectedSize`, so the
-   fill-rate gate and `minSegs` logic are unchanged. The `less` ordering in
-   `newSegmentPacker` sorts by residual fullness instead of residual size.
-   `squeezeSmallSegmentsToBuckets` applies the same two-dimensional fit.
-   `compactionBucket` carries `maxRows` next to `maxSize`.
-4. **Compaction output.** `CompactionPlan.max_size` bounds mix / sort /
-   force-merge outputs on the DataNode; `MultiSegmentWriter` already receives
-   a `maxRows` argument but uses it only to size the bloom filter. Add
-   `CompactionPlan.max_rows`, populated by DataCoord next to `max_size`, and
-   make the writer roll to a new output when either bound is reached. Sort
-   compaction (`merge_sort.go:49`), mix compaction, force-merge, bump-schema
-   and namespace compaction all write through this writer and inherit the
-   rule; import outputs are therefore re-split by the sort compaction that
-   follows import even if the import assignment under-estimated.
-5. **Clustering compaction.** `calculateClusteringCompactionConfig` derives
-   `MaxSegmentRows` / `PreferSegmentRows` from the observed bytes per row. Cap
-   both: `MaxSegmentRows = min(MaxSegmentRows, maxRows)`,
-   `PreferSegmentRows = min(PreferSegmentRows, maxRows × preferRatio)`.
-6. **Import.** `AssignSegments` (`import_util.go:165`) allocates
-   `ceil(size / segmentMaxSize)` segments per vchannel / partition from
-   `PartitionImportStats.partition_data_size`; `partition_rows` is in the same
-   message. Allocate `max(ceil(size / maxSize), ceil(rows / maxRows))`. The
-   DataNode side (`PickSegment`) needs no change: the number of segments bounds
-   the average, and sort compaction re-splits outliers (point 4).
-7. **Other writers.** Backfill, copy-segment and the Import V3 reshard fragment
-   writer (PR #53334) target `max_size` through the same plan / writer types
-   and receive `max_rows` with it.
-8. **L0 segments** are excluded: their rows are delete records applied per
-   target segment, and they already have `FlushL0MaxRowNum`.
-9. **Observability.** The seal and compaction logs that today print the byte
-   reason print which dimension fired (`size` or `rows`), so that operators can
-   see when `maxRows` is the binding limit for a collection.
+1. **DataCoord `getExpectedSegmentSize`.** Apply the formula above. Its
+   consumers need no change: `generatePlansLegacy`, `generatePlansTwoTier`,
+   `squeezeSmallSegmentsToBuckets`, force-merge, `calculateClusteringCompactionConfig`
+   (`MaxSegmentRows` / `PreferSegmentRows` are already derived from the byte
+   target and the observed bytes per row), `AssignSegments`
+   (`ceil(size / expectedSize)` segments per vchannel / partition) and
+   `CompactionPlan.max_size`. On the DataNode, `MultiSegmentWriter` already
+   rolls to a new output at `max_size`; mix, sort, force-merge, bump-schema,
+   namespace, backfill, copy-segment and the Import V3 reshard writer
+   (PR #53334) inherit the smaller target, and the sort compaction that follows
+   an import re-splits import outputs if the assignment under-estimated.
+2. **StreamingNode seal.** `jitterSegmentLimitationPolicy.generateL1Limitation`
+   (`segment_limitation_policy.go`) reads the global `maxSize`; the code
+   carries a TODO that the parameter does not belong there. The shard manager
+   holds the collection schema (`CollectionSchemaOfVChannel`,
+   `shard_manager.go`) and the allocation request carries the schema version,
+   so the policy takes the schema and sets
+   `SegmentSize = jitterRatio × expectedSize(c) × sealProportion`.
+   `SegmentRows` stays `MaxUint64`; L0 keeps `FlushL0MaxRowNum`. The formula
+   lives in one helper (`pkg/util/segmentutil` or similar) shared with
+   DataCoord so that the two components cannot diverge; the DiskANN term is
+   DataCoord-only and the StreamingNode uses `maxSize` as `baseSize`, which
+   only matters above 268 B where the row term is inactive.
+3. **Clustering analysis.** `task_analyze.go:208` derives `numClusters` from
+   the global `maxSize`; it takes `expectedSize(c)` instead. This also fixes
+   the DiskANN case, which is inconsistent today.
+4. **L0 segments** are excluded: their rows are delete records applied per
+   target segment.
+5. **Observability.** The seal and plan-generation logs print
+   `expectedSize(c)` when it differs from `maxSize`, so that operators can see
+   when the row target is the binding limit for a collection.
 
 ### 4. Resource estimation
 
@@ -474,9 +483,9 @@ process RSS on the same single-node build:
 The estimate is adequate for variable-length schemas and low by about 3× for
 narrow fixed-width schemas. This design does not change the estimator; the
 per-row constant for fixed-width columns is listed under Follow-ups with the
-measured numbers so that it can be calibrated separately. With `maxRows`
-in place, the absolute error per segment is bounded (4 M rows × ~80 B =
-320 MB).
+measured numbers so that it can be calibrated separately. With the row-derived
+size target in place, the absolute error per segment of a fixed-width schema
+is bounded (4 M rows × ~80 B = 320 MB).
 
 ## Per-path adaptation and edge cases
 
@@ -517,10 +526,8 @@ in place, the absolute error per segment is bounded (4 M rows × ~80 B =
 
 ## Compatibility
 
-- **Wire / meta.** No proto change except `CompactionPlan.max_rows` (new
-  optional int64; a DataNode that does not know it ignores it and splits by
-  bytes only). No change to `CollectionSchema`, `DescribeCollection`, etcd
-  layout or binlog format.
+- **Wire / meta.** No proto change. No change to `CollectionSchema`,
+  `DescribeCollection`, etcd layout or binlog format.
 - **Rolling upgrade.** Keep `common.enableCollectionWithoutVector=false` until
   Proxy, DataCoord and QueryCoord are on the new version. Risk if enabled
   early: old DataCoord never compacts the new collection (C1), old Proxy
@@ -534,12 +541,15 @@ in place, the absolute error per segment is bounded (4 M rows × ~80 B =
   repository).
 - **CDC.** Replicating `CreateCollection` of a zero-vector collection to an
   older target cluster fails at A1 on the target. Same mitigation.
-- **Row cap on existing collections.** Collections whose rows are narrower than
-  `maxSize / maxRows` = 268 B at defaults will seal, compact and import smaller
-  segments after the upgrade: `BINARY_VECTOR` with dim ≤ 2048, `FLOAT16` /
-  `BFLOAT16` with dim ≤ 128, `FLOAT_VECTOR` with dim ≤ 64, and sparse-only
-  collections with few non-zeros. Existing segments are not re-split; new
-  segments are smaller. Operators can restore the old behaviour with
+- **Smaller segments for narrow-row collections.** Collections whose
+  estimated row width is below `maxSize / maxRows` = 268 B at defaults will
+  seal, compact and import smaller segments after the upgrade:
+  `BINARY_VECTOR` with dim ≤ 2048, `FLOAT16` / `BFLOAT16` with dim ≤ 128,
+  `FLOAT_VECTOR` with dim ≤ 64, `INT8_VECTOR` with dim ≤ 256. Sparse-only
+  collections are estimated at 150 non-zeros per row, above 268 B, and are
+  unaffected whatever their actual density. Existing segments are not re-split; new
+  segments are smaller, and existing full segments are not re-merged because
+  the target only shrinks. Operators can restore the old behaviour with
   `dataCoord.segment.maxRows=0`.
 - **Sparse-only collections** get a 1024 MB compaction / import target instead
   of 2048 MB (C2).
@@ -547,9 +557,9 @@ in place, the absolute error per segment is bounded (4 M rows × ~80 B =
   Compaction children become visible after their scalar indexes finish; the
   parents serve until then. `dataCoord.dataview.forceAllIndexReady` is
   removed; a configuration that sets it is ignored with a deprecation log.
-- **Compaction planner** results are unchanged for any collection whose rows
-  are wider than `maxSize / maxRows` (Section 3.3); narrower collections stop
-  re-merging row-full segments.
+- **Compaction planner** code is unchanged; only its size target moves
+  (Section 3.3). Results are identical for any collection whose estimated row
+  width is above `maxSize / maxRows`.
 - **Bulk import** rejects a file that contains none of the schema's importable
   columns (C3). Today such a file makes the import task loop without progress;
   no completed import changes outcome.
@@ -577,17 +587,21 @@ in place, the absolute error per segment is bounded (4 M rows × ~80 B =
   rejects a row with no schema key and no dynamic key; a Parquet column of
   all nulls on a nullable field imports; `importFile` returns an error on a
   zero-row batch instead of continuing.
-- Section 3.3: `fullness` on byte-dominated and row-dominated segments, with
-  and without deletes, with `maxRows=0`; `isFullSegment` / `isFragmentSegment`
-  / `isSmallSegment` on a row-full narrow segment return full / not fragment /
-  not small; `Knapsack.tryPack` refuses a candidate that fits by bytes but not
-  by rows; `generatePlansTwoTier` on a channel of row-full narrow segments
-  produces no merge plan and still produces a single-segment plan for a
-  segment over the delete-ratio threshold; clustering caps.
+- Section 3.3: `getExpectedSegmentSize` on a fixed-width narrow schema returns
+  `maxRows × rowWidth`, on a wide schema `maxSize`, with DiskANN
+  `min(diskSegmentMaxSize, maxRows × rowWidth)`, with `maxRows=0` the base
+  size; the StreamingNode limitation and DataCoord return the same value for
+  the same schema; `AssignSegments` allocates `ceil(size / expectedSize)`;
+  `numClusters` uses the target; `generatePlansTwoTier` and
+  `generatePlansLegacy` on a channel of outputs at `expectedSize` produce no
+  merge plan and still produce a single-segment plan for a segment over the
+  delete-ratio threshold. The planner simulation
+  (`planner_sim.py` / `target_sim.py`, attached to the implementation PR)
+  provides the expected plan sequences per width.
 - Search entry: one error text across `Search`, `HybridSearch`,
   `SearchIterator`, search-by-pk, REST.
-- Row cap: StreamingNode limitation with `maxRows` set / 0; `MultiSegmentWriter`
-  rolls at `max_rows`; `AssignSegments` allocates by rows.
+- Size target: StreamingNode limitation with `maxRows` set / 0 and with a
+  schema whose estimate is above / below 268 B.
 
 ### End-to-end (`tests/python_client/milvus_client/`)
 
@@ -603,10 +617,12 @@ in place, the absolute error per segment is bounded (4 M rows × ~80 B =
    rejected.
 6. Gate off → create rejected with the legacy error.
 7. REST v2 create / insert / upsert / query / delete.
-8. Row cap: import 12 M narrow rows → ≥ 3 segments; streaming insert past
-   `maxRows × sealProportion` → seal observed; after the periodic trigger has
-   run, the row-full segments are not re-compacted (segment IDs stable across
-   two trigger intervals).
+8. Size target: import 12 M rows of `int64 + int32` → ≥ 3 segments;
+   streaming insert past `expectedSize × sealProportion` (about 5.8 MB) →
+   seal observed; after the periodic trigger has run, outputs at
+   `expectedSize` are not re-compacted (segment IDs stable across two trigger
+   intervals); the same schema with a dense vector of dim 128 added seals at
+   the 1 GiB-derived size.
 9. Import of a Parquet file with none of the schema's columns → job fails with
    the C3 error within the preimport / import timeout, not a hung task.
 
@@ -628,31 +644,53 @@ aarch64).
   wait on, and scalar indexes are rebuilt per segment after compaction either
   way.
 - **Fold a per-row overhead into "segment size"** (size = bytes + rows ×
-  constant) instead of a separate row cap. Rejected: it changes the meaning of
-  `maxSize` for every collection (a dim-768 segment shrinks by ~3 %), while a
-  separate cap is a no-op below the threshold.
+  constant) instead of a row-derived target. Rejected: it changes the meaning
+  of `maxSize` for every collection (a dim-768 segment shrinks by ~3 %), while
+  the `min` form is a no-op above 268 B per row.
 - **Row cap on outputs only (seal, writer, import assignment), planner
   unchanged.** Rejected: the planner would classify every row-full narrow
   segment as small, merge it and have the writer split it again on each
-  trigger interval (Section 3.3).
+  trigger interval; simulated write amplification about 70× (Section 3.3).
+- **Bytes and rows as two dimensions of segment fullness inside the planner**
+  (`fullness = max(size / maxSize, rows / maxRows)` in classification,
+  `Knapsack`, the writer and import; the previous revision of this document).
+  Superseded: with an exact row-width estimate it produces the same plan as the
+  byte target in every simulated interval (Section 3.3), while touching
+  `knapsack.go`, both planners, `squeezeSmallSegmentsToBuckets`,
+  `MultiSegmentWriter`, import assignment, the seal limitation and a new
+  `CompactionPlan.max_rows` field. Its one advantage is a hard row bound that
+  survives a schema change; the byte target bounds rows through the estimate
+  instead. It remains the fallback if a hard bound turns out to be needed.
+- **Observed bytes per row** (`Σ MemorySize / Σ NumOfRows` over the
+  collection's sealed segments) instead of the schema estimate, or the
+  conservative `min(estimate, observed minimum width)` that keeps old narrow
+  rows under `maxRows` after a schema change. Rejected for the first version:
+  the observed value differs between DataCoord and the StreamingNode and
+  across restarts, needs sealed segments to exist, and the schema estimate's
+  error is already in the safe direction. The conservative variant costs
+  `newWidth / oldWidth` times more segments for all post-change data.
 - **One readiness predicate for handoff and compaction input.** Rejected:
   handoff wants every defined index so that the published segment is
   queryable without a brute-force fallback; compaction input only needs to
   avoid consuming a segment whose vector index is still building. Using the
   handoff rule for compaction input would delay compaction by a scalar index
   build that is discarded with the input segment.
-- **No row cap, rely on delete parallelisation.** Rejected for now: the
-  parallelisation is a segcore change with its own review; the cap is a
-  configuration-level guard that can be relaxed when the former lands.
+- **No row target, rely on delete parallelisation.** Rejected for now: the
+  parallelisation is a segcore change with its own review (Follow-ups); the
+  target is a configuration-level guard that can be relaxed when the former
+  lands.
 - **Allow dropping the last vector field.** Deferred to the schema-evolution
   document.
 
 ## Follow-ups (out of scope, tracked separately)
 
-- Parallelise delete application inside a sealed segment (split the sorted
-  primary-key column into ranges), or replace per-key binary search with a
-  single merge of the sorted delete keys against the sorted primary-key
-  column. With either, `maxRows` can be raised.
+- Delete application inside a sealed segment: `search_batch_pks`
+  (`ChunkedSegmentSealedImpl.cpp`) runs one `lower_bound` per delete key per
+  chunk of the sorted primary-key column and inserts hits one by one; the
+  query-side `search_pks` already has a single-pass two-pointer variant
+  (`search_pks_with_two_pointers_impl`, PR #45328) that the delete path does
+  not use. Reuse it and apply hits per chunk range in parallel. With that,
+  `maxRows` can be raised or removed.
 - Loader estimate: add a per-row constant for fixed-width columns (measured
   gap ~80 B per row on `int64 + int32`), not for variable-length columns
   (already covered by the 2× factor).
@@ -667,7 +705,9 @@ aarch64).
 
 - Issue #52065, #33853, #51185
 - Review comments on PR #53983 (xiaofan-luan, 2026-10-10): handoff readiness,
-  row-aware compaction planning, import reader validation
+  row-aware compaction planning, import reader validation. The row-aware
+  planning comment led first to the two-dimensional fullness revision and then
+  to the per-collection size target of Section 3.3.
 - PR #53334 `feat: implement Import V3 reshard` (open)
 - Druid segment optimization: https://druid.apache.org/docs/latest/operations/segment-optimization
 - TiKV coprocessor configuration: https://tikv.org/docs/4.0/tasks/configure/coprocessor/
