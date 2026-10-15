@@ -21,6 +21,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -329,6 +330,64 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 	// Mock scheduler expectations
 	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(2)
 	s.inspector.reloadFromMeta()
+}
+
+func (s *ImportInspectorSuite) TestIgnoreOrphanTasks() {
+	newTask := func(taskID int64, state datapb.ImportTaskStateV2, segmentIDs ...int64) ImportTask {
+		task := &importTask{
+			importMeta: s.importMeta,
+			tr:         timerecord.NewTimeRecorder("import task"),
+		}
+		task.task.Store(&datapb.ImportTaskV2{
+			JobID:        100,
+			TaskID:       taskID,
+			CollectionID: s.collectionID,
+			State:        state,
+			SegmentIDs:   segmentIDs,
+		})
+		return task
+	}
+
+	s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Times(3)
+	s.NoError(s.importMeta.AddTask(context.TODO(), newTask(1, datapb.ImportTaskStateV2_InProgress)))
+	s.NoError(s.importMeta.AddTask(context.TODO(), newTask(2, datapb.ImportTaskStateV2_Pending)))
+	s.NoError(s.importMeta.AddTask(context.TODO(), newTask(3, datapb.ImportTaskStateV2_Failed, 10)))
+
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	s.NoError(s.meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:          10,
+			State:       commonpb.SegmentState_Importing,
+			IsImporting: true,
+		},
+	}))
+
+	// Orphan tasks are skipped just as they were when the inspector iterated jobs first.
+	s.inspector.reloadFromMeta()
+	s.inspector.inspect()
+	s.Equal(commonpb.SegmentState_Importing, s.meta.GetSegment(context.TODO(), 10).GetState())
+}
+
+func (s *ImportInspectorSuite) TestSortImportTasks() {
+	newTask := func(jobID, taskID int64) ImportTask {
+		task := &importTask{}
+		task.task.Store(&datapb.ImportTaskV2{JobID: jobID, TaskID: taskID})
+		return task
+	}
+	tasks := []ImportTask{
+		newTask(2, 4),
+		newTask(1, 3),
+		newTask(2, 2),
+		newTask(1, 1),
+	}
+
+	sortImportTasks(tasks)
+	s.Equal([]int64{1, 1, 2, 2}, lo.Map(tasks, func(task ImportTask, _ int) int64 {
+		return task.GetJobID()
+	}))
+	s.Equal([]int64{1, 3, 2, 4}, lo.Map(tasks, func(task ImportTask, _ int) int64 {
+		return task.GetTaskID()
+	}))
 }
 
 func TestImportInspector(t *testing.T) {
