@@ -348,6 +348,25 @@ segment in one batch. Delete by primary-key list goes through the same
 per-segment apply path as delete by expression; it changes only how the keys
 are batched into the WAL.
 
+Where the per-key cost is (Go CPU profile with `cgosymbolizer`, one
+1.5 M-key delete by primary-key list on the 44 M-row segment, 2026-10-15):
+
+| | aarch64 | x86 |
+|---|---:|---:|
+| `ChunkedSegmentSealedImpl::Delete` (one cgo call) | 13.1 s | 16.2 s |
+| of which `std::lower_bound` in the primary-key search callback (`search_batch_pks`, sorted branch) | 11.1 s (85 %) | 13.1 s (81 %) |
+| `folly::ConcurrentSkipList` insert of the delete records | 0.2 s | 0.3 s |
+| bloom-filter pre-check, sort by timestamp, timestamp read | < 0.3 s | < 0.4 s |
+
+The sorted branch does one independent binary search per delete key over the
+sorted primary-key column (one Storage V2 file per column group, 254 MB for
+44 M rows). Each of the about 25 probes of a search is a cache miss into that
+column, so the cost per key is set by memory latency, about 7 µs on the
+aarch64 machine and 11 µs on the x86 one, and grows only with the logarithm
+of the segment size. That is why the per-key cost measured earlier was the
+same on 5.5 M-row and 44 M-row segments. The delete records themselves
+(skip list, bitmap) are a small fraction.
+
 Comparable systems bound both bytes and rows per scheduling unit: Druid
 segments (`maxRowsPerSegment` default 5,000,000, about 100 B per row at its
 typical 300–700 MB), TiKV regions (96 MB or 960,000 keys, whichever first),
@@ -746,13 +765,17 @@ Reported in Section 3.1 and Section 4.
 
 ## Follow-ups (out of scope, tracked separately)
 
-- Delete application inside a sealed segment: `search_batch_pks`
-  (`ChunkedSegmentSealedImpl.cpp`) runs one `lower_bound` per delete key per
-  chunk of the sorted primary-key column and inserts hits one by one; the
-  query-side `search_pks` already has a single-pass two-pointer variant
-  (`search_pks_with_two_pointers_impl`, PR #45328) that the delete path does
-  not use. Reuse it and apply hits per chunk range in parallel. With that,
-  `maxRows` can be raised or removed.
+- Delete application inside a sealed segment: the profile in Section 3.1
+  puts 81–85 % of the cost in `std::lower_bound`, one independent,
+  cache-missing binary search per delete key over the sorted primary-key
+  column (`search_batch_pks`, sorted branch). The query-side `search_pks`
+  already has a single-pass two-pointer variant
+  (`search_pks_with_two_pointers_impl`, PR #45328): sort the delete keys once
+  and advance through the column sequentially, so that a batch of keys costs
+  one pass over the column instead of 25 random probes per key. The delete
+  record insert (skip list, bitmap) is under 2 % and can additionally be
+  split by offset range across threads. With either, `maxRows` can be raised
+  or removed.
 - Loader estimate: add a per-row constant for fixed-width columns (measured
   gap ~80 B per row on `int64 + int32`), not for variable-length columns
   (already covered by the 2× factor).
