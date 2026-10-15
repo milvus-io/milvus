@@ -8,15 +8,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
-type SnapshotFetcher func(context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
+// SnapshotFetcher returns the current inventory version and, only when it
+// differs from knownVersion, the full inventory. knownVersion must be the last
+// successfully applied version. An unchanged response omits the inventory;
+// a newer response with an empty inventory means all resources were removed.
+type SnapshotFetcher func(ctx context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64, error)
 
 var snapshotFetcher struct {
 	sync.RWMutex
 	fetch SnapshotFetcher
 }
 
-// SetSnapshotFetcher enables preparation by pull for workers that are not
-// members of QueryCoord's legacy file-resource push distribution.
+// SetSnapshotFetcher must be called after InitManager. It enables preparation
+// by pull for workers outside QueryCoord's legacy file-resource push distribution.
 func SetSnapshotFetcher(fetch SnapshotFetcher) {
 	snapshotFetcher.Lock()
 	snapshotFetcher.fetch = fetch
@@ -37,9 +41,16 @@ func Prepare(ctx context.Context) error {
 	// Background runner initialization also needs a bounded coordinator call.
 	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	resources, version, err := fetch(fetchCtx)
+	knownVersion := GlobalFileManager.GetVersion()
+	resources, version, err := fetch(fetchCtx, knownVersion)
 	if err != nil {
 		return err
 	}
+	if version <= knownVersion {
+		return nil
+	}
+	// Never infer "unchanged" from an empty list: a newer empty snapshot clears
+	// the inventory. Sync rechecks the version under its lock in case another
+	// pull or the legacy push path has advanced it while this RPC was in flight.
 	return Sync(ctx, version, resources)
 }

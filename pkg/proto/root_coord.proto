@@ -408,10 +408,19 @@ message GetRLSMetadataResponse {
   repeated RLSPrincipalInfo principals = 6;
 }
 
-message GetFileResourceSnapshotRequest {}
+message GetFileResourceSnapshotRequest {
+  // Last snapshot successfully applied locally, not merely fetched. Zero is
+  // the initial empty inventory version.
+  uint64 known_version = 1;
+}
 
 message FileResourceSnapshot {
   common.Status status = 1;
+  // Current inventory version, read atomically with resources. On success,
+  // equality with known_version means unchanged and resources is omitted.
   uint64 version = 2;
+  // Complete inventory when version differs from known_version, never a delta.
+  // An empty inventory at a newer version removes all local resources. Clients
+  // must ignore versions older than their locally applied version.
   repeated internal.FileResourceInfo resources = 3;
 }

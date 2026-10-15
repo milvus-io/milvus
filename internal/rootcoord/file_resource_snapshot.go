@@ -12,5 +12,8 @@ func (c *Core) GetFileResourceSnapshot(ctx context.Context, req *rootcoordpb.Get
 		return &rootcoordpb.FileResourceSnapshot{Status: merr.Status(err)}, nil
 	}
 	resources, version := c.meta.ListFileResource(ctx)
+	if version == req.GetKnownVersion() {
+		return &rootcoordpb.FileResourceSnapshot{Status: merr.Success(), Version: version}, nil
+	}
 	return &rootcoordpb.FileResourceSnapshot{Status: merr.Success(), Version: version, Resources: resources}, nil
 }
