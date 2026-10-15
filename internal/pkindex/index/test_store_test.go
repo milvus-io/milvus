@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package snapshottest_test
+package index
 
 import (
 	"context"
@@ -27,19 +27,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot/snapshottest"
 )
 
-var _ snapshot.TableStore = (*snapshottest.Store)(nil)
+var _ TableStore = (*FakeStore)(nil)
 
-func TestStoreRoundTrip(t *testing.T) {
+func TestFakeStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.sst")
 	require.NoError(t, os.WriteFile(src, []byte("table"), 0o600))
 
-	s := snapshottest.NewStore()
+	s := NewFakeStore()
 	require.NoError(t, s.UploadFile(ctx, "b", src))
 	require.NoError(t, s.UploadFile(ctx, "a", src))
 	assert.Equal(t, []string{"a", "b"}, s.Keys())
@@ -56,21 +54,21 @@ func TestStoreRoundTrip(t *testing.T) {
 	assert.Len(t, entries, 2)
 }
 
-func TestStoreMissingKey(t *testing.T) {
+func TestFakeStoreMissingKey(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "dst.sst")
-	err := snapshottest.NewStore().DownloadFile(context.Background(), "missing", dst)
+	err := NewFakeStore().DownloadFile(context.Background(), "missing", dst)
 	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 	assert.NoFileExists(t, dst)
 }
 
-func TestStoreInjectedFailures(t *testing.T) {
+func TestFakeStoreInjectedFailures(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.sst")
 	require.NoError(t, os.WriteFile(src, []byte("table"), 0o600))
 	dst := filepath.Join(dir, "dst.sst")
 
-	s := snapshottest.NewStore()
+	s := NewFakeStore()
 	s.FailUploads(1)
 	assert.True(t, errors.Is(s.UploadFile(ctx, "a", src), pkindex.ErrIO))
 	assert.Equal(t, 0, s.Len())

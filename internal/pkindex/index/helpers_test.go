@@ -32,8 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/objpath"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot/snapshottest"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -61,9 +59,9 @@ type fakeClient struct {
 	mu sync.Mutex
 	// claimedTerm is the claimed term of the pchannel, 0 before a claim.
 	claimedTerm int64
-	manifests   map[string]*snapshot.FakeManifest
+	manifests   map[string]*FakeManifest
 	// history keeps every manifest version, by vchannel.
-	history map[string][]*snapshot.FakeManifest
+	history map[string][]*FakeManifest
 
 	claimErrs  []error
 	claimBlock chan struct{}
@@ -74,7 +72,7 @@ type fakeClient struct {
 	// itemErrs are the per-item errors of the lookups, by vchannel.
 	itemErrs map[string][]error
 	// lookups are the refs of each GetRecoveryManifests call, in order.
-	lookups [][]snapshot.VChannelRef
+	lookups [][]VChannelRef
 
 	commitErrs []error
 	loseNext   bool
@@ -83,15 +81,20 @@ type fakeClient struct {
 	// commitBlock blocks CommitFlush until it is closed, if it is not nil.
 	commitBlock chan struct{}
 
-	requests []snapshot.FlushArgs
+	requests []FlushArgs
+	// applied records whether each flush that the fake manifest service
+	// accepted changed the manifest.
+	applied []bool
+	// rewrite changes the returned manifest, if it is not nil.
+	rewrite func(m ManifestView) ManifestView
 	// applyErrs are the errors of the manifest edits, such as a duplicate table.
 	applyErrs []error
 }
 
 func newFakeClient() *fakeClient {
 	return &fakeClient{
-		manifests: make(map[string]*snapshot.FakeManifest),
-		history:   make(map[string][]*snapshot.FakeManifest),
+		manifests: make(map[string]*FakeManifest),
+		history:   make(map[string][]*FakeManifest),
 	}
 }
 
@@ -114,7 +117,7 @@ func (c *fakeClient) ClaimPChannel(ctx context.Context, pchannel string, term in
 		c.claimErrs = c.claimErrs[1:]
 		return err
 	}
-	next, err := snapshot.FakeClaimPChannel(pchannel, c.claimedTerm, term)
+	next, err := FakeClaimPChannel(pchannel, c.claimedTerm, term)
 	if err != nil {
 		return err
 	}
@@ -122,9 +125,9 @@ func (c *fakeClient) ClaimPChannel(ctx context.Context, pchannel string, term in
 	return nil
 }
 
-func (c *fakeClient) GetRecoveryManifests(ctx context.Context, refs []snapshot.VChannelRef) ([]snapshot.RecoveryManifest, error) {
+func (c *fakeClient) GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error) {
 	c.mu.Lock()
-	c.lookups = append(c.lookups, append([]snapshot.VChannelRef(nil), refs...))
+	c.lookups = append(c.lookups, append([]VChannelRef(nil), refs...))
 	block := c.lookupBlock
 	c.mu.Unlock()
 	if block != nil {
@@ -141,24 +144,24 @@ func (c *fakeClient) GetRecoveryManifests(ctx context.Context, refs []snapshot.V
 		c.lookupErrs = c.lookupErrs[1:]
 		return nil, err
 	}
-	out := make([]snapshot.RecoveryManifest, 0, len(refs))
+	out := make([]RecoveryManifest, 0, len(refs))
 	for _, ref := range refs {
 		if errs := c.itemErrs[ref.VChannel]; len(errs) > 0 {
 			c.itemErrs[ref.VChannel] = errs[1:]
-			out = append(out, snapshot.RecoveryManifest{Err: errs[0]})
+			out = append(out, RecoveryManifest{Err: errs[0]})
 			continue
 		}
-		out = append(out, snapshot.FakeRecoveryManifest(c.manifests[ref.VChannel]))
+		out = append(out, FakeRecoveryManifest(c.manifests[ref.VChannel]))
 	}
 	return out, nil
 }
 
 // seed gives vchannel a manifest with view, as if another owner committed it.
-func (c *fakeClient) seed(vchannel string, view snapshot.ManifestView) {
+func (c *fakeClient) seed(vchannel string, view ManifestView) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	view.SSTBasePath = testBasePath(vchannel)
-	c.store(vchannel, &snapshot.FakeManifest{View: view, LastFlushTerm: 1, PKDataType: schemapb.DataType_Int64}, true)
+	c.store(vchannel, &FakeManifest{View: view, LastFlushTerm: 1, PKDataType: schemapb.DataType_Int64}, true)
 }
 
 // claimCount returns the number of ClaimPChannel calls.
@@ -169,21 +172,21 @@ func (c *fakeClient) claimCount() int {
 }
 
 // lookupList returns the refs of each GetRecoveryManifests call.
-func (c *fakeClient) lookupList() [][]snapshot.VChannelRef {
+func (c *fakeClient) lookupList() [][]VChannelRef {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([][]snapshot.VChannelRef(nil), c.lookups...)
+	return append([][]VChannelRef(nil), c.lookups...)
 }
 
-func (c *fakeClient) store(vchannel string, m *snapshot.FakeManifest, changed bool) {
+func (c *fakeClient) store(vchannel string, m *FakeManifest, changed bool) {
 	c.manifests[vchannel] = m
 	if changed {
 		c.history[vchannel] = append(c.history[vchannel], m)
 	}
 }
 
-func (c *fakeClient) CommitFlush(ctx context.Context, args snapshot.FlushArgs) (snapshot.ManifestView, error) {
-	args.AddTables = append([]snapshot.TableRef(nil), args.AddTables...)
+func (c *fakeClient) CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error) {
+	args.AddTables = append([]TableRef(nil), args.AddTables...)
 	c.mu.Lock()
 	c.requests = append(c.requests, args)
 	entered, block := c.commitEntered, c.commitBlock
@@ -200,35 +203,45 @@ func (c *fakeClient) CommitFlush(ctx context.Context, args snapshot.FlushArgs) (
 	if len(c.commitErrs) > 0 {
 		err := c.commitErrs[0]
 		c.commitErrs = c.commitErrs[1:]
-		return snapshot.ManifestView{}, err
+		return ManifestView{}, err
 	}
-	next, changed, err := snapshot.FakeFlush(c.manifests[args.VChannel], c.claimedTerm, args, testBasePath(args.VChannel))
+	next, changed, err := FakeFlush(c.manifests[args.VChannel], c.claimedTerm, args, testBasePath(args.VChannel))
 	if err != nil {
 		c.applyErrs = append(c.applyErrs, err)
-		return snapshot.ManifestView{}, err
+		return ManifestView{}, err
 	}
 	c.store(args.VChannel, next, changed)
+	c.applied = append(c.applied, changed)
 	if c.loseNext {
 		c.loseNext = false
-		return snapshot.ManifestView{}, errors.Mark(errors.New("response lost"), pkindex.ErrUnavailable)
+		return ManifestView{}, errors.Mark(errors.New("response lost"), pkindex.ErrUnavailable)
+	}
+	if c.rewrite != nil {
+		return c.rewrite(next.View), nil
 	}
 	return next.View, nil
 }
 
+func (c *fakeClient) appliedList() []bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]bool(nil), c.applied...)
+}
+
 // manifest returns the current manifest of vchannel, a zero value when it
 // does not exist.
-func (c *fakeClient) manifest(vchannel string) snapshot.ManifestView {
+func (c *fakeClient) manifest(vchannel string) ManifestView {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if m := c.manifests[vchannel]; m != nil {
 		return m.View
 	}
-	return snapshot.ManifestView{}
+	return ManifestView{}
 }
 
 // version returns version v of the manifest of vchannel, nil when it does
 // not exist.
-func (c *fakeClient) version(vchannel string, v int64) *snapshot.ManifestView {
+func (c *fakeClient) version(vchannel string, v int64) *ManifestView {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, m := range c.history[vchannel] {
@@ -240,10 +253,10 @@ func (c *fakeClient) version(vchannel string, v int64) *snapshot.ManifestView {
 	return nil
 }
 
-func (c *fakeClient) requestList() []snapshot.FlushArgs {
+func (c *fakeClient) requestList() []FlushArgs {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]snapshot.FlushArgs(nil), c.requests...)
+	return append([]FlushArgs(nil), c.requests...)
 }
 
 func (c *fakeClient) applyErrList() []error {
@@ -260,7 +273,7 @@ func (c *fakeClient) set(f func(c *fakeClient)) {
 
 // countingStore counts uploads and downloads, and can report every object as missing.
 type countingStore struct {
-	*snapshottest.Store
+	*FakeStore
 	downloads atomic.Int64
 	uploads   atomic.Int64
 	missing   atomic.Bool
@@ -268,7 +281,7 @@ type countingStore struct {
 
 func (s *countingStore) UploadFile(ctx context.Context, key, path string) error {
 	s.uploads.Add(1)
-	return s.Store.UploadFile(ctx, key, path)
+	return s.FakeStore.UploadFile(ctx, key, path)
 }
 
 func (s *countingStore) DownloadFile(ctx context.Context, key, path string) error {
@@ -276,7 +289,7 @@ func (s *countingStore) DownloadFile(ctx context.Context, key, path string) erro
 	if s.missing.Load() {
 		return errors.Mark(errors.Newf("object %s is missing", key), pkindex.ErrCorrupted)
 	}
-	return s.Store.DownloadFile(ctx, key, path)
+	return s.FakeStore.DownloadFile(ctx, key, path)
 }
 
 // syncScheduler runs a task inside Submit.
@@ -360,7 +373,7 @@ func newTestEnv(t *testing.T, sched nodescheduler.Scheduler) *testEnv {
 	env := &testEnv{
 		t:      t,
 		root:   t.TempDir(),
-		store:  &countingStore{Store: snapshottest.NewStore()},
+		store:  &countingStore{FakeStore: NewFakeStore()},
 		client: newFakeClient(),
 	}
 	p := defaultTestParams()
@@ -492,7 +505,7 @@ func segmentOf(t *testing.T, idx *Index, pk int64) int64 {
 	return e.SegmentID
 }
 
-func sstIDs(m snapshot.ManifestView) []int64 {
+func sstIDs(m ManifestView) []int64 {
 	ids := make([]int64, 0, len(m.Tables))
 	for _, s := range m.Tables {
 		ids = append(ids, int64(s.ID))

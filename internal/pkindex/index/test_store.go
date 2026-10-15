@@ -14,11 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package snapshottest provides an in-memory snapshot.TableStore for tests.
-//
-// It does not import package snapshot, so the internal tests of snapshot can
-// import it without an import cycle.
-package snapshottest
+//go:build test
+
+package index
 
 import (
 	"context"
@@ -32,29 +30,29 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex"
 )
 
-// errInjected is the cause of an injected failure.
-var errInjected = errors.New("injected failure")
+// errFakeInjected is the cause of an injected failure of a FakeStore.
+var errFakeInjected = errors.New("injected failure")
 
-// Store keeps objects in memory. It is safe for concurrent use.
-type Store struct {
+// FakeStore is an in-memory TableStore for tests. It is safe for concurrent use.
+type FakeStore struct {
 	mu            sync.Mutex
 	objects       map[string][]byte
 	uploadFails   int
 	downloadFails int
 }
 
-// NewStore returns an empty Store.
-func NewStore() *Store {
-	return &Store{objects: make(map[string][]byte)}
+// NewFakeStore returns an empty FakeStore.
+func NewFakeStore() *FakeStore {
+	return &FakeStore{objects: make(map[string][]byte)}
 }
 
 // UploadFile reads the local file at path and stores its bytes under key.
-func (s *Store) UploadFile(ctx context.Context, key, path string) error {
+func (s *FakeStore) UploadFile(ctx context.Context, key, path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.uploadFails > 0 {
 		s.uploadFails--
-		return pkindex.MarkIO(errInjected, "upload %s", key)
+		return pkindex.MarkIO(errFakeInjected, "upload %s", key)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -66,12 +64,12 @@ func (s *Store) UploadFile(ctx context.Context, key, path string) error {
 
 // DownloadFile writes the bytes under key to path through a temporary file
 // and a rename. A missing key returns an error marked pkindex.ErrCorrupted.
-func (s *Store) DownloadFile(ctx context.Context, key, path string) error {
+func (s *FakeStore) DownloadFile(ctx context.Context, key, path string) error {
 	s.mu.Lock()
 	if s.downloadFails > 0 {
 		s.downloadFails--
 		s.mu.Unlock()
-		return pkindex.MarkIO(errInjected, "download %s", key)
+		return pkindex.MarkIO(errFakeInjected, "download %s", key)
 	}
 	data, ok := s.objects[key]
 	s.mu.Unlock()
@@ -99,7 +97,7 @@ func (s *Store) DownloadFile(ctx context.Context, key, path string) error {
 
 // FailUploads makes the next n UploadFile calls return an error marked
 // pkindex.ErrIO.
-func (s *Store) FailUploads(n int) {
+func (s *FakeStore) FailUploads(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.uploadFails = n
@@ -107,14 +105,14 @@ func (s *Store) FailUploads(n int) {
 
 // FailDownloads makes the next n DownloadFile calls return an error marked
 // pkindex.ErrIO.
-func (s *Store) FailDownloads(n int) {
+func (s *FakeStore) FailDownloads(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.downloadFails = n
 }
 
 // Keys returns the stored keys in sorted order.
-func (s *Store) Keys() []string {
+func (s *FakeStore) Keys() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	keys := make([]string, 0, len(s.objects))
@@ -126,7 +124,7 @@ func (s *Store) Keys() []string {
 }
 
 // Len returns the number of stored objects.
-func (s *Store) Len() int {
+func (s *FakeStore) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.objects)

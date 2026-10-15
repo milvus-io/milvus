@@ -43,12 +43,12 @@ func TestLateApplyHoldsTheWatermark(t *testing.T) {
 	intent, err := idx.Decide(ctx, insertRequest(idx, 1))
 	require.NoError(t, err)
 	ch.Tick(10)
-	assert.EqualValues(t, 0, idx.LastAppliedTimeTick(), "the writer is still in flight")
+	assert.EqualValues(t, 0, idx.ch.wm.lastApplied(), "the writer is still in flight")
 	intent.Apply(ctx, snpkindex.Applied{SegmentID: 5})
-	assert.EqualValues(t, 10, idx.LastAppliedTimeTick())
+	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
 	assert.Panics(t, func() { intent.Apply(ctx, snpkindex.Applied{SegmentID: 5}) })
 	assert.Panics(t, func() { intent.Discard(ctx, nil) })
-	assert.EqualValues(t, 10, idx.LastAppliedTimeTick())
+	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
 }
 
 func TestDiscardEndsTheWriter(t *testing.T) {
@@ -63,7 +63,7 @@ func TestDiscardEndsTheWriter(t *testing.T) {
 	assert.GreaterOrEqual(t, intent.LockWait(), time.Duration(0))
 	ch.Tick(10)
 	intent.Discard(ctx, errors.New("append failed"))
-	assert.EqualValues(t, 10, idx.LastAppliedTimeTick())
+	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
 	assert.False(t, idx.dirty(), "a discarded write does not touch the engine")
 	assert.Panics(t, func() { intent.Discard(ctx, nil) })
 }
@@ -79,7 +79,7 @@ func TestDecideErrorEndsTheWriter(t *testing.T) {
 	_, err := idx.Decide(ctx, insertRequest(idx, 1))
 	require.Error(t, err)
 	ch.Tick(10)
-	assert.EqualValues(t, 10, idx.LastAppliedTimeTick())
+	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
 }
 
 func TestCompanionDeleteDecision(t *testing.T) {
@@ -162,8 +162,8 @@ func (c *Channel) lastAckedRaw() uint64 {
 func bruteLastAcked(c *Channel) uint64 {
 	v := c.wm.lastApplied()
 	for _, idx := range c.list() {
-		if idx.dirty() && idx.LastCommittedTimeTick() < v {
-			v = idx.LastCommittedTimeTick()
+		if idx.dirty() && idx.lastCommittedTimeTick() < v {
+			v = idx.lastCommittedTimeTick()
 		}
 	}
 	return v

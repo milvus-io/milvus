@@ -14,8 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package indextest builds an index Manager over a real engine for tests.
-package indextest
+//go:build test
+
+package index
 
 import (
 	"context"
@@ -28,41 +29,38 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/index"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot/snapshottest"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-// Committer applies claims the way the manifest service does. No vchannel
+// FakeCommitter applies claims the way the manifest service does. No vchannel
 // has a manifest. A handover is not tested with it, so CommitFlush always
 // fails.
-type Committer struct {
+type FakeCommitter struct {
 	mu       sync.Mutex
 	claimed  map[string]int64
 	claimErr error
 }
 
-// NewCommitter creates a Committer with no claims.
-func NewCommitter() *Committer {
-	return &Committer{claimed: make(map[string]int64)}
+// NewFakeCommitter creates a FakeCommitter with no claims.
+func NewFakeCommitter() *FakeCommitter {
+	return &FakeCommitter{claimed: make(map[string]int64)}
 }
 
 // SetClaimErr makes every later claim fail with err.
-func (c *Committer) SetClaimErr(err error) {
+func (c *FakeCommitter) SetClaimErr(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.claimErr = err
 }
 
-// ClaimPChannel implements snapshot.Committer.
-func (c *Committer) ClaimPChannel(ctx context.Context, pchannel string, term int64) error {
+// ClaimPChannel implements Committer.
+func (c *FakeCommitter) ClaimPChannel(ctx context.Context, pchannel string, term int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.claimErr != nil {
 		return c.claimErr
 	}
-	next, err := snapshot.FakeClaimPChannel(pchannel, c.claimed[pchannel], term)
+	next, err := FakeClaimPChannel(pchannel, c.claimed[pchannel], term)
 	if err != nil {
 		return err
 	}
@@ -70,24 +68,24 @@ func (c *Committer) ClaimPChannel(ctx context.Context, pchannel string, term int
 	return nil
 }
 
-// GetRecoveryManifests implements snapshot.Committer. No vchannel has a
+// GetRecoveryManifests implements Committer. No vchannel has a
 // manifest.
-func (c *Committer) GetRecoveryManifests(ctx context.Context, refs []snapshot.VChannelRef) ([]snapshot.RecoveryManifest, error) {
-	return make([]snapshot.RecoveryManifest, len(refs)), nil
+func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error) {
+	return make([]RecoveryManifest, len(refs)), nil
 }
 
-var errNoHandover = errors.New("a handover is not tested here")
+var errFakeNoHandover = errors.New("a handover is not tested here")
 
-// CommitFlush implements snapshot.Committer. It always fails.
-func (c *Committer) CommitFlush(ctx context.Context, args snapshot.FlushArgs) (snapshot.ManifestView, error) {
-	return snapshot.ManifestView{}, errNoHandover
+// CommitFlush implements Committer. It always fails.
+func (c *FakeCommitter) CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error) {
+	return ManifestView{}, errFakeNoHandover
 }
 
-// NeverScheduler accepts every task and never runs it.
-type NeverScheduler struct{}
+// neverScheduler accepts every task and never runs it.
+type neverScheduler struct{}
 
 // Submit returns a handle whose task never runs.
-func (NeverScheduler) Submit(nodescheduler.Task) nodescheduler.TaskHandle { return neverHandle{} }
+func (neverScheduler) Submit(nodescheduler.Task) nodescheduler.TaskHandle { return neverHandle{} }
 
 type neverHandle struct{}
 
@@ -98,22 +96,22 @@ func (neverHandle) Wait(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// Env is an index Manager and the Committer it uses.
-type Env struct {
-	Manager   *index.Manager
-	Committer *Committer
+// FakeEnv is an index Manager over a real engine and the FakeCommitter it uses.
+type FakeEnv struct {
+	Manager   *Manager
+	Committer *FakeCommitter
 }
 
-// NewEnv creates an index Manager over a real engine with root as the local
+// NewFakeEnv creates an index Manager over a real engine with root as the local
 // root directory. No size or tail ever starts a handover. The test cleanup
 // closes the Manager and releases the engine caches.
-func NewEnv(t *testing.T, root string) *Env {
-	env := &Env{Committer: NewCommitter()}
+func NewFakeEnv(t *testing.T, root string) *FakeEnv {
+	env := &FakeEnv{Committer: NewFakeCommitter()}
 	shared := engine.NewSharedResources(engine.SharedConfig{CacheBytes: 8 << 20})
 	t.Cleanup(shared.Release)
 	var nextID atomic.Int64
 	nextID.Store(1000)
-	params := index.Params{
+	params := Params{
 		LockStripes:   16,
 		ActiveBytes:   math.MaxUint64,
 		TailBytes:     math.MaxUint64,
@@ -122,21 +120,21 @@ func NewEnv(t *testing.T, root string) *Env {
 		MaxBackoff:    10 * time.Millisecond,
 		ReuploadAfter: time.Hour,
 	}
-	env.Manager = index.NewManager(index.ManagerConfig{
+	env.Manager = NewManager(ManagerConfig{
 		Root:            root,
 		Shared:          shared,
 		AllocID:         func(context.Context) (int64, error) { return nextID.Add(1), nil },
-		Store:           snapshottest.NewStore(),
+		Store:           NewFakeStore(),
 		StorageRootPath: "root",
 		Committer:       env.Committer,
-		Sched:           NeverScheduler{},
-		Params:          func() index.Params { return params },
+		Sched:           neverScheduler{},
+		Params:          func() Params { return params },
 	})
 	t.Cleanup(env.Manager.Close)
 	return env
 }
 
-// NewManager creates the index Manager of NewEnv.
-func NewManager(t *testing.T, root string) *index.Manager {
-	return NewEnv(t, root).Manager
+// NewManagerForTest creates the index Manager of NewFakeEnv.
+func NewManagerForTest(t *testing.T, root string) *Manager {
+	return NewFakeEnv(t, root).Manager
 }

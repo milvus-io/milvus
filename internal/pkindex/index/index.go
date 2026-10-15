@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/objpath"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -43,8 +42,6 @@ import (
 // warnFailures is the number of failures in a row after which a failed
 // handover logs at warn level.
 const warnFailures = 5
-
-var _ snapshot.Target = (*Index)(nil)
 
 // Index is the primary key index of one vchannel. It owns the engine, the
 // decider on top of it, and the handover state of the vchannel.
@@ -88,7 +85,7 @@ type Index struct {
 	// TODO: recovery replays the WAL into the Index and then clears this.
 	notFresh atomic.Bool
 	// pending is the prepared handover that is not committed yet.
-	pending atomic.Pointer[snapshot.Pending]
+	pending atomic.Pointer[pendingHandover]
 	// backoff, failures and handle are used only by the driver step while
 	// running is false, and only by the handover task while running is true.
 	// A success makes a new backoff with the current params, so they are
@@ -341,54 +338,28 @@ func (i *Intent) release() {
 	i.idx.lifetime.Done()
 }
 
-// CollectionID implements snapshot.Target.
-func (idx *Index) CollectionID() int64 { return idx.collectionID }
-
-// VChannel implements snapshot.Target.
-func (idx *Index) VChannel() string { return idx.vchannel }
-
-// PChannelTerm implements snapshot.Target.
-func (idx *Index) PChannelTerm() int64 { return idx.ch.info.Term }
-
-// PKDataType implements snapshot.Target.
-func (idx *Index) PKDataType() schemapb.DataType { return idx.pkDataType }
-
-// InstalledVersion implements snapshot.Target.
-func (idx *Index) InstalledVersion() int64 {
+// currentInstalledVersion returns the version of the installed manifest, 0
+// when no manifest is installed.
+func (idx *Index) currentInstalledVersion() int64 {
 	idx.installMu.Lock()
 	defer idx.installMu.Unlock()
 	return idx.installedVersion
 }
 
-// SSTBasePath implements snapshot.Target.
-func (idx *Index) SSTBasePath() string { return idx.sstBasePath }
+// lastCommittedTimeTick returns the checkpoint of the last successful
+// handover: all pkindex changes of messages with a time tick <= the returned
+// value are committed.
+func (idx *Index) lastCommittedTimeTick() uint64 { return idx.lastCommitted.Load() }
 
-// CommittedDir implements snapshot.Target.
-func (idx *Index) CommittedDir() string { return idx.committedDir }
-
-// LastAppliedTimeTick implements snapshot.Target. All pkindex changes of
-// messages with a time tick <= the returned value are written to the engine.
-// The value is shared by all vchannels of the pchannel.
-func (idx *Index) LastAppliedTimeTick() uint64 { return idx.ch.wm.lastApplied() }
-
-// LastCommittedTimeTick implements snapshot.Target. All pkindex changes of
-// messages with a time tick <= the returned value are committed.
-func (idx *Index) LastCommittedTimeTick() uint64 { return idx.lastCommitted.Load() }
-
-// SetLastCommittedTimeTick implements snapshot.Target.
-func (idx *Index) SetLastCommittedTimeTick(tt uint64) { idx.lastCommitted.Store(tt) }
-
-// Lifecycle implements snapshot.Target.
-func (idx *Index) Lifecycle() engine.Lifecycle { return idx.eng }
-
-// InstallIfNewer implements snapshot.Target. It installs the tables of m when
-// m is newer than the installed manifest, and retires gens in the same step.
+// installIfNewer installs the tables of m when m is newer than the installed
+// manifest, and retires gens in the same step. local maps the tables of this
+// handover to their local files.
 //
 // It finds the local file of every table of m in this order: local, the
 // tables that the Index installed before, the committed directory (the links
 // survive a restart), and last a download from the store. It downloads
 // outside installMu and checks the version again under it.
-func (idx *Index) InstallIfNewer(ctx context.Context, m snapshot.ManifestView, local map[sst.ID]string, gens ...engine.Generation) error {
+func (idx *Index) installIfNewer(ctx context.Context, m ManifestView, local map[sst.ID]string, gens ...engine.Generation) error {
 	idx.installMu.Lock()
 	newer := m.Version > idx.installedVersion
 	known := make(map[sst.ID]string, len(m.Tables))
@@ -432,7 +403,7 @@ func (idx *Index) InstallIfNewer(ctx context.Context, m snapshot.ManifestView, l
 }
 
 // retireCovered drops gens when a newer manifest than m is installed.
-func (idx *Index) retireCovered(ctx context.Context, m snapshot.ManifestView, gens []engine.Generation) error {
+func (idx *Index) retireCovered(ctx context.Context, m ManifestView, gens []engine.Generation) error {
 	if len(gens) == 0 {
 		return nil
 	}
@@ -446,7 +417,7 @@ func (idx *Index) retireCovered(ctx context.Context, m snapshot.ManifestView, ge
 // so the installed tables hold the data of gens. Without the drop, gens stay
 // frozen, and the next handover sends their committed tables again. The
 // caller holds installMu.
-func (idx *Index) retireCoveredLocked(ctx context.Context, m snapshot.ManifestView, gens []engine.Generation) error {
+func (idx *Index) retireCoveredLocked(ctx context.Context, m ManifestView, gens []engine.Generation) error {
 	for _, g := range gens {
 		if err := idx.eng.DropFrozen(ctx, g); err != nil {
 			idx.logger.Warn(ctx, "failed to drop a frozen generation that a newer manifest covers",
@@ -465,7 +436,7 @@ func (idx *Index) resolveLocal(ctx context.Context, basePath string, id sst.ID, 
 	if p, ok := known[id]; ok {
 		return p, nil
 	}
-	path := snapshot.CommittedPath(idx.committedDir, id)
+	path := committedPath(idx.committedDir, id)
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	} else if !os.IsNotExist(err) {
@@ -619,7 +590,7 @@ func (idx *Index) handover(ctx context.Context) (bool, error) {
 		// which only causes one extra handover.
 		idx.dirtyFlag.Store(false)
 		var err error
-		p, err = snapshot.Prepare(ctx, idx)
+		p, err = idx.prepare(ctx)
 		if err != nil || p == nil {
 			// the writes may still be only in the active generation
 			idx.markDirty()
@@ -629,8 +600,8 @@ func (idx *Index) handover(ctx context.Context) (bool, error) {
 		// it, and the retry does not rotate again.
 		idx.pending.Store(p)
 	}
-	err := snapshot.Commit(ctx, idx, idx.ch.m.cfg.Store, idx.ch.m.cfg.Committer, p, idx.ch.m.cfg.Params().ReuploadAfter)
-	if p.Request == nil {
+	err := idx.commit(ctx, p)
+	if p.request == nil {
 		// a failed DropFrozen must not be retried, the next engine open cleans up
 		idx.pending.Store(nil)
 		if err != nil {
@@ -644,7 +615,7 @@ func (idx *Index) handover(ctx context.Context) (bool, error) {
 	}
 	idx.pending.Store(nil)
 	idx.logger.Debug(ctx, "primary key index handover committed",
-		mlog.Uint64("checkpointTimeTick", p.Covered), mlog.Int("ssts", len(p.Request.AddTables)))
+		mlog.Uint64("checkpointTimeTick", p.covered), mlog.Int("ssts", len(p.request.AddTables)))
 	return true, nil
 }
 
@@ -652,5 +623,5 @@ func (idx *Index) handover(ctx context.Context) (bool, error) {
 // newer owner, the manifest service rejected a request that a retry cannot
 // fix, or stored data is corrupted.
 func isFatal(err error) bool {
-	return errors.Is(err, snapshot.ErrFenced) || errors.Is(err, snapshot.ErrRejected) || errors.Is(err, pkindex.ErrCorrupted)
+	return errors.Is(err, ErrFenced) || errors.Is(err, ErrRejected) || errors.Is(err, pkindex.ErrCorrupted)
 }

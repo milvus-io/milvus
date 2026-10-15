@@ -34,8 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/index"
-	"github.com/milvus-io/milvus/internal/pkindex/index/indextest"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -73,7 +71,7 @@ func TestMain(m *testing.M) {
 // directory. No size or tail ever starts a handover.
 type testIndexEnv struct {
 	mgr       *index.Manager
-	committer *indextest.Committer
+	committer *index.FakeCommitter
 	root      string
 
 	mu     sync.Mutex
@@ -86,7 +84,7 @@ func newTestIndexEnv(t *testing.T) *testIndexEnv {
 
 // newTestIndexEnvAt creates the env with root as the local root directory.
 func newTestIndexEnvAt(t *testing.T, root string) *testIndexEnv {
-	env := indextest.NewEnv(t, root)
+	env := index.NewFakeEnv(t, root)
 	return &testIndexEnv{mgr: env.Manager, committer: env.Committer, root: root}
 }
 
@@ -573,7 +571,7 @@ func TestBuildPanicsWhenAnExistingCollectionHasAnUnsupportedPrimaryKey(t *testin
 // unavailable through param.OnFatal.
 func TestBuildPassesOnFatalToTheIndex(t *testing.T) {
 	env := newTestIndexEnv(t)
-	env.committer.SetClaimErr(errors.Wrap(snapshot.ErrFenced, testVChannel))
+	env.committer.SetClaimErr(errors.Wrap(index.ErrFenced, testVChannel))
 	env.useResource(t)
 
 	fatal := make(chan error, 1)
@@ -593,7 +591,7 @@ func TestBuildPassesOnFatalToTheIndex(t *testing.T) {
 
 	select {
 	case err := <-fatal:
-		require.ErrorIs(t, err, snapshot.ErrFenced)
+		require.ErrorIs(t, err, index.ErrFenced)
 	case <-time.After(10 * time.Second):
 		t.Fatal("OnFatal was not called after a fenced claim")
 	}
@@ -1157,7 +1155,7 @@ func TestTimeTickWithoutSessionsIsPassthrough(t *testing.T) {
 func TestHeldInsertKeepsTheWatermark(t *testing.T) {
 	i, _ := newTestInterceptor(t, nil)
 	idx := i.registry.get(testVChannel).idx
-	require.Equal(t, uint64(0), idx.LastAppliedTimeTick())
+	require.Equal(t, uint64(0), idx.LastAppliedTimeTickForTest())
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -1176,11 +1174,11 @@ func TestHeldInsertKeepsTheWatermark(t *testing.T) {
 
 	_, err := i.DoAppend(newTestAppendContext(), newTimeTick(200), newFakeAppender().append)
 	require.NoError(t, err)
-	require.Equal(t, uint64(0), idx.LastAppliedTimeTick(), "a writer in flight holds the watermark back")
+	require.Equal(t, uint64(0), idx.LastAppliedTimeTickForTest(), "a writer in flight holds the watermark back")
 
 	close(release)
 	require.NoError(t, <-done)
-	require.Equal(t, uint64(200), idx.LastAppliedTimeTick(), "the apply releases the watermark")
+	require.Equal(t, uint64(200), idx.LastAppliedTimeTickForTest(), "the apply releases the watermark")
 }
 
 // TestDiscardLeavesNoWriterInFlight checks that every failed append releases
@@ -1210,7 +1208,7 @@ func TestDiscardLeavesNoWriterInFlight(t *testing.T) {
 
 	_, err = i.DoAppend(newTestAppendContext(), newTimeTick(200), newFakeAppender().append)
 	require.NoError(t, err)
-	require.Equal(t, uint64(200), idx.LastAppliedTimeTick())
+	require.Equal(t, uint64(200), idx.LastAppliedTimeTickForTest())
 }
 
 func TestTxnBodyDoesNotMarkTheIndexDirty(t *testing.T) {
@@ -1235,11 +1233,11 @@ func TestFailedTimeTickDoesNotTick(t *testing.T) {
 	f.failAt, f.failErr = 0, errors.New("boom")
 	_, err := i.DoAppend(newTestAppendContext(), newTimeTick(200), f.append)
 	require.Error(t, err)
-	require.Equal(t, uint64(0), idx.LastAppliedTimeTick())
+	require.Equal(t, uint64(0), idx.LastAppliedTimeTickForTest())
 
 	_, err = i.DoAppend(newTestAppendContext(), newTimeTick(300), newFakeAppender().append)
 	require.NoError(t, err)
-	require.Equal(t, uint64(300), idx.LastAppliedTimeTick())
+	require.Equal(t, uint64(300), idx.LastAppliedTimeTickForTest())
 }
 
 // ===== passthrough =====

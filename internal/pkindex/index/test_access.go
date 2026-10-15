@@ -33,3 +33,9 @@ func (idx *Index) EngineForTest() engine.RW {
 func (idx *Index) DirtyForTest() bool {
 	return idx.dirtyFlag.Load()
 }
+
+// LastAppliedTimeTickForTest returns the lastAppliedTimeTick of the pchannel
+// of the Index.
+func (idx *Index) LastAppliedTimeTickForTest() uint64 {
+	return idx.ch.wm.lastApplied()
+}

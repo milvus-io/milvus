@@ -101,7 +101,7 @@ func (c *Channel) trackDirty(idx *Index) {
 	if idx.removed || idx.heapPos >= 0 || !idx.fresh() {
 		return
 	}
-	idx.heapKey = idx.LastCommittedTimeTick()
+	idx.heapKey = idx.lastCommittedTimeTick()
 	heap.Push(&c.acked, idx)
 }
 
@@ -117,7 +117,7 @@ func (c *Channel) refreshAcked(idx *Index) {
 		c.acked.remove(idx)
 		return
 	}
-	idx.heapKey = idx.LastCommittedTimeTick()
+	idx.heapKey = idx.lastCommittedTimeTick()
 	if idx.heapPos >= 0 {
 		heap.Fix(&c.acked, idx.heapPos)
 		return

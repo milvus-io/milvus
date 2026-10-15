@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -88,14 +87,14 @@ type ManagerConfig struct {
 	// AllocID allocates the IDs of new tables.
 	AllocID func(ctx context.Context) (int64, error)
 	// Store moves tables between local disk and object storage.
-	Store snapshot.TableStore
+	Store TableStore
 	// StorageRootPath is the root path of the object storage
 	// (ChunkManager.RootPath()). The SST base path of a vchannel is under it.
 	StorageRootPath string
 	// Committer claims the pchannels and reads and changes the manifests.
 	// When it is nil, a Channel does not claim and no Index hands over. The
 	// indexes still serve the writes.
-	Committer snapshot.Committer
+	Committer Committer
 	// Sched runs the handovers of all pchannels of the node.
 	Sched nodescheduler.Scheduler
 	// Params returns the current params. The index layer calls it on every

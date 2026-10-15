@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -64,7 +63,7 @@ func TestTailTriggerPicksTheOldestCommit(t *testing.T) {
 	insert(t, a, 1, 1)
 	ch.Tick(10)
 	a.submitHandover()
-	require.EqualValues(t, 10, a.LastCommittedTimeTick())
+	require.EqualValues(t, 10, a.lastCommittedTimeTick())
 	insert(t, a, 1, 2)
 	insert(t, b, 1, 1)
 	ch.Tick(20)
@@ -76,7 +75,7 @@ func TestTailTriggerPicksTheOldestCommit(t *testing.T) {
 	assert.Equal(t, []*Index{b}, ch.pickHandovers(farFuture))
 
 	b.submitHandover()
-	require.EqualValues(t, 20, b.LastCommittedTimeTick())
+	require.EqualValues(t, 20, b.lastCommittedTimeTick())
 	insert(t, b, 1, 2)
 	assert.Equal(t, []*Index{a}, ch.pickHandovers(farFuture))
 }
@@ -182,7 +181,7 @@ func TestNoHandoverBeforeTheClaim(t *testing.T) {
 }
 
 // refNames returns the vchannels of refs.
-func refNames(refs []snapshot.VChannelRef) []string {
+func refNames(refs []VChannelRef) []string {
 	out := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		out = append(out, ref.VChannel)
@@ -202,7 +201,7 @@ func TestOneClaimAndOneLookupForManyVChannels(t *testing.T) {
 		idx := ch.Get(v)
 		waitReady(t, idx)
 		assert.True(t, idx.fresh())
-		assert.Equal(t, testBasePath(v), idx.SSTBasePath())
+		assert.Equal(t, testBasePath(v), idx.sstBasePath)
 	}
 	assert.Equal(t, 1, env.client.claimCount())
 	lookups := env.client.lookupList()
@@ -262,7 +261,7 @@ func TestLookupSplitsIntoBatches(t *testing.T) {
 
 func TestLookupRetriesOnlyTheFailedItems(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
-	env.client.seed("v2", snapshot.ManifestView{Version: 3, CheckpointTimeTick: 5})
+	env.client.seed("v2", ManifestView{Version: 3, CheckpointTimeTick: 5})
 	env.client.set(func(c *fakeClient) {
 		c.itemErrs = map[string][]error{"v1": {merr.WrapErrServiceUnavailable("down")}}
 	})
@@ -283,11 +282,11 @@ func TestLookupRetriesOnlyTheFailedItems(t *testing.T) {
 func TestFatalItemErrorIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.client.set(func(c *fakeClient) {
-		c.itemErrs = map[string][]error{"v1": {errors.Wrap(snapshot.ErrRejected, "corrupted pointer")}}
+		c.itemErrs = map[string][]error{"v1": {errors.Wrap(ErrRejected, "corrupted pointer")}}
 	})
 	ch := env.recoveredChannel(0, "v0", "v1")
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, snapshot.ErrRejected))
+	assert.True(t, errors.Is(err, ErrRejected))
 	assert.False(t, ch.Get("v1").readyDone())
 	insert(t, ch.Get("v1"), 1, 1)
 	assert.Empty(t, ch.pickHandovers(farFuture))
@@ -309,11 +308,11 @@ func TestLookupRetriesAfterARetryableError(t *testing.T) {
 func TestRejectedLookupIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.client.set(func(c *fakeClient) {
-		c.lookupErrs = []error{errors.Wrap(snapshot.ErrRejected, "invalid request")}
+		c.lookupErrs = []error{errors.Wrap(ErrRejected, "invalid request")}
 	})
 	ch := env.recoveredChannel(0, "v0")
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, snapshot.ErrRejected))
+	assert.True(t, errors.Is(err, ErrRejected))
 	idx := ch.Get("v0")
 	assert.False(t, idx.readyDone())
 	insert(t, idx, 1, 1)
@@ -332,13 +331,13 @@ func TestClaimRetriesAfterARetryableError(t *testing.T) {
 
 func TestFencedClaimIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
-	env.client.set(func(c *fakeClient) { c.claimErrs = []error{errors.Wrap(snapshot.ErrFenced, "v0")} })
+	env.client.set(func(c *fakeClient) { c.claimErrs = []error{errors.Wrap(ErrFenced, "v0")} })
 	ch := env.channel(0)
 	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
 	err = env.waitFatal()
-	assert.True(t, errors.Is(err, snapshot.ErrFenced))
+	assert.True(t, errors.Is(err, ErrFenced))
 	idx := ch.Get("v0")
 	assert.False(t, idx.readyDone())
 	insert(t, idx, 1, 1)
@@ -349,14 +348,15 @@ func TestFencedCommitStopsTheHandovers(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	env.client.set(func(c *fakeClient) { c.commitErrs = []error{errors.Wrap(snapshot.ErrFenced, "v0")} })
+	env.client.set(func(c *fakeClient) { c.commitErrs = []error{errors.Wrap(ErrFenced, "v0")} })
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
 
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, snapshot.ErrFenced))
+	assert.True(t, errors.Is(err, ErrFenced))
 	assert.True(t, idx.handoverStopped.Load())
+	assert.Len(t, idx.eng.FrozenGenerations(), 1, "the generations stay frozen")
 	// the Index keeps serving writes, but it does not hand over again
 	insert(t, idx, 2, 2)
 	ch.Tick(20)
@@ -401,7 +401,7 @@ func TestMissingObjectIsFatal(t *testing.T) {
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
-	require.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	require.EqualValues(t, 10, idx.lastCommittedTimeTick())
 
 	// the next install needs the first tables, which are gone everywhere
 	dropCommittedFiles(t, idx)
@@ -421,8 +421,8 @@ func TestIsFatal(t *testing.T) {
 		err   error
 		fatal bool
 	}{
-		{"fenced", errors.Wrap(snapshot.ErrFenced, "v0"), true},
-		{"rejected", errors.Wrap(snapshot.ErrRejected, "v0"), true},
+		{"fenced", errors.Wrap(ErrFenced, "v0"), true},
+		{"rejected", errors.Wrap(ErrRejected, "v0"), true},
 		{"corrupted", errors.Mark(errors.New("bad block"), pkindex.ErrCorrupted), true},
 		{"unavailable", errors.Mark(errors.New("connection reset"), pkindex.ErrUnavailable), false},
 		{"io", errors.Mark(errors.New("disk full"), pkindex.ErrIO), false},
@@ -443,15 +443,16 @@ func TestRejectedCommitIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	env.client.set(func(c *fakeClient) { c.commitErrs = []error{errors.Wrap(snapshot.ErrRejected, "duplicate table")} })
+	env.client.set(func(c *fakeClient) { c.commitErrs = []error{errors.Wrap(ErrRejected, "duplicate table")} })
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
 
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, snapshot.ErrRejected))
+	assert.True(t, errors.Is(err, ErrRejected))
 	assert.True(t, idx.handoverStopped.Load())
 	assert.Zero(t, idx.failures, "no retry is scheduled")
+	assert.Len(t, idx.eng.FrozenGenerations(), 1, "the generations stay frozen")
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	assert.Len(t, env.client.requestList(), 1)
 }
@@ -459,14 +460,14 @@ func TestRejectedCommitIsFatal(t *testing.T) {
 func TestRejectedClaimIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.client.set(func(c *fakeClient) {
-		c.claimErrs = []error{errors.Wrap(snapshot.ErrRejected, "schema mismatch")}
+		c.claimErrs = []error{errors.Wrap(ErrRejected, "schema mismatch")}
 	})
 	ch := env.channel(0)
 	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
 	err = env.waitFatal()
-	assert.True(t, errors.Is(err, snapshot.ErrRejected))
+	assert.True(t, errors.Is(err, ErrRejected))
 	idx := ch.Get("v0")
 	assert.False(t, idx.readyDone())
 	insert(t, idx, 1, 1)
@@ -495,7 +496,7 @@ func TestBackoffParamsApplyAfterASuccess(t *testing.T) {
 	})
 	ch.step(farFuture)
 	require.Zero(t, idx.failures)
-	require.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	require.EqualValues(t, 10, idx.lastCommittedTimeTick())
 
 	env.client.set(func(c *fakeClient) { c.commitErrs = []error{merr.WrapErrServiceUnavailable("down")} })
 	insert(t, idx, 2, 2)
@@ -585,7 +586,7 @@ func TestDriverRunsHandovers(t *testing.T) {
 	idx := env.add(ch, "v0")
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
-	require.Eventually(t, func() bool { return idx.LastCommittedTimeTick() == 10 }, waitTimeout, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return idx.lastCommittedTimeTick() == 10 }, waitTimeout, 10*time.Millisecond)
 	ch.Close()
 }
 

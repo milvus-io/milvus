@@ -296,7 +296,7 @@ func (c *Channel) pickHandovers(now time.Time) []*Index {
 			out = append(out, idx)
 			continue
 		}
-		if dirty && (oldest == nil || idx.LastCommittedTimeTick() < oldest.LastCommittedTimeTick()) {
+		if dirty && (oldest == nil || idx.lastCommittedTimeTick() < oldest.lastCommittedTimeTick()) {
 			oldest = idx
 		}
 	}

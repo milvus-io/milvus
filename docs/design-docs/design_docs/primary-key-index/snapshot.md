@@ -3,7 +3,7 @@
 - **Created:** 2026-10-12
 - **Author(s):** @bigsheeper
 - **Status:** Under Review
-- **Component:** StreamingNode, `internal/pkindex/index`, `internal/pkindex/snapshot`
+- **Component:** StreamingNode, `internal/pkindex/index`
 - **Related Issues:** #52305
 - **Related work:** [write path](write-path.md), [core library](core-library.md), [manifest service](manifest.md)
 
@@ -40,20 +40,20 @@ index.Manager            one per streaming node: shared engine caches, config
  └─ index.Channel        one per pchannel: the claim, the manifest lookups,
      │                   the handover driver, lastAppliedTimeTick, LastAcked
      └─ index.Index      one per vchannel: engine, decider, lastCommittedTimeTick
-          └─ handover ── upload ──▶ object storage   (snapshot.TableStore)
-                      ── commit ──▶ manifest service (snapshot.Committer)
+          └─ handover ── upload ──▶ object storage   (index.TableStore)
+                      ── commit ──▶ manifest service (index.Committer)
                       ── install ─▶ engine           (InstallCommitted)
 ```
 
-- `internal/pkindex/snapshot` holds the two handover phases (`Prepare`,
-  `Commit`) and the `TableStore` interface. It
-  does not know the streaming node.
-- `internal/pkindex/index` holds the index layer. `Index` implements
-  `snapshot.Target`.
-- `snapshot.TableStore` has two methods, `UploadFile` and `DownloadFile`. The
+- `internal/pkindex/index` holds the index layer. A handover is a behavior
+  of the `Index`: its two phases, Prepare and Commit, are methods of the
+  `Index`, and the pending request is a field of it. The package also defines
+  the interfaces and types that the handover exchanges with object storage
+  and the manifest service. It does not know the streaming node.
+- `index.TableStore` has two methods, `UploadFile` and `DownloadFile`. The
   handover defines this interface for its own use. It does not use the
   object store interface of the manifest service.
-- `snapshot.Committer` has three methods, `ClaimPChannel`,
+- `index.Committer` has three methods, `ClaimPChannel`,
   `GetRecoveryManifests` and `CommitFlush`. The handover defines it with its
   own types, so the handover code does not
   import the manifest service, its client or its proto. See
@@ -91,8 +91,8 @@ type Committer interface {
 A `Committer` returns an error that matches one of two sentinels of the
 handover when a retry can not help:
 
-- `snapshot.ErrFenced`: a newer term owns the pchannel.
-- `snapshot.ErrRejected`: the manifest service rejected the request for
+- `index.ErrFenced`: a newer term owns the pchannel.
+- `index.ErrRejected`: the manifest service rejected the request for
   good. Examples are a bug of the caller, an invalid request, and a
   corrupted stored manifest.
 
@@ -571,15 +571,15 @@ reach 64 MiB and hand over through trigger 2.
 | Case | Handling |
 |---|---|
 | Retryable upload, download, claim, lookup or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. A claim and a lookup use `retry.Do` and read `handover.maxBackoff` when they start. A handover uses `typeutil.BackoffWithInstant`: it reads `handover.maxBackoff` when the `Index` opens and after a successful handover that follows a failure, and its wait has a jitter of ±50 %. The pending request keeps the same table IDs. |
-| Fenced (`snapshot.ErrFenced`) on the claim, a lookup or a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
+| Fenced (`index.ErrFenced`) on the claim, a lookup or a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
 | Corrupted (`pkerr.ErrCorrupted`) in a handover | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable. The WAL is assigned again and recovers on another node. |
 | Corrupted (`pkerr.ErrCorrupted`) in a lookup on the write path | `Decide` returns the error and calls `OnFatal`, which marks the WAL unavailable. |
-| Rejected claim, lookup item or commit (`snapshot.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, not claimed, an invalid request, a corrupted stored manifest), a returned manifest that does not have the flush in effect, or a manifest with another SST base path | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
+| Rejected claim, lookup item or commit (`index.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, not claimed, an invalid request, a corrupted stored manifest), a returned manifest that does not have the flush in effect, or a manifest with another SST base path | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
 | Missing object on download | `DownloadFile` marks it as corrupted. A manifest lists the table, so a retry can not clear it. |
 | Local disk error when the index of an existing collection opens at WAL open | `OnFatal` marks the WAL unavailable. The streaming node and its other WALs keep running. |
 | Concurrency | At most one handover per vchannel at a time. The node scheduler limits the handovers of the node. |
 
-- `isFatal` checks only `snapshot.ErrFenced`, `snapshot.ErrRejected` and
+- `isFatal` checks only `index.ErrFenced`, `index.ErrRejected` and
   `pkerr.ErrCorrupted`. The adapter of the later change maps the merr codes
   of the manifest service to the sentinels (see [Committer](#committer)).
   The mapping relies on the manifest service to return
@@ -656,7 +656,7 @@ Common patterns:
 
 - **The adapter over the manifest service client and its wiring.** A later
   change, after the manifest service and this change merge, adds the
-  adapter that implements `snapshot.Committer`. It translates the proto
+  adapter that implements `index.Committer`. It translates the proto
   types and the merr codes (see [Committer](#committer)), with a test for
   each error class, and the streaming node injects it into the `Manager`. It
   also sets `ReuploadAfter`. Until then no `Channel` claims and no `Index`

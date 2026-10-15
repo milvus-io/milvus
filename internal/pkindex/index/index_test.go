@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/objpath"
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -51,7 +50,7 @@ func TestTwoHandoversInOneProcess(t *testing.T) {
 	require.EqualValues(t, 1, first.Version, "the first flush creates the manifest")
 	require.EqualValues(t, 10, first.CheckpointTimeTick)
 	require.NotEmpty(t, first.Tables)
-	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 10, idx.lastCommittedTimeTick())
 	assert.Empty(t, idx.eng.FrozenGenerations())
 
 	insert(t, idx, 20, 4, 5)
@@ -62,7 +61,7 @@ func TestTwoHandoversInOneProcess(t *testing.T) {
 	// the second install holds the tables of the first, which come from installedPaths
 	assert.Subset(t, sstIDs(second), sstIDs(first))
 	assert.Equal(t, len(second.Tables), idx.eng.Stats().CommittedTables)
-	assert.EqualValues(t, 20, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 20, idx.lastCommittedTimeTick())
 	assert.EqualValues(t, 10, segmentOf(t, idx, 1))
 	assert.EqualValues(t, 20, segmentOf(t, idx, 4))
 	assert.Empty(t, env.client.applyErrList())
@@ -92,9 +91,12 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 	reqs := env.client.requestList()
 	require.Len(t, reqs, 2)
 	assert.Equal(t, reqs[0], reqs[1])
+	// the second request took the applied retry branch of the manifest service
+	assert.Equal(t, []bool{true, false}, env.client.appliedList())
+	assert.EqualValues(t, 1, env.client.manifest("v0").Version)
 	assert.Nil(t, idx.pending.Load())
 	assert.Zero(t, idx.failures)
-	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 10, idx.lastCommittedTimeTick())
 	assert.Empty(t, idx.eng.FrozenGenerations())
 	assert.True(t, idx.dirty(), "the write after the rotate is not committed")
 
@@ -102,7 +104,7 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 	reqs = env.client.requestList()
 	require.Len(t, reqs, 3)
 	assert.EqualValues(t, 20, reqs[2].CheckpointTimeTick)
-	assert.EqualValues(t, 20, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 20, idx.lastCommittedTimeTick())
 	assert.Empty(t, env.client.applyErrList())
 	assert.Empty(t, env.fatalList())
 }
@@ -204,9 +206,9 @@ func TestCommittedLeftoverOnlyMakesTheIndexNotFresh(t *testing.T) {
 // makes the Index of an existing collection not fresh: an owner committed it,
 // and the Index can miss the writes of that owner.
 func TestAnyManifestMakesTheIndexNotFresh(t *testing.T) {
-	cases := map[string]snapshot.ManifestView{
+	cases := map[string]ManifestView{
 		"version 1 with no tables":    {Version: 1},
-		"a later version with tables": {Version: 7, CheckpointTimeTick: 5, Tables: []snapshot.TableRef{{ID: 900}}},
+		"a later version with tables": {Version: 7, CheckpointTimeTick: 5, Tables: []TableRef{{ID: 900}}},
 	}
 	for name, view := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -240,7 +242,7 @@ func TestNoManifestAndNoLeftoverIsFresh(t *testing.T) {
 	idx := ch.Get("v0")
 	waitReady(t, idx)
 	assert.True(t, idx.fresh())
-	assert.Equal(t, "root/pk_index/100/v0/sst", idx.SSTBasePath())
+	assert.Equal(t, "root/pk_index/100/v0/sst", idx.sstBasePath)
 
 	insert(t, idx, 10, 1)
 	ch.Tick(10)
@@ -250,10 +252,10 @@ func TestNoManifestAndNoLeftoverIsFresh(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_Int64, reqs[0].PKDataType)
 	m := env.client.manifest("v0")
 	assert.EqualValues(t, 1, m.Version)
-	assert.Equal(t, idx.SSTBasePath(), m.SSTBasePath)
+	assert.Equal(t, idx.sstBasePath, m.SSTBasePath)
 	keys := env.store.Keys()
 	for _, ref := range m.Tables {
-		assert.Contains(t, keys, objpath.SSTKey(idx.SSTBasePath(), int64(ref.ID)))
+		assert.Contains(t, keys, objpath.SSTKey(idx.sstBasePath, int64(ref.ID)))
 	}
 	assert.Empty(t, env.fatalList())
 }
@@ -284,7 +286,7 @@ func TestDecideCorruptionIsFatal(t *testing.T) {
 	assert.Len(t, env.fatalList(), 1)
 	// the failed Decide released the writer
 	ch.Tick(30)
-	assert.EqualValues(t, 30, other.LastAppliedTimeTick())
+	assert.EqualValues(t, 30, other.ch.wm.lastApplied())
 }
 
 func TestUploadFailuresKeepThePending(t *testing.T) {
@@ -315,7 +317,7 @@ func TestUploadFailuresKeepThePending(t *testing.T) {
 	reqs := env.client.requestList()
 	require.Len(t, reqs, 1)
 	assert.EqualValues(t, 10, reqs[0].CheckpointTimeTick)
-	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 10, idx.lastCommittedTimeTick())
 	assert.Empty(t, idx.eng.FrozenGenerations(), "exactly one rotate happened")
 	assert.Equal(t, len(reqs[0].AddTables), env.store.Len())
 	assert.EqualValues(t, 10, segmentOf(t, idx, 1))
@@ -342,7 +344,7 @@ func TestInstallDownloadsMissingTables(t *testing.T) {
 	for _, id := range sstIDs(first) {
 		assert.FileExists(t, filepath.Join(idx.committedDir, sstName(id)))
 	}
-	assert.EqualValues(t, 20, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 20, idx.lastCommittedTimeTick())
 	assert.EqualValues(t, 10, segmentOf(t, idx, 1))
 	assert.Empty(t, env.fatalList())
 }
@@ -363,7 +365,7 @@ func TestInstallIfNewerIgnoresAnOlderVersion(t *testing.T) {
 
 	older := env.client.version("v0", 1)
 	require.NotNil(t, older)
-	require.NoError(t, idx.InstallIfNewer(context.Background(), *older, nil))
+	require.NoError(t, idx.installIfNewer(context.Background(), *older, nil))
 	assert.EqualValues(t, 2, idx.installedVersion)
 	assert.Equal(t, paths, idx.installedPaths)
 	assert.Equal(t, tables, idx.eng.Stats().CommittedTables)
@@ -380,22 +382,32 @@ func TestRetryReuploadsOldTables(t *testing.T) {
 	idx := env.add(ch, "v0")
 	insert(t, idx, 10, 1, 2)
 	ch.Tick(10)
-	env.client.set(func(c *fakeClient) { c.commitErrs = []error{merr.WrapErrServiceUnavailable("down")} })
+	env.client.set(func(c *fakeClient) {
+		c.commitErrs = []error{merr.WrapErrServiceUnavailable("down"), merr.WrapErrServiceUnavailable("down")}
+	})
 	ch.step(farFuture)
 	p := idx.pending.Load()
 	require.NotNil(t, p)
 	uploads := env.store.uploads.Load()
 	objects := env.store.Len()
+	keys := env.store.Keys()
+	require.EqualValues(t, len(p.request.AddTables), uploads)
+
+	// a recent upload is not repeated
+	ch.step(farFuture)
+	require.Same(t, p, idx.pending.Load())
+	assert.Equal(t, uploads, env.store.uploads.Load())
 
 	env.setParams(func(p *Params) { p.ReuploadAfter = 0 })
 	ch.step(farFuture)
 	assert.Nil(t, idx.pending.Load())
-	assert.EqualValues(t, uploads+int64(len(p.Request.AddTables)), env.store.uploads.Load())
+	assert.EqualValues(t, uploads+int64(len(p.request.AddTables)), env.store.uploads.Load())
 	assert.Equal(t, objects, env.store.Len())
+	assert.Equal(t, keys, env.store.Keys(), "the upload repeats under the same keys")
 	reqs := env.client.requestList()
-	require.Len(t, reqs, 2)
-	assert.Equal(t, reqs[0], reqs[1])
-	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	require.Len(t, reqs, 3)
+	assert.Equal(t, reqs[0], reqs[2])
+	assert.EqualValues(t, 10, idx.lastCommittedTimeTick())
 }
 
 func TestParamsFromConfig(t *testing.T) {

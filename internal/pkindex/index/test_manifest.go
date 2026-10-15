@@ -16,7 +16,7 @@
 
 //go:build test
 
-package snapshot
+package index
 
 import (
 	"strconv"

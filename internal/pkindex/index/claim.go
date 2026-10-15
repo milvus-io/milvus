@@ -21,7 +21,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/pkindex/snapshot"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -29,7 +28,7 @@ import (
 
 // recoveryBatch is the largest number of refs in one GetRecoveryManifests
 // call. Tests lower it.
-var recoveryBatch = snapshot.MaxRecoveryManifests
+var recoveryBatch = MaxRecoveryManifests
 
 // StartClaim starts the claim of the pchannel. The caller calls it once,
 // after it added the indexes of the collections that exist at WAL open. Those
@@ -109,13 +108,13 @@ func (c *Channel) lookupRecovered(ctx context.Context, idxs []*Index) error {
 		var lastErr error
 		for start := 0; start < len(pending); start += recoveryBatch {
 			batch := pending[start:min(start+recoveryBatch, len(pending))]
-			refs := make([]snapshot.VChannelRef, 0, len(batch))
+			refs := make([]VChannelRef, 0, len(batch))
 			for _, idx := range batch {
-				refs = append(refs, snapshot.VChannelRef{CollectionID: idx.collectionID, VChannel: idx.vchannel})
+				refs = append(refs, VChannelRef{CollectionID: idx.collectionID, VChannel: idx.vchannel})
 			}
 			answers, err := committer.GetRecoveryManifests(ctx, refs)
 			if err == nil && len(answers) != len(refs) {
-				err = errors.Wrapf(snapshot.ErrRejected, "pchannel %s: %d manifest answers for %d vchannels", c.info.Name, len(answers), len(refs))
+				err = errors.Wrapf(ErrRejected, "pchannel %s: %d manifest answers for %d vchannels", c.info.Name, len(answers), len(refs))
 			}
 			if err != nil {
 				if ctx.Err() != nil || isFatal(err) {
