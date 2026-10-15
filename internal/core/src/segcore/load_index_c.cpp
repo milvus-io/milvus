@@ -229,41 +229,6 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     }
 }
 
-LoadResourceRequest
-EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        auto field_type = load_index_info->field_type;
-        auto element_type = load_index_info->element_type;
-        auto& index_params = load_index_info->index_params;
-        bool find_index_type =
-            index_params.count("index_type") > 0 ? true : false;
-        AssertInfo(find_index_type == true,
-                   "Can't find index type in index_params");
-
-        LoadResourceRequest request =
-            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-                field_type,
-                element_type,
-                load_index_info->index_engine_version,
-                load_index_info->index_size,
-                index_params,
-                load_index_info->enable_mmap,
-                load_index_info->num_rows,
-                load_index_info->dim);
-        return request;
-    } catch (std::exception& e) {
-        ThrowInfo(milvus::UnexpectedError,
-                  fmt::format("failed to estimate index load resource, "
-                              "encounter exception : {}",
-                              e.what()));
-        return LoadResourceRequest{0, 0, 0, 0, false};
-    }
-}
-
 CStatus
 EstimateLoadIndexResourceFromSerializedInfo(
     const uint8_t* serialized_load_index_info,

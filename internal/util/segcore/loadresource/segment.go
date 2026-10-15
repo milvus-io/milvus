@@ -21,7 +21,6 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -155,7 +154,7 @@ func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.Collecti
 
 		estimate, err := EstimateIndexLoadResourceWithRunner(ctx, fieldSchema, loadInfo, fieldIndexInfo, runner)
 		if err != nil {
-			return SegmentResourceUsage{}, errors.Wrapf(err, "failed to estimate final resource usage of index, collection %d, segment %d, indexBuildID %d",
+			return SegmentResourceUsage{}, merr.Wrapf(err, "failed to estimate final resource usage of index, collection %d, segment %d, indexBuildID %d",
 				loadInfo.GetCollectionID(),
 				loadInfo.GetSegmentID(),
 				fieldIndexInfo.GetBuildID())
@@ -174,7 +173,7 @@ func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.Collecti
 
 		metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, fieldIndexInfo.GetIndexParams())
 		if err != nil {
-			return SegmentResourceUsage{}, errors.Wrapf(err, "failed to estimate final resource usage of index, metric type not found, collection %d, segment %d, indexBuildID %d",
+			return SegmentResourceUsage{}, merr.Wrapf(err, "failed to estimate final resource usage of index, metric type not found, collection %d, segment %d, indexBuildID %d",
 				loadInfo.GetCollectionID(),
 				loadInfo.GetSegmentID(),
 				fieldIndexInfo.GetBuildID())

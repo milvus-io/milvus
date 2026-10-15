@@ -337,7 +337,15 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.index_size = 1024 * 1024 * 1024;  // 1G index size
     loadIndexInfo.dim = 128;
 
-    LoadResourceRequest request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+        loadIndexInfo.field_type,
+        loadIndexInfo.element_type,
+        loadIndexInfo.index_engine_version,
+        loadIndexInfo.index_size,
+        loadIndexInfo.index_params,
+        loadIndexInfo.enable_mmap,
+        loadIndexInfo.num_rows,
+        loadIndexInfo.dim);
     ASSERT_EQ(request.has_raw_data, expected.has_raw_data);
     ASSERT_EQ(request.final_memory_cost, expected.final_memory_cost);
     ASSERT_EQ(request.final_disk_cost, expected.final_disk_cost);
@@ -478,7 +486,16 @@ TEST(IndexLoadTest, ScalarV3MmapTantivyUsesDownloadConcurrencyBound) {
         load_index_info.num_rows = kNumRows;
         load_index_info.schema.set_nullable(false);
 
-        auto request = EstimateLoadIndexResource(&load_index_info);
+        auto request =
+            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+                load_index_info.field_type,
+                load_index_info.element_type,
+                load_index_info.index_engine_version,
+                load_index_info.index_size,
+                load_index_info.index_params,
+                load_index_info.enable_mmap,
+                load_index_info.num_rows,
+                load_index_info.dim);
 
         EXPECT_EQ(request.max_memory_cost,
                   expected_download_peak + kValidityBitmapBytes);

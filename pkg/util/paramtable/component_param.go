@@ -3545,7 +3545,7 @@ Set to 0 to disable the penalty period.`,
 
 	p.AutoscalePrecheckEnabled = ParamItem{
 		Key:          "queryCoord.autoscale.precheckEnabled",
-		Version:      "3.0.0",
+		Version:      "2.6.26",
 		DefaultValue: "false",
 		Doc:          "Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.",
 		Export:       true,
@@ -3554,7 +3554,7 @@ Set to 0 to disable the penalty period.`,
 
 	p.AutoscaleEnabled = ParamItem{
 		Key:          "queryCoord.autoscale.enabled",
-		Version:      "3.0.0",
+		Version:      "2.6.26",
 		DefaultValue: "false",
 		Doc:          "Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.",
 		Export:       true,
@@ -3563,7 +3563,7 @@ Set to 0 to disable the penalty period.`,
 
 	p.AutoscaleMaxMemoryLimit = ParamItem{
 		Key:          "queryCoord.autoscale.maxMemoryLimit",
-		Version:      "3.0.0",
+		Version:      "2.6.26",
 		DefaultValue: "0",
 		Doc:          "Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.",
 		Export:       true,
@@ -3572,7 +3572,7 @@ Set to 0 to disable the penalty period.`,
 
 	p.AutoscaleMaxDiskLimit = ParamItem{
 		Key:          "queryCoord.autoscale.maxDiskLimit",
-		Version:      "3.0.0",
+		Version:      "2.6.26",
 		DefaultValue: "0",
 		Doc:          "Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.",
 		Export:       true,
