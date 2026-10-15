@@ -52,10 +52,11 @@ The change set is:
 
 The size target is the only part of the design that is not a pure removal of
 an assumption. It is justified by measurement: delete application inside one
-sealed segment is serial at 6 to 13 µs per primary key (aarch64 and x86 test
-machines), so a 1 GB segment of 13-byte rows (44 M rows) stalls the channel's
-tsafe for 28 s (aarch64) or 55 s (x86) on a 10 % delete, while eight segments
-of 5.5 M rows stall 5.8 s or 8.1 s under the same delete.
+sealed segment is serial at 6 to 13 µs per `int64` primary key (aarch64 and
+x86 test machines) and about 45 µs per 16-byte `varchar` key, so a 1 GB
+segment of 13-byte rows (44 M rows) stalls the channel's tsafe for 28 s
+(aarch64) or 55 s (x86) on a 10 % delete, while eight segments of 5.5 M rows
+stall 5.8 s or 8.1 s under the same delete.
 
 ## Motivation
 
@@ -367,6 +368,30 @@ of the segment size. That is why the per-key cost measured earlier was the
 same on 5.5 M-row and 44 M-row segments. The delete records themselves
 (skip list, bitmap) are a small fraction.
 
+**Varchar primary key.** The same rows with a 16-character zero-padded
+`varchar` key (41.6 B per row `MemorySize`), same machine (aarch64), same
+deletes:
+
+| Path | 1 × 44 M rows | 8 × 5.5 M rows | `int64` key, for comparison |
+|------|--------------:|---------------:|----------------------------:|
+| Delete 1 % by expression | 19.1 s apply, 21 s tsafe stall (43 µs per key) | 2.6 s apply, 2.7 s stall | 3.8 s / 0.7 s |
+| Delete 1 % by primary-key list, one request | 19.8 s apply, 21 s stall | 2.7 s apply, 2.8 s stall | 3.0 s / 0.6 s |
+| Delete 10 % by primary-key list, 44 requests of 100 k | 199 s apply, 186 s stall, strong-consistency queries fail | 27 s apply, 14.5 s stall | 33 s, 24 s stall / 5.3 s, 0.15 s stall |
+| Delete 10 % by expression | rejected by the proxy: `query results exceed the limit size` (4.4 M 16-byte keys in the query-then-delete step) | same | 28.6 s / 5.8 s |
+| Load of the 44 M-row segment with 5.3 M deleted keys | 241 s (`LoadDeletedRecord` replays the deletes at the same 45 µs per key) | — | 7 s |
+
+The profile of a 1.5 M-key delete (68.5 s) puts 95 % of the segcore call in
+`StringChunk::binary_search_string`, three quarters of it in `memcmp`: every
+probe of the binary search reads the string offsets and then the string
+bytes and compares them, so a `varchar` key costs five to six times an
+`int64` key. Two consequences: with a `varchar` key even eight 5.5 M-row
+segments sit at the 3 s limit on a 1 % delete, and the replay of accumulated
+deletes at load time scales the same way. At the 4 M-row target a 1 % delete
+of a `varchar`-keyed segment costs about 1.8 s and a 10 % delete about 18 s;
+the row target bounds the stall but does not remove it for `varchar` keys,
+which is why the merge in Follow-ups is the actual fix and the target is the
+guard until it lands.
+
 Comparable systems bound both bytes and rows per scheduling unit: Druid
 segments (`maxRowsPerSegment` default 5,000,000, about 100 B per row at its
 typical 300–700 MB), TiKV regions (96 MB or 960,000 keys, whichever first),
@@ -392,7 +417,8 @@ p.SegmentMaxRows = ParamItem{
 Default 4,000,000: 250 B per row at 1 GB, the same ratio Elasticsearch
 recommends, and the point where a 10 % single-request delete on one segment
 (400 k keys × 8 µs = 3.2 s on aarch64, 5 s on the x86 test machine) sits at
-the tsafe lag limit. 5,000,000 (Druid)
+the tsafe lag limit for an `int64` key. For a `varchar` key the same 400 k
+keys cost about 18 s; the target keeps a 1 % delete under 3 s there. 5,000,000 (Druid)
 is equally defensible; the difference is at the margin.
 
 The target applies to every collection. Vector collections with dim > 61
@@ -711,9 +737,13 @@ Reported in Section 3.1 and Section 4.
   to 4.9 M rows (137 MB `MemorySize`, 26 B per row on the wire against the
   123 MB seal threshold, Section 3.4 point 2), sort compaction followed each
   seal; `MemorySize` 29.6 B per row, the same as the imported segments.
+- Varchar primary key (aarch64, same rows and deletes, Section 3.1): 43 to
+  46 µs per key, 95 % in `StringChunk::binary_search_string`; load replay of
+  5.3 M deleted keys 241 s; a 4.4 M-key expression delete is rejected by the
+  proxy's query result size limit.
 - Both runs: autocompaction off, standalone, single shard; scripts and raw
-  results under the implementation PR's test notes (`run5.sh`, `run_x86.sh`,
-  `grow.py`, `delids.py`).
+  results under the implementation PR's test notes (`run5.sh`, `run6.sh`,
+  `run_x86.sh`, `grow.py`, `delids.py`, `strtest.py`).
 
 ## Alternatives considered
 
@@ -779,7 +809,10 @@ Reported in Section 3.1 and Section 4.
   keys and is monotone at chunk granularity, but inside a chunk it still runs
   a full binary search from offset 0 for every key; with one Storage V2 file
   per column group (Section 3.1) that gives no gain, so the in-chunk cursor
-  is the part to add, and both paths can then share it. The delete record
+  is the part to add, and both paths can then share it. For `varchar` keys
+  the same change removes most of the `memcmp` calls, since a cursor compares
+  each key against a few neighbours instead of 25 probes; `LoadDeletedRecord`
+  replays through the same function and gains equally. The delete record
   insert (skip list, bitmap) is under 2 % and can additionally be split by
   offset range across threads. With the merge, `maxRows` can be raised or
   removed.
