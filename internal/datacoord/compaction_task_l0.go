@@ -48,7 +48,7 @@ type l0CompactionTask struct {
 	meta      CompactionMeta
 
 	times                *taskcommon.Times
-	committedV3Manifests map[int64]string
+	committedV3Manifests map[int64]l0ManifestCommit
 }
 
 func (t *l0CompactionTask) GetTaskID() int64 {
@@ -230,7 +230,7 @@ func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator
 		allocator:            allocator,
 		meta:                 meta,
 		times:                taskcommon.NewTimes(),
-		committedV3Manifests: make(map[int64]string),
+		committedV3Manifests: make(map[int64]l0ManifestCommit),
 	}
 	task.taskProto.Store(t)
 	return task
