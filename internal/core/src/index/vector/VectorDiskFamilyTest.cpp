@@ -24,6 +24,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -120,9 +121,12 @@ BuildDisk(const std::string& raw_path,
           int64_t dim = kDim,
           int64_t logical_rows = kRows,
           const std::string& offsets_path = {},
-          bool mmap = false) {
+          bool mmap = false,
+          const std::string& index_type = knowhere::IndexEnum::INDEX_DISKANN,
+          const std::map<std::string, std::string>& extra_build_params = {},
+          const std::map<std::string, std::string>& extra_load_params = {}) {
     auto adapted = AdaptIndexType({
-        .index_type = knowhere::IndexEnum::INDEX_DISKANN,
+        .index_type = index_type,
         .field_type =
             offsets_path.empty() ? PhysicalType<T>() : DataType::VECTOR_ARRAY,
         .element_type =
@@ -137,6 +141,11 @@ BuildDisk(const std::string& raw_path,
                    {DISK_ANN_BUILD_DRAM_BUDGET, "2"},
                    {DISK_ANN_BUILD_THREAD_NUM, "2"}},
     });
+    // AISAQ is a DiskANN-family index that always materializes on-disk PQ
+    // vectors; it reuses the DiskANN build knobs above.
+    for (const auto& [key, value] : extra_build_params) {
+        adapted.params[key] = value;
+    }
     adapted.params["local_dir"] = staging_dir;
     auto builder =
         BuilderRegistry<PreparedVectorBuildFiles<T>>::Instance().Create(
@@ -185,6 +194,9 @@ BuildDisk(const std::string& raw_path,
     options.params = adapted.params;
     options.params[INDEX_NUM_ROWS_KEY] = logical_rows;
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
+    for (const auto& [key, value] : extra_load_params) {
+        options.params[key] = value;
+    }
     options.enable_mmap = mmap;
     options.mmap_dir_path = staging_dir;
     opened.base =
@@ -251,6 +263,7 @@ RunOrdinaryDiskSearch(bool mmap) {
         }
     }
 }
+
 
 TEST(VectorDiskFileManagerTest, PreparedInputsAreBorrowedReadOnly) {
     auto inputs = storage::LocalDirectory::CreateOwned(
@@ -393,7 +406,6 @@ TEST(VectorDiskFileManagerTest, MetadataConflictKeepsOutputFailed) {
         }
     }
 }
-
 TEST(VectorDiskFileManagerTest, MetadataCannotConvertLegacyFilesToRaw) {
     auto owner = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_stream_XXXXXX", "stream metadata transport test");
@@ -405,6 +417,190 @@ TEST(VectorDiskFileManagerTest, MetadataCannotConvertLegacyFilesToRaw) {
         manager->AddFileMeta({path, std::filesystem::file_size(path)}));
     EXPECT_EQ(manager->Files().front().transport,
               VectorDiskFileTransport::LegacySliced);
+}
+// Exercises the AISAQ branch of the disk family: build/load/search through the
+// same registry/reader path as DiskANN. AISAQ reuses the DiskANN disk loader
+// and reader, so these cases cover the AISAQ gates added to
+// VectorDiskBuilder/VectorDiskLoader/VectorIndexReader.
+template <typename T>
+void
+RunAisaqDiskSearch(
+    const VectorSearchParams& extra_search_params = {},
+    const std::map<std::string, std::string>& extra_build_params = {},
+    const std::map<std::string, std::string>& extra_load_params = {}) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_aisaq_family_XXXXXX", "vector aisaq family test");
+    const auto raw_path = files->Path() + "/raw";
+    auto values = MakeRows<T>();
+    WriteRaw(raw_path, values, kRows, kDim);
+    OpenedDiskIndex<T> opened;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              "L2",
+              kDim,
+              kRows,
+              {},
+              false,
+              knowhere::IndexEnum::INDEX_AISAQ,
+              extra_build_params,
+              extra_load_params);
+    ASSERT_NE(opened.base, nullptr);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(opened.base->Count(), kRows);
+    EXPECT_EQ(reader->Dim(), kDim);
+    EXPECT_EQ(reader->KnowhereIndexType(), knowhere::IndexEnum::INDEX_AISAQ);
+
+    VectorSearchParams params{
+        .search_params_ = {{DISK_ANN_QUERY_LIST, 8}},
+        .metric_type_ = "L2",
+        .topk_ = 4,
+    };
+    // Merge any caller-provided per-query knobs (e.g. beamwidth,
+    // vectors_beamwidth) that exercise the AISAQ search-config gate.
+    for (const auto& [key, value] :
+         extra_search_params.search_params_.items()) {
+        params.search_params_[key] = value;
+    }
+    auto query = GenDataset(2, kDim, values.data() + 100 * kDim);
+    SearchResult result;
+    reader->Search(query, params, BitsetView{}, nullptr, result);
+    EXPECT_EQ(result.total_nq_, 2);
+    ASSERT_EQ(result.seg_offsets_.size(), 8);
+    EXPECT_EQ(result.unity_topK_, 4);
+    for (int64_t nq = 0; nq < 2; ++nq) {
+        EXPECT_GE(result.seg_offsets_[nq * 4], 0);
+        EXPECT_LT(result.seg_offsets_[nq * 4], kRows);
+    }
+}
+
+TEST(VectorDiskFamilyTest, AisaqFloatBuildLoadSearch) {
+    RunAisaqDiskSearch<float>();
+}
+
+TEST(VectorDiskFamilyTest, AisaqFloat16BuildLoadSearch) {
+    RunAisaqDiskSearch<float16>();
+}
+
+// Supplies an explicit per-query beamwidth and PQ-vectors beamwidth; this is
+// the AISAQ-only path wired through DiskOpenOptions::vectors_beamwidth and the
+// reader's DISK_ANN_QUERY_PQ_BEAMWIDTH injection.
+TEST(VectorDiskFamilyTest, AisaqSearchWithBeamwidthOverrides) {
+    VectorSearchParams extra;
+    extra.search_params_[DISK_ANN_QUERY_BEAMWIDTH] = 4;
+    extra.search_params_[DISK_ANN_QUERY_PQ_BEAMWIDTH] = 2;
+    RunAisaqDiskSearch<float>(extra);
+}
+
+TEST(VectorDiskFamilyTest, AisaqRejectsQueryListSmallerThanTopK) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_aisaq_invalid_XXXXXX", "vector aisaq test");
+    const auto raw_path = files->Path() + "/raw";
+    auto values = MakeRows<float>();
+    WriteRaw(raw_path, values, kRows, kDim);
+    OpenedDiskIndex<float> opened;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              "L2",
+              kDim,
+              kRows,
+              {},
+              false,
+              knowhere::IndexEnum::INDEX_AISAQ);
+    ASSERT_NE(opened.base, nullptr);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    VectorSearchParams params{
+        .search_params_ = {{DISK_ANN_QUERY_LIST, 2}},
+        .metric_type_ = "L2",
+        .topk_ = 4,
+    };
+    SearchResult result;
+    EXPECT_ANY_THROW(reader->Search(GenDataset(1, kDim, values.data()),
+                                    params,
+                                    BitsetView{},
+                                    nullptr,
+                                    result));
+}
+
+// Build-only AISAQ helper that expects the builder to reject invalid build
+// params before any artifact is produced (e.g. an out-of-range inline-PQ).
+template <typename T>
+void
+ExpectAisaqBuildThrows(
+    const std::map<std::string, std::string>& extra_build_params) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_aisaq_build_throw_XXXXXX", "vector aisaq build test");
+    const auto raw_path = files->Path() + "/raw";
+    auto values = MakeRows<T>();
+    WriteRaw(raw_path, values, kRows, kDim);
+
+    auto adapted = AdaptIndexType({
+        .index_type = knowhere::IndexEnum::INDEX_AISAQ,
+        .field_type = PhysicalType<T>(),
+        .element_type = DataType::NONE,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, "L2"},
+                   {DIM_KEY, kDim},
+                   {DISK_ANN_MAX_DEGREE, "24"},
+                   {DISK_ANN_SEARCH_LIST_SIZE, "56"},
+                   {DISK_ANN_PQ_CODE_BUDGET, "0.001"},
+                   {DISK_ANN_BUILD_DRAM_BUDGET, "2"},
+                   {DISK_ANN_BUILD_THREAD_NUM, "2"}},
+    });
+    for (const auto& [key, value] : extra_build_params) {
+        adapted.params[key] = value;
+    }
+    adapted.params["local_dir"] = files->Path();
+    auto builder =
+        BuilderRegistry<PreparedVectorBuildFiles<T>>::Instance().Create(
+            adapted.family, adapted.params);
+    ASSERT_NE(builder, nullptr);
+    PreparedVectorBuildFiles<T> input{.raw_path = raw_path};
+    EXPECT_ANY_THROW(static_cast<void>(std::move(*builder).Build(input)));
+}
+
+// AISAQ inline-PQ configuration: build with inline-PQ + entry points, load
+// with a PQ cache, and search with PQ page-cache + beamwidth knobs. Exercises
+// the AISAQ build params and the load/search beamwidth plumbing together.
+TEST(VectorDiskFamilyTest, AisaqInlinePqFloat16BuildLoadSearch) {
+    const std::map<std::string, std::string> build_params{
+        {AISAQ_INLINE_PQ, "2"},
+        {AISAQ_NUM_ENTRY_POINTS, "100"},
+        {AISAQ_REARRANGE, "false"},
+    };
+    const std::map<std::string, std::string> load_params{
+        {AISAQ_PQ_CACHE_SIZE, "1024"},
+    };
+    VectorSearchParams extra;
+    extra.search_params_[AISAQ_PQ_READ_PAGE_CACHE_SIZE] = 10485760;
+    extra.search_params_[DISK_ANN_QUERY_BEAMWIDTH] = 4;
+    extra.search_params_[DISK_ANN_QUERY_PQ_BEAMWIDTH] = 2;
+    RunAisaqDiskSearch<float16>(extra, build_params, load_params);
+}
+
+// AISAQ rearrange configuration: rearrange=true with inline-PQ disabled.
+TEST(VectorDiskFamilyTest, AisaqRearrangeFloat16BuildLoadSearch) {
+    const std::map<std::string, std::string> build_params{
+        {AISAQ_INLINE_PQ, "0"},
+        {AISAQ_NUM_ENTRY_POINTS, "1"},
+        {AISAQ_REARRANGE, "true"},
+    };
+    const std::map<std::string, std::string> load_params{
+        {AISAQ_PQ_CACHE_SIZE, "1024"},
+    };
+    VectorSearchParams extra;
+    extra.search_params_[AISAQ_PQ_READ_PAGE_CACHE_SIZE] = 10485760;
+    RunAisaqDiskSearch<float16>(extra, build_params, load_params);
+}
+
+// An inline-PQ value far above the vector dimension must be rejected at build
+// time, whether or not a dataset is attached.
+TEST(VectorDiskFamilyTest, AisaqRejectsInvalidInlinePq) {
+    ExpectAisaqBuildThrows<float16>({{AISAQ_INLINE_PQ, "2050"}});
 }
 
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {

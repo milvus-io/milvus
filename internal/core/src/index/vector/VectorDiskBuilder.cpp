@@ -263,7 +263,8 @@ EncodeEmptyEmbeddingOffsets(int64_t dim, const std::vector<size_t>& offsets) {
 
 void
 NormalizeDiskAnnBuildThreads(Config& config, const IndexType& index_type) {
-    if (index_type != knowhere::IndexEnum::INDEX_DISKANN) {
+    if (index_type != knowhere::IndexEnum::INDEX_DISKANN &&
+        index_type != knowhere::IndexEnum::INDEX_AISAQ) {
         return;
     }
     if (!config.contains(DISK_ANN_BUILD_THREAD_NUM)) {
