@@ -82,7 +82,7 @@ func HTTPReturnStream(c *gin.Context, code int, result gin.H) {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
 	setTraceIDHeader(c)
-	if writer, streaming := c.Writer.(*streamingResponseWriter); streaming {
+	if writer, streaming := c.Writer.(*streamingWorkerWriter); streaming {
 		c.Writer.WriteHeader(code)
 		if err := (jsonRender{Data: result}).Render(c.Writer); err != nil {
 			if c.Writer.Written() {

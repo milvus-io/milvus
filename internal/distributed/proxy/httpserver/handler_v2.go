@@ -1644,7 +1644,7 @@ const queryResponseBatchRows = 64
 func returnQueryResponse(ctx context.Context, c *gin.Context, code int, result gin.H) {
 	rows := result[HTTPReturnData].(*queryResponseRows)
 	delete(result, HTTPReturnData)
-	streamWriter, streaming := c.Writer.(*streamingResponseWriter)
+	streamWriter, streaming := c.Writer.(*streamingWorkerWriter)
 	if !streaming {
 		// Direct callers without streaming failure handling must finish
 		// projection before rendering a complete response.

@@ -201,6 +201,7 @@ func streamingTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			deadline:       deadline,
 		}
 		c.Writer = writer
+		var workerPanicStack []byte
 		var cleanupBodyRead func()
 		defer func() {
 			if cleanupBodyRead != nil {
@@ -259,7 +260,10 @@ func streamingTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 				c.Set(HTTPReturnCode, merr.Code(err))
 				c.Set(HTTPReturnMessage, err.Error())
 				_ = c.Error(err).SetType(gin.ErrorTypePrivate)
-				mlog.Error(ctx, "REST handler panicked after response commitment", mlog.Err(err), mlog.Any("panic", panicValue), mlog.String("panic_stack", string(debug.Stack())))
+				if workerPanicStack == nil {
+					workerPanicStack = debug.Stack()
+				}
+				mlog.Error(ctx, "REST handler panicked after response commitment", mlog.Err(err), mlog.Any("panic", panicValue), mlog.String("panic_stack", string(workerPanicStack)))
 				abortResponse()
 				return
 			}
@@ -294,6 +298,67 @@ func streamingTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 				return
 			}
 		}
-		handler(c)
+
+		// The worker owns a copied Gin context and detached I/O adapters. Only
+		// this goroutine writes the connection, so timeout can return without
+		// waiting for downstream computation that ignores cancellation.
+		exchange := &streamingExchange{ctx: ctx, calls: make(chan streamingIOCall)}
+		workerWriter := &streamingWorkerWriter{
+			exchange: exchange, header: realWriter.Header().Clone(),
+			status: realWriter.Status(), size: -1,
+		}
+		workerCtx := c.Copy()
+		workerCtx.Writer = workerWriter
+		workerCtx.Request = c.Request.Clone(ctx)
+		if c.Request.Body != nil && c.Request.Body != http.NoBody {
+			workerCtx.Request.Body = streamingWorkerBody{exchange: exchange}
+		}
+		type completion struct {
+			panicValue any
+			stack      []byte
+		}
+		finished := make(chan completion, 1)
+		go func() {
+			defer func() {
+				result := completion{panicValue: recover()}
+				if result.panicValue != nil {
+					result.stack = debug.Stack()
+				}
+				finished <- result // Never block a worker finishing after timeout.
+			}()
+			handler(workerCtx)
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case call := <-exchange.calls:
+				call.serve(writer, c.Request.Body)
+				if writer.failure != nil {
+					return
+				}
+			case result := <-finished:
+				// The completion send establishes exclusive access to worker state.
+				propagateTimeoutContextKeys(c, workerCtx)
+				c.Errors = append(c.Errors, workerCtx.Errors...)
+				if workerCtx.IsAborted() {
+					c.Abort()
+				}
+				if !writer.Written() {
+					copyStreamingHeader(realWriter.Header(), workerWriter.header)
+					realWriter.WriteHeader(workerWriter.status)
+				}
+				// Cancellation can make a late renderer fail before we select
+				// ctx.Done(). Preserve the precommit timeout envelope in that race.
+				if writer.requestError() == nil {
+					writer.failure = workerWriter.failure
+				}
+				if result.panicValue != nil && !(result.panicValue == http.ErrAbortHandler && writer.requestError() != nil) {
+					workerPanicStack = result.stack
+					panic(result.panicValue)
+				}
+				return
+			}
+		}
 	}
 }

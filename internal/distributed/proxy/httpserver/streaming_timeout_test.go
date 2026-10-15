@@ -28,6 +28,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,6 +95,20 @@ func streamingTestTimeout(t *testing.T, timeout string) {
 	t.Cleanup(func() { paramtable.Get().Reset(key) })
 }
 
+type streamingStalledBody struct {
+	io.ReadCloser
+	reading chan struct{}
+	reads   int
+}
+
+func (b *streamingStalledBody) Read(p []byte) (int, error) {
+	b.reads++
+	if b.reads == 2 {
+		close(b.reading) // The partial JSON was consumed; this read must wait.
+	}
+	return b.ReadCloser.Read(p)
+}
+
 func TestStreamingRequestBodyTimeout(t *testing.T) {
 	for _, protocol := range []string{"http1", "h2", "h2c"} {
 		for _, cancellation := range []string{"deadline", "parent_cancel"} {
@@ -106,6 +122,7 @@ func TestStreamingRequestBodyTimeout(t *testing.T) {
 					streamingTestTimeout(t, budget)
 					readFinished := make(chan error, 1)
 					cancelRequest := make(chan context.CancelFunc, 1)
+					readingBody := make(chan struct{})
 					engine := gin.New()
 					engine.POST("/slow", streamingTimeoutMiddleware(func(c *gin.Context) {
 						var req struct {
@@ -129,6 +146,7 @@ func TestStreamingRequestBodyTimeout(t *testing.T) {
 							defer cancel()
 							cancelRequest <- cancel
 							r = r.WithContext(ctx)
+							r.Body = &streamingStalledBody{ReadCloser: r.Body, reading: readingBody}
 						}
 						wrapped.ServeHTTP(w, r)
 					}))
@@ -152,6 +170,11 @@ func TestStreamingRequestBodyTimeout(t *testing.T) {
 					select {
 					case cancel := <-cancelRequest:
 						if cancellation == "parent_cancel" {
+							select {
+							case <-readingBody:
+							case <-time.After(time.Second):
+								t.Fatal("body read did not start")
+							}
 							cancel()
 						}
 					case <-time.After(time.Second):
@@ -679,38 +702,175 @@ func TestStreamingBlockedOutputAndHealthyStream(t *testing.T) {
 	}
 }
 
-func TestStreamingTimeoutWaitsForWorkerExit(t *testing.T) {
-	paramtable.Init()
-	cfg := paramtable.Get().HTTPCfg.RequestTimeoutMs
-	require.NoError(t, paramtable.Get().Save(cfg.Key, "20"))
-	defer paramtable.Get().Reset(cfg.Key)
-	release := make(chan struct{})
-	expired := make(chan struct{})
-	finished := make(chan struct{})
-	engine := gin.New()
-	engine.Use(streamingRecorderMiddleware)
-	engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
-		<-c.Request.Context().Done()
-		close(expired)
-		<-release
-	}))
-	w := httptest.NewRecorder()
+// Observe accesses to the real writer after ServeHTTP exits, including Header
+// calls that would otherwise silently race with a reused Gin context.
+type streamingLifetimeWriter struct {
+	http.ResponseWriter
+	returned atomic.Bool
+	late     atomic.Int32
+}
+
+func (w *streamingLifetimeWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w *streamingLifetimeWriter) observe() {
+	if w.returned.Load() {
+		w.late.Add(1)
+	}
+}
+func (w *streamingLifetimeWriter) Header() http.Header {
+	w.observe()
+	return w.ResponseWriter.Header()
+}
+func (w *streamingLifetimeWriter) WriteHeader(code int) {
+	w.observe()
+	w.ResponseWriter.WriteHeader(code)
+}
+func (w *streamingLifetimeWriter) Write(p []byte) (int, error) {
+	w.observe()
+	return w.ResponseWriter.Write(p)
+}
+
+type streamingLifetimeBody struct {
+	io.ReadCloser
+	owner *streamingLifetimeWriter
+}
+
+func (b streamingLifetimeBody) Read(p []byte) (int, error) {
+	b.owner.observe()
+	return b.ReadCloser.Read(p)
+}
+
+func (b streamingLifetimeBody) Close() error {
+	b.owner.observe()
+	return b.ReadCloser.Close()
+}
+
+func TestStreamingTimeoutDoesNotWaitForWorker(t *testing.T) {
+	streamingTestTimeout(t, "100")
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		for _, committed := range []bool{false, true} {
+			t.Run(protocol+"/committed="+strconv.FormatBool(committed), func(t *testing.T) {
+				release := make(chan struct{})
+				var releaseOnce sync.Once
+				unblock := func() { releaseOnce.Do(func() { close(release) }) }
+				lateWrite := make(chan error, 1)
+				lateRead := make(chan error, 1)
+				lateClose := make(chan error, 1)
+				workerDone := make(chan struct{})
+				returned := make(chan *streamingLifetimeWriter, 1)
+				engine := gin.New()
+				engine.Use(gin.Recovery())
+				engine.POST("/slow", streamingTimeoutMiddleware(func(c *gin.Context) {
+					defer close(workerDone)
+					if committed {
+						_, _ = c.Writer.Write([]byte(`{"data":[1`))
+						c.Writer.Flush()
+					}
+					<-release // Deliberately ignore context cancellation.
+					_, readErr := c.Request.Body.Read(make([]byte, 1))
+					lateRead <- readErr
+					lateClose <- c.Request.Body.Close()
+					c.Writer.Header().Set("X-Late-Worker", "must-not-reach-client")
+					c.Writer.WriteHeader(http.StatusCreated)
+					_, err := c.Writer.WriteString("LATE_WORKER_BYTES")
+					lateWrite <- err
+					c.Writer.Flush()
+				}))
+				engine.GET("/healthy", streamingTimeoutMiddleware(func(c *gin.Context) {
+					HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: 0})
+				}))
+				wrapped := StreamingHTTPHandler(engine)
+				server, client := streamingTestServer(t, protocol, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/slow" {
+						wrapped.ServeHTTP(w, r)
+						return
+					}
+					tracked := &streamingLifetimeWriter{ResponseWriter: w}
+					r.Body = streamingLifetimeBody{ReadCloser: r.Body, owner: tracked}
+					defer func() { tracked.returned.Store(true); returned <- tracked }()
+					wrapped.ServeHTTP(tracked, r)
+				}))
+				// Release before httptest's server cleanup, even when the old
+				// synchronous implementation fails the timeout assertion below.
+				t.Cleanup(unblock)
+				client.Timeout = time.Second
+				response, err := client.Post(server.URL+"/slow", "application/json", strings.NewReader(`{}`))
+				require.NoError(t, err, "HTTP must finish without releasing the blocked worker")
+				if committed {
+					requireStreamingAbort(t, response)
+				} else {
+					body, err := io.ReadAll(response.Body)
+					response.Body.Close()
+					require.NoError(t, err)
+					require.Equal(t, http.StatusRequestTimeout, response.StatusCode)
+					require.EqualValues(t, merr.TimeoutCode, gjson.GetBytes(body, HTTPReturnCode).Int())
+				}
+				var tracked *streamingLifetimeWriter
+				select {
+				case tracked = <-returned:
+				case <-time.After(time.Second):
+					t.Fatal("HTTP handler still waits for the worker")
+				}
+				select {
+				case <-workerDone:
+					t.Fatal("test worker must remain blocked until explicitly released")
+				default:
+				}
+				unblock()
+				select {
+				case <-workerDone:
+				case <-time.After(time.Second):
+					t.Fatal("late writes or flush must not block after HTTP exit")
+				}
+				require.Error(t, <-lateWrite)
+				require.Error(t, <-lateRead)
+				require.Error(t, <-lateClose)
+				require.Zero(t, tracked.late.Load(), "worker accessed the real writer after HTTP exit")
+				healthy, err := client.Get(server.URL + "/healthy")
+				require.NoError(t, err)
+				body, err := io.ReadAll(healthy.Body)
+				healthy.Body.Close()
+				require.NoError(t, err)
+				require.JSONEq(t, `{"code":0}`, string(body))
+				require.Empty(t, healthy.Header.Get("X-Late-Worker"))
+			})
+		}
+	}
+}
+
+func TestStreamingBatchOwnershipOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	exchange := &streamingExchange{ctx: ctx, calls: make(chan streamingIOCall)}
+	writer := &streamingWorkerWriter{exchange: exchange, header: make(http.Header), status: http.StatusOK, size: -1}
+	batch := []byte("encoded batch")
+	returned := make(chan error, 1)
 	go func() {
-		engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
-		close(finished)
+		_, err := writer.Write(batch)
+		batch[0] = 'X' // An encoder may immediately reuse its bytes after Write.
+		returned <- err
 	}()
-	<-expired
+	call := <-exchange.calls
+	defer func() {
+		select {
+		case call.done <- streamingIOResult{err: http.ErrAbortHandler}:
+		default:
+		}
+	}()
+	require.Same(t, &batch[0], &call.data[0], "handoff must not copy the encoded batch")
+	cancel()
 	select {
-	case <-finished:
-		close(release)
-		t.Fatal("request returned while its worker was still running")
-	case <-time.After(50 * time.Millisecond):
+	case <-returned:
+		t.Fatal("worker reused bytes while the HTTP goroutine still owned them")
+	case <-time.After(20 * time.Millisecond):
 	}
-	close(release)
+	require.Equal(t, "encoded batch", string(call.data))
+	call.done <- streamingIOResult{err: context.Canceled}
 	select {
-	case <-finished:
+	case err := <-returned:
+		require.ErrorIs(t, err, context.Canceled)
 	case <-time.After(time.Second):
-		t.Fatal("request did not return after worker exit")
+		t.Fatal("acknowledgement did not release the worker")
 	}
-	require.Equal(t, http.StatusRequestTimeout, w.Code)
+	_, err := writer.Write([]byte("late batch"))
+	require.ErrorIs(t, err, context.Canceled)
 }
