@@ -7726,7 +7726,7 @@ func (_c *MixCoord_ListDatabases_Call) RunAndReturn(run func(context.Context, *m
 }
 
 // GetFileResourceSnapshot provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) GetFileResourceSnapshot(_a0 context.Context, _a1 *milvuspb.ListFileResourcesRequest) (*rootcoordpb.FileResourceSnapshot, error) {
+func (_m *MixCoord) GetFileResourceSnapshot(_a0 context.Context, _a1 *rootcoordpb.GetFileResourceSnapshotRequest) (*rootcoordpb.FileResourceSnapshot, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
@@ -7735,10 +7735,10 @@ func (_m *MixCoord) GetFileResourceSnapshot(_a0 context.Context, _a1 *milvuspb.L
 
 	var r0 *rootcoordpb.FileResourceSnapshot
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListFileResourcesRequest) (*rootcoordpb.FileResourceSnapshot, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest) (*rootcoordpb.FileResourceSnapshot, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListFileResourcesRequest) *rootcoordpb.FileResourceSnapshot); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest) *rootcoordpb.FileResourceSnapshot); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
@@ -7746,7 +7746,7 @@ func (_m *MixCoord) GetFileResourceSnapshot(_a0 context.Context, _a1 *milvuspb.L
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListFileResourcesRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest) error); ok {
 		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -7762,14 +7762,14 @@ type MixCoord_GetFileResourceSnapshot_Call struct {
 
 // GetFileResourceSnapshot is a helper method to define mock.On call
 //   - _a0 context.Context
-//   - _a1 *milvuspb.ListFileResourcesRequest
+//   - _a1 *rootcoordpb.GetFileResourceSnapshotRequest
 func (_e *MixCoord_Expecter) GetFileResourceSnapshot(_a0 interface{}, _a1 interface{}) *MixCoord_GetFileResourceSnapshot_Call {
 	return &MixCoord_GetFileResourceSnapshot_Call{Call: _e.mock.On("GetFileResourceSnapshot", _a0, _a1)}
 }
 
-func (_c *MixCoord_GetFileResourceSnapshot_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListFileResourcesRequest)) *MixCoord_GetFileResourceSnapshot_Call {
+func (_c *MixCoord_GetFileResourceSnapshot_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetFileResourceSnapshotRequest)) *MixCoord_GetFileResourceSnapshot_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.ListFileResourcesRequest))
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetFileResourceSnapshotRequest))
 	})
 	return _c
 }
@@ -7779,7 +7779,7 @@ func (_c *MixCoord_GetFileResourceSnapshot_Call) Return(_a0 *rootcoordpb.FileRes
 	return _c
 }
 
-func (_c *MixCoord_GetFileResourceSnapshot_Call) RunAndReturn(run func(context.Context, *milvuspb.ListFileResourcesRequest) (*rootcoordpb.FileResourceSnapshot, error)) *MixCoord_GetFileResourceSnapshot_Call {
+func (_c *MixCoord_GetFileResourceSnapshot_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest) (*rootcoordpb.FileResourceSnapshot, error)) *MixCoord_GetFileResourceSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }
