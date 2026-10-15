@@ -123,10 +123,10 @@ func (s *Service) GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRe
 // targets, each valid and none repeated, and returns them.
 func validateRecoveryTargets(in []*pkindexpb.ManifestTarget) ([]manifest.Target, error) {
 	if len(in) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("targets must not be empty")
+		return nil, merr.WrapErrServiceInternalMsg("targets must not be empty")
 	}
 	if len(in) > maxRecoveryTargets {
-		return nil, merr.WrapErrParameterInvalidMsg("at most %d targets in one request, got %d", maxRecoveryTargets, len(in))
+		return nil, merr.WrapErrServiceInternalMsg("at most %d targets in one request, got %d", maxRecoveryTargets, len(in))
 	}
 	targets := make([]manifest.Target, 0, len(in))
 	seen := make(map[manifest.Target]struct{}, len(in))
@@ -136,7 +136,7 @@ func validateRecoveryTargets(in []*pkindexpb.ManifestTarget) ([]manifest.Target,
 		}
 		target := manifest.Target{CollectionID: t.GetCollectionId(), VChannel: t.GetVchannel()}
 		if _, ok := seen[target]; ok {
-			return nil, merr.WrapErrParameterInvalidMsg("target collection %d vchannel %q is repeated", target.CollectionID, target.VChannel)
+			return nil, merr.WrapErrServiceInternalMsg("target collection %d vchannel %q is repeated", target.CollectionID, target.VChannel)
 		}
 		seen[target] = struct{}{}
 		targets = append(targets, target)
@@ -152,16 +152,16 @@ func validateFlush(req *pkindexpb.CommitFlushRequest) error {
 		return err
 	}
 	if funcutil.IsPhysicalChannel(req.GetVchannel()) {
-		return merr.WrapErrParameterInvalidMsg("vchannel %q has no pchannel in its name", req.GetVchannel())
+		return merr.WrapErrServiceInternalMsg("vchannel %q has no pchannel in its name", req.GetVchannel())
 	}
 	if err := validateTerm(req.GetPchannelTerm()); err != nil {
 		return err
 	}
 	if req.GetCheckpointTimeTick() == 0 {
-		return merr.WrapErrParameterInvalidMsg("checkpoint_time_tick must not be 0")
+		return merr.WrapErrServiceInternalMsg("checkpoint_time_tick must not be 0")
 	}
 	if t := req.GetPkDataType(); t != schemapb.DataType_Int64 && t != schemapb.DataType_VarChar {
-		return merr.WrapErrParameterInvalidMsg("pk_data_type must be Int64 or VarChar, got %s", t)
+		return merr.WrapErrServiceInternalMsg("pk_data_type must be Int64 or VarChar, got %s", t)
 	}
 	return nil
 }
@@ -170,7 +170,7 @@ func validateFlush(req *pkindexpb.CommitFlushRequest) error {
 // can form a manifest key: a positive collection ID and a valid channel name.
 func validateTarget(collectionID int64, vchannel string) error {
 	if collectionID <= 0 {
-		return merr.WrapErrParameterInvalidMsg("collection_id must be positive, got %d", collectionID)
+		return merr.WrapErrServiceInternalMsg("collection_id must be positive, got %d", collectionID)
 	}
 	return validateChannelName("vchannel", vchannel)
 }
@@ -179,7 +179,7 @@ func validateTarget(collectionID int64, vchannel string) error {
 // not empty, ".", or "..", and does not contain "/".
 func validateChannelName(field, name string) error {
 	if name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
-		return merr.WrapErrParameterInvalidMsg("invalid %s %q", field, name)
+		return merr.WrapErrServiceInternalMsg("invalid %s %q", field, name)
 	}
 	return nil
 }
@@ -191,7 +191,7 @@ func validatePChannel(name string) error {
 		return err
 	}
 	if !funcutil.IsPhysicalChannel(name) {
-		return merr.WrapErrParameterInvalidMsg("pchannel %q is not a pchannel name", name)
+		return merr.WrapErrServiceInternalMsg("pchannel %q is not a pchannel name", name)
 	}
 	return nil
 }
@@ -199,7 +199,7 @@ func validatePChannel(name string) error {
 // validateTerm checks that a pchannel term is positive.
 func validateTerm(term int64) error {
 	if term <= 0 {
-		return merr.WrapErrParameterInvalidMsg("pchannel_term must be positive, got %d", term)
+		return merr.WrapErrServiceInternalMsg("pchannel_term must be positive, got %d", term)
 	}
 	return nil
 }
