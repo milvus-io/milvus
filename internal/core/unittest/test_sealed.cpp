@@ -2649,6 +2649,18 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
               dataset_size);
 
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        const auto offset = ids_ds->GetIds()[i];
+        if (int8_valid_values[offset]) {
+            EXPECT_EQ(int8_result->scalars().int_data().data(i),
+                      static_cast<int32_t>(int8_values[offset]));
+        }
+        if (int16_valid_values[offset]) {
+            EXPECT_EQ(int16_result->scalars().int_data().data(i),
+                      static_cast<int32_t>(int16_values[offset]));
+        }
+    }
+
     EXPECT_EQ(GetFieldDataRowValidData(*bool_result).size(), dataset_size);
     EXPECT_EQ(GetFieldDataRowValidData(*int8_result).size(), dataset_size);
     EXPECT_EQ(GetFieldDataRowValidData(*int16_result).size(), dataset_size);
@@ -5195,6 +5207,141 @@ TEST(SealedSegmentCowState, StagedEagerAndLazyManifestTasksOpenInOneBatch) {
     ASSERT_EQ(columns.size(), 2);
     EXPECT_EQ(columns[0]->DataByteSize(), 1);
     EXPECT_EQ(columns[1]->DataByteSize(), 1);
+}
+
+TEST(SealedSegmentCowState, ResolvesVortexColumnGroupLocalFormatFallback) {
+    const FieldId pk(100);
+    const FieldId raw(101);
+    const FieldId vortex(102);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta(FieldName("pk"),
+                               pk,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_RAW));
+    schema->AddField(FieldMeta(FieldName("raw"),
+                               raw,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_RAW));
+    schema->AddField(FieldMeta(FieldName("vortex"),
+                               vortex,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_VORTEX));
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->format = LOON_FORMAT_VORTEX;
+
+    column_group->columns = {schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Vortex);
+    column_group->columns = {schema->get_storage_column_name(raw),
+                             schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Default);
+    column_group->columns = {schema->get_storage_column_name(pk),
+                             schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Raw);
+
+    column_group->format = "parquet";
+    column_group->columns = {schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Default);
+    column_group->columns = {schema->get_storage_column_name(pk)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Raw);
+}
+
+TEST(SealedSegmentCowState, ResolvesCompleteVortexGroupsPerSchemaSnapshot) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_external_source("s3://bucket/path");
+    schema_proto.set_external_spec(R"({"format":"parquet"})");
+    auto add_field = [&](int64_t id,
+                         const std::string& column,
+                         const std::string& local_format) {
+        auto* field = schema_proto.add_fields();
+        field->set_fieldid(id);
+        field->set_name("field_" + std::to_string(id));
+        field->set_data_type(milvus::proto::schema::DataType::Int64);
+        field->set_external_field(column);
+        auto* param = field->add_type_params();
+        param->set_key("local_format");
+        param->set_value(local_format);
+        return field;
+    };
+    add_field(100, "id", LOCAL_FORMAT_RAW)->set_is_primary_key(true);
+    add_field(101, "shared", LOCAL_FORMAT_VORTEX);
+    add_field(102, "shared", LOCAL_FORMAT_VORTEX);
+    add_field(103, "direct", LOCAL_FORMAT_VORTEX);
+    add_field(104, "raw", LOCAL_FORMAT_RAW);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto add_group = [&](const std::string& format,
+                         std::vector<std::string> columns) {
+        auto group = std::make_shared<milvus_storage::api::ColumnGroup>();
+        group->format = format;
+        group->columns = std::move(columns);
+        groups->push_back(std::move(group));
+    };
+    add_group("parquet", {"direct"});
+    add_group(LOON_FORMAT_VORTEX, {});
+    add_group(LOON_FORMAT_VORTEX, {"shared"});
+    add_group(LOON_FORMAT_VORTEX, {"direct"});
+    add_group(LOON_FORMAT_VORTEX, {"direct", "raw"});
+    add_group(LOON_FORMAT_VORTEX, {"999"});
+    add_group(LOON_FORMAT_VORTEX, {"direct", "999"});
+    add_group(LOON_FORMAT_VORTEX, {"id", "direct"});
+    add_group("parquet", {"id"});
+    // Numeric field-id fallback does not establish a physical-name match.
+    add_group(LOON_FORMAT_VORTEX, {"103"});
+    using Format = VortexColumnGroupLocalFormat;
+    const std::vector<Format> expected = {Format::Default,
+                                          Format::Default,
+                                          Format::Vortex,
+                                          Format::Vortex,
+                                          Format::Default,
+                                          Format::Default,
+                                          Format::Default,
+                                          Format::Raw,
+                                          Format::Raw,
+                                          Format::Default};
+    EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, schema),
+              expected);
+
+    // A Raw alias excludes its entire group, including a Vortex-only projection.
+    schema_proto.mutable_fields(2)->mutable_type_params(0)->set_value(
+        LOCAL_FORMAT_RAW);
+    auto next_schema = Schema::ParseFrom(schema_proto);
+    auto next_expected = expected;
+    next_expected[2] = Format::Default;
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormats(groups, next_schema),
+        next_expected);
+    EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, schema),
+              expected);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
