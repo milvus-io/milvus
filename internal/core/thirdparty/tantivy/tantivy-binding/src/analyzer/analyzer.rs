@@ -246,6 +246,25 @@ mod tests {
     use tantivy::tokenizer::TokenStream;
 
     #[test]
+    fn test_missing_resource_name_classification_uses_validation_snapshot() {
+        let params = r#"{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"missing_dictionary","file_name":"stop.txt"}}]}"#;
+        let runtime_info = r#"{"resource_map":{}}"#;
+        let validation_info = r#"{"resource_map":{},"validate_resource_names":true}"#;
+        assert!(matches!(
+            super::validate_analyzer(params, validation_info),
+            Err(crate::error::TantivyBindingError::InvalidArgument(_))
+        ));
+        assert!(matches!(
+            super::validate_analyzer(params, runtime_info),
+            Err(crate::error::TantivyBindingError::InternalError(_))
+        ));
+        assert!(matches!(
+            create_analyzer(params, runtime_info),
+            Err(crate::error::TantivyBindingError::InternalError(_))
+        ));
+    }
+
+    #[test]
     fn test_jieba_custom_word_is_not_a_system_dictionary_name() {
         assert!(create_analyzer(
             r#"{"tokenizer":{"type":"jieba","dict":["custom_word"]}}"#,

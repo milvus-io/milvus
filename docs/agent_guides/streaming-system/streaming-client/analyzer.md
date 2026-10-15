@@ -100,7 +100,12 @@ RPC remains as a forwarding entry for existing callers. There is no
 
 Before native validation, the selected StreamingNode calls `fileresource.Prepare`
 to pull Coordinator's current resource snapshot and synchronize its local files
-and native resource table. Validation returns the deduplicated resource IDs.
+and native resource table. In sync mode, validation copies the applied name-to-ID map under the manager
+lock and passes it as explicit native extra info. Only this validation snapshot
+classifies an unknown resource name as bad input. Runtime lookups and non-sync
+modes retain system-error semantics. A concurrent sync cannot change the names
+seen by an in-flight validation; if it removes a referenced file, native file I/O
+still reports a system error. Validation returns the deduplicated resource IDs.
 RootCoord reserves these references under its existing metadata lock before DDL
 publication; a concurrent resource removal must fail reservation rather than
 publish a schema with missing resources. RootCoord does not wait for all QNs to
@@ -117,8 +122,11 @@ uses its existing readiness/retry loop, returns Unimplemented immediately, and
 maps invalid arguments to the public DDL parameter-error contract. The same
 Analyzer request timeout bounds retries of persistent preparation failures, so
 DDL validation cannot retain its collection-name lock indefinitely when the
-caller supplied no deadline. No independent retry loop, discovery mechanism,
-or shutdown lifecycle is introduced.
+caller supplied no deadline. Known permanent storage failures during preparation
+(such as a missing object or denied access) terminate the streaming retry loop as
+system errors; unclassified network/gRPC errors and fetch timeouts remain eligible
+for retry. With no available StreamingNode, discovery waits up to that same
+request timeout. No independent retry loop or shutdown lifecycle is introduced.
 
 The internal Coordinator `GetFileResourceSnapshot` RPC uses a dedicated
 `GetFileResourceSnapshotRequest`. Its `known_version` is the last snapshot
