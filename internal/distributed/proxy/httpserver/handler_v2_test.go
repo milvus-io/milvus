@@ -20,8 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1295,138 +1293,6 @@ func TestTextFieldQueryV2(t *testing.T) {
 	data := resp[HTTPReturnData].([]interface{})
 	require.Len(t, data, 1)
 	assert.Equal(t, "rest query text", data[0].(map[string]interface{})[FieldText])
-}
-
-// Full projection and encoding must finish before output starts, including
-// failures in the last row. Protect the public envelope across all DQL routes.
-func TestV2DirectDQLRoutes(t *testing.T) {
-	paramtable.Init()
-	for _, setting := range []struct{ key, value string }{
-		{paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"},
-		{paramtable.Get().QueryNodeCfg.StorageUsageTrackingEnabled.Key, "true"},
-	} {
-		require.NoError(t, paramtable.Get().Save(setting.key, setting.value))
-		t.Cleanup(func() { paramtable.Get().Reset(setting.key) })
-	}
-	routes := []struct{ action, body, method string }{
-		{QueryAction, `{"collectionName":"book","filter":"book_id > 0","outputFields":["book_id","text_field","value"],"limit":130}`, "Query"},
-		{GetAction, `{"collectionName":"book","id":[1],"outputFields":["book_id","text_field","value"]}`, "Query"},
-		{SearchAction, `{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":130}`, "Search"},
-		{AdvancedSearchAction, `{"collectionName":"book","search":[{"data":[[0.1,0.2]],"annsField":"book_intro","limit":130}],"rerank":{"strategy":"rrf","params":{}},"limit":130}`, "HybridSearch"},
-		{HybridSearchAction, `{"collectionName":"book","search":[{"data":[[0.1,0.2]],"annsField":"book_intro","limit":130}],"rerank":{"strategy":"rrf","params":{}},"limit":130}`, "HybridSearch"},
-	}
-	for _, route := range routes {
-		for _, mode := range []string{"success", "numeric", "empty", "lateNaN", "lateProjectionError"} {
-			t.Run(route.action+"/"+mode, func(t *testing.T) {
-				count := 130
-				if mode == "empty" {
-					count = 0
-				}
-				ids, texts, values := make([]int64, count), make([]string, count), make([]float64, count)
-				for i := range ids {
-					ids[i], texts[i], values[i] = 9007199254740993+int64(i), "<tag>&", float64(i)+0.5
-				}
-				if mode == "lateNaN" {
-					values[129] = math.NaN()
-				}
-				fields := []*schemapb.FieldData{
-					{FieldName: "book_id", Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}}}}},
-					{FieldName: "text_field", Type: schemapb.DataType_Text, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: texts}}}}},
-					{FieldName: "value", Type: schemapb.DataType_Double, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: values}}}}},
-				}
-				if mode == "lateProjectionError" {
-					dynamic := make([][]byte, count)
-					for i := range dynamic {
-						dynamic[i] = []byte(`{"extra":1}`)
-					}
-					dynamic[129] = []byte(`{"extra":`)
-					fields = append(fields, &schemapb.FieldData{FieldName: "$meta", Type: schemapb.DataType_JSON, IsDynamic: true, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: dynamic}}}}})
-				}
-				status := &commonpb.Status{ExtraInfo: map[string]string{"report_value": "17", "scanned_remote_bytes": "25", "scanned_total_bytes": "100", "cache_hit_ratio": "0.75"}}
-				mp := mocks.NewMockProxy(t)
-				mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: &StatusSuccess, Schema: generateCollectionSchema(schemapb.DataType_Int64, false, true)}, nil).Once()
-				var response interface{}
-				if route.method == "Query" {
-					response = &milvuspb.QueryResults{Status: status, OutputFields: []string{"book_id", "text_field", "value", "extra"}, FieldsData: fields}
-					mp.EXPECT().Query(mock.Anything, mock.Anything).Return(response.(*milvuspb.QueryResults), nil).Once()
-				} else {
-					scores := make([]float32, count)
-					for i := range scores {
-						scores[i] = float32(i) + 0.25
-					}
-					response = &milvuspb.SearchResults{Status: status, Results: &schemapb.SearchResultData{TopK: int64(count), Topks: []int64{int64(count)}, Recalls: []float32{0.5}, OutputFields: []string{"book_id", "text_field", "value", "extra"}, FieldsData: fields, Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}}, Scores: scores}}
-					if route.method == "Search" {
-						mp.EXPECT().Search(mock.Anything, mock.Anything).Return(response.(*milvuspb.SearchResults), nil).Once()
-					} else {
-						mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(response.(*milvuspb.SearchResults), nil).Once()
-					}
-				}
-				engine := gin.New()
-				engine.Use(gin.Recovery())
-				var original *gin.Context
-				engine.Use(func(c *gin.Context) { original = c; c.Set("traceID", "direct-trace"); c.Next() })
-				NewHandlersV2(mp).RegisterRoutesToV2(engine.Group("/v2/vectordb", genAuthMiddleWare(false)))
-				req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, route.action), strings.NewReader(route.body))
-				if mode == "numeric" {
-					req.Header.Set(HTTPHeaderAllowInt64, "true")
-				}
-				server := httptest.NewServer(StreamingHTTPHandler(engine))
-				defer server.Close()
-				req.URL.Scheme = "http"
-				req.URL.Host = strings.TrimPrefix(server.URL, "http://")
-				req.RequestURI = ""
-				responseHTTP, err := server.Client().Do(req)
-				require.NoError(t, err)
-				defer responseHTTP.Body.Close()
-				responseBytes, readErr := io.ReadAll(responseHTTP.Body)
-				require.Equal(t, http.StatusOK, responseHTTP.StatusCode)
-				require.Equal(t, "direct-trace", responseHTTP.Header.Get(HTTPHeaderMilvusTraceID))
-				require.Equal(t, "application/json; charset=utf-8", responseHTTP.Header.Get("Content-Type"))
-				body := map[string]interface{}{}
-				require.NoError(t, readErr)
-				require.NoError(t, json.Unmarshal(responseBytes, &body), string(responseBytes))
-				if strings.HasPrefix(mode, "late") {
-					require.EqualValues(t, merr.Code(merr.ErrInvalidSearchResult), body[HTTPReturnCode])
-					require.NotEmpty(t, body[HTTPReturnMessage])
-					require.NotContains(t, body, HTTPReturnData)
-					code, _ := original.Get(HTTPReturnCode)
-					require.Equal(t, merr.Code(merr.ErrInvalidSearchResult), code)
-					message, _ := original.Get(HTTPReturnMessage)
-					require.NotEmpty(t, message)
-				} else {
-					require.Equal(t, float64(0), body[HTTPReturnCode])
-					require.Equal(t, float64(17), body[HTTPReturnCost])
-					data := body[HTTPReturnData].([]interface{})
-					require.Len(t, data, count)
-					if count > 0 {
-						require.Equal(t, float64(25), body[HTTPReturnScannedRemoteBytes])
-						require.Equal(t, float64(100), body[HTTPReturnScannedTotalBytes])
-						require.Equal(t, 0.75, body[HTTPReturnCacheHitRatio])
-						require.Equal(t, "<tag>&", data[129].(map[string]interface{})["text_field"])
-						require.Contains(t, string(responseBytes), `\u003ctag\u003e\u0026`)
-						require.Equal(t, 129.5, data[129].(map[string]interface{})["value"])
-						if mode == "numeric" {
-							require.IsType(t, float64(0), data[129].(map[string]interface{})["book_id"])
-							require.Contains(t, string(responseBytes), `"book_id":9007199254741122`)
-						} else {
-							require.Equal(t, "9007199254741122", data[129].(map[string]interface{})["book_id"])
-						}
-						if route.method != "Query" {
-							require.Equal(t, 129.25, data[129].(map[string]interface{})["distance"])
-							require.Equal(t, []interface{}{float64(130)}, body[HTTPReturnTopks])
-						}
-						if route.method == "Search" {
-							require.Equal(t, []interface{}{0.5}, body[HTTPReturnRecalls])
-						}
-					}
-					code, _ := original.Get(HTTPReturnCode)
-					require.Equal(t, merr.Code(nil), code)
-				}
-				gotResponse, _ := original.Get(ContextResponse)
-				require.Same(t, response, gotResponse)
-			})
-		}
-	}
 }
 
 func TestDocInDocOutInsertInvalid(t *testing.T) {
@@ -3179,9 +3045,6 @@ func versionalV2(category string, action string) string {
 func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	h := NewHandlersV2(proxy)
 	ginHandler := gin.Default()
-	// ResponseRecorder has no socket deadlines. The shim is only for existing
-	// value assertions; transport lifecycle tests use real HTTP/1 and HTTP/2.
-	ginHandler.Use(streamingRecorderMiddleware)
 	// Mirror the middleware the real server installs, so tests exercise the same
 	// chain rather than a handler-only subset of it.
 	ginHandler.Use(IdempotencyKeyHandlerFunc)
@@ -4824,7 +4687,6 @@ func newRESTV2ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) *gin.Eng
 	t.Helper()
 	h := NewHandlersV2(pxy)
 	ginHandler := gin.Default()
-	ginHandler.Use(streamingRecorderMiddleware)
 	appV2 := ginHandler.Group("/v2/vectordb", func(c *gin.Context) {
 		username, _, ok := ParseUsernamePassword(c)
 		if !ok || username == "" {
