@@ -60,10 +60,11 @@ progress.
   reporting and backoff until the caller context ends. Field attempts copy the
   request with the latest assignment. Inline attempts have no PChannel and use
   the ready-connection picker. Unsupported RPCs return Unimplemented immediately.
-- Analyzer failures (parameters, schema admission, runner availability and
-  execution) use Milvus Status in the response. HandlerClient forwards these
-  responses without retrying or converting them to streaming errors. Proxy
-  preserves the Status, including its original code and retriability.
+- Analyzer failures (file-resource preparation, parameters, schema admission,
+  runner availability and execution) use Milvus Status in the response.
+  HandlerClient forwards these responses without retrying or converting them to
+  streaming errors. Proxy preserves the Status, including its original code and
+  retriability.
 
 Proxy resolves metadata once and forwards the result; it does not refresh
 metadata or retry analyzer responses. RunAnalyzer uses the same gRPC service

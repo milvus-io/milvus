@@ -294,16 +294,48 @@ func TestAnalyzerPreparationErrorClassification(t *testing.T) {
 			}).Build()
 			handler := NewHandlerService(nil)
 			_, validateErr := handler.ValidateAnalyzer(t.Context(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
-			_, runErr := handler.RunAnalyzer(t.Context(), inlineAnalyzerRequest("{}"))
-			for _, err := range []error{validateErr, runErr} {
-				require.Error(t, err)
-				wireErr := status.AsStreamingError(err)
-				require.Equal(t, tc.terminal, wireErr.IsUnrecoverable())
-				require.False(t, wireErr.IsInvalidArgument(), "storage state is not an analyzer parameter error")
-				if !tc.terminal {
-					require.ErrorIs(t, err, tc.err)
-				}
+			require.Error(t, validateErr)
+			wireErr := status.AsStreamingError(validateErr)
+			require.Equal(t, tc.terminal, wireErr.IsUnrecoverable())
+			require.False(t, wireErr.IsInvalidArgument(), "storage state is not an analyzer parameter error")
+			if !tc.terminal {
+				require.ErrorIs(t, validateErr, tc.err)
 			}
+			require.Zero(t, native.Times())
+		})
+	}
+}
+
+func TestRunAnalyzerPreparationStatus(t *testing.T) {
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+	streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
+	go server.Serve(listener)
+	defer server.Stop()
+	conn, err := grpc.NewClient("passthrough:///analyzer-preparation", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	require.NoError(t, err)
+	defer conn.Close()
+	client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
+	for _, prepareErr := range []error{
+		merr.WrapErrIoKeyNotFound("dictionary.txt"),
+		merr.Wrap(merr.ErrIoPermissionDenied, "dictionary.txt"),
+		merr.ErrServiceUnavailable,
+		context.DeadlineExceeded,
+	} {
+		mockey.PatchConvey(prepareErr.Error(), t, func() {
+			mockey.Mock(fileresource.Prepare).Return(prepareErr).Build()
+			native := mockey.Mock(analyzer.Run).Return(nil, nil).Build()
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			resp, err := client.RunAnalyzer(ctx, inlineAnalyzerRequest("{}"))
+			require.NoError(t, err, "preparation failures must remain business Status across streaming interceptors")
+			require.NotNil(t, resp)
+			want := merr.Status(merr.Wrap(prepareErr, "prepare analyzer file resources"))
+			require.True(t, proto.Equal(want, resp.GetStatus()), "want %v, got %v", want, resp.GetStatus())
+			require.Equal(t, merr.Code(prepareErr), resp.GetStatus().GetCode())
+			require.Equal(t, merr.IsRetryableErr(prepareErr), resp.GetStatus().GetRetriable())
+			require.Equal(t, merr.GetErrorType(prepareErr), merr.GetErrorType(merr.Error(resp.GetStatus())))
+			require.Empty(t, resp.GetResults())
 			require.Zero(t, native.Times())
 		})
 	}
