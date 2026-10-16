@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
@@ -775,16 +776,17 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	}
 
 	var (
-		totalSlots     = index.CalculateNodeSlots()
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importV2Used   = node.importScheduler.Slots()
-		importV3Used   = node.importV3Scheduler.Slots()
-		queueUsed      = node.importV3Scheduler.QueuedSlots()
+		totalSlots         = index.CalculateNodeSlots()
+		indexStatsUsed     = node.taskScheduler.TaskQueue.GetUsingSlot()
+		compactionUsed     = node.compactionExecutor.Slots()
+		importV2Used       = node.importScheduler.Slots()
+		importV3Used       = node.importV3Scheduler.Slots()
+		queueUsed          = node.importV3Scheduler.QueuedSlots()
+		pkindexCompactUsed = node.pkindexCompactionSlots()
 	)
 	importUsed := importV2Used + importV3Used
 
-	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed - queueUsed
+	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed - queueUsed - pkindexCompactUsed
 	if availableSlots < 0 {
 		availableSlots = 0
 	}
@@ -797,6 +799,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		mlog.Int64("importUsed", importUsed),
 		mlog.Int64("importV3Used", importV3Used),
 		mlog.Int64("importV3QueuedSlots", queueUsed),
+		mlog.Int64("pkindexCompactionUsed", pkindexCompactUsed),
 	)
 
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
@@ -804,6 +807,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "pkindexCompactionUsed").Set(float64(pkindexCompactUsed))
 
 	return &datapb.QuerySlotResponse{
 		Status:                   merr.Success(),
@@ -952,6 +956,12 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		external := taskType == taskcommon.ExternalCopySegment ||
 			req.GetExternalSpec() != "" || hasExternalSourceRoot(req.GetSources())
 		return node.copySegment(ctx, req, external)
+	case taskcommon.PKIndexCompaction:
+		req := &pkindexpb.CompactionRequest{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(merr.WrapErrServiceInternalErr(err, "decode pkindex compaction request")), nil
+		}
+		return node.createPKIndexCompaction(ctx, req)
 	default:
 		err := merr.Wrapf(merr.ErrServiceUnimplemented,
 			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
@@ -1129,6 +1139,8 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(taskcommon.FromCopySegmentState(resp.GetState()))
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.PKIndexCompaction:
+		return node.queryPKIndexCompaction(ctx, taskID)
 	default:
 		err := merr.Wrapf(merr.ErrServiceUnimplemented,
 			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
@@ -1207,6 +1219,8 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			mlog.Int64("taskID", taskID),
 			mlog.String("clusterID", clusterID))
 		return merr.Success(), nil
+	case taskcommon.PKIndexCompaction:
+		return node.dropPKIndexCompaction(ctx, taskID)
 	default:
 		err := merr.Wrapf(merr.ErrServiceUnimplemented,
 			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
