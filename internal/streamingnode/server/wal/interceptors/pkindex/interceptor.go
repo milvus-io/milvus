@@ -162,7 +162,7 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 	guard, err := i.decide(ctx, t, authority.DecideRequest{
 		Kind:     authority.KindInsert,
 		VChannel: msg.VChannel(),
-		PKs:      toPKs(keys),
+		PKs:      snpkindex.PKsOf(keys),
 		TxnID:    txnIDOf(msg),
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	guard, err := i.decide(ctx, t, authority.DecideRequest{
 		Kind:     authority.KindDelete,
 		VChannel: msg.VChannel(),
-		PKs:      toPKs(keys),
+		PKs:      snpkindex.PKsOf(keys),
 		TxnID:    txnIDOf(msg),
 	})
 	if err != nil {
