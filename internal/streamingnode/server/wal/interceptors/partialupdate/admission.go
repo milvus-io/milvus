@@ -17,12 +17,12 @@ import (
 type partialUpdateState struct {
 	channel types.PChannelInfo
 	// Immutable lower bound for proofs backed by this WAL lifecycle's state.
-	historyStartTs      uint64
-	pkVersions          *pkVersionIndex
-	fences              *collectionFenceIndex
-	incompleteTxnFences *vchannelFenceIndex
-	txnMu               sync.RWMutex
-	txns                map[message.TxnID]*pendingTxn
+	historyStartTs uint64
+	pkVersions     *pkVersionIndex
+	fences         *collectionFenceIndex
+	rowLocks       *rowLockManager
+	txnMu          sync.RWMutex
+	txns           map[message.TxnID]*pendingTxn
 }
 
 func newPartialUpdateState(versionIndexTTL time.Duration, maxVersionIndexBytes int64) *partialUpdateState {
@@ -37,10 +37,10 @@ func newPartialUpdateStateWithBudget(
 	versionIndexBudget *versionByteBudget,
 ) *partialUpdateState {
 	return &partialUpdateState{
-		pkVersions:          newPKVersionIndexWithBudget(versionIndexTTL, versionIndexBudget),
-		fences:              newCollectionFenceIndex(),
-		incompleteTxnFences: newVChannelFenceIndex(),
-		txns:                make(map[message.TxnID]*pendingTxn),
+		pkVersions: newPKVersionIndexWithBudget(versionIndexTTL, versionIndexBudget),
+		fences:     newCollectionFenceIndex(),
+		rowLocks:   globalRowLockManager,
+		txns:       make(map[message.TxnID]*pendingTxn),
 	}
 }
 
@@ -48,7 +48,6 @@ func newPartialUpdateStateWithBudget(
 // durably appended under the vchannel exclusive lock.
 func (s *partialUpdateState) removeDroppedVChannel(vchannel string, collectionID int64) {
 	s.pkVersions.Remove(vchannel)
-	s.incompleteTxnFences.Remove(vchannel)
 	s.fences.Remove(vchannel, collectionID)
 }
 
@@ -57,12 +56,126 @@ func (s *partialUpdateState) registerTxnCleanup(session *txn.TxnSession, timetic
 		return
 	}
 	txnID := session.TxnContext().TxnID
-	if !s.markTxnCleanup(txnID) {
+	s.txnMu.Lock()
+	txnState := s.txnLocked(txnID)
+	if txnState.cleanupRegistered {
+		s.txnMu.Unlock()
 		return
 	}
+	txnState.cleanupRegistered = true
+	txnState.session = session
+	s.txnMu.Unlock()
+
+	// Session cleanup holds the session mutex, so register outside txnMu.
+	// CDC may replace a session while replaying the same source transaction.
 	session.RegisterCleanup(func() {
-		s.deleteTxn(txnID)
+		s.txnMu.Lock()
+		defer s.txnMu.Unlock()
+		if s.txns[txnID] == txnState {
+			delete(s.txns, txnID)
+		}
 	}, timetick)
+}
+
+// prepareTxnBegin follows the session created by TimeTick before the WAL append.
+// A replayed Begin can reuse the source TxnID with a new session. Its write set
+// and recovery flags must start empty, and cleanup must belong to that session.
+// A failed Begin remains incomplete until another Begin is durably appended.
+func (s *partialUpdateState) prepareTxnBegin(session *txn.TxnSession) {
+	if session == nil {
+		return
+	}
+	txnID := session.TxnContext().TxnID
+	s.txnMu.Lock()
+	defer s.txnMu.Unlock()
+	if current := s.txns[txnID]; current == nil || current.session != session {
+		s.txns[txnID] = &pendingTxn{session: session}
+	}
+}
+
+// completeTxnWriteSet requires the recovered prefix and all runtime body PKs.
+// Local CAS proofs do not survive a WAL lifecycle change. Ordinary transactions
+// retain their original session and lease when their write set was recovered.
+func (s *partialUpdateState) completeTxnWriteSet(msg message.MutableMessage, txnID message.TxnID) (*pendingTxn, error) {
+	txnState := s.getTxn(txnID)
+	if err := checkTxnWriteSetComplete(msg, txnID, txnState); err != nil {
+		return nil, err
+	}
+	return txnState, nil
+}
+
+func checkTxnWriteSetComplete(msg message.MutableMessage, txnID message.TxnID, txnState *pendingTxn) error {
+	if message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil &&
+		(txnState == nil || !txnState.observedBegin || txnState.recovered) {
+		return status.NewPartialUpdateRetryable(
+			"partial update transaction %d has no complete runtime proof in the current WAL lifecycle", txnID,
+		)
+	}
+	if txnState == nil || !txnState.observedBegin {
+		return status.NewTransactionExpired(
+			"transaction %d write set could not be recovered; replay the full transaction", txnID,
+		)
+	}
+	return nil
+}
+
+// admitTxnBody counts a transaction body from the lock interceptor until its
+// append returns. Bodies record their PKs downstream of TimeTick, so CommitTxn
+// must not lock its write set while a body is still in flight.
+func (s *partialUpdateState) admitTxnBody(txnID message.TxnID) (func(), error) {
+	s.txnMu.Lock()
+	defer s.txnMu.Unlock()
+	// A live session always has a record, created at Begin or recovery. Do not
+	// create one here: a late body of a cleaned-up transaction is rejected by
+	// TimeTick and would otherwise leave a record that no cleanup removes.
+	txnState := s.txns[txnID]
+	if txnState == nil {
+		return func() {}, nil
+	}
+	if txnState.commitAdmitted {
+		return nil, status.NewTransactionExpired(
+			"transaction %d received a body after its CommitTxn took row locks; replay the full transaction",
+			txnID,
+		)
+	}
+	txnState.inFlightBodies++
+	return func() {
+		s.txnMu.Lock()
+		defer s.txnMu.Unlock()
+		txnState.inFlightBodies--
+	}, nil
+}
+
+// admitTxnCommit freezes a complete transaction write set and returns the PKs
+// to lock. Producers send CommitTxn only after every body append has returned;
+// a body still in flight means that contract was broken, so the commit is
+// rejected rather than locking a partial set.
+//
+// A missing or incomplete write set takes no row lock and is not classified
+// here. The commit cannot succeed: TimeTick rejects it by session state, for
+// example INVALID_TRANSACTION_STATE when a committed transaction's CommitTxn is
+// retried after its record was deleted, and validateCommit rejects any other
+// incomplete write set before the WAL append. A local record cannot become
+// complete in between, because only a replicated Begin can reuse a TxnID.
+func (s *partialUpdateState) admitTxnCommit(msg message.MutableMessage, txnID message.TxnID) (primaryKeys, error) {
+	// Check, freeze and snapshot the live record in one critical section so
+	// that no body can be admitted between the check and the freeze.
+	s.txnMu.Lock()
+	defer s.txnMu.Unlock()
+	txnState := s.txns[txnID]
+	if checkTxnWriteSetComplete(msg, txnID, txnState) != nil {
+		return primaryKeys{}, nil
+	}
+	if txnState.inFlightBodies > 0 {
+		if message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil {
+			return primaryKeys{}, status.NewPartialUpdateRetryable(
+				"partial update transaction %d has a body append in flight at commit admission", txnID)
+		}
+		return primaryKeys{}, status.NewTransactionExpired(
+			"transaction %d has a body append in flight at commit admission; replay the full transaction", txnID)
+	}
+	txnState.commitAdmitted = true
+	return txnState.pks.clone(), nil
 }
 
 // validateCommit snapshots a completed transaction and validates local CAS
@@ -71,21 +184,14 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 	if msg == nil || msg.VChannel() == "" {
 		return nil, status.NewUnrecoverableError("partial update commit vchannel is empty")
 	}
-	txnState := s.getTxn(txnID)
+	txnState, err := s.completeTxnWriteSet(msg, txnID)
+	if err != nil {
+		return nil, err
+	}
 	marker := message.HasPartialUpdateCAS(msg)
 	if txnState != nil && txnState.meta != nil && !marker {
 		return nil, status.NewUnrecoverableError("partial update transaction %d commit marker is missing", txnID)
 	}
-	if txnState == nil || !txnState.observedBegin {
-		if marker && msg.ReplicateHeader() == nil {
-			return nil, status.NewPartialUpdateRetryable(
-				"partial update transaction %d has no complete runtime proof in the current WAL lifecycle",
-				txnID,
-			)
-		}
-		return txnState, nil
-	}
-
 	if txnState.meta == nil {
 		if marker {
 			return nil, status.NewUnrecoverableError("partial update transaction %d has no CAS proof", txnID)
@@ -128,9 +234,6 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 			txnState.meta.GetReadTs(), s.historyStartTs, msg.VChannel(),
 		)
 	}
-	if err := s.incompleteTxnFences.Verify(msg.VChannel(), txnState.meta.GetReadTs()); err != nil {
-		return nil, err
-	}
 	if err := s.pkVersions.VerifyTyped(msg.VChannel(), txnState.pks, txnState.meta.GetReadTs(), msg.TimeTick()); err != nil {
 		return nil, err
 	}
@@ -142,8 +245,8 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 
 func (s *partialUpdateState) publishCommit(msg message.MutableMessage, txnState *pendingTxn) {
 	if txnState == nil || !txnState.observedBegin {
-		s.pkVersions.Advance(msg.TimeTick())
-		s.incompleteTxnFences.Update(msg.VChannel(), msg.TimeTick())
+		// Commit validation rejects these states before append. Do not publish
+		// an incomplete write set if a future caller bypasses that validation.
 		return
 	}
 	if txnState.pks.Len() > 0 {
@@ -160,6 +263,7 @@ func (s *partialUpdateState) publishCommit(msg message.MutableMessage, txnState 
 // transaction. observedBegin distinguishes a complete runtime write set from
 // a recovered transaction for which only a body suffix or CommitTxn was seen.
 type pendingTxn struct {
+	session           *txn.TxnSession
 	pks               primaryKeys
 	meta              *messagespb.PartialUpdateCAS
 	collectionID      int64
@@ -167,7 +271,13 @@ type pendingTxn struct {
 	casScopeSet       bool
 	fenceCollection   int64
 	observedBegin     bool
+	recovered         bool
 	cleanupRegistered bool
+	// inFlightBodies counts bodies between the lock interceptor and the end
+	// of their append. commitAdmitted is set once CommitTxn has taken its row
+	// locks; later bodies are rejected so the locked write set cannot grow.
+	inFlightBodies int
+	commitAdmitted bool
 }
 
 func (s *partialUpdateState) txnLocked(txnID message.TxnID) *pendingTxn {
@@ -254,17 +364,6 @@ func (s *partialUpdateState) recordTxnFence(txnID message.TxnID, collectionID in
 	s.txnLocked(txnID).fenceCollection = collectionID
 }
 
-func (s *partialUpdateState) markTxnCleanup(txnID message.TxnID) bool {
-	s.txnMu.Lock()
-	defer s.txnMu.Unlock()
-	txnState := s.txnLocked(txnID)
-	if txnState.cleanupRegistered {
-		return false
-	}
-	txnState.cleanupRegistered = true
-	return true
-}
-
 func (s *partialUpdateState) getTxn(txnID message.TxnID) *pendingTxn {
 	s.txnMu.RLock()
 	defer s.txnMu.RUnlock()
@@ -273,6 +372,7 @@ func (s *partialUpdateState) getTxn(txnID message.TxnID) *pendingTxn {
 		return nil
 	}
 	return &pendingTxn{
+		session:           txnState.session,
 		pks:               txnState.pks.clone(),
 		meta:              cloneCASMeta(txnState.meta),
 		collectionID:      txnState.collectionID,
@@ -280,6 +380,7 @@ func (s *partialUpdateState) getTxn(txnID message.TxnID) *pendingTxn {
 		casScopeSet:       txnState.casScopeSet,
 		fenceCollection:   txnState.fenceCollection,
 		observedBegin:     txnState.observedBegin,
+		recovered:         txnState.recovered,
 		cleanupRegistered: txnState.cleanupRegistered,
 	}
 }

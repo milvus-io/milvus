@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	lockinterceptor "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
@@ -25,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -32,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -46,9 +49,16 @@ func TestPartialUpdateInterceptorBuildsIndependentPerWALState(t *testing.T) {
 	}).(*appendInterceptor)
 
 	require.NotSame(t, first.state, second.state)
+	require.Same(t, globalRowLockManager, first.state.rowLocks)
+	require.Same(t, first.state.rowLocks, second.state.rowLocks)
+	require.NotSame(t, first.state.pkVersions, second.state.pkVersions)
+	require.NotSame(t, first.state.fences, second.state.fences)
 	require.Same(t, first.state.pkVersions.budget, second.state.pkVersions.budget)
 	require.EqualValues(t, 1, first.state.channel.Term)
 	require.EqualValues(t, 2, second.state.channel.Term)
+	first.state.recordTxnBegin(10)
+	require.NotNil(t, first.state.getTxn(10))
+	require.Nil(t, second.state.getTxn(10))
 
 	first.state.pkVersions.UpdateAllTyped("v1", primaryKeys{
 		kind:        primaryKeyKindInt64,
@@ -72,6 +82,45 @@ func TestPartialUpdateInterceptorBuildsIndependentPerWALState(t *testing.T) {
 	require.Zero(t, budget.used.Load())
 	second.Close()
 	require.Zero(t, budget.used.Load())
+}
+
+func TestPartialUpdateInterceptorCloseAndDropPreserveSharedRowLocks(t *testing.T) {
+	// Different builders and WAL terms still coordinate through the same
+	// process-wide manager. Closing either tracker must not erase active locks.
+	first := (&interceptorBuilder{}).Build(&interceptors.InterceptorBuildParam{
+		ChannelInfo: types.PChannelInfo{Name: "p1", Term: 1},
+	}).(*appendInterceptor)
+	second := (&interceptorBuilder{}).Build(&interceptors.InterceptorBuildParam{
+		ChannelInfo: types.PChannelInfo{Name: "p1", Term: 2},
+	}).(*appendInterceptor)
+	t.Cleanup(second.Close)
+	require.Same(t, globalRowLockManager, first.state.rowLocks)
+	require.Same(t, first.state.rowLocks, second.state.rowLocks)
+	vchannel := t.Name()
+	pks := primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}
+	release := acquireTestRowLock(t, first.state.rowLocks, vchannel, pks, true)
+	first.Close()
+	second.state.removeDroppedVChannel(vchannel, 1)
+
+	key := pkLockKey{vchannel: vchannel, kind: primaryKeyKindInt64, int64Value: 10}
+	require.False(t, testPKMutex(t, globalRowLockManager, key).TryRLock())
+	result := startTestRowLock(context.Background(), second.state.rowLocks, vchannel,
+		primaryKeys{int64Values: []int64{5, 10}}, false)
+	waitForTestPKHeld(t, second.state.rowLocks, vchannel, 5)
+	select {
+	case acquired := <-result:
+		if acquired.release != nil {
+			acquired.release()
+		}
+		t.Fatalf("WAL close or collection drop erased another writer's row lock: %v", acquired.err)
+	default:
+	}
+	release()
+	acquired := awaitTestRowLock(t, result)
+	require.NoError(t, acquired.err)
+	require.NotNil(t, acquired.release)
+	acquired.release()
+	requireTestRowLocksAvailable(t, globalRowLockManager, vchannel, 5, 10)
 }
 
 func TestPartialUpdateChainSerializesConcurrentCASCommits(t *testing.T) {
@@ -193,10 +242,12 @@ func TestPartialUpdateChainPublishesCASBeforeNextOrdinaryWriter(t *testing.T) {
 	commitAtWAL := make(chan struct{})
 	releaseCommit := make(chan struct{})
 	commitDone := make(chan error, 1)
+	var commitTS uint64
 	go func() {
 		_, err := env.append(
 			commit,
-			func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
+				commitTS = msg.TimeTick()
 				close(commitAtWAL)
 				<-releaseCommit
 				return env.nextMessageID(), nil
@@ -213,8 +264,8 @@ func TestPartialUpdateChainPublishesCASBeforeNextOrdinaryWriter(t *testing.T) {
 			newDeleteMessage(&schemapb.IDs{
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}},
 			}),
-			func(context.Context, message.MutableMessage) (message.MessageID, error) {
-				writerAtWAL <- env.hasPKVersionAfter("v1", int64(10), readTS)
+			func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
+				writerAtWAL <- msg.TimeTick() > commitTS && env.hasPKVersionAfter("v1", int64(10), readTS)
 				return env.nextMessageID(), nil
 			},
 		)
@@ -225,13 +276,13 @@ func TestPartialUpdateChainPublishesCASBeforeNextOrdinaryWriter(t *testing.T) {
 	case <-writerAtWAL:
 		close(releaseCommit)
 		require.NoError(t, <-commitDone)
-		t.Fatal("ordinary writer reached the WAL while the CAS commit held the vchannel lock")
+		t.Fatal("ordinary writer reached the WAL while the CAS commit held its PK lock")
 	case <-time.After(20 * time.Millisecond):
 	}
 
 	close(releaseCommit)
 	require.NoError(t, <-commitDone)
-	require.True(t, <-writerAtWAL, "CAS PK version was not published before the next writer acquired the vchannel lock")
+	require.True(t, <-writerAtWAL, "next same-PK writer must see the CAS publication and receive a newer timestamp")
 	require.NoError(t, <-writerDone)
 }
 
@@ -251,20 +302,28 @@ func TestPartialUpdateChainRecoveredOrdinaryTxnKeepsCommitSemantics(t *testing.T
 
 	_, err := env.append(newCommitTxnMessage("v1", 1, 0), nil)
 	require.NoError(t, err)
-	requirePartialUpdateRetryable(t, env.partial.state.incompleteTxnFences.Verify("v1", readTS))
+	require.True(t, env.hasPKVersionAfter("v1", 10, readTS))
 
 	session, err := env.txnManager.GetSessionOfTxn(1)
 	require.NoError(t, err)
 	require.Equal(t, message.TxnStateCommitted, session.State())
 }
 
+// A recovered local CAS has no proof in the new WAL lifecycle. It takes no row
+// lock; validateCommit rejects it after TimeTick has checked the session, so
+// the session is rolled back and the WAL is untouched.
 func TestPartialUpdateChainRecoveredLocalCASReturnsRetry(t *testing.T) {
 	env := newPartialUpdateChainTestEnvWithRecoveredTxn(t, true)
 	commit := newCASCommitTxnMessage(t, "v1", 1, 0)
 
-	_, err := env.append(commit, nil)
+	appended := false
+	_, err := env.append(commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return env.nextMessageID(), nil
+	})
 	requirePartialUpdateRetryable(t, err)
 	require.True(t, txn.IsCommitAdmissionRejected(err))
+	require.False(t, appended)
 
 	session, err := env.txnManager.GetSessionOfTxn(1)
 	require.NoError(t, err)
@@ -450,7 +509,7 @@ func TestPartialUpdateInterceptorPublishesOrdinaryTxn(t *testing.T) {
 	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 129, 131))
 }
 
-func TestPartialUpdateInterceptorRecoveredOrdinaryTxnUsesVChannelFence(t *testing.T) {
+func TestPartialUpdateInterceptorRejectsOrdinaryTxnWithoutCompleteWriteSet(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
 	body := newDeleteMessage(&schemapb.IDs{
 		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}},
@@ -459,10 +518,13 @@ func TestPartialUpdateInterceptorRecoveredOrdinaryTxnUsesVChannelFence(t *testin
 	require.NoError(t, err)
 	require.False(t, interceptor.state.getTxn(1).observedBegin)
 
-	_, err = interceptor.DoAppend(context.Background(), newCommitTxnMessage("v1", 1, 130), appendOK)
-	require.NoError(t, err)
-	requirePartialUpdateRetryable(t, interceptor.state.incompleteTxnFences.Verify("v1", 129))
-	require.NoError(t, interceptor.state.incompleteTxnFences.Verify("v1", 130))
+	called := false
+	_, err = interceptor.DoAppend(context.Background(), newCommitTxnMessage("v1", 1, 130), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		called = true
+		return walimplstest.NewTestMessageID(1), nil
+	})
+	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	require.False(t, called)
 }
 
 func TestPartialUpdateInterceptorRecoveredLocalCASRetries(t *testing.T) {
@@ -487,7 +549,7 @@ func TestPartialUpdateInterceptorRecoveredLocalCASRetries(t *testing.T) {
 	require.False(t, called)
 }
 
-func TestPartialUpdateInterceptorRecoveredReplicatedCASUsesVChannelFence(t *testing.T) {
+func TestPartialUpdateInterceptorRejectsReplicatedCASTxnWithoutCompleteWriteSet(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 2})
 	msg := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(10)}, validCASMeta(100, 1)).
 		WithTxnContext(message.TxnContext{TxnID: 1, Keepalive: time.Second}).
@@ -497,9 +559,13 @@ func TestPartialUpdateInterceptorRecoveredReplicatedCASUsesVChannelFence(t *test
 
 	commit := newCASCommitTxnMessage(t, "v1", 1, 130).
 		WithReplicateHeader(newChainTestReplicateHeader(2, 130))
-	_, err = interceptor.DoAppend(context.Background(), commit, appendOK)
-	require.NoError(t, err)
-	requirePartialUpdateRetryable(t, interceptor.state.incompleteTxnFences.Verify("v1", 129))
+	called := false
+	_, err = interceptor.DoAppend(context.Background(), commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		called = true
+		return walimplstest.NewTestMessageID(1), nil
+	})
+	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	require.False(t, called)
 }
 
 func TestPartialUpdateInterceptorReplicatedCASBypassesSourceTerm(t *testing.T) {
@@ -631,8 +697,6 @@ func TestPartialUpdateInterceptorCollectionFences(t *testing.T) {
 		interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
 		interceptor.state.pkVersions.UpdateAll("v1", []any{int64(10)}, 110)
 		interceptor.state.pkVersions.UpdateAll("v2", []any{int64(20)}, 110)
-		interceptor.state.incompleteTxnFences.Update("v1", 110)
-		interceptor.state.incompleteTxnFences.Update("v2", 110)
 		interceptor.state.fences.Update("v1", 10, 110)
 		interceptor.state.fences.Update("v2", 20, 110)
 		_, err := interceptor.DoAppend(context.Background(), newDropCollectionMessage(10).WithTimeTick(120), appendOK)
@@ -644,8 +708,6 @@ func TestPartialUpdateInterceptorCollectionFences(t *testing.T) {
 		require.True(t, loaded)
 		require.Equal(t, versionIndexBudgetForEntries(1), interceptor.state.pkVersions.budget.used.Load())
 		requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v2", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{20}}, 109, 121))
-		require.NoError(t, interceptor.state.incompleteTxnFences.Verify("v1", 109))
-		requirePartialUpdateRetryable(t, interceptor.state.incompleteTxnFences.Verify("v2", 109))
 		require.NoError(t, interceptor.state.fences.Verify("v1", 10, 109))
 		requirePartialUpdateRetryable(t, interceptor.state.fences.Verify("v2", 20, 109))
 	})
@@ -654,7 +716,6 @@ func TestPartialUpdateInterceptorCollectionFences(t *testing.T) {
 func TestPartialUpdateInterceptorKeepsStateWhenDropCollectionAppendFails(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
 	interceptor.state.pkVersions.UpdateAll("v1", []any{int64(10)}, 110)
-	interceptor.state.incompleteTxnFences.Update("v1", 110)
 	interceptor.state.fences.Update("v1", 10, 110)
 	expectedErr := errors.New("append failed")
 
@@ -667,7 +728,6 @@ func TestPartialUpdateInterceptorKeepsStateWhenDropCollectionAppendFails(t *test
 	require.True(t, loaded)
 	require.Equal(t, versionIndexBudgetForEntries(1), interceptor.state.pkVersions.budget.used.Load())
 	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 109, 121))
-	requirePartialUpdateRetryable(t, interceptor.state.incompleteTxnFences.Verify("v1", 109))
 	requirePartialUpdateRetryable(t, interceptor.state.fences.Verify("v1", 10, 109))
 }
 
@@ -703,7 +763,7 @@ func TestPartialUpdateInterceptorExtractsOrdinaryInsertPKUsingDescriptor(t *test
 	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 119, 121))
 }
 
-func TestPartialUpdateInterceptorFallsBackToFenceWithoutSchema(t *testing.T) {
+func TestPartialUpdateInterceptorAllowsLegacyInsertWithoutSchemaAndPublishesFence(t *testing.T) {
 	schemaManager := &partialUpdateSchemaManagerTarget{}
 	m := mockey.Mock((*partialUpdateSchemaManagerTarget).GetPrimaryKeyDescriptor).
 		Return(shards.PrimaryKeyDescriptor{}, shards.ErrCollectionSchemaNotFound).
@@ -765,6 +825,7 @@ func TestPartialUpdateInterceptorRejectsTxnCASAttemptMismatchBeforeAppend(t *tes
 }
 
 type partialUpdateChainTestEnv struct {
+	buildParam   *interceptors.InterceptorBuildParam
 	chain        interceptors.InterceptorWithReady
 	partial      *appendInterceptor
 	txnManager   *txn.TxnManager
@@ -811,6 +872,27 @@ func newPartialUpdateChainTestEnvWithBuilders(
 	builders map[message.TxnID]*message.ImmutableTxnMessageBuilder,
 ) *partialUpdateChainTestEnv {
 	t.Helper()
+	return newPartialUpdateChainTestEnvWithBuildersAndGetter(t, builders, &staticPrimaryKeyDescriptorGetter{
+		descriptor: shards.PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64},
+	})
+}
+
+func newPartialUpdateChainTestEnvWithBuildersAndGetter(
+	t *testing.T,
+	builders map[message.TxnID]*message.ImmutableTxnMessageBuilder,
+	getter primaryKeyDescriptorGetter,
+) *partialUpdateChainTestEnv {
+	t.Helper()
+	return newPartialUpdateChainTestEnvWithBuildersGetterAndContext(context.Background(), t, builders, getter)
+}
+
+func newPartialUpdateChainTestEnvWithBuildersGetterAndContext(
+	ctx context.Context,
+	t *testing.T,
+	builders map[message.TxnID]*message.ImmutableTxnMessageBuilder,
+	getter primaryKeyDescriptorGetter,
+) *partialUpdateChainTestEnv {
+	t.Helper()
 	paramtable.Init()
 	resource.InitForTest(t)
 
@@ -822,20 +904,28 @@ func newPartialUpdateChainTestEnvWithBuilders(
 	if len(builders) == 0 {
 		<-txnManager.RecoverDone()
 	}
+	scannerMetrics := metricsutil.NewScanMetrics(channel).NewScannerMetrics()
+	t.Cleanup(scannerMetrics.Close)
+	txnBuffer := utility.NewTxnBuffer(resource.Resource().Logger(), scannerMetrics)
+	for _, builder := range builders {
+		begin, body := builder.Messages()
+		messages := append([]message.ImmutableMessage{begin}, body...)
+		lastTS := begin.TimeTick()
+		if len(body) > 0 {
+			lastTS = body[len(body)-1].TimeTick()
+		}
+		txnBuffer.HandleImmutableMessages(messages, lastTS)
+	}
 	param := &interceptors.InterceptorBuildParam{
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{TxnBuffer: txnBuffer},
+		Context:                ctx,
 		ChannelInfo:            channel,
+		WAL:                    syncutil.NewFuture[wal.WAL](),
 		LastTimeTickMessage:    lastTimeTick,
 		LastConfirmedMessageID: lastConfirmed,
 		MVCCManager:            mvcc.NewMVCCManager(lastTimeTick.TimeTick()),
 		TxnManager:             txnManager,
-		ShardManager: &partialUpdateSchemaManagerTarget{
-			primaryKeyDescriptorGetter: &staticPrimaryKeyDescriptorGetter{
-				descriptor: shards.PrimaryKeyDescriptor{
-					FieldID:  100,
-					DataType: schemapb.DataType_Int64,
-				},
-			},
-		},
+		ShardManager:           &partialUpdateSchemaManagerTarget{primaryKeyDescriptorGetter: getter},
 	}
 	partial := NewInterceptorBuilder().Build(param).(*appendInterceptor)
 	chain := interceptors.NewChainedInterceptor(
@@ -847,6 +937,7 @@ func newPartialUpdateChainTestEnvWithBuilders(
 	t.Cleanup(writeMetrics.Close)
 	t.Cleanup(chain.Close)
 	return &partialUpdateChainTestEnv{
+		buildParam:   param,
 		chain:        chain,
 		partial:      partial,
 		txnManager:   txnManager,
@@ -877,7 +968,7 @@ func (e *partialUpdateChainTestEnv) allocateReadTS(t *testing.T) uint64 {
 	return readTS
 }
 
-func (e *partialUpdateChainTestEnv) prepareCASTxn(t *testing.T, readTS uint64, pk int64) message.TxnContext {
+func (e *partialUpdateChainTestEnv) prepareCASTxn(t *testing.T, readTS uint64, pks ...int64) message.TxnContext {
 	t.Helper()
 	begin := message.NewBeginTxnMessageBuilderV2().
 		WithVChannel("v1").
@@ -888,7 +979,7 @@ func (e *partialUpdateChainTestEnv) prepareCASTxn(t *testing.T, readTS uint64, p
 	require.NoError(t, err)
 	require.NotNil(t, result.TxnCtx)
 
-	body := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(pk)}, validCASMeta(readTS, 1)).
+	body := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(pks...)}, validCASMeta(readTS, 1)).
 		WithTxnContext(*result.TxnCtx)
 	_, err = e.append(body, nil)
 	require.NoError(t, err)
