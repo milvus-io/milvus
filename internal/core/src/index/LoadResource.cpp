@@ -824,9 +824,12 @@ PackedScalarIndexLoadResource(
     const bool file_stream = type == INVERTED_INDEX_TYPE ||
                              type == NGRAM_INDEX_TYPE ||
                              type == RTREE_INDEX_TYPE;
+    const bool worker_writes = type != BITMAP_INDEX_TYPE;
+    const bool bounded_load = use_async_load || worker_writes;
     const bool may_write_files =
-        use_async_load && (mmap_enable || file_stream || type == MARISA_TRIE ||
-                           type == MARISA_TRIE_UPPER);
+        (!use_async_load && worker_writes) ||
+        (use_async_load && (mmap_enable || file_stream || type == MARISA_TRIE ||
+                            type == MARISA_TRIE_UPPER));
     EntryStreamLoadInfo legacy_stream;
     uint64_t total_transient = 0;
     uint64_t max_task = 0;
@@ -835,7 +838,7 @@ PackedScalarIndexLoadResource(
                 std::get_if<storage::EncryptedEntrySource>(&entry.source)) {
             legacy_stream.encrypted = true;
             for (const auto& slice : encrypted->slices) {
-                if (!use_async_load) {
+                if (!bounded_load) {
                     const auto bytes = SaturatingAdd(
                         slice.remote_bytes,
                         SaturatingMultiply(slice.plaintext_bytes, uint64_t{2}));
@@ -858,10 +861,13 @@ PackedScalarIndexLoadResource(
                 total_transient = SaturatingAdd(total_transient, bytes);
                 max_task = std::max(max_task, bytes);
             }
-        } else if (use_async_load) {
+        } else if (bounded_load) {
             const auto slice_size = storage::DefaultStreamSliceSize();
             auto bytes = entry.plaintext_size;
-            auto task_bytes = std::min<uint64_t>(bytes, slice_size);
+            auto task_bytes = std::min<uint64_t>(
+                bytes,
+                use_async_load ? slice_size
+                               : storage::MaxEntryStreamTaskBytes());
             if (may_write_files && bytes != 0) {
                 const auto slices = 1 + (bytes - 1) / slice_size;
                 bytes = SaturatingAdd(
@@ -879,13 +885,13 @@ PackedScalarIndexLoadResource(
     }
     // Estimates survive admission refreshes, including removal of all limits.
     // The shared overhead group applies the live global bound where eligible.
-    const auto read_peak = use_async_load ? total_transient
-                                          : ScalarIndexStreamMemoryOverhead(
-                                                index_size,
-                                                std::max(version, 3),
-                                                legacy_stream.encrypted,
-                                                file_stream,
-                                                legacy_stream);
+    const auto read_peak =
+        bounded_load ? total_transient
+                     : ScalarIndexStreamMemoryOverhead(index_size,
+                                                       std::max(version, 3),
+                                                       legacy_stream.encrypted,
+                                                       file_stream,
+                                                       legacy_stream);
     uint64_t staging_bytes = 0;
     uint64_t bitmap_resident_bytes = 0;
     if ((type == INVERTED_INDEX_TYPE || type == NGRAM_INDEX_TYPE) &&
@@ -928,11 +934,6 @@ PackedScalarIndexLoadResource(
         staging_bytes = SaturatingAdd(
             staging_bytes, directory.At("fm_index_null_bitmap").plaintext_size);
     }
-    if (!use_async_load && type == ASCENDING_SORT &&
-        metadata.contains("version") && directory.HasEntry("valid_bitset")) {
-        staging_bytes = SaturatingAdd(
-            staging_bytes, directory.At("valid_bitset").plaintext_size);
-    }
     auto request = ScalarIndexLoadResourceWithOverhead(field_type,
                                                        index_size,
                                                        resolved_params,
@@ -970,13 +971,13 @@ PackedScalarIndexLoadResource(
                  SaturatingAdd(request.final_memory_cost,
                                SaturatingAdd(staging_bytes, read_peak)));
     // The translator pins the load mode for the lifetime of this cell.
-    // Ordered sync prefetch retains completed buffers beyond worker execution;
-    // only its direct-to-file streams have worker-bounded scratch lifetimes.
+    // Non-bitmap sync plans consume slices on the downloading worker. Both
+    // modes keep admission through the destination write and scratch release.
     const bool can_share =
-        (use_async_load || file_stream) && staging_bytes == 0 &&
-        type != BITMAP_INDEX_TYPE && type != RTREE_INDEX_TYPE &&
+        bounded_load && staging_bytes == 0 && type != BITMAP_INDEX_TYPE &&
+        type != RTREE_INDEX_TYPE &&
         request.max_memory_cost - request.final_memory_cost <= read_peak;
-    if (!use_async_load) {
+    if (!bounded_load) {
         max_task = legacy_stream.encrypted
                        ? legacy_stream.max_task_transient_bytes
                        : SaturatingMultiply(
