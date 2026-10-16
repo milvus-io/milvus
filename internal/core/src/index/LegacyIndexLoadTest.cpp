@@ -58,6 +58,7 @@
 #include "index/test_utils/ScalarTestData.h"
 #include "knowhere/version.h"
 #include "storage/LocalFileIOPool.h"
+#include "storage/LegacyIndexFileIO.h"
 #include "storage/FileWriter.h"
 #include "storage/Util.h"
 #include "storage/artifact/FileSink.h"
@@ -596,9 +597,92 @@ TEST_F(LegacyIndexLoadTest, SyncMaterializationUsesWritePermitAndDirectIO) {
     }
 }
 
+TEST_F(LegacyIndexLoadTest, AsyncEnvelopeInspectionBoundsEachBatch) {
+    FILE_SLICE_SIZE.store(1024 * 1024);
+    PersistSorted();
+    const auto file = DataFile();
+    ASSERT_NE(file, nullptr);
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    auto restore = folly::makeGuard([&] { admission.SetCapacitySlots(4); });
+    struct Scenario {
+        size_t slots;
+        size_t batches;
+        size_t expected_inflight;
+    };
+    for (const auto scenario : {Scenario{0, 1, 16},
+                                Scenario{0, 2, 32},
+                                Scenario{32, 1, 16},
+                                Scenario{8, 2, 8},
+                                Scenario{1, 1, 1}}) {
+        SCOPED_TRACE(::testing::Message() << "slots=" << scenario.slots
+                                          << " batches=" << scenario.batches);
+        admission.SetCapacitySlots(scenario.slots);
+        fs_->files.clear();
+        fs_->opens = 0;
+        file->ResetCounters();
+        file->SetAutoComplete(false);
+        std::vector<std::vector<std::string>> batches(scenario.batches);
+        for (size_t batch = 0; batch < batches.size(); ++batch) {
+            batches[batch].reserve(64);
+            for (size_t i = 0; i < 64; ++i) {
+                auto path = std::to_string(batch) + "/" + std::to_string(i);
+                batches[batch].push_back(path);
+                // Aliased immutable objects let the file track aggregate I/O.
+                fs_->files.emplace(std::move(path), file);
+            }
+        }
+        folly::CancellationSource cancel;
+        std::vector<
+            std::future<std::shared_ptr<const storage::LegacyIndexFileInfos>>>
+            pending;
+        pending.reserve(batches.size());
+        auto drain = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            file->SetAutoComplete(true);
+            for (size_t i = 0; i < file->DirectReadCalls().size(); ++i)
+                file->Complete(i);
+            for (auto& result : pending)
+                if (result.valid())
+                    result.wait();
+        });
+        for (size_t batch = 0; batch < batches.size(); ++batch) {
+            pending.push_back(std::async(std::launch::async, [&, batch] {
+                return Run(storage::InspectLegacyIndexFilesAsync(
+                    batches[batch],
+                    context_.chunkManagerPtr,
+                    context_.fs,
+                    proto::common::LoadPriority::HIGH,
+                    cancel.getToken()));
+            }));
+        }
+        ASSERT_TRUE(file->WaitForCallCount(scenario.expected_inflight));
+        EXPECT_FALSE(file->WaitForCallCount(scenario.expected_inflight + 1,
+                                            std::chrono::milliseconds(30)));
+        EXPECT_EQ(file->PeakInflight(), scenario.expected_inflight);
+        if (scenario.slots == 0 || scenario.slots >= 16)
+            EXPECT_EQ(fs_->opens.load(), 16 * batches.size());
+        file->SetAutoComplete(true);
+        for (size_t i = 0; i < file->DirectReadCalls().size(); ++i)
+            file->Complete(i);
+        for (auto& result : pending) {
+            const auto infos = result.get();
+            EXPECT_EQ(infos->size(), 64);
+            for (const auto& [path, info] : *infos)
+                EXPECT_GT(info.payload_bytes, 0);
+        }
+        EXPECT_EQ(fs_->opens.load(), 64 * batches.size());
+        EXPECT_LE(file->PeakInflight(), scenario.expected_inflight);
+    }
+}
+
 TEST_F(LegacyIndexLoadTest, AsyncEnvelopeInspectionOverlapsAndDrainsOnFailure) {
-    for (const auto mode : {0, 1, 2}) {
-        SCOPED_TRACE(mode);
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    auto restore = folly::makeGuard([&] { admission.SetCapacitySlots(4); });
+    for (const auto [slots, mode] :
+         {std::pair{0, 0}, {0, 1}, {0, 2}, {4, 0}, {4, 1}, {4, 2}}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "slots=" << slots << " mode=" << mode);
+        admission.SetCapacitySlots(slots);
         FILE_SLICE_SIZE.store(1024 * 1024);
         PersistSorted();
         auto source =

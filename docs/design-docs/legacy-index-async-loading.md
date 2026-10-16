@@ -57,11 +57,14 @@ and hold that lease through inspection, including failure draining. Async
 inspection releases its ordinary slot before acquiring descriptor bytes and a
 slot together, so a one-slot limit permits progress.
 This threshold changes resource handling, not the accepted storage format.
-Async inspection retains its per-batch window and drains issued I/O on failure.
+Async inspection starts at most 16 object inspections per batch concurrently,
+independent of the process-wide slot setting, and drains issued I/O on failure.
 All batches now also share `LoadAdmissionController` slots with payload loading;
-`common.loadAdmissionSlots=0` retains unlimited slot admission. Packed V3 stream
-opening and directory inspection participate too; directory inspection releases
-its slot before `__meta__` loading acquires its existing slice reservations.
+`common.loadAdmissionSlots=0` disables only the global slot limit. The per-batch
+window still applies, but multiple batches can exceed 16 inspections in total.
+Packed V3 stream opening and directory inspection participate too. Directory
+inspection releases its slot before `__meta__` loading acquires its existing
+slice reservations.
 No separate metadata controller or byte budget is introduced. Slot waits preserve
 request priority and cancellation; issued I/O drains before returning its slot.
 

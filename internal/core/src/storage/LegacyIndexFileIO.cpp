@@ -771,11 +771,12 @@ InspectLegacyIndexFilesAsync(std::span<const std::string> files,
     auto tasks = *infos | std::views::transform([&](auto& entry) {
         return inspect(entry.first, entry.second);
     });
-    const auto slots = LoadAdmissionController::GetInstance().CapacitySlots();
-    const auto concurrency =
-        std::max<size_t>(1, slots == 0 ? infos->size() : slots);
+    // Bound each batch even when process-wide slot admission is disabled.
+    constexpr size_t kMaxConcurrentInspections = 16;
     co_await folly::coro::co_withCancellation(
-        token, folly::coro::collectAllWindowed(std::move(tasks), concurrency));
+        token,
+        folly::coro::collectAllWindowed(std::move(tasks),
+                                        kMaxConcurrentInspections));
     ThrowIfCancelled(token, "LegacyIndexFileIO::InspectFilesComplete");
     co_return infos;
 }

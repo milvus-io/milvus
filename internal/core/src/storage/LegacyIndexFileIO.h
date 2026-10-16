@@ -94,7 +94,8 @@ LegacyIndexLoadTransientBytes(size_t total_bytes,
 using LegacyIndexFileInfos =
     std::unordered_map<std::string, LegacyIndexFileInfo>;
 
-// Inspect distinct objects with a per-batch window and shared load slots.
+// Inspect at most 16 distinct objects per batch concurrently, even with shared
+// slot limits disabled. Each I/O phase also reserves a shared load slot.
 // Failure cancels siblings and drains issued I/O.
 [[nodiscard]] folly::coro::Task<std::shared_ptr<const LegacyIndexFileInfos>>
 InspectLegacyIndexFilesAsync(std::span<const std::string> files,
