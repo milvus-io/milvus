@@ -291,20 +291,21 @@ class TestRestValueFidelity(TestBase):
         assert d["s"] == "1.50"
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_json_object_reads_back_native(self):
-        # On master latest nativeJSONResponse defaults to true, so a JSON object
-        # reads back as a native object.
+    def test_json_object_reads_back_as_json_text(self):
+        # 2.6 defaults nativeJSONResponse to false: static JSON fields return
+        # their stored JSON text, unlike dynamic fields.
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, j={"j": "hello"})])
         d = self._query(self._scalar_coll, f"id == {pk}", ["j"])["data"][0]
-        assert d["j"] == {"j": "hello"}, f"got {d['j']!r}"
+        assert isinstance(d["j"], str), f"expected JSON text, got {d['j']!r}"
+        assert json.loads(d["j"]) == {"j": "hello"}
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_json_string_reads_back_as_string(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, j="hello")])
         d = self._query(self._scalar_coll, f"id == {pk}", ["j"])["data"][0]
-        assert d["j"] == "hello", f"got {d['j']!r}"
+        assert d["j"] == json.dumps("hello"), f"got {d['j']!r}"
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_dynamic_field_bigint_top_level(self):
@@ -470,7 +471,8 @@ class TestRestValueFidelity(TestBase):
         col.flush()
         time.sleep(2)
         d = self._query(self._scalar_coll, f"id == {pk}", ["j"])["data"][0]
-        assert d["j"] == {"j": "hello"}, f"REST read of gRPC-written JSON mismatch: {d['j']!r}"
+        assert isinstance(d["j"], str), f"expected JSON text, got {d['j']!r}"
+        assert json.loads(d["j"]) == {"j": "hello"}, f"REST read of gRPC-written JSON mismatch: {d['j']!r}"
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_dynamic_bigint_grpc_write_rest_read(self):
@@ -759,7 +761,9 @@ class TestRestValueFidelity(TestBase):
         time.sleep(1)
         d_s = self._query(self._scalar_coll, f"id == {pk}", ["dyn_big", "j"])["data"][0]
         assert d_g["dyn_big"] == d_s["dyn_big"] == 9007199254740993
-        assert d_g["j"] == d_s["j"] == {"x": 1}
+        assert isinstance(d_g["j"], str) and isinstance(d_s["j"], str)
+        assert d_g["j"] == d_s["j"]
+        assert json.loads(d_g["j"]) == {"x": 1}
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_nullable_scalar_null_roundtrip(self):
@@ -812,7 +816,9 @@ class TestRestValueFidelity(TestBase):
         self.collection_client.flush(name)
         time.sleep(1)
         d = self._query(name, "id == 1", ["ai", "as"])["data"][0]
-        assert d["ai"] == [1, 2] and d["as"] == ["a", "b"]
+        # 2.6 returns ordinary arrays inside the ScalarField response envelope.
+        assert d["ai"]["Data"]["LongData"]["data"] == [1, 2]
+        assert d["as"]["Data"]["StringData"]["data"] == ["a", "b"]
 
     # ================= L1: additional rejection =================
 
