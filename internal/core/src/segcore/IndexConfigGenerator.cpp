@@ -59,15 +59,39 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     if (is_sparse) {
         const auto& index_params = index_meta_.GetIndexParams();
 
-        static const std::unordered_set<std::string>
-            sparse_growing_exclude_params = {
-                knowhere::meta::INDEX_TYPE,
-                knowhere::meta::METRIC_TYPE,
-                knowhere::indexparam::DROP_RATIO_BUILD};
-        for (const auto& [key, value] : index_params) {
-            if (sparse_growing_exclude_params.count(key) == 0) {
-                build_params_[key] = value;
-            }
+        // This allowlist is intentional: inherit only the algorithm and BM25
+        // scorer parameters, keeping interim parameters simele and independent of the
+        // persistent index. Because some build parameters are only for sealed index,
+        // not allowed for growing segment index.
+        // Do not forward quant_type, inverted_index_codec,
+        // sindi_window_size or block_max_block_size. Growing and unindexed
+        // sealed segments use Knowhere defaults for these settings, which may
+        // depend on the target index version. Quantization and scores can
+        // therefore differ from a persisted fp32/u32 index; the interim
+        // algorithm override does not guarantee matching its precision.
+        if (auto algo_it =
+                index_params.find(knowhere::indexparam::INVERTED_INDEX_ALGO);
+            algo_it != index_params.end()) {
+            build_params_[knowhere::indexparam::INVERTED_INDEX_ALGO] =
+                algo_it->second;
+        }
+
+        if (metric_type_ == knowhere::metric::BM25) {
+            build_params_[knowhere::meta::BM25_K1] =
+                index_params.at(knowhere::meta::BM25_K1);
+            build_params_[knowhere::meta::BM25_B] =
+                index_params.at(knowhere::meta::BM25_B);
+            build_params_[knowhere::meta::BM25_AVGDL] =
+                index_params.at(knowhere::meta::BM25_AVGDL);
+        }
+
+        const auto& algo = metric_type_ == knowhere::metric::BM25
+                               ? config.get_sparse_bm25_interim_index_algo()
+                               : config.get_sparse_ip_interim_index_algo();
+        if (!algo.empty()) {
+            // Override only the algorithm, preserving the index-type mapping
+            // and the BM25 scorer parameters copied above.
+            build_params_[knowhere::indexparam::INVERTED_INDEX_ALGO] = algo;
         }
     }
 
