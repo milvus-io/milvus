@@ -1328,7 +1328,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}}
+		s := &Server{meta: &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}, notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1340,12 +1340,13 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, s.meta.collections.Len())
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan)
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
 		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 		collections.Insert(1, &collectionInfo{ID: 1})
-		s := &Server{meta: &meta{collections: collections}}
+		s := &Server{meta: &meta{collections: collections}, notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1363,6 +1364,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		coll, ok = s.meta.collections.Get(1)
 		assert.True(t, ok)
 		assert.NotNil(t, coll.Properties)
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan, "an altered schema may add fields that need stats")
 	})
 }
 
