@@ -49,6 +49,7 @@ namespace pb = milvus::proto;
 class TestGrowingStorageV2 : public ::testing::Test {
     void
     SetUp() override {
+        milvus_storage::FileRowGroupReader::CleanFooterMetadataCache();
         fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
         SetUpCommonData();
