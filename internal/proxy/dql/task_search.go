@@ -868,6 +868,11 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 		sp.AddEvent("Call-function-udf")
 		for _, subReq := range t.SubReqs {
+			// Only subrequests on a function output field were rewritten; the
+			// others keep the placeholders validated during conversion.
+			if !embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, []int64{subReq.GetFieldId()}) {
+				continue
+			}
 			if err := t.validateFunctionOutputDimensions(subReq.GetPlaceholderGroup(), subReq.GetFieldId()); err != nil {
 				return err
 			}

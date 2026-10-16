@@ -1504,6 +1504,12 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 			{
 				FieldID: 104, Name: "ts", DataType: schemapb.DataType_Int64,
 			},
+			{
+				FieldID: 105, Name: "vector3", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
@@ -1727,6 +1733,29 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 	}
+
+	t.Run("hybrid revalidates only function outputs", func(t *testing.T) {
+		task := getHybridSearchTask(t, collectionName, [][]string{{"sentence1"}})
+		task.request.SubReqs = append(task.request.SubReqs, &milvuspb.SubSearchRequest{
+			PlaceholderGroup: mustMarshalPlaceholderGroup(t, commonpb.PlaceholderType_FloatVector, [][]byte{make([]byte, 4*4)}),
+			SearchParams: []*commonpb.KeyValuePair{
+				{Key: AnnsFieldKey, Value: "vector3"},
+				{Key: TopKKey, Value: "10"},
+			},
+			Nq: 1,
+		})
+		var validated []int64
+		mockValidate := mockey.Mock((*SearchTask).validateFunctionOutputDimensions).
+			To(func(_ *SearchTask, _ []byte, fieldID int64) error {
+				validated = append(validated, fieldID)
+				return nil
+			}).
+			Build()
+		defer mockValidate.UnPatch()
+
+		require.NoError(t, task.PreExecute(ctx))
+		assert.Equal(t, []int64{102}, validated)
+	})
 
 	invalidFunctionOutput := mustMarshalPlaceholderGroup(
 		t,
