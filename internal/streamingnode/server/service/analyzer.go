@@ -68,26 +68,20 @@ func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streami
 		if info.GetParams() != "" {
 			var params map[string]json.RawMessage
 			if err := json.Unmarshal([]byte(info.GetParams()), &params); err != nil || params == nil {
-				return nil, status.NewInvalidArgument("analyzer parameters must be a JSON object for field: %s, name: %s", info.GetField(), info.GetName())
+				return &streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("analyzer parameters must be a JSON object for field: %s, name: %s", info.GetField(), info.GetName()))}, nil
 			}
 		}
 		ids, err := fileresource.ValidateAnalyzer(info.GetParams())
 		if err != nil {
 			err = merr.Wrapf(err, "validate analyzer failed for field: %s, name: %s", info.GetField(), info.GetName())
-			if merr.GetErrorType(err) == merr.InputError {
-				// Translate the native input classification into the streaming wire dialect.
-				return nil, status.NewInvalidArgument(err.Error())
-			}
-			if !merr.IsRetryableErr(err) {
-				// Preserve terminal system failures as system errors. In particular,
-				// do not turn every native failure into a user parameter error.
-				return nil, status.NewUnrecoverableError(err.Error())
-			}
-			return nil, err
+			// Validation results must not enter the readiness retry loop. In
+			// particular, FileReadFailed can mean a misspelled file_name as well
+			// as a transient local I/O failure; preserve its original classification.
+			return &streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(err)}, nil
 		}
 		resourceIDs.Insert(ids...)
 	}
-	return &streamingpb.StreamingNodeValidateAnalyzerResponse{ResourceIds: resourceIDs.Collect()}, nil
+	return &streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Success(), ResourceIds: resourceIDs.Collect()}, nil
 }
 
 // Preparation can return gRPC, context and network errors without merr metadata.

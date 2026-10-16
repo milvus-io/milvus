@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -204,7 +205,7 @@ func TestValidateAnalyzerPreparesResources(t *testing.T) {
 }
 
 func TestValidateAnalyzerNativeTransport(t *testing.T) {
-	mockey.PatchConvey("native streaming errors, no response error payload", t, func() {
+	mockey.PatchConvey("native validation failures use response Status", t, func() {
 		mockey.Mock(fileresource.Prepare).Return(nil).Build()
 		listener := bufconn.Listen(1024 * 1024)
 		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
@@ -251,23 +252,22 @@ func TestValidateAnalyzerNativeTransport(t *testing.T) {
 				require.NoError(t, err)
 				require.Empty(t, resp.ResourceIds)
 			} else {
-				require.Error(t, err)
-				require.Nil(t, resp)
-				require.True(t, status.AsStreamingError(err).IsInvalidArgument(), "%s: %v", params, err)
+				require.NoError(t, err)
+				require.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(resp.GetStatus())), "%s: %v", params, resp.GetStatus())
 			}
 		}
-		var nativeErr error = merr.ErrServiceUnavailable
+		var nativeErr error
 		mockey.Mock(analyzer.ValidateAnalyzer).To(func(string, string) ([]int64, error) {
 			return nil, nativeErr
 		}).Build()
-		_, err = client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: "{}"}}})
-		require.Error(t, err)
-		require.False(t, status.AsStreamingError(err).IsUnrecoverable(), "transient system failures must remain retriable")
-		nativeErr = merr.ErrServiceInternal
-		_, err = client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: "{}"}}})
-		require.Error(t, err)
-		require.True(t, status.AsStreamingError(err).IsUnrecoverable())
-		require.False(t, status.AsStreamingError(err).IsInvalidArgument(), "terminal system failures must not be blamed on the user")
+		for _, failure := range []error{merr.ErrServiceUnavailable, merr.ErrServiceInternal} {
+			nativeErr = failure
+			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: "{}"}}})
+			require.NoError(t, err)
+			require.Equal(t, merr.Code(failure), resp.GetStatus().GetCode())
+			require.Equal(t, merr.IsRetryableErr(failure), resp.GetStatus().GetRetriable())
+			require.Equal(t, merr.SystemError, merr.GetErrorType(merr.Error(resp.GetStatus())))
+		}
 	})
 }
 
@@ -362,9 +362,38 @@ func TestValidateAnalyzerMissingResourceNativeTransport(t *testing.T) {
 		for _, mode := range []fileresource.Mode{fileresource.SyncMode, fileresource.CloseMode} {
 			fileresource.GlobalFileManager = fileresource.NewManager(nil, mode)
 			resp, err := client.ValidateAnalyzer(ctx, req)
-			require.Nil(t, resp)
-			require.Error(t, err)
-			require.Equal(t, mode == fileresource.SyncMode, status.AsStreamingError(err).IsInvalidArgument())
+			require.NoError(t, err)
+			require.Error(t, merr.Error(resp.GetStatus()))
+			require.Equal(t, mode == fileresource.SyncMode, merr.GetErrorType(merr.Error(resp.GetStatus())) == merr.InputError)
 		}
+	})
+}
+
+func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
+	mockey.PatchConvey("missing local file is a validation result, not a transport failure", t, func() {
+		mockey.Mock(fileresource.Prepare).Return(nil).Build()
+		previous := fileresource.GlobalFileManager
+		fileresource.GlobalFileManager = fileresource.NewManager(nil, fileresource.CloseMode)
+		defer func() { fileresource.GlobalFileManager = previous }()
+		listener := bufconn.Listen(1024 * 1024)
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
+		go server.Serve(listener)
+		defer server.Stop()
+		conn, err := grpc.NewClient("passthrough:///missing-validation-file", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		require.NoError(t, err)
+		defer conn.Close()
+		params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"` + filepath.Join(t.TempDir(), "missing.txt") + `"}}]}`
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		resp, err := streamingpb.NewStreamingNodeHandlerServiceClient(conn).ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: params, Field: "body"}}})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.Equal(t, int32(merr.CodeFileReadFailed), resp.GetStatus().GetCode())
+		require.True(t, resp.GetStatus().GetRetriable())
+		require.Equal(t, merr.SystemError, merr.GetErrorType(merr.Error(resp.GetStatus())))
+		require.Contains(t, resp.GetStatus().GetReason(), "body")
+		require.Contains(t, resp.GetStatus().GetReason(), "missing.txt")
+		require.Empty(t, resp.GetResourceIds())
 	})
 }

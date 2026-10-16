@@ -1067,4 +1067,5 @@ message StreamingNodeValidateAnalyzerRequest {
 
 message StreamingNodeValidateAnalyzerResponse {
     repeated int64 resource_ids = 1;
+    common.Status status = 2;
 }
