@@ -205,6 +205,9 @@ service RootCoord {
 
     rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
     rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
+    // Fan out the running-request calls to every proxy and merge the answers.
+    rpc ListRunningRequests(milvus.ListRunningRequestsRequest) returns (milvus.ListRunningRequestsResponse) {}
+    rpc CancelRequests(milvus.CancelRequestsRequest) returns (milvus.CancelRequestsResponse) {}
     rpc BackupEzk(internal.BackupEzkRequest) returns (internal.BackupEzkResponse) {}
     // File Resource Management
     rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}

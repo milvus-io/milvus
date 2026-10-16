@@ -1954,6 +1954,28 @@ func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 	})
 }
 
+func (c *Client) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ListRunningRequestsResponse, error) {
+		return client.ListRunningRequests(ctx, req)
+	})
+}
+
+func (c *Client) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.CancelRequestsResponse, error) {
+		return client.CancelRequests(ctx, req)
+	})
+}
+
 func (c *Client) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest, opts ...grpc.CallOption) (*querypb.GetQueryNodeDistributionResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(

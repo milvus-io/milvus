@@ -30,8 +30,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -41,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -50,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -4436,6 +4440,38 @@ func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {
 		Topks:      []int64{},
 	}
 	return &result
+}
+
+// TestSearchShardCanceledContextKeepsShardLeaderCache: a QueryNode error
+// observed after the request's own ctx is done is a consequence of the
+// cancellation, so the shard leader cache must stay intact. The mock manager
+// has no expectation for InvalidateShardLeaderCache; a call would fail the test.
+func TestSearchShardCanceledContextKeepsShardLeaderCache(t *testing.T) {
+	const nodeID int64 = 101
+	channel := "ch-canceled"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	qn := mocks.NewMockQueryNodeClient(t)
+	qn.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *querypb.SearchRequest, opts ...grpc.CallOption) (*internalpb.SearchResults, error) {
+			cancel()
+			return nil, context.Canceled
+		})
+
+	task := &SearchTask{
+		ctx: ctx,
+		SearchRequest: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search},
+		},
+		request:           &milvuspb.SearchRequest{DbName: "default", CollectionName: "c"},
+		Condition:         NewTaskCondition(ctx),
+		shardClientMgr:    shardclient.NewMockShardClientManager(t),
+		resultBuf:         typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+		queryChannelsNode: typeutil.NewConcurrentMap[string, int64](),
+	}
+
+	err := task.searchShard(ctx, nodeID, qn, channel)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 type GetPartitionIDsSuite struct {

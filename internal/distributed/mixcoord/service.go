@@ -862,6 +862,14 @@ func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 	return s.mixCoord.ClearReadTaskQueue(ctx, req)
 }
 
+func (s *Server) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return s.mixCoord.ListRunningRequests(ctx, req)
+}
+
+func (s *Server) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return s.mixCoord.CancelRequests(ctx, req)
+}
+
 func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
 	return s.mixCoord.SuspendBalance(ctx, req)
 }

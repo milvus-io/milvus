@@ -34,6 +34,15 @@ service Proxy {
   rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
   rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
   rpc SyncFileResource(internal.SyncFileResourceRequest) returns (common.Status) {}
+
+  // Running requests registered on THIS proxy. The public
+  // MilvusService.ListRunningRequests / CancelRequests fan out to every proxy
+  // through the coordinator and merge these per-proxy answers; the names
+  // differ because Proxy implements both services and Go methods may not
+  // collide. Request and response types are the public ones: a proxy-local
+  // answer has the same shape as the cluster-wide one.
+  rpc ListLocalRunningRequests(milvus.ListRunningRequestsRequest) returns (milvus.ListRunningRequestsResponse) {}
+  rpc CancelLocalRequests(milvus.CancelRequestsRequest) returns (milvus.CancelRequestsResponse) {}
 }
 
 message InvalidateCollMetaCacheRequest {

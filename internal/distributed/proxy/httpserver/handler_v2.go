@@ -248,6 +248,9 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/segments/describe":    "GetSegmentsInfo",
 	"/v2/vectordb/quotacenter/describe": "GetQuotaMetrics",
 
+	"/v2/vectordb/requests/running/list":   "ListRunningRequests",
+	"/v2/vectordb/requests/running/cancel": "CancelRequests",
+
 	"/v2/vectordb/common/run_analyzer": "RunAnalyzer",
 }
 
@@ -424,6 +427,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	// segment group
 	router.POST(SegmentCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetSegmentsInfoReq{} }, wrapperTraceLog(h.getSegmentsInfo))))
 	router.POST(QuotaCenterCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetQuotaMetricsReq{} }, wrapperTraceLog(h.getQuotaMetrics))))
+	router.POST(RunningRequestCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &ListRunningRequestsReq{} }, wrapperTraceLog(h.listRunningRequests))))
+	router.POST(RunningRequestCategory+CancelAction, timeoutMiddleware(wrapperPost(func() any { return &CancelRequestsReq{} }, wrapperTraceLog(h.cancelRequests))))
 
 	// common
 	router.POST(CommonCategory+RunAnalyzerAction, timeoutMiddleware(wrapperPost(func() any { return &RunAnalyzerReq{} }, wrapperTraceLog(h.runAnalyzer))))
@@ -4537,6 +4542,58 @@ func (h *HandlersV2) getQuotaMetrics(ctx context.Context, c *gin.Context, anyReq
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: response.GetMetricsInfo()})
 	}
 
+	return resp, err
+}
+
+func (h *HandlersV2) listRunningRequests(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*ListRunningRequestsReq)
+	req := &milvuspb.ListRunningRequestsRequest{
+		// Here the database name is one of four filters, not the target of the
+		// call, so it is taken from the body as written rather than from the
+		// name the wrapper resolved. The wrapper substitutes "default" when
+		// the body and the header name none, which for a filter would silently
+		// hide every other database's requests from an operator who asked
+		// about all of them. An empty filter means every database, which is
+		// what the same call over gRPC does.
+		DbName:         httpReq.DbName,
+		CollectionName: httpReq.CollectionName,
+		User:           httpReq.User,
+		MinElapsedMs:   httpReq.MinElapsedMs,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListRunningRequests", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListRunningRequests(reqCtx, req.(*milvuspb.ListRunningRequestsRequest))
+	})
+	if err == nil {
+		response := resp.(*milvuspb.ListRunningRequestsResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
+			"requests":    response.GetRequests(),
+			"nodeResults": response.GetNodeResults(),
+		}})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) cancelRequests(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CancelRequestsReq)
+	req := &milvuspb.CancelRequestsRequest{
+		RequestIds: httpReq.RequestIDs,
+		Reason:     httpReq.Reason,
+		User:       httpReq.User,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CancelRequests", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.CancelRequests(reqCtx, req.(*milvuspb.CancelRequestsRequest))
+	})
+	if err == nil {
+		response := resp.(*milvuspb.CancelRequestsResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
+			"canceled":     response.GetCanceled(),
+			"notFound":     response.GetNotFound(),
+			"undetermined": response.GetUndetermined(),
+			"nodeResults":  response.GetNodeResults(),
+		}})
+	}
 	return resp, err
 }
 

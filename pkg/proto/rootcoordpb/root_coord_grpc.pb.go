@@ -99,6 +99,8 @@ const (
 	RootCoord_AlterDatabase_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/AlterDatabase"
 	RootCoord_GetQuotaMetrics_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetQuotaMetrics"
 	RootCoord_ClearReadTaskQueue_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/ClearReadTaskQueue"
+	RootCoord_ListRunningRequests_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/ListRunningRequests"
+	RootCoord_CancelRequests_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/CancelRequests"
 	RootCoord_BackupEzk_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/BackupEzk"
 	RootCoord_AddFileResource_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AddFileResource"
 	RootCoord_RemoveFileResource_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/RemoveFileResource"
@@ -266,6 +268,9 @@ type RootCoordClient interface {
 	AlterDatabase(ctx context.Context, in *AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
 	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
+	// Fan out the running-request calls to every proxy and merge the answers.
+	ListRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error)
+	CancelRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error)
 	BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error)
 	// File Resource Management
 	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -971,6 +976,24 @@ func (c *rootCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb
 	return out, nil
 }
 
+func (c *rootCoordClient) ListRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	out := new(milvuspb.ListRunningRequestsResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ListRunningRequests_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) CancelRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	out := new(milvuspb.CancelRequestsResponse)
+	err := c.cc.Invoke(ctx, RootCoord_CancelRequests_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rootCoordClient) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
 	out := new(internalpb.BackupEzkResponse)
 	err := c.cc.Invoke(ctx, RootCoord_BackupEzk_FullMethodName, in, out, opts...)
@@ -1208,6 +1231,9 @@ type RootCoordServer interface {
 	AlterDatabase(context.Context, *AlterDatabaseRequest) (*commonpb.Status, error)
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
 	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
+	// Fan out the running-request calls to every proxy and merge the answers.
+	ListRunningRequests(context.Context, *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error)
+	CancelRequests(context.Context, *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error)
 	BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error)
 	// File Resource Management
 	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
@@ -1452,6 +1478,12 @@ func (UnimplementedRootCoordServer) GetQuotaMetrics(context.Context, *internalpb
 }
 func (UnimplementedRootCoordServer) ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ClearReadTaskQueue not implemented")
+}
+func (UnimplementedRootCoordServer) ListRunningRequests(context.Context, *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRunningRequests not implemented")
+}
+func (UnimplementedRootCoordServer) CancelRequests(context.Context, *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelRequests not implemented")
 }
 func (UnimplementedRootCoordServer) BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackupEzk not implemented")
@@ -2860,6 +2892,42 @@ func _RootCoord_ClearReadTaskQueue_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_ListRunningRequests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ListRunningRequestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ListRunningRequests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ListRunningRequests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ListRunningRequests(ctx, req.(*milvuspb.ListRunningRequestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_CancelRequests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.CancelRequestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CancelRequests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CancelRequests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CancelRequests(ctx, req.(*milvuspb.CancelRequestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RootCoord_BackupEzk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.BackupEzkRequest)
 	if err := dec(in); err != nil {
@@ -3332,6 +3400,14 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClearReadTaskQueue",
 			Handler:    _RootCoord_ClearReadTaskQueue_Handler,
+		},
+		{
+			MethodName: "ListRunningRequests",
+			Handler:    _RootCoord_ListRunningRequests_Handler,
+		},
+		{
+			MethodName: "CancelRequests",
+			Handler:    _RootCoord_CancelRequests_Handler,
 		},
 		{
 			MethodName: "BackupEzk",
