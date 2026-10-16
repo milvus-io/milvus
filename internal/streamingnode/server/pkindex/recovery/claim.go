@@ -107,7 +107,7 @@ func (r *Recovery) claim(ctx context.Context, committer pkindex.Committer, concu
 // readManifests reads the bodies of the found manifests in parallel, at most
 // concurrency at a time, and records each view in its Index. The first
 // failed read cancels the other reads: the whole Recover fails. It returns a
-// fatal error of any read before the error of a cancelled sibling.
+// fatal error of any read before the error of a canceled sibling.
 func (r *Recovery) readManifests(ctx context.Context, committer pkindex.Committer, found map[string]pkindex.RecoveryManifest, concurrency int, opts []retry.Option) error {
 	readCtx, cancelReads := context.WithCancel(ctx)
 	defer cancelReads()

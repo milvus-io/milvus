@@ -420,7 +420,7 @@ func TestOpenKeepsCommittedDirAndWipesEngineDir(t *testing.T) {
 	committed := idx.CommittedDirForTest()
 	require.NoError(t, os.MkdirAll(committed, 0o755))
 	kept := filepath.Join(committed, "7.sst")
-	require.NoError(t, os.WriteFile(kept, []byte("table"), 0o644))
+	require.NoError(t, os.WriteFile(kept, []byte("table"), 0o600))
 	idx.MarkReady(ctx, false)
 	insert(t, idx, 1, 5)
 	engineDir := filepath.Join(index.Dir(root, "v1"), "engine")
@@ -458,7 +458,7 @@ func TestResolveLocalRedownloadsATableWithTheWrongSize(t *testing.T) {
 	require.NoError(t, store.UploadFile(ctx, key, p.Local()[ref.ID]))
 	// corrupt the local copy: wrong size
 	local := index.CommittedPathForTest(idx.CommittedDirForTest(), ref.ID)
-	require.NoError(t, os.WriteFile(local, []byte("short"), 0o644))
+	require.NoError(t, os.WriteFile(local, []byte("short"), 0o600))
 
 	view := index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 11, Tables: []index.TableRef{ref}}
 	require.NoError(t, idx.InstallIfNewerForTest(ctx, view, nil))
@@ -554,8 +554,8 @@ func TestInstallReconcilesTheCommittedDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	stale := filepath.Join(dir, "99.sst")
 	partial := filepath.Join(dir, "5.sst.download-abc")
-	require.NoError(t, os.WriteFile(stale, []byte("x"), 0o644))
-	require.NoError(t, os.WriteFile(partial, []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(stale, []byte("x"), 0o600))
+	require.NoError(t, os.WriteFile(partial, []byte("x"), 0o600))
 	idx.SetCommitted(index.ManifestView{Version: 1, CheckpointTimeTick: 1})
 	require.NoError(t, idx.Install(ctx))
 	assert.NoFileExists(t, stale)

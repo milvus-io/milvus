@@ -29,7 +29,7 @@ import (
 )
 
 // installTask installs the committed table set of one Index and marks it
-// ready. A transient error retries with backoff until the task is cancelled
+// ready. A transient error retries with backoff until the task is canceled
 // or the Index closes; a fatal one (a missing or corrupted object) goes to
 // OnFatal.
 type installTask struct {
@@ -40,7 +40,7 @@ type installTask struct {
 }
 
 // Execute implements nodescheduler.Task. The scheduler cancels ctx when the
-// handle of the task is cancelled. It returns nil after a fatal error, which
+// handle of the task is canceled. It returns nil after a fatal error, which
 // OnFatal and the log line here report, and after the Index closed.
 func (t *installTask) Execute(ctx context.Context) error {
 	p := t.params()

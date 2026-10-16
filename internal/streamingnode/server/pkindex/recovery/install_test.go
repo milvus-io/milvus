@@ -145,7 +145,7 @@ func TestInstallTaskStopsAtClose(t *testing.T) {
 	view := committedTable(t, env, false)
 	env.Committer.SetManifest("v1", &index.FakeManifest{View: view})
 	store := env.Manager.StoreForTest().(*index.FakeStore)
-	store.FailDownloads(1 << 30) // every download fails: the install retries until it is cancelled
+	store.FailDownloads(1 << 30) // every download fails: the install retries until it is canceled
 	sched := nodescheduler.New(2)
 	t.Cleanup(sched.Close)
 	rec, err := Recover(ctx, env.Manager, Param{
