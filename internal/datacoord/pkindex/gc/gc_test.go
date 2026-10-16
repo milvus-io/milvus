@@ -85,6 +85,11 @@ func refs(ids ...int64) []*pkindexpb.SSTRef {
 	return out
 }
 
+// runRefs returns one compaction output table in a new run.
+func runRefs(id int64) []*pkindexpb.SSTRef {
+	return []*pkindexpb.SSTRef{{Id: id, RunId: 7, MinKey: []byte("a"), MaxKey: []byte("z")}}
+}
+
 func (e *env) upload(t *testing.T, vchannel string, ids ...int64) {
 	for _, id := range ids {
 		require.NoError(t, e.store.Write(context.Background(), sstKey(vchannel, id), []byte("x")))
@@ -150,7 +155,7 @@ func TestSSTSweep(t *testing.T) {
 	e.create(t, "v")
 	e.upload(t, "v", 1, 2, 3, 4, 5)
 	e.flush(t, "v", 10, 2, 1)
-	_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
+	_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: runRefs(3)})
 	require.NoError(t, err)
 	e.inFlight = func(context.Context, int64, string) ([]int64, error) { return []int64{4}, nil }
 
@@ -238,7 +243,7 @@ func TestGCDoesNotDependOnManagerCache(t *testing.T) {
 	other := manifest.New(e.pointers, e.store, testRoot)
 	flushWith(t, other, "v", 20, 2) // version 3
 	// version 4
-	_, err := other.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
+	_, err := other.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: runRefs(3)})
 	require.NoError(t, err)
 	flushWith(t, other, "v", 30, 4) // version 5
 	flushWith(t, other, "v", 40, 5) // version 6
@@ -294,7 +299,7 @@ func TestCompactionCommittedBetweenReads(t *testing.T) {
 	e.inFlight = func(context.Context, int64, string) ([]int64, error) {
 		e.store.Now = func() time.Time { return t0 }
 		defer func() { e.store.Now = func() time.Time { return e.now } }()
-		_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
+		_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: runRefs(3)})
 		require.NoError(t, err)
 		return nil, nil
 	}
