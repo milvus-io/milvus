@@ -1258,7 +1258,8 @@ AsyncRetrieveAsArrow(CTraceContext c_trace,
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
-            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
+            ValidateSegmentSchemaCompatibility(
+                segment, plan->schema_, plan->access_entries_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment);
