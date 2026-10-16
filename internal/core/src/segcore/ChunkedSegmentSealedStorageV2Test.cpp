@@ -163,6 +163,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
  protected:
     void
     SetUp() override {
+        milvus_storage::FileRowGroupReader::CleanFooterMetadataCache();
         bool pk_is_string = GetParam();
         auto* test_info =
             ::testing::UnitTest::GetInstance()->current_test_info();
