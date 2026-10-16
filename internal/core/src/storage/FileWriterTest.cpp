@@ -296,6 +296,41 @@ TEST_F(FileWriterTest, WritePropagatesFailureWithWriteLimit) {
     LocalFileIOPool::GetInstance().Configure(0);
 }
 
+// A failed write closes the file and frees the aligned buffer, so a caller
+// that swallows the error and keeps writing used to copy into freed memory on
+// the fast path. It must get an error instead.
+TEST_F(FileWriterTest, WriteAfterFailedWriteIsRejected) {
+    if (!std::filesystem::exists("/dev/full")) {
+        GTEST_SKIP() << "/dev/full is not available on this platform";
+    }
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    // /dev/full is seekable and fails every write with ENOSPC
+    FileWriter writer("/dev/full");
+    std::vector<char> data(kBufferSize * 4, 'x');
+    EXPECT_THROW(writer.Write(data.data(), data.size()), std::runtime_error);
+
+    // small enough to take the fast path into the freed buffer
+    std::vector<char> small(16, 'y');
+    EXPECT_THROW(writer.Write(small.data(), small.size()), std::runtime_error);
+}
+
+// With an empty buffer Finish() used to skip the flush and return the stale
+// file size of a writer whose data never reached the file.
+TEST_F(FileWriterTest, FinishAfterFailedWriteIsRejected) {
+    if (!std::filesystem::exists("/dev/full")) {
+        GTEST_SKIP() << "/dev/full is not available on this platform";
+    }
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    FileWriter writer("/dev/full");
+    std::vector<char> data(kBufferSize * 4, 'x');
+    EXPECT_THROW(writer.Write(data.data(), data.size()), std::runtime_error);
+    EXPECT_THROW(writer.Finish(), std::runtime_error);
+}
+
 TEST_F(FileWriterTest, MmapChunkTargetWithWriteback) {
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
