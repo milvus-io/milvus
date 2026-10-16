@@ -105,7 +105,7 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 		return merr.WrapErrParameterInvalidMsg("collection %s should not be empty", entityType)
 	}
 
-	invalidMsg := fmt.Sprintf("Invalid collection %s: %s. ", entityType, entity)
+	invalidMsg := fmt.Sprintf("Invalid collection %s: %s.", entityType, entity)
 	if len(entity) > paramtable.Get().ProxyCfg.MaxNameLength.GetAsInt() {
 		return merr.WrapErrParameterInvalidMsg("%s the length of a collection %s must be less than %s characters", invalidMsg, entityType,
 			paramtable.Get().ProxyCfg.MaxNameLength.GetValue())
