@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -497,11 +496,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate namespace sharding
 	if err := common.ValidateNamespaceShardingEnabled(t.GetProperties()...); err != nil {
-		return err
-	}
-
-	// validate row level security
-	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
 		return err
 	}
 
@@ -2079,35 +2073,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		t.CollectionID = collectionID
 		return nil
 	}
-	requiresManageRLS := false
-	for _, property := range t.GetProperties() {
-		if property.GetKey() == common.RLSEnabledKey || property.GetKey() == common.RLSForceKey {
-			requiresManageRLS = true
-			break
-		}
-	}
-	if !requiresManageRLS {
-		for _, key := range t.GetDeleteKeys() {
-			if key == common.RLSEnabledKey || key == common.RLSForceKey {
-				requiresManageRLS = true
-				break
-			}
-		}
-	}
-	if requiresManageRLS {
-		if err := resolveCollectionInfo(); err != nil {
-			return err
-		}
-		canonicalDBName := collInfo.DBName
-		if canonicalDBName == "" {
-			canonicalDBName = t.GetDbName()
-		}
-		if err := checkManageRLSPrivilege(ctx, t.GetMetaCache(), t.AlterCollectionRequest,
-			canonicalDBName, collInfo.Schema.GetName()); err != nil {
-			return err
-		}
-	}
-
 	// External source/spec form an atomic tuple bound to the physical data
 	// layout. The only supported way to change them is RefreshExternalCollection,
 	// which applies them atomically and re-runs the data load pipeline.
@@ -2127,16 +2092,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	if err := common.ValidateNamespaceShardingEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
 		return err
-	}
-	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
-		return err
-	}
-	for _, key := range t.GetDeleteKeys() {
-		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
-			if strings.EqualFold(key, expected) && key != expected {
-				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
-			}
-		}
 	}
 
 	if err := resolveCollectionInfo(); err != nil {
