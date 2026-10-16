@@ -3,6 +3,7 @@ package fileresource
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -119,7 +121,7 @@ func TestPrepareFileResourcesIgnoresSnapshotOvertakenDuringFetch(t *testing.T) {
 func setupPullTestManager(t *testing.T, version uint64) *SyncManager {
 	t.Helper()
 	previous := GlobalFileManager
-	manager := &SyncManager{version: atomic.NewUint64(version)}
+	manager := &SyncManager{version: atomic.NewUint64(version), resourceFileNames: make(map[string]string)}
 	GlobalFileManager = manager
 	t.Cleanup(func() {
 		SetSnapshotFetcher(nil)
@@ -131,15 +133,17 @@ func setupPullTestManager(t *testing.T, version uint64) *SyncManager {
 func TestValidateAnalyzerUsesResourceSnapshot(t *testing.T) {
 	manager := setupPullTestManager(t, 4)
 	manager.resourceMap = map[string]int64{"dictionary": 10}
+	manager.resourceFileNames = map[string]string{"dictionary": "stop.txt"}
 	native := mockey.Mock(analyzer.ValidateAnalyzer).To(func(params, extraInfo string) ([]int64, error) {
 		// A later sync may replace or mutate the inventory. The native request must
 		// still use the version copied under the manager lock, not the global table.
 		manager.Lock()
 		manager.resourceMap["dictionary"] = 20
+		manager.resourceFileNames["dictionary"] = "replacement.txt"
 		manager.version.Store(5)
 		manager.Unlock()
 		require.Equal(t, "{}", params)
-		require.JSONEq(t, `{"resource_map":{"dictionary":10},"validate_resource_names":true}`, extraInfo)
+		require.JSONEq(t, `{"resource_map":{"dictionary":10},"resource_file_names":{"dictionary":"stop.txt"},"validate_resource_names":true}`, extraInfo)
 		var snapshot struct {
 			Resources map[string]int64 `json:"resource_map"`
 		}
@@ -166,4 +170,41 @@ func TestValidateAnalyzerWithoutSyncInventory(t *testing.T) {
 		_, err := ValidateAnalyzer("{}")
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 	}
+}
+
+func TestSyncPublishesResourceFileNamesAtomically(t *testing.T) {
+	mockey.PatchConvey("filenames follow the successfully applied resource snapshot", t, func() {
+		manager := setupPullTestManager(t, 0)
+		manager.localPath = t.TempDir()
+		var downloadErr error
+		download := mockey.Mock((*BaseManager).downloadFile).To(func(_ *BaseManager, _ context.Context, _ storage.ChunkManager, _ *internalpb.FileResourceInfo, _ string, _ time.Duration) error {
+			return downloadErr
+		}).Build()
+		var activationErr error
+		mockey.Mock(analyzer.UpdateGlobalResourceInfo).To(func(map[string]int64) error {
+			return activationErr
+		}).Build()
+		first := []*internalpb.FileResourceInfo{{Id: 10, Name: "dictionary", Path: "dicts/stop.txt"}}
+		require.NoError(t, manager.Sync(t.Context(), 1, first))
+		require.Equal(t, map[string]string{"dictionary": "stop.txt"}, manager.resourceFileNames)
+		require.NoError(t, manager.Sync(t.Context(), 2, first))
+		require.Equal(t, 1, download.Times(), "an unchanged resource must reuse its file")
+		require.Equal(t, map[string]string{"dictionary": "stop.txt"}, manager.resourceFileNames)
+		next := []*internalpb.FileResourceInfo{{Id: 20, Name: "dictionary", Path: "dicts/replacement.txt"}}
+		downloadErr = merr.ErrServiceUnavailable
+		require.ErrorIs(t, manager.Sync(t.Context(), 3, next), downloadErr)
+		downloadErr = nil
+		activationErr = merr.ErrServiceInternal
+		require.ErrorIs(t, manager.Sync(t.Context(), 3, next), activationErr)
+		require.EqualValues(t, 2, manager.GetVersion())
+		require.Equal(t, map[string]int64{"dictionary": 10}, manager.resourceMap)
+		require.Equal(t, map[string]string{"dictionary": "stop.txt"}, manager.resourceFileNames)
+		activationErr = nil
+		require.NoError(t, manager.Sync(t.Context(), 3, next))
+		require.Equal(t, map[string]int64{"dictionary": 20}, manager.resourceMap)
+		require.Equal(t, map[string]string{"dictionary": "replacement.txt"}, manager.resourceFileNames)
+		require.NoError(t, manager.Sync(t.Context(), 4, nil))
+		require.Empty(t, manager.resourceMap)
+		require.Empty(t, manager.resourceFileNames)
+	})
 }

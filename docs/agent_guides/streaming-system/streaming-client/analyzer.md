@@ -103,8 +103,11 @@ RPC remains as a forwarding entry for existing callers. There is no
 Before native validation, the selected StreamingNode calls `fileresource.Prepare`
 to pull Coordinator's current resource snapshot and synchronize its local files
 and native resource table. In sync mode, validation copies the applied name-to-ID map under the manager
-lock and passes it as explicit native extra info. Only this validation snapshot
-classifies an unknown resource name as bad input. Runtime lookups and non-sync
+lock, together with the filenames derived from the registered object paths,
+and passes them as explicit native extra info. Only this validation snapshot
+classifies an unknown resource name or a mismatched remote `file_name` as bad
+input. The filename must equal the basename of the registered path; validation
+does not infer caller blame from local file existence. Runtime lookups and non-sync
 modes retain system-error semantics. A concurrent sync cannot change the names
 seen by an in-flight validation; if it removes a referenced file, native file I/O
 still reports a system error. Validation returns the deduplicated resource IDs.
@@ -118,9 +121,10 @@ The validation response carries a business Status and, on success, resource IDs.
 Native validation failures return in Status, preserving their error code, input
 classification and retriability. HandlerClient checks this Status after the
 readiness loop and does not retry business failures, even when Status marks an
-I/O error retriable. A wrong file_name or missing local path therefore returns
-the native file error immediately instead of holding the collection DDL lock
-through repeated readiness attempts. Filesystem absence alone does not prove
+I/O error retriable. A mismatched remote filename returns a parameter error;
+a missing local path returns the native I/O error without readiness retries.
+The outer Proxy-to-Coordinator client may retry retriable I/O Status within its
+existing attempt limit and the caller context. Filesystem absence alone does not prove
 invalid input: concurrent resource removal or worker-local state can cause the
 same failure, so these errors retain their system classification.
 Deterministically invalid analyzer options remain input errors at their Rust
