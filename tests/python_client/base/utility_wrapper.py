@@ -375,6 +375,7 @@ class ApiUtilityWrapper:
         return res, check_result
 
     def drop_collection(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.drop_collection, collection_name, timeout, using])
         check_result = ResponseChecker(
