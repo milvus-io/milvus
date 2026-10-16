@@ -23,17 +23,19 @@ import (
 )
 
 // RecoverBroadcaster recovers the broadcaster from the recovery info.
+// ctx only scopes recovery; the returned broadcaster owns its lifetime and must
+// be closed by the caller. It does not retain ctx or its values after recovery.
 func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
 	tasks, err := resource.Resource().StreamingCatalog().ListBroadcastTask(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return newBroadcastTaskManager(ctx, tasks), nil
+	return newBroadcastTaskManager(tasks), nil
 }
 
 // newBroadcastTaskManager creates a new broadcast task manager with recovery info.
-// return the manager, the pending broadcast tasks and the pending ack callback tasks.
-func newBroadcastTaskManager(ctx context.Context, protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
+// Its independent lifecycle ends when Close is called.
+func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
 	logger := resource.Resource().Logger().With(mlog.FieldComponent("broadcaster"))
 	metrics := newBroadcasterMetrics()
 	rkLocker := newResourceKeyLocker()
@@ -85,7 +87,7 @@ func newBroadcastTaskManager(ctx context.Context, protos []*streamingpb.Broadcas
 		idxOfKeys.Add(task.IdempotencyScope(), task.Header().BroadcastID)
 	}
 
-	managerCtx, cancel := context.WithCancel(ctx)
+	managerCtx, cancel := context.WithCancel(context.Background())
 	m := &broadcastTaskManager{
 		lifetime:           typeutil.NewLifetime(),
 		ctx:                managerCtx,
