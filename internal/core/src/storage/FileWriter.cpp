@@ -284,6 +284,10 @@ FileWriter::WriteInternal(const void* data, size_t nbyte) {
 
 void
 FileWriter::Write(const void* data, size_t nbyte) {
+    // a failed write closes the file and frees aligned_buf_ but keeps
+    // capacity_/offset_, so the fast path below would copy into freed memory
+    AssertInfo(fd_ != -1, "File is not open: {}", filename_);
+
     // if the data can fit in the aligned buffer, we can just copy it to the
     // aligned buffer
     if (nbyte <= capacity_ - offset_) {
@@ -332,6 +336,10 @@ FileWriter::FlushWithBufferedIO() {
 
 size_t
 FileWriter::Finish() {
+    // after a failed write the buffered tail is lost, so neither flushing it
+    // nor returning file_size_ as the finished size is valid
+    AssertInfo(fd_ != -1, "File is not open: {}", filename_);
+
     const bool needs_finish_io =
         offset_ != 0 ||
         (fdatasync_on_finish_ && !use_direct_io_ && file_size_ != 0);
