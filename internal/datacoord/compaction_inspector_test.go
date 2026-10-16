@@ -571,12 +571,12 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 	s.Error(s.handler.submitTask(t2))
 }
 
-func (s *CompactionPlanHandlerSuite) TestAtTaskLimit() {
+func (s *CompactionPlanHandlerSuite) TestIsFullAtMaxTaskNum() {
 	for _, tc := range []struct {
 		name             string
 		maxTaskNum       string
 		pending, running int
-		atLimit          bool
+		full             bool
 	}{
 		{"0 is unlimited", "0", 2, 2, false},
 		{"-1 is unlimited", "-1", 2, 2, false},
@@ -593,9 +593,7 @@ func (s *CompactionPlanHandlerSuite) TestAtTaskLimit() {
 			for i := 0; i < tc.running; i++ {
 				inspector.executingTasks[int64(100+i)] = newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(100 + i)}, nil, s.mockMeta, newMockVersionManager())
 			}
-			s.Equal(tc.atLimit, inspector.atTaskLimit())
-			// The soft cap must not make isFull skip whole trigger runs.
-			s.False(inspector.isFull())
+			s.Equal(tc.full, inspector.isFull())
 		})
 	}
 }

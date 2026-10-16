@@ -333,26 +333,18 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		mlog.Int64("signal.partitionID", signal.partitionID),
 		mlog.Int64s("signal.segmentIDs", signal.segmentIDs))
 
-	// A force signal is a manual compaction request, which is not capped.
-	var budget *triggerBudget
-	if !signal.isForce {
-		budget = newTriggerBudget()
-	}
-	// The compaction task limits are back-pressure, not an error: stop planning
-	// and leave the remaining plans to later signals.
-	limitReached := func() bool {
-		if !budget.stop(t.inspector) {
+	// A full inspector is back-pressure, not an error: an automatic signal stops
+	// planning and leaves the rest to later signals. A force signal is a manual
+	// compaction request, which is not capped.
+	inspectorFull := func() bool {
+		if signal.isForce || !t.inspector.isFull() {
 			return false
 		}
-		log.RatedInfo(context.TODO(), rate.Limit(1), "stop generating compaction plans, compaction task limit reached")
+		log.RatedInfo(context.TODO(), rate.Limit(1), "stop generating compaction plans since inspector is full")
 		return true
 	}
 
-	if !signal.isForce && t.inspector.isFull() {
-		log.Warn(context.TODO(), "skip to generate compaction plan due to handler full")
-		return merr.WrapErrServiceQuotaExceeded("compaction handler full")
-	}
-	if limitReached() {
+	if inspectorFull() {
 		return nil
 	}
 
@@ -374,11 +366,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			mlog.String("group.channel", group.channelName),
 		)
 
-		if !signal.isForce && t.inspector.isFull() {
-			log.Warn(context.TODO(), "skip to generate compaction plan due to handler full")
-			return merr.WrapErrServiceQuotaExceeded("compaction handler full")
-		}
-		if limitReached() {
+		if inspectorFull() {
 			return nil
 		}
 
@@ -417,11 +405,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		expectedSize := getExpectedSegmentSize(t.meta, coll.ID, coll.Schema)
 		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
 		for _, bucket := range plans {
-			if !signal.isForce && t.inspector.isFull() {
-				log.Warn(context.TODO(), "skip to generate compaction plan due to handler full")
-				return merr.WrapErrServiceQuotaExceeded("compaction handler full")
-			}
-			if limitReached() {
+			if inspectorFull() {
 				return nil
 			}
 			inputSegmentIDs := lo.Map(bucket.segments, func(s *SegmentInfo, _ int) int64 { return s.GetID() })
@@ -465,7 +449,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 					mlog.Err(err))
 				continue
 			}
-			budget.consume()
 
 			log.Info(context.TODO(), "time cost of generating compaction",
 				mlog.Int64("planID", task.GetPlanID()),

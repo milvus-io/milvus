@@ -281,7 +281,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 			return nil
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroViews, nil)
+	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroViews, false)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
@@ -321,80 +321,82 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 			return nil
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroViews, nil)
+	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroViews, false)
 }
 
-// TestHandleTickerTaskLimits checks that an automatic run stops at the
-// per-trigger budget, which spans its trigger types and counts successful
-// submissions only, and at the soft task limit, while its sort views are never
-// capped.
-func (s *CompactionTriggerManagerSuite) TestHandleTickerTaskLimits() {
+// TestHandleTickerSubmitsSortsFirstUntilFull checks that an automatic run
+// submits its sort views before the others and stops once the inspector is full.
+func (s *CompactionTriggerManagerSuite) TestHandleTickerSubmitsSortsFirstUntilFull() {
 	views := func(segmentIDs ...int64) []CompactionView {
 		return lo.Map(segmentIDs, func(segmentID int64, _ int) CompactionView {
 			return &MixSegmentView{label: s.testLabel, segments: []*SegmentView{{ID: segmentID, label: s.testLabel, Size: 1}}, triggerID: 1000}
 		})
 	}
-	// run triggers a SingleTicker run and returns the segments of the
-	// successful non-sort and sort submissions.
-	run := func(events map[CompactionTriggerType][]CompactionView) (capped, sorted []int64) {
-		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
-		handler := NewNMockHandler(s.T())
-		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
-			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: &schemapb.CollectionSchema{}}, nil)
-		s.triggerManager.handler = handler
-		s.triggerManager.allocator = newMockAllocator(s.T())
-		s.triggerManager.policies[SingleTicker] = &testCompactionPolicy{enabled: true, policyName: "test", triggerResult: events}
-		s.inspector.EXPECT().isFull().Return(false).Once()
-		s.inspector.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(func(task *datapb.CompactionTask) error {
-			segmentID := task.GetInputSegments()[0]
-			switch {
-			case segmentID == 900:
-				return merr.WrapErrCompactionPlanConflict("segment is compacting")
-			case task.GetType() == datapb.CompactionType_SortCompaction:
-				sorted = append(sorted, segmentID)
-			default:
-				capped = append(capped, segmentID)
-			}
-			return nil
-		})
-		s.triggerManager.handleTicker(context.Background(), SingleTicker)
-		return capped, sorted
-	}
-
-	s.Run("stops at maxTaskNumPerTrigger submissions", func() {
-		s.SetupTest()
-		paramtable.Get().Save(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key, "2")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key)
-		s.inspector.EXPECT().atTaskLimit().Return(false)
-
-		capped, sorted := run(map[CompactionTriggerType][]CompactionView{
-			TriggerTypeSingle:                views(900, 901, 902, 903),
-			TriggerTypeStorageVersionUpgrade: views(904),
-			TriggerTypeSort:                  views(905, 906),
-		})
-		// The rejected view 900 does not count; trigger types run in map order.
-		s.Len(capped, 2)
-		s.ElementsMatch([]int64{905, 906}, sorted)
+	s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+		Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: &schemapb.CollectionSchema{}}, nil)
+	s.triggerManager.handler = handler
+	s.triggerManager.allocator = newMockAllocator(s.T())
+	s.triggerManager.policies[SingleTicker] = &testCompactionPolicy{enabled: true, policyName: "test", triggerResult: map[CompactionTriggerType][]CompactionView{
+		TriggerTypeSingle: views(901, 902),
+		TriggerTypeSort:   views(905, 906),
+	}}
+	var submitted []int64
+	// The inspector is full once one task is submitted.
+	s.inspector.EXPECT().isFull().RunAndReturn(func() bool { return len(submitted) >= 1 })
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(func(task *datapb.CompactionTask) error {
+		submitted = append(submitted, task.GetInputSegments()...)
+		return nil
 	})
 
-	s.Run("still submits its sort views at the task limit", func() {
-		s.SetupTest()
-		s.inspector.EXPECT().atTaskLimit().Return(true)
+	s.triggerManager.handleTicker(context.Background(), SingleTicker)
+	s.Equal([]int64{905}, submitted)
+}
 
-		capped, sorted := run(map[CompactionTriggerType][]CompactionView{
-			TriggerTypeSingle: views(901, 902),
-			TriggerTypeSort:   views(905, 906),
-		})
-		s.Empty(capped)
-		s.ElementsMatch([]int64{905, 906}, sorted)
+// TestHandleSortSignal checks that the sort of a flushed segment is capped,
+// while the sort of a clustering output is not. Both are invisible until sorted.
+func (s *CompactionTriggerManagerSuite) TestHandleSortSignal() {
+	const segmentID = 900
+	setup := func(createdByCompaction bool) {
+		// Rebuild the fixture so the mocks verify their calls when the subtest ends.
+		s.SetupTest()
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		segment := genTestSegmentInfo(s.testLabel, segmentID, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
+		segment.IsInvisible = true
+		segment.CreatedByCompaction = createdByCompaction
+		s.meta.segments.SetSegment(segmentID, segment)
+		s.handler.(*NMockHandler).EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: &schemapb.CollectionSchema{}}, nil)
+		s.triggerManager = NewCompactionTriggerManager(newMockAllocator(s.T()), s.handler, s.inspector, s.meta, s.versionManager)
+	}
+
+	s.Run("sort of a flushed segment stops when full", func() {
+		setup(false)
+		s.inspector.EXPECT().isFull().Return(true).Once()
+		// No enqueueCompaction expectation is set, so a submission would fail the test.
+		s.triggerManager.handleSortSignal(context.Background(), segmentID)
+	})
+
+	s.Run("sort of a flushed segment is not capped without the sort sweep", func() {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableAutoCompaction.Key)
+		setup(false)
+		// No isFull expectation is set, so a check would fail the test.
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Once()
+		s.triggerManager.handleSortSignal(context.Background(), segmentID)
+	})
+
+	s.Run("sort of a clustering output is not capped", func() {
+		setup(true)
+		// No isFull expectation is set, so a check would fail the test.
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Once()
+		s.triggerManager.handleSortSignal(context.Background(), segmentID)
 	})
 }
 
-// Manual compaction is not capped: it neither consults atTaskLimit nor stops at
-// maxTaskNumPerTrigger.
+// Manual compaction is not capped: it never checks whether the inspector is full.
 func (s *CompactionTriggerManagerSuite) TestManualTriggerIsNotCapped() {
-	paramtable.Get().Save(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key, "1")
-	defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionMaxTaskNumPerTrigger.Key)
 	// One L0 segment per view, so the request yields three views.
 	paramtable.Get().Save(Params.DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.Key, "1")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.Key)
@@ -402,7 +404,7 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerIsNotCapped() {
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 	s.triggerManager.handler = handler
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil)
-	// No atTaskLimit expectation is set, so a call would fail the test.
+	// No isFull expectation is set, so a call would fail the test.
 	s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Times(3)
 
 	_, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{

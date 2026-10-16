@@ -6378,7 +6378,6 @@ type dataCoordConfig struct {
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
 	CompactionMaxTaskNum                   ParamItem `refreshable:"true"`
-	CompactionMaxTaskNumPerTrigger         ParamItem `refreshable:"true"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
 	CompactionRPCTimeout                       ParamItem `refreshable:"true"`
@@ -6815,24 +6814,13 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Key:          "dataCoord.compaction.maxTaskNum",
 		Version:      "3.0.1",
 		DefaultValue: "0",
-		Doc: `Soft cap on pending and running compaction tasks: automatic compaction stops submitting tasks once this many
-are pending or running, so concurrent submissions can briefly exceed it.
-Manual compaction and sort compaction (after flush, of clustering outputs, for import, and the periodic sort sweep)
-are not capped. 0 or a negative value means unlimited.`,
+		Doc: `Soft cap on pending and running compaction tasks: once reached, automatic compaction, including sort compaction and
+target-based compaction, stops planning and submitting tasks, so concurrent submissions can briefly exceed it.
+Manual compaction, import and the sort of clustering compaction outputs are not capped, nor is the sort of flushed
+segments while automatic compaction is disabled. 0 or a negative value means unlimited.`,
 		Export: true,
 	}
 	p.CompactionMaxTaskNum.Init(base.mgr)
-
-	p.CompactionMaxTaskNumPerTrigger = ParamItem{
-		Key:          "dataCoord.compaction.maxTaskNumPerTrigger",
-		Version:      "3.0.1",
-		DefaultValue: "0",
-		Doc: `Maximum number of compaction tasks that one automatic compaction trigger run submits; the rest are left to later runs.
-Manual compaction and sort compaction (after flush, of clustering outputs, for import, and the periodic sort sweep)
-are not capped. 0 or a negative value means unlimited.`,
-		Export: true,
-	}
-	p.CompactionMaxTaskNumPerTrigger.Init(base.mgr)
 
 	p.CompactionPreAllocateIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",

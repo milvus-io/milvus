@@ -1186,7 +1186,6 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 		assert.Equal(t, int64(4096), Params.GrowingSegmentsMemSizeInMB.GetAsInt64())
 		assert.Equal(t, 0, Params.CompactionMaxTaskNum.GetAsInt())
-		assert.Equal(t, 0, Params.CompactionMaxTaskNumPerTrigger.GetAsInt())
 
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
