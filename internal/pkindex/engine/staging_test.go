@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/sst"
+	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
 // Re-flushing a generation must produce the very same tables under the very

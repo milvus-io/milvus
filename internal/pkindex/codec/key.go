@@ -38,7 +38,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
 )
 
 // Int64PKSize is the encoded size of an int64 primary key.
@@ -58,7 +58,7 @@ func DecodeInt64PK(b []byte) (int64, error) {
 	if len(b) != Int64PKSize {
 		return 0, errors.Mark(
 			errors.Newf("invalid int64 pk key length %d, want %d", len(b), Int64PKSize),
-			pkerr.ErrCorrupted)
+			pkindex.ErrCorrupted)
 	}
 	return int64(binary.BigEndian.Uint64(b) ^ (1 << 63)), nil
 }

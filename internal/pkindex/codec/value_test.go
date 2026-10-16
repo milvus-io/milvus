@@ -24,7 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
 )
 
 func TestPKEntryRoundtrip(t *testing.T) {
@@ -47,14 +47,14 @@ func TestDecodePKEntryInvalid(t *testing.T) {
 	for _, b := range [][]byte{nil, {}, {byte(valueKindPKEntry)}, make([]byte, 8)} {
 		_, err := DecodePKEntry(b)
 		assert.Error(t, err)
-		assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+		assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 	}
 	// unknown kind
 	bad := EncodePKEntry(PKEntry{SegmentID: 1})
 	bad[0] = 0x7f
 	_, err := DecodePKEntry(bad)
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 }
 
 // The kind byte and the fixed part are the on-disk format; pinning them keeps

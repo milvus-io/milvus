@@ -53,7 +53,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/sst"
+	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
 // Generation identifies one container of writes. It increases monotonically
@@ -228,7 +228,7 @@ type Stats struct {
 // The conditions a caller branches on. They are sentinels rather than error
 // categories because "the engine is closed" and "that generation is not
 // frozen" call for different handling, which a shared merr code could not
-// tell apart. Translation to merr happens at the boundary (see pkerr).
+// tell apart. Translation to merr happens at the boundary (see the pkindex package).
 var (
 	// ErrClosed is returned by every method once the engine is closed.
 	ErrClosed = errors.New("pkindex engine closed")
