@@ -204,7 +204,10 @@ struct RegexRoutingCounts {
     size_t execute = 0;
     size_t legacy_guard = 0;
     size_t legacy_pattern = 0;
+    size_t like_pattern = 0;
     std::shared_ptr<const RegexIndexPlan> plan;
+    const void* candidate_data = nullptr;
+    const void* validity_data = nullptr;
 };
 
 // FmIndexReader remains final. This untimed observer retains the production
@@ -256,7 +259,9 @@ class CountingFMReader final : public index::IIndexReaderBase,
     }
     TargetBitmap
     IsNotNull() const override {
-        return nulls_->IsNotNull();
+        auto validity = nulls_->IsNotNull();
+        counts_->validity_data = validity.data();
+        return validity;
     }
     RegexIndexCostModel
     GetRegexIndexCostModel() const override {
@@ -274,7 +279,9 @@ class CountingFMReader final : public index::IIndexReaderBase,
     TargetBitmap
     ExecuteRegexIndexPlan(const RegexIndexPlan& plan) const override {
         ++counts_->execute;
-        return pattern_->ExecuteRegexIndexPlan(plan);
+        auto candidates = pattern_->ExecuteRegexIndexPlan(plan);
+        counts_->candidate_data = candidates.data();
+        return candidates;
     }
     bool
     ShouldUseForOp(index::PatternOp op,
@@ -289,7 +296,10 @@ class CountingFMReader final : public index::IIndexReaderBase,
     TargetBitmap
     PatternMatch(std::string_view pattern, index::PatternOp op) const override {
         counts_->legacy_pattern += op == index::PatternOp::RegexMatch;
-        return pattern_->PatternMatch(pattern, op);
+        counts_->like_pattern += op == index::PatternOp::Match;
+        auto candidates = pattern_->PatternMatch(pattern, op);
+        counts_->candidate_data = candidates.data();
+        return candidates;
     }
 
  private:
@@ -329,6 +339,40 @@ class PrefetchObservingUnaryExpr : public exec::PhyUnaryRangeFilterExpr {
 
  private:
     std::atomic<size_t> raw_prefetch_calls_{0};
+};
+
+class FMCandidateCacheObservingUnaryExpr
+    : public exec::PhyUnaryRangeFilterExpr {
+ public:
+    using PhyUnaryRangeFilterExpr::PhyUnaryRangeFilterExpr;
+
+    void
+    SeedCandidates(TargetBitmap candidates, TargetBitmap validity) {
+        cached_phase1_res_ =
+            std::make_shared<TargetBitmap>(std::move(candidates));
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(std::move(validity));
+    }
+
+    const TargetBitmap&
+    Candidates() const {
+        return *cached_phase1_res_;
+    }
+
+    const TargetBitmap&
+    Validity() const {
+        return *cached_index_chunk_valid_res_;
+    }
+
+    std::shared_ptr<const TargetBitmap>
+    CandidateAlias() const {
+        return cached_phase1_res_;
+    }
+
+    std::shared_ptr<const TargetBitmap>
+    ValidityAlias() const {
+        return cached_index_chunk_valid_res_;
+    }
 };
 
 std::vector<FieldDataPtr>
@@ -2026,6 +2070,497 @@ TEST(FmIndexExpressionTest, ExecutorRegexRareAndZeroKeepExactOneShotResults) {
             EXPECT_EQ(calls->plan->empty_result, pattern == "ABSENT_54191.*");
         }
     }
+}
+
+TEST_P(FmIndexPatternExpressionTest,
+       ExecutorSparseCandidateWordsAndChunksMatchBatches) {
+    const auto op = GetParam();
+    constexpr size_t n = 1027;
+    constexpr size_t batch = 128;
+    std::vector<std::string> rows(n, "foo " + std::string(1000, 'x'));
+    for (size_t row : {size_t{63},
+                       size_t{64},
+                       size_t{127},
+                       size_t{128},
+                       size_t{198},
+                       size_t{199},
+                       size_t{539},
+                       size_t{540},
+                       size_t{1026}}) {
+        rows[row] += " SPARSE_TOKEN";
+    }
+    // Both rows remain literal candidates, but fail the canonical ordering.
+    rows[64] = "SPARSE_TOKEN " + rows[0];
+    rows[540] = "SPARSE_TOKEN " + rows[0];
+    rows[65] += " SPARSEXTOKEN";  // '_' remains a literal in the LIKE case.
+    rows[127] += " SINGLE_TOKEN";
+    rows.back() += " TAIL_TOKEN";
+    std::vector<uint8_t> validity((n + 7) / 8, 0xff);
+    for (size_t row : {size_t{0}, size_t{128}, size_t{539}, size_t{1025}}) {
+        validity[row / 8] &= static_cast<uint8_t>(~(1u << (row % 8)));
+    }
+    auto chunks = MakeNullableStringChunks(rows, validity, {0, 199, 540, n});
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto loaded = LoadSealedFMMatch(rows,
+                                    chunks,
+                                    true,
+                                    validity.data(),
+                                    nullptr,
+                                    true,
+                                    ObserveFMReader(calls, 0));
+    ASSERT_EQ(loaded.segment->num_chunk_data(loaded.varchar_id), 3);
+    milvus::test::ExprBatchSizeGuard batch_guard(batch);
+    for (const auto& patterns :
+         std::array<std::pair<std::string, std::string>, 4>{
+             {{"foo.*SPARSE_TOKEN", R"(%foo%SPARSE\_TOKEN%)"},
+              {"foo.*SINGLE_TOKEN", R"(%foo%SINGLE\_TOKEN%)"},
+              {"foo.*TAIL_TOKEN", R"(%foo%TAIL\_TOKEN%)"},
+              {"foo.*ABSENT_TOKEN", R"(%foo%ABSENT\_TOKEN%)"}}}) {
+        const auto& pattern =
+            op == proto::plan::Match ? patterns.second : patterns.first;
+        PartialRegexMatcher regex_oracle(patterns.first);
+        LikePatternMatcher like_oracle(patterns.second);
+        const auto oracle = [&](const std::string& row) {
+            return op == proto::plan::Match ? like_oracle(row)
+                                            : regex_oracle(row);
+        };
+        for (bool masked : {false, true}) {
+            TargetBitmap mask(n, true);
+            if (masked) {
+                for (size_t row : {size_t{63}, size_t{127}, size_t{199}}) {
+                    mask.reset(row);
+                }
+            }
+            for (bool negate : {false, true}) {
+                std::optional<std::pair<TargetBitmap, TargetBitmap>> batched;
+                for (bool one_shot : {false, true}) {
+                    SCOPED_TRACE(pattern + "/masked=" + std::to_string(masked) +
+                                 "/not=" + std::to_string(negate) +
+                                 "/one_shot=" + std::to_string(one_shot));
+                    *calls = RegexRoutingCounts{};
+                    auto typed = MakeMatchTypedExpr(
+                        loaded.schema, loaded.varchar_id, pattern, true, op);
+                    expr::TypedExprPtr root = typed;
+                    if (negate) {
+                        root = std::make_shared<expr::LogicalUnaryExpr>(
+                            expr::LogicalUnaryExpr::OpType::LogicalNot, root);
+                    }
+                    auto query = std::make_shared<exec::QueryContext>(
+                        DEAFULT_QUERY_ID,
+                        loaded.segment.get(),
+                        n,
+                        MAX_TIMESTAMP);
+                    query->set_enable_expr_cache(false);
+                    exec::ExecContext execution(query.get());
+                    auto compiled =
+                        exec::CompileExpressions({root}, &execution, {}, false);
+                    if (one_shot) {
+                        ASSERT_TRUE(compiled[0]->CanExecuteAllAtOnce());
+                        compiled[0]->SetExecuteAllAtOnce();
+                    }
+                    exec::EvalCtx context(&execution);
+                    TargetBitmap hits;
+                    TargetBitmap valid;
+                    for (size_t begin = 0; begin < n;) {
+                        const size_t size =
+                            one_shot ? n : std::min(batch, n - begin);
+                        if (masked) {
+                            TargetBitmap local;
+                            local.append(mask, begin, size);
+                            context.set_bitmap_input(std::move(local));
+                        }
+                        VectorPtr output;
+                        compiled[0]->Eval(context, output);
+                        auto column =
+                            std::dynamic_pointer_cast<ColumnVector>(output);
+                        ASSERT_NE(column, nullptr);
+                        ASSERT_EQ(column->size(), size);
+                        if (one_shot) {
+                            // These are the actual reader allocations, observed
+                            // without keeping an extra owner of either bitmap.
+                            EXPECT_EQ(column->GetRawData(),
+                                      calls->candidate_data);
+                            EXPECT_EQ(column->GetValidRawData(),
+                                      calls->validity_data);
+                        }
+                        hits.append(
+                            TargetBitmapView(column->GetRawData(), size));
+                        valid.append(
+                            TargetBitmapView(column->GetValidRawData(), size));
+                        if (masked) {
+                            for (size_t i = 0; i < size; ++i) {
+                                EXPECT_EQ(context.get_bitmap_input()[i],
+                                          mask[begin + i]);
+                            }
+                        }
+                        begin += size;
+                    }
+                    EXPECT_EQ(calls->prepare,
+                              op == proto::plan::RegexMatch ? 1u : 0u);
+                    EXPECT_EQ(calls->execute,
+                              op == proto::plan::RegexMatch ? 1u : 0u);
+                    EXPECT_EQ(calls->like_pattern,
+                              op == proto::plan::Match ? 1u : 0u);
+                    EXPECT_EQ(calls->legacy_guard, 0u);
+                    EXPECT_EQ(calls->legacy_pattern, 0u);
+                    for (size_t row = 0; row < n; ++row) {
+                        const bool row_valid =
+                            validity[row / 8] & (1u << (row % 8));
+                        EXPECT_EQ(valid[row], row_valid) << row;
+                        if (mask[row] && row_valid) {
+                            EXPECT_EQ(hits[row], negate != oracle(rows[row]))
+                                << row;
+                        }
+                        if (batched.has_value()) {
+                            EXPECT_EQ(hits[row], batched->first[row]) << row;
+                            EXPECT_EQ(valid[row], batched->second[row]) << row;
+                        }
+                    }
+                    auto physical = compiled[0];
+                    if (negate) {
+                        physical = physical->GetInputsRef()[0];
+                    }
+                    if (auto adapter = std::dynamic_pointer_cast<
+                            exec::RawExprCacheAdapter>(physical)) {
+                        physical = adapter->wrapped_expr();
+                    }
+                    auto leaf = std::dynamic_pointer_cast<
+                        exec::PhyUnaryRangeFilterExpr>(physical);
+                    ASSERT_NE(leaf, nullptr);
+                    // Check before re-entering Eval: a moved-from cache must
+                    // never be read if one-shot completion missed its cursor.
+                    ASSERT_EQ(leaf->GetNextBatchSize(), 0);
+                    context.clear_bitmap_input();
+                    VectorPtr exhausted;
+                    leaf->Eval(context, exhausted);
+                    EXPECT_EQ(exhausted, nullptr);
+                    // Take has its own row domain after sequential exhaustion.
+                    // Exercise disorder, duplicates, endpoints and NULLs.
+                    exec::OffsetVector offsets{1026, 0, 199, 64, 128, 63, 1026};
+                    context.set_offset_input(&offsets);
+                    VectorPtr gathered;
+                    leaf->Eval(context, gathered);
+                    auto taken =
+                        std::dynamic_pointer_cast<ColumnVector>(gathered);
+                    ASSERT_NE(taken, nullptr);
+                    ASSERT_EQ(taken->size(), offsets.size());
+                    TargetBitmapView offset_hits(taken->GetRawData(),
+                                                 offsets.size());
+                    TargetBitmapView offset_valid(taken->GetValidRawData(),
+                                                  offsets.size());
+                    for (size_t i = 0; i < offsets.size(); ++i) {
+                        const size_t row = offsets[i];
+                        const bool row_valid =
+                            validity[row / 8] & (1u << (row % 8));
+                        EXPECT_EQ(offset_valid[i], row_valid);
+                        if (row_valid) {
+                            // The leaf is positive even when its original
+                            // parent applies NOT to the sequential result.
+                            EXPECT_EQ(offset_hits[i], oracle(rows[row]));
+                        }
+                    }
+                    context.set_offset_input(nullptr);
+                    ASSERT_EQ(leaf->GetNextBatchSize(), 0);
+                    leaf->Eval(context, exhausted);
+                    EXPECT_EQ(exhausted, nullptr);
+                    EXPECT_EQ(calls->prepare,
+                              op == proto::plan::RegexMatch ? 1u : 0u);
+                    EXPECT_EQ(calls->execute,
+                              op == proto::plan::RegexMatch ? 1u : 0u);
+                    EXPECT_EQ(calls->like_pattern,
+                              op == proto::plan::Match ? 1u : 0u);
+                    EXPECT_EQ(calls->legacy_guard, 0u);
+                    EXPECT_EQ(calls->legacy_pattern, 0u);
+                    if (!one_shot) {
+                        batched.emplace(std::move(hits), std::move(valid));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_P(FmIndexPatternExpressionTest,
+       ExecutorCandidateCacheOwnershipProtectsAliasesAndBatches) {
+    const auto op = GetParam();
+    constexpr size_t n = 259;
+    constexpr size_t batch = 128;
+    const std::string pattern = op == proto::plan::Match
+                                    ? R"(%foo%SPARSE\_TOKEN%)"
+                                    : "foo.*SPARSE_TOKEN";
+    std::vector<std::string> rows(n, "foo " + std::string(1000, 'x'));
+    TargetBitmap candidates(n, false);
+    for (size_t row : {size_t{0},
+                       size_t{63},
+                       size_t{64},
+                       size_t{65},
+                       size_t{127},
+                       size_t{128},
+                       size_t{192},
+                       size_t{193},
+                       size_t{257},
+                       size_t{258}}) {
+        rows[row] += " SPARSE_TOKEN";
+        candidates.set(row);
+    }
+    rows[63] = "SPARSE_TOKEN " + rows[1];
+    rows[193] = "SPARSE_TOKEN " + rows[1];
+    rows[66] += " SPARSEXTOKEN";
+    candidates.set(66);  // Recheck must reject an unescaped-'_' near miss.
+    std::vector<uint8_t> validity((n + 7) / 8, 0xff);
+    TargetBitmap valid(n, true);
+    for (size_t row : {size_t{0}, size_t{128}}) {
+        validity[row / 8] &= static_cast<uint8_t>(~(1u << (row % 8)));
+        valid.reset(row);
+        candidates.reset(row);
+    }
+    auto chunks = MakeNullableStringChunks(rows, validity, {0, 65, 193, n});
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto loaded = LoadSealedFMMatch(rows,
+                                    chunks,
+                                    true,
+                                    validity.data(),
+                                    nullptr,
+                                    true,
+                                    ObserveFMReader(calls, 0));
+    auto typed =
+        MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, pattern, true, op);
+    auto unary =
+        std::dynamic_pointer_cast<const expr::UnaryRangeFilterExpr>(typed);
+    ASSERT_NE(unary, nullptr);
+    PartialRegexMatcher regex_oracle("foo.*SPARSE_TOKEN");
+    LikePatternMatcher like_oracle(R"(%foo%SPARSE\_TOKEN%)");
+    const auto oracle = [&](const std::string& row) {
+        return op == proto::plan::Match ? like_oracle(row) : regex_oracle(row);
+    };
+    for (bool dense : {false, true}) {
+        // Dense candidates include every valid row, so canonical recheck must
+        // reject most rows across multiple bitmap words.
+        const auto seeded_candidates =
+            dense ? valid.clone() : candidates.clone();
+        ASSERT_EQ(seeded_candidates.count() > n / 2, dense);
+        for (bool one_shot : {false, true}) {
+            for (int aliases : {0, 1, 2, 3}) {
+                *calls = RegexRoutingCounts{};
+                SCOPED_TRACE("dense=" + std::to_string(dense) +
+                             "/one_shot=" + std::to_string(one_shot) +
+                             "/aliases=" + std::to_string(aliases));
+                auto physical =
+                    std::make_shared<FMCandidateCacheObservingUnaryExpr>(
+                        std::vector<std::shared_ptr<exec::Expr>>{},
+                        unary,
+                        "PhyUnaryRangeFilterExpr",
+                        nullptr,
+                        loaded.segment.get(),
+                        n,
+                        batch,
+                        0);
+                ASSERT_TRUE(physical->CanExecuteAllAtOnce());
+                if (one_shot) {
+                    physical->SetExecuteAllAtOnce();
+                }
+                physical->SeedCandidates(seeded_candidates.clone(),
+                                         valid.clone());
+                const void* candidate_data = physical->Candidates().data();
+                const void* validity_data = physical->Validity().data();
+                const auto candidate_alias =
+                    aliases & 1 ? physical->CandidateAlias() : nullptr;
+                const auto validity_alias =
+                    aliases & 2 ? physical->ValidityAlias() : nullptr;
+                auto query = std::make_shared<exec::QueryContext>(
+                    DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+                exec::ExecContext execution(query.get());
+                exec::EvalCtx context(&execution);
+                for (size_t begin = 0; begin < n;) {
+                    const size_t size =
+                        one_shot ? n : std::min(batch, n - begin);
+                    TargetBitmap input(size, true);
+                    if (begin <= 64 && 64 < begin + size) {
+                        input.reset(64 - begin);
+                    }
+                    auto saved = input.clone();
+                    context.set_bitmap_input(std::move(input));
+                    VectorPtr output;
+                    physical->Eval(context, output);
+                    auto column =
+                        std::dynamic_pointer_cast<ColumnVector>(output);
+                    ASSERT_NE(column, nullptr);
+                    ASSERT_EQ(column->size(), size);
+                    const bool consumed = one_shot && aliases == 0;
+                    EXPECT_EQ(column->GetRawData() == candidate_data, consumed);
+                    EXPECT_EQ(column->GetValidRawData() == validity_data,
+                              consumed);
+                    TargetBitmapView hits(column->GetRawData(), size);
+                    TargetBitmapView result_valid(column->GetValidRawData(),
+                                                  size);
+                    for (size_t i = 0; i < size; ++i) {
+                        const size_t row = begin + i;
+                        EXPECT_EQ(context.get_bitmap_input()[i], saved[i]);
+                        EXPECT_EQ(result_valid[i], valid[row]);
+                        EXPECT_EQ(hits[i],
+                                  saved[i] && valid[row] && oracle(rows[row]))
+                            << row;
+                    }
+                    if (!consumed) {
+                        // In particular, rechecking false positives and applying
+                        // the external mask must not corrupt a later batch or an
+                        // observer sharing only one of the two cache entries.
+                        ASSERT_EQ(physical->Candidates().size(), n);
+                        ASSERT_EQ(physical->Validity().size(), n);
+                        for (size_t row = 0; row < n; ++row) {
+                            EXPECT_EQ(physical->Candidates()[row],
+                                      seeded_candidates[row]);
+                            EXPECT_EQ(physical->Validity()[row], valid[row]);
+                        }
+                    }
+                    begin += size;
+                }
+                ASSERT_EQ(physical->GetNextBatchSize(), 0);
+                context.clear_bitmap_input();
+                VectorPtr exhausted;
+                physical->Eval(context, exhausted);
+                EXPECT_EQ(exhausted, nullptr);
+                exec::OffsetVector offsets{258, 0, 193, 64, 128, 63, 258};
+                context.set_offset_input(&offsets);
+                VectorPtr gathered;
+                physical->Eval(context, gathered);
+                auto taken = std::dynamic_pointer_cast<ColumnVector>(gathered);
+                ASSERT_NE(taken, nullptr);
+                ASSERT_EQ(taken->size(), offsets.size());
+                TargetBitmapView offset_hits(taken->GetRawData(),
+                                             offsets.size());
+                TargetBitmapView offset_valid(taken->GetValidRawData(),
+                                              offsets.size());
+                for (size_t i = 0; i < offsets.size(); ++i) {
+                    const size_t row = offsets[i];
+                    EXPECT_EQ(offset_valid[i], valid[row]);
+                    if (valid[row]) {
+                        EXPECT_EQ(offset_hits[i], oracle(rows[row]));
+                    }
+                }
+                context.set_offset_input(nullptr);
+                ASSERT_EQ(physical->GetNextBatchSize(), 0);
+                physical->Eval(context, exhausted);
+                EXPECT_EQ(exhausted, nullptr);
+                // Seeded candidates and later Take both bypass FM phase 1.
+                EXPECT_EQ(calls->prepare, 0u);
+                EXPECT_EQ(calls->execute, 0u);
+                EXPECT_EQ(calls->legacy_pattern, 0u);
+                EXPECT_EQ(calls->like_pattern, 0u);
+            }
+        }
+    }
+}
+
+TEST_P(FmIndexPatternExpressionTest,
+       ExecutorOneShotConjunctionSkipExhaustsCandidatesAndAllowsTake) {
+    const auto op = GetParam();
+    constexpr size_t n = 259;
+    constexpr size_t batch = 128;
+    const std::string pattern = op == proto::plan::Match
+                                    ? R"(%foo%SPARSE\_TOKEN%)"
+                                    : "foo.*SPARSE_TOKEN";
+    std::vector<std::string> rows(n, "foo " + std::string(1000, 'x'));
+    rows[63] += " SPARSE_TOKEN";
+    rows.back() += " SPARSE_TOKEN";
+    std::vector<uint8_t> validity((n + 7) / 8, 0xff);
+    validity[128 / 8] &= static_cast<uint8_t>(~(1u << (128 % 8)));
+    std::vector<int64_t> ids(n);
+    for (size_t row = 0; row < n; ++row) {
+        ids[row] = row;
+    }
+    auto calls = std::make_shared<RegexRoutingCounts>();
+    auto loaded = LoadSealedFMMatch(
+        rows, {}, true, validity.data(), &ids, true, ObserveFMReader(calls, 0));
+    auto numeric_field =
+        std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+    numeric_field->FillFieldData(ids.data(), ids.size());
+    auto opened = test::expr_index::BuildIndex(
+        loaded.int_id, DataType::INT64, "STL_SORT", {numeric_field});
+    test::expr_index::InstallIndex(
+        *loaded.segment, loaded.int_id, DataType::INT64, std::move(opened));
+    milvus::test::ExprBatchSizeGuard batch_guard(batch);
+    proto::plan::GenericValue upper;
+    upper.set_int64_val(0);
+    auto numeric = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(loaded.int_id, DataType::INT64),
+        proto::plan::LessThan,
+        upper);
+    auto match =
+        MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, pattern, true, op);
+    auto typed = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, numeric, match);
+    auto query = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+    query->set_enable_expr_cache(false);
+    exec::ExecContext execution(query.get());
+    auto compiled = exec::CompileExpressions({typed}, &execution, {}, false);
+    auto parent =
+        std::dynamic_pointer_cast<exec::PhyConjunctFilterExpr>(compiled[0]);
+    ASSERT_NE(parent, nullptr);
+    ASSERT_EQ(parent->GetInputsRef().size(), 2u);
+    parent->Reorder({0, 1});
+    auto physical = parent->GetInputsRef()[1];
+    if (auto adapter =
+            std::dynamic_pointer_cast<exec::RawExprCacheAdapter>(physical)) {
+        physical = adapter->wrapped_expr();
+    }
+    auto leaf =
+        std::dynamic_pointer_cast<exec::PhyUnaryRangeFilterExpr>(physical);
+    ASSERT_NE(leaf, nullptr);
+    ASSERT_TRUE(parent->CanExecuteAllAtOnce());
+    ASSERT_EQ(leaf->GetExecPath(), exec::ExprExecPath::ScalarIndex);
+    parent->SetExecuteAllAtOnce();
+    exec::EvalCtx context(&execution);
+    VectorPtr output;
+    parent->Eval(context, output);
+    auto column = std::dynamic_pointer_cast<ColumnVector>(output);
+    ASSERT_NE(column, nullptr);
+    ASSERT_EQ(column->size(), n);
+    EXPECT_TRUE(TargetBitmapView(column->GetRawData(), n).none());
+    EXPECT_TRUE(TargetBitmapView(column->GetValidRawData(), n).all());
+    EXPECT_TRUE(context.get_bitmap_input().empty());
+    // The real AND executor skips its second leaf through MoveCursor().
+    // Verify this before Eval so a missing completion cannot run FM phase 1.
+    ASSERT_EQ(leaf->GetNextBatchSize(), 0);
+    VectorPtr exhausted;
+    leaf->Eval(context, exhausted);
+    EXPECT_EQ(exhausted, nullptr);
+    EXPECT_EQ(calls->prepare, 0u);
+    EXPECT_EQ(calls->execute, 0u);
+    EXPECT_EQ(calls->legacy_pattern, 0u);
+    EXPECT_EQ(calls->like_pattern, 0u);
+
+    exec::OffsetVector offsets{258, 0, 128, 63, 258};
+    context.set_offset_input(&offsets);
+    VectorPtr gathered;
+    leaf->Eval(context, gathered);
+    auto taken = std::dynamic_pointer_cast<ColumnVector>(gathered);
+    ASSERT_NE(taken, nullptr);
+    ASSERT_EQ(taken->size(), offsets.size());
+    TargetBitmapView offset_hits(taken->GetRawData(), offsets.size());
+    TargetBitmapView offset_valid(taken->GetValidRawData(), offsets.size());
+    PartialRegexMatcher regex_oracle("foo.*SPARSE_TOKEN");
+    LikePatternMatcher like_oracle(R"(%foo%SPARSE\_TOKEN%)");
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const size_t row = offsets[i];
+        const bool row_valid = validity[row / 8] & (1u << (row % 8));
+        EXPECT_EQ(offset_valid[i], row_valid);
+        if (row_valid) {
+            EXPECT_EQ(offset_hits[i],
+                      op == proto::plan::Match ? like_oracle(rows[row])
+                                               : regex_oracle(rows[row]));
+        }
+    }
+    context.set_offset_input(nullptr);
+    ASSERT_EQ(leaf->GetNextBatchSize(), 0);
+    leaf->Eval(context, exhausted);
+    EXPECT_EQ(exhausted, nullptr);
+    EXPECT_EQ(calls->prepare, 0u);
+    EXPECT_EQ(calls->execute, 0u);
+    EXPECT_EQ(calls->legacy_guard, 0u);
+    EXPECT_EQ(calls->legacy_pattern, 0u);
+    EXPECT_EQ(calls->like_pattern, 0u);
 }
 
 TEST(FmIndexExpressionTest, ExecutorRegexCountProofsDoNotRequestSuffixStats) {

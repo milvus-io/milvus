@@ -21,6 +21,7 @@
 #include <folly/futures/Future.h>
 #include <simdjson.h>
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -2709,9 +2710,20 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     }
 
     const int64_t segment_offset = current_index_chunk_pos_;
+    // A complete one-shot result is the cache's last consumer. Move only
+    // locally owned bitmaps; batched evaluation and shared caches retain them.
+    const bool consume_cached_bitmaps =
+        execute_all_at_once_ && segment_offset == 0 &&
+        real_batch_size == active_count_ &&
+        cached_phase1_res_.use_count() == 1 &&
+        cached_index_chunk_valid_res_.use_count() == 1;
     TargetBitmap batch_candidates;
-    batch_candidates.append(
-        *cached_phase1_res_, segment_offset, real_batch_size);
+    if (consume_cached_bitmaps) {
+        batch_candidates = std::move(*cached_phase1_res_);
+    } else {
+        batch_candidates.append(
+            *cached_phase1_res_, segment_offset, real_batch_size);
+    }
 
     if (!bitmap_input.empty()) {
         batch_candidates &= bitmap_input;
@@ -2729,10 +2741,19 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
 
         OffsetVector offsets;
         offsets.reserve(batch_candidates.count());
-        for (int64_t i = 0; i < real_batch_size; ++i) {
-            if (batch_candidates[i]) {
-                offsets.push_back(static_cast<int32_t>(segment_offset + i));
+        // Read each bitmap word once, then enumerate its set bits in order.
+        // The final read uses only the remaining bits of a short tail.
+        const size_t size = batch_candidates.size();
+        for (size_t start = 0; start < size;) {
+            const auto width = std::min(size_t{64}, size - start);
+            auto word = batch_candidates.read(start, width);
+            while (word != 0) {
+                const auto bit = std::countr_zero(word);
+                offsets.push_back(static_cast<int32_t>(
+                    segment_offset + static_cast<int64_t>(start + bit)));
+                word &= word - 1;
             }
+            start += width;
         }
 
         TargetBitmap compact(offsets.size(), false);
@@ -2777,8 +2798,12 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     }
 
     TargetBitmap valid_result;
-    valid_result.append(
-        *cached_index_chunk_valid_res_, segment_offset, real_batch_size);
+    if (consume_cached_bitmaps) {
+        valid_result = std::move(*cached_index_chunk_valid_res_);
+    } else {
+        valid_result.append(
+            *cached_index_chunk_valid_res_, segment_offset, real_batch_size);
+    }
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(batch_candidates),
                                           std::move(valid_result));

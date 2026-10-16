@@ -966,7 +966,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     void
     MoveCursor() override {
-        if (fm_regex_deferred_ && execute_all_at_once_ && !has_offset_input_) {
+        if (execute_all_at_once_ && !has_offset_input_ &&
+            (fm_regex_deferred_ || CanUseFMPatternCandidates())) {
             // Logical one-shot completion/parent skip still consumes its full
             // row window. Candidate recheck uses Take and does not advance Scan.
             AdvanceDataCursor(active_count_ - current_data_global_pos_);
