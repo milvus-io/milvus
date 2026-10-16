@@ -115,43 +115,26 @@ func TestGetOrCreateDoesNotHoldManagerLockWhileInspectingTask(t *testing.T) {
 	bm.SetLogger(mlog.With())
 	ackMsg := newTruncateCollectionAckMessage(101, "v1")
 
-	task.mu.Lock()
-	bm.mu.Lock()
-	type getResult struct {
-		task *broadcastTask
-		ok   bool
-	}
-	getDone := make(chan getResult, 1)
-	go func() {
-		got, ok := bm.getOrCreateBroadcastTask(ackMsg)
-		getDone <- getResult{task: got, ok: ok}
-	}()
-	// Queue getOrCreate behind bm.mu so it is the first waiter when the lock is released.
-	time.Sleep(20 * time.Millisecond)
-	bm.mu.Unlock()
-	time.Sleep(20 * time.Millisecond)
+	var original func(*broadcastTask) streamingpb.BroadcastTaskState
+	var stateCalls int
+	var managerUnlocked bool
+	patch := mockey.Mock((*broadcastTask).State).Origin(&original).To(func(b *broadcastTask) streamingpb.BroadcastTaskState {
+		stateCalls++
+		// Probe at the actual task-lock boundary, without relying on goroutine
+		// scheduling. The original State still acquires the real task lock.
+		managerUnlocked = bm.mu.TryLock()
+		if managerUnlocked {
+			bm.mu.Unlock()
+		}
+		return original(b)
+	}).Build()
+	defer patch.UnPatch()
 
-	lookupDone := make(chan bool, 1)
-	go func() {
-		_, ok := bm.getBroadcastTaskByID(101)
-		lookupDone <- ok
-	}()
-	select {
-	case ok := <-lookupDone:
-		require.True(t, ok)
-	case <-time.After(time.Second):
-		task.mu.Unlock()
-		t.Fatal("getOrCreate held bm.mu while blocked on task.mu")
-	}
-
-	task.mu.Unlock()
-	select {
-	case result := <-getDone:
-		require.True(t, result.ok)
-		require.Same(t, task, result.task)
-	case <-time.After(time.Second):
-		t.Fatal("getOrCreate did not finish after task lock was released")
-	}
+	got, ok := bm.getOrCreateBroadcastTask(ackMsg)
+	require.Equal(t, 1, stateCalls, "must inspect the existing task")
+	require.True(t, managerUnlocked, "getOrCreate held bm.mu when acquiring task.mu")
+	require.True(t, ok)
+	require.Same(t, task, got)
 }
 
 func TestPendingSchemaScanSkipsLockedUnrelatedTask(t *testing.T) {
