@@ -264,7 +264,6 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 		return err
 	}
 	logger.Debug(context.TODO(), "all vchannels are acked")
-	s.bm.admitSchemaTarget(bt)
 
 	msg, result := bt.BroadcastResult()
 	makeMap := make(map[string]*message.AppendResult, len(result))

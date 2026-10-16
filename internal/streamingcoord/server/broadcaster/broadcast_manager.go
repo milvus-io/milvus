@@ -45,7 +45,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		recoveryTasks = append(recoveryTasks, t)
 	}
 	tasks := make(map[uint64]*broadcastTask, len(recoveryTasks))
-	schemaTasks := make(schemaTaskIndex)
+	schemaTasks := newSchemaTaskIndex()
 	pendingTasks := make([]*pendingBroadcastTask, 0, len(recoveryTasks))
 	pendingAckCallbackTasks := make([]*broadcastTask, 0, len(recoveryTasks))
 	tombstoneIDs := make([]uint64, 0, len(recoveryTasks))
@@ -77,7 +77,8 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 			tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
 		}
 		tasks[task.Header().BroadcastID] = task
-		schemaTasks.add(task.Header().BroadcastID, task)
+		task.schemaTasks = schemaTasks
+		schemaTasks.update(task)
 		// Rebuild the idempotency index across EVERY state, tombstones included:
 		// a tombstoned task is exactly what a late retry must still hit.
 		idxOfKeys.Add(task.IdempotencyScope(), task.Header().BroadcastID)
@@ -111,7 +112,7 @@ type broadcastTaskManager struct {
 	lifetime           *typeutil.Lifetime
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
-	schemaTasks        schemaTaskIndex
+	schemaTasks        *schemaTaskIndex
 	idempotencyIndex   *idempotencyIndex // map the idempotency key to the broadcastID that owns it
 	resourceKeyLocker  *resourceKeyLocker
 	metrics            *broadcasterMetrics
@@ -410,7 +411,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
 	bm.tasks[broadcastID] = newIncomingTask
-	bm.schemaTasks.add(broadcastID, newIncomingTask)
+	newIncomingTask.schemaTasks = bm.schemaTasks
 	bm.idempotencyIndex.Add(scope, broadcastID)
 	return newIncomingTask, true
 }
@@ -435,7 +436,7 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	newBroadcastTask := newBroadcastTaskFromImmutableMessage(msg, bm.metrics, bm.ackScheduler)
 	newBroadcastTask.SetLogger(bm.Logger())
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
-	bm.schemaTasks.add(bh.BroadcastID, newBroadcastTask)
+	newBroadcastTask.schemaTasks = bm.schemaTasks
 	bm.idempotencyIndex.Add(newBroadcastTask.IdempotencyScope(), bh.BroadcastID)
 	return newBroadcastTask, true
 }
@@ -456,7 +457,6 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 
 	if t, ok := bm.tasks[broadcastID]; ok {
 		bm.idempotencyIndex.Remove(t.IdempotencyScope(), broadcastID)
-		bm.schemaTasks.remove(broadcastID, t.schemaCollectionID)
 	}
 	delete(bm.tasks, broadcastID)
 }

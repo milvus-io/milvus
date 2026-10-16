@@ -105,6 +105,7 @@ type broadcastTask struct {
 
 	// Immutable collection index key; zero for tasks without schema intent.
 	schemaCollectionID       int64
+	schemaTasks              *schemaTaskIndex // set by the manager before publication; contains durable snapshots only.
 	mu                       sync.Mutex
 	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
 	task                     *streamingpb.BroadcastTask
@@ -535,13 +536,7 @@ func ackedCount(task *streamingpb.BroadcastTask) int {
 // MarkAckCallbackDone marks the ack callback is done.
 func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 	b.mu.Lock()
-	defer func() {
-		b.mu.Unlock()
-		if b.schemaCollectionID != 0 {
-			// Release the task lock before taking the manager lock.
-			b.ackCallbackScheduler.bm.removeSchemaTask(b.Header().BroadcastID, b.schemaCollectionID)
-		}
-	}()
+	defer b.mu.Unlock()
 	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
 		close(b.done)
@@ -566,7 +561,6 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 	if !b.dirty {
 		return nil
 	}
-	b.dirty = false
 	logger = logger.With(mlog.String("state", b.task.State.String()), mlog.Int("ackedVChannelCount", ackedCount(b.task)))
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
 		logger.Warn(ctx, "save broadcast task failed", mlog.Err(err))
@@ -574,6 +568,10 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 			panic("critical error: the save broadcast task is failed before the context is done")
 		}
 		return err
+	}
+	b.dirty = false
+	if b.schemaTasks != nil {
+		b.schemaTasks.update(b)
 	}
 	b.ObserveStateChanged(b.task.State)
 	logger.Info(ctx, "save broadcast task done")

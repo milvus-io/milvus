@@ -87,8 +87,8 @@ func GetPendingSchemaFileResources() map[int64][]int64 {
 	return singleton.Get().GetPendingSchemaFileResources()
 }
 
-// GetPendingSchemaTarget reads Broadcaster-owned preparation intent. Planning
-// must retry if recovery or ordered callback admission has not completed.
+// GetPendingSchemaTarget reads the earliest unfinished durable schema ALTER.
+// Recovery must complete first; WAL append and ACK completion are not required.
 func GetPendingSchemaTarget(collectionID int64) (*broadcaster.SchemaTarget, error) {
 	if !singleton.Ready() {
 		return nil, merr.WrapErrServiceNotReadyMsg("schema target recovery is not ready")

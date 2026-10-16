@@ -1,6 +1,10 @@
 package broadcaster
 
 import (
+	"maps"
+	"sync"
+
+	"github.com/google/btree"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -8,17 +12,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// SchemaTarget is an owned snapshot of durable ALTER intent. It is available
-// only after the ordered ACK callback may prepare resources. RootCoord's
-// published schema takes over when that callback completes and is tombstoned.
+// SchemaTarget is an owned snapshot of the earliest unfinished durable schema
+// ALTER for a collection. It is readable after task persistence, before WAL
+// append or ACK completion. This does not authorize publication or prove that
+// any channel has applied the schema. Completion of its callback retires it.
 type SchemaTarget struct {
 	CollectionID int64
 	BroadcastID  uint64
 	Schema       *schemapb.CollectionSchema
-	TimeTicks    map[string]uint64
+	// TimeTicks contains only persisted, known business-channel ACK checkpoints.
+	// Missing entries are unknown; the initial snapshot may have none.
+	TimeTicks map[string]uint64
 }
 
 // schemaTargetCollectionID is captured before publishing a task. MarkIgnore can
@@ -36,87 +42,78 @@ func schemaTargetCollectionID(msg message.BroadcastMutableMessage) int64 {
 	return alter.Header().GetCollectionId()
 }
 
-// schemaTaskIndex tracks pending membership and the target admitted by the ACK
-// scheduler. Conflicting collection callbacks are serialized by the scheduler;
-// only its current callback may expose a schema, independent of pending ACK order.
-// All accesses are protected by broadcastTaskManager.mu.
-type schemaTaskIndex map[int64]*collectionSchemaTasks
+// schemaTaskIndex contains only successfully persisted task snapshots. Code
+// holding its lock never acquires a manager or task lock, so persistence can
+// update it under the task lock without blocking readers on metadata I/O.
+//
+// ALTERs for a collection are serial: withResourceKeys allocates BroadcastID
+// after acquiring the resource lock, and replication preserves that ID. Keep the
+// earliest unfinished ID, including on secondaries with several pending ALTERs.
+// ACK arrival order and missing control-channel checkpoints do not change order.
+type schemaTaskIndex struct {
+	mu          sync.RWMutex
+	collections map[int64]*collectionSchemaTasks
+}
 
 type collectionSchemaTasks struct {
-	pending map[uint64]*broadcastTask
-	target  *broadcastTask
+	pending *btree.BTreeG[*SchemaTarget]
+	head    *SchemaTarget
 }
 
-// add is called only before the task is published to concurrent readers.
-func (i schemaTaskIndex) add(id uint64, task *broadcastTask) {
-	if task.schemaCollectionID == 0 ||
-		task.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
-		task.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+func newSchemaTaskIndex() *schemaTaskIndex {
+	return &schemaTaskIndex{collections: make(map[int64]*collectionSchemaTasks)}
+}
+
+// update is called with the task lock held after a successful catalog save, or
+// before recovery publishes the manager. Never index an unpersisted mutation.
+func (i *schemaTaskIndex) update(task *broadcastTask) {
+	collectionID := task.schemaCollectionID
+	if collectionID == 0 {
 		return
 	}
-	tasks := i[task.schemaCollectionID]
+	snapshot := task.pendingSchemaTarget()
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	tasks := i.collections[collectionID]
+	if snapshot == nil {
+		if tasks != nil {
+			tasks.pending.Delete(&SchemaTarget{BroadcastID: task.header().BroadcastID})
+			if tasks.pending.Len() == 0 {
+				delete(i.collections, collectionID)
+			} else {
+				tasks.head, _ = tasks.pending.Min()
+			}
+		}
+		return
+	}
 	if tasks == nil {
-		tasks = &collectionSchemaTasks{pending: make(map[uint64]*broadcastTask)}
-		i[task.schemaCollectionID] = tasks
+		tasks = &collectionSchemaTasks{pending: btree.NewG(2, func(a, b *SchemaTarget) bool {
+			return a.BroadcastID < b.BroadcastID
+		})}
+		i.collections[collectionID] = tasks
 	}
-	tasks.pending[id] = task
+	tasks.pending.ReplaceOrInsert(snapshot)
+	tasks.head, _ = tasks.pending.Min()
 }
 
-func (i schemaTaskIndex) remove(id uint64, collectionID int64) {
-	tasks := i[collectionID]
-	if tasks == nil {
-		return
-	}
-	if tasks.target == tasks.pending[id] {
-		tasks.target = nil
-	}
-	delete(tasks.pending, id)
-	if len(tasks.pending) == 0 {
-		delete(i, collectionID)
-	}
-}
-
-func (bm *broadcastTaskManager) removeSchemaTask(broadcastID uint64, collectionID int64) {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-	bm.schemaTasks.remove(broadcastID, collectionID)
-}
-
-// admitSchemaTarget is called with the callback's resource locks held and all
-// channels ACKed. Recovery rebuilds pending membership only; the scheduler must
-// grant admission again before a recovered target becomes readable.
-func (bm *broadcastTaskManager) admitSchemaTarget(task *broadcastTask) {
-	if task.schemaCollectionID == 0 {
-		return
-	}
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-	bm.schemaTasks[task.schemaCollectionID].target = task
-}
-
-func (b *broadcastTask) pendingSchemaTarget(collectionID int64) *SchemaTarget {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE || b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE || b.msg.MessageTypeWithVersion() != message.MessageTypeAlterCollectionV2 {
+// pendingSchemaTarget snapshots the task under its lock (or before publication).
+func (b *broadcastTask) pendingSchemaTarget() *SchemaTarget {
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE || b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
 		return nil
 	}
-	msg, err := message.AsMutableAlterCollectionMessageV2(b.msg)
-	if err != nil || msg.Header().GetCollectionId() != collectionID || !messageutil.IsSchemaChange(msg.Header()) {
-		return nil
-	}
+	msg := message.MustAsMutableAlterCollectionMessageV2(b.msg)
 	schema := msg.MustBody().GetUpdates().GetSchema()
 	if schema == nil {
 		return nil
 	}
 	snapshot := &SchemaTarget{
-		CollectionID: collectionID,
+		CollectionID: b.schemaCollectionID,
 		BroadcastID:  b.header().BroadcastID,
 		Schema:       proto.Clone(schema).(*schemapb.CollectionSchema),
 		TimeTicks:    make(map[string]uint64),
 	}
 	for i, channel := range b.header().VChannels {
-		tick := b.task.AckedCheckpoints[i].GetTimeTick()
-		if !funcutil.IsControlChannel(channel) {
+		if tick := b.task.AckedCheckpoints[i].GetTimeTick(); !funcutil.IsControlChannel(channel) && tick != 0 {
 			snapshot.TimeTicks[channel] = tick
 		}
 	}
@@ -124,18 +121,20 @@ func (b *broadcastTask) pendingSchemaTarget(collectionID int64) *SchemaTarget {
 }
 
 func (bm *broadcastTaskManager) GetPendingSchemaTarget(collectionID int64) (*SchemaTarget, error) {
-	bm.mu.Lock()
-	tasks := bm.schemaTasks[collectionID]
+	bm.schemaTasks.mu.RLock()
+	tasks := bm.schemaTasks.collections[collectionID]
 	if tasks == nil {
-		bm.mu.Unlock()
+		bm.schemaTasks.mu.RUnlock()
 		return nil, nil
 	}
-	target := tasks.target
-	bm.mu.Unlock()
-	if target == nil {
-		return nil, merr.WrapErrServiceNotReadyMsg("schema target for collection %d awaits its ordered ACK callback", collectionID)
-	}
-	// Recheck completion under the task lock: the callback may have finished
-	// since the index lookup. Clone only the selected target for the caller.
-	return target.pendingSchemaTarget(collectionID), nil
+	snapshot := tasks.head
+	bm.schemaTasks.mu.RUnlock()
+	// Index snapshots are immutable. Copy only the selected target, without
+	// acquiring any task lock or inspecting pending successors.
+	return &SchemaTarget{
+		CollectionID: snapshot.CollectionID,
+		BroadcastID:  snapshot.BroadcastID,
+		Schema:       proto.Clone(snapshot.Schema).(*schemapb.CollectionSchema),
+		TimeTicks:    maps.Clone(snapshot.TimeTicks),
+	}, nil
 }
