@@ -105,12 +105,8 @@ SealedIndexTranslator::SealedIndexTranslator(
         AssertInfo(stream_load_info.has_value(),
                    "missing stream load info for packed scalar V3 index");
         if (use_shared_memory_overhead_group) {
-            auto max_task_overhead =
-                stream_load_info->encrypted
-                    ? stream_load_info->max_task_transient_bytes
-                    : milvus::storage::SaturatingMultiply(
-                          milvus::storage::MaxEntryStreamTaskBytes(),
-                          milvus::storage::kFileStreamBufferMultiplier);
+            const auto max_task_overhead =
+                stream_load_info->positioned_max_task_transient_bytes;
             auto memory_group =
                 milvus::storage::LoadMemoryOverheadController::GetInstance()
                     .GetOrCreate(milvus::ThreadPools::GetLoadExecutorWorkers());
@@ -119,12 +115,8 @@ SealedIndexTranslator::SealedIndexTranslator(
                     milvus::cachinglayer::LoadingOverheadGroupBinding{
                         std::move(memory_group),
                         PolicyBytes(max_task_overhead)},
-                    // FIXME: Bind scalar V3 file overhead to the executor-backed
-                    // file group after every file-backed load path writes through
-                    // positioned tasks on the HIGH/LOW load executors. Some paths
-                    // still use FileWriter or its independent worker pool, so
-                    // binding them now would under-reserve concurrent disk
-                    // overhead.
+                    // Materialized files survive worker completion until index
+                    // initialization; keep disk overhead request-local.
                     std::nullopt};
         }
     }
