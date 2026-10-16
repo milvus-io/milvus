@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
@@ -68,7 +69,6 @@ func TestTwoHandoversInOneProcess(t *testing.T) {
 	assert.Empty(t, env.fatalList())
 	assert.Zero(t, env.store.downloads.Load())
 	assert.False(t, idx.Dirty())
-	assert.True(t, idx.Fresh())
 }
 
 func TestLostResponseRetriesTheSameRequest(t *testing.T) {
@@ -109,7 +109,7 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 	assert.Empty(t, env.fatalList())
 }
 
-func TestReopenedIndexStartsEmptyAndDoesNotHandOver(t *testing.T) {
+func TestReopenedIndexStartsEmpty(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
@@ -123,7 +123,6 @@ func TestReopenedIndexStartsEmptyAndDoesNotHandOver(t *testing.T) {
 	require.Empty(t, env.client.manifest("v0").Tables)
 
 	idx = env.add(ch, "v0")
-	assert.False(t, idx.Fresh())
 	assert.Empty(t, idx.EngineForTest().FrozenGenerations())
 	assert.NoDirExists(t, idx.CommittedDirForTest())
 	assert.Zero(t, segmentOf(t, idx, 1), "the old key is gone")
@@ -131,11 +130,6 @@ func TestReopenedIndexStartsEmptyAndDoesNotHandOver(t *testing.T) {
 	insert(t, idx, 20, 3)
 	ch.ObserveTimeTick(20)
 	assert.EqualValues(t, 20, segmentOf(t, idx, 3))
-	assert.Empty(t, ch.pickHandovers(farFuture))
-	ch.step(farFuture)
-	assert.Len(t, env.client.requestList(), 1, "only the request from before the reopen")
-	assert.False(t, inHeap(ch, idx))
-	assert.EqualValues(t, 20, ch.LastAcked(), "the Index does not hold LastAcked back")
 	assert.Empty(t, env.fatalList())
 }
 
@@ -146,42 +140,10 @@ func inHeap(ch *PChannelIndexManager, idx *index.Index) bool {
 	return ch.acked.contains(idx)
 }
 
-func TestFoundManifestStopsTheHandovers(t *testing.T) {
-	env := newTestEnv(t, syncScheduler{})
-	ch := env.channel(0)
-	idx := env.add(ch, "v0")
-	insert(t, idx, 10, 1)
-	ch.ObserveTimeTick(10)
-	ch.step(farFuture)
-	require.NotEmpty(t, env.client.manifest("v0").Tables)
-
-	// the pchannel moves to a node with no local files, and the WAL opens again
-	ch.Close()
-	require.NoError(t, os.RemoveAll(filepath.Join(env.root, "v0")))
-	block := make(chan struct{})
-	env.client.set(func(c *fakeClient) { c.lookupBlock = block })
-	ch = env.recoveredChannel(0, "v0")
-	idx = ch.get("v0")
-	assert.True(t, idx.Fresh(), "no local leftovers")
-	// a write before the lookup puts the Index into the heap
-	insert(t, idx, 20, 2)
-	require.True(t, inHeap(ch, idx))
-
-	close(block)
-	waitReady(t, idx)
-	assert.False(t, idx.Fresh())
-	assert.False(t, inHeap(ch, idx), "the lookup removes the Index from the heap")
-	assert.EqualValues(t, 20, segmentOf(t, idx, 2), "the lookup keeps the new writes")
-	insert(t, idx, 30, 3)
-	ch.ObserveTimeTick(30)
-	assert.False(t, inHeap(ch, idx))
-	assert.Empty(t, ch.pickHandovers(farFuture))
-	ch.step(farFuture)
-	assert.Len(t, env.client.requestList(), 1, "no CommitFlush after the move")
-	assert.Empty(t, env.fatalList())
-}
-
-func TestCommittedLeftoverOnlyMakesTheIndexNotFresh(t *testing.T) {
+// TestLeftoverInCommittedOnlyIsRemovedAtOpen checks that a file left in the
+// committed directory alone, such as a download that did not finish, is
+// removed at open, and the Index starts empty.
+func TestLeftoverInCommittedOnlyIsRemovedAtOpen(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	committed := filepath.Join(env.root, "v0", "committed")
 	require.NoError(t, os.MkdirAll(committed, 0o755))
@@ -191,57 +153,19 @@ func TestCommittedLeftoverOnlyMakesTheIndexNotFresh(t *testing.T) {
 
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	assert.False(t, idx.Fresh())
 	assert.NoDirExists(t, committed)
-
-	insert(t, idx, 10, 1)
-	ch.ObserveTimeTick(10)
-	assert.Empty(t, ch.pickHandovers(farFuture))
-	ch.step(farFuture)
-	assert.Empty(t, env.client.requestList())
+	assert.Empty(t, idx.EngineForTest().FrozenGenerations())
+	assert.Zero(t, segmentOf(t, idx, 1))
 	assert.Empty(t, env.fatalList())
 }
 
-// TestAnyManifestMakesTheIndexNotFresh checks that a manifest of any version
-// makes the Index of an existing collection not fresh: an owner committed it,
-// and the Index can miss the writes of that owner.
-func TestAnyManifestMakesTheIndexNotFresh(t *testing.T) {
-	cases := map[string]index.ManifestView{
-		"version 1 with no tables":    {Version: 1},
-		"a later version with tables": {Version: 7, CheckpointTimeTick: 5, Tables: []index.TableRef{{ID: 900}}},
-	}
-	for name, view := range cases {
-		t.Run(name, func(t *testing.T) {
-			env := newTestEnv(t, syncScheduler{})
-			env.client.seed("v0", view)
-
-			ch := env.recoveredChannel(0, "v0")
-			idx := ch.get("v0")
-			waitReady(t, idx)
-			assert.False(t, idx.Fresh())
-
-			insert(t, idx, 10, 1)
-			ch.ObserveTimeTick(10)
-			assert.False(t, inHeap(ch, idx))
-			assert.Empty(t, ch.pickHandovers(farFuture))
-			ch.step(farFuture)
-			assert.Empty(t, env.client.requestList(), "no CommitFlush")
-			assert.EqualValues(t, 10, segmentOf(t, idx, 1), "the Index still deduplicates")
-			assert.Empty(t, env.fatalList())
-		})
-	}
-}
-
-// TestNoManifestAndNoLeftoverIsFresh checks that the Index of an existing
-// collection without a manifest and without local files from before is
-// fresh, uploads under the SST base path that it computes, and creates the
-// manifest with its first handover.
-func TestNoManifestAndNoLeftoverIsFresh(t *testing.T) {
+// TestFirstHandoverCreatesTheManifest checks that a ready Index uploads under
+// the SST base path that it computes, and creates the manifest with its first
+// handover.
+func TestFirstHandoverCreatesTheManifest(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
-	ch := env.recoveredChannel(0, "v0")
-	idx := ch.get("v0")
-	waitReady(t, idx)
-	assert.True(t, idx.Fresh())
+	ch := env.channel(0)
+	idx := env.add(ch, "v0")
 	assert.Equal(t, "root/pk_index/100/v0/sst", idx.SSTBasePathForTest())
 
 	insert(t, idx, 10, 1)
@@ -425,10 +349,9 @@ func TestNoCommitterDedupsButNeverHandsOver(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.mgr.cfg.Committer = nil
 	ch := env.channel(0)
-	created, err := ch.CreateCollection(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	idx, created, err := ch.CreateCollection(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
-	idx := ch.get("v0")
 	require.NotNil(t, idx)
 
 	insert(t, idx, 10, 1, 2)
@@ -439,8 +362,7 @@ func TestNoCommitterDedupsButNeverHandsOver(t *testing.T) {
 	assert.EqualValues(t, 20, segmentOf(t, idx, 1))
 	assert.EqualValues(t, 10, segmentOf(t, idx, 2))
 
-	assert.False(t, idx.Ready(), "no claim")
-	assert.False(t, idx.Fresh())
+	assert.False(t, idx.HasCommitter())
 	assert.False(t, inHeap(ch, idx))
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	ch.step(farFuture)
@@ -451,4 +373,33 @@ func TestNoCommitterDedupsButNeverHandsOver(t *testing.T) {
 
 	ch.remove(context.Background(), "v0")
 	assert.Nil(t, ch.get("v0"))
+}
+
+// TestNotReadyIndexDecidesDegraded checks that an Index whose committed table
+// set is not installed treats every key as present: an insert gets a
+// companion delete for every key and a delete writes a tombstone for every
+// key, so that no record that the install brings back comes back to life.
+func TestNotReadyIndexDecidesDegraded(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	ch := env.recoveredChannel(0, "v0")
+	idx := ch.get("v0")
+	ctx := context.Background()
+	require.False(t, idx.Ready())
+
+	guard, err := idx.Authority().Decide(ctx, insertRequest(idx, 1, 2))
+	require.NoError(t, err)
+	assert.Equal(t, int64PKs(1, 2), guard.Decision().CompanionDeletePKs, "absent keys count as present")
+	guard.Apply(ctx, authority.Applied{SegmentID: 10})
+
+	guard, err = idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindDelete, VChannel: idx.VChannel(), PKs: int64PKs(2, 3)})
+	require.NoError(t, err)
+	assert.Equal(t, int64PKs(2, 3), guard.Decision().PresentPKs, "a tombstone for every key")
+	guard.Apply(ctx, authority.Applied{})
+	assert.Zero(t, segmentOf(t, idx, 2), "the tombstone removed key 2")
+
+	idx.MarkReady(ctx, false)
+	guard, err = idx.Authority().Decide(ctx, insertRequest(idx, 1, 3))
+	require.NoError(t, err)
+	assert.Equal(t, int64PKs(1), guard.Decision().CompanionDeletePKs, "ready: only the present key")
+	guard.Discard(ctx, nil)
 }

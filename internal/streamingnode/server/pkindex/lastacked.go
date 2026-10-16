@@ -38,8 +38,8 @@ import (
 // commit and that write, so the returned value stays correct. LastAcked keeps
 // the largest returned value and never returns less.
 //
-// An Index that is not fresh never joins the heap, so it does not hold the
-// value back.
+// An Index of a node without a Committer never joins the heap, so it does not
+// hold the value back.
 //
 // TODO: the clamp to ackedMax can report too much. An Index that joins the
 // heap after a larger value was returned, such as one opened while the
@@ -88,8 +88,8 @@ func (c *PChannelIndexManager) lastAckedLocked() uint64 {
 //     reads true, the Index stays. So a dirty Index is never left out.
 //   - Remove and Close delete the Index.
 //
-// An Index that is not fresh never stays in the heap: trackDirty skips it,
-// and refreshAcked removes it.
+// An Index of a node without a Committer never stays in the heap: trackDirty
+// skips it, and refreshAcked removes it.
 //
 // The heap key is the LastCommittedTimeTick at the last refresh. The real
 // value only goes up between refreshes, so the key is a lower bound and the
@@ -100,7 +100,7 @@ func (c *PChannelIndexManager) lastAckedLocked() uint64 {
 func (c *PChannelIndexManager) trackDirty(idx *index.Index) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.attachedLocked(idx) || c.acked.contains(idx) || !idx.Fresh() {
+	if !c.attachedLocked(idx) || c.acked.contains(idx) || !idx.HasCommitter() {
 		return
 	}
 	c.acked.update(idx, idx.LastCommittedTimeTick())
@@ -114,7 +114,7 @@ func (c *PChannelIndexManager) refreshAcked(idx *index.Index) {
 	if !c.attachedLocked(idx) {
 		return
 	}
-	if !idx.Dirty() || !idx.Fresh() {
+	if !idx.Dirty() || !idx.HasCommitter() {
 		c.acked.remove(idx)
 		return
 	}

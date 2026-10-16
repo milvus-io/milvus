@@ -55,30 +55,31 @@ type PChannelIndexManager struct {
 	// happens outside mu.
 	opMu sync.Mutex
 
-	// mu guards indexes, the LastAcked heap, schedules, ackedMax and claimed.
+	// mu guards indexes, the LastAcked heap, schedules, ackedMax and started.
 	mu        sync.Mutex
 	indexes   map[string]*index.Index
 	acked     ackTracker
 	schedules map[*index.Index]*handoverSchedule // the driver bookkeeping of each Index
 	ackedMax  uint64
-	// claimStarted is set by StartClaim. claimed is set when the pchannel is
-	// claimed and the manifests of the recovered indexes are looked up. An
-	// Index added after that is ready at once.
-	claimStarted bool
-	claimed      bool
+	// started is set by Start: the recovery of the pchannel is done. An Index
+	// created after that is ready at once; one created before waits for the
+	// recovery to mark it.
+	started bool
 }
 
-func newPChannelIndexManager(m *Manager, info types.PChannelInfo, seed uint64, tail func() WALTail, onFatal func(error)) *PChannelIndexManager {
+func newPChannelIndexManager(m *Manager, cfg PChannelConfig) *PChannelIndexManager {
 	ctx, cancel := context.WithCancel(context.Background())
+	tail := cfg.Tail
 	if tail == nil {
 		tail = func() WALTail { return WALTail{} }
 	}
+	info := cfg.PChannel
 	return &PChannelIndexManager{
 		m:         m,
 		info:      info,
-		wm:        newWatermark(seed),
+		wm:        newWatermark(cfg.Seed),
 		tail:      tail,
-		onFatal:   onFatal,
+		onFatal:   cfg.OnFatal,
 		logger:    mlog.With(mlog.FieldModule("pkindex"), mlog.FieldPChannel(info.Name), mlog.Int64("term", info.Term)),
 		ctx:       ctx,
 		cancel:    cancel,
@@ -95,36 +96,60 @@ func errClosed(what string) error {
 	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of %s is closed", what), pkroot.ErrUnavailable)
 }
 
-// CreateCollection opens the Index of a vchannel and reports whether this
-// call opened it. It returns false and no error when the Index exists, so a
-// caller that rolls back after a failure removes only an Index that it
-// opened. It returns the error of the engine open.
-func (c *PChannelIndexManager) CreateCollection(ctx context.Context, vchannel string, collectionID int64, pkDataType schemapb.DataType) (created bool, err error) {
+// Start ends the recovery of the pchannel: it starts the handover driver,
+// and every Index that CreateCollection opens from now on is ready at once.
+// The recovery calls it once, after it installed and replayed the indexes of
+// the existing collections. No handover runs before it.
+func (c *PChannelIndexManager) Start() {
+	c.start(true)
+}
+
+// start is Start with the choice to run the driver goroutine. The tests do
+// not run it and call step by hand.
+func (c *PChannelIndexManager) start(driver bool) {
+	c.mu.Lock()
+	already := c.started
+	c.started = true
+	c.mu.Unlock()
+	if already || !driver {
+		return
+	}
+	c.startDriver()
+}
+
+// CreateCollection opens the Index of a vchannel and returns it, with whether
+// this call opened it. It returns the existing Index and false when the Index
+// exists, so a caller that rolls back after a failure removes only an Index
+// that it opened. It returns the error of the engine open.
+//
+// Before Start, the Index is not ready: the recovery of the pchannel marks
+// it after the install of its committed table set. After Start, the Index is
+// ready at once: a collection created after the recovery has a new collection
+// ID in its vchannel name, so no manifest can exist for it.
+func (c *PChannelIndexManager) CreateCollection(ctx context.Context, vchannel string, collectionID int64, pkDataType schemapb.DataType) (*index.Index, bool, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return false, errClosed("pchannel " + c.info.Name)
+		return nil, false, errClosed("pchannel " + c.info.Name)
 	}
 	defer c.lifetime.Done()
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 
-	if c.get(vchannel) != nil {
-		return false, nil
+	if idx := c.get(vchannel); idx != nil {
+		return idx, false, nil
 	}
 	idx, err := index.Open(ctx, c.indexConfig(vchannel, collectionID, pkDataType))
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	c.mu.Lock()
 	c.indexes[vchannel] = idx
 	c.schedules[idx] = &handoverSchedule{backoff: c.newBackoff()}
-	ready := c.claimed
+	ready := c.started
 	c.mu.Unlock()
 	if ready {
-		// A collection created after the claim has a new collection ID in its
-		// vchannel name, so no manifest can exist for it.
 		idx.MarkReady(ctx, false)
 	}
-	return true, nil
+	return idx, true, nil
 }
 
 // remove closes the Index of a vchannel. It waits for a running handover

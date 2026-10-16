@@ -478,3 +478,28 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, entry)
 }
+
+func TestDegradedTreatsEveryKeyAsPresent(t *testing.T) {
+	ctx := context.Background()
+	eng := NewMemoryEngine()
+	t.Cleanup(func() { _ = eng.Close() })
+	degraded := true
+	a := New(eng, Config{LockStripes: 4, Degraded: func() bool { return degraded }})
+	seed(t, eng, 100, 1)
+
+	g, err := a.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1, 2)})
+	require.NoError(t, err)
+	require.Equal(t, int64PKs(1, 2), g.Decision().CompanionDeletePKs)
+	g.Discard(ctx, nil)
+
+	g, err = a.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(2, 3)})
+	require.NoError(t, err)
+	require.Equal(t, int64PKs(2, 3), g.Decision().PresentPKs)
+	g.Apply(ctx, Applied{})
+
+	degraded = false
+	g, err = a.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1, 2)})
+	require.NoError(t, err)
+	require.Equal(t, int64PKs(1), g.Decision().CompanionDeletePKs, "the probe is back")
+	g.Discard(ctx, nil)
+}

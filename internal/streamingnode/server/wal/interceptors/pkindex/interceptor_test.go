@@ -92,8 +92,8 @@ func newTestIndexEnvAt(t *testing.T, root string) *testIndexEnv {
 
 // openChannel opens the index Channel of the test pchannel.
 func (env *testIndexEnv) openChannel(seed uint64) *snpkindex.PChannelIndexManager {
-	ch := env.mgr.Open(context.Background(), snpkindex.OpenParam{PChannel: types.PChannelInfo{Name: testPChannel, Term: 1}, Seed: seed, OnFatal: env.onFatal})
-	ch.StartClaim()
+	ch := env.mgr.New(snpkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: testPChannel, Term: 1}, Seed: seed, OnFatal: env.onFatal})
+	ch.Start()
 	return ch
 }
 
@@ -479,8 +479,23 @@ func TestBuildWithoutIndexManagerIsPassthrough(t *testing.T) {
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
 }
 
-func TestBuildWithIndexManagerUsesTheIndex(t *testing.T) {
+// TestBuildWithoutAnOpenPChannelIsPassthrough checks that the interceptor
+// passes the messages through when the manager has no index for the pchannel:
+// the WAL recovery did not build one.
+func TestBuildWithoutAnOpenPChannelIsPassthrough(t *testing.T) {
 	newTestIndexEnv(t).useResource(t)
+
+	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+		ChannelInfo: types.PChannelInfo{Name: testPChannel},
+	})
+	defer i.Close()
+	require.IsType(t, passthroughInterceptor{}, i)
+}
+
+func TestBuildWithIndexManagerUsesTheIndex(t *testing.T) {
+	env := newTestIndexEnv(t)
+	env.useResource(t)
+	env.openChannel(0)
 
 	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
 		ChannelInfo: types.PChannelInfo{Name: testPChannel},
@@ -500,7 +515,9 @@ func (l fakeSchemaLister) GetAllCollectionSchemaInfos() map[int64]shards.Collect
 }
 
 func TestBuildCreatesTheIndexOfExistingCollections(t *testing.T) {
-	newTestIndexEnv(t).useResource(t)
+	env := newTestIndexEnv(t)
+	env.useResource(t)
+	env.openChannel(0)
 
 	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
 		ChannelInfo: types.PChannelInfo{Name: testPChannel},
@@ -529,7 +546,9 @@ func newBrokenRoot(t *testing.T) string {
 // TestBuildMarksTheWALUnavailableWhenTheIndexCanNotBeOpened checks that a
 // local disk error at WAL open goes to param.OnFatal and does not panic.
 func TestBuildMarksTheWALUnavailableWhenTheIndexCanNotBeOpened(t *testing.T) {
-	newTestIndexEnvAt(t, newBrokenRoot(t)).useResource(t)
+	env := newTestIndexEnvAt(t, newBrokenRoot(t))
+	env.useResource(t)
+	env.openChannel(0)
 
 	var fatals []error
 	var i interceptors.Interceptor
@@ -551,7 +570,9 @@ func TestBuildMarksTheWALUnavailableWhenTheIndexCanNotBeOpened(t *testing.T) {
 }
 
 func TestBuildPanicsWhenAnExistingCollectionHasAnUnsupportedPrimaryKey(t *testing.T) {
-	newTestIndexEnv(t).useResource(t)
+	env := newTestIndexEnv(t)
+	env.useResource(t)
+	env.openChannel(0)
 	schema := testSchema(false)
 	schema.Fields[0].DataType = schemapb.DataType_Float
 
@@ -568,36 +589,6 @@ func TestBuildPanicsWhenAnExistingCollectionHasAnUnsupportedPrimaryKey(t *testin
 			testCollectionID: {VChannel: testVChannel, Schema: schema},
 		}},
 	})
-}
-
-// TestBuildPassesOnFatalToTheIndex checks that a fenced claim marks the WAL
-// unavailable through param.OnFatal.
-func TestBuildPassesOnFatalToTheIndex(t *testing.T) {
-	env := newTestIndexEnv(t)
-	env.committer.SetClaimErr(errors.Wrap(index.ErrFenced, testVChannel))
-	env.useResource(t)
-
-	fatal := make(chan error, 1)
-	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-		ChannelInfo: types.PChannelInfo{Name: testPChannel, Term: 1},
-		OnFatal: func(err error) {
-			select {
-			case fatal <- err:
-			default:
-			}
-		},
-		ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
-			testCollectionID: {VChannel: testVChannel, Schema: testSchema(false)},
-		}},
-	})
-	defer i.Close()
-
-	select {
-	case err := <-fatal:
-		require.ErrorIs(t, err, index.ErrFenced)
-	case <-time.After(10 * time.Second):
-		t.Fatal("OnFatal was not called after a fenced claim")
-	}
 }
 
 // ===== autocommit insert =====

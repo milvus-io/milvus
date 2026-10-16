@@ -52,8 +52,8 @@ type Index struct {
 	cancel   context.CancelFunc
 	lifetime *typeutil.Lifetime
 
-	// ready is closed when the pchannel is claimed and, for an Index of an
-	// existing collection, the manifest of the vchannel is looked up.
+	// ready is closed when the committed table set of the vchannel is
+	// installed, see MarkReady. Before that the Authority is degraded.
 	ready     chan struct{}
 	readyOnce sync.Once
 	// sstBasePath is the object key prefix of the tables of the vchannel.
@@ -63,14 +63,6 @@ type Index struct {
 	// dirtyFlag is set by every successful engine write and cleared right
 	// before a handover rotates.
 	dirtyFlag atomic.Bool
-	// notFresh is set when the Index may miss writes that the WAL holds: the
-	// local directories had files from before this open, or the vchannel has
-	// a manifest. Such an Index serves writes, but it never hands over and it
-	// stays out of the LastAcked heap. A handover would commit a checkpoint
-	// that covers the missing writes.
-	//
-	// TODO: recovery replays the WAL into the Index and then clears this.
-	notFresh atomic.Bool
 	// pending is the prepared handover that is not committed yet.
 	pending atomic.Pointer[pendingHandover]
 	// installMu serializes the installs of committed table sets.
@@ -131,9 +123,9 @@ type Config struct {
 // Channel marks it ready after the claim.
 //
 // The local directories of the vchannel may hold files from before this
-// open: a crash, or a Remove that kept them. Such an Index may miss writes
-// that the WAL holds, so it is not fresh, see Fresh. Its files are removed
-// and the Index starts empty. The engine dir and the committed dir are
+// open: a crash, or a close that kept them. The files are removed and the
+// Index starts empty; the recovery brings the committed table set back and
+// replays the WAL from its checkpoint. The engine dir and the committed dir are
 // checked together, because a table in committed/ is only useful with the
 // engine state that installed it, and both are rebuilt by the writes
 // since. A file in only one of the two directories, such as the temporary
@@ -153,7 +145,7 @@ func Open(ctx context.Context, cfg Config) (*Index, error) {
 		if err := wipeLocal(engineDir, committedDir); err != nil {
 			return nil, err
 		}
-		cfg.Logger.Info(ctx, "removed the local primary key index files from before this open, the index starts empty and does not hand over",
+		cfg.Logger.Info(ctx, "removed the local primary key index files from before this open, the index starts empty",
 			mlog.FieldVChannel(cfg.VChannel))
 	}
 	eng, err := engine.Open(ctx, engine.Config{
@@ -181,10 +173,10 @@ func Open(ctx context.Context, cfg Config) (*Index, error) {
 		ready:        make(chan struct{}),
 		sstBasePath:  pkroot.SSTBasePath(cfg.StorageRootPath, cfg.CollectionID, cfg.VChannel),
 	}
-	idx.notFresh.Store(leftover)
 	idx.auth = authority.New(dirtyRW{eng: eng, idx: idx}, authority.Config{
 		LockStripes:   params.LockStripes,
 		OnWriterBegin: cfg.OnWriterBegin,
+		Degraded:      func() bool { return !idx.Ready() },
 	})
 	return idx, nil
 }
@@ -238,10 +230,12 @@ func wipeLocal(dirs ...string) error {
 	return nil
 }
 
-// fresh reports whether the Index can hand over: the node has a Committer,
-// and notFresh is not set.
-func (idx *Index) Fresh() bool {
-	return idx.cfg.Committer != nil && !idx.notFresh.Load()
+// HasCommitter reports whether the Index can ever commit: the node has a
+// Committer. Without one the Index deduplicates the writes, never hands over,
+// and stays out of the LastAcked heap, so it does not hold the WAL back for
+// a commit that never comes.
+func (idx *Index) HasCommitter() bool {
+	return idx.cfg.Committer != nil
 }
 
 // dirtyRW is the engine as the write path sees it. A successful write marks
@@ -264,10 +258,10 @@ func (w dirtyRW) Write(ctx context.Context, muts []engine.Mutation) error {
 }
 
 // markDirty sets the dirty flag. On the change from clean to dirty it adds
-// the Index to the LastAcked heap of its Channel, unless the Index is not
-// fresh.
+// the Index to the LastAcked heap of its pchannel, unless the node has no
+// Committer.
 func (idx *Index) markDirty() {
-	if idx.dirtyFlag.CompareAndSwap(false, true) && idx.Fresh() {
+	if idx.dirtyFlag.CompareAndSwap(false, true) && idx.HasCommitter() {
 		idx.cfg.OnDirtied(idx)
 	}
 }
@@ -413,8 +407,9 @@ func (idx *Index) resolveLocal(ctx context.Context, basePath string, id sst.ID, 
 	return path, nil
 }
 
-// readyDone reports whether the Index is ready: the pchannel is claimed and
-// the manifest lookup of the vchannel is done.
+// Ready reports whether the committed table set of the vchannel is installed
+// in the Index. Until then the Index serves writes degraded (every key counts
+// as present, see authority.Config.Degraded) and does not hand over.
 func (idx *Index) Ready() bool {
 	select {
 	case <-idx.ready:
@@ -424,22 +419,13 @@ func (idx *Index) Ready() bool {
 	}
 }
 
-// markReady marks the Index ready, once. found reports whether the vchannel
-// has a manifest. A manifest of any version makes the Index not fresh: an
-// owner committed it, and this Index can miss the writes of that owner that
-// it neither handed over nor replayed. It does nothing after the Index closed.
-//
-// The engine holds no frozen generation here: openIndex removed the data from
-// before the open, and no handover starts before the Index is ready. So no
-// generation needs to retire through the manifest.
-//
-// TODO: recovery opens the Index with the data from before the open. It reads
-// the manifest body from the BodyKey of the lookup, and it must retire the
-// frozen generations whose staged tables the manifest already holds, else the
-// first handover sends them again and the manifest service rejects them as
-// duplicates. After a compaction, a match by staged table IDs can add tables
-// back that the compaction removed. Reading the staged list must not stage a
-// generation, so the engine needs an accessor that only reads the STAGED list.
+// MarkReady marks the Index ready, once: its committed table set is
+// installed. found reports whether the vchannel had a manifest. The recovery
+// of the pchannel calls it for an Index of an existing collection, with
+// false right after the lookup when the vchannel has no manifest, and with
+// true after the install when it has one. The PChannelIndexManager calls it
+// with false for a collection created after the recovery, whose vchannel can
+// have no manifest. It does nothing after the Index closed.
 func (idx *Index) MarkReady(ctx context.Context, found bool) {
 	if !idx.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
@@ -448,19 +434,13 @@ func (idx *Index) MarkReady(ctx context.Context, found bool) {
 	first := false
 	idx.readyOnce.Do(func() {
 		first = true
-		if found {
-			// The engine holds only writes from after this open. Keep them,
-			// but never hand them over: the manifest can cover writes that
-			// this Index does not have.
-			idx.notFresh.Store(true)
-		}
 		close(idx.ready)
 	})
 	if !first {
 		return
 	}
 	idx.cfg.OnRefresh(idx)
-	idx.logger.Info(ctx, "primary key index ready", mlog.Bool("manifestFound", found), mlog.Bool("fresh", idx.Fresh()))
+	idx.logger.Info(ctx, "primary key index ready", mlog.Bool("manifestFound", found))
 }
 
 // Handover runs one handover step under the lifetime of the Index: it

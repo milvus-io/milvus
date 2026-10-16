@@ -173,10 +173,10 @@ func (c *PChannelIndexManager) runHandover(ctx context.Context, idx *index.Index
 // Only the driver step calls it. It reads and changes the schedule of an Index
 // only when no handover of that Index runs, see handoverSchedule.
 //
-// The candidates come from the LastAcked heap, which holds every dirty and
-// fresh Index: an Index with nothing to publish is never a candidate, and a
-// pending request counts as dirty. So a step costs the number of dirty
-// Indexes.
+// The candidates come from the LastAcked heap, which holds every dirty Index
+// of a node with a Committer: an Index with nothing to publish is never a
+// candidate, and a pending request counts as dirty. So a step costs the
+// number of dirty Indexes. An Index that is not ready waits.
 func (c *PChannelIndexManager) pickHandovers(now time.Time) []*index.Index {
 	params := c.m.cfg.Params()
 	tail := c.tail()
@@ -185,7 +185,7 @@ func (c *PChannelIndexManager) pickHandovers(now time.Time) []*index.Index {
 	for _, idx := range c.dirtyIndexes() {
 		s := c.scheduleOf(idx)
 		c.reapHandover(s)
-		if s.running.Load() || s.stopped.Load() || !idx.Ready() || !idx.Fresh() {
+		if s.running.Load() || s.stopped.Load() || !idx.Ready() {
 			continue
 		}
 		if now.Before(s.backoff.NextInstant()) {
@@ -222,4 +222,17 @@ func (c *PChannelIndexManager) pickHandovers(now time.Time) []*index.Index {
 		out = append(out, oldest)
 	}
 	return out
+}
+
+// newBackoff returns the handover backoff of an Index with the current
+// params.
+func (c *PChannelIndexManager) newBackoff() *typeutil.BackoffWithInstant {
+	params := c.m.cfg.Params()
+	return typeutil.NewBackoffWithInstant(typeutil.BackoffTimerConfig{
+		Backoff: typeutil.BackoffConfig{
+			InitialInterval: params.BackoffBase,
+			Multiplier:      2,
+			MaxInterval:     params.MaxBackoff,
+		},
+	})
 }

@@ -42,6 +42,13 @@ type Config struct {
 	// function it returns runs once when the write ends, after Apply or
 	// Discard. The owner uses it to count the writers in flight. Nil is allowed.
 	OnWriterBegin func() (end func())
+	// Degraded reports whether the engine may miss records: the committed
+	// table set of the vchannel is not installed yet. While it returns true,
+	// a decision does not probe the engine and treats every key as present.
+	// An insert then gets a companion delete for every key, and a delete
+	// writes a tombstone for every key, so that a record that the install
+	// brings back later does not come back to life. Nil means never degraded.
+	Degraded func() bool
 }
 
 // Authority makes the write path decisions of one vchannel on top of its engine.
@@ -52,6 +59,7 @@ type Authority struct {
 	eng           engine.RW
 	stripes       *stripeLocks
 	onWriterBegin func() func()
+	degraded      func() bool
 	lifetime      *typeutil.Lifetime
 
 	// pendingMu guards pending and every pendingTxn in it. Lock order: stripes
@@ -67,6 +75,7 @@ func New(eng engine.RW, cfg Config) *Authority {
 		eng:           eng,
 		stripes:       newStripeLocks(cfg.LockStripes),
 		onWriterBegin: cfg.OnWriterBegin,
+		degraded:      cfg.Degraded,
 		lifetime:      typeutil.NewLifetime(),
 		pending:       make(map[int64]*pendingTxn),
 	}
@@ -143,10 +152,15 @@ func (a *Authority) decide(ctx context.Context, g *WriteGuard) error {
 	return nil
 }
 
-// present returns the keys of pks that exist in the index, in the order of pks.
+// present returns the keys of pks that exist in the index, in the order of
+// pks. While the Authority is degraded it returns all of pks without a probe,
+// see Config.Degraded.
 func (a *Authority) present(ctx context.Context, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
+	}
+	if a.degraded != nil && a.degraded() {
+		return append([]PK(nil), pks...), nil
 	}
 	entries, err := lookup(ctx, a.eng, pks)
 	if err != nil {

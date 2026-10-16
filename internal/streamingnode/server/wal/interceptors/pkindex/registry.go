@@ -106,7 +106,7 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	}
 	// The engine open does disk IO, so it runs outside mu. Writes of other
 	// vchannels keep reading the registry meanwhile.
-	created, err := r.ch.CreateCollection(ctx, vchannel, collectionID, pkField.GetDataType())
+	_, created, err := r.ch.CreateCollection(ctx, vchannel, collectionID, pkField.GetDataType())
 	if err != nil {
 		return false, errors.Mark(errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel), errOpenIndex)
 	}
@@ -149,9 +149,10 @@ func (r *registry) drop(ctx context.Context, vchannel string) {
 }
 
 // close drops every target and closes the Channel.
+// close forgets the targets. It does not close the index of the pchannel: the
+// WAL recovery owns it.
 func (r *registry) close() {
 	r.mu.Lock()
 	r.targets = make(map[string]*target)
 	r.mu.Unlock()
-	r.ch.Close()
 }

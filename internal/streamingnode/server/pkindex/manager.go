@@ -117,7 +117,7 @@ type Manager struct {
 	lifetime *typeutil.Lifetime
 
 	mu       sync.Mutex
-	channels map[*PChannelIndexManager]struct{}
+	channels map[string]*PChannelIndexManager // by pchannel name
 }
 
 // NewManager creates a Manager.
@@ -125,12 +125,12 @@ func NewManager(cfg ManagerConfig) *Manager {
 	return &Manager{
 		cfg:      cfg,
 		lifetime: typeutil.NewLifetime(),
-		channels: make(map[*PChannelIndexManager]struct{}),
+		channels: make(map[string]*PChannelIndexManager),
 	}
 }
 
-// OpenParam is what the WAL gives the primary key index of a pchannel.
-type OpenParam struct {
+// PChannelConfig is what the WAL gives the primary key index of a pchannel.
+type PChannelConfig struct {
 	PChannel types.PChannelInfo
 	// Seed is the initial lastAppliedTimeTick: the time tick of the last
 	// TimeTick message when the WAL opens.
@@ -142,40 +142,43 @@ type OpenParam struct {
 	OnFatal func(error)
 }
 
-// Open opens the primary key index of a pchannel.
+// New creates the primary key index of a pchannel and registers it, so that
+// Get finds it until it closes. It does not start the handover driver.
 //
-// The caller creates the indexes of the existing collections with
-// CreateCollection and then calls StartClaim.
+// The owner, the WAL recovery, creates the indexes of the existing
+// collections with CreateCollection, recovers them, and then calls Start.
+// It closes the PChannelIndexManager when the WAL closes.
 //
-// After Close, Open returns a closed PChannelIndexManager: CreateCollection
-// on it fails.
-func (m *Manager) Open(_ context.Context, p OpenParam) *PChannelIndexManager {
-	return m.open(p, true)
-}
-
-// open opens a PChannelIndexManager. Tests pass startDriver false and call
-// step by hand.
-func (m *Manager) open(p OpenParam, startDriver bool) *PChannelIndexManager {
-	c := newPChannelIndexManager(m, p.PChannel, p.Seed, p.Tail, p.OnFatal)
+// After Close, New returns a closed PChannelIndexManager that Get does not
+// find: CreateCollection on it fails.
+func (m *Manager) New(cfg PChannelConfig) *PChannelIndexManager {
+	c := newPChannelIndexManager(m, cfg)
 	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
 		c.Close()
 		return c
 	}
 	defer m.lifetime.Done()
 	m.mu.Lock()
-	m.channels[c] = struct{}{}
+	m.channels[cfg.PChannel.Name] = c
 	m.mu.Unlock()
-	if startDriver {
-		c.startDriver()
-	}
 	return c
+}
+
+// Get returns the primary key index of a pchannel, nil when none is open.
+// The WAL interceptor borrows it from here; it does not own it.
+func (m *Manager) Get(pchannel string) *PChannelIndexManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.channels[pchannel]
 }
 
 // forget removes a closed PChannelIndexManager from the Manager.
 func (m *Manager) forget(c *PChannelIndexManager) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.channels, c)
+	if m.channels[c.info.Name] == c {
+		delete(m.channels, c.info.Name)
+	}
 }
 
 // Close closes every open PChannelIndexManager. It does not release ManagerConfig.Shared.
@@ -185,7 +188,7 @@ func (m *Manager) Close() {
 
 	m.mu.Lock()
 	channels := make([]*PChannelIndexManager, 0, len(m.channels))
-	for c := range m.channels {
+	for _, c := range m.channels {
 		channels = append(channels, c)
 	}
 	m.mu.Unlock()

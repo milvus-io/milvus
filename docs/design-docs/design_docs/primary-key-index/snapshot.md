@@ -37,8 +37,8 @@ problems stay:
 
 ```
 Manager                     one per streaming node: shared engine caches, config
- └─ PChannelIndexManager    one per pchannel: the member table, the claim, the manifest
-     │                      lookups, the handover driver, lastAppliedTimeTick, LastAcked
+ └─ PChannelIndexManager    one per pchannel: the member table, the handover driver,
+     │                      lastAppliedTimeTick, LastAcked
      └─ Index               one per vchannel: engine, Authority, lastCommittedTimeTick
           │  └─ Authority   the write path decision over the engine
           └─ handover ── upload ──▶ object storage   (TableStore)
@@ -53,9 +53,10 @@ packages:  server/pkindex  ──▶  server/pkindex/index  ──▶  pkindex/a
   `Manager` opens a `PChannelIndexManager` per pchannel. The
   `PChannelIndexManager` keeps the member table of its vchannels
   (`CreateCollection`, `DropCollection`, `Authority(vchannel)`), observes the
-  TimeTick messages (`ObserveTimeTick`), claims the pchannel and looks up the
-  manifests (`StartClaim`), drives the handovers, and keeps `lastAppliedTimeTick`
-  and `LastAcked`. It defines `Claimer`, the part of the manifest service it
+  TimeTick messages (`ObserveTimeTick`), drives the handovers once the
+  recovery started it (`Start`), and keeps `lastAppliedTimeTick`
+  (`watermark.go`) and `LastAcked` (`lastacked.go`). The root package defines
+  `Claimer`, the part of the manifest service that the recovery of a pchannel
   uses: `ClaimPChannel` and `GetRecoveryManifests`.
 - `internal/streamingnode/server/pkindex/index` is the vchannel level: the
   `Index` owns the engine of a vchannel and its `Authority`, and the handover
@@ -77,9 +78,9 @@ packages:  server/pkindex  ──▶  server/pkindex/index  ──▶  pkindex/a
   handover defines this interface for its own use. It does not use the
   object store interface of the manifest service.
 - The manifest service is used through two interfaces that the users define,
-  `Claimer` (pchannel level) and `Committer` (vchannel level); the root
-  package's `Committer` is the union of the two, which the one adapter of the
-  streaming node implements. Neither side imports the manifest service, its
+  `Claimer` (the recovery of a pchannel) and `Committer` (the handover of a
+  vchannel); the root package's `Committer` is the union of the two, which the
+  one adapter of the streaming node implements. Neither side imports the manifest service, its
   client or its proto. See [Committer](#committer).
 
 ### Committer
@@ -149,8 +150,7 @@ format. `objpath.go` and the constant `common.PKIndexPath` are byte-identical to
 the copies in the manifest service change. The change that merges second
 drops its copy at the rebase.
 
-When the `Manager` has no `Committer`, no `PChannelIndexManager` claims, and no `Index`
-hands over. The indexes still deduplicate the writes, and they stay out of
+When the `Manager` has no `Committer`, no `Index` hands over. The indexes still deduplicate the writes, and they stay out of
 the `LastAcked` heap. This change does not inject a `Committer` (see
 [Wiring into the streaming node](#wiring-into-the-streaming-node)).
 
@@ -178,12 +178,20 @@ the primary key index:
   metrics (`RecoveryTailBytes`). The tail triggers use it.
 - A `Decide` on a closed index returns the on-shutdown error of the streaming
   node.
-- At WAL open, the interceptor calls `Manager.Open` with the pchannel, the
-  watermark seed, the WAL tail and `OnFatal`, creates the index of every
-  existing collection with `CreateCollection`, and then calls `StartClaim`.
+- The WAL recovery owns the index of a pchannel. It creates it with
+  `Manager.New` (the pchannel, the watermark seed, the WAL tail, `OnFatal`),
+  creates the index of every existing collection with `CreateCollection`,
+  recovers them (claim, manifest lookups, install, replay), calls `Start`, and
+  closes it with the WAL. That recovery is a later change (see
+  [Readiness](#readiness)); in this change nothing calls `Manager.New`.
+- The interceptor only borrows the index: `Build` takes it from
+  `Manager.Get(pchannel)`, and passes the messages through when there is none.
+  It registers the translation of every existing collection and calls
+  `CreateCollection` for it, which finds the index that the recovery opened.
   An open that fails on the local disk goes to `OnFatal`: the WAL rejects all
   appends, and its next open tries again. A schema that the index rejects is
-  a broken invariant for an existing collection, and it panics.
+  a broken invariant for an existing collection, and it panics. `Close` of the
+  interceptor does not close the index.
 - DropCollection and the rollback of a failed CreateCollection call
   `PChannelIndexManager.DropCollection`. It closes the index and removes `<root>/<vchannel>/`. A
   vchannel name embeds the collection ID, so no later open of the vchannel
@@ -336,8 +344,7 @@ engine lives in `<root>/<vchannel>/engine/`. `committed/` is outside it,
 because `engine.Destroy` removes the whole engine directory. An open that
 finds files from before in the engine directory or in `committed/` removes
 both directories (see
-[Only a fresh index hands over](#only-a-fresh-index-hands-over)). So the links
-are not reused after a restart.
+[Readiness](#readiness)). So the links are not reused after a restart.
 
 ### Install order
 
@@ -366,60 +373,32 @@ left in `committed/` is a file from before, so the next open removes both
 local directories. The download runs outside the install lock, and the
 version check runs again under the lock.
 
-### Claim
+### Readiness
 
-The WAL open first adds the `Index` of each existing collection, and then
-calls `PChannelIndexManager.StartClaim`. When the `Manager` has a `Committer`, the
-`PChannelIndexManager` claims its pchannel once, in the background (see
-[the manifest service](manifest.md)). The number of vchannels does not change
-the number of claims. A failed claim retries with backoff. A fenced claim and
-a rejected claim (see [Failure handling](#failure-handling)) mark the WAL
-unavailable.
+An `Index` is ready when the committed table set of its vchannel is
+installed. `Index.Ready` reports it, and `Index.MarkReady` sets it once.
+Until then the `Index` serves writes degraded and does not hand over.
 
-After the claim, the `PChannelIndexManager` looks up the manifests of the indexes of the
-existing collections with `GetRecoveryManifests`, in calls of at most 10000
-items. It retries only the items that failed, with backoff. A fenced or
-rejected item, or a fenced or rejected call, marks the WAL unavailable. The
-answer decides whether the `Index` is fresh.
+Who marks an `Index` ready:
 
-An `Index` that a CreateCollection adds does not look up. Its collection is
-new, and the vchannel name holds the new collection ID, so no manifest can
-exist for it. The check for local files from before still applies. No `Index`
-hands over before the claim and the lookups are done.
+- The recovery of the pchannel, for an `Index` of an existing collection. It
+  claims the pchannel (`ClaimPChannel`), looks up the manifests of the
+  existing vchannels (`GetRecoveryManifests`, in calls of at most 10000
+  items), and then marks an `Index` without a manifest ready right away, and
+  an `Index` with a manifest after it downloaded and installed the committed
+  set. It replays the WAL from the checkpoints and calls
+  `PChannelIndexManager.Start` when it is done. The recovery is a later
+  change; this change has no caller of `MarkReady` outside the tests.
+- The `PChannelIndexManager`, for a collection created after `Start`. Its
+  vchannel name holds the new collection ID, so no manifest can exist for it,
+  and `CreateCollection` marks it ready at once. A collection created before
+  `Start` waits for the recovery.
 
-### Only a fresh index hands over
+`Start` also starts the handover driver. No handover runs before it, and no
+`Index` that is not ready is a candidate: a handover of such an `Index` would
+commit a checkpoint that covers writes it does not have.
 
-An `Index` is fresh when both of these are true:
-
-- When it opens, its engine directory and its `committed/` directory hold no
-  files from before this open. A file in only one of them counts too, for
-  example the rest of a removal that did not finish.
-- Its vchannel has no manifest.
-
-When an open finds files from before, it removes both local directories, and
-the `Index` starts empty and not fresh. When the vchannel has a manifest of
-any version and content, the `Index` keeps the writes from after the open,
-but it is not fresh either.
-
-A manifest means that an owner committed for the vchannel. That owner can
-have writes that it did not hand over, and that this `Index` neither has nor
-replays. A handover of this `Index` would commit a checkpoint that covers
-them, and the WAL replay would skip them.
-
-The rule is conservative. `engine.Open` always creates the first generation,
-so any reopen of a vchannel on the same node finds files from before and does
-not hand over until recovery exists. It never writes a wrong manifest.
-
-Only a fresh `Index` hands over. An `Index` that is not fresh:
-
-- serves writes as usual,
-- never hands over,
-- does not join the `LastAcked` heap, so it does not hold `LastAcked` back.
-
-Recovery does not exist yet. When it replays the WAL into the index, it will
-clear this state.
-
-Why the data from before can not hand over:
+Why the index before its install can not hand over:
 
 - **Restart.** Without a replay, the index after a restart does not have the
   writes that were only in a memtable before the restart. But the watermark
@@ -432,12 +411,23 @@ Why the data from before can not hand over:
   newer state.
 - **Crash after a commit.** The pending request lives only in memory. A crash
   after a successful commit and before the install loses it. The vchannel
-  then has a manifest, so the `Index` is not fresh and does not send the
-  tables again.
+  then has a manifest, and the install brings its tables back.
 
-An alternative was to hand over as usual and let recovery mark the older
-checkpoints as not trusted by version. It was not chosen, because the wrong
-data would first go into storage.
+So an open removes the local files from before (the engine directory and
+`committed/`, a file in only one of them counts too), and the `Index` starts
+empty; the recovery brings the committed set back.
+
+While an `Index` is not ready, its `Authority` is degraded
+(`authority.Config.Degraded`): a decision does not probe the engine and
+treats every key as present. An insert then gets a companion delete for every
+key, and a delete writes a tombstone for every key. This is for correctness,
+not speed: a delete applied before the install would otherwise write
+tombstones only for the keys the empty engine knows, and the install would
+bring the deleted records back.
+
+A dirty `Index` that is not ready holds `LastAcked` back, like any dirty
+`Index`: its writes are not committed. An `Index` of a node without a
+`Committer` never joins the heap, because nothing would ever commit it.
 
 ## Coverage watermarks
 
@@ -533,8 +523,8 @@ generations, or a pending request.
   `lastAppliedTimeTick`. WAL summary uses the same rule.
 - A min-heap keyed by `lastCommittedTimeTick` holds the dirty indexes. The
   first write after a clean state adds an `Index`. The end of each handover
-  and of the manifest lookup updates or removes it. An `Index` that is not fresh never
-  joins the heap. A pchannel with many vchannels
+  and `MarkReady` update or remove it. An `Index` of a node without a
+  `Committer` never joins the heap. A pchannel with many vchannels
   does not compute a full minimum on each call.
 - The value is monotonic. `PChannelIndexManager` keeps the largest value that it returned
   and never returns less. This clamp can report too much: an `Index` that
@@ -557,7 +547,7 @@ scheduler (`nodescheduler`). An idle vchannel has no goroutine and no timer.
 | 2 | Early tail | Hand over before the WAL throttles appends | WAL recovery tail ≥ `handover.tailBytes` and `LastAcked` < the recovery time tick of the WAL: the dirty vchannel with the smallest `lastCommittedTimeTick` hands over | 2 GiB |
 | 3 | Soft pressure | Fallback for trigger 2 | WAL recovery tail ≥ `walRecovery.tail.softWatermark` and `LastAcked` < the recovery time tick of the WAL: same pick as trigger 2 | 8 GiB |
 
-Only a fresh `Index` whose claim and manifest lookup are done can hand over.
+Only a ready `Index` hands over (see [Readiness](#readiness)).
 
 The condition on `LastAcked` makes sure that the index holds the WAL tail
 back. The driver reads the recovery time tick (`RecoveryTimeTick` in the
@@ -606,11 +596,11 @@ reach 64 MiB and hand over through trigger 2.
 
 | Case | Handling |
 |---|---|
-| Retryable upload, download, claim, lookup or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. A claim and a lookup use `retry.Do` and read `handover.maxBackoff` when they start. A handover uses `typeutil.BackoffWithInstant`: it reads `handover.maxBackoff` when the `Index` opens and after a successful handover that follows a failure, and its wait has a jitter of ±50 %. The pending request keeps the same table IDs. |
-| Fenced (`index.ErrFenced`) on the claim, a lookup or a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
+| Retryable upload, download or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. A claim and a lookup use `retry.Do` and read `handover.maxBackoff` when they start. A handover uses `typeutil.BackoffWithInstant`: it reads `handover.maxBackoff` when the `Index` opens and after a successful handover that follows a failure, and its wait has a jitter of ±50 %. The pending request keeps the same table IDs. |
+| Fenced (`index.ErrFenced`) on a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
 | Corrupted (`pkindex.ErrCorrupted`) in a handover | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable. The WAL is assigned again and recovers on another node. |
 | Corrupted (`pkindex.ErrCorrupted`) in a lookup on the write path | `Decide` returns the error and calls `OnFatal`, which marks the WAL unavailable. |
-| Rejected claim, lookup item or commit (`index.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, not claimed, an invalid request, a corrupted stored manifest), a returned manifest that does not have the flush in effect, or a manifest with another SST base path | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
+| Rejected commit (`index.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, not claimed, an invalid request, a corrupted stored manifest), a returned manifest that does not have the flush in effect, or a manifest with another SST base path | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
 | Missing object on download | `DownloadFile` marks it as corrupted. A manifest lists the table, so a retry can not clear it. |
 | Local disk error when the index of an existing collection opens at WAL open | `OnFatal` marks the WAL unavailable. The streaming node and its other WALs keep running. |
 | Concurrency | At most one handover per vchannel at a time. The node scheduler limits the handovers of the node. |
@@ -653,7 +643,7 @@ Metrics:
 | `streaming.pkindex.maxOpenFiles` | `4096` | No, forbidden at runtime | Table cache size that all indexes on one streaming node share. |
 | `streaming.pkindex.handover.activeBytes` | `64m` | Yes, at the next driver step | Size trigger. |
 | `streaming.pkindex.handover.tailBytes` | `2g` | Yes, at the next driver step | Early tail trigger. Keep it below `streaming.walRecovery.tail.lowWatermark`. |
-| `streaming.pkindex.handover.maxBackoff` | `60s` | Yes: a claim or lookup at its start, a handover when the `Index` opens or after its next success | Longest wait between two attempts of a failed handover, claim or manifest lookup. A new value does not change the wait of a handover that keeps failing. |
+| `streaming.pkindex.handover.maxBackoff` | `60s` | Yes: a handover when the `Index` opens or after its next success | Longest wait between two attempts of a failed handover, claim or manifest lookup. A new value does not change the wait of a handover that keeps failing. |
 | `streaming.pkindex.memTableSize` | `4m` | No, read when an `Index` opens | Memtable size of the engine of one vchannel. |
 | `streaming.walRecovery.tail.softWatermark` | `8g` | Yes, at the next driver step | Existing key. Soft pressure trigger. |
 | `dataCoord.pkindex.gc.grace` | `86400` (s) | — | Key of the manifest service. The change that injects the `Committer` sets `ReuploadAfter` of the primary key index to half of it. A retry uploads again after that age. |
@@ -695,19 +685,18 @@ Common patterns:
   adapter that implements `Committer`. It translates the proto
   types and the merr codes (see [Committer](#committer)), with a test for
   each error class, and the streaming node injects it into the `Manager`. It
-  also sets `ReuploadAfter`. Until then no `PChannelIndexManager` claims and no `Index`
-  hands over.
+  also sets `ReuploadAfter`. Until then no `Index` hands over.
 - **End-to-end tests of the handover.** They run in the wiring change: a
   handover with object storage, an object storage outage, sustained writes
   with large vectors, and a check in the integration suite that a handover
   ran.
 
-- **Recovery and replay after a WAL open.** On a WAL open, the index removes
-  its local data from before and starts empty. It does not replay the WAL.
-  The index has no restart durability yet.
-- **A handover after a restart or a move.** A vchannel whose index is not
-  fresh does not hand over until recovery exists (see
-  [Only a fresh index hands over](#only-a-fresh-index-hands-over)).
+- **Recovery of a pchannel.** The claim, the manifest lookups, the install of
+  the committed sets, the WAL replay and `Start`, and the `Manager.New` call
+  that creates the index of a pchannel at WAL open. Nothing creates one in
+  this change, so the interceptor passes the messages through. Until the
+  recovery exists, an index after a restart starts empty and is never marked
+  ready (see [Readiness](#readiness)).
 - **`LastAcked` for WAL truncation.** `PChannelIndexManager.LastAcked` exists, but the WAL
   recovery storage does not use it. It goes in with recovery, because the
   bound only matters with replay.
@@ -744,29 +733,21 @@ Unit tests cover these cases:
   installed version, with a checkpoint below the covered time tick, or with
   another SST base path, is rejected, and the generations stay.
 - Install: a missing table is downloaded, and a missing object is fatal.
-- Fresh only: an open with engine data from before removes the local data,
-  starts empty and does not hand over. A file from before in `committed/`
-  only, such as the temporary file of a download, has the same result. No
-  manifest and no leftover is fresh, uploads under the SST base path that it
-  computes, and creates the manifest at version 1 with its first handover. A
-  manifest of any version, also version 1 with no tables, gives an `Index`
-  that is not fresh and never calls `CommitFlush`. An `Index` that is not fresh is not in
-  the `LastAcked` heap.
-- Claim and lookup: one `ClaimPChannel` call for a `PChannelIndexManager` with many
-  vchannels, and one `GetRecoveryManifests` call for the indexes of the
-  existing collections. More than the batch size splits into several calls.
-  A retry sends only the failed items. An `Index` of a new collection does
-  not look up, also when it opens while the claim runs, and it waits for
-  the claim. No handover before the claim. A retryable claim or lookup
-  error retries. A fenced claim, a rejected claim, a rejected call and a
-  rejected item are fatal.
-- No `Committer`: the `PChannelIndexManager` does not claim, the `Index` does not hand over, stays out
-  of the `LastAcked` heap, and still deduplicates the writes.
+- Readiness: an `Index` created before `Start` is not ready, decides
+  degraded (every key present, companion deletes and tombstones for all),
+  holds `LastAcked` back while dirty, and does not hand over; `MarkReady`
+  makes it a candidate; a collection created after `Start` is ready at once.
+  A ready `Index` uploads under the SST base path that it computes and
+  creates the manifest at version 1 with its first handover. An open with
+  files from before, in the engine directory or in `committed/` only,
+  removes them and starts empty.
+- No `Committer`: the `Index` does not hand over, stays out of the `LastAcked`
+  heap, and still deduplicates the writes.
 - Fatal errors: `ErrFenced`, `ErrRejected` and `ErrCorrupted` are fatal.
   Other errors are retryable, also a merr code that no adapter translated.
 - Object key: `pkindex.SSTKey` gives `<sst_base_path>/<id>.sst`.
-- Duplicate CreateCollection: an `Add` of an `Index` that exists reports
-  that it created nothing, so the rollback after a failed append does not
+- Duplicate CreateCollection: a `CreateCollection` of an `Index` that exists
+  reports that it created nothing, so the rollback after a failed append does not
   remove the `Index` in use.
 - Drop: DropCollection and the rollback of a failed CreateCollection remove
   the local directory, and a new create of the vchannel sees none of the old

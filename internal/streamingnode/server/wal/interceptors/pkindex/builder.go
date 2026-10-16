@@ -60,20 +60,15 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		return passthroughInterceptor{}
 	}
 
-	// The seed is the time tick of the last TimeTick message at WAL open. Every
-	// message before it is appended, and nothing is replayed into the index.
-	// TODO: the recovery replays the WAL into the index and seeds the watermark from it.
-	var seed uint64
-	if param.LastTimeTickMessage != nil {
-		seed = param.LastTimeTickMessage.TimeTick()
+	// The WAL recovery owns the index of the pchannel: it creates it before
+	// the interceptors are built and closes it with the WAL. The interceptor
+	// only borrows it. No index means the recovery did not build one, and the
+	// interceptor passes the messages through.
+	ch := mgr.Get(param.ChannelInfo.Name)
+	if ch == nil {
+		return passthroughInterceptor{}
 	}
 	onFatal := onFatalOf(param)
-	ch := mgr.Open(ctx, snpkindex.OpenParam{
-		PChannel: param.ChannelInfo,
-		Seed:     seed,
-		Tail:     tailOf(param.RecoveryStorage),
-		OnFatal:  onFatal,
-	})
 	reg := newRegistry(ch)
 	if lister, ok := param.ShardManager.(collectionSchemaLister); ok {
 		for collectionID, info := range lister.GetAllCollectionSchemaInfos() {
@@ -89,13 +84,9 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 				break
 			}
 			// A collection that exists can not have a schema the index rejects.
-			ch.Close()
 			panic(fmt.Sprintf("create the primary key index of vchannel %s at wal open: %v", info.VChannel, err))
 		}
 	}
-	// The indexes of the existing collections are open, so the claim looks up
-	// their manifests. A later CreateCollection does not look up.
-	ch.StartClaim()
 	// param.TxnManager is a pointer, so it must not be assigned to the interface
 	// while it is nil. The interface would then be non-nil and carry a nil pointer.
 	var sessions txnSessions

@@ -401,31 +401,35 @@ func (env *testEnv) setParams(f func(p *Params)) {
 	env.params.Store(&p)
 }
 
-// channel opens a PChannelIndexManager without the driver goroutine and starts its claim.
-// Every Index that a test adds to it is the Index of a new collection.
+// channel opens a started PChannelIndexManager without the driver goroutine.
+// Every Index that a test adds to it is the Index of a new collection, ready
+// at once.
 func (env *testEnv) channel(seed uint64) *PChannelIndexManager {
 	ch := env.openChannel(seed)
-	ch.StartClaim()
+	ch.start(false)
 	return ch
 }
 
-// recoveredChannel opens a PChannelIndexManager, adds the indexes of vchannels as the
-// indexes of existing collections, and starts the claim. It does not wait
-// for the claim.
+// recoveredChannel opens a PChannelIndexManager that is not started yet and
+// adds the indexes of vchannels as the indexes of existing collections. They
+// are not ready: the recovery would mark them.
 func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *PChannelIndexManager {
 	ch := env.openChannel(seed)
 	for _, v := range vchannels {
-		created, err := ch.CreateCollection(context.Background(), v, testCollectionID, schemapb.DataType_Int64)
+		_, created, err := ch.CreateCollection(context.Background(), v, testCollectionID, schemapb.DataType_Int64)
 		require.NoError(env.t, err)
 		require.True(env.t, created)
 	}
-	ch.StartClaim()
 	return ch
 }
 
+// openChannel opens the PChannelIndexManager of the test pchannel and claims
+// the pchannel at the fake manifest service, as the recovery does first.
 func (env *testEnv) openChannel(seed uint64) *PChannelIndexManager {
 	info := types.PChannelInfo{Name: "test-dml_0", Term: testTerm}
-	return env.mgr.open(OpenParam{PChannel: info, Seed: seed, Tail: env.walTail, OnFatal: env.onFatal}, false)
+	ch := env.mgr.New(PChannelConfig{PChannel: info, Seed: seed, Tail: env.walTail, OnFatal: env.onFatal})
+	require.NoError(env.t, env.client.ClaimPChannel(context.Background(), info.Name, testTerm))
+	return ch
 }
 
 func (env *testEnv) walTail() WALTail {
@@ -459,10 +463,9 @@ func (env *testEnv) waitFatal() error {
 
 // add opens the Index of vchannel and waits until it is ready.
 func (env *testEnv) add(ch *PChannelIndexManager, vchannel string) *index.Index {
-	created, err := ch.CreateCollection(context.Background(), vchannel, testCollectionID, schemapb.DataType_Int64)
+	idx, created, err := ch.CreateCollection(context.Background(), vchannel, testCollectionID, schemapb.DataType_Int64)
 	require.NoError(env.t, err)
 	require.True(env.t, created)
-	idx := ch.get(vchannel)
 	require.NotNil(env.t, idx)
 	waitReady(env.t, idx)
 	return idx
