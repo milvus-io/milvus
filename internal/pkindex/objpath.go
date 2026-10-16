@@ -14,9 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package objpath builds and parses the object keys of the primary key index.
-// All keys are complete object keys under the root path of the object storage.
-package objpath
+// This file builds and parses the object keys of the primary key index. All
+// keys are complete object keys under the root path of the object storage.
+package pkindex
 
 import (
 	"fmt"
