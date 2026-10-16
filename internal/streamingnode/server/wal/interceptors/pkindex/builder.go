@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -110,18 +109,6 @@ func pkindexManager() *snpkindex.Manager {
 		return nil
 	}
 	return r.PKIndexManager()
-}
-
-// tailOf returns a function that reads the WAL recovery tail. The function
-// returns zeros when rs is nil.
-func tailOf(rs recovery.RecoveryStorage) func() snpkindex.WALTail {
-	if rs == nil {
-		return func() snpkindex.WALTail { return snpkindex.WALTail{} }
-	}
-	return func() snpkindex.WALTail {
-		m := rs.Metrics()
-		return snpkindex.WALTail{Bytes: m.RecoveryTailBytes, RecoveryTimeTick: m.RecoveryTimeTick}
-	}
 }
 
 // onFatalOf returns param.OnFatal. When it is nil, as in tests, the returned

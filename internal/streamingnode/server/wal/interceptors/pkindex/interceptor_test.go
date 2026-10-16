@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1452,12 +1450,4 @@ func TestCreateCollectionOnControlChannelHasNoTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, i.registry.get(controlChannel))
 	require.Equal(t, []message.MessageType{message.MessageTypeCreateCollection}, f.types)
-}
-
-func TestTailOfReadsTheRecoveryMetrics(t *testing.T) {
-	require.Equal(t, snpkindex.WALTail{}, tailOf(nil)())
-
-	rs := mock_recovery.NewMockRecoveryStorage(t)
-	rs.EXPECT().Metrics().Return(recovery.RecoveryMetrics{RecoveryTimeTick: 42, RecoveryTailBytes: 1000})
-	require.Equal(t, snpkindex.WALTail{Bytes: 1000, RecoveryTimeTick: 42}, tailOf(rs)())
 }
