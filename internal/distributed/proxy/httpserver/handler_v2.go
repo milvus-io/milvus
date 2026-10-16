@@ -1608,9 +1608,9 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := newQueryResponseRows(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
 		if err != nil {
-			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Err(err))
+			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: resultErrMessage(err),
@@ -1618,7 +1618,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		} else {
 			scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(queryResp.GetStatus())
 			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-				returnQueryResponse(ctx, c, http.StatusOK, gin.H{
+				HTTPReturnStream(c, http.StatusOK, gin.H{
 					HTTPReturnCode:               merr.Code(nil),
 					HTTPReturnData:               outputData,
 					HTTPReturnCost:               proxy.GetCostValue(queryResp.GetStatus()),
@@ -1627,7 +1627,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 					HTTPReturnCacheHitRatio:      cacheHitRatio,
 				})
 			} else {
-				returnQueryResponse(ctx, c, http.StatusOK, gin.H{
+				HTTPReturnStream(c, http.StatusOK, gin.H{
 					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: outputData,
 					HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
@@ -1636,34 +1636,6 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		}
 	}
 	return resp, err
-}
-
-// queryResponseBatchRows bounds the projection and encoding working set.
-const queryResponseBatchRows = 64
-
-func returnQueryResponse(ctx context.Context, c *gin.Context, code int, result gin.H) {
-	rows := result[HTTPReturnData].(*queryResponseRows)
-	delete(result, HTTPReturnData)
-	streamWriter := c.Writer.(*streamingWorkerWriter)
-	c.Set(HTTPReturnCode, result[HTTPReturnCode])
-	setTraceIDHeader(c)
-	jsonRender{}.WriteContentType(c.Writer)
-	c.Writer.WriteHeader(code)
-	if err := writeQueryResponse(ctx, c.Writer, result, rows, queryResponseBatchRows); err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to render query result", mlog.Err(err))
-		if c.Writer.Written() {
-			c.Set(HTTPReturnCode, merr.Code(merr.ErrInvalidSearchResult))
-			c.Set(HTTPReturnMessage, resultErrMessage(err))
-			streamWriter.failure = err
-			c.Abort()
-			return
-		}
-		// The streaming middleware owns the precommit timeout response.
-		if c.Request.Context().Err() != nil {
-			return
-		}
-		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrInvalidSearchResult), HTTPReturnMessage: resultErrMessage(err)})
-	}
 }
 
 func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -1707,9 +1679,9 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := newQueryResponseRows(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
 		if err != nil {
-			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Err(err))
+			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: resultErrMessage(err),
@@ -1717,7 +1689,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		} else {
 			scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(queryResp.GetStatus())
 			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-				returnQueryResponse(ctx, c, http.StatusOK, gin.H{
+				HTTPReturnStream(c, http.StatusOK, gin.H{
 					HTTPReturnCode:               merr.Code(nil),
 					HTTPReturnData:               outputData,
 					HTTPReturnCost:               proxy.GetCostValue(queryResp.GetStatus()),
@@ -1726,7 +1698,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 					HTTPReturnCacheHitRatio:      cacheHitRatio,
 				})
 			} else {
-				returnQueryResponse(ctx, c, http.StatusOK, gin.H{
+				HTTPReturnStream(c, http.StatusOK, gin.H{
 					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: outputData,
 					HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
@@ -2386,9 +2358,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := newQueryResponseRows(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
 			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Err(err))
+				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: resultErrMessage(err),
@@ -2396,7 +2368,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			} else {
 				if len(searchResp.Results.Recalls) > 0 {
 					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-						returnQueryResponse(ctx, c, http.StatusOK, gin.H{
+						HTTPReturnStream(c, http.StatusOK, gin.H{
 							HTTPReturnCode:               merr.Code(nil),
 							HTTPReturnData:               outputData,
 							HTTPReturnCost:               cost,
@@ -2407,7 +2379,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 							HTTPReturnCacheHitRatio:      cacheHitRatio,
 						})
 					} else {
-						returnQueryResponse(ctx, c, http.StatusOK, gin.H{
+						HTTPReturnStream(c, http.StatusOK, gin.H{
 							HTTPReturnCode:    merr.Code(nil),
 							HTTPReturnData:    outputData,
 							HTTPReturnCost:    cost,
@@ -2417,7 +2389,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 					}
 				} else {
 					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-						returnQueryResponse(ctx, c, http.StatusOK, gin.H{
+						HTTPReturnStream(c, http.StatusOK, gin.H{
 							HTTPReturnCode:               merr.Code(nil),
 							HTTPReturnData:               outputData,
 							HTTPReturnCost:               cost,
@@ -2427,7 +2399,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 							HTTPReturnCacheHitRatio:      cacheHitRatio,
 						})
 					} else {
-						returnQueryResponse(ctx, c, http.StatusOK, gin.H{
+						HTTPReturnStream(c, http.StatusOK, gin.H{
 							HTTPReturnCode:  merr.Code(nil),
 							HTTPReturnData:  outputData,
 							HTTPReturnCost:  cost,
@@ -2577,18 +2549,18 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := newQueryResponseRows(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
 			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Err(err))
+				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: resultErrMessage(err),
 				})
 			} else {
 				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-					returnQueryResponse(ctx, c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks, HTTPReturnScannedRemoteBytes: scannedRemoteBytes, HTTPReturnScannedTotalBytes: scannedTotalBytes, HTTPReturnCacheHitRatio: cacheHitRatio})
+					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks, HTTPReturnScannedRemoteBytes: scannedRemoteBytes, HTTPReturnScannedTotalBytes: scannedTotalBytes, HTTPReturnCacheHitRatio: cacheHitRatio})
 				} else {
-					returnQueryResponse(ctx, c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks})
+					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks})
 				}
 			}
 		}

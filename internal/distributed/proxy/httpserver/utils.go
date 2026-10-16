@@ -4100,23 +4100,282 @@ func scalarFieldToRESTAny(field *schemapb.ScalarField, enableInt64 bool) (any, e
 }
 
 //nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
-func buildQueryResp(rowsNum int64, needFields []string, fields []*schemapb.FieldData, ids *schemapb.IDs,
-	scores []float32, enableInt64 bool, schema *schemapb.CollectionSchema,
+func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
 ) ([]map[string]interface{}, error) {
-	rows, err := newQueryResponseRows(rowsNum, needFields, fields, ids, scores, enableInt64, schema)
-	if err != nil {
-		return nil, err
+	nativeJSON := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
+	jsonFieldNames := make(map[string]struct{})
+	jsonAllValid := true
+
+	columnNum := len(fieldDataList)
+	if rowsNum == int64(0) { // always
+		if columnNum > 0 {
+			var err error
+			rowsNum, err = fieldDataRowCount(fieldDataList[0])
+			if err != nil {
+				return nil, wrapOutputFieldErr(fieldDataList[0].GetFieldName(), err)
+			}
+		} else if ids != nil {
+			switch ids.GetIdField().(type) {
+			case *schemapb.IDs_IntId:
+				int64Pks := ids.GetIntId().GetData()
+				rowsNum = int64(len(int64Pks))
+			case *schemapb.IDs_StrId:
+				stringPks := ids.GetStrId().GetData()
+				rowsNum = int64(len(stringPks))
+			default:
+				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
+			}
+		}
 	}
-	result := make([]map[string]interface{}, 0, rows.rowsNum)
-	for {
-		batch, err := rows.Next(context.Background(), 1024)
-		if err == io.EOF {
-			return result, nil
-		}
+	if rowsNum == int64(0) {
+		return []map[string]interface{}{}, nil
+	}
+	fieldDataAccessors := make([]*fieldDataRowAccessor, 0, columnNum)
+	structArrayAccessors := make([]*structArrayRowAccessor, columnNum)
+	for idx, fieldData := range fieldDataList {
+		accessor, err := newFieldDataRowAccessor(fieldData)
 		if err != nil {
-			return nil, err
+			return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 		}
-		result = append(result, batch...)
+		fieldDataAccessors = append(fieldDataAccessors, accessor)
+		if fieldData.GetType() == schemapb.DataType_ArrayOfStruct {
+			structAccessor, err := newStructArrayRowAccessor(fieldData, collectionSchema)
+			if err != nil {
+				return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
+			}
+			structArrayAccessors[idx] = structAccessor
+		}
+	}
+	queryResp := make([]map[string]interface{}, 0, rowsNum)
+	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
+	legacyArrayResponse := paramtable.Get().HTTPCfg.LegacyArrayResponse.GetAsBool()
+
+	pkFieldName := DefaultPrimaryFieldName
+	if collectionSchema != nil {
+		fieldsSchema := collectionSchema.GetFields()
+		for _, field := range fieldsSchema {
+			if field.GetIsPrimaryKey() {
+				pkFieldName = field.GetName()
+				break
+			}
+		}
+	}
+	for i := int64(0); i < rowsNum; i++ {
+		row := map[string]interface{}{}
+		if columnNum > 0 {
+			for j := 0; j < columnNum; j++ {
+				fieldData := fieldDataList[j]
+				dataIdx, valid, err := fieldDataAccessors[j].rowIndex(i)
+				if err != nil {
+					return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
+				}
+				if !valid {
+					if !fieldData.GetIsDynamic() {
+						row[fieldData.GetFieldName()] = nil
+					}
+					continue
+				}
+				switch fieldDataList[j].GetType() {
+				case schemapb.DataType_Bool:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetBoolData().GetData()[dataIdx]
+				case schemapb.DataType_Int8:
+					row[fieldDataList[j].GetFieldName()] = int8(fieldDataList[j].GetScalars().GetIntData().GetData()[dataIdx])
+				case schemapb.DataType_Int16:
+					row[fieldDataList[j].GetFieldName()] = int16(fieldDataList[j].GetScalars().GetIntData().GetData()[dataIdx])
+				case schemapb.DataType_Int32:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetIntData().GetData()[dataIdx]
+				case schemapb.DataType_Int64:
+					if enableInt64 {
+						row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetLongData().GetData()[dataIdx]
+					} else {
+						row[fieldDataList[j].GetFieldName()] = strconv.FormatInt(fieldDataList[j].GetScalars().GetLongData().GetData()[dataIdx], 10)
+					}
+				case schemapb.DataType_Float:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetFloatData().GetData()[dataIdx]
+				case schemapb.DataType_Double:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetDoubleData().GetData()[dataIdx]
+				case schemapb.DataType_Timestamptz:
+					if fieldDataList[j].GetScalars().GetTimestamptzData() != nil {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetTimestamptzData().GetData()[dataIdx]
+					} else {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
+					}
+				case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
+				case schemapb.DataType_BinaryVector:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
+				case schemapb.DataType_FloatVector:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloatVector().GetData()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
+				case schemapb.DataType_Float16Vector:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloat16Vector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()*2) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
+				case schemapb.DataType_BFloat16Vector:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBfloat16Vector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()*2) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
+				case schemapb.DataType_SparseFloatVector:
+					row[fieldDataList[j].GetFieldName()] = typeutil.SparseFloatBytesToMap(fieldDataList[j].GetVectors().GetSparseFloatVector().Contents[dataIdx])
+				case schemapb.DataType_Int8Vector:
+					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetInt8Vector()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
+				case schemapb.DataType_Array:
+					arrayRow := fieldDataList[j].GetScalars().GetArrayData().GetData()[dataIdx]
+					if legacyArrayResponse {
+						// Escape hatch: emit the raw ScalarField so it serializes back into
+						// the protobuf wrapper shape clients may have parsed before the fix.
+						// The shape is what those clients read; Accept-Type-Allow-Int64 is
+						// about what their JSON parser can hold, which the shape does not
+						// change, so an Int64 is still rendered the way the header asks.
+						row[fieldDataList[j].GetFieldName()] = legacyArrayValue(arrayRow, enableInt64)
+						continue
+					}
+					value, err := scalarFieldToRESTAny(arrayRow, enableInt64)
+					if err != nil {
+						return nil, wrapOutputFieldErr(fieldData.GetFieldName(), merr.Wrapf(err, "row %d", i))
+					}
+					row[fieldDataList[j].GetFieldName()] = value
+				case schemapb.DataType_JSON:
+					data, ok := fieldDataList[j].GetScalars().GetData().(*schemapb.ScalarField_JsonData)
+					if ok && !fieldDataList[j].GetIsDynamic() {
+						// A JSON field reads back as a string by default, which
+						// is why the same value in a dynamic field reads back as a
+						// document. proxy.http.nativeJSONResponse returns the
+						// document instead; jsonFieldsToStrings below undoes it for
+						// the whole response if any row turns out not to hold one.
+						raw := data.JsonData.GetData()[dataIdx]
+						if nativeJSON {
+							row[fieldDataList[j].GetFieldName()] = json.RawMessage(raw)
+							jsonFieldNames[fieldDataList[j].GetFieldName()] = struct{}{}
+							// json.Valid accepts invalid UTF-8, which the encoder
+							// would replace with U+FFFD without saying so
+							if !json.Valid(raw) || !utf8.Valid(raw) {
+								jsonAllValid = false
+							}
+						} else {
+							row[fieldDataList[j].GetFieldName()] = string(raw)
+						}
+					} else {
+						var dataMap map[string]interface{}
+
+						// Decode with UseNumber so numeric dynamic-field values are kept as
+						// json.Number instead of float64. float64 only has a 53-bit mantissa,
+						// so integers larger than 2^53 (e.g. 9223372036854775807) silently lose
+						// precision when round-tripped through the REST response. json.Number
+						// preserves the exact digits and serializes back as the same integer.
+						raw := fieldDataList[j].GetScalars().GetJsonData().Data[dataIdx]
+
+						// A Decoder reads one value and ignores whatever follows
+						// it, where the Unmarshal this replaced rejected trailing
+						// content. A second Decode on the same decoder restores
+						// that in the same pass: only whitespace to the end
+						// answers io.EOF, anything else answers a value or an
+						// error. An earlier version ran json.Valid first, which
+						// read every row twice; the ways to avoid the second
+						// call are all closed -- Token is not in sonic's
+						// Decoder, which this build uses everywhere, More
+						// answers false at a closing bracket because it exists
+						// to iterate inside one, and Buffered only exposes the
+						// window the decoder happened to pre-read, so a second
+						// document past four kilobytes of padding sat outside
+						// it and was silently dropped.
+						decoder := json.NewDecoder(bytes.NewReader(raw))
+						decoder.UseNumber()
+						err := decoder.Decode(&dataMap)
+						if err == nil {
+							var trailing interface{}
+							if trailingErr := decoder.Decode(&trailing); trailingErr != io.EOF {
+								err = merr.WrapErrParameterInvalidMsg(
+									"dynamic field does not hold a single JSON document")
+							}
+						}
+						if err != nil {
+							mlog.Error(context.TODO(),
+								fmt.Sprintf("[BuildQueryResp] Unmarshal error %s", err.Error()))
+							// This branch is only entered for the dynamic field, so the
+							// name here is always the internal $meta -- never one of the
+							// caller's outputFields -- which makes wrapOutputFieldErr's
+							// contract not hold and would report a column the caller
+							// cannot drop. What it can act on is the cause: the stored
+							// bytes are not one JSON document. That describes its own
+							// data, not our layout, so echo it and keep the decoder's
+							// text (which can quote the bytes and an offset into them)
+							// in the log line above.
+							return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg(
+								"dynamic field does not hold a single JSON document"))
+						}
+
+						if containsString(dynamicOutputFields, fieldDataList[j].GetFieldName()) {
+							for key, value := range dataMap {
+								row[key] = value
+							}
+						} else {
+							for _, dynamicField := range dynamicOutputFields {
+								if _, ok := dataMap[dynamicField]; ok {
+									row[dynamicField] = dataMap[dynamicField]
+								}
+							}
+						}
+					}
+				case schemapb.DataType_Geometry:
+					if fieldDataList[j].GetScalars().GetGeometryData() != nil {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryData().GetData()[dataIdx]
+					} else {
+						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[dataIdx]
+					}
+				case schemapb.DataType_ArrayOfStruct:
+					structRow, err := structArrayAccessors[j].row(int(dataIdx), enableInt64)
+					if err != nil {
+						return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
+					}
+					row[fieldDataList[j].GetFieldName()] = structRow
+				default:
+					row[fieldDataList[j].GetFieldName()] = ""
+				}
+			}
+		}
+		if ids != nil {
+			switch ids.GetIdField().(type) {
+			case *schemapb.IDs_IntId:
+				int64Pks := ids.GetIntId().GetData()
+				if enableInt64 {
+					row[pkFieldName] = int64Pks[i]
+				} else {
+					row[pkFieldName] = strconv.FormatInt(int64Pks[i], 10)
+				}
+			case *schemapb.IDs_StrId:
+				stringPks := ids.GetStrId().GetData()
+				row[pkFieldName] = stringPks[i]
+			default:
+				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
+			}
+		}
+		if scores != nil && int64(len(scores)) > i {
+			row[HTTPReturnDistance] = scores[i] // only 8 decimal places
+		}
+		queryResp = append(queryResp, row)
+	}
+
+	if nativeJSON && !jsonAllValid {
+		// Rows written before the insert path was fixed can hold bytes that are
+		// not a JSON document. Embedding one of those natively makes the whole
+		// response fail to marshal, so a single legacy row would break every
+		// query that selects it. Degrade the whole response instead of part of
+		// it: a caller can handle "always a document" or "always a string", but
+		// not one field that is sometimes each.
+		mlog.Warn(context.TODO(),
+			"a JSON field holds bytes that are not a JSON document, returning JSON fields as strings for this response",
+			mlog.Int("rows", len(queryResp)))
+		jsonFieldsToStrings(queryResp, jsonFieldNames)
+	}
+
+	return queryResp, nil
+}
+
+// jsonFieldsToStrings turns the named fields back into their textual form.
+func jsonFieldsToStrings(rows []map[string]interface{}, fields map[string]struct{}) {
+	for _, row := range rows {
+		for name := range fields {
+			if raw, ok := row[name].(json.RawMessage); ok {
+				row[name] = string(raw)
+			}
+		}
 	}
 }
 

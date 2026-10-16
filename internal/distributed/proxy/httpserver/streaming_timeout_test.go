@@ -270,20 +270,6 @@ func requireStreamingAbort(t *testing.T, response *http.Response) []byte {
 	return body
 }
 
-func streamingProjectionRows(t *testing.T, count, badIndex int) *queryResponseRows {
-	t.Helper()
-	values := make([]string, count)
-	for i := range values {
-		values[i] = `{"value":1}`
-	}
-	values[badIndex] = `{broken`
-	field := jsonRespFieldData(values...)
-	field.IsDynamic, field.FieldName = true, "$meta"
-	rows, err := newQueryResponseRows(0, []string{"value"}, []*schemapb.FieldData{field}, nil, nil, true, nil)
-	require.NoError(t, err)
-	return rows
-}
-
 func TestStreamingResponseDeliveredBeforeHandlerReturns(t *testing.T) {
 	paramtable.Init()
 	release := make(chan struct{})
@@ -312,25 +298,13 @@ func TestStreamingTransportFailures(t *testing.T) {
 	streamingTestTimeout(t, "80")
 	for _, protocol := range []string{"http1", "h2", "h2c"} {
 		t.Run(protocol, func(t *testing.T) {
-			for _, mode := range []string{"timeout", "panic", "late projection", "late encoding"} {
+			for _, mode := range []string{"timeout", "panic"} {
 				t.Run(mode, func(t *testing.T) {
 					engine := gin.New()
 					engine.Use(gin.Recovery())
 					unwound := make(chan struct{})
 					engine.Use(func(c *gin.Context) { c.Next(); close(unwound) })
 					engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
-						if mode == "late projection" || mode == "late encoding" {
-							values := make([]float64, 130)
-							if mode == "late encoding" {
-								values[129] = math.NaN()
-							}
-							rows := streamTestRows(t, values...)
-							if mode == "late projection" {
-								rows = streamingProjectionRows(t, 130, 129)
-							}
-							returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: rows})
-							return
-						}
 						_, _ = c.Writer.Write([]byte(`{"data":[1`))
 						c.Writer.Flush()
 						if mode == "panic" {
@@ -428,12 +402,7 @@ func TestStreamingPrecommitErrorsAndKeepalive(t *testing.T) {
 				case "panic":
 					panic("uncommitted panic")
 				case "encoding":
-					returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnCost: func() {}, HTTPReturnData: streamTestRows(t, 1)})
-				case "first encoding":
-					returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: streamTestRows(t, math.NaN())})
-				case "first projection":
-					rows := streamingProjectionRows(t, 1, 0)
-					returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: rows})
+					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnCost: func() {}, HTTPReturnData: []gin.H{{"value": 1}}})
 				case "nested encoding":
 					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: []gin.H{{"value": math.NaN()}}})
 				default:
@@ -441,7 +410,7 @@ func TestStreamingPrecommitErrorsAndKeepalive(t *testing.T) {
 				}
 			}))
 			server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
-			for index, mode := range []string{"timeout", "panic", "encoding", "first encoding", "first projection", "nested encoding", "healthy"} {
+			for index, mode := range []string{"timeout", "panic", "encoding", "nested encoding", "healthy"} {
 				reused := false
 				req, err := http.NewRequest(http.MethodGet, server.URL+"/"+mode, nil)
 				require.NoError(t, err)
@@ -462,7 +431,7 @@ func TestStreamingPrecommitErrorsAndKeepalive(t *testing.T) {
 				case "panic":
 					require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 					require.JSONEq(t, `{"code":500}`, string(body))
-				case "encoding", "first encoding", "first projection", "nested encoding":
+				case "encoding", "nested encoding":
 					require.Equal(t, int64(merr.Code(merr.ErrInvalidSearchResult)), gjson.GetBytes(body, HTTPReturnCode).Int())
 					require.True(t, json.Valid(body))
 				default:
@@ -531,27 +500,21 @@ func TestStreamingUnsupportedDeadlinesFailClosed(t *testing.T) {
 
 func TestStreamingCommittedFailureReturnsToHandler(t *testing.T) {
 	streamingTestTimeout(t, "1000")
-	for _, nested := range []bool{false, true} {
-		t.Run(strconv.FormatBool(nested), func(t *testing.T) {
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
 			continued := make(chan error, 1)
 			engine := gin.New()
 			engine.Use(gin.Recovery())
 			engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
-				if nested {
-					_, _ = c.Writer.Write([]byte(`{"data":[1`))
-					c.Writer.Flush()
-					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: math.NaN()})
-				} else {
-					values := make([]float64, 130)
-					values[129] = math.NaN()
-					returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: streamTestRows(t, values...)})
-				}
+				_, _ = c.Writer.Write([]byte(`{"data":[1`))
+				c.Writer.Flush()
+				HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: math.NaN()})
 				// Real route wrappers must regain control to record their normal
 				// accounting, but cannot write more bytes after renderer failure.
 				_, err := c.Writer.Write([]byte("]}\n"))
 				continued <- err
 			}))
-			server, client := streamingTestServer(t, "http1", StreamingHTTPHandler(engine))
+			server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
 			resp, err := client.Get(server.URL)
 			require.NoError(t, err)
 			requireStreamingAbort(t, resp)
@@ -572,7 +535,7 @@ func TestStreamingImmediateTimeoutHeader(t *testing.T) {
 			engine := gin.New()
 			engine.Use(gin.Recovery())
 			engine.GET("/", streamingTimeoutMiddleware(func(c *gin.Context) {
-				returnQueryResponse(c.Request.Context(), c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: streamTestRows(t, 1)})
+				HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: 0, HTTPReturnData: []gin.H{{"value": 1}}})
 			}))
 			server, client := streamingTestServer(t, protocol, StreamingHTTPHandler(engine))
 			req, err := http.NewRequest(http.MethodGet, server.URL, nil)

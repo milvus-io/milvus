@@ -48,7 +48,7 @@ type streamingIOCall struct {
 	done   chan streamingIOResult
 }
 
-// streamingExchange borrows one batch at a time, without copying or queuing it.
+// streamingExchange borrows one I/O slice at a time, without copying or queuing it.
 // Only the serving goroutine accesses the real writer and request body. A late
 // worker retains this detached exchange, never the connection or pooled Gin context.
 type streamingExchange struct {

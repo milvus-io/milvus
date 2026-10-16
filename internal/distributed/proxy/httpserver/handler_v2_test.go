@@ -1297,9 +1297,9 @@ func TestTextFieldQueryV2(t *testing.T) {
 	assert.Equal(t, "rest query text", data[0].(map[string]interface{})[FieldText])
 }
 
-// Late encoder/projection failures interrupt committed output. The success
-// cases also protect the public envelope across all five DQL routes.
-func TestV2BatchedDQLRoutes(t *testing.T) {
+// Full projection and encoding must finish before output starts, including
+// failures in the last row. Protect the public envelope across all DQL routes.
+func TestV2DirectDQLRoutes(t *testing.T) {
 	paramtable.Init()
 	for _, setting := range []struct{ key, value string }{
 		{paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"},
@@ -1364,7 +1364,7 @@ func TestV2BatchedDQLRoutes(t *testing.T) {
 				engine := gin.New()
 				engine.Use(gin.Recovery())
 				var original *gin.Context
-				engine.Use(func(c *gin.Context) { original = c; c.Set("traceID", "batch-trace"); c.Next() })
+				engine.Use(func(c *gin.Context) { original = c; c.Set("traceID", "direct-trace"); c.Next() })
 				NewHandlersV2(mp).RegisterRoutesToV2(engine.Group("/v2/vectordb", genAuthMiddleWare(false)))
 				req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, route.action), strings.NewReader(route.body))
 				if mode == "numeric" {
@@ -1380,21 +1380,20 @@ func TestV2BatchedDQLRoutes(t *testing.T) {
 				defer responseHTTP.Body.Close()
 				responseBytes, readErr := io.ReadAll(responseHTTP.Body)
 				require.Equal(t, http.StatusOK, responseHTTP.StatusCode)
-				require.Equal(t, "batch-trace", responseHTTP.Header.Get(HTTPHeaderMilvusTraceID))
+				require.Equal(t, "direct-trace", responseHTTP.Header.Get(HTTPHeaderMilvusTraceID))
 				require.Equal(t, "application/json; charset=utf-8", responseHTTP.Header.Get("Content-Type"))
-				require.Empty(t, responseHTTP.Header.Get("Content-Length"))
 				body := map[string]interface{}{}
+				require.NoError(t, readErr)
+				require.NoError(t, json.Unmarshal(responseBytes, &body), string(responseBytes))
 				if strings.HasPrefix(mode, "late") {
-					require.Error(t, readErr)
-					require.False(t, json.Valid(responseBytes))
-					require.NotContains(t, string(responseBytes), `"message"`)
+					require.EqualValues(t, merr.Code(merr.ErrInvalidSearchResult), body[HTTPReturnCode])
+					require.NotEmpty(t, body[HTTPReturnMessage])
+					require.NotContains(t, body, HTTPReturnData)
 					code, _ := original.Get(HTTPReturnCode)
 					require.Equal(t, merr.Code(merr.ErrInvalidSearchResult), code)
 					message, _ := original.Get(HTTPReturnMessage)
 					require.NotEmpty(t, message)
 				} else {
-					require.NoError(t, readErr)
-					require.NoError(t, json.Unmarshal(responseBytes, &body), string(responseBytes))
 					require.Equal(t, float64(0), body[HTTPReturnCode])
 					require.Equal(t, float64(17), body[HTTPReturnCost])
 					data := body[HTTPReturnData].([]interface{})
