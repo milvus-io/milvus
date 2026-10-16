@@ -44,10 +44,6 @@ type Catalog struct {
 	pool *conc.Pool[any]
 }
 
-type prefixWalker interface {
-	WalkWithPrefix(context.Context, string, int, func([]byte, []byte) error) error
-}
-
 func NewCatalog(metaKV kv.TxnKV) metastore.RootCoordCatalog {
 	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 	return &Catalog{Txn: metaKV, pool: ioPool}
