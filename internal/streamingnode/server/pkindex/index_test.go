@@ -490,3 +490,164 @@ func TestResolveLocalReusesATableWithTheRightSize(t *testing.T) {
 	view := index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 11, Tables: []index.TableRef{ref}}
 	require.NoError(t, idx.InstallIfNewerForTest(ctx, view, nil))
 }
+
+func TestReplaySkipsWritesTheManifestCovers(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.SetCommitted(index.ManifestView{Version: 1, CheckpointTimeTick: 100})
+	assert.Equal(t, uint64(100), idx.LastCommittedTimeTick())
+
+	require.NoError(t, idx.Replay(ctx, index.ReplayWrite{Kind: authority.KindInsert, PKs: []authority.PK{authority.Int64PK(1)}, SegmentID: 7, TimeTick: 100}))
+	assert.False(t, idx.Dirty(), "a write at the checkpoint is committed already")
+	require.NoError(t, idx.Replay(ctx, index.ReplayWrite{Kind: authority.KindInsert, PKs: []authority.PK{authority.Int64PK(2)}, SegmentID: 7, TimeTick: 101}))
+	assert.True(t, idx.Dirty())
+	c.ObserveTimeTick(200)
+	assert.Equal(t, uint64(100), c.LastAcked(), "the dirty index holds LastAcked at its checkpoint")
+}
+
+func TestReplayOfADeleteBeforeTheInstallWritesEveryTombstone(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.MarkReady(ctx, false)
+	// a committed table with pk 1 and 2, from a handover of another "life"
+	insert(t, idx, 1, 1, 2)
+	c.ObserveTimeTick(50)
+	p, err := idx.PrepareForTest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	ref := p.Request().AddTables[0]
+	store := env.Manager.StoreForTest().(*index.FakeStore)
+	require.NoError(t, store.UploadFile(ctx, pkroot.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID)), p.Local()[ref.ID]))
+	view := index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 50, Tables: []index.TableRef{ref}}
+	c.RemoveForTest(ctx, "v1")
+
+	// restart: empty engine, not ready, the delete of pk 1 replays before the install
+	idx, _, err = c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.SetCommitted(view)
+	require.NoError(t, idx.Replay(ctx, index.ReplayWrite{Kind: authority.KindDelete, PKs: []authority.PK{authority.Int64PK(1)}, TimeTick: 60}))
+	require.NoError(t, idx.Install(ctx))
+	require.True(t, idx.Ready())
+
+	g, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindDelete, VChannel: "v1", PKs: []authority.PK{authority.Int64PK(1), authority.Int64PK(2)}})
+	require.NoError(t, err)
+	assert.Equal(t, []authority.PK{authority.Int64PK(2)}, g.Decision().PresentPKs, "pk 1 stays deleted after the install")
+	g.Discard(ctx, nil)
+}
+
+func TestInstallReconcilesTheCommittedDir(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	dir := idx.CommittedDirForTest()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	stale := filepath.Join(dir, "99.sst")
+	partial := filepath.Join(dir, "5.sst.download-abc")
+	require.NoError(t, os.WriteFile(stale, []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(partial, []byte("x"), 0o644))
+	idx.SetCommitted(index.ManifestView{Version: 1, CheckpointTimeTick: 1})
+	require.NoError(t, idx.Install(ctx))
+	assert.NoFileExists(t, stale)
+	assert.NoFileExists(t, partial)
+	assert.True(t, idx.Ready())
+}
+
+func TestInstallWithoutAManifestOnlyMarksReady(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	require.False(t, idx.Ready())
+	require.NoError(t, idx.Install(ctx))
+	assert.True(t, idx.Ready())
+	assert.Equal(t, int64(0), idx.InstalledVersionForTest())
+}
+
+func TestInstallRetriesAfterAFailedDownload(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.MarkReady(ctx, false)
+	store := env.Manager.StoreForTest().(*index.FakeStore)
+	var refs []index.TableRef
+	for i, tt := range []uint64{50, 60} {
+		insert(t, idx, 1, int64(2*i+1), int64(2*i+2))
+		c.ObserveTimeTick(tt)
+		p, err := idx.PrepareForTest(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, p)
+		for _, ref := range p.Request().AddTables {
+			require.NoError(t, store.UploadFile(ctx, pkroot.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID)), p.Local()[ref.ID]))
+			if i == 0 || ref.ID != refs[0].ID {
+				refs = append(refs, ref)
+			}
+		}
+		if i == 0 {
+			require.NoError(t, idx.InstallIfNewerForTest(ctx, index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: tt, Tables: refs}, p.Local()))
+		}
+	}
+	require.Len(t, refs, 2)
+	view := index.ManifestView{Version: 2, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 60, Tables: refs}
+	dir := idx.CommittedDirForTest()
+	c.RemoveForTest(ctx, "v1")
+
+	idx, _, err = c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.SetCommitted(view)
+	for _, ref := range refs {
+		require.NoError(t, os.RemoveAll(index.CommittedPathForTest(dir, ref.ID)))
+	}
+	store.FailDownloads(1)
+	require.Error(t, idx.Install(ctx))
+	assert.False(t, idx.Ready())
+	assert.Equal(t, int64(0), idx.InstalledVersionForTest())
+
+	require.NoError(t, idx.Install(ctx))
+	assert.True(t, idx.Ready())
+	assert.Equal(t, int64(2), idx.InstalledVersionForTest())
+	for _, ref := range refs {
+		assert.FileExists(t, index.CommittedPathForTest(dir, ref.ID))
+	}
+	require.NoError(t, idx.Install(ctx))
+	assert.True(t, idx.Ready())
+}
+
+func TestReplayAppliesATransactionAsAWhole(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.SetCommitted(index.ManifestView{Version: 1, CheckpointTimeTick: 100})
+	txn := func(id int64, pk int64, tt uint64) {
+		require.NoError(t, idx.Replay(ctx, index.ReplayWrite{Kind: authority.KindInsert, PKs: []authority.PK{authority.Int64PK(pk)}, SegmentID: 7, TxnID: id, TimeTick: tt}))
+		require.NoError(t, idx.Replay(ctx, index.ReplayWrite{Kind: authority.KindCommitTxn, TxnID: id, TimeTick: tt}))
+	}
+	txn(9, 1, 100)
+	assert.False(t, idx.Dirty(), "a transaction committed at the checkpoint is committed already")
+	txn(10, 2, 101)
+	assert.True(t, idx.Dirty())
+
+	idx.MarkReady(ctx, false)
+	g, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindDelete, VChannel: "v1", PKs: []authority.PK{authority.Int64PK(1), authority.Int64PK(2)}})
+	require.NoError(t, err)
+	assert.Equal(t, []authority.PK{authority.Int64PK(2)}, g.Decision().PresentPKs)
+	g.Discard(ctx, nil)
+}

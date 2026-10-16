@@ -69,6 +69,9 @@ type Index struct {
 	installMu        sync.Mutex
 	installedVersion int64
 	installedPaths   map[sst.ID]string
+	// recovered is the manifest of the vchannel at the open, set by
+	// SetCommitted and installed by Install. Nil when the vchannel had none.
+	recovered *ManifestView
 }
 
 // Params are the parameters of an Index. The Channel refreshes them.
