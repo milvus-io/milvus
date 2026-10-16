@@ -18,12 +18,16 @@ package datanode
 
 import (
 	"context"
+	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	pkcompaction "github.com/milvus-io/milvus/internal/datanode/pkindex/compaction"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/objstore"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -32,23 +36,66 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// initPKIndexCompaction builds the primary key index compaction executor on
-// the object storage of this node. When the storage is not local and has no
-// address, it leaves the executor nil: the task RPCs then answer not-ready.
-// Otherwise it returns the error of the storage client or of the local
-// directory.
+// lazyStore is the object store of the primary key index compaction executor.
+// It creates the chunk manager on the first task, so that a node whose object
+// storage is not reachable yet still starts. A failed creation is marked
+// pkindex.ErrUnavailable and is not kept: the next task tries again.
+type lazyStore struct {
+	newChunkManager func(ctx context.Context) (storage.ChunkManager, error)
+	ctx             context.Context
+
+	mu    sync.Mutex
+	store *objstore.Store
+}
+
+func (s *lazyStore) get() (*objstore.Store, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.store != nil {
+		return s.store, nil
+	}
+	cm, err := s.newChunkManager(s.ctx)
+	if err != nil {
+		return nil, errors.Mark(errors.Wrap(err, "create the chunk manager of the primary key index compaction"), pkindex.ErrUnavailable)
+	}
+	s.store = objstore.New(cm)
+	return s.store, nil
+}
+
+func (s *lazyStore) UploadFile(ctx context.Context, key, path string) error {
+	store, err := s.get()
+	if err != nil {
+		return err
+	}
+	return store.UploadFile(ctx, key, path)
+}
+
+func (s *lazyStore) DownloadFile(ctx context.Context, key, path string) error {
+	store, err := s.get()
+	if err != nil {
+		return err
+	}
+	return store.DownloadFile(ctx, key, path)
+}
+
+// initPKIndexCompaction builds the primary key index compaction executor. When
+// the storage is not local and has no address, it leaves the executor nil: the
+// task RPCs then answer not-ready. Otherwise it returns the error of the local
+// directory. The chunk manager is created on the first task, not here.
 func (node *DataNode) initPKIndexCompaction() error {
 	storageConfig := compaction.CreateStorageConfig()
 	if storageConfig.GetStorageType() != "local" && storageConfig.GetAddress() == "" {
 		mlog.Info(node.ctx, "No storage address configured, primary key index compaction is disabled")
 		return nil
 	}
-	cm, err := node.storageFactory.NewChunkManager(node.ctx, storageConfig)
-	if err != nil {
-		return err
+	store := &lazyStore{
+		ctx: node.ctx,
+		newChunkManager: func(ctx context.Context) (storage.ChunkManager, error) {
+			return node.storageFactory.NewChunkManager(ctx, compaction.CreateStorageConfig())
+		},
 	}
 	cfg := pkcompaction.ConfigFromParams()
-	exec, err := pkcompaction.New(node.ctx, cfg, objstore.New(cm))
+	exec, err := pkcompaction.New(node.ctx, cfg, store)
 	if err != nil {
 		return err
 	}
