@@ -47,8 +47,15 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	}
 	pkDescriptorGetter, _ := param.ShardManager.(primaryKeyDescriptorGetter)
 	interceptor := &appendInterceptor{
+		enableCAS:          paramtable.Get().StreamingCfg.PartialUpdateEnableCAS.GetAsBool(),
 		state:              state,
 		pkDescriptorGetter: pkDescriptorGetter,
+	}
+	if !interceptor.enableCAS {
+		// CAS is disabled: no write-set recovery and no row-lock hook. The lock
+		// interceptor keeps only its shard lifecycle locks, and this
+		// interceptor passes writes through.
+		return interceptor
 	}
 	interceptor.recoverTransactions(param)
 	// Builders share this per-WAL parameter. The lock interceptor reads the
@@ -58,6 +65,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 }
 
 type appendInterceptor struct {
+	enableCAS          bool
 	state              *partialUpdateState
 	pkDescriptorGetter primaryKeyDescriptorGetter
 }
@@ -71,6 +79,9 @@ func (i *appendInterceptor) DoAppend(
 	msg message.MutableMessage,
 	appendOp interceptors.Append,
 ) (message.MessageID, error) {
+	if !i.enableCAS {
+		return appendOp(ctx, msg)
+	}
 	switch msg.MessageType() {
 	case message.MessageTypeCommitTxn:
 		return i.appendCommit(ctx, msg, appendOp)

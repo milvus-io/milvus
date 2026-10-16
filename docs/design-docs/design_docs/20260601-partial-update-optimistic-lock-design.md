@@ -151,12 +151,13 @@ with an empty value as a control marker. The outer marker contains no PK,
 
 ### Configuration and metrics
 
-The proposal adds one internal, non-refreshable StreamingNode configuration
-parameter. The remaining values are internal constants:
+The proposal uses two internal, non-refreshable StreamingNode configuration
+parameters. The remaining values are internal constants:
 
 | Parameter or constant | Default | Purpose |
 |---|---|---|
 | `defaultVersionIndexTTL` | 30 seconds | Limits how long each vchannel retains recent PK-write versions and also bounds the valid window from `readTS` to `commitTS` for one partial-update attempt. When the window is exceeded, StreamingNode returns a retryable CAS rejection; Proxy automatically retries only replacement updates that can be rebuilt safely. |
+| `streaming.partialUpdate.enableCAS` | `true` | Hidden switch added by #54248. When it is `false`, the partial-update interceptor installs no row-lock hook, skips write-set recovery, and passes every write through without CAS validation, so concurrent updates based on stale rows may overwrite each other. Shard lifecycle and structural DDL locks are unchanged. Each interceptor reads it once when the WAL opens. |
 | `streaming.partialUpdate.versionIndexMaxBytes` | 640,000,000 bytes, approximately 610 MiB | Caps the estimated memory used by all PK-version indexes on one StreamingNode. When the shared budget is unavailable, ordinary writes continue, but CAS on the affected vchannel fails closed until the omitted write leaves the valid read window. |
 | `partialUpdateCASMaxRetryAttempts` | 5 attempts, including the first attempt | Limits the total number of Proxy attempts used to rebuild a complete replacement update after a deterministic CAS conflict. Requests containing relative field operations do not use this automatic retry. |
 | `partialUpdateCASRetryBackoff` | Starts at 10 ms with exponential backoff; each sleep is capped at 40 ms | Controls the delay between Proxy CAS attempts and reduces sustained contention caused by immediately retrying concurrent conflicts. The 40 ms cap is calculated as `4 * partialUpdateCASRetryBackoff`. |

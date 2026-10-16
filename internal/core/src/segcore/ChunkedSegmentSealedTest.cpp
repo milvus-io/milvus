@@ -464,6 +464,60 @@ TEST(test_chunk_segment,
     }
 }
 
+// The result-fill phase must produce identical output whether it reads through
+// the request-pinned snapshot (SearchResult::read_snapshot_) or the per-call
+// segment fallback. This covers FillTargetEntry -> TryTakeForSearch /
+// bulk_subscript_from_state reusing the pinned published state instead of
+// re-capturing it per output field.
+TEST(test_chunk_segment, PinnedFillTargetEntryMatchesUnpinned) {
+    constexpr int64_t row_count = 16;
+    constexpr int64_t dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto scalar_id = schema->AddDebugField("scalar", DataType::INT64);
+    auto vector_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+
+    auto segment = CreateColdVectorOutputSegment(schema, vector_id, row_count);
+    auto* chunked =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(chunked, nullptr);
+
+    auto snapshot = chunked->CaptureReadSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    // The type-erased bridge must rebind the sealed snapshot to the concrete
+    // published state, and reject null / non-sealed inputs.
+    auto state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(snapshot);
+    ASSERT_NE(state, nullptr);
+    ASSERT_EQ(segcore::ChunkedSegmentSealedImpl::ToPublishedState(nullptr),
+              nullptr);
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {pk_id, scalar_id, vector_id};
+
+    auto pinned = MakeSearchResult({0, 3, 7, 11});
+    pinned.read_snapshot_ = snapshot;
+    auto unpinned = MakeSearchResult({0, 3, 7, 11});
+
+    // Vector field is cold in CreateColdVectorOutputSegment; disable the
+    // reject-remote-vector-output gate so both paths exercise the same fill.
+    ScopedRejectRemoteVectorOutput scoped_config(false);
+    ASSERT_NO_THROW(chunked->TestFillTargetEntry(&plan, pinned));
+    ASSERT_NO_THROW(chunked->TestFillTargetEntry(&plan, unpinned));
+
+    for (auto field_id : plan.target_entries_) {
+        ASSERT_EQ(pinned.output_fields_data_.count(field_id), 1);
+        ASSERT_EQ(unpinned.output_fields_data_.count(field_id), 1);
+        EXPECT_EQ(
+            pinned.output_fields_data_.at(field_id)->SerializeAsString(),
+            unpinned.output_fields_data_.at(field_id)->SerializeAsString())
+            << "field " << field_id.get();
+    }
+    EXPECT_EQ(pinned.search_storage_cost_.scanned_total_bytes,
+              unpinned.search_storage_cost_.scanned_total_bytes);
+}
+
 TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
