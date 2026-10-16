@@ -46,10 +46,7 @@ func TestSchemaTargetFollowsOrderedCallback(t *testing.T) {
 	bm.schemaTasks.add(200, first)
 	_, err := bm.GetPendingSchemaTarget(100)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady, "recovery alone cannot authorize a target")
-	second.schemaTargetEligible = true
-	_, err = bm.GetPendingSchemaTarget(100)
-	require.ErrorIs(t, err, merr.ErrServiceNotReady, "must not skip a predecessor")
-	first.schemaTargetEligible = true
+	bm.admitSchemaTarget(first)
 	got, err := bm.GetPendingSchemaTarget(100)
 	require.NoError(t, err)
 	require.EqualValues(t, 200, got.BroadcastID)
@@ -63,6 +60,9 @@ func TestSchemaTargetFollowsOrderedCallback(t *testing.T) {
 	require.EqualValues(t, 11, again.TimeTicks["v1"])
 	first.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
 	bm.removeBroadcastTask(200)
+	_, err = bm.GetPendingSchemaTarget(100)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady, "successor requires scheduler admission")
+	bm.admitSchemaTarget(second)
 	got, err = bm.GetPendingSchemaTarget(100)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, got.Schema.Version)
@@ -130,9 +130,7 @@ func TestSchemaTargetIndexLifecycle(t *testing.T) {
 		require.Same(t, replicated, again)
 
 		for _, task := range []*broadcastTask{bm.tasks[1], local, replicated} {
-			task.mu.Lock()
-			task.schemaTargetEligible = true
-			task.mu.Unlock()
+			bm.admitSchemaTarget(task)
 			target, err := bm.GetPendingSchemaTarget(task.schemaCollectionID)
 			require.NoError(t, err)
 			require.Equal(t, task.Header().BroadcastID, target.BroadcastID)
@@ -159,26 +157,40 @@ func TestSchemaTargetIndexLifecycle(t *testing.T) {
 	})
 }
 
-func TestSchemaTargetLookupDoesNotInspectOtherCollections(t *testing.T) {
+func TestSchemaTargetLookupOnlyInspectsAdmittedTask(t *testing.T) {
 	paramtable.Init()
 	metrics := newBroadcasterMetrics()
-	other := newBroadcastTaskFromBroadcastMessage(schemaTestMessage(100, 1), metrics, nil)
-	bm := &broadcastTaskManager{mu: &sync.Mutex{}, tasks: map[uint64]*broadcastTask{1: other}, schemaTasks: make(schemaTaskIndex)}
-	bm.schemaTasks.add(1, other)
-	// A lookup for an unrelated collection must not wait on this task's lock.
+	bm := &broadcastTaskManager{mu: &sync.Mutex{}, schemaTasks: make(schemaTaskIndex)}
+	selected := newBroadcastTaskFromBroadcastMessage(schemaTestMessage(100, 1), metrics, nil)
+	successor := newBroadcastTaskFromBroadcastMessage(schemaTestMessage(100, 2), metrics, nil)
+	other := newBroadcastTaskFromBroadcastMessage(schemaTestMessage(101, 3), metrics, nil)
+	for _, task := range []*broadcastTask{selected, successor, other} {
+		bm.schemaTasks.add(task.Header().BroadcastID, task)
+	}
+	bm.admitSchemaTarget(selected)
+	// Neither pending successors nor unrelated collections may be inspected.
+	// In particular, reading the selected schema must not wait for their locks.
+	successor.mu.Lock()
+	defer successor.mu.Unlock()
 	other.mu.Lock()
 	defer other.mu.Unlock()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		target, err := bm.GetPendingSchemaTarget(999)
+		target, err := bm.GetPendingSchemaTarget(100)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, target.BroadcastID)
+		target, err = bm.GetPendingSchemaTarget(101)
+		require.ErrorIs(t, err, merr.ErrServiceNotReady)
+		require.Nil(t, target)
+		target, err = bm.GetPendingSchemaTarget(999)
 		require.NoError(t, err)
 		require.Nil(t, target)
 	}()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("lookup inspected an unrelated schema task")
+		t.Fatal("lookup inspected a task without callback admission")
 	}
 }
 
@@ -196,9 +208,7 @@ func TestSchemaTargetCompletionKeepsNextTask(t *testing.T) {
 		require.Len(t, bm.snapshotSchemaTasks(100), 1)
 		_, err := bm.GetPendingSchemaTarget(100)
 		require.ErrorIs(t, err, merr.ErrServiceNotReady, "the next task still requires callback admission")
-		bm.tasks[2].mu.Lock()
-		bm.tasks[2].schemaTargetEligible = true
-		bm.tasks[2].mu.Unlock()
+		bm.admitSchemaTarget(bm.tasks[2])
 		target, err := bm.GetPendingSchemaTarget(100)
 		require.NoError(t, err)
 		require.EqualValues(t, 2, target.BroadcastID)
@@ -206,6 +216,9 @@ func TestSchemaTargetCompletionKeepsNextTask(t *testing.T) {
 		// GC of the earlier tombstone must not remove the later task's bucket.
 		bm.removeBroadcastTask(1)
 		require.Len(t, bm.snapshotSchemaTasks(100), 1)
+		target, err = bm.GetPendingSchemaTarget(100)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, target.BroadcastID, "old tombstone GC must preserve the admitted successor")
 		require.NoError(t, bm.tasks[2].MarkAckCallbackDone(t.Context()))
 		require.Empty(t, bm.schemaTasks)
 		require.Contains(t, bm.tasks, uint64(2))
@@ -232,7 +245,7 @@ func TestSchemaTargetIndexExcludesNonSchemaAlter(t *testing.T) {
 			index := make(schemaTaskIndex)
 			index.add(1, task)
 			if tc.schema == nil {
-				require.Len(t, index[100], 1, "index membership uses only the header")
+				require.Len(t, index[100].pending, 1, "index membership uses only the header")
 			} else {
 				require.Empty(t, index)
 			}
@@ -362,18 +375,15 @@ func TestSchemaTargetMissingSuccessorControlAck(t *testing.T) {
 	require.NotEqual(t, -1, controlIndex)
 	first := newBroadcastTaskFromProto(firstPB, metrics, nil)
 	second := newBroadcastTaskFromProto(secondPB, metrics, nil)
-	first.schemaTargetEligible = true
 	bm := &broadcastTaskManager{mu: &sync.Mutex{}, schemaTasks: make(schemaTaskIndex)}
 	bm.schemaTasks.add(1, first)
 	bm.schemaTasks.add(2, second)
+	_, err := bm.GetPendingSchemaTarget(100)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	bm.admitSchemaTarget(first)
 	target, err := bm.GetPendingSchemaTarget(100)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, target.BroadcastID)
-	first.schemaTargetEligible = false
-	target, err = bm.GetPendingSchemaTarget(100)
-	require.Nil(t, target)
-	require.ErrorIs(t, err, merr.ErrServiceNotReady)
-	first.schemaTargetEligible = true
 	second.task.AckedCheckpoints[controlIndex] = &streamingpb.AckedCheckpoint{TimeTick: 20}
 	target, err = bm.GetPendingSchemaTarget(100)
 	require.NoError(t, err)
@@ -382,7 +392,7 @@ func TestSchemaTargetMissingSuccessorControlAck(t *testing.T) {
 	target, err = bm.GetPendingSchemaTarget(100)
 	require.Nil(t, target)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
-	second.schemaTargetEligible = true
+	bm.admitSchemaTarget(second)
 	target, err = bm.GetPendingSchemaTarget(100)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, target.BroadcastID)
@@ -411,4 +421,20 @@ func TestSchemaTargetRecoverySkipsCompletedBody(t *testing.T) {
 			})
 		})
 	}
+}
+
+// Inspect pending membership only in lifecycle tests; production lookups use
+// the scheduler-admitted target directly.
+func (bm *broadcastTaskManager) snapshotSchemaTasks(collectionID int64) []*broadcastTask {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	entry := bm.schemaTasks[collectionID]
+	if entry == nil {
+		return nil
+	}
+	tasks := make([]*broadcastTask, 0, len(entry.pending))
+	for _, task := range entry.pending {
+		tasks = append(tasks, task)
+	}
+	return tasks
 }

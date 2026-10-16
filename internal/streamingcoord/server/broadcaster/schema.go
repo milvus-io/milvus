@@ -1,8 +1,6 @@
 package broadcaster
 
 import (
-	"sort"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -23,12 +21,6 @@ type SchemaTarget struct {
 	TimeTicks    map[string]uint64
 }
 
-type pendingSchemaTarget struct {
-	target          *SchemaTarget
-	controlTimeTick uint64
-	eligible        bool
-}
-
 // schemaTargetCollectionID is captured before publishing a task. MarkIgnore can
 // replace a task's message later, but only for AlterReplicateConfig messages.
 // Read only the header: completed tasks need not have their bodies decoded
@@ -44,12 +36,16 @@ func schemaTargetCollectionID(msg message.BroadcastMutableMessage) int64 {
 	return alter.Header().GetCollectionId()
 }
 
-// schemaTaskIndex narrows reads to one collection's unfinished ALTER tasks.
-// Tombstoning removes membership; recovery excludes completed tasks. Readers
-// holding an earlier snapshot still check task state and callback eligibility
-// under the task lock.
+// schemaTaskIndex tracks pending membership and the target admitted by the ACK
+// scheduler. Conflicting collection callbacks are serialized by the scheduler;
+// only its current callback may expose a schema, independent of pending ACK order.
 // All accesses are protected by broadcastTaskManager.mu.
-type schemaTaskIndex map[int64]map[uint64]*broadcastTask
+type schemaTaskIndex map[int64]*collectionSchemaTasks
+
+type collectionSchemaTasks struct {
+	pending map[uint64]*broadcastTask
+	target  *broadcastTask
+}
 
 // add is called only before the task is published to concurrent readers.
 func (i schemaTaskIndex) add(id uint64, task *broadcastTask) {
@@ -60,16 +56,22 @@ func (i schemaTaskIndex) add(id uint64, task *broadcastTask) {
 	}
 	tasks := i[task.schemaCollectionID]
 	if tasks == nil {
-		tasks = make(map[uint64]*broadcastTask)
+		tasks = &collectionSchemaTasks{pending: make(map[uint64]*broadcastTask)}
 		i[task.schemaCollectionID] = tasks
 	}
-	tasks[id] = task
+	tasks.pending[id] = task
 }
 
 func (i schemaTaskIndex) remove(id uint64, collectionID int64) {
 	tasks := i[collectionID]
-	delete(tasks, id)
-	if len(tasks) == 0 {
+	if tasks == nil {
+		return
+	}
+	if tasks.target == tasks.pending[id] {
+		tasks.target = nil
+	}
+	delete(tasks.pending, id)
+	if len(tasks.pending) == 0 {
 		delete(i, collectionID)
 	}
 }
@@ -80,21 +82,19 @@ func (bm *broadcastTaskManager) removeSchemaTask(broadcastID uint64, collectionI
 	bm.schemaTasks.remove(broadcastID, collectionID)
 }
 
-func (bm *broadcastTaskManager) snapshotSchemaTasks(collectionID int64) []*broadcastTask {
+// admitSchemaTarget is called with the callback's resource locks held and all
+// channels ACKed. Recovery rebuilds pending membership only; the scheduler must
+// grant admission again before a recovered target becomes readable.
+func (bm *broadcastTaskManager) admitSchemaTarget(task *broadcastTask) {
+	if task.schemaCollectionID == 0 {
+		return
+	}
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	tasks := bm.schemaTasks[collectionID]
-	if len(tasks) == 0 {
-		return nil
-	}
-	snapshot := make([]*broadcastTask, 0, len(tasks))
-	for _, task := range tasks {
-		snapshot = append(snapshot, task)
-	}
-	return snapshot
+	bm.schemaTasks[task.schemaCollectionID].target = task
 }
 
-func (b *broadcastTask) pendingSchemaTarget(collectionID int64) *pendingSchemaTarget {
+func (b *broadcastTask) pendingSchemaTarget(collectionID int64) *SchemaTarget {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE || b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE || b.msg.MessageTypeWithVersion() != message.MessageTypeAlterCollectionV2 {
@@ -108,49 +108,34 @@ func (b *broadcastTask) pendingSchemaTarget(collectionID int64) *pendingSchemaTa
 	if schema == nil {
 		return nil
 	}
-	snapshot := &pendingSchemaTarget{
-		target:   &SchemaTarget{CollectionID: collectionID, BroadcastID: b.header().BroadcastID, Schema: proto.Clone(schema).(*schemapb.CollectionSchema), TimeTicks: make(map[string]uint64)},
-		eligible: b.schemaTargetEligible,
+	snapshot := &SchemaTarget{
+		CollectionID: collectionID,
+		BroadcastID:  b.header().BroadcastID,
+		Schema:       proto.Clone(schema).(*schemapb.CollectionSchema),
+		TimeTicks:    make(map[string]uint64),
 	}
 	for i, channel := range b.header().VChannels {
 		tick := b.task.AckedCheckpoints[i].GetTimeTick()
-		if funcutil.IsControlChannel(channel) {
-			snapshot.controlTimeTick = tick
-		} else {
-			snapshot.target.TimeTicks[channel] = tick
+		if !funcutil.IsControlChannel(channel) {
+			snapshot.TimeTicks[channel] = tick
 		}
 	}
 	return snapshot
 }
 
 func (bm *broadcastTaskManager) GetPendingSchemaTarget(collectionID int64) (*SchemaTarget, error) {
-	var pending []*pendingSchemaTarget
-	for _, task := range bm.snapshotSchemaTasks(collectionID) {
-		if snapshot := task.pendingSchemaTarget(collectionID); snapshot != nil {
-			pending = append(pending, snapshot)
-		}
-	}
-	if len(pending) == 0 {
+	bm.mu.Lock()
+	tasks := bm.schemaTasks[collectionID]
+	if tasks == nil {
+		bm.mu.Unlock()
 		return nil, nil
 	}
-	// Match ACK callback recovery order, never choose the largest pending DDL.
-	sort.Slice(pending, func(i, j int) bool {
-		if pending[i].controlTimeTick != pending[j].controlTimeTick {
-			// Replication may register a successor via a business-channel ACK
-			// before its control-channel ACK arrives. Its unknown order must
-			// not hide an already admitted predecessor.
-			if pending[i].controlTimeTick == 0 {
-				return false
-			}
-			if pending[j].controlTimeTick == 0 {
-				return true
-			}
-			return pending[i].controlTimeTick < pending[j].controlTimeTick
-		}
-		return pending[i].target.BroadcastID < pending[j].target.BroadcastID
-	})
-	if !pending[0].eligible {
+	target := tasks.target
+	bm.mu.Unlock()
+	if target == nil {
 		return nil, merr.WrapErrServiceNotReadyMsg("schema target for collection %d awaits its ordered ACK callback", collectionID)
 	}
-	return pending[0].target, nil
+	// Recheck completion under the task lock: the callback may have finished
+	// since the index lookup. Clone only the selected target for the caller.
+	return target.pendingSchemaTarget(collectionID), nil
 }

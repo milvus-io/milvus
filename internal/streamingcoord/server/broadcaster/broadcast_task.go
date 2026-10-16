@@ -104,9 +104,7 @@ type broadcastTask struct {
 	*taskMetricsGuard
 
 	// Immutable collection index key; zero for tasks without schema intent.
-	schemaCollectionID int64
-	// Process-local admission; recovery must re-enter the ordered callback.
-	schemaTargetEligible     bool
+	schemaCollectionID       int64
 	mu                       sync.Mutex
 	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
 	task                     *streamingpb.BroadcastTask
