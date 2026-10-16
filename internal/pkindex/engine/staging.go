@@ -28,8 +28,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/pebble"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/sst"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
 // stage writes a frozen generation out and stages its tables:
@@ -57,13 +57,13 @@ func (e *Engine) stage(ctx context.Context, g *generation) ([]sst.ID, error) {
 	// an earlier attempt may have linked some tables before failing; their IDs
 	// were never reported to anyone, so the whole attempt is discarded
 	if err := os.RemoveAll(g.stagedDir); err != nil {
-		return nil, pkerr.MarkIO(err, "clear staged tables %s", g.stagedDir)
+		return nil, pkindex.MarkIO(err, "clear staged tables %s", g.stagedDir)
 	}
 	if err := os.MkdirAll(g.stagedDir, 0o755); err != nil {
-		return nil, pkerr.MarkIO(err, "create staged tables %s", g.stagedDir)
+		return nil, pkindex.MarkIO(err, "create staged tables %s", g.stagedDir)
 	}
 	if err := syncDir(filepath.Dir(g.stagedDir)); err != nil {
-		return nil, pkerr.MarkIO(err, "sync engine dir after creating %s", g.stagedDir)
+		return nil, pkindex.MarkIO(err, "sync engine dir after creating %s", g.stagedDir)
 	}
 	if err := g.db.Flush(); err != nil {
 		return nil, sst.MarkPebbleErr(errors.Wrapf(err, "flush generation %s", g.dir))
@@ -93,14 +93,14 @@ func (e *Engine) stage(ctx context.Context, g *generation) ([]sst.ID, error) {
 		id := sst.ID(raw)
 		src := filepath.Join(g.dir, fmt.Sprintf("%s%s", t.FileNum, sst.Extension))
 		if err := os.Link(src, filepath.Join(g.stagedDir, sst.FileName(id))); err != nil {
-			return nil, pkerr.MarkIO(err, "stage sst %s of generation %d", src, g.gen)
+			return nil, pkindex.MarkIO(err, "stage sst %s of generation %d", src, g.gen)
 		}
 		ids = append(ids, id)
 	}
 	// the links must be durable before STAGED marks them complete, or a
 	// crash can keep a list that names tables which are gone
 	if err := syncDir(g.stagedDir); err != nil {
-		return nil, pkerr.MarkIO(err, "sync staged tables %s", g.stagedDir)
+		return nil, pkindex.MarkIO(err, "sync staged tables %s", g.stagedDir)
 	}
 	if err := writeStagedList(g.stagedDir, ids); err != nil {
 		return nil, err
@@ -134,25 +134,25 @@ func writeStagedList(dir string, ids []sst.ID) error {
 	}
 	tmp, err := os.CreateTemp(dir, stagedListName+".tmp-*")
 	if err != nil {
-		return pkerr.MarkIO(err, "create staged manifest in %s", dir)
+		return pkindex.MarkIO(err, "create staged manifest in %s", dir)
 	}
 	if _, err := tmp.WriteString(sb.String()); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
-		return pkerr.MarkIO(err, "write staged manifest %s", tmp.Name())
+		return pkindex.MarkIO(err, "write staged manifest %s", tmp.Name())
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
-		return pkerr.MarkIO(err, "sync staged manifest %s", tmp.Name())
+		return pkindex.MarkIO(err, "sync staged manifest %s", tmp.Name())
 	}
 	tmp.Close()
 	if err := os.Rename(tmp.Name(), filepath.Join(dir, stagedListName)); err != nil {
 		os.Remove(tmp.Name())
-		return pkerr.MarkIO(err, "publish staged manifest in %s", dir)
+		return pkindex.MarkIO(err, "publish staged manifest in %s", dir)
 	}
 	if err := syncDir(dir); err != nil {
-		return pkerr.MarkIO(err, "sync staged manifest in %s", dir)
+		return pkindex.MarkIO(err, "sync staged manifest in %s", dir)
 	}
 	return nil
 }
@@ -165,7 +165,7 @@ func readStagedList(dir string) (ids []sst.ID, ok bool, err error) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, pkerr.MarkIO(err, "read staged manifest in %s", dir)
+		return nil, false, pkindex.MarkIO(err, "read staged manifest in %s", dir)
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 		if line == "" {
@@ -175,7 +175,7 @@ func readStagedList(dir string) (ids []sst.ID, ok bool, err error) {
 		if perr != nil {
 			return nil, false, errors.Mark(
 				errors.Wrapf(perr, "staged manifest in %s is malformed", dir),
-				pkerr.ErrCorrupted)
+				pkindex.ErrCorrupted)
 		}
 		ids = append(ids, sst.ID(n))
 	}

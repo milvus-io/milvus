@@ -5,7 +5,7 @@ package mock_engine
 import (
 	context "context"
 
-	engine "github.com/milvus-io/milvus/internal/pkindex/core/engine"
+	engine "github.com/milvus-io/milvus/internal/pkindex/engine"
 	mock "github.com/stretchr/testify/mock"
 )
 

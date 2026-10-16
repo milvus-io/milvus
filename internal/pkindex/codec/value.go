@@ -21,7 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
 )
 
 // valueKind is the first byte of a stored value and selects its layout:
@@ -103,12 +103,12 @@ func DecodePKEntry(b []byte) (PKEntry, error) {
 	if len(b) < pkEntrySize {
 		return PKEntry{}, errors.Mark(
 			errors.Newf("invalid pk entry length %d, want at least %d", len(b), pkEntrySize),
-			pkerr.ErrCorrupted)
+			pkindex.ErrCorrupted)
 	}
 	if valueKind(b[0]) != valueKindPKEntry {
 		return PKEntry{}, errors.Mark(
 			errors.Newf("unknown pk value kind %d", b[0]),
-			pkerr.ErrCorrupted)
+			pkindex.ErrCorrupted)
 	}
 	return PKEntry{SegmentID: int64(binary.BigEndian.Uint64(b[1:pkEntrySize]))}, nil
 }

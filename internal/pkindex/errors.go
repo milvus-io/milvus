@@ -14,10 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package pkerr holds the error categories shared by the pkindex tree and the
-// translation into merr at its boundaries.
+// Package pkindex holds what every role of the primary key index shares: the
+// error categories and their translation into merr at the role boundaries.
+// The storage format lives in its subpackages codec, engine and sst.
 //
-// Code under internal/pkindex does not return merr. A caller inside the tree
+// Primary key index code does not return merr. A caller inside it
 // branches on what happened, and merr.Is matches on the numeric code alone, so
 // distinct situations that share a code (an engine that is closed, a
 // generation that is not frozen) become indistinguishable once they are
@@ -29,13 +30,13 @@
 //     package, attached with errors.Mark so that the original error chain and
 //     its context survive.
 //
-// Both are translated once, at the boundary that leaves the tree: ToMerr for a
+// Both are translated once, at the boundary that leaves the primary key index: ToMerr for a
 // coordinator's gRPC service or a worker's task result, and the streamingnode
 // interceptor's own mapping to streaming status errors. This mirrors how the
 // streaming package keeps walimpls.ErrFenced internal and translates at its
 // interceptor boundary. An error that escapes untranslated crosses gRPC as
 // code 65535.
-package pkerr
+package pkindex
 
 import (
 	"github.com/cockroachdb/errors"
@@ -71,7 +72,7 @@ func MarkIO(err error, format string, args ...any) error {
 }
 
 // ToMerr translates a pkindex error into a merr for a boundary that leaves the
-// pkindex tree: a coordinator's gRPC service or a worker's task result. An
+// primary key index: a coordinator's gRPC service or a worker's task result. An
 // error marked with a category translates by its category, even when it wraps
 // a merr; an unmarked merr passes through unchanged.
 func ToMerr(err error) error {
