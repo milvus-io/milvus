@@ -111,20 +111,17 @@ impl FileResourcePathBuilder for ResourceInfo {
         resource_name: &str,
         file_name: &str,
     ) -> Result<(i64, PathBuf)> {
-        let resource_id =
-            self.resource_map
-                .get(resource_name)
-                .ok_or_else(|| {
-                    let message = format!(
-                        "file resource: {} not found in local resource list",
-                        resource_name
-                    );
-                    if self.validate_resource_names {
-                        TantivyBindingError::InvalidArgument(message)
-                    } else {
-                        TantivyBindingError::InternalError(message)
-                    }
-                })?;
+        let resource_id = self.resource_map.get(resource_name).ok_or_else(|| {
+            let message = format!(
+                "file resource: {} not found in local resource list",
+                resource_name
+            );
+            if self.validate_resource_names {
+                TantivyBindingError::InvalidArgument(message)
+            } else {
+                TantivyBindingError::InternalError(message)
+            }
+        })?;
 
         let base_value =
             get_options(RESOURCE_PATH_KEY).ok_or(TantivyBindingError::InternalError(
