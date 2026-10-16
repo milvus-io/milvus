@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub struct ResourceInfo {
     storage_name: Option<String>,
     resource_map: HashMap<String, i64>,
+    resource_file_names: Option<HashMap<String, String>>,
     validate_resource_names: bool,
 }
 
@@ -18,6 +19,7 @@ impl ResourceInfo {
         Self {
             storage_name: None,
             resource_map: HashMap::new(),
+            resource_file_names: None,
             validate_resource_names: false,
         }
     }
@@ -49,6 +51,7 @@ impl ResourceInfo {
         Ok(Self {
             storage_name: None,
             resource_map,
+            resource_file_names: None,
             validate_resource_names: false,
         })
     }
@@ -92,9 +95,23 @@ impl ResourceInfo {
             storage_name = Some(name)
         }
 
+        // Optional for compatibility with existing runtime/extra-info callers.
+        // Validation supplies names and filenames from the same applied snapshot.
+        let resource_file_names = m
+            .get("resource_file_names")
+            .map(|value| {
+                json::from_value::<HashMap<String, String>>(value.clone()).map_err(|_| {
+                    TantivyBindingError::InternalError(
+                        "resource_file_names must map resource names to filenames".to_string(),
+                    )
+                })
+            })
+            .transpose()?;
+
         Ok(Self {
             storage_name,
             resource_map,
+            resource_file_names,
             // Set only by the streaming validation boundary after preparation.
             // Global/runtime and per-collection lookups keep system semantics.
             validate_resource_names: m
@@ -122,6 +139,23 @@ impl FileResourcePathBuilder for ResourceInfo {
                 TantivyBindingError::InternalError(message)
             }
         })?;
+
+        if self.validate_resource_names {
+            if let Some(file_names) = &self.resource_file_names {
+                let expected = file_names.get(resource_name).ok_or_else(|| {
+                    TantivyBindingError::InternalError(format!(
+                        "file resource {} is missing its filename in the validation snapshot",
+                        resource_name
+                    ))
+                })?;
+                if file_name != expected {
+                    return Err(TantivyBindingError::InvalidArgument(format!(
+                        "file_name {:?} does not match registered filename {:?} for resource {:?}",
+                        file_name, expected, resource_name
+                    )));
+                }
+            }
+        }
 
         let base_value =
             get_options(RESOURCE_PATH_KEY).ok_or(TantivyBindingError::InternalError(

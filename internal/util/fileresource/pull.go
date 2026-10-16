@@ -70,6 +70,7 @@ func ValidateAnalyzer(params string) ([]int64, error) {
 	// Marshal under the lock: Sync cannot mutate the map midway through the copy.
 	extraInfo, err := json.Marshal(map[string]any{
 		"resource_map":            manager.resourceMap,
+		"resource_file_names":     manager.resourceFileNames,
 		"validate_resource_names": true,
 	})
 	manager.Unlock()

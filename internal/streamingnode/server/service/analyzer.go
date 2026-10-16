@@ -75,8 +75,8 @@ func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streami
 		if err != nil {
 			err = merr.Wrapf(err, "validate analyzer failed for field: %s, name: %s", info.GetField(), info.GetName())
 			// Validation results must not enter the readiness retry loop. In
-			// particular, FileReadFailed can mean a misspelled file_name as well
-			// as a transient local I/O failure; preserve its original classification.
+			// particular, a valid reference can still encounter local I/O failures
+			// after metadata validation; preserve their original classification.
 			return &streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(err)}, nil
 		}
 		resourceIDs.Insert(ids...)

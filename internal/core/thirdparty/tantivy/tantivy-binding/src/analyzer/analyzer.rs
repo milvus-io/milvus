@@ -265,6 +265,65 @@ mod tests {
     }
 
     #[test]
+    fn test_remote_filename_validation_uses_metadata_not_file_existence() {
+        use crate::analyzer::options::set_options;
+        use crate::error::TantivyBindingError;
+        use serde_json::json;
+
+        let directory = tempfile::tempdir().unwrap();
+        // An absolute storage_name keeps this fixture independent of other
+        // tests changing the global resource_path.
+        set_options(&json!({"resource_path": "/tmp"}).to_string()).unwrap();
+        let resource_dir = directory.path().join("10");
+        std::fs::create_dir(&resource_dir).unwrap();
+        let file = resource_dir.join("stop.txt");
+        std::fs::write(&file, "the\n").unwrap();
+        let mut info = json!({
+            "resource_map": {"dictionary": 10},
+            "resource_file_names": {"dictionary": "stop.txt"},
+            "storage_name": directory.path().to_str().unwrap(),
+            "validate_resource_names": true
+        });
+        let params = |file_name: &str| {
+            json!({
+                "tokenizer": "standard",
+                "filter": [{"type": "stop", "stop_words_file": {
+                    "type": "remote", "resource_name": "dictionary", "file_name": file_name
+                }}]
+            })
+            .to_string()
+        };
+
+        assert_eq!(
+            super::validate_analyzer(&params("stop.txt"), &info.to_string()).unwrap(),
+            vec![10]
+        );
+        // Even an existing file must not override the registered filename.
+        std::fs::write(resource_dir.join("typo.txt"), "a\n").unwrap();
+        for file_name in ["typo.txt", "missing.txt", "../stop.txt", ""] {
+            let err = super::validate_analyzer(&params(file_name), &info.to_string()).unwrap_err();
+            assert!(
+                matches!(&err, TantivyBindingError::InvalidArgument(_)),
+                "{err}"
+            );
+            assert!(err
+                .to_string()
+                .contains("does not match registered filename"));
+        }
+        // A correct reference followed by disappearance is still an I/O error.
+        std::fs::remove_file(&file).unwrap();
+        assert!(matches!(
+            super::validate_analyzer(&params("stop.txt"), &info.to_string()),
+            Err(TantivyBindingError::IOError(err)) if err.kind() == std::io::ErrorKind::NotFound
+        ));
+        // Runtime extra-info callers retain their previous lookup semantics.
+        info["validate_resource_names"] = json!(false);
+        assert!(super::validate_analyzer(&params("typo.txt"), &info.to_string()).is_ok());
+        info.as_object_mut().unwrap().remove("resource_file_names");
+        assert!(super::validate_analyzer(&params("typo.txt"), &info.to_string()).is_ok());
+    }
+
+    #[test]
     fn test_jieba_custom_word_is_not_a_system_dictionary_name() {
         assert!(create_analyzer(
             r#"{"tokenizer":{"type":"jieba","dict":["custom_word"]}}"#,

@@ -394,6 +394,7 @@ func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
 		require.Equal(t, merr.SystemError, merr.GetErrorType(merr.Error(resp.GetStatus())))
 		require.Contains(t, resp.GetStatus().GetReason(), "body")
 		require.Contains(t, resp.GetStatus().GetReason(), "missing.txt")
+		require.Contains(t, resp.GetStatus().GetReason(), "No such file or directory")
 		require.Empty(t, resp.GetResourceIds())
 	})
 }
