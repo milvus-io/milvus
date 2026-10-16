@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -228,14 +229,9 @@ func TestPartialUpdateRecoveryMalformedNewInsertDoesNotBlockWALOpen(t *testing.T
 		appended = true
 		return env.nextMessageID(), nil
 	})
-	// Commit admission rejects the incomplete write set before TimeTick, so the
-	// producer replays the full transaction and the session stays InFlight
-	// until its lease expires.
 	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	require.True(t, txn.IsCommitAdmissionRejected(err))
 	require.False(t, appended)
-	session, err := env.txnManager.GetSessionOfTxn(1)
-	require.NoError(t, err)
-	require.Equal(t, message.TxnStateInFlight, session.State())
 }
 
 func TestPartialUpdateRecoveryPayloadDecodeRespectsWALOpenCancellation(t *testing.T) {

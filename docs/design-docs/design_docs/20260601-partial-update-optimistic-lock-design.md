@@ -570,14 +570,27 @@ but that record alone does not promise atomic CAS protection against legacy
 writes. Mixed transactions lock their known PKs and publish both known PK
 versions and any legacy fence. DDL retains its existing transaction cleanup.
 
-For CommitTxn, `admitTxnCommit` first validates that the write set is complete.
-A missing or incomplete write set, or a recovered local CAS, is rejected with
-`PartialUpdateRetryable` for local CAS and `TRANSACTION_EXPIRED` otherwise.
-Admission applies the same rejection while any body is still in flight. It then
-sets `commitAdmitted`, snapshots the PK union, and acquires exclusive stripes
-for local CAS or shared stripes for ordinary commits. A body that arrives after
-`commitAdmitted` is rejected with `TRANSACTION_EXPIRED`, so the locked set
-cannot grow.
+For CommitTxn, `admitTxnCommit` checks the live `pendingTxn` record in one
+critical section. A complete write set is admitted only while no body is in
+flight. Admission then sets `commitAdmitted`, snapshots the PK union, and
+acquires exclusive stripes for local CAS or shared stripes for ordinary commits.
+A commit that arrives while a body is still in flight is rejected with
+`PartialUpdateRetryable` for local CAS and `TRANSACTION_EXPIRED` otherwise. A
+body that arrives after `commitAdmitted` is rejected with `TRANSACTION_EXPIRED`,
+so the locked set cannot grow.
+
+Admission does not classify a missing or incomplete write set, including a
+recovered local CAS. Such a commit takes no row lock and continues to TimeTick,
+which owns the transaction state. A CommitTxn resent after its transaction
+committed finds no record, because the record is deleted at commit, and
+TimeTick answers `INVALID_TRANSACTION_STATE` from the committed session.
+Producers do not replay that error. Reporting `TRANSACTION_EXPIRED` or
+`PartialUpdateRetryable` there would make the producer or Proxy apply an
+already committed write a second time. For a live session, `validateCommit`
+rejects the incomplete write set before the WAL append and TimeTick rolls the
+session back. Such a commit can never write, so it needs no row lock. A local
+record cannot become complete in between, because only a replicated BeginTxn
+reuses a TxnID.
 
 Producers send CommitTxn only after every body append has returned:
 `ProduceGuard` waits for all body appends before it sends CommitTxn. The
@@ -647,8 +660,9 @@ in-flight bodies.
 If TimeTick cleanup removes the InFlight session while the commit waits for
 row locks, `handleCommit` fails with `TRANSACTION_EXPIRED`; the producer
 replays the transaction, or returns the CAS retry signal to Proxy for local
-CAS. If cleanup removes the partial-update state before admission, admission
-rejects the commit, as retryable for local CAS. A TSO failure happens before
+CAS. If cleanup removes the session and its partial-update state before
+admission, the commit takes no row lock and `handleCommit` fails with
+`TRANSACTION_EXPIRED` in the same way. A TSO failure happens before
 `handleCommit`, so the session stays InFlight and the client can retry the
 same CommitTxn. Ambiguous WAL append failures retain their existing
 transaction outcome handling.
@@ -727,8 +741,17 @@ admission reject is marked separately from a WAL append error:
   not persisted.
 
 This distinction changes only the in-process transaction transition. It does
-not provide an exactly-once client outcome. A rejection in row-lock admission
-happens before TimeTick handles the commit and leaves the session InFlight.
+not provide an exactly-once client outcome. Only one rejection happens before
+TimeTick handles the commit: a commit that arrives while a body append is in
+flight. It leaves the session InFlight until its lease ends. A missing or
+incomplete write set reaches TimeTick and `validateCommit`, so a live session
+is rolled back by `RejectCommit()`.
+
+A CommitTxn resent after TimeTick has removed its committed session, which
+happens at the next TimeTick message, or after the WAL moves to another
+StreamingNode, receives `TRANSACTION_EXPIRED`, and the producer replays the
+transaction. This existing at-least-once behavior of transaction retries is
+outside the scope of this design.
 
 ### Per-term PK version index
 
@@ -836,7 +859,8 @@ Promotion creates a new term and a new empty per-term version index.
 |---|---|---|
 | Term mismatch, PK conflict, collection fence, TTL expiry, or budget-incomplete history | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Rebuild `REPLACE`; project relative update to non-retriable conflict |
 | Recovered local CAS without complete proof | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
-| Local CAS commit with an incomplete write set or a body append still in flight | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
+| Local CAS commit while a body append is still in flight | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
+| CommitTxn resent after its transaction committed, while TimeTick still holds the committed session | `STREAMING_CODE_INVALID_TRANSACTION_STATE` from TimeTick | Producer returns the error and does not replay the transaction |
 | Local CAS transaction expires before commit | Producer converts to `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
 | Malformed marker, proof, Insert schema scope, PK write set, or internal invariant | `STREAMING_CODE_UNRECOVERABLE` | Fail without CAS retry |
 | Shard schema version mismatch | `STREAMING_CODE_SCHEMA_VERSION_MISMATCH` | `ErrCollectionSchemaMismatch` |
@@ -978,11 +1002,17 @@ Focused tests must verify ordering and observable concurrency, including:
   append has completed;
 - TimeTick cleanup can expire a session while its commit waits for row locks;
   `handleCommit` rejects it with `TRANSACTION_EXPIRED` before WAL append and
-  its row locks are released; cleanup before admission makes admission reject
-  the commit; a TSO failure leaves the session InFlight so the same CommitTxn
-  can be retried;
-- a commit rejected at admission or row-lock acquisition returns before
-  timestamp allocation and leaves the session InFlight; row-lock release
+  its row locks are released; cleanup before admission leaves the commit
+  without row locks and `handleCommit` rejects it the same way; a TSO failure
+  leaves the session InFlight so the same CommitTxn can be retried;
+- a CommitTxn resent after its transaction committed, for ordinary and local
+  CAS transactions, takes no row lock, receives `INVALID_TRANSACTION_STATE`
+  from TimeTick, and never reaches the WAL, so the producer does not replay it;
+  a recovered local CAS or another incomplete write set is rejected by
+  `validateCommit` after TimeTick and its session is rolled back;
+- a commit rejected because a body is in flight, or whose row-lock wait is
+  canceled, returns before timestamp allocation and leaves the session
+  InFlight; row-lock release
   occurs only after transaction transition, acknowledgement, and MVCC
   publication, and before the shard lifecycle lock is released; ambiguous WAL
   errors keep their existing classification;

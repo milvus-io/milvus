@@ -146,18 +146,25 @@ func (s *partialUpdateState) admitTxnBody(txnID message.TxnID) (func(), error) {
 	}, nil
 }
 
-// admitTxnCommit validates that the transaction has a complete write set, then
-// freezes it and returns the PKs to lock. Producers send CommitTxn only after
-// every body append has returned; a body still in flight means that contract
-// was broken, so the commit is rejected rather than locking a partial set.
+// admitTxnCommit freezes a complete transaction write set and returns the PKs
+// to lock. Producers send CommitTxn only after every body append has returned;
+// a body still in flight means that contract was broken, so the commit is
+// rejected rather than locking a partial set.
+//
+// A missing or incomplete write set takes no row lock and is not classified
+// here. The commit cannot succeed: TimeTick rejects it by session state, for
+// example INVALID_TRANSACTION_STATE when a committed transaction's CommitTxn is
+// retried after its record was deleted, and validateCommit rejects any other
+// incomplete write set before the WAL append. A local record cannot become
+// complete in between, because only a replicated Begin can reuse a TxnID.
 func (s *partialUpdateState) admitTxnCommit(msg message.MutableMessage, txnID message.TxnID) (primaryKeys, error) {
 	// Check, freeze and snapshot the live record in one critical section so
 	// that no body can be admitted between the check and the freeze.
 	s.txnMu.Lock()
 	defer s.txnMu.Unlock()
 	txnState := s.txns[txnID]
-	if err := checkTxnWriteSetComplete(msg, txnID, txnState); err != nil {
-		return primaryKeys{}, err
+	if checkTxnWriteSetComplete(msg, txnID, txnState) != nil {
+		return primaryKeys{}, nil
 	}
 	if txnState.inFlightBodies > 0 {
 		if message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil {
