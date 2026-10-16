@@ -1918,6 +1918,13 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
+	if isBackup {
+		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+	}
 
 	// Allocate file ids.
 	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
