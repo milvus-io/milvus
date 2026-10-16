@@ -82,10 +82,6 @@ struct CompileLimits {
     uint64_t max_dfa_cache_bytes = 0;
 };
 
-struct ExecutionLimits {
-    uint64_t max_result_bytes = 0;
-};
-
 struct Span {
     uint64_t start;
     uint64_t end;
@@ -199,7 +195,7 @@ class Session {
     // use a separately copied CancellationToken for concurrent cancellation.
     Result
     ExecuteBatch(const std::vector<std::string_view>& texts,
-                 const ExecutionLimits& limits);
+                 uint64_t max_result_bytes);
 
  private:
     friend class Plan;

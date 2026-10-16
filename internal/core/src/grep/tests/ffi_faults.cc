@@ -112,7 +112,7 @@ MgGrepStatus
 mg_grep_execute_batch(MgGrepSession*,
                       const MgGrepBytes*,
                       size_t count,
-                      const MgGrepExecutionLimits*,
+                      uint64_t,
                       MgGrepResult** out,
                       MgGrepError* error) {
     ++faults.execute_calls;
@@ -166,9 +166,9 @@ class GrepFault : public testing::Test {
     Compile() {
         return Plan::Compile({"a"}, {}, {1000000, 1000000});
     }
-    ExecutionLimits
+    uint64_t
     Budget() {
-        return {10000};
+        return 10000;
     }
     template <typename Fn>
     void
@@ -284,7 +284,7 @@ TEST_F(GrepFault, InternalFailureRemainsPoisonedAfterCancellation) {
     Expect([&] { session.ExecuteBatch({"a"}, Budget()); },
            MG_GREP_INTERNAL_ERROR,
            Operation::Execute);
-    Expect([&] { session.ExecuteBatch({}, {}); },
+    Expect([&] { session.ExecuteBatch({}, 0); },
            MG_GREP_INTERNAL_ERROR,
            Operation::Execute);
     EXPECT_EQ(faults.execute_calls, 1);

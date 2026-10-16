@@ -389,7 +389,7 @@ Session::GetCancellationToken() const {
 
 Result
 Session::ExecuteBatch(const std::vector<std::string_view>& texts,
-                      const ExecutionLimits& limits) {
+                      uint64_t max_result_bytes) {
     auto state =
         state_;  // Pins Rust through conversion, execution and final checks.
     if (!state) {
@@ -402,7 +402,7 @@ Session::ExecuteBatch(const std::vector<std::string_view>& texts,
         throw Error(
             Status::InternalError, Operation::Execute, "session is poisoned");
     }
-    if (!limits.max_result_bytes) {
+    if (!max_result_bytes) {
         throw Error(Status::InvalidArgument,
                     Operation::Execute,
                     "result byte budget must be positive");
@@ -410,20 +410,19 @@ Session::ExecuteBatch(const std::vector<std::string_view>& texts,
     auto check = [&] { state->Check(); };
     check();
     // A lower bound only; Rust charges all core/view/handle metadata precisely.
-    if (texts.size() > limits.max_result_bytes / sizeof(MgGrepTextResult)) {
+    if (texts.size() > max_result_bytes / sizeof(MgGrepTextResult)) {
         throw Error(Status::ResourceLimit,
                     Operation::Execute,
                     "result metadata budget exceeded");
     }
     const auto bytes = ToBytes(texts, Operation::Execute, check);
     check();
-    const MgGrepExecutionLimits c_limits{limits.max_result_bytes};
     MgGrepError error{};
     MgGrepResult* raw = nullptr;
     const auto status = mg_grep_execute_batch(state->handle.get(),
                                               bytes.data(),
                                               bytes.size(),
-                                              &c_limits,
+                                              max_result_bytes,
                                               &raw,
                                               &error);
     Result result(raw);

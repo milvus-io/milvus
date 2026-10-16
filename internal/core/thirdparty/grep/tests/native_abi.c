@@ -10,7 +10,6 @@ _Static_assert(sizeof(MgGrepBytes) == 16 && offsetof(MgGrepBytes, len) == 8, "by
 _Static_assert(sizeof(MgGrepMatchOptions) == 12 && offsetof(MgGrepMatchOptions, boundary) == 8, "options layout");
 _Static_assert(sizeof(MgGrepSpecView) == 32 && offsetof(MgGrepSpecView, options) == 16, "spec layout");
 _Static_assert(sizeof(MgGrepCompileLimits) == 16 && offsetof(MgGrepCompileLimits, max_regex_bytes) == 0 && offsetof(MgGrepCompileLimits, max_dfa_cache_bytes) == 8, "compile limits layout");
-_Static_assert(sizeof(MgGrepExecutionLimits) == 8 && offsetof(MgGrepExecutionLimits, max_result_bytes) == 0, "execution limits layout");
 _Static_assert(sizeof(MgGrepSpan) == 16 && offsetof(MgGrepSpan, end) == 8, "span layout");
 _Static_assert(sizeof(MgGrepLine) == 32 && offsetof(MgGrepLine, spans) == 16 && offsetof(MgGrepLine, span_count) == 24, "line layout");
 _Static_assert(sizeof(MgGrepTextResult) == 16 && offsetof(MgGrepTextResult, line_count) == 8, "text layout");
@@ -24,7 +23,7 @@ static MgGrepBytes bytes(const char *s) {
 
 int main(void) {
     MgGrepCompileLimits cl = {1048576, 1048576};
-    MgGrepExecutionLimits el = {200000000};
+    uint64_t el = {200000000};
     MgGrepBytes p = bytes("error");
     MgGrepSpecView spec = {&p, 1, {0, 0, 0}};
     MgGrepError error; /* Output storage does not need caller initialization. */
@@ -40,7 +39,7 @@ int main(void) {
     assert(input != NULL);
     strcpy(input, "error: error\r\nnext");
     MgGrepBytes batch[] = {bytes("done"), bytes(input), {NULL, 0}};
-    assert(mg_grep_execute_batch(session, batch, 3, &el, &result, &error) == MG_GREP_OK);
+    assert(mg_grep_execute_batch(session, batch, 3, el, &result, &error) == MG_GREP_OK);
     free(input);
     mg_grep_session_free(session);
     const MgGrepBatchView *view = mg_grep_result_view(result);
@@ -79,7 +78,7 @@ int main(void) {
     assert(mg_grep_session_create(plan, &session, NULL) == MG_GREP_OK);
     mg_grep_plan_free(plan);
     MgGrepBytes unicode_batch[] = {bytes("\xc3\xa9"), bytes("\n"), {NULL, 0}};
-    assert(mg_grep_execute_batch(session, unicode_batch, 3, &el, &result, &error) == MG_GREP_OK);
+    assert(mg_grep_execute_batch(session, unicode_batch, 3, el, &result, &error) == MG_GREP_OK);
     view = mg_grep_result_view(result);
     line = view->texts[0].lines;
     assert(line->span_count == 2 && line->spans[0].start == 0 && line->spans[1].start == 2);
@@ -87,7 +86,7 @@ int main(void) {
     assert(view->texts[1].lines[0].span_count == 1);
     assert(view->texts[2].lines == NULL);
     mg_grep_result_free(result);
-    assert(mg_grep_execute_batch(session, NULL, 0, &el, &result, &error) == MG_GREP_OK);
+    assert(mg_grep_execute_batch(session, NULL, 0, el, &result, &error) == MG_GREP_OK);
     view = mg_grep_result_view(result);
     assert(view->text_count == 0 && view->texts == NULL);
     mg_grep_result_free(result);
@@ -97,12 +96,13 @@ int main(void) {
     p = bad;
     assert(mg_grep_compile(&spec, &cl, &plan, &error) == MG_GREP_INVALID_UTF8 && plan == NULL);
     result = (MgGrepResult *)(uintptr_t)1;
-    assert(mg_grep_execute_batch(session, &bad, 1, &el, &result, &error) == MG_GREP_INVALID_UTF8 && result == NULL);
-    el.max_result_bytes = 1;
-    assert(mg_grep_execute_batch(session, NULL, 0, &el, &result, &error) == MG_GREP_RESOURCE_LIMIT && result == NULL);
-    el.max_result_bytes = 200000000;
+    assert(mg_grep_execute_batch(session, &bad, 1, el, &result, &error) == MG_GREP_INVALID_UTF8 && result == NULL);
+    assert(mg_grep_execute_batch(session, NULL, 0, 0, &result, &error) == MG_GREP_INVALID_ARGUMENT && result == NULL);
+    el = 1;
+    assert(mg_grep_execute_batch(session, NULL, 0, el, &result, &error) == MG_GREP_RESOURCE_LIMIT && result == NULL);
+    el = 200000000;
     MgGrepBytes good = bytes("ok");
-    assert(mg_grep_execute_batch(session, &good, 1, &el, &result, &error) == MG_GREP_OK);
+    assert(mg_grep_execute_batch(session, &good, 1, el, &result, &error) == MG_GREP_OK);
     mg_grep_result_free(result);
 
     /* Use a nonmatching pattern so this exercises input size, not the
@@ -119,12 +119,12 @@ int main(void) {
     assert(large != NULL);
     memset(large, 'x', large_size);
     MgGrepBytes long_input = {(const uint8_t *)large, large_size};
-    assert(mg_grep_execute_batch(session, &long_input, 1, &el, &result, &error) == MG_GREP_OK);
+    assert(mg_grep_execute_batch(session, &long_input, 1, el, &result, &error) == MG_GREP_OK);
     mg_grep_result_free(result);
     free(large);
     mg_grep_session_cancel(session);
     mg_grep_session_cancel(session);
-    assert(mg_grep_execute_batch(session, NULL, 0, &el, &result, &error) == MG_GREP_CANCELLED && result == NULL);
+    assert(mg_grep_execute_batch(session, NULL, 0, el, &result, &error) == MG_GREP_CANCELLED && result == NULL);
     mg_grep_session_free(session);
 
     mg_grep_plan_free(NULL);

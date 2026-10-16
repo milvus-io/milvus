@@ -21,8 +21,6 @@
 namespace milvus::grep {
 using namespace milvus::segcore;
 namespace {
-constexpr size_t kCancellationCheckInterval = 1024;
-
 void
 CheckArrow(const arrow::Status& status) {
     if (!status.ok()) {
@@ -33,26 +31,22 @@ CheckArrow(const arrow::Status& status) {
                            error.error_msg);
     }
 }
-// These limits protect a configured operation, not malformed request values.
 void
-Charge(uint64_t amount, uint64_t& remaining, uint64_t limit) {
-    if (amount > remaining) {
+CheckResultBudget(uint64_t total_bytes, uint64_t limit) {
+    if (total_bytes > limit) {
         ThrowInfo(OutOfRange,
                   fmt::format("grep result budget exceeded "
                               "(quotaAndLimits.limits.maxOutputSize={} bytes): "
-                              "remaining={} bytes, requested={} bytes",
+                              "actual={} bytes",
                               limit,
-                              remaining,
-                              amount));
+                              total_bytes));
     }
-    remaining -= amount;
 }
 
-// Owns the Arrow output and its byte budget across all input batches.
+// Builds the Arrow output and counts its bytes across all input batches.
 class GrepResultBuilder {
  public:
-    explicit GrepResultBuilder(uint64_t limit)
-        : limit_(limit), remaining_(limit) {
+    GrepResultBuilder() {
         auto span_type =
             arrow::struct_({arrow::field("start", arrow::uint64(), false),
                             arrow::field("end", arrow::uint64(), false)});
@@ -77,8 +71,6 @@ class GrepResultBuilder {
                                                               spans_});
         details_ = std::make_unique<arrow::ListBuilder>(
             arrow::default_memory_pool(), lines_, details_type_);
-        // Includes fixed offsets for empty lists; all later arithmetic is subtractive.
-        Charge(16, remaining_, limit_);
     }
 
     int64_t
@@ -87,42 +79,27 @@ class GrepResultBuilder {
     }
 
     uint64_t
-    RemainingBytes() const {
-        return remaining_;
+    TotalBytes() const {
+        return total_bytes_;
     }
 
-    template <typename CheckCancelled>
     void
-    Append(const Result& result,
-           const std::vector<int64_t>& input_positions,
-           const CheckCancelled& check) {
-        size_t processed = 0;
-        // Share the interval across rows, lines and spans so deeply nested
-        // results remain cancellable without checking every element.
-        auto check_periodically = [&] {
-            if (processed++ % kCancellationCheckInterval == 0) {
-                check();
-            }
-        };
+    Append(const Result& result, const std::vector<int64_t>& input_positions) {
         for (size_t i = 0; i < input_positions.size(); ++i) {
-            check_periodically();
             if (!result.Selected(i))
                 continue;
-            Charge(16,
-                   remaining_,
-                   limit_);  // position, row list offset and validity
+            total_bytes_ += 16;  // position, row list offset and validity
             CheckArrow(positions_.Append(input_positions[i]));
             CheckArrow(details_->Append());
             for (size_t j = 0; j < result.LineCount(i); ++j) {
-                check_periodically();
                 auto text = result.Content(i, j);
                 const auto span_count = result.SpanCount(i, j);
-                ChargeLine(text.size(), span_count);
+                // Line/string/list offsets, text and all span boundaries.
+                total_bytes_ += 16 + text.size() + span_count * 17;
                 CheckArrow(lines_->Append());
                 CheckArrow(content_->Append(text));
                 CheckArrow(spans_->Append());
                 for (size_t k = 0; k < span_count; ++k) {
-                    check_periodically();
                     auto hit = result.GetSpan(i, j, k);
                     CheckArrow(span_->Append());
                     CheckArrow(starts_->Append(hit.start));
@@ -145,33 +122,7 @@ class GrepResultBuilder {
     }
 
  private:
-    void
-    ChargeLine(uint64_t text_bytes, uint64_t span_count) {
-        constexpr uint64_t line_overhead = 16;
-        constexpr uint64_t span_bytes = 17;
-        // Check by subtraction/division before adding or multiplying sizes.
-        if (remaining_ < line_overhead ||
-            text_bytes > remaining_ - line_overhead ||
-            span_count >
-                (remaining_ - line_overhead - text_bytes) / span_bytes) {
-            ThrowInfo(
-                OutOfRange,
-                fmt::format("grep result budget exceeded "
-                            "(quotaAndLimits.limits.maxOutputSize={} bytes): "
-                            "remaining={} bytes, line overhead={} bytes, "
-                            "text={} bytes, spans={} ({} bytes each)",
-                            limit_,
-                            remaining_,
-                            line_overhead,
-                            text_bytes,
-                            span_count,
-                            span_bytes));
-        }
-        remaining_ -= line_overhead + text_bytes + span_count * span_bytes;
-    }
-
-    const uint64_t limit_;
-    uint64_t remaining_;
+    uint64_t total_bytes_ = 0;
     std::shared_ptr<arrow::DataType> details_type_;
     std::shared_ptr<arrow::UInt64Builder> starts_, ends_;
     std::shared_ptr<arrow::StructBuilder> span_, lines_;
@@ -252,14 +203,12 @@ ReadGrepBatch(const SegmentInternalInterface* segment,
     return batch;
 }
 
-template <typename CheckCancelled>
 void
 MatchGrepBatch(const GrepInputBatch& batch,
                int64_t begin,
                Session& session,
                const CGrepScanOptions& opt,
-               GrepResultBuilder& output,
-               const CheckCancelled& check) {
+               GrepResultBuilder& output) {
     std::vector<std::string_view> texts;
     std::vector<int64_t> input_positions;
     int64_t consumed = 0;
@@ -271,9 +220,6 @@ MatchGrepBatch(const GrepInputBatch& batch,
         // Prefetched rows stay owned/pinned until this read batch ends.
         while (consumed < batch.count &&
                static_cast<int64_t>(texts.size()) < quota) {
-            if (consumed % kCancellationCheckInterval == 0) {
-                check();
-            }
             auto text = batch.Text(consumed++);
             if (!text) {
                 continue;
@@ -283,8 +229,9 @@ MatchGrepBatch(const GrepInputBatch& batch,
         }
         if (texts.empty())
             continue;
-        check();
-        if (output.RemainingBytes() == 0)
+
+        const auto remaining = opt.max_result_bytes - output.TotalBytes();
+        if (remaining == 0)
             ThrowInfo(
                 OutOfRange,
                 fmt::format("grep result budget exceeded "
@@ -292,8 +239,9 @@ MatchGrepBatch(const GrepInputBatch& batch,
                             "remaining=0 bytes",
                             opt.max_result_bytes));
         // The request cancellation token is the only execution deadline.
-        auto result = session.ExecuteBatch(texts, {output.RemainingBytes()});
-        output.Append(result, input_positions, check);
+        auto result = session.ExecuteBatch(texts, remaining);
+        output.Append(result, input_positions);
+        CheckResultBudget(output.TotalBytes(), opt.max_result_bytes);
     }
 }
 
@@ -346,7 +294,7 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
                            segment->HasFieldData(field) &&
                            (!snapshot || snapshot->GetColumn(field) != nullptr);
 
-    GrepResultBuilder output(opt.max_result_bytes);
+    GrepResultBuilder output;
     for (int64_t begin = 0; begin < size && output.Count() < opt.limit;) {
         check();
         auto batch =
@@ -358,7 +306,7 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
                           std::min<int64_t>(opt.batch_size, size - begin),
                           rows,
                           use_views);
-        MatchGrepBatch(batch, begin, session, opt, output, check);
+        MatchGrepBatch(batch, begin, session, opt, output);
         begin += batch.count;
     }
     return output.Finish();

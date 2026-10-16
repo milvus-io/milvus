@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     session::ResultOverhead, BatchResult, Boundary, CancellationToken, CaseMode, CompileLimits,
-    Error, ExecutionLimits, LimitKind, MatchOptions, PatternKind, Plan, Session, TextResult,
+    Error, LimitKind, MatchOptions, PatternKind, Plan, Session, TextResult,
 };
 
 pub type MgGrepStatus = u32;
@@ -81,15 +81,6 @@ pub struct MgGrepSpecView {
 pub struct MgGrepCompileLimits {
     pub max_regex_bytes: u64,
     pub max_dfa_cache_bytes: u64,
-}
-
-/// Positive result-byte budget including core data, C view arrays, handle
-/// metadata and text, but excluding allocation overhead and temporary buffers.
-/// Execution is controlled by the session cancellation token.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct MgGrepExecutionLimits {
-    pub max_result_bytes: u64,
 }
 
 /// UTF-8 byte interval [start,end) relative to the owning line.content.
@@ -235,9 +226,12 @@ pub unsafe extern "C" fn mg_grep_session_free(session: *mut MgGrepSession) {
     });
 }
 
-/// Synchronous batch match. Required: session, limits, out_result. Empty batch
+/// Synchronous batch match. Required: session, out_result. Empty batch
 /// accepts texts == NULL, subject to result budget and cancellation. {NULL,0} is empty
 /// text, not database NULL. On failure a valid output slot is NULL.
+/// Positive result-byte budget including core data, C view arrays, handle
+/// metadata and text, but excluding allocation overhead and temporary buffers.
+/// Execution is controlled by the session cancellation token.
 /// # Safety
 /// Inputs live through return and obey the header's memory rules. A Session
 /// cannot execute concurrent batches; callers synchronize all handle releases.
@@ -246,7 +240,7 @@ pub unsafe extern "C" fn mg_grep_execute_batch(
     session: *mut MgGrepSession,
     texts: *const MgGrepBytes,
     text_count: usize,
-    limits: *const MgGrepExecutionLimits,
+    max_result_bytes: u64,
     out_result: *mut *mut MgGrepResult,
     error: *mut MgGrepError,
 ) -> MgGrepStatus {
@@ -260,7 +254,9 @@ pub unsafe extern "C" fn mg_grep_execute_batch(
         if session.poisoned.load(Ordering::Acquire) {
             return Err(Error::Internal("session is poisoned"));
         }
-        let limits = execution_limits(*required(limits)?)?;
+        if max_result_bytes == 0 {
+            return Err(invalid("result byte budget must be positive"));
+        }
         let check = || check_execution(session);
         check()?;
         let mut inner = match session.inner.try_lock() {
@@ -274,14 +270,14 @@ pub unsafe extern "C" fn mg_grep_execute_batch(
             .checked_mul(size_of::<TextResult>() + size_of::<MgGrepTextResult>())
             .and_then(|n| n.checked_add(size_of::<MgGrepResult>()))
             .ok_or(Error::ResourceLimit(LimitKind::ResultBytes))?;
-        if base as u64 > limits.max_result_bytes {
+        if base as u64 > max_result_bytes {
             return Err(Error::ResourceLimit(LimitKind::ResultBytes));
         }
         let descriptors = checked_slice(texts, text_count)?;
         let texts = inputs(descriptors, check)?;
         let data = inner.execute_accounted(
             &texts,
-            limits,
+            max_result_bytes,
             ResultOverhead {
                 batch: size_of::<MgGrepResult>() - size_of::<BatchResult>(),
                 text: size_of::<MgGrepTextResult>(),
@@ -484,14 +480,6 @@ fn compile_limits(l: MgGrepCompileLimits) -> Result<CompileLimits, Error> {
             .map_err(|_| invalid("cache limit exceeds size_t"))?,
     })
 }
-fn execution_limits(l: MgGrepExecutionLimits) -> Result<ExecutionLimits, Error> {
-    if l.max_result_bytes == 0 {
-        return Err(invalid("result byte budget must be positive"));
-    }
-    Ok(ExecutionLimits {
-        max_result_bytes: l.max_result_bytes,
-    })
-}
 fn check_execution(s: &MgGrepSession) -> Result<(), Error> {
     if s.cancellation.is_cancelled() {
         return Err(Error::Cancelled);
@@ -638,13 +626,6 @@ mod tests {
             (16, 0, 8)
         );
         assert_eq!(
-            (
-                size_of::<MgGrepExecutionLimits>(),
-                offset_of!(MgGrepExecutionLimits, max_result_bytes)
-            ),
-            (8, 0)
-        );
-        assert_eq!(
             (size_of::<MgGrepSpan>(), offset_of!(MgGrepSpan, end)),
             (16, 8)
         );
@@ -702,10 +683,8 @@ mod tests {
         }
     }
 
-    fn limits() -> MgGrepExecutionLimits {
-        MgGrepExecutionLimits {
-            max_result_bytes: 100_000_000,
-        }
+    fn limits() -> u64 {
+        100_000_000
     }
 
     #[test]
@@ -744,7 +723,7 @@ mod tests {
         unsafe {
             let mut result = ptr::dangling_mut();
             assert_eq!(
-                mg_grep_execute_batch(session, ptr::null(), 0, &limits(), &mut result, &mut error),
+                mg_grep_execute_batch(session, ptr::null(), 0, limits(), &mut result, &mut error),
                 MG_GREP_INTERNAL_ERROR
             );
             assert!(result.is_null());
@@ -786,7 +765,7 @@ mod tests {
                     session,
                     ptr::null(),
                     0,
-                    &limits(),
+                    limits(),
                     &mut result,
                     ptr::null_mut()
                 ),
@@ -805,7 +784,7 @@ mod tests {
             let guard = handle.inner.lock().unwrap();
             let mut result = ptr::dangling_mut();
             assert_eq!(
-                mg_grep_execute_batch(raw, ptr::null(), 0, &limits(), &mut result, ptr::null_mut()),
+                mg_grep_execute_batch(raw, ptr::null(), 0, limits(), &mut result, ptr::null_mut()),
                 MG_GREP_INVALID_ARGUMENT
             );
             assert!(result.is_null());
@@ -813,7 +792,7 @@ mod tests {
             assert!(handle.cancellation.is_cancelled());
             drop(guard);
             assert_eq!(
-                mg_grep_execute_batch(raw, ptr::null(), 0, &limits(), &mut result, ptr::null_mut()),
+                mg_grep_execute_batch(raw, ptr::null(), 0, limits(), &mut result, ptr::null_mut()),
                 MG_GREP_CANCELLED
             );
             mg_grep_session_free(raw);
@@ -835,18 +814,17 @@ mod tests {
             + size_of::<crate::Span>()
             + size_of::<MgGrepSpan>()
             + 1;
-        let mut limit = limits();
-        limit.max_result_bytes = required as u64;
+        let mut limit = required as u64;
         unsafe {
             let mut result = ptr::null_mut();
             assert_eq!(
-                mg_grep_execute_batch(session, &text, 1, &limit, &mut result, ptr::null_mut()),
+                mg_grep_execute_batch(session, &text, 1, limit, &mut result, ptr::null_mut()),
                 MG_GREP_OK
             );
             mg_grep_result_free(result);
-            limit.max_result_bytes -= 1;
+            limit -= 1;
             assert_eq!(
-                mg_grep_execute_batch(session, &text, 1, &limit, &mut result, ptr::null_mut()),
+                mg_grep_execute_batch(session, &text, 1, limit, &mut result, ptr::null_mut()),
                 MG_GREP_RESOURCE_LIMIT
             );
             assert!(result.is_null());
@@ -906,7 +884,7 @@ mod tests {
                     address as *mut MgGrepSession,
                     &text,
                     1,
-                    &limits(),
+                    limits(),
                     &mut result,
                     ptr::null_mut(),
                 )

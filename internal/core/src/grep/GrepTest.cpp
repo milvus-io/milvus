@@ -28,9 +28,9 @@ CompileLimits
 CompileBudget() {
     return {1024 * 1024, 1024 * 1024};
 }
-ExecutionLimits
+uint64_t
 Budget() {
-    return {200000000};
+    return 200000000;
 }
 Plan
 Compile(std::string_view pattern, MatchOptions options = {}) {
@@ -156,14 +156,14 @@ TEST(Grep, InvalidConfigurationIsNotARegexError) {
         Status::InvalidArgument,
         Operation::Compile);
     auto session = Compile("a").CreateSession();
-    ExpectError([&] { session.ExecuteBatch({}, {}); },
+    ExpectError([&] { session.ExecuteBatch({}, 0); },
                 Status::InvalidArgument,
                 Operation::Execute);
 }
 
 TEST(Grep, LargeInputAndRequestCancellation) {
     auto session = Compile("needle").CreateSession();
-    const ExecutionLimits limits{1 << 20};
+    const uint64_t limits{1 << 20};
     const std::string large(9 << 20, 'x');
     auto result = session.ExecuteBatch({large}, limits);
     EXPECT_EQ(result.TextCount(), 1);
@@ -180,13 +180,13 @@ TEST(Grep, LimitsAndInvalidTextDoNotPoisonTheSession) {
                 Status::InvalidUtf8,
                 Operation::Execute);
     auto limits = Budget();
-    limits.max_result_bytes = 1;
+    limits = 1;
     ExpectError([&] { session.ExecuteBatch({""}, limits); },
                 Status::ResourceLimit,
                 Operation::Execute);
     // Enough to pass the C++ metadata lower bound; insufficient for Rust's
     // complete result and view storage. Exercise the actual C error path.
-    limits.max_result_bytes = 128;
+    limits = 128;
     ExpectError([&] { session.ExecuteBatch({"aa"}, limits); },
                 Status::ResourceLimit,
                 Operation::Execute);

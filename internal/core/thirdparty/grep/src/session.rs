@@ -14,14 +14,6 @@ use grep::{
 
 use crate::{BatchResult, Error, InputKind, LimitKind, Line, Plan, Span, TextResult};
 
-#[derive(Clone, Copy, Debug)]
-pub struct ExecutionLimits {
-    /// Logical owned result structs/arrays/content, not capacity, allocator
-    /// overhead or temporary storage. A future ABI must also account for any
-    /// separately allocated views when converting the result.
-    pub max_result_bytes: u64,
-}
-
 /// Can be cloned and used concurrently with execution, without aliasing a
 /// mutable Session. Cancellation is sticky and also affects later batches.
 #[derive(Clone, Debug, Default)]
@@ -62,21 +54,23 @@ impl Session {
 
     /// Synchronous, exclusive execution. Ordinary errors discard the batch but
     /// leave the session reusable; a recovered unwind poisons it permanently.
+    /// `max_result_bytes` covers logical result data, not allocator overhead
+    /// or temporary storage.
     pub fn execute_batch(
         &mut self,
         inputs: &[&[u8]],
-        limits: ExecutionLimits,
+        max_result_bytes: u64,
     ) -> Result<BatchResult, Error> {
-        self.execute_accounted(inputs, limits, ResultOverhead::default())
+        self.execute_accounted(inputs, max_result_bytes, ResultOverhead::default())
     }
 
     pub(crate) fn execute_accounted(
         &mut self,
         inputs: &[&[u8]],
-        limits: ExecutionLimits,
+        max_result_bytes: u64,
         overhead: ResultOverhead,
     ) -> Result<BatchResult, Error> {
-        self.guarded(|session| session.execute(inputs, limits, overhead))
+        self.guarded(|session| session.execute(inputs, max_result_bytes, overhead))
     }
 
     fn guarded<T>(&mut self, f: impl FnOnce(&Self) -> Result<T, Error>) -> Result<T, Error> {
@@ -97,10 +91,10 @@ impl Session {
     fn execute(
         &self,
         inputs: &[&[u8]],
-        limits: ExecutionLimits,
+        max_result_bytes: u64,
         overhead: ResultOverhead,
     ) -> Result<BatchResult, Error> {
-        if limits.max_result_bytes == 0 {
+        if max_result_bytes == 0 {
             return Err(Error::InvalidConfiguration(
                 "result byte budget must be positive",
             ));
@@ -110,7 +104,7 @@ impl Session {
         };
         control.check()?;
         let mut budget = ResultBudget {
-            remaining: limits.max_result_bytes,
+            remaining: max_result_bytes,
         };
         budget.charge(size_of::<BatchResult>())?;
         budget.charge(overhead.batch)?;

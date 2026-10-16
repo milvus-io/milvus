@@ -268,7 +268,7 @@ TEST_P(GrepScanTest, BudgetErrorsCarryConfigurationAndCause) {
          OutOfRange,
          nullptr,
          {"quotaAndLimits.limits.maxOutputSize=1 bytes",
-          "remaining=1 bytes, requested=16 bytes"});
+          "result metadata budget exceeded"});
     options.max_result_bytes = 128;
     Scan({2},
          "timeout",

@@ -4,8 +4,8 @@ use std::{
 };
 
 use milvus_grep_core::{
-    BatchResult, Boundary, CaseMode, CompileLimits, Error, ExecutionLimits, InputKind, LimitKind,
-    Line, MatchOptions, PatternKind, Plan, Session, Span, TextResult,
+    BatchResult, Boundary, CaseMode, CompileLimits, Error, InputKind, LimitKind, Line,
+    MatchOptions, PatternKind, Plan, Session, Span, TextResult,
 };
 
 fn compile_limits() -> CompileLimits {
@@ -15,10 +15,8 @@ fn compile_limits() -> CompileLimits {
     }
 }
 
-fn execution_limits() -> ExecutionLimits {
-    ExecutionLimits {
-        max_result_bytes: 32 * 1024 * 1024,
-    }
+fn execution_limits() -> u64 {
+    32 * 1024 * 1024
 }
 
 fn plan(patterns: &[&str], options: MatchOptions) -> Plan {
@@ -291,8 +289,7 @@ fn invalid_limits_and_missing_patterns_are_rejected() {
         ));
     }
     let mut session = Session::new(&plan(&["a"], MatchOptions::default()));
-    let mut limits = execution_limits();
-    limits.max_result_bytes = 0;
+    let limits = 0;
     assert!(matches!(
         session.execute_batch(&[], limits),
         Err(Error::InvalidConfiguration(_))
@@ -302,10 +299,8 @@ fn invalid_limits_and_missing_patterns_are_rejected() {
 #[test]
 fn invalid_later_text_fails_batch_before_matching_and_session_recovers() {
     let mut session = Session::new(&plan(&["a"], MatchOptions::default()));
-    let mut limits = execution_limits();
-    // Enough metadata, but no space for the first field's matching payload:
-    // validation must still report the later corrupt input before scanning.
-    limits.max_result_bytes = (size_of::<BatchResult>() + 2 * size_of::<TextResult>()) as u64;
+    // Enough metadata, but no space for matching payload. Validate all inputs first.
+    let limits = (size_of::<BatchResult>() + 2 * size_of::<TextResult>()) as u64;
     let error = session.execute_batch(&[b"a", &[0xff]], limits).unwrap_err();
     assert!(matches!(
         error,
@@ -330,13 +325,12 @@ fn output_budget_charges_metadata_content_and_every_span() {
         + size_of::<Line>()
         + 3
         + 2 * size_of::<Span>();
-    let mut limits = execution_limits();
-    limits.max_result_bytes = required as u64;
+    let mut limits = required as u64;
     assert_eq!(
         rows(&session.execute_batch(&[b"a a"], limits).unwrap().texts[0]),
         [("a a", vec![(0, 1), (2, 3)])]
     );
-    limits.max_result_bytes -= 1;
+    limits -= 1;
     assert!(matches!(
         session.execute_batch(&[b"a a"], limits),
         Err(Error::ResourceLimit(LimitKind::ResultBytes))
@@ -347,8 +341,7 @@ fn output_budget_charges_metadata_content_and_every_span() {
 #[test]
 fn metadata_only_result_exhaustion() {
     let mut session = Session::new(&plan(&["a"], MatchOptions::default()));
-    let mut limits = execution_limits();
-    limits.max_result_bytes = size_of::<BatchResult>() as u64;
+    let limits = size_of::<BatchResult>() as u64;
     assert!(session.execute_batch(&[], limits).unwrap().texts.is_empty());
     assert!(matches!(
         session.execute_batch(&[b""], limits),
@@ -422,9 +415,7 @@ fn cancellation_can_be_requested_from_another_thread() {
 #[test]
 fn large_input_preserves_cancellation() {
     let mut session = Session::new(&plan(&["needle"], MatchOptions::default()));
-    let limits = ExecutionLimits {
-        max_result_bytes: 65536,
-    };
+    let limits = 65536;
     let large = vec![b'x'; 9 << 20];
     assert!(session.execute_batch(&[&large], limits).is_ok());
     session.cancellation_token().cancel();

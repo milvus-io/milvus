@@ -6,15 +6,13 @@
 //! used. Inputs and outputs contain no database identifiers.
 //!
 //! ```
-//! use milvus_grep_core::{CompileLimits, ExecutionLimits, MatchOptions, Plan, Session, Span};
+//! use milvus_grep_core::{CompileLimits, MatchOptions, Plan, Session, Span};
 //!
 //! let plan = Plan::compile(&[b"error"], MatchOptions::default(), CompileLimits {
 //!     max_regex_bytes: 1024 * 1024, max_dfa_cache_bytes: 1024 * 1024,
 //! })?;
 //! let mut session = Session::new(&plan);
-//! let result = session.execute_batch(&[b"ok\nerror: error"], ExecutionLimits {
-//!     max_result_bytes: 4096,
-//! })?;
+//! let result = session.execute_batch(&[b"ok\nerror: error"], 4096)?;
 //! let line = &result.texts[0].lines[0];
 //! assert_eq!(&*line.content, "error: error");
 //! assert_eq!(&*line.spans, &[Span { start: 0, end: 5 }, Span { start: 7, end: 12 }]);
@@ -30,4 +28,4 @@ mod session;
 pub use error::{Error, InputKind, LimitKind};
 pub use plan::{Boundary, CaseMode, CompileLimits, MatchOptions, PatternKind, Plan};
 pub use result::{BatchResult, Line, Span, TextResult};
-pub use session::{CancellationToken, ExecutionLimits, Session};
+pub use session::{CancellationToken, Session};

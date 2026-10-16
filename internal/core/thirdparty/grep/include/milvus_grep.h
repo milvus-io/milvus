@@ -86,15 +86,6 @@ typedef struct {
 } MgGrepError;
 
 /**
- * Positive result-byte budget including core data, C view arrays, handle
- * metadata and text, but excluding allocation overhead and temporary buffers.
- * Execution is controlled by the session cancellation token.
- */
-typedef struct {
-  uint64_t max_result_bytes;
-} MgGrepExecutionLimits;
-
-/**
  * UTF-8 byte interval [start,end) relative to the owning line.content.
  * Empty matches have start == end; endpoints are character boundaries.
  */
@@ -199,9 +190,12 @@ void mg_grep_session_cancel(MgGrepSession *session);
 void mg_grep_session_free(MgGrepSession *session);
 
 /**
- * Synchronous batch match. Required: session, limits, out_result. Empty batch
+ * Synchronous batch match. Required: session, out_result. Empty batch
  * accepts texts == NULL, subject to result budget and cancellation. {NULL,0} is empty
  * text, not database NULL. On failure a valid output slot is NULL.
+ * Positive result-byte budget including core data, C view arrays, handle
+ * metadata and text, but excluding allocation overhead and temporary buffers.
+ * Execution is controlled by the session cancellation token.
  * # Safety
  * Inputs live through return and obey the header's memory rules. A Session
  * cannot execute concurrent batches; callers synchronize all handle releases.
@@ -209,7 +203,7 @@ void mg_grep_session_free(MgGrepSession *session);
 MgGrepStatus mg_grep_execute_batch(MgGrepSession *session,
                                    const MgGrepBytes *texts,
                                    size_t text_count,
-                                   const MgGrepExecutionLimits *limits,
+                                   uint64_t max_result_bytes,
                                    MgGrepResult **out_result,
                                    MgGrepError *error);
 
