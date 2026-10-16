@@ -81,12 +81,7 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 
 type fakeServiceIndex struct{}
 
-func (fakeServiceIndex) Build(*indexcgowrapper.Dataset) error                        { return nil }
-func (fakeServiceIndex) Serialize() ([]*indexcgowrapper.Blob, error)                 { return nil, nil }
-func (fakeServiceIndex) GetIndexFileInfo() ([]*indexcgowrapper.IndexFileInfo, error) { return nil, nil }
-func (fakeServiceIndex) Load([]*indexcgowrapper.Blob) error                          { return nil }
-func (fakeServiceIndex) Delete() error                                               { return nil }
-func (fakeServiceIndex) CleanLocalData() error                                       { return nil }
+func (fakeServiceIndex) Delete() error { return nil }
 func (fakeServiceIndex) UpLoad() (*cgopb.IndexStats, error) {
 	return &cgopb.IndexStats{SerializedIndexInfos: []*cgopb.SerializedIndexFileInfo{{FileName: "text-index", FileSize: 10}}}, nil
 }

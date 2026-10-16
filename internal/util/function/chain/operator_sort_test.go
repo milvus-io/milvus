@@ -90,7 +90,7 @@ func (s *SortOpTestSuite) TestSpecialFloatOrdering() {
 						df := builder.Build()
 						defer df.Release()
 						ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-						result, err := newSortOp(types.ScoreFieldName, desc, tieBreak).Execute(ctx, df)
+						result, err := ExecuteOperator(ctx, df, newSortOp(types.ScoreFieldName, desc, tieBreak))
 						s.Require().NoError(err)
 						defer result.Release()
 						want := []int64{6, 4, 3, 5}
@@ -112,7 +112,7 @@ func (s *SortOpTestSuite) TestSpecialFloatOrdering() {
 						s.Equal(want, result.Column(types.IDFieldName).Chunk(0).(*array.Int64).Int64Values())
 						if dataType.ID() == arrow.FLOAT32 {
 							// Remove the leading infinity and retain only finite rows.
-							limited, err := NewLimitOp(2, 1).Execute(ctx, result)
+							limited, err := ExecuteOperator(ctx, result, NewLimitOp(2, 1))
 							s.Require().NoError(err)
 							defer limited.Release()
 							exported, err := ToSearchResultData(limited)
@@ -167,7 +167,7 @@ func (s *SortOpTestSuite) TestSortDescending() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -191,7 +191,7 @@ func (s *SortOpTestSuite) TestSortAscending() {
 
 	op := newSortOp(types.ScoreFieldName, false, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -230,7 +230,7 @@ func (s *SortOpTestSuite) TestSortWithAllNullScores() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -274,7 +274,7 @@ func (s *SortOpTestSuite) TestSortNullsLastDescending() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -317,7 +317,7 @@ func (s *SortOpTestSuite) TestSortNullsLastAscending() {
 
 	op := newSortOp(types.ScoreFieldName, false, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -340,7 +340,7 @@ func (s *SortOpTestSuite) TestSortMultiChunkIndependent() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -363,7 +363,7 @@ func (s *SortOpTestSuite) TestSortColumnNotFound() {
 
 	op := newSortOp("nonexistent", true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err := op.Execute(ctx, df)
+	_, err := ExecuteOperator(ctx, df, op)
 	s.Error(err)
 	s.Contains(err.Error(), "not found")
 }
@@ -390,7 +390,7 @@ func (s *SortOpTestSuite) TestSortEmptyChunk() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -445,7 +445,7 @@ func (s *SortOpTestSuite) TestSortTieBreakByID() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -470,7 +470,7 @@ func (s *SortOpTestSuite) TestSortTieBreakPartialTies() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -504,7 +504,7 @@ func (s *SortOpTestSuite) TestSortFastPathFloat32DescWithInt64TieBreak() {
 
 	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -543,7 +543,7 @@ func (s *SortOpTestSuite) TestSortIgnoresNonComparableTieBreakAndStringHelpers()
 	op := newSortOp(types.ScoreFieldName, true, "bool_tie")
 	s.Equal("Sort($score DESC, bool_tie ASC)", op.String())
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 

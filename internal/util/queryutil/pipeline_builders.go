@@ -17,6 +17,8 @@
 package queryutil
 
 import (
+	"github.com/apache/arrow/go/v17/arrow"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
@@ -44,6 +46,13 @@ func BuildQueryReducePipeline(
 	groupByFieldIDs []int64,
 	aggregates []*planpb.Aggregate,
 	maxOutputSize int64,
+	// arrowRecords, when non-nil, routes the plain reduce through the Arrow
+	// path: the user columns are left in the records and the chosen rows are
+	// reported in arrowOut instead of being merged into FieldsData. Only the
+	// plain pipeline consumes it -- group-by/aggregation is excluded from the
+	// Arrow transport by routing, and ORDER BY is a documented follow-up.
+	arrowRecords []arrow.Record,
+	arrowOut *ArrowSelection,
 ) (*Pipeline, error) {
 	hasGroupBy := len(groupByFieldIDs) > 0 || len(aggregates) > 0
 	hasOrderBy := len(orderByFields) > 0
@@ -55,13 +64,15 @@ func BuildQueryReducePipeline(
 	} else if hasOrderBy {
 		return buildOrderByReducePipeline(name, schema, topK, orderByFields, maxOutputSize), nil
 	}
-	return buildPlainReducePipeline(name, schema, topK, reduceType, maxOutputSize), nil
+	return buildPlainReducePipeline(name, schema, topK, reduceType, maxOutputSize, arrowRecords, arrowOut), nil
 }
 
 // buildPlainReducePipeline: [ReduceByPKTS(topK)] → output
-func buildPlainReducePipeline(name string, schema *schemapb.CollectionSchema, topK int64, reduceType reduce.IReduceType, maxOutputSize int64) *Pipeline {
+func buildPlainReducePipeline(name string, schema *schemapb.CollectionSchema, topK int64, reduceType reduce.IReduceType, maxOutputSize int64, arrowRecords []arrow.Record, arrowOut *ArrowSelection) *Pipeline {
 	b := NewPipelineBuilder(name)
-	b.Add(OpReduceByPKTS, pin(), pout(), NewReduceByPKWithTimestampOperator(reduceType, maxOutputSize, topK, schema))
+	b.Add(OpReduceByPKTS, pin(), pout(),
+		NewReduceByPKWithTimestampOperator(reduceType, maxOutputSize, topK, schema).
+			withArrowRecords(arrowRecords, arrowOut))
 	return b.Build()
 }
 

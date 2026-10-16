@@ -40,8 +40,10 @@ namespace {
 
 struct StringAccessStats {
     int full_views = 0;
+    int take_calls = 0;
     std::vector<int64_t> pinned_chunks;
     bool fail_pin = false;
+    bool take_only = false;
 };
 
 template <typename Base>
@@ -64,12 +66,25 @@ class CountingStringColumn : public Base {
 
     PinWrapper<Chunk*>
     GetChunk(milvus::OpContext* ctx, int64_t chunk_id) const override {
-        if (stats_->fail_pin) {
+        if (stats_->fail_pin || stats_->take_only) {
             ThrowInfo(ErrorCode::FileReadFailed,
                       "injected string chunk failure");
         }
         stats_->pinned_chunks.push_back(chunk_id);
         return Base::GetChunk(ctx, chunk_id);
+    }
+
+    ChunkedColumnInterface::LocalFormat
+    GetLocalFormat() const override {
+        return stats_->take_only ? ChunkedColumnInterface::LocalFormat::Vortex
+                                 : Base::GetLocalFormat();
+    }
+
+    ChunkedColumnInterface::TakeResultPtr
+    Take(milvus::OpContext* ctx,
+         ChunkedColumnInterface::TakeOptions options) const override {
+        ++stats_->take_calls;
+        return Base::Take(ctx, std::move(options));
     }
 
  private:
@@ -277,6 +292,16 @@ TEST_P(GroupByStringGetterTest, ChunkReadFailureKeepsItsCode) {
     // A failed pin must not leave an unusable entry in the getter cache.
     stats_->fail_pin = false;
     EXPECT_EQ(getter->Get(32), expected_[32]);
+}
+
+TEST_P(GroupByStringGetterTest, VortexUsesOneTakePerVisitedFile) {
+    stats_->take_only = true;
+    auto getter = GetDataGetter<std::string>(nullptr, *segment_, field_id_);
+    for (auto offset : {96, 97, 0, 31, 96, 0}) {
+        EXPECT_EQ(getter->Get(offset), expected_[offset]);
+    }
+    EXPECT_EQ(stats_->take_calls, 2);
+    EXPECT_TRUE(stats_->pinned_chunks.empty());
 }
 
 INSTANTIATE_TEST_SUITE_P(ColumnBackends,

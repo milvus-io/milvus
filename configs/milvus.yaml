@@ -911,6 +911,7 @@ dataCoord:
   # if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version
   targetScalarIndexVersion: -1
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
+  manifestCommitConcurrency: 16 # Maximum concurrent DataCoord manifest commits across L0 compaction, index and stats publication, schema materialization, and GC. Values are clamped to [1, 256]. Workers start on demand. Read once during metadata initialization; changes require restart.
   # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
   enableCompaction: true
@@ -982,8 +983,8 @@ dataCoord:
     # The setting may be switched in either direction. Turning it off changes where new completions are written; records already published to manifests remain recoverable through the segment's sticky manifest_has_index marker.
     # The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.
     writeSegmentIndexToManifest: false
-    # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
-    # Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
+    # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Reads await asynchronous transaction callbacks in Go. Values are clamped to [1, 256], and the coordinator read limit is also capped by positive minio.maxConnections values. Restore assembly and verification share the same budget.
+    # Startup continuously schedules bounded concurrent reads and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
     segmentIndexManifestLoadConcurrency: 64
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
@@ -1110,7 +1111,7 @@ dataNode:
     concurrencyPerCPUCore: 4 # The execution concurrency unit for import/pre-import tasks per CPU core.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
     readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
-    readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
+    readDeleteBufferSizeInMB: 128 # The delete memory budget (in MB) used for legacy L0 import slot estimation and typed snapshot delete maps. Shared-L0 snapshot tasks use bounded delete batches and pool the per-reader delete allowances for bitmaps in both phases; admission also reserves row buffers and requires an import memory allowance greater than twice this budget.
     memoryLimitPercentage: 10 # The percentage of memory limit for import/pre-import tasks.
     # Initial backoff interval in seconds for import write retry. Must be a positive integer;
     # a non-positive or unparseable value falls back to the default.
@@ -1679,6 +1680,13 @@ streamingNode:
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can send, unit: byte
     clientMaxRecvSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can receive, unit: byte
 
+# Any configuration related to query views.
+queryView:
+  idfOracle:
+    lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
+    sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.
+  leaseDuration: 60s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
+
 # Any configuration related to the streaming service.
 streaming:
   # Whether StreamingNode splits oversized logical messages into physical WAL records.
@@ -1770,6 +1778,8 @@ streaming:
       # The max size of l0 segment, 32m by default.
       # If the binary size of l0 segment is greater than this size, it will be flushed.
       maxSize: 32m
+  summary:
+    cacheBytesPerPChannel: 64MB # Encoded WALSummary chunk cache budget per PChannel. Zero disables residency. Indexes, in-flight reads and decoded delivery batches are accounted separately. Applied when the WAL opens.
   walRecovery:
     # The interval of persist recovery info, 10s by default. 
     # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.

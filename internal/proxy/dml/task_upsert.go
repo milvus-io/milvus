@@ -493,17 +493,10 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	}
 	existRowNum := typeutil.GetSizeOfIDs(existIDs)
 	if existRowNum > 0 && it.rlsEnabled {
+		// Authorize the PK-deduplicated read snapshot, including partition-key collections.
 		if err := rlsutil.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, usingExpr, "upsert", "using"); err != nil {
 			log.Warn(ctx, "RLS using expression validation failed for upsert", mlog.Err(err))
 			return nil, err
-		}
-		if it.partitionKeyMode && usingExpr != nil {
-			// Query reduction keeps one row per PK, while partition-key upsert
-			// deletes that PK from every physical partition. Until internal
-			// retrieval preserves every (partition, PK) copy, a non-trivial USING
-			// predicate cannot authorize all rows that the delete will affect.
-			return nil, merr.WrapErrOperationNotSupportedMsg(
-				"RLS upsert with a USING predicate is not supported for partition-key collections")
 		}
 		if partialUpdate && usingExpr != nil {
 			if err := dql.FormatTimestamptzFields(existFieldData, it.schema.SchemaHelper.GetTimezone()); err != nil {
@@ -630,6 +623,14 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				validData[i] = true
 			}
 			typeutil.SetFieldDataValidData(fieldData, validData)
+		}
+
+		// An omitted vector validity bitmap means every supplied row is valid.
+		// Materialize it before merge, which indexes logical rows and appends
+		// validity separately from the compact vector payload.
+		if fieldSchema.GetNullable() && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) &&
+			len(typeutil.GetFieldDataValidData(fieldData)) == 0 {
+			typeutil.SetFieldDataValidData(fieldData, lo.RepeatBy(upsertIDSize, func(int) bool { return true }))
 		}
 
 		// compatible with different nullable/default_value data format from sdk

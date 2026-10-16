@@ -610,6 +610,65 @@ func (_c *MockCSegment_Retrieve_Call) RunAndReturn(run func(context.Context, *se
 	return _c
 }
 
+// RetrieveAsArrow provides a mock function with given fields: ctx, plan
+func (_m *MockCSegment) RetrieveAsArrow(ctx context.Context, plan *segcore.RetrievePlan) (*segcore.RetrieveArrowResult, error) {
+	ret := _m.Called(ctx, plan)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RetrieveAsArrow")
+	}
+
+	var r0 *segcore.RetrieveArrowResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.RetrievePlan) (*segcore.RetrieveArrowResult, error)); ok {
+		return rf(ctx, plan)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.RetrievePlan) *segcore.RetrieveArrowResult); ok {
+		r0 = rf(ctx, plan)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*segcore.RetrieveArrowResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *segcore.RetrievePlan) error); ok {
+		r1 = rf(ctx, plan)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCSegment_RetrieveAsArrow_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RetrieveAsArrow'
+type MockCSegment_RetrieveAsArrow_Call struct {
+	*mock.Call
+}
+
+// RetrieveAsArrow is a helper method to define mock.On call
+//   - ctx context.Context
+//   - plan *segcore.RetrievePlan
+func (_e *MockCSegment_Expecter) RetrieveAsArrow(ctx interface{}, plan interface{}) *MockCSegment_RetrieveAsArrow_Call {
+	return &MockCSegment_RetrieveAsArrow_Call{Call: _e.mock.On("RetrieveAsArrow", ctx, plan)}
+}
+
+func (_c *MockCSegment_RetrieveAsArrow_Call) Run(run func(ctx context.Context, plan *segcore.RetrievePlan)) *MockCSegment_RetrieveAsArrow_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*segcore.RetrievePlan))
+	})
+	return _c
+}
+
+func (_c *MockCSegment_RetrieveAsArrow_Call) Return(_a0 *segcore.RetrieveArrowResult, _a1 error) *MockCSegment_RetrieveAsArrow_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCSegment_RetrieveAsArrow_Call) RunAndReturn(run func(context.Context, *segcore.RetrievePlan) (*segcore.RetrieveArrowResult, error)) *MockCSegment_RetrieveAsArrow_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RetrieveByOffsets provides a mock function with given fields: ctx, plan
 func (_m *MockCSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcore.RetrieveResult, error) {
 	ret := _m.Called(ctx, plan)

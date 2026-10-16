@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -442,6 +443,7 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
         null_ids = []
         non_null_ids = []
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
@@ -2161,6 +2163,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
@@ -2330,6 +2333,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         else:
             raise Exception(f"not support file format:{file_format}")
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
@@ -2469,6 +2473,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
@@ -2611,6 +2616,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
@@ -2766,6 +2772,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
@@ -3316,6 +3323,7 @@ class TestImportWithTextEmbeddingFunction(TestcaseBase):
         else:
             file_type = BulkFileType.PARQUET
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
@@ -3414,6 +3422,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
         else:
             file_type = BulkFileType.PARQUET
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=invalid_schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
@@ -3487,6 +3496,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
         else:
             file_type = BulkFileType.PARQUET
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=invalid_schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(

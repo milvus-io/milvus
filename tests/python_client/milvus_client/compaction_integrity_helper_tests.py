@@ -72,7 +72,12 @@ def test_continuous_executor_signals_before_join_and_restores_after_workers(cont
             restored.append((stopped.is_set(), validator_stopped.is_set()))
 
     with pytest.raises(type(failure), match=str(failure)):
-        with restore_config(), continuous._continuous_executor(stop, checkpoints) as executor:
+        with (
+            restore_config(),
+            continuous._continuous_executor(
+                stop, checkpoints, continuous._ContinuousFailureRecorder("executor-failure-unit")
+            ) as executor,
+        ):
             producer_future = executor.submit(producer)
             validator_future = executor.submit(validator)
             raise failure
@@ -83,7 +88,9 @@ def test_continuous_executor_signals_before_join_and_restores_after_workers(cont
 def test_continuous_executor_success_keeps_final_validation_enabled(continuous):
     stop = threading.Event()
     checkpoints = queue.Queue()
-    with continuous._continuous_executor(stop, checkpoints) as executor:
+    with continuous._continuous_executor(
+        stop, checkpoints, continuous._ContinuousFailureRecorder("executor-success-unit")
+    ) as executor:
         assert executor.submit(lambda: 42).result(timeout=2) == 42
     assert not stop.is_set()
     assert checkpoints.empty()
@@ -242,7 +249,17 @@ def test_continuous_prefix_failure_wakes_other_workers(continuous, monkeypatch):
     oracle = Mock()
     budget = continuous._ContinuousBudget(10, stop)
     with pytest.raises(pytest.fail.Exception, match="corrupt row"):
-        case._run_prefix_validator(Mock(), "c", [], oracle, checkpoints, Mock(), stop, budget)
+        case._run_prefix_validator(
+            Mock(),
+            "c",
+            [],
+            oracle,
+            checkpoints,
+            Mock(),
+            stop,
+            budget,
+            continuous._ContinuousFailureRecorder("prefix-failure-unit"),
+        )
     assert stop.is_set()
     assert checkpoints.get_nowait() is None
     oracle.poison.assert_called_once()

@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -592,6 +593,15 @@ func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 		redactedReq := *request
 		redactedReq.ExternalSource = externalspec.RedactExternalSource(request.ExternalSource)
 		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(request.ExternalSpec)
+		return mlog.Any("request", &redactedReq)
+	case *ImportReq:
+		if request == nil || len(request.Options) == 0 {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		// Reuse import option redaction on a logging-only copy. The handler
+		// still needs the original external_spec and ezk to read source data.
+		redactedReq.Options = funcutil.KeyValuePair2Map(importutilv2.RedactOptions(funcutil.Map2KeyValuePair(request.Options)))
 		return mlog.Any("request", &redactedReq)
 	case *PasswordReq:
 		if request == nil {
