@@ -36,6 +36,10 @@ message SSTRef {
   bytes min_key = 4;
   bytes max_key = 5;
   int64 num_entries = 6;
+  // 0: the SST came from a flush and is a run of its own (an L0 table).
+  // Otherwise the SSTs of one compaction share one run id; their key
+  // ranges do not overlap and they are listed in ascending key order.
+  int64 run_id = 7;
 }
 
 // ManifestPointer is the etcd value of one vchannel.
@@ -84,6 +88,36 @@ message GetRecoveryManifestsResponse {
   common.Status status = 1;
   // One entry per target, in the order of the targets.
   repeated ManifestPointerEntry entries = 2;
+}
+
+// CompactionRequest is the payload of a CreateTask of type PKIndexCompaction.
+message CompactionRequest {
+  int64 task_id = 1;
+  int64 collection_id = 2;
+  string vchannel = 3;
+  // Complete object key prefix of the SST files (Manifest.sst_base_path).
+  string sst_base_path = 4;
+  // Newest first, a contiguous slice of the manifest list.
+  repeated SSTRef inputs = 5;
+  // The run id of every output.
+  int64 run_id = 6;
+  // The outputs take their IDs from [output_id_begin, output_id_end).
+  int64 output_id_begin = 7;
+  int64 output_id_end = 8;
+  // An output is closed when its entries reach this many bytes.
+  int64 target_file_size = 9;
+  // Drop a key whose newest value is a tombstone.
+  bool drop_tombstones = 10;
+}
+
+// CompactionResult is the payload of a QueryTask of type PKIndexCompaction.
+message CompactionResult {
+  common.Status status = 1;
+  // Ascending key order, all with run_id. Set when the task is finished.
+  repeated SSTRef outputs = 2;
+  int64 entries_processed = 3;
+  // Set with a failed task: a retry on another node may succeed.
+  bool retriable = 4;
 }
 
 service PKIndexCoordService {
