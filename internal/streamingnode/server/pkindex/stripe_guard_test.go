@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dedup
+package pkindex
 
 import (
 	"sync"
@@ -22,13 +22,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/internal/pkindex/authority"
 )
 
 func TestStripeGuardReleaseIsIdempotentAndNilSafe(t *testing.T) {
 	locks := newStripeLocks(4)
-	guard := locks.acquire([]authority.PK{authority.Int64PK(1), authority.Int64PK(1), authority.Int64PK(2)})
+	guard := locks.acquire([]PK{Int64PK(1), Int64PK(1), Int64PK(2)})
 	guard.Release()
 	guard.Release()
 
@@ -36,7 +34,7 @@ func TestStripeGuardReleaseIsIdempotentAndNilSafe(t *testing.T) {
 	nilGuard.Release()
 
 	// released stripes can be acquired again.
-	again := locks.acquire([]authority.PK{authority.Int64PK(1)})
+	again := locks.acquire([]PK{Int64PK(1)})
 	again.Release()
 }
 
@@ -49,11 +47,11 @@ func TestStripeGuardEmptyKeys(t *testing.T) {
 
 func TestStripeGuardBlocksSameKey(t *testing.T) {
 	locks := newStripeLocks(16)
-	first := locks.acquire([]authority.PK{authority.VarCharPK("a")})
+	first := locks.acquire([]PK{VarCharPK("a")})
 
 	acquired := make(chan struct{})
 	go func() {
-		second := locks.acquire([]authority.PK{authority.VarCharPK("a")})
+		second := locks.acquire([]PK{VarCharPK("a")})
 		close(acquired)
 		second.Release()
 	}()
@@ -74,11 +72,11 @@ func TestStripeGuardBlocksSameKey(t *testing.T) {
 // Opposite key orders must not deadlock: stripes are always locked in ascending order.
 func TestStripeGuardNoDeadlockOnOppositeOrder(t *testing.T) {
 	locks := newStripeLocks(8)
-	keys := make([]authority.PK, 0, 64)
+	keys := make([]PK, 0, 64)
 	for i := int64(0); i < 64; i++ {
-		keys = append(keys, authority.Int64PK(i))
+		keys = append(keys, Int64PK(i))
 	}
-	reversed := make([]authority.PK, len(keys))
+	reversed := make([]PK, len(keys))
 	for i, k := range keys {
 		reversed[len(keys)-1-i] = k
 	}

@@ -14,17 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package dedup makes the write path decisions of the primary key index: which
-// keys of an insert need a companion delete, which keys of a delete exist, and
-// how the writes of a transaction take effect at its commit.
-package dedup
+// Package pkindex is the primary key index of a streaming node: the index of
+// each vchannel (Authority) and the write path decisions made with it
+// (Decider): which keys of an insert need a companion delete, which keys of a
+// delete exist, and how the writes of a transaction take effect at its commit.
+package pkindex
 
 import (
 	"context"
 	"sync"
 	"time"
-
-	"github.com/milvus-io/milvus/internal/pkindex/authority"
 )
 
 // WriteKind is the kind of write the caller is about to append.
@@ -41,14 +40,14 @@ const (
 type Request struct {
 	Kind     WriteKind
 	VChannel string
-	PKs      []authority.PK // The keys of an insert or delete. Empty for commit and rollback.
-	TxnID    int64          // 0 for an autocommit write
+	PKs      []PK  // The keys of an insert or delete. Empty for commit and rollback.
+	TxnID    int64 // 0 for an autocommit write
 }
 
 // Decision tells the caller what to append.
 type Decision struct {
-	CompanionDeletePKs []authority.PK // keys of an insert that need a companion delete in the same transaction
-	PresentPKs         []authority.PK // keys of a delete that exist in the index, in request order. Nil when none exists.
+	CompanionDeletePKs []PK // keys of an insert that need a companion delete in the same transaction
+	PresentPKs         []PK // keys of a delete that exist in the index, in request order. Nil when none exists.
 }
 
 // Applied is what the caller read back from the appended main message.
@@ -66,7 +65,7 @@ type Applied struct {
 // TODO: duplicate primary keys inside one insert are not detected.
 // TODO: pick the stripe count from a throughput benchmark.
 type Decider struct {
-	authority authority.Authority
+	authority Authority
 	stripes   *stripeLocks
 
 	// pendingMu guards pending and every pendingTxn in it. Lock order: stripes
@@ -75,8 +74,8 @@ type Decider struct {
 	pending   map[int64]*pendingTxn
 }
 
-// New creates the Decider of a vchannel. It takes ownership of a.
-func New(a authority.Authority, stripeCount int) *Decider {
+// NewDecider creates the Decider of a vchannel. It takes ownership of a.
+func NewDecider(a Authority, stripeCount int) *Decider {
 	return &Decider{
 		authority: a,
 		stripes:   newStripeLocks(stripeCount),
@@ -145,7 +144,7 @@ func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 }
 
 // present returns the keys of pks that exist in the index, in the order of pks.
-func (d *Decider) present(ctx context.Context, pks []authority.PK) ([]authority.PK, error) {
+func (d *Decider) present(ctx context.Context, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
@@ -153,7 +152,7 @@ func (d *Decider) present(ctx context.Context, pks []authority.PK) ([]authority.
 	if err != nil {
 		return nil, err
 	}
-	var present []authority.PK
+	var present []PK
 	for i, entry := range entries {
 		if entry != nil {
 			present = append(present, pks[i])
@@ -185,7 +184,7 @@ func (d *Decider) Close() error {
 	return d.authority.Close()
 }
 
-func (i *Intent) acquire(pks []authority.PK) {
+func (i *Intent) acquire(pks []PK) {
 	start := time.Now()
 	i.guard = i.d.stripes.acquire(pks)
 	i.lockWait = time.Since(start)
