@@ -235,15 +235,10 @@ func TestPartialUpdateCommitExpiresDuringRealGuardWait(t *testing.T) {
 			snapshotOnce.Do(func() { close(resumeSnapshot) })
 			once.Do(unlock)
 			err = receiveCommitValue(t, done)
-			if cleanupFirst {
-				// Missing proof state is rejected at commit admission, before
-				// any row lock or timestamp is taken.
-				require.True(t, status.AsStreamingError(err).IsPartialUpdateRetryableCAS(), "guarded commit returned: %v", err)
-			} else {
-				// The commit reaches TimeTick after the lock is released and
-				// finds its session gone.
-				require.True(t, status.AsStreamingError(err).IsTxnExpired(), "guarded commit returned: %v", err)
-			}
+			// Either way the commit reaches TimeTick and finds its session
+			// gone. With the record already cleaned up, admission takes no row
+			// lock and leaves the classification to TimeTick.
+			require.True(t, status.AsStreamingError(err).IsTxnExpired(), "guarded commit returned: %v", err)
 			require.Empty(t, wal)
 			requireTestRowLocksAvailable(t, guards, "v1", 10)
 		})

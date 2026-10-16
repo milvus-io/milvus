@@ -103,13 +103,9 @@ func TestPartialUpdateRecoveryUnsupportedBodyOnlyRejectsItsTransaction(t *testin
 	})
 	requireTransactionExpired(t, err)
 	require.False(t, called, "a new-format body with missing PKs must not commit unguarded")
-	// Commit admission rejects txn 1 before TimeTick: its session stays InFlight
-	// until its lease ends, and the rejection does not affect txn 2.
-	session, err := env.txnManager.GetSessionOfTxn(1)
-	require.NoError(t, err)
-	require.Equal(t, message.TxnStateInFlight, session.State())
 	_, err = env.append(newCommitTxnMessage("v1", 2, 0), nil)
 	require.NoError(t, err)
+	require.Nil(t, env.partial.state.getTxn(1))
 	require.Nil(t, env.partial.state.getTxn(2))
 }
 
