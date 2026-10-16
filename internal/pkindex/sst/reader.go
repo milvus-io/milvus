@@ -18,6 +18,7 @@ package sst
 
 import (
 	"os"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/pebble"
@@ -32,6 +33,9 @@ type Reader struct {
 	name string
 	size int64
 	r    *sstable.Reader
+
+	// openIters counts the Iters not yet closed
+	openIters atomic.Int32
 }
 
 // ReaderOption adjusts how a table is opened.
@@ -181,26 +185,25 @@ func (r *Reader) Get(key []byte) (value []byte, ok bool, err error) {
 // Iter iterates all entries in key order, invoking fn per entry; iteration
 // stops at the first error. The key/value slices are only valid within fn.
 func (r *Reader) Iter(fn func(key, value []byte) error) error {
-	it, err := r.r.NewIter(nil, nil)
+	it, err := r.NewIter()
 	if err != nil {
-		return MarkPebbleErr(errors.Wrapf(err, "scan sst %s", r.name))
+		return err
 	}
 	defer it.Close()
-	for ik, lv := it.First(); ik != nil; ik, lv = it.Next() {
-		v, _, err := lv.Value(nil)
-		if err != nil {
-			return MarkPebbleErr(errors.Wrapf(err, "read sst value in %s", r.name))
-		}
-		if err := fn(ik.UserKey, v); err != nil {
+	for ok := it.First(); ok; ok = it.Next() {
+		if err := fn(it.Key(), it.Value()); err != nil {
 			return err
 		}
 	}
-	// the loop also ends on a block the iterator could not read
-	return r.iterErr(it.Error(), "scan sst %s")
+	return it.Error()
 }
 
-// Close releases the reader and the source it was opened from.
+// Close releases the reader and the source it was opened from. Close every
+// Iter before its Reader: while one is open, Close fails and releases nothing.
 func (r *Reader) Close() error {
+	if n := r.openIters.Load(); n > 0 {
+		return errors.Newf("close sst %s: %d iterators are still open", r.name, n)
+	}
 	if err := r.r.Close(); err != nil {
 		return MarkPebbleErr(errors.Wrapf(err, "close sst %s", r.name))
 	}
