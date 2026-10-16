@@ -153,8 +153,9 @@ type SegmentManifestCommit struct {
 // segMu; the final catalog mutation is rebased onto the latest SegmentInfo and
 // catalog + memory publication stays in one segMu critical section. Only
 // short, memory-only locks are taken inside that section: a staged SegmentIndex
-// install updates the stored-index-size gauge through indexMeta's task
-// counters, never through fieldIndexLock.
+// install updates indexMeta's task counters, never fieldIndexLock. Its
+// observability, including the stored-index-size gauge whose writes can wait
+// for a Prometheus scrape, runs after segMu is released (still under keyLock).
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
@@ -295,7 +296,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// Re-enter segMu only for the final full-record publication. Ordinary
 	// segment writers may have changed unrelated fields during manifest I/O, so
 	// apply the catalog mutation to the latest clone rather than the I/O input.
-	return func() error {
+	err = func() error {
 		m.segMu.Lock()
 		defer m.segMu.Unlock()
 		latest := m.segments.GetSegment(commit.SegmentID)
@@ -344,13 +345,6 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 
 		updated, metricMutation, err := m.applySegmentCatalogMutation(segment, commit.CatalogMutation)
 		if err != nil {
-			// Preserve UpdateSegmentsInfo's contract for stale SaveBinlogPaths
-			// requests: the prepared immutable revision remains unpublished and
-			// the caller need not retry an operation that is no longer applicable.
-			if errors.Is(err, errIgnoredSegmentMetaOperation) {
-				mlog.Info(ctx, "segment manifest commit ignored stale segment meta operation", mlog.Err(err))
-				return nil
-			}
 			return err
 		}
 		updated.ManifestPath = manifestPath
@@ -392,6 +386,23 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		}
 		return nil
 	}()
+	if errors.Is(err, errIgnoredSegmentMetaOperation) {
+		// Preserve UpdateSegmentsInfo's contract for stale SaveBinlogPaths
+		// requests: the prepared immutable revision remains unpublished and the
+		// caller need not retry an operation that is no longer applicable.
+		mlog.Info(ctx, "segment manifest commit ignored stale segment meta operation", mlog.Err(err))
+		return nil
+	}
+	if err != nil || len(stagedIndexes) == 0 {
+		return err
+	}
+	for _, indexMutation := range commit.CatalogMutation.SegmentIndexes {
+		if indexMutation.FinishedTask != nil {
+			m.indexMeta.recordFinishedTask(indexMutation.FinishedTask)
+		}
+	}
+	m.indexMeta.taskCounts.publishStoredSizes()
+	return nil
 }
 
 func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error) {

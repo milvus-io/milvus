@@ -59,8 +59,11 @@ type indexTaskCounts struct {
 	// activeSizes is the per-collection size of active indexes, the value of
 	// DataCoordStoredIndexFilesSize. Zero sums are not stored.
 	activeSizes map[int64]int64
-	// recovering holds back gauge writes while reload rebuilds the aggregate.
-	recovering bool
+	// dirtySizes holds the collections whose stored size has not been
+	// published since it last changed; publication fills in their sizes.
+	dirtySizes map[int64]int64
+	// publishMu orders gauge writes; see publishStoredSizes.
+	publishMu sync.Mutex
 }
 
 func indexTaskStateSlot(state commonpb.IndexState) int {
@@ -82,10 +85,9 @@ func indexTaskStateSlot(state commonpb.IndexState) int {
 	}
 }
 
-// adjustTask reports whether the active size of task's collection changed.
-func (c *indexTaskCounts) adjustTask(task *model.SegmentIndex, delta int64) bool {
+func (c *indexTaskCounts) adjustTask(task *model.SegmentIndex, delta int64) {
 	if task == nil {
-		return false
+		return
 	}
 	key := [2]int64{task.CollectionID, task.IndexID}
 	active := c.active[key]
@@ -106,11 +108,9 @@ func (c *indexTaskCounts) adjustTask(task *model.SegmentIndex, delta int64) bool
 		}
 		c.byIndex[key] = stats
 	}
-	if !active || size == 0 {
-		return false
+	if active && size != 0 {
+		c.addActiveSize(task.CollectionID, size)
 	}
-	c.addActiveSize(task.CollectionID, size)
-	return true
 }
 
 func (c *indexTaskCounts) addActiveSize(collectionID, delta int64) {
@@ -122,16 +122,10 @@ func (c *indexTaskCounts) addActiveSize(collectionID, delta int64) {
 	} else {
 		c.activeSizes[collectionID] = size
 	}
-}
-
-// publishStoredSize sets the absolute value, so a series deleted by collection
-// cleanup is rebuilt correctly by the next update. The caller holds mu.
-func (c *indexTaskCounts) publishStoredSize(collectionID int64) {
-	if c.recovering {
-		return
+	if c.dirtySizes == nil {
+		c.dirtySizes = make(map[int64]int64)
 	}
-	metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", strconv.FormatInt(collectionID, 10)).
-		Set(float64(c.activeSizes[collectionID]))
+	c.dirtySizes[collectionID] = 0
 }
 
 func (c *indexTaskCounts) replaceTask(old, current *model.SegmentIndex) {
@@ -142,14 +136,8 @@ func (c *indexTaskCounts) replaceTask(old, current *model.SegmentIndex) {
 		old.IsDeleted == current.IsDeleted && old.IndexSerializedSize == current.IndexSerializedSize {
 		return
 	}
-	oldChanged := c.adjustTask(old, -1)
-	currentChanged := c.adjustTask(current, 1)
-	if oldChanged {
-		c.publishStoredSize(old.CollectionID)
-	}
-	if currentChanged && (!oldChanged || current.CollectionID != old.CollectionID) {
-		c.publishStoredSize(current.CollectionID)
-	}
+	c.adjustTask(old, -1)
+	c.adjustTask(current, 1)
 }
 
 func (c *indexTaskCounts) replaceIndex(old, current *model.Index) {
@@ -158,10 +146,6 @@ func (c *indexTaskCounts) replaceIndex(old, current *model.Index) {
 	if c.active == nil {
 		c.active = make(map[[2]int64]bool)
 	}
-	// Publish after both changes so replacing a live definition never exposes
-	// an intermediate total.
-	var changed [2]int64
-	n := 0
 	for _, change := range [...]struct {
 		index *model.Index
 		delta int64
@@ -181,42 +165,43 @@ func (c *indexTaskCounts) replaceIndex(old, current *model.Index) {
 		}
 		if stats.size != 0 {
 			c.addActiveSize(key[0], stats.size*change.delta)
-			changed[n] = key[0]
-			n++
-		}
-	}
-	for i := 0; i < n; i++ {
-		if i == 0 || changed[i] != changed[0] {
-			c.publishStoredSize(changed[i])
 		}
 	}
 }
 
-// setRecovering holds back or resumes gauge writes around reload.
-func (c *indexTaskCounts) setRecovering(recovering bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.recovering = recovering
-}
-
-// publishRecoveredStoredSize publishes a collection rebuilt by reload. A live
-// update may have published it already; both write the current total.
-func (c *indexTaskCounts) publishRecoveredStoredSize(collectionID int64) {
+// publishStoredSizes writes the current stored size of every dirty collection,
+// deleting the series of one that has none, so a series deleted by collection
+// cleanup is rebuilt correctly by the next change. Callers run it after
+// releasing segMu and fieldIndexLock: creating or deleting a series waits for an
+// in-flight scrape of the gauge vector. publishMu orders publications and each
+// reads the totals while holding it, so an older total never overwrites a newer
+// one.
+func (c *indexTaskCounts) publishStoredSizes() {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if _, ok := c.activeSizes[collectionID]; ok {
-		c.publishStoredSize(collectionID)
+	idle := len(c.dirtySizes) == 0
+	c.mu.RUnlock()
+	if idle {
+		// The publication that took this caller's change reads the total
+		// after it.
+		return
 	}
-}
-
-// forgetStoredSize deletes the gauge series of a collection whose last index
-// definition is gone; with no active index left it holds no size. The caller
-// holds fieldIndexLock so no index of the collection can be activated
-// concurrently.
-func (c *indexTaskCounts) forgetStoredSize(collectionID int64) {
+	c.publishMu.Lock()
+	defer c.publishMu.Unlock()
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	metrics.DataCoordStoredIndexFilesSize.DeleteLabelValues("", "", strconv.FormatInt(collectionID, 10))
+	sizes := c.dirtySizes
+	c.dirtySizes = nil
+	for collectionID := range sizes {
+		sizes[collectionID] = c.activeSizes[collectionID]
+	}
+	c.mu.Unlock()
+	for collectionID, size := range sizes {
+		label := strconv.FormatInt(collectionID, 10)
+		if size == 0 {
+			metrics.DataCoordStoredIndexFilesSize.DeleteLabelValues("", "", label)
+		} else {
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", label).Set(float64(size))
+		}
+	}
 }
 
 func (c *indexTaskCounts) snapshot() indexTaskStateCounts {

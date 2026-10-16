@@ -142,6 +142,29 @@ func storedIndexSizeSeries(t *testing.T) map[int64]int64 {
 	return series
 }
 
+// holdStoredIndexSizeScrape starts a scrape of DataCoordStoredIndexFilesSize
+// and holds it mid-collection, with the vector's read lock held, until release
+// or test cleanup drains it.
+func holdStoredIndexSizeScrape(t *testing.T) (release func()) {
+	// Two placeholder series, which storedIndexSizeSeries skips, so receiving
+	// the first proves the scrape is in progress.
+	for _, label := range []string{"-1", "-2"} {
+		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", label)
+	}
+	scrape := make(chan prometheus.Metric)
+	go func() {
+		metrics.DataCoordStoredIndexFilesSize.Collect(scrape)
+		close(scrape)
+	}()
+	<-scrape
+	release = func() {
+		for range scrape {
+		}
+	}
+	t.Cleanup(release)
+	return release
+}
+
 func assertIndexTaskCounts(t *testing.T, m *indexMeta) {
 	t.Helper()
 	require.Equal(t, scanIndexTaskCounts(m), m.indexTaskCountsSnapshot())
@@ -533,6 +556,8 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 		<-done
 		t.Fatal("manifest install waited for the DDL lock")
 	}
+	require.Empty(t, storedIndexSizeSeries(t), "install must leave the gauge to its caller")
+	m.taskCounts.publishStoredSizes()
 	assertIndexTaskCounts(t, m)
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
 	require.Equal(t, map[int64]int64{1: 4096}, storedIndexSizeSeries(t))
@@ -541,5 +566,55 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
 	removed.install()
 	require.Equal(t, indexTaskStateCounts{}, m.indexTaskCountsSnapshot())
+	m.taskCounts.publishStoredSizes()
 	assertIndexTaskCounts(t, m)
+}
+
+// A scrape holds the gauge vector's read lock while it sends series, and
+// creating or deleting a series waits for it. A publication stuck there must
+// not hold the counters' lock, which manifest installs take under segMu.
+func TestIndexTaskCountsPublishDuringScrape(t *testing.T) {
+	metrics.DataCoordStoredIndexFilesSize.Reset()
+	ctx := context.Background()
+	m, err := newIndexMeta(ctx, &taskCountsCatalog{}, nil)
+	require.NoError(t, err)
+	for id := int64(1); id <= 3; id++ {
+		require.NoError(t, m.CreateIndex(ctx, &model.Index{CollectionID: id, IndexID: 10}))
+		require.NoError(t, m.AddSegmentIndex(ctx, &model.SegmentIndex{CollectionID: id, IndexID: 10, SegmentID: id, BuildID: id}))
+	}
+	finish := func(buildID int64, size uint64) error {
+		return m.FinishTask(&workerpb.IndexTaskInfo{BuildID: buildID, State: commonpb.IndexState_Finished, SerializedSize: size})
+	}
+	require.NoError(t, finish(1, 100))
+	require.NoError(t, finish(2, 200))
+
+	release := holdStoredIndexSizeScrape(t)
+	finished := make(chan error, 1)
+	go func() { finished <- finish(3, 300) }()
+	require.Never(t, func() bool { return len(finished) > 0 }, 100*time.Millisecond, time.Millisecond,
+		"creating a series must wait for the scrape")
+
+	m.keyLock.Lock(2)
+	defer m.keyLock.Unlock(2)
+	staged, err := m.stageSegmentIndexMutation(SegmentIndexMutation{
+		Type: SegmentIndexUpsert, BuildID: 2,
+		FinishedTask: &workerpb.IndexTaskInfo{BuildID: 2, State: commonpb.IndexState_Finished, SerializedSize: 250},
+	})
+	require.NoError(t, err)
+	installed := make(chan struct{})
+	go func() {
+		staged.install()
+		m.indexTaskCountsSnapshot()
+		close(installed)
+	}()
+	select {
+	case <-installed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("manifest install waited for a publication stuck behind a scrape")
+	}
+	release()
+	require.NoError(t, <-finished)
+	m.taskCounts.publishStoredSizes()
+	assertIndexTaskCounts(t, m)
+	require.Equal(t, map[int64]int64{1: 100, 2: 250, 3: 300}, storedIndexSizeSeries(t))
 }

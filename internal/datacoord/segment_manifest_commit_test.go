@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1240,9 +1241,9 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 // definitions. The commit installs its staged SegmentIndex mutations inside its
 // segMu critical section, so it must never wait for that lock: sync.RWMutex is
 // writer-preferring, and a commit parked on it with segMu held stalls every
-// GetSegment/SelectSegments/SaveBinlogPaths. The install updates the
-// stored-index-size gauge through indexMeta's memory-only task counters, so the
-// whole commit, publication included, completes while the lock is held.
+// GetSegment/SelectSegments/SaveBinlogPaths. The install updates indexMeta's
+// memory-only task counters, and the stored-index-size gauge is published from
+// them without the lock, so the whole commit completes while the lock is held.
 func TestCommitSegmentManifestDoesNotWaitForIndexDDL(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 	newFakeManifestStore(t)
@@ -1301,4 +1302,52 @@ func TestCommitSegmentManifestDoesNotWaitForIndexDDL(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, baseManifest, m.GetSegment(ctx, restartSegID).GetManifestPath(),
 		"publication must complete while index DDL holds the field index lock")
+}
+
+// Regression test for a stall between the manifest commit and a Prometheus
+// scrape. A scrape holds the stored-index-size gauge vector's read lock while it
+// sends series, and creating or deleting a series waits for it, so a gauge write
+// inside the commit's segMu critical section would stall every segment reader
+// for the length of the scrape. The commit publishes the gauge only after segMu
+// is released.
+func TestCommitSegmentManifestPublishesIndexSizeOutsideSegMu(t *testing.T) {
+	withSegmentIndexManifestWrites(t, true)
+	newFakeManifestStore(t)
+	ctx := context.TODO()
+
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	seedRestartTask(t, m)
+	baseManifest := m.GetSegment(ctx, restartSegID).GetManifestPath()
+
+	metrics.DataCoordStoredIndexFilesSize.Reset()
+	t.Cleanup(metrics.DataCoordStoredIndexFilesSize.Reset)
+	release := holdStoredIndexSizeScrape(t)
+
+	// Publishing the finished task creates the collection's series.
+	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	it := newIndexBuildTask(segIdx, 1, m, nil, nil, nil)
+	committed := make(chan error, 1)
+	go func() {
+		committed <- it.setJobInfo(&workerpb.IndexTaskInfo{
+			BuildID:               restartBuildID,
+			State:                 commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"0", "1"},
+			SerializedSize:        4096,
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		})
+	}()
+
+	require.Eventually(t, func() bool {
+		if !m.segMu.TryLock() {
+			return false
+		}
+		defer m.segMu.Unlock()
+		return m.segments.GetSegment(restartSegID).GetManifestPath() != baseManifest
+	}, 10*time.Second, time.Millisecond, "commit held segMu while its gauge write waited for the scrape")
+	require.Empty(t, committed, "the gauge write must wait for the scrape")
+	release()
+	require.NoError(t, <-committed)
+	require.Equal(t, map[int64]int64{restartCollID: 4096}, storedIndexSizeSeries(t))
 }

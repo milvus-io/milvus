@@ -2303,15 +2303,16 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 			SerializedSize: size,
 		}))
 	}
-	gauge := func() float64 {
-		return testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
+	// gauge reads the series without creating it; an absent series reads 0.
+	gauge := func(t *testing.T) float64 {
+		return float64(storedIndexSizeSeries(t)[collID])
 	}
 
 	// FinishTask must add the real serialized size (not 0 from stale pointer).
 	t.Run("FinishTask adds real serialized size", func(t *testing.T) {
 		m, _ := setup(t)
 		finish(t, m, serializedSize)
-		assert.Equal(t, float64(serializedSize), gauge(),
+		assert.Equal(t, float64(serializedSize), gauge(t),
 			"metric should equal serialized size after FinishTask")
 	})
 
@@ -2322,7 +2323,7 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 		catalog.EXPECT().DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		finish(t, m, serializedSize)
 		assert.NoError(t, m.RemoveSegmentIndex(context.TODO(), buildID))
-		assert.Equal(t, float64(0), gauge(),
+		assert.Equal(t, float64(0), gauge(t),
 			"RemoveSegmentIndex must subtract when index definition is still alive")
 	})
 
@@ -2333,7 +2334,7 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			finish(t, m, serializedSize)
 		}
-		assert.Equal(t, float64(serializedSize), gauge(),
+		assert.Equal(t, float64(serializedSize), gauge(t),
 			"metric must equal serialized size exactly once, not doubled")
 	})
 
@@ -2344,7 +2345,7 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 		finish(t, m, serializedSize)
 		var newSize uint64 = 8192
 		finish(t, m, newSize)
-		assert.Equal(t, float64(newSize), gauge(),
+		assert.Equal(t, float64(newSize), gauge(t),
 			"metric should reflect the updated size after version upgrade")
 	})
 
@@ -2353,10 +2354,10 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 		m, _ := setup(t)
 		var largeSize uint64 = 8192
 		finish(t, m, largeSize)
-		assert.Equal(t, float64(largeSize), gauge())
+		assert.Equal(t, float64(largeSize), gauge(t))
 		var smallerSize uint64 = 2048
 		finish(t, m, smallerSize)
-		assert.Equal(t, float64(smallerSize), gauge(),
+		assert.Equal(t, float64(smallerSize), gauge(t),
 			"metric should decrease when new index is smaller")
 	})
 
@@ -2371,14 +2372,14 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 		catalog.EXPECT().DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		catalog.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		finish(t, m, serializedSize)
-		assert.Equal(t, float64(serializedSize), gauge())
+		assert.Equal(t, float64(serializedSize), gauge(t))
 
 		metrics.CleanupDataCoordWithCollectionID(collID)
 		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, nil))
-		assert.Equal(t, float64(0), gauge(), "metric must not go negative after the series was cleaned up")
+		assert.Equal(t, float64(0), gauge(t), "metric must not go negative after the series was cleaned up")
 
 		require.NoError(t, m.RemoveSegmentIndex(context.TODO(), buildID))
-		assert.Equal(t, float64(0), gauge(),
+		assert.Equal(t, float64(0), gauge(t),
 			"metric must not go negative after GC on a dropped collection")
 		require.NoError(t, m.RemoveIndex(context.TODO(), collID, indexID))
 		assert.False(t, metrics.DataCoordStoredIndexFilesSize.DeleteLabelValues("", "", collIDLabel),
@@ -2392,13 +2393,13 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 
 		// Build finishes — gauge goes up.
 		finish(t, m, serializedSize)
-		assert.Equal(t, float64(serializedSize), gauge())
+		assert.Equal(t, float64(serializedSize), gauge(t))
 
 		// Drop the index — gauge goes to 0 immediately. segmentIndexes is
 		// cleared to guard against reintroducing a full segment-index scan.
 		m.segmentIndexes = nil
 		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID}))
-		assert.Equal(t, float64(0), gauge(),
+		assert.Equal(t, float64(0), gauge(t),
 			"gauge must be 0 immediately after MarkIndexAsDeleted")
 	})
 
@@ -2412,11 +2413,11 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 		finish(t, m, serializedSize)
 		// Drop the index — gauge goes to 0.
 		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID}))
-		assert.Equal(t, float64(0), gauge())
+		assert.Equal(t, float64(0), gauge(t))
 
 		// GC removes the segment index — gauge must stay at 0, not go negative.
 		require.NoError(t, m.RemoveSegmentIndex(context.TODO(), buildID))
-		assert.Equal(t, float64(0), gauge(),
+		assert.Equal(t, float64(0), gauge(t),
 			"gauge must remain 0 after GC removes segment index post-drop")
 	})
 
@@ -2436,7 +2437,7 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 			IndexState:          commonpb.IndexState_Finished,
 			IndexSerializedSize: serializedSize,
 		}))
-		assert.Equal(t, float64(serializedSize), gauge(),
+		assert.Equal(t, float64(serializedSize), gauge(t),
 			"AddSegmentIndex must count preloaded Finished indexes")
 	})
 
@@ -2457,7 +2458,7 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 			IndexSerializedSize: serializedSize,
 		}))
 		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID}))
-		assert.Equal(t, float64(0), gauge(),
+		assert.Equal(t, float64(0), gauge(t),
 			"MarkIndexAsDeleted must subtract preloaded Finished bytes")
 	})
 
@@ -2470,11 +2471,11 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 
 		// Drop the index BEFORE the build finishes — gauge stays 0.
 		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID}))
-		assert.Equal(t, float64(0), gauge())
+		assert.Equal(t, float64(0), gauge(t))
 
 		// Late FinishTask arrives — must NOT add to gauge because the index is deleted.
 		finish(t, m, serializedSize)
-		assert.Equal(t, float64(0), gauge(),
+		assert.Equal(t, float64(0), gauge(t),
 			"FinishTask after index drop must not re-add bytes to gauge")
 	})
 }
