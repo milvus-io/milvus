@@ -27,8 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -318,8 +318,8 @@ func TestToMerr(t *testing.T) {
 		{"duplicate sst", manifest.ErrDuplicateSST, merr.Code(merr.ErrServiceInternal), false},
 		{"stale edit", manifest.ErrStaleEdit, merr.Code(merr.ErrServiceInternal), false},
 		{"schema mismatch", manifest.ErrSchemaMismatch, merr.Code(merr.ErrServiceInternal), false},
-		{"unavailable", errors.Mark(errors.New("x"), pkerr.ErrUnavailable), merr.Code(merr.ErrServiceUnavailable), true},
-		{"corrupted", errors.Mark(errors.New("x"), pkerr.ErrCorrupted), merr.Code(merr.ErrDataIntegrity), false},
+		{"unavailable", errors.Mark(errors.New("x"), pkindex.ErrUnavailable), merr.Code(merr.ErrServiceUnavailable), true},
+		{"corrupted", errors.Mark(errors.New("x"), pkindex.ErrCorrupted), merr.Code(merr.ErrDataIntegrity), false},
 		{"unmarked", errors.New("x"), merr.Code(merr.ErrServiceInternal), false},
 	}
 	for _, c := range cases {
