@@ -140,7 +140,7 @@ require (
 	github.com/bytedance/sonic/loader v0.5.1 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/casbin/govaluate v1.3.0 // indirect
-	github.com/cespare/xxhash/v2 v2.3.0
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
