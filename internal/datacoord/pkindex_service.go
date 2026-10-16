@@ -25,9 +25,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
-	pkindexgc "github.com/milvus-io/milvus/internal/pkindex/coordinator/gc"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	pkindexgc "github.com/milvus-io/milvus/internal/datacoord/pkindex/gc"
+	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -99,11 +99,11 @@ func (s chunkManagerStore) Write(ctx context.Context, key string, data []byte) e
 	return s.cm.Write(ctx, key, data)
 }
 
-// Read returns an error marked with pkerr.ErrCorrupted when the key does not exist.
+// Read returns an error marked with pkindex.ErrCorrupted when the key does not exist.
 func (s chunkManagerStore) Read(ctx context.Context, key string) ([]byte, error) {
 	b, err := s.cm.Read(ctx, key)
 	if errors.Is(err, merr.ErrIoKeyNotFound) {
-		return nil, errors.Mark(errors.Wrapf(err, "read object %s", key), pkerr.ErrCorrupted)
+		return nil, errors.Mark(errors.Wrapf(err, "read object %s", key), pkindex.ErrCorrupted)
 	}
 	return b, err
 }

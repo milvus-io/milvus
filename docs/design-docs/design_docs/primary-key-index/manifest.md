@@ -3,7 +3,7 @@
 - **Created:** 2026-10-12
 - **Author:** bigsheeper
 - **Status:** Draft
-- **Component:** DataCoord, `internal/pkindex/coordinator/manifest`, `internal/pkindex/core/objpath`
+- **Component:** DataCoord, `internal/datacoord/pkindex/manifest`, `internal/pkindex/objpath`
 - **Related work:** Primary Key Index Core Library (#53910), issue #52305
 
 ## Summary
@@ -112,12 +112,12 @@ Rules of the model:
 | Object storage | `<rootPath>/pk_index/<collectionID>/<vchannel>/sst/<id>.sst` | SST file |
 
 - The meta keys come from `ClaimKey` and `PointerKey` in
-  `internal/pkindex/coordinator/manifest`.
+  `internal/datacoord/pkindex/manifest`.
 - `pk_index` is `common.PKIndexPath`. No other storage prefix starts with it, so
   the existing orphan scans do not see these objects.
 - `sst_base_path` is `<rootPath>/pk_index/<collectionID>/<vchannel>/sst`. The
   function `objpath.SSTBasePath(rootPath, collectionID, vchannel)` in
-  `internal/pkindex/core/objpath` builds it. That package builds all object
+  `internal/pkindex/objpath` builds it. That package builds all object
   keys of the primary key index. The writer of the SSTs, the manifest writer
   and GC all use it, so they cannot disagree. The first version records the
   value, and readers and GC use the recorded value.
@@ -134,7 +134,7 @@ Rules of the model:
 
 A caller sends an edit, not a complete manifest. The manager applies the edit
 to the current version. The edit rules are private functions of the manifest
-writer in `internal/pkindex/coordinator/manifest`. They do not change the
+writer in `internal/datacoord/pkindex/manifest`. They do not change the
 current version.
 
 ### Claim
@@ -235,7 +235,7 @@ This is true only when compaction follows this contract:
 
 ## Commit Steps and Crash Windows
 
-`internal/pkindex/coordinator/manifest` holds the only writer. It keeps
+`internal/datacoord/pkindex/manifest` holds the only writer. It keeps
 one lock for each vchannel, so it applies the edits of one vchannel one at a
 time. Different vchannels commit at the same time.
 
@@ -370,13 +370,13 @@ Code under `internal/pkindex` does not return merr. It uses two kinds of
 errors:
 
 - Sentinels that a caller can test with `errors.Is`. The manifest sentinels are
-  in `internal/pkindex/coordinator/manifest`.
-- Categories from `internal/pkindex/pkerr`, attached with `errors.Mark`.
+  in `internal/datacoord/pkindex/manifest`.
+- Categories from `internal/pkindex`, attached with `errors.Mark`.
 
 The service translates each error once, before it returns. `ErrFenced` maps to
-`ChannelNotAvailable`. All other errors go through `pkerr.ToMerr`.
+`ChannelNotAvailable`. All other errors go through `pkindex.ToMerr`.
 
-`pkerr.ToMerr` checks the category marks before a merr in the error chain. This
+`pkindex.ToMerr` checks the category marks before a merr in the error chain. This
 order matters here: the meta kv and the chunk manager already return merr
 errors (for example `IoFailed`, which is not retryable). The manifest code
 marks those failures as `ErrUnavailable`, and the mark must win.
@@ -406,7 +406,7 @@ Notes:
   the failures of a wrong store configuration and of a too large object: a
   retry does not fix them, so they keep their own code. `IoFailed` is not one
   of them, because the object storage client also returns it for unknown and
-  transient failures. `pkerr.ErrIO` (code `IoFailed`) is only for local disk,
+  transient failures. `pkindex.ErrIO` (code `IoFailed`) is only for local disk,
   and the manifest service does not use it.
 - A missing object has both marks: `ErrCorrupted` from the object store adapter
   and `ErrUnavailable` from the caller. `ToMerr` checks `ErrCorrupted` first.
@@ -442,7 +442,7 @@ Notes:
 
 ## Garbage Collection
 
-`internal/pkindex/coordinator/gc` runs in DataCoord. It is a separate loop from
+`internal/datacoord/pkindex/gc` runs in DataCoord. It is a separate loop from
 the segment garbage collector. Each round lists all manifest pointers and
 handles each vchannel separately. An error on one vchannel is logged, and the
 round continues.

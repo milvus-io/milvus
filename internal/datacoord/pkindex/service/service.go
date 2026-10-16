@@ -26,8 +26,8 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -206,10 +206,10 @@ func validateTerm(term int64) error {
 
 // toMerr translates a manifest error at the service boundary. A fenced caller
 // no longer owns the channel and gets a code that is not retryable. Every
-// other error translates by its pkerr category.
+// other error translates by its pkindex error category.
 func toMerr(err error, channel string) error {
 	if errors.Is(err, manifest.ErrFenced) {
 		return errors.WithSecondaryError(merr.WrapErrChannelNotAvailable(channel, "pchannel term is fenced"), err)
 	}
-	return pkerr.ToMerr(err)
+	return pkindex.ToMerr(err)
 }

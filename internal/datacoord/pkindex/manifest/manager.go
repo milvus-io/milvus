@@ -28,8 +28,8 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/objpath"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -59,7 +59,7 @@ type MetaStore interface {
 // All keys are complete object keys.
 type ObjectStore interface {
 	Write(ctx context.Context, key string, data []byte) error
-	// Read returns an error marked with pkerr.ErrCorrupted when the key does not exist.
+	// Read returns an error marked with pkindex.ErrCorrupted when the key does not exist.
 	Read(ctx context.Context, key string) ([]byte, error)
 	// Walk calls fn for every object under prefix, recursively, until fn returns false.
 	Walk(ctx context.Context, prefix string, fn func(key string, modTime time.Time) bool) error
@@ -323,10 +323,10 @@ func (m *Manager) load(ctx context.Context, key string) (*vchannelManifest, erro
 	}
 	var mf pkindexpb.Manifest
 	if err := proto.Unmarshal(body, &mf); err != nil {
-		return nil, errors.Mark(errors.Wrapf(err, "decode manifest body %s", p.GetBodyKey()), pkerr.ErrCorrupted)
+		return nil, errors.Mark(errors.Wrapf(err, "decode manifest body %s", p.GetBodyKey()), pkindex.ErrCorrupted)
 	}
 	if mf.GetVersion() != p.GetVersion() {
-		return nil, errors.Mark(errors.Newf("manifest body %s has version %d, pointer has %d", p.GetBodyKey(), mf.GetVersion(), p.GetVersion()), pkerr.ErrCorrupted)
+		return nil, errors.Mark(errors.Newf("manifest body %s has version %d, pointer has %d", p.GetBodyKey(), mf.GetVersion(), p.GetVersion()), pkindex.ErrCorrupted)
 	}
 	cur = &vchannelManifest{pb: &mf, pointer: ptr}
 	m.remember(key, cur)
@@ -334,15 +334,15 @@ func (m *Manager) load(ctx context.Context, key string) (*vchannelManifest, erro
 }
 
 // decodePointer decodes the stored value of the pointer key. It returns an
-// error marked with pkerr.ErrCorrupted when the value does not decode or names
+// error marked with pkindex.ErrCorrupted when the value does not decode or names
 // no body.
 func decodePointer(key, value string) (*pkindexpb.ManifestPointer, error) {
 	var p pkindexpb.ManifestPointer
 	if err := proto.Unmarshal([]byte(value), &p); err != nil {
-		return nil, errors.Mark(errors.Wrapf(err, "decode manifest pointer %s", key), pkerr.ErrCorrupted)
+		return nil, errors.Mark(errors.Wrapf(err, "decode manifest pointer %s", key), pkindex.ErrCorrupted)
 	}
 	if p.GetVersion() == 0 || p.GetBodyKey() == "" {
-		return nil, errors.Mark(errors.Newf("manifest pointer %s has version %d and body key %q", key, p.GetVersion(), p.GetBodyKey()), pkerr.ErrCorrupted)
+		return nil, errors.Mark(errors.Newf("manifest pointer %s has version %d and body key %q", key, p.GetVersion(), p.GetBodyKey()), pkindex.ErrCorrupted)
 	}
 	return &p, nil
 }
@@ -359,9 +359,9 @@ var permanentStoreErrors = []error{
 }
 
 // markUnavailable adds context to a failure of a remote store and marks it as
-// pkerr.ErrUnavailable. A permanent failure (see permanentStoreErrors) is not
+// pkindex.ErrUnavailable. A permanent failure (see permanentStoreErrors) is not
 // marked and keeps its merr code. A mark that err already has, such as
-// pkerr.ErrCorrupted for a missing object, stays.
+// pkindex.ErrCorrupted for a missing object, stays.
 func markUnavailable(err error, format string, args ...any) error {
 	err = errors.Wrapf(err, format, args...)
 	for _, target := range permanentStoreErrors {
@@ -369,7 +369,7 @@ func markUnavailable(err error, format string, args ...any) error {
 			return err
 		}
 	}
-	return errors.Mark(err, pkerr.ErrUnavailable)
+	return errors.Mark(err, pkindex.ErrUnavailable)
 }
 
 func (m *Manager) remember(key string, v *vchannelManifest) {
