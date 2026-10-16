@@ -126,8 +126,8 @@ func (dv DataVersion) GTE(other DataVersion) bool {
 // FromProtoDataVersion converts a DataVersion proto to a DataVersion.
 func FromProtoDataVersion(dv *viewpb.DataVersion) DataVersion {
 	return DataVersion{
-		StreamingVersion: dv.StreamingVersion,
-		CompactVersion:   dv.CompactVersion,
+		StreamingVersion: dv.GetStreamingVersion(),
+		CompactVersion:   dv.GetCompactVersion(),
 	}
 }
 
@@ -235,3 +235,6 @@ func (qv QueryViewVersion) IntoProto() *viewpb.QueryViewVersion {
 		QueryVersion: qv.QueryVersion,
 	}
 }
+
+// UnknownReplicaID requests resolution of the replica from its vchannel.
+const UnknownReplicaID int64 = 0

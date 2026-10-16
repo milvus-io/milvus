@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -79,6 +80,8 @@ type RootCoordMockOption func(mock *MixCoordMock)
 type describeCollectionFuncType func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 
 type showPartitionsFuncType func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
+
+var _ types.MixCoordClient = (*MixCoordMock)(nil)
 
 type MixCoordMock struct {
 	nodeID  typeutil.UniqueID
@@ -1622,6 +1625,14 @@ func (coord *MixCoordMock) GetReplicas(ctx context.Context, in *milvuspb.GetRepl
 	return &milvuspb.GetReplicasResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+func (coord *MixCoordMock) GetQueryViewLoadInfo(ctx context.Context, in *querypb.GetQueryViewLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetQueryViewLoadInfo is not configured by this test")
+}
+
+func (coord *MixCoordMock) GetStreamingNodeQueryViewResources(ctx context.Context, in *datapb.GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetStreamingNodeQueryViewResources is not configured by this test")
 }
 
 func (coord *MixCoordMock) GetShardLeaders(ctx context.Context, in *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
