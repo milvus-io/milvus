@@ -44,7 +44,10 @@ class TestRestValueFidelity(TestBase):
         return requests.post(f"{endpoint}{path}", headers=headers, data=json.dumps(payload)).json()
 
     @pytest.fixture(scope="class", autouse=True)
-    def _shared_collections(self, endpoint, token):
+    def _shared_collections(self, request):
+        endpoint = request.config.getoption("--endpoint")
+        token = request.config.getoption("--token")
+
         def build(fields, index_params=None):
             name = gen_collection_name("rvf")
             payload = {
@@ -114,7 +117,7 @@ class TestRestValueFidelity(TestBase):
         return requests.post(f"{self.endpoint}{path}", headers=self._headers(), data=raw_body).json()
 
     def _raw_insert(self, coll, data_json):
-        raw = '{"collectionName":"%s","data":%s}' % (coll, data_json)
+        raw = f'{{"collectionName":"{coll!s}","data":{data_json!s}}}'
         return self._raw_post("/v2/vectordb/entities/insert", raw)
 
     def _insert(self, coll, rows):
@@ -240,8 +243,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1e3,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1e3,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
@@ -254,8 +256,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":9007199254740993.0,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":9007199254740993.0,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
@@ -268,8 +269,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":1e300,"j":{"k":1},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":1e300,"j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
@@ -282,8 +282,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":1.50,"j":{"k":1},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":1.50,"j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
@@ -326,8 +325,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"dyn_f":1e19,"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"dyn_f":1e19,"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] == 0, rsp
         self.collection_client.flush(self._scalar_coll)
@@ -511,8 +509,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":%d,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % (pk, val),
+            f'[{{"id":{pk:d},"i8":{val:d},"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, f"int8={val} should be rejected: {rsp}"
 
@@ -522,8 +519,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":%d,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % (pk, val),
+            f'[{{"id":{pk:d},"i8":1,"i16":{val:d},"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, f"int16={val} should be rejected: {rsp}"
 
@@ -533,8 +529,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":%d,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % (pk, val),
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":{val:d},"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, f"int32={val} should be rejected: {rsp}"
 
@@ -544,8 +539,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":%d,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % (pk, val),
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":{val:d},"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, f"int64={val} should be rejected: {rsp}"
 
@@ -554,8 +548,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1.5,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1.5,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, rsp
 
@@ -565,8 +558,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":%s,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % (pk, val),
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":{val!s},"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, f"f32={val} should be rejected: {rsp}"
 
@@ -575,8 +567,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":{"a":1},"j":{"k":1},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":{{"a":1}},"j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, rsp
 
@@ -585,8 +576,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"a":1,"a":2},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{{"a":1,"a":2}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, rsp
 
@@ -597,8 +587,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"big":18446744073709551616},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{{"big":18446744073709551616}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, rsp
 
@@ -607,8 +596,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"big":18446744073709551615},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{{"big":18446744073709551615}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] == 0, rsp
 
@@ -619,7 +607,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"vec":[0.1,0.2]}]' % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, f"missing required field should be rejected: {rsp}"
 
@@ -628,8 +616,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":"[0.1,0.2]"}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":"[0.1,0.2]"}}]',
         )
         assert rsp["code"] != 0, rsp
 
@@ -638,15 +625,14 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":1,"i16":1,"i32":1,"i64":010,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":1,"i16":1,"i32":1,"i64":010,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, rsp
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_array_null_element_rejected(self):
         pk = self._new_pk()
-        rsp = self._raw_insert(self._array_coll, '[{"id":%d,"arr":[true,null],"vec":[0.1,0.2]}]' % pk)
+        rsp = self._raw_insert(self._array_coll, f'[{{"id":{pk:d},"arr":[true,null],"vec":[0.1,0.2]}}]')
         assert rsp["code"] != 0, rsp
 
     # ================= L1: C. exprParams (negative) =================
@@ -695,7 +681,7 @@ class TestRestValueFidelity(TestBase):
         assert rsp["code"] == 0, rsp
         self.collection_client.collection_load(collection_name=name)
         self.wait_collection_load_completed(name)
-        raw = '{"collectionName":"%s","data":[{"id":1,"bv":"AQ=="}]}' % name
+        raw = f'{{"collectionName":"{name!s}","data":[{{"id":1,"bv":"AQ=="}}]}}'
         rsp = self._raw_post("/v2/vectordb/entities/insert", raw)
         assert rsp["code"] == 0, rsp
 
@@ -844,8 +830,7 @@ class TestRestValueFidelity(TestBase):
         pk = self._new_pk()
         rsp = self._raw_insert(
             self._scalar_coll,
-            '[{"id":%d,"i8":null,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{"k":1},"vec":[0.1,0.2]}]'
-            % pk,
+            f'[{{"id":{pk:d},"i8":null,"i16":1,"i32":1,"i64":1,"f32":1,"f64":1,"b":true,"s":"x","j":{{"k":1}},"vec":[0.1,0.2]}}]',
         )
         assert rsp["code"] != 0, rsp
 
