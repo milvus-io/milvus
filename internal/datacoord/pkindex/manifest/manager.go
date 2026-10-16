@@ -116,10 +116,11 @@ type vchannelManifest struct {
 // returns are shared with its cache; the caller must not change them.
 //
 // The cache of a vchannel is filled on its first use and is refreshed only
-// after a failed write. Until then, the manager does not see the commits of
-// another coordinator. LoadPointers does not use the cache. The predicates of
-// each write keep commits safe when the cache is stale: a flush writes on the
-// predicate that the claim record still holds the flush term.
+// after a failed write and after an edit that is rejected as stale. Until
+// then, the manager does not see the commits of another coordinator.
+// LoadPointers does not use the cache. The predicates of each write keep
+// commits safe when the cache is stale: a flush writes on the predicate that
+// the claim record still holds the flush term.
 type Manager struct {
 	claims   *claimTable
 	meta     MetaStore
@@ -227,7 +228,9 @@ func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerR
 // edit changes the manifest, commit writes the new body under a unique key, then
 // writes the pointer on the predicate that the stored pointer is still the
 // one it loaded, or does not exist for the first version. With cp, the same
-// write also requires cp.pred; it does not write the claim record.
+// write also requires cp.pred; it does not write the claim record. When apply
+// rejects the edit as stale, commit forgets the cached manifest, so that the
+// next load reads the pointer and the body from the stores.
 func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel string, cp *pchannelClaimPred,
 	apply func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error),
 ) (*pkindexpb.Manifest, error) {
@@ -245,6 +248,9 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 	}
 	next, err := apply(curManifest)
 	if err != nil {
+		if errors.Is(err, ErrStaleEdit) {
+			m.forget(key)
+		}
 		return nil, err
 	}
 	if next == nil {
