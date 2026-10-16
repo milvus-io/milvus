@@ -56,6 +56,7 @@ type streamPipeline struct {
 	lastAccessTime          *atomic.Time
 	emptyTimeTickSlowdowner *emptyTimeTickSlowdowner
 	msgPackBatcher          MsgPackBatcher
+	filteredTimeTickHandler func(uint64)
 }
 
 func (p *streamPipeline) work() {
@@ -87,6 +88,12 @@ func (p *streamPipeline) work() {
 		// So we filter out the empty time tick message as much as possible.
 		// TODO: After 3.0, we can remove the filter logic by LSN+MVCC.
 		if p.emptyTimeTickSlowdowner.Filter(msg) {
+			// Previous packs, including a delete batch preceding a pending tick,
+			// have finished process(). Preserve their ordered consumption progress
+			// without running the data-processing nodes for this empty pack.
+			if p.filteredTimeTickHandler != nil {
+				p.filteredTimeTickHandler(msg.EndTs)
+			}
 			continue
 		}
 
@@ -199,6 +206,15 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 }
 
 type StreamPipelineOption func(*streamPipeline)
+
+// WithFilteredTimeTickHandler preserves consumption progress when an empty pack
+// skips the pipeline nodes. The handler runs synchronously after all preceding
+// packs have finished processing.
+func WithFilteredTimeTickHandler(handler func(uint64)) StreamPipelineOption {
+	return func(pipeline *streamPipeline) {
+		pipeline.filteredTimeTickHandler = handler
+	}
+}
 
 func WithMsgPackBatcher(batcher MsgPackBatcher) StreamPipelineOption {
 	return func(pipeline *streamPipeline) {
