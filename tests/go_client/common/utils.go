@@ -75,6 +75,15 @@ func GenFloatVector(dim int) []float32 {
 	return vector
 }
 
+// GenInt8Vector samples the full signed-byte range, matching Python's gen_int8_vectors.
+func GenInt8Vector(dim int) []int8 {
+	vector := make([]int8, dim)
+	for i := range dim {
+		vector[i] = int8(rand.Intn(256) - 128)
+	}
+	return vector
+}
+
 func GenFloat16Vector(dim int) []byte {
 	ret := make([]byte, dim*2)
 	for i := 0; i < dim; i++ {
