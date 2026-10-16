@@ -2291,7 +2291,6 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().SetProxyClients(sessions).Run(func([]*sessionutil.Session) {
 			clientsSet = true
 		})
-		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest).Return(nil)
 		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientsSet)
