@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package authority
+package pkindex
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 
 func newTestAuthority(t *testing.T) Authority {
 	t.Helper()
-	a, err := New("v1")
+	a, err := NewAuthority("v1")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = a.Close() })
 	return a
@@ -112,7 +112,7 @@ func TestAuthorityRejectsCorruptValue(t *testing.T) {
 
 func TestAuthorityAfterClose(t *testing.T) {
 	ctx := context.Background()
-	a, err := New("v1")
+	a, err := NewAuthority("v1")
 	require.NoError(t, err)
 	require.NoError(t, a.Close())
 	_, err = a.Get(ctx, Int64PK(1))
@@ -152,6 +152,6 @@ func TestNewWithoutEngineFactory(t *testing.T) {
 	defer RegisterEngineFactory(NewMemoryEngine)
 
 	require.False(t, HasEngineFactory())
-	_, err := New("v1")
+	_, err := NewAuthority("v1")
 	require.True(t, errors.Is(err, ErrNoEngineFactory))
 }

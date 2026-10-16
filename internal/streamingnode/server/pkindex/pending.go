@@ -14,36 +14,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dedup
-
-import "github.com/milvus-io/milvus/internal/pkindex/authority"
+package pkindex
 
 // pendingTxn collects the primary key writes of a transaction that has not been
 // committed yet. They reach the index only when the CommitTxn is applied.
 type pendingTxn struct {
 	puts    map[string]pendingPut // encoded key -> the last insert of that key
-	deletes map[string]authority.PK
+	deletes map[string]PK
 }
 
 type pendingPut struct {
-	pk        authority.PK
+	pk        PK
 	segmentID int64
 }
 
 func newPendingTxn() *pendingTxn {
 	return &pendingTxn{
 		puts:    make(map[string]pendingPut),
-		deletes: make(map[string]authority.PK),
+		deletes: make(map[string]PK),
 	}
 }
 
-func (p *pendingTxn) recordInsert(pks []authority.PK, segmentID int64) {
+func (p *pendingTxn) recordInsert(pks []PK, segmentID int64) {
 	for _, pk := range pks {
 		p.puts[string(pk.Encode())] = pendingPut{pk: pk, segmentID: segmentID}
 	}
 }
 
-func (p *pendingTxn) recordDelete(pks []authority.PK) {
+func (p *pendingTxn) recordDelete(pks []PK) {
 	for _, pk := range pks {
 		p.deletes[string(pk.Encode())] = pk
 	}
@@ -69,8 +67,8 @@ func (p *pendingTxn) changedSince(snapshot *pendingTxn) bool {
 }
 
 // allPKs returns every key touched by the transaction, for locking.
-func (p *pendingTxn) allPKs() []authority.PK {
-	pks := make([]authority.PK, 0, len(p.puts)+len(p.deletes))
+func (p *pendingTxn) allPKs() []PK {
+	pks := make([]PK, 0, len(p.puts)+len(p.deletes))
 	for _, put := range p.puts {
 		pks = append(pks, put.pk)
 	}
@@ -83,8 +81,8 @@ func (p *pendingTxn) allPKs() []authority.PK {
 }
 
 // companionCandidates returns the inserted keys that the transaction does not delete itself.
-func (p *pendingTxn) companionCandidates() []authority.PK {
-	pks := make([]authority.PK, 0, len(p.puts))
+func (p *pendingTxn) companionCandidates() []PK {
+	pks := make([]PK, 0, len(p.puts))
 	for k, put := range p.puts {
 		if _, ok := p.deletes[k]; !ok {
 			pks = append(pks, put.pk)

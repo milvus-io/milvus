@@ -112,18 +112,18 @@ in `docs/agent_guides/streaming-system/wal/timetick_and_txn.md`.
 internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin shell)
         │ translates WAL messages into requests, appends what the decider asks for
         ▼
-internal/pkindex/dedup                                   the write path decisions
-        │ probe, striped locks, pending writes of transactions
+internal/streamingnode/server/pkindex                    the index of the streaming node
+        │ Decider: probe, striped locks, pending writes of transactions
+        │ Authority: the index of one vchannel, key-value semantics
+        │            (Get, MultiGet, NewBatch, Write)
         ▼
-internal/pkindex/authority                               the index of one vchannel
-        │ key-value semantics: Get, MultiGet, NewBatch, Write
-        ▼
-authority.Engine                                         the storage behind it
+Engine                                                   the storage behind it
                                                          (in-memory in this step)
 ```
 
-The two `internal/pkindex` packages do not depend on the streaming node. The
-interceptor is the only place that knows both sides.
+The package `internal/streamingnode/server/pkindex` holds the index logic and
+does not depend on the WAL. The interceptor is the only place that knows both
+sides.
 
 The primary key payload of a message is read by `wal/utility/primarykey`. It
 checks the payload the way the write path needs it: a bad message gets an
