@@ -70,10 +70,11 @@ Proxy resolves metadata once and forwards the result; it does not refresh
 metadata or retry analyzer responses. RunAnalyzer uses the same gRPC service
 configuration and streaming recovery helper as the other handler operations.
 There is no analyzer-specific retry loop or method configuration.
-`function.analyzer.requestTimeout` (default `10m`) bounds the complete client wait
-for RunAnalyzer and ValidateAnalyzer, including discovery, preparation and retries;
-a shorter caller deadline wins. Large inventories may require a higher value.
-This bounds the caller's wait, not native execution already in progress.
+RunAnalyzer and ValidateAnalyzer propagate the caller's context through discovery,
+RPCs and readiness retries, without adding an analyzer-specific timeout. The caller
+controls cancellation and the total deadline; without a caller deadline, readiness
+retries have no additional time limit. Cancellation does not interrupt native
+execution already in progress.
 HandlerClient does not interpret business Status or retry business failures.
 
 Collection identity is pinned before execution: Proxy resolves field/channel
@@ -119,20 +120,19 @@ classification and retriability. HandlerClient checks this Status after the
 readiness loop and does not retry business failures, even when Status marks an
 I/O error retriable. A wrong file_name or missing local path therefore returns
 the native file error immediately instead of holding the collection DDL lock
-until the analyzer request timeout. Filesystem absence alone does not prove
+through repeated readiness attempts. Filesystem absence alone does not prove
 invalid input: concurrent resource removal or worker-local state can cause the
 same failure, so these errors retain their system classification.
 Deterministically invalid analyzer options remain input errors at their Rust
 origin; HandlerClient maps these to the public DDL parameter-error contract.
 Discovery and resource preparation still use the existing streaming readiness
-retry loop, and Unimplemented returns immediately. The same
-Analyzer request timeout bounds retries of persistent preparation failures, so
-DDL validation cannot retain its collection-name lock indefinitely when the
-caller supplied no deadline. Known permanent storage failures during preparation
-(such as a missing object or denied access) terminate the streaming retry loop as
+retry loop, and Unimplemented returns immediately. The caller context controls
+these retries, including cancellation of DDL validation. Known permanent storage
+failures during preparation (such as a missing object or denied access) terminate the streaming retry loop as
 system errors; unclassified network/gRPC errors and fetch timeouts remain eligible
-for retry. With no available StreamingNode, discovery waits up to that same
-request timeout. No independent retry loop or shutdown lifecycle is introduced.
+for retry. With no available StreamingNode, discovery waits until a node becomes
+available or the caller context ends. No independent retry loop or shutdown
+lifecycle is introduced.
 
 The internal Coordinator `GetFileResourceSnapshot` RPC uses a dedicated
 `GetFileResourceSnapshotRequest`. Its `known_version` is the last snapshot

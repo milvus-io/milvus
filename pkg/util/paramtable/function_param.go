@@ -31,7 +31,6 @@ type functionConfig struct {
 	ZillizProviders               ParamGroup `refreshable:"true"`
 	AnalyzerConcurrencyPerCPUCore ParamItem  `refreshable:"true"`
 	AnalyzerRunnerConcurrency     ParamItem  `refreshable:"true"`
-	AnalyzerRequestTimeout        ParamItem  `refreshable:"true"`
 	// EnableWriteBeforeMaterialization gates the write-before function
 	// materialization (streamingnode materializes BM25/embedding function
 	// output fields before WAL append). Default "auto": it is switched on
@@ -245,22 +244,6 @@ func (p *functionConfig) init(base *BaseTable) {
 		// restrict configuration writes.
 	}
 	p.ZillizProviders.Init(base.mgr)
-
-	p.AnalyzerRequestTimeout = ParamItem{
-		Key:          "function.analyzer.requestTimeout",
-		Version:      "3.0",
-		DefaultValue: "10m",
-		Export:       true,
-		Doc:          "Total client wait timeout for RunAnalyzer and ValidateAnalyzer, including discovery, resource preparation and retries. Earlier caller deadlines take precedence. Increase it for large inventories; it does not interrupt native execution already in progress.",
-		Formatter: func(v string) string {
-			duration, err := time.ParseDuration(v)
-			if err != nil || duration <= 0 {
-				return "10m"
-			}
-			return v
-		},
-	}
-	p.AnalyzerRequestTimeout.Init(base.mgr)
 
 	p.AnalyzerConcurrencyPerCPUCore = ParamItem{
 		Key:          "function.analyzer.concurrency_per_cpu_core",

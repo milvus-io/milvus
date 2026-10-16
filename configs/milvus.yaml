@@ -1914,7 +1914,6 @@ function:
     local_resource_path: /var/lib/milvus/analyzer
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
     runner_concurrency: 8 # The concurrency for each function runner to tokenize text
-    requestTimeout: 10m # Total client wait timeout for RunAnalyzer and ValidateAnalyzer, including discovery, resource preparation and retries. Earlier caller deadlines take precedence. Increase it for large inventories; it does not interrupt native execution already in progress.
   pyUDF:
     enabled: false # Whether to enable PyUDF in processes that use it. Enabling it on Proxy also requires common.fileResource.mode.proxy: sync. Restart is required after changing this value.
     address: 127.0.0.1:19090 # Shared local IPv4 address and port of the PyUDF workers. Keep on loopback or a trusted, access-controlled network; the worker endpoint has no TLS or authentication. Restart is required after changing this value.

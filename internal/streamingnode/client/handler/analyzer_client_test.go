@@ -337,12 +337,9 @@ func TestValidateAnalyzerBusinessFailuresDoNotRetry(t *testing.T) {
 	}
 }
 
-func TestAnalyzerRequestsBoundPersistentPreparationFailures(t *testing.T) {
+func TestAnalyzerRequestsRespectCallerDeadline(t *testing.T) {
 	for _, validate := range []bool{false, true} {
-		mockey.PatchConvey("persistent preparation failure has an operation deadline", t, func() {
-			param := &paramtable.Get().FunctionCfg.AnalyzerRequestTimeout
-			previous := param.SwapTempValue("50ms")
-			defer param.SwapTempValue(previous)
+		mockey.PatchConvey("persistent preparation failure respects the caller deadline", t, func() {
 			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
 			calls := 0
 			mockey.Mock((*analyzerRPC).RunAnalyzer).To(func(_ *analyzerRPC, _ context.Context, _ *streamingpb.StreamingNodeRunAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
@@ -354,9 +351,8 @@ func TestAnalyzerRequestsBoundPersistentPreparationFailures(t *testing.T) {
 				return nil, status.NewUnknownError("resource download failed")
 			}).Build()
 			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
-			// The caller itself has no deadline. Repeated errors must not keep the
-			// request (and a RootCoord DDL lock) alive indefinitely.
-			ctx, cancel := context.WithCancel(context.Background())
+			// Persistent readiness errors must stop at the caller deadline.
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {
@@ -374,7 +370,7 @@ func TestAnalyzerRequestsBoundPersistentPreparationFailures(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				cancel()
 				<-done
-				t.Fatal("analyzer request did not enforce its configured timeout")
+				t.Fatal("analyzer request did not respect the caller deadline")
 			}
 			require.Positive(t, calls)
 			client.lifetime.SetState(typeutil.LifetimeStateStopped)
@@ -383,20 +379,30 @@ func TestAnalyzerRequestsBoundPersistentPreparationFailures(t *testing.T) {
 	}
 }
 
-func TestAnalyzerRequestPreservesEarlierCallerDeadline(t *testing.T) {
-	mockey.PatchConvey("the caller's earlier deadline wins", t, func() {
-		mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		deadline, _ := ctx.Deadline()
-		mockey.Mock((*analyzerRPC).ValidateAnalyzer).To(func(_ *analyzerRPC, got context.Context, _ *streamingpb.StreamingNodeValidateAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
-			actual, ok := got.Deadline()
-			require.True(t, ok)
-			require.Equal(t, deadline, actual)
-			return &streamingpb.StreamingNodeValidateAnalyzerResponse{}, nil
-		}).Build()
-		client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
-		_, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
-		require.NoError(t, err)
-	})
+func TestAnalyzerRequestsPreserveCallerContext(t *testing.T) {
+	for _, withDeadline := range []bool{false, true} {
+		mockey.PatchConvey("analyzer requests preserve the caller context", t, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if withDeadline {
+				var deadlineCancel context.CancelFunc
+				ctx, deadlineCancel = context.WithTimeout(ctx, 30*time.Minute)
+				defer deadlineCancel()
+			}
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			mockey.Mock((*analyzerRPC).RunAnalyzer).To(func(_ *analyzerRPC, got context.Context, _ *streamingpb.StreamingNodeRunAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+				require.Same(t, ctx, got)
+				return &streamingpb.StreamingNodeRunAnalyzerResponse{}, nil
+			}).Build()
+			mockey.Mock((*analyzerRPC).ValidateAnalyzer).To(func(_ *analyzerRPC, got context.Context, _ *streamingpb.StreamingNodeValidateAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+				require.Same(t, ctx, got)
+				return &streamingpb.StreamingNodeValidateAnalyzerResponse{}, nil
+			}).Build()
+			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
+			_, err := client.RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}})
+			require.NoError(t, err)
+			_, err = client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			require.NoError(t, err)
+		})
+	}
 }

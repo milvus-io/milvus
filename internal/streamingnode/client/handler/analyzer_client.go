@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -20,9 +19,6 @@ func (hc *handlerClientImpl) RunAnalyzer(ctx context.Context, req *streamingpb.S
 		return nil, status.NewOnShutdownError("handler client is closing")
 	}
 	defer hc.lifetime.Done()
-	// Bound the whole readiness/retry operation, not just one snapshot fetch.
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().FunctionCfg.AnalyzerRequestTimeout.GetAsDurationByParse())
-	defer cancel()
 	field := req.GetFieldAnalyzer()
 	if field == nil && req.GetInlineAnalyzer() == nil {
 		return nil, status.NewInvalidArgument("analyzer source is required")
@@ -58,9 +54,6 @@ func (hc *handlerClientImpl) ValidateAnalyzer(ctx context.Context, req *streamin
 		return nil, status.NewOnShutdownError("handler client is closing")
 	}
 	defer hc.lifetime.Done()
-	// Bound the whole readiness/retry operation, not just one snapshot fetch.
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().FunctionCfg.AnalyzerRequestTimeout.GetAsDurationByParse())
-	defer cancel()
 	logger := mlog.With(mlog.String("handler", "validate-analyzer"))
 	response, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, "", func(ctx context.Context, _ *types.PChannelInfoAssigned) (any, error) {
 		client, err := hc.service.GetService(ctx)
