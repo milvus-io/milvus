@@ -55,10 +55,12 @@ class TestConnectionParams(TestcaseBase):
                                                 check_items={ct.err_code: 999,
                                                              ct.err_msg: "Type of 'host' must be str"})
 
+        # The pinned PyMilvus rejects out-of-range ports during legality checks,
+        # before the explicit range check is reached.
         data = {"port": "-1", "host": "hostlocal"}
         self.connection_wrap.add_connection(_kwargs=data, check_task=ct.CheckTasks.err_res,
                                             check_items={ct.err_code: 999,
-                                                         ct.err_msg: "port number -1 out of range, valid range [0, 65535)"})
+                                                         ct.err_msg: "Type of 'port' must be str or int"})
 
         # get addr of default alias
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
@@ -1030,8 +1032,14 @@ class TestConnectAddressInvalid(TestcaseBase):
         expected: connected is False
         """
         address = "{}:{}".format(host, port)
+        # Port 100 passes SDK validation and fails at the gRPC layer. The pinned
+        # PyMilvus rejects port 65536 during address validation before any RPC.
+        if 0 <= int(port) < 65535:
+            err_msg = "illegal connection params or server unavailable"
+        else:
+            err_msg = f"Illegal address: {address}, should be in form 'localhost:19530'"
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 999,
-                                                  ct.err_msg: "illegal connection params or server unavailable"})
+                                                  ct.err_msg: err_msg})
 
 
